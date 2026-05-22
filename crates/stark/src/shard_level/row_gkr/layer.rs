@@ -1,7 +1,7 @@
-//! Layer types for the row-only GKR backend (task #24, A.2 step 1).
+//! Layer types for the row-only GKR backend (the task, A.2 step 1).
 //!
 //! Direct port of
-//! [`/tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs:27-73`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L27-L73)
+//! `crates/hypercube/src/logup_gkr/cpu.rs:27-73`
 //! with the `slop_*` types replaced by Ziren-native containers:
 //!
 //! | the                          | Ziren equivalent                              |
@@ -40,7 +40,7 @@ use p3_field::{ExtensionField, Field};
 /// interactions while still letting the GKR sumcheck virtually pad to
 /// `2^num_interaction_variables` cells via zero/one fill at access
 /// time (mirrors SP1's `PaddedMle` pattern; see
-/// `/tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs:222-242`).
+/// `crates/hypercube/src/logup_gkr/execution.rs:222-242`).
 ///
 /// `num_interaction_variables` is the log₂ of the per-chip padded width
 /// (`num_interactions.next_power_of_two().trailing_zeros()`) — used as
@@ -56,7 +56,7 @@ pub struct RowMajorTable<F> {
     /// are NOT materialized — readers consult the per-call padding tag
     /// (LogUp-GKR uses `F::ZERO` for numerators, `F::ONE` for
     /// denominators).  This mirrors SP1's `PaddedMle::Constant` pattern
-    /// (`/tmp/sp1/slop/crates/multilinear/src/padded.rs`) — see
+    /// (`slop/crates/multilinear/src/padded.rs`) — see
     /// `crate::basefold::padded::PaddedMle` for the standalone version.
     pub cells: Vec<F>,
     /// log₂ of LOGICAL row count.  The actual allocated storage may be
@@ -236,7 +236,7 @@ impl<F: Clone> RowMajorTable<F> {
 /// tables — one per chip.
 ///
 /// Port of
-/// [`LogUpGkrCpuLayer<F, EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L40-L57).
+/// `LogUpGkrCpuLayer<F, EF>`.
 ///
 /// **Two field params** (`NumF`, `DenF`):  At the first layer the
 /// numerators are in the base field `F` (raw multiplicities) while
@@ -276,7 +276,7 @@ impl<NumF, DenF> LogUpGkrCpuLayer<NumF, DenF> {
 /// the singleton row holds the row-reduced fractions).
 ///
 /// Port of
-/// [`InteractionLayer<F, EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L60-L73).
+/// `InteractionLayer<F, EF>`.
 ///
 /// At extraction time we interleave the four sub-MLEs to produce
 /// the final `circuit_output.numerator/denominator` of length
@@ -295,7 +295,7 @@ pub struct InteractionLayer<F, EF> {
 /// EF numerators.
 ///
 /// Port of
-/// [`GkrCircuitLayer<F, EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L32-L37).
+/// `GkrCircuitLayer<F, EF>`.
 #[allow(clippy::large_enum_variant)]
 pub enum GkrCircuitLayer<F: Field, EF: ExtensionField<F>> {
     Layer(LogUpGkrCpuLayer<EF, EF>),
@@ -319,7 +319,7 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
         }
     }
 
-    /// #398 sub-step 3 — construct a SHAPE-ONLY proxy carrying just
+    /// construct a SHAPE-ONLY proxy carrying just
     /// the dimension metadata (`num_row_variables`,
     /// `num_interaction_variables`), with empty `cells` vectors on
     /// every per-chip [`RowMajorTable`].
@@ -350,7 +350,7 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
     /// SP1 has no analog — its consumer never has a host fallback.
     /// This proxy is Ziren-specific scaffolding for the
     /// device-resident consumer migration; the long-term direction
-    /// (full sub-step 3) is to delete the host fallback entirely,
+    /// (full ) is to delete the host fallback entirely,
     /// at which point this proxy can be removed in favor of the
     /// existing `DeviceCircuitLayer` enum.
     #[must_use]
@@ -493,7 +493,7 @@ impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
 /// largest, layer N-1 = terminal interaction-only).
 ///
 /// Port of
-/// [`LogupGkrCpuCircuit<F, EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L27-L29).
+/// `LogupGkrCpuCircuit<F, EF>`.
 ///
 /// Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `layers` now
 /// stores [`LayerState`] entries so the per-layer storage can be
@@ -596,7 +596,7 @@ mod tests {
         assert_eq!(mid.num_interaction_variables(), 2);
     }
 
-    /// #398 sub-step 3 — `shape_only_layer_proxy` produces a
+    /// `shape_only_layer_proxy` produces a
     /// `GkrCircuitLayer::Layer` with empty `cells` carrying only
     /// the shape metadata.  Safe to pass to `prove_gkr_round` ONLY
     /// when the V3 dispatch will consume the layer from the

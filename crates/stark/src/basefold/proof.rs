@@ -1,9 +1,9 @@
 //! BaseFold proof structure.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold/src/lib.rs`](file:///tmp/sp1/slop/crates/basefold/src/lib.rs)
+//! `slop/crates/basefold/src/lib.rs`
 //! and the prover construction in
-//! [`/tmp/sp1/slop/crates/basefold-prover/src/prover.rs`](file:///tmp/sp1/slop/crates/basefold-prover/src/prover.rs).
+//! `slop/crates/basefold-prover/src/prover.rs`.
 //!
 //! Per-round shape (much simpler than WHIR):
 //!   * `univariate_messages[i]` holds the two end-point evaluations

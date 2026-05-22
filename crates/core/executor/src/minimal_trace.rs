@@ -1,4 +1,4 @@
-//! Minimal-trace skeleton for the SP1-style two-stage tracing split (#316).
+//! Minimal-trace skeleton for the SP1-style two-stage tracing split.
 //!
 //! Background
 //! ----------
@@ -21,14 +21,14 @@
 //!    across shards via rayon.
 //!
 //! This module defines the Ziren equivalent of SP1's
-//! `sp1_jit::MinimalTrace` (see `/tmp/sp1/crates/core/jit/src/risc.rs:401`)
+//! `sp1_jit::MinimalTrace` (see `crates/core/jit/src/risc.rs:401`)
 //! and `TraceChunk` (`risc.rs:316`) — adapted to MIPS register width and the
 //! Ziren executor's state layout.
 //!
-//! Phase B (this file) lands the format only. The JIT-side emit path is
+//! (this file) lands the format only. The JIT-side emit path is
 //! gated behind the `ZIREN_JIT_MINIMAL_TRACE=1` environment variable so
 //! callers can opt in without disturbing the existing JIT fast-path
-//! (`run_fast` / `try_run_fast_jit`). Phase C will add a `TracingVM` that
+//! (`run_fast` / `try_run_fast_jit`). a future revision will add a `TracingVM` that
 //! consumes these traces and produces full `ExecutionRecord`s.
 //!
 //! Differences from SP1's TraceChunk:
@@ -42,7 +42,7 @@
 //!   the resulting [`ExecutionRecord`]s back into shard order without a
 //!   side channel.
 //!
-//! Phase C TODO:
+//! TODO:
 //! - Populate `mem_reads` from JIT memory-read instrumentation. Today this
 //!   field is left empty by the JIT emit path; the TracingVM will fall
 //!   back to re-reading guest memory directly. The oracle becomes load-
@@ -54,7 +54,7 @@ use std::sync::Arc;
 
 /// One memory-read observation emitted by the Stage-1 fast runner.
 ///
-/// Mirrors `sp1_jit::risc::MemValue` (`/tmp/sp1/crates/core/jit/src/risc.rs:117`)
+/// Mirrors `sp1_jit::risc::MemValue` (`crates/core/jit/src/risc.rs:117`)
 /// but uses MIPS-native `u32` words instead of RISC-V64 `u64`.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(C)]
@@ -73,7 +73,7 @@ pub struct MemValue {
 /// `pc_start` / `clk_start` up to `clk_end` and emit a full
 /// `ExecutionRecord`.
 ///
-/// Mirrors `sp1_jit::risc::TraceChunk` (`/tmp/sp1/crates/core/jit/src/risc.rs:316`)
+/// Mirrors `sp1_jit::risc::TraceChunk` (`crates/core/jit/src/risc.rs:316`)
 /// adapted to MIPS register layout and Ziren's existing `JitContext` shape.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceChunk {
@@ -95,7 +95,7 @@ pub struct TraceChunk {
     /// JIT emit path was not configured to record memory; in that case
     /// Stage 2 falls back to direct guest-memory reads.
     ///
-    /// #316 Phase D — Option B (mem_reads oracle): when populated by the
+    /// Option B (mem_reads oracle): when populated by the
     /// sequential producer, Stage 2 pre-loads its sub-Executor's
     /// page_table from these entries before replaying, eliminating the
     /// need for chunks to carry full memory state. The Arc is built at
@@ -131,8 +131,8 @@ impl TraceChunk {
 ///
 /// Mirrors the SP1 pattern: `MinimalTrace` is the bridge between
 /// `MinimalExecutorRunner` (Stage 1) and the TracingVM workers (Stage 2).
-/// See `/tmp/sp1/crates/core/runner/src/portable.rs` for the SP1 portable
-/// runner and `/tmp/sp1/crates/core/machine/src/executor.rs:34` for the
+/// See `crates/core/runner/src/portable.rs` for the SP1 portable
+/// runner and `crates/core/machine/src/executor.rs:34` for the
 /// Stage 2 entry point.
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinimalTrace {
@@ -157,7 +157,7 @@ impl MinimalTrace {
         self.chunks.push(chunk);
     }
 
-    /// #316 Phase D.2: seal the last open chunk with the final clock
+    /// seal the last open chunk with the final clock
     /// after the executor finishes. Drop any leading chunks whose
     /// clk_end ≤ clk_start (degenerate zero-cycle shards opened by an
     /// extra trailing `bump_record()`).
@@ -175,10 +175,10 @@ impl MinimalTrace {
 /// Environment variable that opts the JIT runner into emitting a
 /// `MinimalTrace` alongside its normal output. Default off.
 ///
-/// While Phase B only ships the format, callers can already test the
+/// While  only ships the format, callers can already test the
 /// plumbing by setting `ZIREN_JIT_MINIMAL_TRACE=1` — the JIT runner will
-/// observe the flag in Phase B's follow-up patch and start populating
-/// `TraceChunk` shells, even before Phase C wires the consumer.
+/// observe the flag in 's follow-up patch and start populating
+/// `TraceChunk` shells, even before a future revision wires the consumer.
 pub const ENV_MINIMAL_TRACE: &str = "ZIREN_JIT_MINIMAL_TRACE";
 
 /// Is the minimal-trace emit path enabled for this process?

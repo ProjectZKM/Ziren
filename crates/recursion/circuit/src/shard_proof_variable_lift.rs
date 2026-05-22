@@ -308,7 +308,7 @@ where
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
-/// META #59 swap 1+2: variant of [`build_opened_values_from_chip_openings`]
+/// swap 1+2: variant of [`build_opened_values_from_chip_openings`]
 /// that consumes a per-chip `chip_cumulative_sums` map (witnessed from
 /// the host BasefoldShardProof) and uses real values for
 /// `local_cumulative_sum` and `global_cumulative_sum` per chip.

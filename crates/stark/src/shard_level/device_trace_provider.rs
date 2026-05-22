@@ -9,7 +9,7 @@
 //! `JaggedTraceMle<Felt, TaskScope>` flows through
 //! `prove_shard_with_data → prove_logup_gkr / zerocheck` as an
 //! explicit argument
-//! (`/tmp/sp1/sp1-gpu/crates/shard_prover/src/prover.rs:632-690`).
+//! (`sp1-gpu/crates/shard_prover/src/prover.rs:632-690`).
 //!
 //! Why: the legacy `set_device_trace_snapshot(...)` writes to a
 //! process-global slot.  Under multi-GPU compress N pool workers
@@ -95,7 +95,7 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
-    /// #339: per-chip canonical index from the machine's
+    /// per-chip canonical index from the machine's
     /// `chip_ordering: HashMap<String, usize>`. This is the host's
     /// AUTHORITATIVE ordering, set once at machine setup
     /// (`machine.rs:471`) and used by `shard_chips_ordered` for

@@ -1,7 +1,7 @@
 //! BaseFold verifier.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold/src/verifier.rs`](file:///tmp/sp1/slop/crates/basefold/src/verifier.rs).
+//! `slop/crates/basefold/src/verifier.rs`.
 //!
 //! Mirrors the prover's transcript structure exactly:
 //!   1. PoW grind for batching coefficients

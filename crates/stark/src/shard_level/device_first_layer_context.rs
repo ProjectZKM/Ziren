@@ -1,4 +1,4 @@
-//! #316 + #308 Phase 3/4: per-thread device-first-layer side-channel
+//! + #308 Phase 3/4: per-thread device-first-layer side-channel
 //! API consumed by `row_gkr/round.rs` and by ziren-gpu's
 //! `basefold/src/device_first_layer.rs`.
 //!

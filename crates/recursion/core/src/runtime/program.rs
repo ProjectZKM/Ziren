@@ -11,12 +11,12 @@ use crate::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
     /// SeqBlock representation of the program — the canonical
-    /// instruction container. Phase A4 (#259) migrated the runtime
-    /// off the flat `instructions` Vec and onto `iter_instructions()`,
-    /// and Phase A5 dropped the redundant `instructions` field
-    /// entirely. The compiler emits one `Basic` block today; Phase C
-    /// will introduce `Parallel` blocks once the memory layer is
-    /// thread-safe.
+    /// instruction container. An earlier refactor migrated the
+    /// runtime off the flat `instructions` Vec and onto
+    /// `iter_instructions()`, and the redundant `instructions`
+    /// field has been dropped entirely. The compiler emits one
+    /// `Basic` block today; a future revision will introduce
+    /// `Parallel` blocks once the memory layer is thread-safe.
     #[serde(default = "RawProgram::default")]
     pub seq_blocks: RawProgram<Instruction<F>>,
     pub total_memory: usize,

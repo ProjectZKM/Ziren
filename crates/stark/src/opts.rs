@@ -100,7 +100,7 @@ impl ZKMProverOpts {
     /// only) on ziren-gpu's `layer_transition_dispatch.rs` for the matching
     /// half of SP1's pattern that drops the first-layer device buffers
     /// after the second is materialized.  Full first-layer-virtual host
-    /// regen wiring is deferred — see `project_sp1_small_card_port.md`.
+    /// regen wiring is deferred — see the related design memo.
     #[must_use]
     pub fn gpu(_cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
         let mut opts = ZKMProverOpts::default();
@@ -109,7 +109,7 @@ impl ZKMProverOpts {
         if 24 <= gpu_ram_gb {
             opts.core_opts.shard_batch_size = 1;
 
-            // SP1 `local_gpu_opts` small-card port (#376): on cards
+            // SP1 `local_gpu_opts` small-card port: on cards
             // <= 30 GB, halve the default shard cycle budget. This is
             // the per-cycle analogue of SP1's element-threshold
             // reduction; matches SP1's "reduce work per shard so

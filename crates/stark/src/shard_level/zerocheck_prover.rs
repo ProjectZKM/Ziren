@@ -7,7 +7,7 @@
 //!
 //! # Algorithm
 //!
-//! Mirror of `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`,
+//! Mirror of `crates/hypercube/src/prover/shard.rs:474-646`,
 //! adapted to Ziren's existing per-chip constraint evaluator
 //! ([`crate::zerocheck_prover::eval_constraints_on_hypercube`])
 //! and per-chip sumcheck prover
@@ -128,7 +128,7 @@ where
 /// for-bit identical to the prior serial outer-loop implementation
 /// (the `compute_combined_table_rlc_serial` reference below).
 ///
-/// Used by `prove_shard_zerocheck` Step 4 (C-full B3 fusion).
+/// Used by `prove_shard_zerocheck` Step 4 ( fusion).
 fn compute_combined_table_rlc<SC>(
     padded: &[Vec<Challenge<SC>>],
     lambda: Challenge<SC>,
@@ -208,7 +208,7 @@ where
     acc
 }
 
-/// C-full C2 — opt-in device fusion path for the lambda-RLC step.
+///  — opt-in device fusion path for the lambda-RLC step.
 ///
 /// When `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a GPU combine
 /// hook is registered (via
@@ -302,7 +302,7 @@ where
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             FIRED_ONCE.get_or_init(|| {
                 tracing::warn!(
-                    "C-full C2 zerocheck combine hook FIRED \
+                    " zerocheck combine hook FIRED \
                      (ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1, \
                      n_chips={n}, target_size={target_size})"
                 );
@@ -321,7 +321,7 @@ where
             static FELL_ONCE: OnceLock<()> = OnceLock::new();
             FELL_ONCE.get_or_init(|| {
                 tracing::warn!(
-                    "C-full C2 zerocheck combine hook FELL THROUGH \
+                    " zerocheck combine hook FELL THROUGH \
                      (returned None); host parallel fold used"
                 );
             });
@@ -333,7 +333,7 @@ where
 /// Shard-level zerocheck prover.
 ///
 /// SP1 reference: `ShardProver::zerocheck` at
-/// `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`.
+/// `crates/hypercube/src/prover/shard.rs:474-646`.
 ///
 /// # Pipeline
 ///
@@ -362,7 +362,7 @@ pub fn prove_shard_zerocheck<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    // #263: per-shard device-trace provider (SP1-aligned).  None today;
+    // per-shard device-trace provider (SP1-aligned).  None today;
     // Phase 3 wires the zerocheck device-resident ctable hooks.
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> PartialSumcheckProof<Challenge<SC>>
@@ -407,7 +407,7 @@ where
     //
     // Per-chip parallelism: dispatch one rayon task per chip
     // (mirroring SP1's `chips.par_iter()` pattern at
-    // `/tmp/sp1/crates/hypercube/src/prover/shard.rs`).  Each
+    // `crates/hypercube/src/prover/shard.rs`).  Each
     // task runs a long contiguous sequential body — building
     // and evaluating the chip's constraint table over its
     // hypercube — so the per-shard rayon dispatch overhead is
@@ -455,7 +455,7 @@ where
                     return Some((log_height, table.clone()));
                 }
             }
-            // #372: pure-AIR / permutation-bearing chip split.
+            // pure-AIR / permutation-bearing chip split.
             //
             // Historically Ziren skipped permutation-bearing chips
             // (those with `permutation_width() > 0`) entirely so the
@@ -514,7 +514,7 @@ where
             let height = main_trace.values.len() / main_trace.width.max(1);
             let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
-            // META #59 Phase C: compute real per-chip cumulative sums so the
+            // compute real per-chip cumulative sums so the
             // zerocheck hypercube table reflects the chip's real AIR
             // evaluation (matches what the recursion verifier will check via
             // `build_opened_values_from_chip_openings_with_cumsums` when
@@ -545,7 +545,7 @@ where
             };
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
-            // #111 dispatch hook: when ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1
+            // dispatch hook: when ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1
             // AND a GPU hook is registered AND `Challenge<SC>` is the
             // production `Ef4` type, route the per-row constraint walk
             // through the registered GPU bytecode interpreter (mirrors
@@ -746,7 +746,7 @@ where
     // Step 4: lambda-RLC the padded tables into a single combined
     // table.  combined = Σ_i λ^i · padded[i].
     //
-    // C-full B3 (Apr 2026) — fused host-side RLC.
+    //  (Apr 2026) — fused host-side RLC.
     //
     // Previously: serial outer loop over chips, serial inner loop over
     // table elements (≈100-300ms/shard, no SIMD/par per A4 plan §3).
@@ -761,9 +761,9 @@ where
     //
     // The full device-resident fusion (combined-table on GPU, no
     // host pad, no host RLC, hand the device handle straight into
-    // #106's GPU sumcheck) is the architectural target documented
+    // GPU sumcheck) is the architectural target documented
     // in /tmp/c_full_a4_plan.md §3 and the deferred follow-up
-    // /tmp/c_full_b3_followup.md.  C-full C2 (this revision) ships
+    // /tmp/c_full_b3_followup.md.   (this revision) ships
     // the device fusion kernel (`combine_ctables_with_lambda_powers`)
     // without yet eliminating the host pad — when
     // `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a hook is
@@ -929,7 +929,7 @@ where
     let public_values_kb: &[Kb] = unsafe {
         core::slice::from_raw_parts(public_values.as_ptr().cast::<Kb>(), public_values.len())
     };
-    // #372: same env-gated split as the per-chip path.  When
+    // same env-gated split as the per-chip path.  When
     // `ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=1`, the batched pre-pass also
     // includes permutation-bearing chips.  The pure-AIR c-table is
     // computed via the `EmptyMessageBuilder` path on host fallback and
@@ -1117,7 +1117,7 @@ fn cross_shard_batch_enabled() -> bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #147 — cross-shard constraint-eval coordinator.
+// cross-shard constraint-eval coordinator.
 //
 // `compute_gpu_batched_pre_pass` is invoked from `prove_shard_zerocheck`
 // once per shard.  In the multi-GPU compress orchestrator, several
@@ -1754,7 +1754,7 @@ fn _btreemap_anchor() -> BTreeMap<String, ()> {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Internal helpers for the GPU zerocheck dispatch hook (#106)
+// Internal helpers for the GPU zerocheck dispatch hook
 // ────────────────────────────────────────────────────────────────────
 
 /// Type-erased adapter that forwards the GPU zerocheck hook's

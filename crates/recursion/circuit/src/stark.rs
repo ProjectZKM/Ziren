@@ -225,8 +225,8 @@ where
 /// witness-stream `read()` count is shape-stable across dummy and
 /// real proofs.
 ///
-/// META #59 Phase 4 — unblocks `program_from_shape` basefold
-/// dispatch (#52) and downstream `dummy()` constructors for
+/// Phase 4 — unblocks `program_from_shape` basefold
+/// dispatch and downstream `dummy()` constructors for
 /// `ZKMCoreBasefoldWitnessValues` etc.
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,

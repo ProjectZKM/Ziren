@@ -11,7 +11,7 @@
 //! hash → index). After merge, the output's keys are the union of
 //! all input keys (deduplicated) and the values are 0..N (sequential
 //! indices in BTreeMap key order). Used by Layer 1 of the parallel
-//! vk_map regen path (#81).
+//! vk_map regen path.
 
 use std::collections::BTreeMap;
 use std::fs::File;

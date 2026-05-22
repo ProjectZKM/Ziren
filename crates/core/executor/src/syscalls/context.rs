@@ -139,7 +139,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
                 }
 
-                // #316 Phase D.4 lifter step 2 fix: also flush the register-slot
+                // also flush the register-slot
                 // fast-path mirror for register addresses. Without this, the
                 // reg_slots[addr] event keeps its pre-syscall `initial_mem_access`
                 // and gets extended by post-syscall accesses, double-covering the

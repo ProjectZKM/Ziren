@@ -588,7 +588,7 @@ fn lower_one<T: MipsTranspiler>(
             // register in `op_a`.  The transpiler trait splits these into
             // `j` / `jal` / `jr` / `jalr` so we dispatch on (imm_b, rd).
             //
-            // CRITICAL (#73): for JAL/JALR the executor writes
+            // CRITICAL: for JAL/JALR the executor writes
             // `rd = next_pc + 4 = current_pc + 8` as the return
             // address.  The trait `jal`/`jalr` lowerings only set
             // delayed_jump_target; the comment on `jal` says "Driver

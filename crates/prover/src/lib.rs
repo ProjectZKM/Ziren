@@ -843,7 +843,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// each input proof. Returns `None` when any deferred proof is
     /// missing the side channel (caller falls back to the legacy path).
     ///
-    /// META #59 Phase 4 (#49). Mirrors the layout of
+    /// Phase 4. Mirrors the layout of
     /// `get_recursion_core_inputs_basefold` — same `if all_have_bf
     /// { Some } else { None }` pattern.
     pub fn get_recursion_deferred_inputs_basefold<'a>(
@@ -980,7 +980,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        // META #59 Phase 4 (#49): when all deferred proofs carry a basefold
+        // Phase 4: when all deferred proofs carry a basefold
         // side channel, emit DeferredBasefold witnesses; otherwise fall
         // back to legacy Deferred.
         if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(

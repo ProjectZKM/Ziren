@@ -1,4 +1,4 @@
-//! #316 Phase D.3.b: byte-equivalence probe on a real ELF.
+//!.b: byte-equivalence probe on a real ELF.
 //!
 //! Runs a program through:
 //!   1. `Executor::run` with `minimal_trace_collector = Some(...)` → produces
@@ -6,7 +6,7 @@
 //!   2. `drive_tracing_vm_parallel(trace)` → records_B (parallel replay)
 //!
 //! Compares per-shard record contents and reports the first divergence with
-//! enough detail to inform the next Phase D step (memory-state seeding,
+//! enough detail to inform the next  step (memory-state seeding,
 //! mem_reads oracle, etc.).
 //!
 //! Usage:
@@ -114,7 +114,7 @@ fn main() {
     if cpu_match && mem_match {
         println!("BYTE-EQUIV PASS");
     } else {
-        println!("BYTE-EQUIV FAIL — Phase D needs memory-state seeding");
+        println!("BYTE-EQUIV FAIL — a future revision needs memory-state seeding");
         std::process::exit(1);
     }
 }

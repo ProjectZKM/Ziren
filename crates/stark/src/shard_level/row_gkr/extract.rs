@@ -1,8 +1,8 @@
 //! Output extraction for the row-only GKR backend
-//! (task #24, A.2 step 4).
+//! (the task, A.2 step 4).
 //!
 //! Port of
-//! [`extract_outputs`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L37-L108)
+//! `extract_outputs`
 //! against [`RowMajorTable`].
 //!
 //! ## Purpose
@@ -44,7 +44,7 @@ use super::layer::{LogUpGkrCpuLayer, RowMajorTable};
 /// Unified output of the GKR circuit's row-reduction phase.
 ///
 /// Mirrors SP1's
-/// [`LogUpGkrOutput<EF>`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs#L11-L20).
+/// `LogUpGkrOutput<EF>`.
 /// Each MLE has length `2^(num_interaction_variables + 1)` and is
 /// what the recursion verifier consumes as `circuit_output`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,7 +68,7 @@ fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
         "interleave_chip expects terminal-layer table (num_row_variables == 1)"
     );
     let cols = table.num_interactions;
-    // PaddedMle (task #88): test helper assumes the table is fully real
+    // PaddedMle: test helper assumes the table is fully real
     // (num_real_rows == 2).  Only used by row-GKR unit tests today.
     debug_assert_eq!(table.num_real_rows, 2);
     debug_assert_eq!(table.cells.len(), 2 * cols);
@@ -135,7 +135,7 @@ where
         debug_assert!(offset + chip_cols <= cols);
 
         // Terminal layer has num_row_vars=1 → 2 logical rows.  PaddedMle
-        // (task #88): each quadrant's `num_real_rows` is independently
+        //: each quadrant's `num_real_rows` is independently
         // 0/1/2; rows beyond it carry the per-quadrant pad value
         // (n* → 0, d* → 1).
         for c in 0..chip_cols {

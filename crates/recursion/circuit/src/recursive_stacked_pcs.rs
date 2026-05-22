@@ -193,7 +193,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             .flatten()
             .copied()
             .collect();
-        // META #59 Phase 2 gate 3 diagnostic: on assertion failure, log
+        // Phase 2 gate 3 diagnostic: on assertion failure, log
         // per-round lengths + dimensions so the next session can
         // fingerprint the exact shape mismatch.  See
         // docs/phase2_gate3_analysis.md for the three candidate fixes.

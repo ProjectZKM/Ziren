@@ -1,7 +1,7 @@
 //! Reed-Solomon encoder for the Basefold protocol.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold-prover/src/encoder.rs`](file:///tmp/sp1/slop/crates/basefold-prover/src/encoder.rs).
+//! `slop/crates/basefold-prover/src/encoder.rs`.
 //!
 //! # Encoding choice
 //!

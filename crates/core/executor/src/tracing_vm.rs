@@ -1,4 +1,4 @@
-//! TracingVM scaffold for the SP1-style two-stage tracing split (#316 Phase C).
+//! TracingVM scaffold for the SP1-style two-stage tracing split.
 //!
 //! This module defines the consumer side of the [`crate::minimal_trace`]
 //! checkpoint format: a per-shard re-executor that, given a `TraceChunk`,
@@ -17,7 +17,7 @@
 //!   `Executor` recovered from the chunk's start state (registers + pc)
 //!   via `Executor::recover`, then runs to the chunk's `clk_end` via
 //!   the existing interpreter trace path. The full SP1-style port
-//!   (`/tmp/sp1/crates/core/executor/src/tracing.rs:29`, ~3000 LOC of
+//!   (`crates/core/executor/src/tracing.rs:29`, ~3000 LOC of
 //!   bespoke per-opcode `execute_instruction` lifters) is deferred.
 //!   The delegation is correct — Ziren's `Executor` already emits every
 //!   event the prover needs — but yields no speedup on its own; the win
@@ -30,7 +30,7 @@
 //!   only kicks in once `execute_from_chunk` stops needing to rerun
 //!   from scratch (i.e. once the JIT-side `mem_reads` oracle in
 //!   `TraceChunk::mem_reads` is populated and the bespoke per-opcode
-//!   lifter is in place — Phase D / multi-week).
+//!   lifter is in place —  / multi-week).
 //!
 //! # Why scaffold first
 //!
@@ -42,7 +42,7 @@
 //!
 //! # Reference
 //!
-//! SP1's analogous file: `/tmp/sp1/crates/core/executor/src/tracing.rs`
+//! SP1's analogous file: `crates/core/executor/src/tracing.rs`
 //! (the `TracingVM<'a>` struct on line 29 + `execute_instruction` on
 //! line 68).
 
@@ -56,8 +56,8 @@ use zkm_stark::ZKMCoreOpts;
 /// A per-shard re-executor that consumes a [`TraceChunk`] and produces
 /// the events needed for proving.
 ///
-/// Mirrors SP1's `TracingVM<'a>` (`/tmp/sp1/crates/core/executor/src/tracing.rs:29`).
-/// In Phase C the implementation delegates to a plain `Executor`; a
+/// Mirrors SP1's `TracingVM<'a>` (`crates/core/executor/src/tracing.rs:29`).
+/// In  the implementation delegates to a plain `Executor`; a
 /// future port will replace the body with a bespoke per-opcode lifter
 /// to halve the per-shard wall.
 pub struct TracingVM<'a> {
@@ -67,7 +67,7 @@ pub struct TracingVM<'a> {
     /// VM is independent and the driver can fan out across threads.
     pub opts: ZKMCoreOpts,
     /// Output record. The driver allocates this with
-    /// `ExecutionRecord::new_preallocated` (Phase A) sized for the
+    /// `ExecutionRecord::new_preallocated` sized for the
     /// chunk's cycle count.
     pub record: &'a mut ExecutionRecord,
 }
@@ -87,7 +87,7 @@ impl<'a> TracingVM<'a> {
     /// to `chunk.clk_end`, emitting every event the prover needs into
     /// `self.record`.
     ///
-    /// # Phase C scaffold behaviour
+    /// # scaffold behaviour
     ///
     /// Today this builds a fresh `ExecutionState` from the chunk header,
     /// recovers an `Executor`, runs it to completion or to the chunk's
@@ -100,7 +100,7 @@ impl<'a> TracingVM<'a> {
     ///
     /// Perf: this version does NOT consult `chunk.mem_reads`, so each
     /// shard reruns its memory reads from `self.program.image` rather
-    /// than the oracle. Once Phase D wires the oracle and the bespoke
+    /// than the oracle. Once a future revision wires the oracle and the bespoke
     /// per-opcode lifter, this method's body shrinks to a tight inner
     /// loop. For now it exists to validate the *parallel* story below.
     pub fn execute_from_chunk(
@@ -108,7 +108,7 @@ impl<'a> TracingVM<'a> {
         chunk: &TraceChunk,
     ) -> Result<(), ExecutionError> {
         // Rebuild a minimal ExecutionState from the chunk header.
-        // Phase D will replace this with a hot-path-friendly seed.
+        // will replace this with a hot-path-friendly seed.
         let mut state =
             ExecutionState::new(chunk.pc_start, chunk.pc_start.wrapping_add(4));
         state.global_clk = chunk.clk_start;
@@ -129,7 +129,7 @@ impl<'a> TracingVM<'a> {
         let program = (*self.program).clone();
         let mut sub = Executor::recover(program, state, self.opts);
 
-        // #316 Phase D — Option B: seed sub-Executor memory from the
+        // Option B: seed sub-Executor memory from the
         // chunk's mem_reads oracle. Each entry was captured by the
         // sequential producer at the moment the address was read or
         // written, so pre-loading them recovers the memory state
@@ -155,7 +155,7 @@ impl<'a> TracingVM<'a> {
             }
         }
 
-        // #316 Phase D.1: bound this worker to chunk.clk_end. Without
+        // bound this worker to chunk.clk_end. Without
         // this bound every TracingVM worker re-executes from
         // chunk.pc_start *to program halt*, defeating parallelism.
         //
@@ -164,10 +164,10 @@ impl<'a> TracingVM<'a> {
         // execute_cycle return `ExceededCycleLimit` the moment we cross
         // the shard boundary. We catch that and treat it as "worker
         // done with its chunk" — semantically identical to SP1's
-        // `CycleResult::TraceEnd` (see /tmp/sp1/.../tracing.rs:51).
+        // `CycleResult::TraceEnd` (see .../tracing.rs:51).
         sub.executor_mode = crate::ExecutorMode::Trace;
         sub.max_cycles = Some(chunk.clk_end);
-        // #316 Phase D.4 lifter port step 1: skip replay-irrelevant
+        // skip replay-irrelevant
         // bookkeeping (opcode_counts, local_counts, syscall_counts).
         // These were already populated in the original checkpoint-gen
         // pass; recomputing them here is pure waste.
@@ -180,7 +180,7 @@ impl<'a> TracingVM<'a> {
                 Err(e) => return Err(e),
             }
         }
-        // #316 Phase D.3: bump the worker's live record into its
+        // bump the worker's live record into its
         // records vec. When `ExceededCycleLimit` triggers, the normal
         // trailing bump_record path in execute() is bypassed, leaving
         // events stranded in the live record. Without this step the
@@ -194,7 +194,7 @@ impl<'a> TracingVM<'a> {
         // `bump_record()`; the live `sub.record` is empty at this
         // point. Merge everything from `sub.records` into `self.record`
         // so the caller gets a single combined ExecutionRecord per
-        // chunk. Phase D will skip the intermediate Vec entirely.
+        // chunk. a future revision will skip the intermediate Vec entirely.
         use zkm_stark::MachineRecord;
         for mut other in sub.records.drain(..) {
             self.record.append(&mut other);
@@ -210,12 +210,12 @@ impl<'a> TracingVM<'a> {
 /// runtime drops from `sum(per_shard_emit)` to `max(per_shard_emit) +
 /// dispatch_overhead`, i.e. ~M× speedup of the trace-emit stage.
 ///
-/// # Phase C scaffold caveat
+/// # scaffold caveat
 ///
 /// Because [`TracingVM::execute_from_chunk`] currently re-runs each
 /// chunk via the full Executor loop, each worker still does the full
 /// (slow) per-shard interpreter walk. The parallelism is real and lands
-/// today — the per-shard cost shrinks once Phase D wires the oracle and
+/// today — the per-shard cost shrinks once a future revision wires the oracle and
 /// the bespoke lifter. Without that, this is a "correct but no-faster"
 /// drop-in: useful for nailing down the API and shaking out the
 /// per-shard `ExecutionState` capture before the lifter lands.
@@ -223,7 +223,7 @@ impl<'a> TracingVM<'a> {
 /// # Reservation sizing
 ///
 /// Each record is pre-allocated via `ExecutionRecord::new_preallocated`
-/// (Phase A) sized at `chunk.num_cycles() / 8`, matching SP1's
+/// sized at `chunk.num_cycles() / 8`, matching SP1's
 /// `prover/src/worker/prover/core.rs:276` heuristic.
 pub fn drive_tracing_vm_parallel(
     program: Arc<Program>,
@@ -286,7 +286,7 @@ mod tests {
         // If we got here without panic, the lifetime story holds.
     }
 
-    /// #316 Phase D — Option B Checkpoint-mode oracle test. The
+    /// Option B Checkpoint-mode oracle test. The
     /// production producer in `prove.rs` uses `execute_state` which
     /// runs in `ExecutorMode::Checkpoint`, NOT `Trace`. The mem_reads
     /// oracle population in `mr`/`mw` is gated only on
@@ -336,7 +336,7 @@ mod tests {
         );
     }
 
-    /// #316 Phase D lifter step 2: measure the speedup of
+    /// : measure the speedup of
     /// `skip_replay_bookkeeping`. Run two trace passes over the same
     /// 5000-ADD program: baseline (flag off) vs lifter (flag on).
     /// Assert the lifter pass is at least as fast as baseline (it
@@ -379,7 +379,7 @@ mod tests {
         // Regression gate: lifter must not be > 1.5× slower than baseline.
         let ratio = t_lifter.as_nanos() as f64 / t_baseline.as_nanos().max(1) as f64;
         eprintln!(
-            "[D.4 lifter step 1] baseline={:.3}ms lifter={:.3}ms ratio={:.2}",
+            "[D.4 ] baseline={:.3}ms lifter={:.3}ms ratio={:.2}",
             t_baseline.as_secs_f64() * 1000.0,
             t_lifter.as_secs_f64() * 1000.0,
             ratio,
@@ -387,7 +387,7 @@ mod tests {
         assert!(ratio < 1.5, "lifter regressed: {:.2}× baseline", ratio);
     }
 
-    /// #316 Phase D.3: end-to-end byte-equivalence between the
+    /// end-to-end byte-equivalence between the
     /// sequential trace path (`Executor::run` with collector ON) and
     /// the parallel replay (`drive_tracing_vm_parallel` on the
     /// captured `MinimalTrace`). Asserts that per-shard CPU event
@@ -433,9 +433,9 @@ mod tests {
             "ADD event count diverges: seq={} par={}", total_addsub_a, total_addsub_b);
     }
 
-    /// #316 Phase D — deeper byte-equiv: compare CpuEvent + AluEvent
+    /// deeper byte-equiv: compare CpuEvent + AluEvent
     /// fields between sequential and parallel paths, not just counts.
-    /// This is the regression net for D.5 codegen step 2 (when the
+    /// This is the regression net for D.5  (when the
     /// JIT-emit path lands, this test will catch any per-event drift
     /// even if total counts coincidentally match).
     #[test]
@@ -506,7 +506,7 @@ mod tests {
         }
     }
 
-    /// #316 Phase D.2: opening the `minimal_trace_collector` on an
+    /// opening the `minimal_trace_collector` on an
     /// Executor makes `bump_record()` emit chunks. Sanity-check that
     /// chunks come out in clk order and tile contiguously.
     #[test]
@@ -546,7 +546,7 @@ mod tests {
         }
     }
 
-    /// #316 Phase D.1: bound check — `chunk.clk_end` must actually
+    /// bound check — `chunk.clk_end` must actually
     /// stop the worker mid-program.
     ///
     /// Uses a long straight-line ADD chain (no jumps, so no MIPS

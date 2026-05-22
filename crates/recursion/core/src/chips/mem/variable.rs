@@ -58,7 +58,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // Phase A5 (#259): collect instructions into a Vec so we can
+        // Phase A5: collect instructions into a Vec so we can
         // par_iter — `iter_instructions()` returns a sequential
         // iterator, but rayon parallelism here is a meaningful speedup
         // so we materialize first. `.copied()` flattens

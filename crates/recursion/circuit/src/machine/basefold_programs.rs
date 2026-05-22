@@ -1,4 +1,4 @@
-//! Program constructors for SP1-style multi-stage basefold recursion (#19).
+//! Program constructors for SP1-style multi-stage basefold recursion.
 //!
 //! Each function builds + compiles one of the four recursion programs
 //! (Normalize / Compose / Deferred / Wrap) that consume the SP1-style
@@ -360,7 +360,7 @@ mod tests {
     /// at the right type and can be coerced to a function pointer
     /// with the expected signature.  Validates the type bounds on
     /// the public API without actually running the AsmCompiler
-    /// (which needs valid witness fixtures — see task #23 for the
+    /// (which needs valid witness fixtures — see the task for the
     /// runtime end-to-end test).
     ///
     /// Catches the most common breakage class — generic-bound drift
@@ -420,7 +420,7 @@ mod tests {
     /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
     /// witness whose per-shard `chip_cumulative_sums` cardinality
     /// matches a real shard's chip count — the shape-stability
-    /// invariant for `program_from_shape` (#52) basefold dispatch.
+    /// invariant for `program_from_shape` basefold dispatch.
     #[test]
     fn dummy_core_basefold_witness_shape_stable() {
         use zkm_core_machine::mips::MipsAir;

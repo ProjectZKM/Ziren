@@ -433,7 +433,7 @@ fn bne_loop_jit_matches_interpreter() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None, // #316 Phase D.5 step 5
+            mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(&program, params, None).expect("build_jit_function");
     let mut memory = vec![0u8; 4096];
@@ -627,7 +627,7 @@ fn halt_syscall_jit_matches_interpreter() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None, // #316 Phase D.5 step 5
+            mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(
         &program,
@@ -700,7 +700,7 @@ fn alu_chain_jit_matches_interpreter_for_register_file() {
         pc_start: 0,
         pc_base: 0,
         clk_bump: 4,
-            mem_read_recorder: None, // #316 Phase D.5 step 5
+            mem_read_recorder: None,
     };
     let jit_fn = build_jit_function(&program, params, None).expect("build_jit_function");
 

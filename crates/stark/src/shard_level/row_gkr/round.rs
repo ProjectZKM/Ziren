@@ -3654,7 +3654,7 @@ where
         return None;
     }
 
-    // #383 sub-step 1: consult the per-shard LogupTaskScope first.
+    // consult the per-shard LogupTaskScope first.
     //
     // When the scope has a pre-materialized device circuit installed
     // (sub-step 2 will wire the populator), `next_layer()` pops the

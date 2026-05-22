@@ -1,8 +1,8 @@
 //! **Basefold multilinear PCS — Ziren port of SP1's slop_basefold.**
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold`](file:///tmp/sp1/slop/crates/basefold) and
-//! [`/tmp/sp1/slop/crates/basefold-prover`](file:///tmp/sp1/slop/crates/basefold-prover).
+//! `slop/crates/basefold` and
+//! `slop/crates/basefold-prover`.
 //!
 //! Replaces the WHIR PCS stack.  Structural OOM cure: encodes each MLE
 //! via DFT individually (`Message<Mle<F>>` flow), no single dense

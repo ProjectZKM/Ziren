@@ -29,8 +29,8 @@
 //! the case on off-pool basefold workers.
 //!
 //! This is the same conceptual pattern as the `Option<&dyn
-//! DeviceTraceProvider>` arg added to the chip-keyed hooks in
-//! #263, but without requiring fn-pointer signature changes
+//! DeviceTraceProvider>` arg added to the chip-keyed hooks,
+//! but without requiring fn-pointer signature changes
 //! across the call graph.  Particularly suited to hooks like
 //! `GpuLayerTransitionFn` whose signature is `fn(u64, u64) ->
 //! u64` (opaque IDs only — no place to attach an explicit

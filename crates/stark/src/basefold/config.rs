@@ -1,7 +1,7 @@
 //! Basefold protocol configuration.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold/src/config.rs`](file:///tmp/sp1/slop/crates/basefold/src/config.rs).
+//! `slop/crates/basefold/src/config.rs`.
 //!
 //! The SP1 source carries a `BasefoldConfigImpl` enum of
 //! Poseidon2{BabyBear,KoalaBear,Bn254Fr} variants; Ziren targets

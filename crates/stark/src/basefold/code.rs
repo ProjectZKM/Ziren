@@ -1,7 +1,7 @@
 //! Reed-Solomon codeword type used throughout the BaseFold protocol.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold/src/code.rs`](file:///tmp/sp1/slop/crates/basefold/src/code.rs).
+//! `slop/crates/basefold/src/code.rs`.
 //!
 //! In the SP1 source this is a `Tensor<F, A>` wrapper.  Ziren uses
 //! `RowMajorMatrix<F>` from `p3_matrix` instead, which has the same

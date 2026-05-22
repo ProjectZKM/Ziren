@@ -2,9 +2,9 @@
 //! (Tier 1 Phase 3 of SP1-alignment).
 //!
 //! Direct port of
-//! [`/tmp/sp1/slop/crates/sumcheck/src/poly.rs`](file:///tmp/sp1/slop/crates/sumcheck/src/poly.rs)
+//! `slop/crates/sumcheck/src/poly.rs`
 //! and
-//! [`/tmp/sp1/slop/crates/sumcheck/src/prover.rs`](file:///tmp/sp1/slop/crates/sumcheck/src/prover.rs).
+//! `slop/crates/sumcheck/src/prover.rs`.
 //!
 //! The intent is to *uniformize* sumcheck driving across Ziren — every
 //! "polynomial that can be sumchecked" implements the trait and the
@@ -57,7 +57,7 @@ use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 /// Common trait for any sumcheckable polynomial.
 ///
 /// Port of
-/// [`SumcheckPolyBase`](file:///tmp/sp1/slop/crates/sumcheck/src/poly.rs#L4-L6).
+/// `SumcheckPolyBase`.
 pub trait SumcheckPolyBase {
     /// Number of remaining variables to sumcheck-bind.
     fn num_variables(&self) -> u32;
@@ -67,7 +67,7 @@ pub trait SumcheckPolyBase {
 /// reported to the caller after the sumcheck reduces to a point.
 ///
 /// Port of
-/// [`ComponentPoly`](file:///tmp/sp1/slop/crates/sumcheck/src/poly.rs#L8-L10).
+/// `ComponentPoly`.
 pub trait ComponentPoly<K: Field> {
     /// Return the sub-polynomials' values at the reduced point.
     fn get_component_poly_evals(&self) -> Vec<K>;
@@ -77,7 +77,7 @@ pub trait ComponentPoly<K: Field> {
 /// variable bound (i.e. all rounds after the first).
 ///
 /// Port of
-/// [`SumcheckPoly`](file:///tmp/sp1/slop/crates/sumcheck/src/poly.rs#L25-L29).
+/// `SumcheckPoly`.
 pub trait SumcheckPoly<K: Field>: SumcheckPolyBase + ComponentPoly<K> + Sized {
     /// Bind the highest remaining variable to `alpha` and return the
     /// folded poly with one fewer variable.
@@ -97,7 +97,7 @@ pub trait SumcheckPoly<K: Field>: SumcheckPolyBase + ComponentPoly<K> + Sized {
 /// `t` variables at once.
 ///
 /// Port of
-/// [`SumcheckPolyFirstRound`](file:///tmp/sp1/slop/crates/sumcheck/src/poly.rs#L13-L22).
+/// `SumcheckPolyFirstRound`.
 ///
 /// Ziren only consumes `t = 1` today, but the trait keeps the SP1
 /// signature for parity (and to make a future `t > 1` extension
@@ -153,7 +153,7 @@ fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
 /// claim about the polynomial at a randomly-sampled point.
 ///
 /// Port of
-/// [`reduce_sumcheck_to_evaluation`](file:///tmp/sp1/slop/crates/sumcheck/src/prover.rs#L13-L96)
+/// `reduce_sumcheck_to_evaluation`
 /// adapted to Ziren's per-coefficient base-field observation pattern.
 ///
 /// # Single-poly case (`polys.len() == 1`)
@@ -280,7 +280,7 @@ where
 /// powers of `lambda`.
 ///
 /// Port of
-/// [`rlc_univariate_polynomials`](file:///tmp/sp1/slop/crates/algebra/src/univariate.rs)
+/// `rlc_univariate_polynomials`
 /// adapted to Ziren's coefficient-form `UnivariatePolynomial`.
 ///
 /// `result = polys[0] · λ^{n-1} + polys[1] · λ^{n-2} + ... + polys[n-1]`
@@ -522,7 +522,7 @@ pub fn get_gpu_zerocheck_hook() -> Option<GpuZerocheckFn> {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// GPU zerocheck combine hook (C-full C2 — sister of #106 above).
+// GPU zerocheck combine hook ( — sister of #106 above).
 // ────────────────────────────────────────────────────────────────────
 //
 // Replaces the host parallel lambda-RLC fold in
@@ -690,7 +690,7 @@ pub fn get_gpu_constraint_eval_batched_hook() -> Option<GpuConstraintEvalBatched
 }
 
 // ────────────────────────────────────────────────────────────────────
-// #147 — CROSS-SHARD batched variant of `GpuConstraintEvalBatchedFn`.
+// CROSS-SHARD batched variant of `GpuConstraintEvalBatchedFn`.
 // ────────────────────────────────────────────────────────────────────
 //
 // Same per-chip semantics as `GpuConstraintEvalBatchedFn` (above), but
@@ -764,7 +764,7 @@ pub fn get_gpu_constraint_eval_cross_shard_hook()
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #112 — GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
+// GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
 //
 // Sister of the #111 constraint-eval hook above, but for the OTHER
 // per-row chip walk: `build_chip_interaction_tables` in
@@ -816,7 +816,7 @@ pub type GpuInteractionEvalFn = fn(
     preprocessed_width: usize,
     alpha: Ef4,
     betas: &[Ef4],
-    // #263 SP1-aligned: per-shard device-trace provider replaces the
+    // SP1-aligned: per-shard device-trace provider replaces the
     // racy global Mutex<DeviceTraceSnapshot> in
     // `ziren-gpu/core/src/basefold/interaction_eval.rs`.  The hook
     // implementation downcasts the per-chip handle to its concrete
@@ -844,13 +844,13 @@ pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #113 — GPU jagged-PCS orchestration hook (sister of #105C / #107).
+// GPU jagged-PCS orchestration hook (sister of #105C / #107).
 //
 // Eliminates the per-shard host orchestrator overhead in
 // `crate::shard_level::prover::emit_jagged_pcs_bytes` by routing the
 // entire jagged-PCS prove pipeline (commit, per-chip y-evals, sumcheck
 // reduction, BaseFold opening) to a device-resident driver.  The
-// inner sumcheck KERNEL `prove_jagged_reduction_gpu` (#107) already
+// inner sumcheck KERNEL `prove_jagged_reduction_gpu` already
 // exists in `ziren-gpu/basefold/src/jagged_sumcheck.rs`; this hook
 // owns the WRAPPING (transcript management, per-chip y-evaluations
 // via #103, BaseFold open) so the ~30 ms × N_shards of host
@@ -930,7 +930,7 @@ pub use jagged_orchestration_hook::{
 };
 
 // ─────────────────────────────────────────────────────────────────────
-// #174 (C-full B1) — GPU jagged-PCS DEVICE-trace orchestration hook.
+// GPU jagged-PCS DEVICE-trace orchestration hook.
 //
 // Sister of #113 [`jagged_orchestration_hook`] above.  The #113 hook
 // receives HOST traces (`RowMajorMatrix<KoalaBear>`) — the same shape
@@ -967,7 +967,7 @@ mod jagged_pcs_device_hook {
         chip_names: &[String],
         r_row_per_chip: &[Vec<Ef4>],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
-        // #263 SP1-aligned: per-shard device-trace provider.
+        // SP1-aligned: per-shard device-trace provider.
         // Replaces the racy global `ACTIVE_CHIP_TRACES` consulted by
         // `phase4_device_hook` (which keys by chip name like this hook
         // does).  Borrowed reference scoped to a single shard's
@@ -1001,10 +1001,10 @@ pub use jagged_pcs_device_hook::{
 };
 
 // ────────────────────────────────────────────────────────────────────
-// C-full H2 — device-resident LogUp-GKR per-layer sumcheck hook.
+//  — device-resident LogUp-GKR per-layer sumcheck hook.
 // ────────────────────────────────────────────────────────────────────
 //
-// Sister of the per-round `GpuSumcheckEvalsFn` (#102) above, but
+// Sister of the per-round `GpuSumcheckEvalsFn` above, but
 // STATEFUL across all `total_vars` rounds of one GKR layer's
 // sumcheck.  The hook receives the flattened layer state PLUS
 // transcript closures for observe + sample, runs the entire round
@@ -1012,7 +1012,7 @@ pub use jagged_pcs_device_hook::{
 // only ~3 EF partials + alpha cross PCIe per round), and returns
 // the assembled per-round univariate polynomials + the final 4
 // component openings.  Mirrors H1's `prove_jagged_reduction_gpu`
-// pattern at `/home/ubuntu/sd/ziren-gpu/basefold/src/jagged_sumcheck.rs`.
+// pattern in ziren-gpu's basefold/src/jagged_sumcheck.rs.
 //
 // Concrete-typed (`Ef4`) for the same reason as #102 — the function-
 // pointer hook can't carry a generic `EF` parameter.  Generic-EF
@@ -1080,7 +1080,7 @@ pub fn get_gpu_logup_round_hook() -> Option<GpuLogupRoundProverFn> {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// #336 / #343: GPU chip-structured sumcheck round-poly hook.
+// GPU chip-structured sumcheck round-poly hook.
 //
 // Separate from `GpuSumcheckEvalsFn` (covers PACKED mode, post-
 // chip-collapse, flat n0/d0/n1/d1 arrays). This hook covers rounds
@@ -1127,7 +1127,7 @@ pub fn get_gpu_chip_structured_sumcheck_hook(
 }
 
 // ──────────────────────────────────────────────────────────────────
-// #343 Phase C: GPU device-resident chip-structured sumcheck hook.
+// GPU device-resident chip-structured sumcheck hook.
 //
 // Adds the per-round state needed for device-resident replay:
 //   - `sumcheck_id` keys a thread-local device cache so the hook
@@ -1183,7 +1183,7 @@ pub fn get_gpu_chip_structured_sumcheck_device_hook(
 }
 
 // ──────────────────────────────────────────────────────────────────
-// #316 fixup: V2 logup-round hook + first-round hook stubs.
+// fixup: V2 logup-round hook + first-round hook stubs.
 //
 // These are referenced by `row_gkr/round.rs` (#270/#271 in-flight
 // work) but were never committed on this branch.  The ziren-gpu side
@@ -1226,7 +1226,7 @@ pub fn get_gpu_logup_round_hook_v2() -> Option<GpuLogupRoundProverFnV2> {
 }
 
 // ──────────────────────────────────────────────────────────────────
-// #371 scaffolding: V3 device-handle logup-round hook.
+// scaffolding: V3 device-handle logup-round hook.
 //
 // SP1-aligned signature that accepts an opaque device-buffer handle
 // instead of host `Vec<Ef4>` payloads.  Eliminates the `flatten_layer`
@@ -1305,7 +1305,7 @@ pub fn get_gpu_logup_round_hook_v3() -> Option<GpuLogupRoundProverFnV3> {
     GPU_LOGUP_ROUND_HOOK_V3.get().copied()
 }
 
-// #371 TLS handle stash: thread DeviceLayerHandle from one V3 hook call to the
+// TLS handle stash: thread DeviceLayerHandle from one V3 hook call to the
 // next within a single shard's GKR-circuit walk. The dispatch site
 // `try_logup_round_gpu_v3` `take`s before each call and `publish`es after the
 // returned `next_layer` (if any). Caller is expected to `clear` at shard
@@ -1486,7 +1486,7 @@ mod tests {
         assert_eq!(r.coefficients[1], EF::from_u32(24));
     }
 
-    // #371 scaffolding: V3 device-handle hook registration smoke test.
+    // scaffolding: V3 device-handle hook registration smoke test.
     //
     // OnceLock is process-global so this stub becomes "the" V3 hook for
     // the rest of the test process.  That's fine — no other test in this

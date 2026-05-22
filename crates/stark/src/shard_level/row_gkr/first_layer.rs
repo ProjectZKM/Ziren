@@ -1,8 +1,8 @@
 //! First-layer generator for the row-only GKR backend
-//! (task #24, A.2 step 2).
+//! (the task, A.2 step 2).
 //!
 //! Port of
-//! [`generate_first_layer`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L110-L252)
+//! `generate_first_layer`
 //! against Ziren's [`Lookup`]/[`VirtualPairCol`]/`RowMajorMatrix`
 //! types instead of the `Interaction`/`PaddedMle`/`Mle`.
 //!
@@ -49,7 +49,7 @@ use crate::Chip;
 /// Per-row, per-interaction `(numerator, denominator)` evaluator.
 ///
 /// Direct port of
-/// [`generate_interaction_vals`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L13-L35).
+/// `generate_interaction_vals`.
 ///
 /// `denominator = α + Σ β_k · v_k` where `v_0 = argument_index` and
 /// `v_k = lookup.values[k-1].apply(prep_row, main_row)`.  The
@@ -145,7 +145,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
 /// `(2^target_log_rows) × num_cols`, using `pad_value` for the new
 /// rows.  Returns the padded `Vec<F>` (still row-major).
 ///
-/// **Status (task #88)**: no longer called by `generate_first_layer`
+/// **Status**: no longer called by `generate_first_layer`
 /// — the PaddedMle path skips materialised row padding entirely.
 /// Retained for tests and as a reference implementation.
 #[allow(dead_code)]
@@ -163,7 +163,7 @@ fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, p
     padded
 }
 
-/// PaddedMle-aware MSB split (task #88).  Split a row-major
+/// PaddedMle-aware MSB split.  Split a row-major
 /// `(real_rows × num_cols)` buffer at the logical row MSB
 /// (`half_logical = 2^(log_rows - 1)`) and return the **real-only**
 /// prefix of each half:
@@ -226,7 +226,7 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 /// Generate the GKR circuit's first layer from raw chip data.
 ///
 /// Port of
-/// [`LogupGkrCpuTraceGenerator::generate_first_layer`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L110-L252).
+/// `LogupGkrCpuTraceGenerator::generate_first_layer`.
 ///
 /// Inputs:
 /// - `chips`: per-chip (sends + receives) lookup specs (in BTreeSet
@@ -253,7 +253,7 @@ pub fn generate_first_layer<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
-    // #263: per-shard device-trace provider threaded into the GPU
+    // per-shard device-trace provider threaded into the GPU
     // first-layer hook (replaces the racy global Mutex snapshot).
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> LogUpGkrCpuLayer<F, EF>
@@ -295,7 +295,7 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        // #112 / C-full K1: device-resident first-layer dispatch.
+        // full K1: device-resident first-layer dispatch.
         // The legacy env-gated opt-in (`ZIREN_GPU_INTERACTION_EVAL_DEVICE`
         // / `ZIREN_GPU_BUILD_GKR_DEVICE` + master `ZIREN_GPU_DEVICE_HOOKS`)
         // was removed: the hook-registration check + `provider_present`
@@ -404,7 +404,7 @@ where
                             prep_padded_width,
                             alpha_ef4,
                             betas_ef4,
-                            // #263: per-shard device-trace provider
+                            // per-shard device-trace provider
                             // threaded from prove_shard_to_basefold's
                             // caller (compress_multi_gpu / shard_prover_gpu).
                             // Hook implementation downcast-uses the per-chip
@@ -479,7 +479,7 @@ where
             )
         };
 
-        // PaddedMle row optimisation (task #88):  do NOT materialise
+        // PaddedMle row optimisation:  do NOT materialise
         // the row padding here.  Compute the per-chip real row count,
         // then split the real prefix into the upper/lower halves
         // without expanding to `2^num_row_variables`.  Virtual rows

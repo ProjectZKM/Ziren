@@ -1219,9 +1219,9 @@ pub mod tests {
     //   #7  exit_group result zeroed
     //   #8  fnctl(a1==1) result constrained
     //   #9  is_a0_0/1/2 bidirectional
-    //   #10 write: read value = prev_value
-    //   #11 mmap: bytewise heap update via AddOperation
-    //   #12 is_a1_1/3 bidirectional
+    //   write: read value = prev_value
+    //   mmap: bytewise heap update via AddOperation
+    //   is_a1_1/3 bidirectional
     // -----------------------------------------------------------------------
 
     /// Exercises SYS_WRITE, exit_group, mmap, clone, brk, fcntl, and nop

@@ -349,7 +349,7 @@ impl ZKMProofShape {
     /// uniform-area projection + dedup, collapse to a much smaller
     /// per-chip `OrderedShape` set (~13-30 unique).  This
     /// replaces Ziren's legacy ~1.25M-shape per-chip cartesian
-    /// (`CoreShapeConfig::all_shapes`); task #32 commits to
+    /// (`CoreShapeConfig::all_shapes`); the task commits to
     /// stacked_shapes as the sole Recursion-shape source.
     ///
     /// The `core_shape_config` argument is retained for API
@@ -524,7 +524,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// program builders (`recursion_program_basefold`,
     /// `compose_program_basefold`, etc.) instead of the legacy FRI ones.
     ///
-    /// META #59 step 4 (#52). Used by `build_compress_vks` to regenerate
+    /// step 4. Used by `build_compress_vks` to regenerate
     /// `vk_map.bin` against the basefold compress programs.
     pub fn program_from_shape_basefold(
         &self,
@@ -546,7 +546,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
-                // #261: dummy now consumes the full ZKMCompressWithVkeyShape so
+                // dummy now consumes the full ZKMCompressWithVkeyShape so
                 // its embedded merkle_tree_height sizes the vk-merkle witness.
                 let input = ZKMCompressBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
@@ -555,7 +555,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.compose_program_basefold(&input)
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                // #261 SP1 alignment: dummy now consumes the full
+                // SP1 alignment: dummy now consumes the full
                 // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
                 // sizes the vk-merkle witness for the wrap stage too.
                 let input = ZKMWrapBasefoldWitnessValues::dummy(
