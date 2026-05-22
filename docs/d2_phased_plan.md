@@ -2,12 +2,23 @@
 
 Phased deliverables for completing the D2 basefold-recursion cutover, with example workloads (fibonacci + keccak) at each phase, before moving to GPU acceleration and JIT.
 
+> **Historical snapshot (Apr 22 2026).** Several env vars referenced
+> below — `ZIREN_USE_BASEFOLD`, `ZIREN_BASEFOLD_GPU`,
+> `ZIREN_GPU_SHARD_PROVE`, `ZIREN_DEBUG_GATE3`, `ZIREN_BASEFOLD_REAL`
+> and the host-side `*_PROFILE` / `*_DEBUG_*` gates — were retired in
+> the May 2026 env-var consolidation (Phases 1-4). BaseFold + jagged
+> is now the only production PCS path; the commands quoted in this
+> document are no longer runnable verbatim. See
+> the "Env-var consolidation (May 2026)" section at the end of
+> `docs/perf_reth_gpu.md` for the full mapping from old vars to
+> current defaults / kill-switches.
+
 ## Phase 1: Single-shard, single-cluster — ✅ GREEN
 
 **Status**: landed Apr 22, 2026.
 
 - **Workload**: `test_e2e_compress_fibonacci` (fibonacci-1k, ~1 shard, core cluster only)
-- **Test command**: `ZIREN_USE_BASEFOLD=1 VERIFY_VK=true cargo test -p zkm-prover --release --features debug -- test_e2e_compress_fibonacci --ignored --nocapture`
+- **Test command** (historical, May 2026): `cargo test -p zkm-prover --release --features debug -- test_e2e_compress_fibonacci --ignored --nocapture` (`VERIFY_VK=true` still respected; the legacy `ZIREN_USE_BASEFOLD=1` opt-in is removed and is no longer required — basefold is the default)
 - **Result**: PASSES, ~150s end-to-end (compile cached)
 - **Artifacts**: `crates/prover/vk_map.bin` carries 2 keys (FIBONACCI_ELF basefold normalize VK + ziren-shape-bin/{fibonacci-1k,chess,json} cluster).
 

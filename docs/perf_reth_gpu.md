@@ -8,6 +8,11 @@ the GPU prover from `feat/gpu-basefold-dispatch` ziren-gpu.  Trace
 generation uses `TRACE_GEN_WORKERS=16`, `recursion_opts.shard_batch_size
 = 4`, GPUs 2-7 selected via `CUDA_VISIBLE_DEVICES`.
 
+See [Env-var consolidation (May 2026)](#env-var-consolidation-may-2026)
+near the end of this document for the canonical list of env vars that
+were retired, renamed, or had defaults flipped — older perf docs and
+tutorials reference names that no longer exist.
+
 ## Workload
 
 | Field      | Value |
@@ -241,8 +246,13 @@ export PATH=/usr/local/cuda/bin:/usr/local/go/bin:$PATH
 source ~/.zkm-toolchain/env
 
 # Use a known-free GPU set and pin all the prover knobs.
-# (ZIREN_USE_BASEFOLD / ZIREN_BASEFOLD_GPU removed in env-phase-1 —
-#  basefold + GPU dispatch is the only path; no env-var selector.)
+# BaseFold + GPU dispatch is the only production path now; no env
+# selector. The legacy `ZIREN_USE_BASEFOLD`, `ZIREN_BASEFOLD_GPU`,
+# and `ZIREN_GPU_SHARD_PROVE` toggles were removed in env-phase-1
+# (May 2026) — every prior code-path read defaulted to the only
+# production path, so the deletion was a no-op behavior-wise.
+# See the "Env-var consolidation (May 2026)" section at the end of
+# this document for the full audit.
 export VERIFY_VK=false
 export ZKM_GPU_CORE_MAX_TASKS_PER_DEVICE=1
 export ZKM_GPU_RECURSION_MAX_TASKS_PER_DEVICE=1
@@ -270,8 +280,10 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 ZKM_GPU_DEVICES=0,1,2,3,4,5,6,7 \
   ./target/release/zkm-gpu-perf --program reth --stage wrap
 ```
 
-Drop `--skip-verify` (it's the default ON) to also run every per-stage
-verifier; total run time grows by ~5 % for the verify pass.
+Verify always runs end-to-end (per-stage core/compress/shrink/wrap
+verifiers); total run time grows by ~5 % vs prove-only. The legacy
+`ZIREN_PERF_SKIP_VERIFY_CORE` opt-out was deleted in env-phase-2
+(May 2026) — there is no longer a path to skip verification.
 
 ## Captured 2026-04-30
 
@@ -282,3 +294,144 @@ verifier; total run time grows by ~5 % for the verify pass.
 - Default proof system: FRI everywhere (host CPU + GPU paths share one
   vk_map).  Re-introduce the BaseFold-shard prover as a deliberate
   selector — not env-gated — once round-0 sumcheck is resolved.
+
+## Env-var consolidation (May 2026)
+
+The May 2026 audit + cleanup retired or restructured ~45 `ZIREN_*`
+environment variables that had accreted across the Ziren and
+ziren-gpu repos during BaseFold / GPU bring-up. This section is the
+single reference for what changed so that scripts or perf reports
+from earlier in the project (including the snippets in `docs/d2_*.md`,
+`docs/meta_59_design.md`, and `docs/perf_results.md`) can be ported
+forward.
+
+The work landed in four phases plus a follow-up prewarm decoupling.
+**Zero production default behavior changed** — every removed var
+either defaulted to its only production path or had its semantics
+preserved under a renamed flag.
+
+### Phase 1 — dead-var deletion (May 21)
+
+Three env vars had no remaining `env::var` reads anywhere on either
+branch and were removed from bench scripts and source comments:
+
+| Removed | Replacement |
+|---|---|
+| `ZIREN_USE_BASEFOLD` | BaseFold + jagged is the only PCS path; no opt-in needed |
+| `ZIREN_BASEFOLD_GPU` | GPU dispatch is unconditional when the `gpu` feature is enabled |
+| `ZIREN_GPU_SHARD_PROVE` | Shard-level GPU prove is the default code path |
+
+Treat any `export ZIREN_USE_BASEFOLD=...` line in an older script
+as a no-op snapshot from before this consolidation.
+
+### Phase 2 — diagnostic / bring-up var deletion (May 22)
+
+Thirty-seven host-side debug / profile / bring-up / kill-switch vars
+were deleted (-685 LOC). Highlights of names you may encounter:
+
+- `ZIREN_DEBUG_GATE3` (META #59 lift-padding probe)
+- `ZIREN_DEBUG_WRITE_TYPES` / `ZIREN_DEBUG_READ_TYPES` (DSL emit logs)
+- `ZIREN_DEBUG_PARALLEL_EMIT` / `ZIREN_DEBUG_PARALLEL_COMPILE`
+- `ZIREN_DEBUG_CUMSUM` (verifier wrap-cumsum dump)
+- `ZIREN_BASEFOLD_LOGUP_PROFILE` / `ZIREN_ROW_GKR_PROFILE`
+- `ZIREN_LOGUP_V2_PROFILE` / `ZIREN_LOGUP_V3_PROFILE`
+- `ZIREN_PERF_SKIP_VERIFY_CORE` — **verify is now always on**; no
+  way to opt out (per the project-wide rule that every perf
+  experiment must include verify, no silent miscompile risk).
+- `ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE_*` family (4 SP1-port device
+  opt-outs; defaults ON, hard-coded).
+
+None of these vars controlled production behavior — they were debug
+instrumentation or inverted-polarity kill switches that defaulted to
+the production path.
+
+### Phase 3 — kill-switch renames (May 21)
+
+Five Category-B kill-switch vars were renamed to make their nature
+(broken / legacy / test-only / dormant) explicit at every read site.
+**Polarity and defaults are preserved end-to-end** — only the var
+name changed.
+
+| Old | New |
+|---|---|
+| `ZIREN_GPU_LOGUP_PACKED` | `ZIREN_DEBUG_LOGUP_PACKED_BROKEN` |
+| `ZIREN_GPU_GKR_TRANSITION_LEGACY` | `ZIREN_DEBUG_GKR_LEGACY_PERCHIP` |
+| `ZIREN_DISABLE_BUNDLE_LIFT` | `ZIREN_LEGACY_NONBUNDLE_LIFT` |
+| `ZIREN_SKIP_BASEFOLD` | `ZIREN_TEST_SKIP_BASEFOLD` |
+| `ZIREN_GPU_LOGUP_ZIREN_PATH` | `ZIREN_DEBUG_LOGUP_ZIREN_PATH_DORMANT` |
+
+If a script sets one of the old names, the read site no longer
+exists — update to the new name. Same set of values (typically
+`=1`) selects the same code path.
+
+### Phase 4 — `ZIREN_GPU_RESIDENCY` profile (May 21)
+
+Four per-subsystem residency / cache toggles were collapsed into a
+single profile env:
+
+```
+ZIREN_GPU_RESIDENCY=host|hybrid|full
+```
+
+| Subsystem | `host` | `hybrid` (default) | `full` | Legacy var (still honored) |
+|---|:---:|:---:|:---:|---|
+| compose-pk cache | OFF | OFF | ON | `ZIREN_COMPOSE_PK_CACHE=1` |
+| program cache | OFF | OFF | ON | `ZIREN_PROGRAM_CACHE=1` |
+| program cache audit | OFF | OFF | OFF | `ZIREN_VERIFY_PROGRAM_CACHE=1` (orthogonal) |
+
+`hybrid` reproduces the pre-Phase-4 audited default bit-for-bit.
+`full` opts into all production caches (long-lived GPU provers
+where compile cost amortizes). `host` forces everything OFF
+(debugging / no-GPU fallback).
+
+All three legacy vars still work. Setting any of them to a truthy
+value (`1`, `true`) wins over the profile and emits a one-shot
+deprecation `tracing::warn!`. So existing bench / VK-gen scripts
+need zero edits.
+
+### Compose pre-warm — default ON with kill-switch (May 22)
+
+The compose-program pre-warm at `ZKMProver::new()` was lifted out of
+the RESIDENCY profile (it had briefly been gated by
+`ZIREN_GPU_RESIDENCY=full`) and is now **default-ON**, with a
+kill-switch:
+
+```
+ZIREN_DISABLE_COMPOSE_PREWARM=1   # opt-out only
+```
+
+Rationale: the SP1 dummy-shard-proof port (Ziren `8728b983`) made
+pre-warm cheap (~64.8s → 2.0s of compose-compile work amortized at
+startup), so the original opt-in posture is no longer the right
+default. Set the kill-switch only when measuring cold-start timing
+or debugging prewarm-related issues. The legacy
+`ZIREN_ENABLE_COMPOSE_PREWARM=1` opt-in env was removed in the same
+change — it is no longer read.
+
+### Quick-reference: what to do with an old script
+
+| Old export | What to do |
+|---|---|
+| `export ZIREN_USE_BASEFOLD=1` | Delete the line. BaseFold is default. |
+| `export ZIREN_BASEFOLD_GPU=1` | Delete the line. |
+| `export ZIREN_GPU_SHARD_PROVE=1` | Delete the line. |
+| `export ZIREN_USE_FRI=1` | Delete the line. FRI legacy PCS removed. |
+| `export ZIREN_USE_WHIR=1` | Delete the line. WHIR removed end-to-end. |
+| `export ZIREN_BASEFOLD_REAL=1` | Delete the line. Real-value verifier is default. |
+| `export ZIREN_DEBUG_*=1` (anything in the Phase 2 list) | Delete the line. Diagnostic gates removed. |
+| `export ZIREN_*_PROFILE=1` | Delete the line. Profile gates removed. |
+| `export ZIREN_PERF_SKIP_VERIFY_CORE=1` | Delete the line. Verify is always on. |
+| `export ZIREN_GPU_LOGUP_PACKED=1` | Replace with `ZIREN_DEBUG_LOGUP_PACKED_BROKEN=1` |
+| `export ZIREN_GPU_GKR_TRANSITION_LEGACY=0` | Replace with `ZIREN_DEBUG_GKR_LEGACY_PERCHIP=0` |
+| `export ZIREN_DISABLE_BUNDLE_LIFT=1` | Replace with `ZIREN_LEGACY_NONBUNDLE_LIFT=1` |
+| `export ZIREN_SKIP_BASEFOLD=1` | Replace with `ZIREN_TEST_SKIP_BASEFOLD=1` |
+| `export ZIREN_GPU_LOGUP_ZIREN_PATH=1` | Replace with `ZIREN_DEBUG_LOGUP_ZIREN_PATH_DORMANT=1` |
+| `export ZIREN_COMPOSE_PK_CACHE=1` | Still works (deprecation warn). Prefer `ZIREN_GPU_RESIDENCY=full`. |
+| `export ZIREN_PROGRAM_CACHE=1` | Still works (deprecation warn). Prefer `ZIREN_GPU_RESIDENCY=full`. |
+| `export ZIREN_ENABLE_COMPOSE_PREWARM=1` | Delete the line. Pre-warm is default-ON. |
+
+For the long tail of `ZKM_GPU_*`, `RECURSION_*`, `TRACE_GEN_WORKERS`,
+`SHARD_SIZE` and similar tuning knobs: those were **not** in scope
+for this consolidation and are unchanged. `ZIREN_DISABLE_JIT=1` (the
+JIT-executor kill switch documented in `docs/jit_vs_interp_perf.md`)
+is also unchanged.
