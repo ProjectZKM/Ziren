@@ -374,14 +374,26 @@ where
     // BasefoldShardOpenedValuesVariable Witnessable impl.
     let opened_values = ShardOpenedValues { chips: Vec::new() };
 
-    // Compute per-chip log_height from the main trace dimensions —
-    // each main_traces[i] corresponds to chips[i] (zip-aligned input).
+    // Compute per-chip log_height from the loader's metadata
+    // (gap #1 Phase B-1: route through `MainTraceLoader::chip_dims()`).
+    //
+    // Previously this consumer walked `main_traces.iter()` — every
+    // chip's full host trace was required up front, which forced the
+    // orchestrator-level `materialize_all()` even though Phase 5 only
+    // ever reads heights.  Now we ask the loader for dims directly;
+    // for `LazyDeviceLoader::with_dims(...)` (GPU shard-prover) this
+    // is an O(1) host-side struct read with zero PCIe traffic.
+    //
+    // For `EagerHostLoader` (CPU host caller) the default trait impl
+    // walks the underlying slice — byte-equivalent to the legacy
+    // path.
+    //
     // Stored under chip name so the verifier can look up by the
     // BTreeMap key set in `logup_evaluations.chip_openings`.
-    use p3_matrix::Matrix;
     let mut chip_log_heights = std::collections::BTreeMap::new();
-    for (chip, trace) in chips.iter().zip(main_traces.iter()) {
-        let h = trace.height().max(1);
+    let dims = main_trace_loader.chip_dims();
+    for (chip, (h, _w)) in chips.iter().zip(dims.iter()) {
+        let h = (*h).max(1);
         // ceil_log2 — h is power of two for committed traces.
         let log_h = if h.is_power_of_two() {
             h.trailing_zeros() as u8
