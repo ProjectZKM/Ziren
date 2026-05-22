@@ -1415,7 +1415,15 @@ where
     // GPU function-pointer.  Otherwise fall back to the host trait-driven
     // path below.  Output is byte-identical (same per-round shape, same
     // observe pattern, same MSB fold + insert(0, alpha) point).
-    if std::env::var("ZIREN_GPU_ZEROCHECK").map(|v| v == "1").unwrap_or(false) {
+    // GPU zerocheck is default-on; per-shard sumcheck ~10x faster on device.
+    // Opt-out via ZIREN_GPU_ZEROCHECK_DISABLE=1 (or legacy ZIREN_GPU_ZEROCHECK=0).
+    let gpu_zc_disabled = std::env::var("ZIREN_GPU_ZEROCHECK_DISABLE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        || std::env::var("ZIREN_GPU_ZEROCHECK")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false);
+    if !gpu_zc_disabled {
         if let Some(gpu_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_zerocheck_hook()
         {
