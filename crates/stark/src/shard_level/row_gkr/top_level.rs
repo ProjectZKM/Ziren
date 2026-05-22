@@ -1,4 +1,4 @@
-//! Top-level row-reduction shard LogUp-GKR prover (task #24, A.2 step 6).
+//! Top-level row-reduction shard LogUp-GKR prover (the task, A.2 step 6).
 //!
 //! Assembles the full pipeline: first-layer generation, row-by-row
 //! reduction, per-round sumcheck, and final per-chip trace openings.
@@ -73,7 +73,7 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     main_traces: &[RowMajorMatrix<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
-    // #263: per-shard device-trace provider (SP1-aligned param pattern).
+    // per-shard device-trace provider (SP1-aligned param pattern).
     // None => host-only path.  Future Phase 3 will plumb this into the
     // first-layer / Step-6 / layer-transition GPU hooks instead of the
     // racy global-Mutex snapshot.
@@ -85,7 +85,7 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // #383 sub-step 1 — RAII LogUp-GKR task scope wired via
+    // RAII LogUp-GKR task scope wired via
     // `enter_with_scope` so the V3 dispatch site (`round.rs::
     // try_logup_round_gpu_v3`) can consult the typed scope pointer
     // and pop pre-materialized device layers via `scope.next_layer()`
@@ -93,18 +93,18 @@ where
     //
     // **Today's behavior change**: structurally none — the scope's
     // `circuit` field stays `None` (no `install_circuit` caller until
-    // sub-step 2 wires the populator).  When the scope holds no
+    //  wires the populator).  When the scope holds no
     // installed circuit, `with_production_scope_mut` still returns
     // `Some(...)` but `scope.next_layer()` returns `None`, and the
     // V3 dispatch falls through to the existing `take_logup_v3_next
     // _handle` path — byte-identical to pre-#383.
     //
-    // **Future sub-step 2 wins**: when the populator installs the
+    // **Future  wins**: when the populator installs the
     // device circuit at scope start, the V3 dispatch will pop a
     // `DeviceCircuitLayer` per round, skip `flatten_layer` +
     // `cast_vec_ef_to_ef4`, and feed the handle directly into the
     // V3 hook — projected -500 µs per call per
-    // `project_383_taskscope_logup.md`.
+    // the related design memo.
     //
     // The guard MUST be held for the duration of every GKR walk and
     // dropped strictly AFTER the final V3 dispatch returns; the scope
@@ -114,13 +114,13 @@ where
         crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
     );
 
-    // #383 sub-step 2 / #394 — the populator invocation moved AFTER
+    // / #394 — the populator invocation moved AFTER
     // `build_gkr_circuit` (below) because the ziren-gpu populator
     // drains the per-circuit layer-transition registry which is only
     // filled DURING `build_gkr_circuit`.  Invoking it at scope-entry
     // (the original position) declined every time on production:
     //
-    //   #394 V3 scope populate declined — no active layer-transition
+    //   V3 scope populate declined — no active layer-transition
     //         registry circuit on current GPU
     //
     // The typed-pointer guard (`enter_with_scope`) is bound here so
@@ -133,7 +133,7 @@ where
             &mut logup_task_scope,
         );
 
-    // #359 followup: env-gated profile to scope what fraction of
+    // followup: env-gated profile to scope what fraction of
     // basefold compress wall this row-GKR LogUp loop consumes.
     // This IS the active LogUp path on basefold (per project_359
     // _basefold_compress_path). Default OFF.
@@ -209,12 +209,12 @@ where
         "logup_gkr sub-phase done"
     );
 
-    // #383 sub-step 2 / #394 — invoke the registered populator AFTER
+    // / #394 — invoke the registered populator AFTER
     // `build_gkr_circuit` (which fills ziren-gpu's per-circuit
     // layer-transition registry) but BEFORE the GKR walk fires V3
     // dispatch (which consults the scope via `with_production_scope_
     // mut`).  This is the correct insertion point per
-    // `project_394_substep2b_zirengpu_populator.md`: the populator
+    // the related design memo: the populator
     // drains the just-built registry into `DeviceCircuitLayerPayload`
     // entries that the scope installs.
     //
@@ -228,7 +228,7 @@ where
     // registered hook returns `None` (e.g. its own env gate is OFF),
     // the install is skipped and the scope's `circuit` stays `None`
     // — V3 dispatch falls through to the legacy `take_logup_v3_next_
-    // handle` TLS path.  Byte-equivalent to sub-step 1.
+    // handle` TLS path.  Byte-equivalent to .
     //
     // **Borrow semantics**: `_logup_task_scope_guard` (above) holds
     // only a raw TLS pointer, NOT a borrow.  We can still take
@@ -264,7 +264,7 @@ where
                             circuit_id: cid,
                             num_row_variables: max_log_row_count as u32,
                             num_interaction_variables: 0,
-                            // #376 sub-step 1 — regen payload not yet
+                            // regen payload not yet
                             // populated; #383 populator path is eager
                             // (all layers materialized at scope entry),
                             // so the lazy regen arm never fires here.
@@ -379,17 +379,17 @@ where
     // resident across all 8 concurrent shards × 8 GPUs and OOM the
     // basefold commit Merkle phase that follows.
     let mut device_circuit_id_to_drain: Option<u64> = None;
-    // #360 sub-phase accumulators: per-iteration costs within
+    // sub-phase accumulators: per-iteration costs within
     // layer_transitions. Profile when ZIREN_ROW_GKR_PROFILE=1.
     let mut acc_pull_us: u64 = 0;
     let mut acc_prove_us: u64 = 0;
     let mut acc_observe_us: u64 = 0;
     let mut acc_other_us: u64 = 0;
 
-    // #398 sub-step 3 — opt-in device-resident consumer.
+    // opt-in device-resident consumer.
     //
     // When `ZIREN_LOGUP_DEVICE_CONSUMER=1` AND the scope has an
-    // installed circuit (sub-step 2 + 2b populator wired) AND the
+    // installed circuit ( + 2b populator wired) AND the
     // V3 GPU hook is registered AND the production EF gate matches,
     // skip `pull_device_layer_to_host` for `LayerState::Device`
     // entries: pass a SHAPE-ONLY proxy to `prove_gkr_round` and let
@@ -401,10 +401,10 @@ where
     // demonstrates the device-resident consumer architecture without
     // requiring the full SP1 `LogUpCudaCircuit::next()` port.  Default
     // OFF so the legacy pull path remains the production path until
-    // sub-step 2b ships the ziren-gpu populator that actually fills
+    //  ships the ziren-gpu populator that actually fills
     // the scope.
     //
-    // SP1 reference: `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs`
+    // SP1 reference: `sp1-gpu/crates/logup_gkr/src/utils.rs`
     // (LogUpCudaCircuit::next at line 167 — pops from
     // `materialized_layers` Vec, never pulls to host).
     //
@@ -446,7 +446,7 @@ where
         // (each iteration), releasing the host materialization before
         // the next round allocates.
         //
-        // #398 sub-step 3 — when `device_consumer_enabled` AND this is
+        // when `device_consumer_enabled` AND this is
         // a `LayerState::Device` entry AND the scope's peek matches
         // this entry's shape, we construct a shape-only proxy instead
         // of pulling; the V3 dispatch reads from the scope handle.
@@ -475,7 +475,7 @@ where
                     );
                 }
 
-                // #398 sub-step 3 — device-resident consumer fast path.
+                // device-resident consumer fast path.
                 // The scope peek tells us if a layer is available; we
                 // require shape parity with the `LayerState::Device`
                 // entry to guard against ordering mismatches between
@@ -801,7 +801,7 @@ where
          transition / pull) to be installed before producing any Device entries",
     );
 
-    // #230 multi-GPU fix: thread circuit_id so the GPU side can scope
+    // multi-GPU fix: thread circuit_id so the GPU side can scope
     // its registry lookup to this build_gkr_circuit invocation's
     // bucket — otherwise concurrent shards on the same GPU collide on
     // the per-GPU `next_handle` counter.

@@ -2,7 +2,7 @@
 //! `num_variables` shape but only `num_real_entries` cells materialized.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/multilinear/src/padded.rs`](file:///tmp/sp1/slop/crates/multilinear/src/padded.rs).
+//! `slop/crates/multilinear/src/padded.rs`.
 //!
 //! ## Why
 //!

@@ -1,8 +1,8 @@
 //! Per-layer GKR round sumcheck for the row-only backend
-//! (task #24, A.2 step 5).
+//! (the task, A.2 step 5).
 //!
 //! Port of
-//! [`prove_gkr_round`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L151-L226)
+//! `prove_gkr_round`
 //! against Ziren's sumcheck conventions.
 //!
 //! ## What this proves
@@ -45,7 +45,7 @@
 //! all assume `reduced_point[k] = challenge for variable k`.
 //!
 //! The **sumcheck fold** itself runs **MSB-first** to match SP1
-//! (`/tmp/sp1/slop/crates/sumcheck/src/prover.rs:13-96`): round 0
+//! (`slop/crates/sumcheck/src/prover.rs:13-96`): round 0
 //! binds the highest remaining variable via the pair `(g, g+half)`,
 //! and the freshly-sampled challenge is `insert(0, alpha)`-ed at the
 //! front of `reduced_point`.  After all `n` rounds the per-coord
@@ -112,7 +112,7 @@ where
     let total_chip_cols: usize =
         layer.numerator_0.iter().map(|c| c.num_interactions).sum();
     let pad_per_row = cols.saturating_sub(total_chip_cols);
-    // #368 follow-up: parallel-init the four flat buffers (was sequential
+    // follow-up: parallel-init the four flat buffers (was sequential
     // `vec![EF::ZERO/ONE; total]`).  Profile probe showed flatten_layer
     // dominates V2 path at 77% of per-layer cost; sequential init of
     // 4 × `total` EF4 elements (16 B each) is the bulk of that time.
@@ -164,7 +164,7 @@ where
                 let d0_chip = &layer.denominator_0[chip_idx];
                 let n1_chip = &layer.numerator_1[chip_idx];
                 let d1_chip = &layer.denominator_1[chip_idx];
-                // PaddedMle (task #88): rows beyond per-quadrant
+                // PaddedMle: rows beyond per-quadrant
                 // num_real_rows take the identity-fraction value
                 // (0 for numerators, 1 for denominators).
                 let n0_real = row < n0_chip.num_real_rows;
@@ -423,10 +423,10 @@ fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
 /// row-major table.  `chip_offsets[c]` is the running sum of chip
 /// widths and matches `flatten_layer`'s column placement.
 ///
-/// ## PaddedMle row optimisation (task #88)
+/// ## PaddedMle row optimisation
 ///
 /// Mirrors SP1's `PaddedMle::Constant` shape
-/// (`/tmp/sp1/slop/crates/multilinear/src/padded.rs`): each chip's
+/// (`slop/crates/multilinear/src/padded.rs`): each chip's
 /// data array stores ONLY the real prefix of `num_real_rows` rows,
 /// even though the LOGICAL row count is `chip_rows = 1 << remaining_row_variables`.
 /// Virtual rows in `[num_real_rows[c], chip_rows)` carry the per-
@@ -460,7 +460,7 @@ struct ChipLayerState<EF> {
 /// row-major cells.  Mirrors SP1's `LogUpGkrCpuLayer` but expressed
 /// directly as `Vec<Vec<EF>>` to keep the round body simple.
 ///
-/// **PaddedMle row optimisation (task #88)**: each chip's per-quadrant
+/// **PaddedMle row optimisation**: each chip's per-quadrant
 /// `cells` buffer is taken AS-IS from the `RowMajorTable` — when the
 /// upstream `first_layer` / `transition` produced real-only storage
 /// (`num_real_rows < 1 << num_row_variables`), the chip table here is
@@ -469,7 +469,7 @@ struct ChipLayerState<EF> {
 /// `num_real_rows` records each chip's materialised row count.  The
 /// fold and round-poly evaluation paths handle the
 /// (real, real) / (real, pad) / (pad, pad) cases analytically.
-/// #270 step 7n / Option B2 scaffold: env-gated GPU first-round
+/// / Option B2 scaffold: env-gated GPU first-round
 /// pre-computation hook.
 ///
 /// Called from `LogupRoundPolynomial::new` BEFORE `build_chip_state`
@@ -579,7 +579,7 @@ fn from_strided_post_fix<EF: Field + Copy>(
     })
 }
 
-/// #270 step 7z synthetic diff test — fixed-input, hand-computable
+/// synthetic diff test — fixed-input, hand-computable
 /// 1-chip 4-row 1-col case for isolating the SP1<->Ziren convention
 /// error.  Called once via OnceLock from try_first_round_on_gpu.
 fn synthetic_diff_test_step7z() {
@@ -791,11 +791,11 @@ fn lagrange_interp_4<EF: Field>(pts: [EF; 4], vals: [EF; 4]) -> [EF; 4] {
     result
 }
 
-/// #309 — dedicated rayon pool for the GPU first-round marshal.
+/// dedicated rayon pool for the GPU first-round marshal.
 ///
 /// The marshal's `n_chips`-wide par_iter previously ran on the rayon
 /// global pool, contending with concurrent shards' rayon work on
-/// multi-GPU (project_270_step8_summary.md showed +11s on 2-GPU).
+/// multi-GPU (the related design memo showed +11s on 2-GPU).
 /// The dedicated pool caps per-marshal parallelism so M concurrent
 /// shards stay within `M * num_threads` cores rather than oversubscribing
 /// every available core via the global pool.
@@ -891,7 +891,7 @@ where
         return None;
     }
 
-    // #308 Phase 2 step 3: lazily drain the ziren-gpu device-first-layer
+    // Phase 2 step 3: lazily drain the ziren-gpu device-first-layer
     // stash and install into TLS for this scope.  Gated by
     // `ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=1` (separate from the
     // stash-populating `ZIREN_GPU_DEVICE_FIRST_LAYER` flag) so
@@ -901,7 +901,7 @@ where
     let _device_first_layer_guard = {
         static CONSUME_GATE: OnceLock<bool> = OnceLock::new();
         let consume = *CONSUME_GATE.get_or_init(|| {
-            // #380 default ON to match SP1 (device-first-layer stash drain
+            // default ON to match SP1 (device-first-layer stash drain
             // is mandatory in SP1's first-round kernel pipeline — no env
             // gate). Opt-OUT with ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=0.
             std::env::var("ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME")
@@ -964,7 +964,7 @@ where
     // per chip writes directly to its slice.  Eliminates per-chip
     // intermediate Vec<Vec> overhead.
     //
-    // #308 ROI probe: time the marshal so we can validate whether the
+    // ROI probe: time the marshal so we can validate whether the
     // multi-day device-resident dispatch refactor delivers its
     // estimated savings.  Aggregate across shards to compare against
     // baseline wall.
@@ -1029,7 +1029,7 @@ where
         // num_zero_section[c.start..c.start+c.cells]   = chip c's n0 interleaved
         // num_one_section [c.start..c.start+c.cells]   = chip c's n1 interleaved
         //
-        // #309: run the marshal par_iter on a dedicated pool (capped at
+        // run the marshal par_iter on a dedicated pool (capped at
         // 4 threads default) instead of the rayon global pool — see
         // marshal_thread_pool() doc for the multi-GPU contention story.
         use p3_maybe_rayon::prelude::*;
@@ -1136,7 +1136,7 @@ where
         });
         });  // marshal_thread_pool().install
     }
-    // #308 ROI probe: per-shard marshal elapsed.
+    // ROI probe: per-shard marshal elapsed.
     let _marshal_elapsed_us = _marshal_start.elapsed().as_micros();
     tracing::info!(
         target = "first_round_marshal",
@@ -1320,7 +1320,7 @@ where
             layer_nrv, n_chips, chip_info);
     });
 
-    // #308 Phase 4: device-variant attempt.  When env flag is set
+    // Phase 4: device-variant attempt.  When env flag is set
     // AND TLS handle present, try the device-resident dispatch first.
     // Returns same (Vec<Ef4>, Vec<Ef4>) partials shape as the host
     // hook — Step 8e reconstruction continues unchanged.  On None,
@@ -1347,7 +1347,7 @@ where
     let device_result: Option<(Vec<ProdEF>, Vec<ProdEF>)> = {
         static GATE: OnceLock<bool> = OnceLock::new();
         let env_on = *GATE.get_or_init(|| {
-            // #380 default ON to match SP1 (no per-shard env gate; phase 3
+            // default ON to match SP1 (no per-shard env gate; phase 3
             // device dispatch is always engaged when TLS+hook present).
             // Opt-OUT with ZIREN_GPU_PHASE3_DISPATCH=0.
             let v = std::env::var("ZIREN_GPU_PHASE3_DISPATCH")
@@ -1477,7 +1477,7 @@ where
     );
 
     // SP1-style reconstruction (best guess — see SP1
-    // /tmp/sp1/sp1-gpu/crates/logup_gkr/src/sumcheck.rs:51-93).
+    // sp1-gpu/crates/logup_gkr/src/sumcheck.rs:51-93).
     // Assumes padding_adjustment = pad_eq_int_sum and
     // eq_adjustment = ONE (Ziren collapses both into pad_eq_int_sum).
     let host_coeffs = poly_coefficients_from_evals(host_evals);
@@ -1885,7 +1885,7 @@ where
         );
     }
 
-    // Per-chip num_real_rows (PaddedMle pattern, task #88).  All four
+    // Per-chip num_real_rows (PaddedMle pattern, the task).  All four
     // quadrants of a given chip share the same logical row count, but
     // n*/d* may differ in `num_real_rows` if the source `transition`
     // produced empty lower halves (e.g. when src_real <= next_rows the
@@ -1995,7 +1995,7 @@ where
 /// in the tail contributes `eq * 1` to the round poly, so we add
 /// `pad_eq_int_sum * eq_row_pair_X * 1` for X ∈ {1, 2, 3}.
 ///
-/// **PaddedMle row optimisation (task #88)**: each chip carries its own
+/// **PaddedMle row optimisation**: each chip carries its own
 /// `num_real_rows[c]` (the materialised-row prefix); rows ≥ this index
 /// are virtual and resolve to `(0, 1, 0, 1)`.  The per-row branching
 /// inside each chip distinguishes:
@@ -2026,7 +2026,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     debug_assert!(eq_row.len() == state.chip_rows);
     let row_half = state.chip_rows / 2;
 
-    // #336 / #343: GPU dispatch hook for chip-structured round-poly
+    // GPU dispatch hook for chip-structured round-poly
     // compute. Default OFF (`ZIREN_GPU_CHIP_SUMCHECK=1` enables).
     // Hook impl lives in ziren-gpu/basefold/chip_sumcheck_dispatch.rs;
     // when registered + env on + EF == Ef4 production type, route to
@@ -2412,7 +2412,7 @@ fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, 
 /// the layout `flatten_layer` would have produced after the same number
 /// of row-binding folds — see Phase 2A `flatten_layer` for the layout.
 ///
-/// **PaddedMle pattern (task #88)**: chips with `num_real_rows == 0`
+/// **PaddedMle pattern**: chips with `num_real_rows == 0`
 /// were fully-padding and contributed nothing materialised — their
 /// global slots stay at the initial `(0, 1)` identity fraction.  Chips
 /// with `num_real_rows == 1` (i.e., real after folding) blit their
@@ -2487,7 +2487,7 @@ fn fold_eq<EF: Field + Send + Sync>(tab: &[EF], alpha: EF) -> Vec<EF> {
 /// (Tier 1 Phase 3).
 ///
 /// Mirrors SP1's
-/// [`LogupRoundPolynomial`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs#L13-L28)
+/// `LogupRoundPolynomial`
 /// in role: it carries the layer's per-chip n/d MLEs plus the factored
 /// eq tables (`eq_row`, `eq_interaction`) and a batching scalar
 /// `lambda`.  The sumcheck driver in
@@ -2543,19 +2543,19 @@ pub struct LogupRoundPolynomial<EF> {
     /// call.  Cleared by fix_last_variable so subsequent rounds use the
     /// normal host path.
     gpu_cached_first_poly: Option<UnivariatePolynomial<EF>>,
-    /// #343 Phase C: per-instance id for the device-resident
+    /// per-instance id for the device-resident
     /// chip-sumcheck cache. Assigned eagerly via a process-global
     /// counter so every `LogupRoundPolynomial` has a unique key
     /// for the device hook's thread-local layer cache.
     chip_sumcheck_id: u64,
-    /// #343 Phase C: 0-based round counter for the chip-state
+    /// 0-based round counter for the chip-state
     /// sumcheck. Incremented at the end of each `fix_last_variable`
     /// while in `Chip` state. Round 0 of the chip-sumcheck is
     /// the value when `sum_as_poly_in_last_variable` first runs
     /// on `PolynomialLayer::Chip` (transitions from GpuPrefolded
     /// reset this to 0).
     chip_sumcheck_round: usize,
-    /// #343 Phase C: verifier-sampled `alpha` from the most recent
+    /// verifier-sampled `alpha` from the most recent
     /// `fix_last_variable` call while in `Chip` state. `None` until
     /// the first such call. Used by the device hook to fold the
     /// cached device layer before running the next round's
@@ -2572,7 +2572,7 @@ enum PolynomialLayer<EF> {
     Chip(ChipLayerState<EF>),
     /// Interaction-binding mode — single flat `Vec<EF>` per quadrant.
     Packed { n0: Vec<EF>, d0: Vec<EF>, n1: Vec<EF>, d1: Vec<EF> },
-    /// #270 step 7n / Option B2: SP1-aligned GPU pre-folded round 0.
+    /// / Option B2: SP1-aligned GPU pre-folded round 0.
     ///
     /// Set by `LogupRoundPolynomial::new` when
     /// `try_first_round_on_gpu` returned Some — i.e. the GPU kernel
@@ -2635,7 +2635,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             total_vars,
         );
 
-        // #270 step 7n / Option B2 scaffold: env-gated GPU first-round
+        // / Option B2 scaffold: env-gated GPU first-round
         // pre-computation hook.  When ZIREN_GPU_FUSED_FIRST_ROUND=1 AND
         // we're processing a FirstLayer (not an intermediate GKR layer),
         // attempt to pre-compute the first sumcheck round on GPU using
@@ -2643,7 +2643,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         // byte-equiv in #270 step 7m).  This sits BEFORE
         // `build_chip_state` so we have raw FELT numerators (matching
         // SP1's layer-0 type signature) — option B2 from
-        // `project_270_caller_migration_scope.md`.
+        // the related design memo.
         //
         // SCAFFOLD: returns None unconditionally for now.  The body
         // (extract raw layer data → flatten to SP1 layout → call
@@ -2667,7 +2667,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
 
         let claimed_sum = lambda * numerator_eval + denominator_eval;
 
-        // #270 step 7w: diff harness — when env on, dispatch GPU
+        // diff harness — when env on, dispatch GPU
         // first-round + compute host evals + log side-by-side.
         // All inputs built; safe to compare paths.  Returns None
         // unconditionally (safety net).
@@ -2714,7 +2714,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             remaining_row_vars: num_row_variables,
             layer_int_vars: num_interaction_variables,
             gpu_cached_first_poly,
-            // #343 Phase C: device-resident chip-sumcheck per-instance
+            // device-resident chip-sumcheck per-instance
             // id (process-global counter) + round counters. The id is
             // assigned eagerly so every LogupRoundPolynomial instance
             // has a unique key for the thread-local device cache.
@@ -2818,7 +2818,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         // Fold n/d data based on current mode.
         match &mut self.state {
             PolynomialLayer::GpuPrefolded { post_fix_state, .. } => {
-                // #270 step 7n / Option B2: round 0 was pre-computed
+                // / Option B2: round 0 was pre-computed
                 // by GPU.  Transition into Chip(post_fix_state) and
                 // fold by alpha (which is round-0's binding).
                 //
@@ -2868,7 +2868,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
             PolynomialLayer::Chip(state) => {
                 fold_chip_state_row(state, alpha);
                 self.remaining_row_vars -= 1;
-                // #343 Phase C: capture the alpha just applied to the
+                // capture the alpha just applied to the
                 // chip state. Round counter advances by one — the next
                 // sum_as_poly_in_last_variable will be the next round
                 // in this chip-sumcheck instance.
@@ -2964,7 +2964,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         if let Some(cached) = &self.gpu_cached_first_poly {
             return cached.clone();
         }
-        // #270 step 7n / Option B2: GpuPrefolded short-circuit.  When
+        // / Option B2: GpuPrefolded short-circuit.  When
         // round 0 was pre-computed by GPU, return the cached
         // univariate polynomial verbatim.  fix_last_variable will
         // then transition the state out of GpuPrefolded.
@@ -2974,7 +2974,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         let claim_v = claim.expect("sum_as_poly_in_last_variable: claim required");
         let evals = match &self.state {
             PolynomialLayer::Chip(state) => {
-                // #343 Phase C: optional device-resident dispatch.
+                // optional device-resident dispatch.
                 // Gated on ZIREN_GPU_CHIP_SUMCHECK=1 (engages the
                 // existing host SP1 hook path) AND
                 // ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE=1 (engages the
@@ -3227,7 +3227,7 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// in **per-chip** `Vec<Vec<EF>>` form (`Σ_c chip_rows × chip_cols`)
 /// rather than the layer-wide `2^total_vars × |EF|` flat tables.
 /// This mirrors SP1's `LogUpGkrCpuLayer` representation
-/// (`/tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs:106-225`)
+/// (`crates/hypercube/src/logup_gkr/logup_poly.rs:106-225`)
 /// and avoids materialising the column-padded interaction axis.  On
 /// production reth shards the saving is on the order of 10–60×
 /// because `Σ chip_cols ≪ 2^num_int_vars` for most layer shapes.
@@ -3257,7 +3257,7 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // #361 diagnostic: env-gated probe — fires once with the
+    // diagnostic: env-gated probe — fires once with the
     // env+TypeId+hook state at first call to identify which gate
     // blocks the H2 / V2 path on basefold compress.
     static H2_DIAG: std::sync::OnceLock<()> = std::sync::OnceLock::new();
@@ -3284,7 +3284,7 @@ where
         });
     }
 
-    // C-full H2 — device-resident per-layer LogUp-GKR sumcheck.
+    //  — device-resident per-layer LogUp-GKR sumcheck.
     //
     // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
     // registered via `register_gpu_logup_round_hook` AND `EF` is the
@@ -3297,12 +3297,12 @@ where
     // or on CUDA error; in either case we fall through to the host
     // trait-driven driver below.  Generic-EF callers (test code,
     // non-production) take the host path unconditionally.
-    // #380 default ON to match SP1 (sp1-gpu has no env gate — the device
+    // default ON to match SP1 (sp1-gpu has no env gate — the device
     // LogUp-GKR path is the only path).  SP1 reference: sp1-gpu/.../
     // logup_gkr/src/tracegen.rs (no `if env_var` wrapper).
     //
-    // Expected workload impact (per project_379_combined_incompatible.md
-    // and project_validation_may20_findings.md May 20 bench data):
+    // Expected workload impact (per the related design memo
+    // and the related design memo May 20 bench data):
     //   * reth (large shards, total_vars >= 17): -56% wall — best lever
     //   * tendermint (small shards): +40-94% wall — small-layer dispatch
     //     overhead dominates; SP1 amortizes via TaskScope-persisted state
@@ -3317,7 +3317,7 @@ where
         type Ef4 = p3_field::extension::BinomialExtensionField<
             p3_koala_bear::KoalaBear, 4>;
 
-        // #361 follow-up (Step 3 V3-regression analysis, May 19): scaffold
+        // follow-up (Step 3 V3-regression analysis, May 19): scaffold
         // for the "per-layer size threshold" fix path proposed by the
         // comment block above.  Skip the GPU dispatch entirely (including
         // all of try_logup_round_gpu_v3's host marshalling — flatten_layer,
@@ -3328,7 +3328,7 @@ where
         // MIN_DEVICE_TOTAL_VARS=8 gate).
         //
         // Set ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS=N (recommend
-        // N in [14,20] per project_v3_regression_analysis.md) to avoid
+        // N in [14,20] per the related design memo) to avoid
         // routing tiny layers through V3.  When the guard fires, control
         // falls straight to the host trait-driven driver below.
         //
@@ -3362,7 +3362,7 @@ where
             // hook" via its log presence.
         } else {
 
-        // #271 step 5: V2 dispatch (preferred when challenger is
+        // V2 dispatch (preferred when challenger is
         // InnerChallenger).  V2 takes &mut InnerChallenger directly —
         // the eventual fused round-finalize kernel will use device-
         // resident DuplexChallenger state to eliminate per-round
@@ -3372,7 +3372,7 @@ where
         if TypeId::of::<EF>() == TypeId::of::<Ef4>()
             && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
         {
-            // #371 step 1: V3 dispatch (preferred over V2 when registered).
+            // V3 dispatch (preferred over V2 when registered).
             // V3 hook accepts an opaque device-layer handle (Option<...>); first
             // call passes None and the hook marshals from `*_flat` host vecs,
             // subsequent calls within the same shard pass the stashed handle
@@ -3440,7 +3440,7 @@ where
                 static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                 FIRED_ONCE.get_or_init(|| {
                     tracing::warn!(
-                        "C-full H2 logup-round hook FIRED \
+                        " logup-round hook FIRED \
                          (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
                          gpu_hook present); attempting device-resident \
                          per-layer sumcheck"
@@ -3509,7 +3509,7 @@ where
     }
 }
 
-/// C-full H2 — try the device-resident GPU hook for one full GKR layer's
+///  — try the device-resident GPU hook for one full GKR layer's
 /// sumcheck.  Returns `Some(proof)` on GPU success, `None` if the hook
 /// declined (caller falls back to host trait driver).
 ///
@@ -3658,7 +3658,7 @@ where
     })
 }
 
-/// #271 step 5: V2 dispatch helper.  Same input prep as
+/// V2 dispatch helper.  Same input prep as
 /// `try_logup_round_gpu` but forwards to the V2 hook with a direct
 /// `&mut InnerChallenger` instead of observe/sample closures.
 ///
@@ -3723,11 +3723,11 @@ where
         return None;
     }
 
-    // #368 profile probe: per-layer host-side marshal breakdown.
+    // profile probe: per-layer host-side marshal breakdown.
     // Set ZIREN_LOGUP_V2_PROFILE=1 to emit `[#368] flatten_us=X
     // eq_us=Y hook_us=Z postproc_us=W vars=N` lines per layer.
     // Validates the per-call host-marshal hypothesis behind Gap 1
-    // (project_368_369_real_scope.md) before committing to the
+    // (the related design memo) before committing to the
     // multi-week SP1 LogUpCudaCircuit port.
     let profile = std::env::var("ZIREN_LOGUP_V2_PROFILE")
         .map(|v| v == "1")
@@ -3804,7 +3804,7 @@ where
     })
 }
 
-/// #371 V3 dispatch: thread an optional `DeviceLayerHandle` from a prior layer's
+/// V3 dispatch: thread an optional `DeviceLayerHandle` from a prior layer's
 /// hook output through TLS, plus host fallback inputs. The hook implementation
 /// (registered ziren-gpu side) downcasts the handle to its concrete CudaSlice
 /// state; when present it skips marshalling the `*_flat` host vecs entirely.
@@ -3874,18 +3874,18 @@ where
         .unwrap_or(false);
     let t_start = profile.then(std::time::Instant::now);
 
-    // #383 sub-step 1: consult the per-shard LogupTaskScope first.
+    // consult the per-shard LogupTaskScope first.
     //
     // When the scope has a pre-materialized device circuit installed
-    // (sub-step 2 will wire the populator), `next_layer()` pops the
+    // ( will wire the populator), `next_layer()` pops the
     // bottom-most `DeviceCircuitLayer` and we bridge its handle to the
     // V3 hook's untyped `Option<DeviceLayerHandle>` parameter — skipping
     // `flatten_layer` + `cast_vec_ef_to_ef4` for n0/d0/n1/d1 (the
     // dominant ~500 µs of the per-call host overhead per
-    // `project_383_taskscope_logup.md` accounting table).
+    // the related design memo accounting table).
     //
     // **Today**: the scope's `circuit` field is always `None` (no
-    // `install_circuit` caller until sub-step 2), so this lookup
+    // `install_circuit` caller until ), so this lookup
     // returns `None` and we fall through to the legacy TLS path
     // (`take_logup_v3_next_handle`).  Byte-equivalent to pre-#383
     // behavior.
@@ -3916,13 +3916,13 @@ where
         }
     };
 
-    // #371: pull stashed device handle from prior layer's output, if any.
+    // pull stashed device handle from prior layer's output, if any.
     // First call in a shard's circuit walk returns None and the hook marshals
     // from `*_flat` host vecs. Subsequent calls reuse device buffers.
     //
     // Resolution order:
     //   1. scope_layer (from #383 LogupTaskScope) — preferred when
-    //      sub-step 2 populator is wired and the scope has the
+    //       populator is wired and the scope has the
     //      pre-materialized layer for this round.
     //   2. legacy TLS handle (`take_logup_v3_next_handle`) — the
     //      pre-#383 path; still fires when the scope is empty.

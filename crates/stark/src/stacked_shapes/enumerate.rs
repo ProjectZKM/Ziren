@@ -1,4 +1,4 @@
-//! Shape enumeration helpers (task #20 phase 2 — tactic (b)).
+//! Shape enumeration helpers (the task phase 2 — tactic (b)).
 //!
 //! Produces the concrete list of `CoreProofShape`s used to index the
 //! VK map.  Under tactic (b), shapes are quantized to a small number
@@ -177,7 +177,7 @@ pub fn build_mips_machine_shape() -> MachineShape {
 /// production test suite).
 ///
 /// SP1 reference:
-/// [`max_main_multiple_for_preprocessed_multiple`](file:///tmp/sp1/crates/prover/src/shapes.rs#L575).
+/// `max_main_multiple_for_preprocessed_multiple`.
 const MAX_AREA_MULTIPLE: usize = 12;
 
 /// Per-preprocessed cap on main_multiple. SP1's formula:
@@ -220,13 +220,13 @@ pub fn size_class_bands() -> Vec<(usize, usize)> {
 
 /// Produce every `CoreProofShape` — the top-level enumeration entry
 /// point. Now mirrors SP1's
-/// [`create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580)
+/// `create_all_input_shapes`
 /// using **consecutive integer** ranges for `preprocessed_multiple`
 /// and `main_multiple` instead of Ziren's previous power-of-2-only
 /// `[1, 2, 4, 8, 16, 32]`. The power-of-2 list missed real programs
 /// like hello_world whose actual shape sits between powers (e.g.
 /// `prep_mult=3` or `main_mult=5`), causing "Invalid verification
-/// key" lookups (#75).
+/// key" lookups.
 #[must_use]
 pub fn create_all_input_shapes(machine_shape: &MachineShape) -> Vec<CoreProofShape> {
     let paddings = padding_col_variants();
@@ -338,7 +338,7 @@ mod tests {
     /// enumeration missed its shape and "Invalid verification key"
     /// fired. Now consecutive integers `1..=MAX_AREA_MULTIPLE` are
     /// enumerated (matching SP1's
-    /// [`create_all_input_shapes`](file:///tmp/sp1/crates/prover/src/shapes.rs#L580)).
+    /// `create_all_input_shapes`).
     #[test]
     fn area_multiples_are_consecutive_integers() {
         let ms = area_multiples();

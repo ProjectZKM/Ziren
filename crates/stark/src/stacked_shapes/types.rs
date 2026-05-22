@@ -1,4 +1,4 @@
-//! Core shape types (task #20 phase 1 — types only).
+//! Core shape types (the task phase 1 — types only).
 //!
 //! No construction helpers / enumeration helpers yet; those arrive in
 //! phase 2 (`enumerate.rs`).  This phase adds the data types themselves
@@ -11,7 +11,7 @@
 //! [`crate::Chip<F, A>`] doesn't implement `Ord`/`Hash` (it wraps an
 //! AIR that's only `MachineAir`-bounded), and adding those bounds
 //! would ripple through every MIPS chip AIR — out of scope per task
-//! #20's "no zkVM circuit changes" constraint.
+//! "no zkVM circuit changes" constraint.
 //!
 //! Switching identification to `BTreeSet<String>` (chip names) sidesteps
 //! the issue with no information loss: for the purpose of shape-indexed
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 /// rather than per-chip heights.  This (plus the prover setup) entirely
 /// determines the verifier circuit for that shape.
 ///
-/// Port of [`sp1_hypercube::prover::shard::CoreProofShape`](file:///tmp/sp1/crates/hypercube/src/prover/shard.rs#L798),
+/// Port of `sp1_hypercube::prover::shard::CoreProofShape`,
 /// with `shard_chips: BTreeSet<Chip<F, A>>` replaced by
 /// `shard_chip_names: BTreeSet<String>` — see module docs.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
@@ -100,7 +100,7 @@ impl CoreProofShape {
 /// the full cartesian product of per-chip heights (~1.25M) that
 /// Ziren's legacy [`crate::shape::CoreShapeConfig`] uses.
 ///
-/// Port of [`sp1_hypercube::machine::MachineShape`](file:///tmp/sp1/crates/hypercube/src/machine.rs#L10).
+/// Port of `sp1_hypercube::machine::MachineShape`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MachineShape {
     /// The chip clusters — curated combinations of chip names that
@@ -140,7 +140,7 @@ impl MachineShape {
 /// Single-shard Normalize input shape: one `CoreProofShape` plus the
 /// stacking/FRI parameters that affect the recursion circuit shape.
 ///
-/// Port of [`sp1_prover::shapes::SP1NormalizeInputShape`](file:///tmp/sp1/crates/prover/src/shapes.rs#L76).
+/// Port of `sp1_prover::shapes::SP1NormalizeInputShape`.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 pub struct ZKMNormalizeInputShape {
     pub proof_shapes: Vec<CoreProofShape>,
@@ -153,7 +153,7 @@ pub struct ZKMNormalizeInputShape {
 /// Selects which VK index + program body to use for a given inner
 /// proof at recursion time.
 ///
-/// Port of [`sp1_prover::shapes::SP1RecursionProgramShape`](file:///tmp/sp1/crates/prover/src/shapes.rs#L84).
+/// Port of `sp1_prover::shapes::SP1RecursionProgramShape`.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Hash, Serialize, Deserialize)]
 pub enum ZKMRecursionProgramShape {
     /// Verifies one core shard proof.  The VK used at the recursion
@@ -172,7 +172,7 @@ pub enum ZKMRecursionProgramShape {
 /// downstream code can pin log_blowup / log_stacking_height against
 /// the same values the enumeration uses.
 ///
-/// Mirrors the constants in [`sp1_prover::components`](file:///tmp/sp1/crates/prover/src/components.rs#L16-L60):
+/// Mirrors the constants in `sp1_prover::components`:
 /// `CORE_LOG_STACKING_HEIGHT = 21`, `CORE_LOG_BLOWUP = 2`.
 pub mod consts {
     /// Log2 of the stacking stripe height — every core commit's area

@@ -21,10 +21,10 @@ mod io;
 pub mod jit_runner;
 pub mod memory;
 /// Minimal-trace skeleton for the SP1 MinimalTrace + TracingVM split
-/// (#316 Phase B). Defines the per-shard checkpoint format the JIT
-/// emits and the TracingVM (Phase C) consumes. See module docs.
+///. Defines the per-shard checkpoint format the JIT
+/// emits and the TracingVM consumes. See module docs.
 pub mod minimal_trace;
-/// TracingVM scaffold + parallel driver (#316 Phase C). Consumes
+/// TracingVM scaffold + parallel driver. Consumes
 /// `MinimalTrace` chunks and produces full `ExecutionRecord`s — one
 /// per shard, rayon-parallelised across cores. See module docs.
 pub mod tracing_vm;

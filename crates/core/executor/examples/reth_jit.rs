@@ -1,5 +1,5 @@
-//! Run the Reth zkVM ELF (from /data/stephen/ziren-shape-bin/reth/)
-//! through the JIT-by-default executor with a real stdin input.
+//! Run the Reth zkVM ELF through the JIT-by-default executor with a
+//! real stdin input.
 //!
 //! Usage:
 //!     cargo run --release -p zkm-core-executor --example reth_jit

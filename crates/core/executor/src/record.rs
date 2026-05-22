@@ -112,7 +112,7 @@ impl ExecutionRecord {
     /// `core/executor/src/record.rs::new_preallocated` and prover/worker/prover/core.rs).
     ///
     /// This avoids the Vec-growth realloc storm seen on the per-shard interpreter hot
-    /// loop (#316). When `reservation_size == 0` this degrades cleanly to `new`.
+    /// loop. When `reservation_size == 0` this degrades cleanly to `new`.
     #[must_use]
     pub fn new_preallocated(program: Arc<Program>, reservation_size: usize) -> Self {
         let mut result = Self { program, ..Default::default() };

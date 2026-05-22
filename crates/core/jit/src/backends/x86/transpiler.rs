@@ -45,7 +45,7 @@ impl MipsTranspiler for TranspilerBackend {
         self.may_early_exit = false;
 
         // Optional PC trace + halt-after-N counter for post-mortem
-        // SEGV diagnosis (#73).  Emit early — even before the exit-
+        // SEGV diagnosis.  Emit early — even before the exit-
         // code gate — so we capture the broken instruction even when
         // the JIT'd code faults inside its own prologue check.
         if self.emit_pc_trace {

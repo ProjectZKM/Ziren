@@ -184,13 +184,13 @@ where
             ExecutionState,
             bool,
             u64,
-            // #316 Phase D.4 producer wiring: optional sidecar of
+            // producer wiring: optional sidecar of
             // sealed TraceChunks accumulated since the last batch.
             // Consumer may use these via `trace_chunk` to avoid
             // re-executing memory state from scratch.
             Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
         )>(opts.checkpoints_channel_capacity);
-        // #316 Phase D.4 opt-in. When set, producer collects MinimalTrace
+        // opt-in. When set, producer collects MinimalTrace
         // chunks during Checkpoint-mode execution and sends them alongside
         // each ExecutionState batch. Consumer may then prefer `trace_chunk`
         // (which uses the chunks' mem_reads oracle) over `trace_checkpoint`
@@ -208,7 +208,7 @@ where
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
                     let mut index = 0;
-                    // #316 Phase D.4: track how many chunks we've already
+                    // track how many chunks we've already
                     // sent so each batch's sidecar only carries the NEW
                     // chunks added since the last `execute_state`.
                     let mut last_pulled_chunks = 0usize;
@@ -225,7 +225,7 @@ where
                         // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
                         let global_clk = runtime.state.global_clk;
 
-                        // #316 Phase D.4: pull NEW chunks accumulated by
+                        // pull NEW chunks accumulated by
                         // the collector during this batch. Only sealed
                         // chunks (clk_end != u64::MAX) are eligible.
                         let chunks_sidecar = if use_minimal_trace {
@@ -328,7 +328,7 @@ where
                                 done = done,
                                 num_cycles = num_cycles,
                             );
-                            // #316 Phase D.4: if env-gated and the
+                            // if env-gated and the
                             // producer supplied chunks, use the oracle
                             // path (`trace_chunk`) instead of the
                             // re-execute-from-checkpoint path
@@ -912,7 +912,7 @@ where
     (records, runtime.report)
 }
 
-/// #316 Phase D.4 — drop-in replacement for `trace_checkpoint` that
+/// drop-in replacement for `trace_checkpoint` that
 /// consumes a [`zkm_core_executor::minimal_trace::TraceChunk`] instead
 /// of a full [`ExecutionState`]. The chunk's `mem_reads` oracle
 /// pre-populates the worker's memory; `start_registers` seeds the

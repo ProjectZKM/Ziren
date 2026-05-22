@@ -572,7 +572,7 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     JaggedLateBindingFailed,
     /// Zerocheck proofs attached but number does not match number of chips.
     InvalidProofShape,
-    /// Shard-level BaseFold verifier (task #28 path) rejected the proof.
+    /// Shard-level BaseFold verifier (the task path) rejected the proof.
     /// The message carries the inner BasefoldVerifyError's display.
     BasefoldShardVerifier(String),
 }
@@ -684,7 +684,7 @@ impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
 
 // `try_verify_late_binding_proofs`, `try_verify_jagged_late_binding_proof`,
 // and the per-KB jagged-late-binding helper retired alongside the legacy
-// MIPS verify path (#13).  BaseFold MIPS verification now lives in
+// MIPS verify path.  BaseFold MIPS verification now lives in
 // `BasefoldShardVerifier::verify_shard`
 // (`crates/stark/src/shard_level/verifier.rs`), dispatched from
 // `Verifier::verify_shard` when `basefold_shard_proof.is_some()`.

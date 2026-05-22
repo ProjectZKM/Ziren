@@ -475,7 +475,7 @@ impl ComputeInstructions for TranspilerBackend {
 impl MemoryInstructions for TranspilerBackend {
     fn lb(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        // #316 Phase D.5 step 2: see lw() for the guest-address stash
+        // see lw() for the guest-address stash
         // contract. When recorder unset, codegen is byte-identical to
         // pre-D.5 (no extra mov, no call).
         if self.mem_read_recorder.is_some() {
@@ -494,7 +494,7 @@ impl MemoryInstructions for TranspilerBackend {
 
     fn lbu(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        // #316 Phase D.5 step 2: see lw().
+        // see lw().
         if self.mem_read_recorder.is_some() {
             self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
@@ -511,7 +511,7 @@ impl MemoryInstructions for TranspilerBackend {
 
     fn lh(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        // #316 Phase D.5 step 2: see lw().
+        // see lw().
         if self.mem_read_recorder.is_some() {
             self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
@@ -528,7 +528,7 @@ impl MemoryInstructions for TranspilerBackend {
 
     fn lhu(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        // #316 Phase D.5 step 2: see lw().
+        // see lw().
         if self.mem_read_recorder.is_some() {
             self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
@@ -545,7 +545,7 @@ impl MemoryInstructions for TranspilerBackend {
 
     fn lw(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
         self.may_early_exit = true;
-        // #316 Phase D.5 step 2: when a mem-read recorder is registered,
+        // when a mem-read recorder is registered,
         // compute the GUEST virtual address (rs1 + imm) into TEMP_B
         // BEFORE emit_address_translate clobbers TEMP_A with a HOST
         // address. The recorder needs guest addresses (what the MIPS
@@ -568,7 +568,7 @@ impl MemoryInstructions for TranspilerBackend {
     }
 
     fn lwl(&mut self, rd: MipsRegister, rs1: MipsRegister, imm: i32) {
-        // #316 Phase D.5 step 2c (DEFERRED): the mem-read recorder is
+        // (DEFERRED): the mem-read recorder is
         // NOT wired into LWL/LWR. The merge logic below clobbers rbp
         // (TEMP_B) via `emit_register_load(rd, TEMP_B)` and consumes
         // eax/edx/ecx for the variable-shift sequence, so the post-load

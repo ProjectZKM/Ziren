@@ -2,12 +2,12 @@
 //!
 //! Mirror of the hypercube proof shapes:
 //!   - `UnivariatePolynomial<K>` from
-//!     `/tmp/sp1/slop/crates/algebra/src/univariate.rs`
+//!     `slop/crates/algebra/src/univariate.rs`
 //!   - `PartialSumcheckProof<K>` from
-//!     `/tmp/sp1/slop/crates/sumcheck/src/proof.rs`
+//!     `slop/crates/sumcheck/src/proof.rs`
 //!   - `LogUpGkrOutput`, `LogupGkrRoundProof`, `LogupGkrProof`,
 //!     `ChipEvaluation`, `LogUpEvaluations` from
-//!     `/tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs`
+//!     `crates/hypercube/src/logup_gkr/proof.rs`
 //!
 //! These types are used by:
 //!   - the shard-level prover (`crate::shard_level::prover::prove_shard_to_basefold`)
@@ -111,7 +111,7 @@ pub struct ChipEvaluation<EF> {
     /// proof bytes — verifier treats 0 as "uniform max_log_row_count
     /// padding" (legacy placeholder behavior).
     ///
-    /// META #59 swap 4 plumbing — populated by `prove_shard_to_basefold`
+    /// swap 4 plumbing — populated by `prove_shard_to_basefold`
     /// from the host trace heights; consumed by the recursion verifier
     /// once `build_opened_values_from_chip_openings_with_heights`
     /// becomes the default code path.

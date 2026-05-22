@@ -57,7 +57,7 @@ fn main() {
     // before unwinding. Without this, panics inside the rayon/thread
     // pools that prove_core/compress spawn can be swallowed by Rust's
     // default abort-on-panic behaviour and the binary exits silently
-    // — task #57 "diagnose collect_basefold_vks silent crash on
+    // — the task "diagnose collect_basefold_vks silent crash on
     // multi-shard workloads". With this hook, every panicking thread
     // logs `[PANIC] thread=... at file:line: msg` so the source is
     // visible without a debugger.

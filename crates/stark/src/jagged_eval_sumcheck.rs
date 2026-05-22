@@ -1,7 +1,7 @@
 //! Jagged-eval sub-protocol prover (Ziren port of SP1 `prove_jagged_evaluation`).
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:182-243`](file:///tmp/sp1/slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs).
+//! `slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:182-243`.
 //!
 //! # Status (#243 scaffolding — May 6 2026)
 //!
@@ -9,7 +9,7 @@
 //! [`JaggedSumcheckEvalProof`] mirrors the SP1 wire-format struct;
 //! [`prove_jagged_evaluation`] is a stub that returns a structurally-
 //! valid placeholder.  The actual sumcheck body is the day-2 work of
-//! task #243.
+//! the task.
 //!
 //! # Math (what the real body must compute)
 //!
@@ -65,7 +65,7 @@ use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 /// over the polynomial defined in this module's docs.
 ///
 /// Mirrors SP1's
-/// [`JaggedSumcheckEvalProof`](file:///tmp/sp1/slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:22-25).
+/// `JaggedSumcheckEvalProof`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JaggedSumcheckEvalProof<EF> {
     pub partial_sumcheck_proof: PartialSumcheckProof<EF>,
@@ -321,7 +321,7 @@ const NAIVE_SUMCHECK_MAX_N: usize = 24;
 
 /// SP1-port structural sumcheck prover for the jagged-eval polynomial.
 ///
-/// Mirrors [`JaggedAssistSumAsPolyCPUImpl`](file:///tmp/sp1/slop/crates/jagged/src/jagged_eval/sumcheck_sum_as_poly.rs:57-247).
+/// Mirrors `JaggedAssistSumAsPolyCPUImpl`.
 ///
 /// **Structural trick**: instead of materializing P(x, y) over the
 /// full hypercube of 2^N points, per-round iterates over `num_cols`
@@ -520,7 +520,7 @@ pub fn prove_jagged_evaluation(
     z_trace: &[InnerChallenge],
     challenger: &mut InnerChallenger,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
-    // #243 day-2 complete (test fixtures): claimed_sum + naive
+    // day-2 complete (test fixtures): claimed_sum + naive
     // sumcheck via materialization for small workloads.
     // Production large workloads still need SP1's structural prover
     // (JaggedAssistSumAsPoly) — fall back to dummy with real
@@ -645,7 +645,7 @@ mod tests {
         assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 10);
     }
 
-    /// #243 naive sumcheck: round-by-round identity holds.  Each
+    /// naive sumcheck: round-by-round identity holds.  Each
     /// round's univariate poly satisfies `g(0) + g(1) = previous round
     /// claim`, and the final point evaluates to the per-round
     /// folded poly value.  This is the core soundness identity the
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
-    /// #243 STRUCTURAL: SP1-port structural sumcheck satisfies the
+    /// STRUCTURAL: SP1-port structural sumcheck satisfies the
     /// same round-identity properties as the naive prover.  Tests
     /// the same workload (small fixture) but via the O(N×num_cols)
     /// path that scales to production.
@@ -747,7 +747,7 @@ mod tests {
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
-    /// #243 day-2: claimed_sum equals the closed-form expected sum.
+    /// day-2: claimed_sum equals the closed-form expected sum.
     /// At z_col=0 (boolean point), z_col_lagrange[0] = 1, others = 0,
     /// so claimed_sum equals BP.eval(t_0, t_1).  At all-zero z_row /
     /// z_trace too, BP eval is the indicator at the zero point.

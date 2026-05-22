@@ -24,7 +24,7 @@ use crate::witness::{Witnessable, WitnessWriter};
 use crate::CircuitConfig;
 use zkm_stark::{InnerChallenge, InnerVal};
 
-// ── Per-chip cumulative sums (META #59 swap 1+2) ────────────────
+// ── Per-chip cumulative sums (swap 1+2) ────────────────
 
 impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>
 where

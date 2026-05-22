@@ -297,7 +297,7 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F>,
 {
-    // #359 followup: env-gated profile to scope what fraction of wall
+    // followup: env-gated profile to scope what fraction of wall
     // this host-pure LogUp-GKR loop consumes on the basefold path. The
     // chip-sumcheck device-residency port (#343C/#355/#358) targets a
     // different sumcheck (row_gkr); this function is basefold's

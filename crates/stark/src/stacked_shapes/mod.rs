@@ -1,4 +1,4 @@
-//! Stacked shape types for Ziren recursion (task #20).
+//! Stacked shape types for Ziren recursion.
 //!
 //! Ports the `CoreProofShape` / `MachineShape` / `SP1RecursionProgramShape`
 //! design into Ziren.
@@ -27,10 +27,10 @@
 //!
 //! | Ziren (this module)          | the source                                          |
 //! |------------------------------|-----------------------------------------------------|
-//! | [`CoreProofShape`]           | `/tmp/sp1/crates/hypercube/src/prover/shard.rs:798` |
-//! | [`MachineShape`]             | `/tmp/sp1/crates/hypercube/src/machine.rs:10`       |
-//! | [`ZKMRecursionProgramShape`] | `/tmp/sp1/crates/prover/src/shapes.rs:84`           |
-//! | [`ZKMNormalizeInputShape`]   | `/tmp/sp1/crates/prover/src/shapes.rs:76`           |
+//! | [`CoreProofShape`]           | `crates/hypercube/src/prover/shard.rs:798` |
+//! | [`MachineShape`]             | `crates/hypercube/src/machine.rs:10`       |
+//! | [`ZKMRecursionProgramShape`] | `crates/prover/src/shapes.rs:84`           |
+//! | [`ZKMNormalizeInputShape`]   | `crates/prover/src/shapes.rs:76`           |
 
 pub mod enumerate;
 pub mod types;

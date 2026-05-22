@@ -8,7 +8,7 @@
 //!
 //! # Status
 //!
-//! Body port done (task #22.4).  Verifies a batch of deferred
+//! Body port done (the task.4).  Verifies a batch of deferred
 //! recursive proofs: each is a Compress-stage output whose public
 //! values live in `shard_proof.public_values` interpreted as
 //! `RecursionPublicValues`.  Asserts merkle membership of the VK,
@@ -88,7 +88,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
         ),
     )>,
-    /// META #59 Phase D: per-input per-chip cumulative sums.
+    /// per-input per-chip cumulative sums.
     pub chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
@@ -272,7 +272,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 evaluation_proof_var,
                 chip_height_bits,
             );
-        // META #59 Phase D: consume real per-chip cumulative_sums.
+        // consume real per-chip cumulative_sums.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
         let cumsums_for_input = chip_cumulative_sums_per_input
             .get(_deferred_i)

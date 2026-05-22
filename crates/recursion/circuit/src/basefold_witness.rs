@@ -288,7 +288,7 @@ where
 
 // Per-chip zerocheck and LogUp-GKR Witnessable impls retired alongside
 // the legacy `ShardProofVariable.basefold_logup_gkr_proofs` /
-// `basefold_zerocheck_proofs` fields (#13).  The per-chip recursion
+// `basefold_zerocheck_proofs` fields.  The per-chip recursion
 // verifiers (`crate::per_chip_zerocheck` / `crate::per_chip_logup_gkr`)
 // went with them.
 

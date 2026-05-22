@@ -285,7 +285,7 @@ where
 
 // ---------------------------------------------------------------------------
 // Witnessable impls for SP1-style shard-level basefold recursion stages
-// (task #22 / #19).  Each one follows the pattern of the legacy equivalent
+// (the task / #19).  Each one follows the pattern of the legacy equivalent
 // above, with `ShardProof<SC>::read` replaced by `BasefoldShardProof::read`
 // (which produces a 5-tuple variable, see shard_level_witness.rs:198-241).
 // ---------------------------------------------------------------------------
@@ -308,7 +308,7 @@ mod basefold_witness {
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
             let shard_proof_tuples = self.shard_proofs.read(builder);
-            // META #59 swap 1+2: read per-shard chip_cumulative_sums.
+            // swap 1+2: read per-shard chip_cumulative_sums.
             // Order: outer = shard_proofs iteration (Vec); inner = BTreeMap iter (sorted by key).
             let chip_cumulative_sums_per_shard: Vec<_> = self
                 .shard_proofs
@@ -336,7 +336,7 @@ mod basefold_witness {
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
             self.shard_proofs.write(witness);
-            // META #59 swap 1+2: write per-shard chip_cumulative_sums in matching order.
+            // swap 1+2: write per-shard chip_cumulative_sums in matching order.
             for sp in self.shard_proofs.iter() {
                 for (_name, sums) in sp.chip_cumulative_sums.iter() {
                     sums.write(witness);
@@ -366,7 +366,7 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            // META #59 Phase D: witness chip_cumulative_sums per input.
+            // witness chip_cumulative_sums per input.
             let chip_cumulative_sums_per_input: Vec<_> = self
                 .vks_and_proofs
                 .iter()
@@ -412,7 +412,7 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            // META #59 Phase D: witness chip_cumulative_sums per input.
+            // witness chip_cumulative_sums per input.
             let chip_cumulative_sums_per_input: Vec<_> = self
                 .vks_and_proofs
                 .iter()
@@ -472,7 +472,7 @@ mod basefold_witness {
 
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vks_and_proofs = self.vks_and_proofs.read(builder);
-            // META #59 Phase D: witness chip_cumulative_sums per input.
+            // witness chip_cumulative_sums per input.
             let chip_cumulative_sums_per_input: Vec<_> = self
                 .vks_and_proofs
                 .iter()

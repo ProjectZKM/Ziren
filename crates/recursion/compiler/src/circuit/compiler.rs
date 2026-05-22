@@ -611,7 +611,7 @@ where
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
         // Compile each IR instruction into a SeqBlock structure (#259
-        // Phase C). Most ops accumulate into the current Basic block;
+        //). Most ops accumulate into the current Basic block;
         // a `DslIr::Parallel` op flushes the current Basic block and
         // pushes a `SeqBlock::Parallel(per_subprogram_RawProgram)`.
         // This step also counts the number of times each address is

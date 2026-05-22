@@ -169,7 +169,7 @@ fn chips_to_mles(
     (mles, dims)
 }
 
-/// Public for the GPU dispatch hook (#76 / D2 — C-full E2): the
+/// Public for the GPU dispatch hook (#76 / D2 — ): the
 /// device-side commit path needs to run the same MLE-construction +
 /// padding logic as the host before invoking the GPU encoder.
 pub fn chips_to_mles_owned(
@@ -202,7 +202,7 @@ pub fn chips_to_mles_owned(
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
 ///
-/// **#76 / D2 (C-full C4 plan §5)** — when `ZIREN_GPU_BASEFOLD=1` is
+/// **#76 / D2 ( plan §5)** — when `ZIREN_GPU_BASEFOLD=1` is
 /// set AND ziren-gpu has registered the device commit hook (via
 /// [`register_gpu_basefold_commit_hook`]), the commit dispatches
 /// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
@@ -310,7 +310,7 @@ pub fn commit_basefold_late_binding_host(
 /// compatible with the open path (`open_basefold_late_binding`)
 /// without further changes.
 ///
-/// Used by the GPU dispatch hook (#76 / D2 — C-full E2) to shortcut
+/// Used by the GPU dispatch hook (#76 / D2 — ) to shortcut
 /// the encode step onto device while keeping the MMCS-commit + open
 /// path on host (option A in `/tmp/c_full_d2_followup.md`).
 pub fn commit_basefold_late_binding_with_encoder<E>(
@@ -378,9 +378,9 @@ pub fn lb_fri_config() -> FriConfig<LbVal> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #76 / D2 (C-full C4 plan §5) — GPU BaseFold commit dispatch hook.
+// GPU BaseFold commit dispatch hook.
 //
-// Mirror of the #174 (C-full B1) jagged-PCS device-trace hook pattern
+// Mirror of the #174 () jagged-PCS device-trace hook pattern
 // in `crate::shard_level::sumcheck_poly::jagged_pcs_device_hook`.  The
 // hook receives the same inputs as `commit_basefold_late_binding` and
 // returns a byte-identical `(commit, prover_data)` — the device side
@@ -439,7 +439,7 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #107 / G1 — GPU jagged-reduction sumcheck dispatch hook.
+// GPU jagged-reduction sumcheck dispatch hook.
 //
 // Mirrors the host `crate::jagged_sumcheck::prove_jagged_reduction_owned`
 // signature one-for-one — same inputs (owned `dense_q`, packing,
@@ -490,7 +490,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // Win B (jagged_assist hook hardening) — V2 signature with optional
 // device-resident dense_q handle.
 //
-// Rationale (from `project_gap_jagged_complete.md` narrow win #2):
+// Rationale (from the related design memo narrow win #2):
 // V1's hook accepts an owned `Vec<LbVal>` for `dense_q`.  When the
 // producer (`ziren-gpu/basefold/src/jagged_reduction_dispatch.rs`)
 // wraps it as `DenseQDevice::Host(...)`, the device round-0 path in
@@ -511,7 +511,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // dereferences the handle, that's entirely GPU-side bookkeeping.  This
 // is the simpler newtype wrapper fallback the diag calls out (passing
 // a real `&DeviceBuffer<LbVal>` would require pulling
-// `zkm-gpu-core` into `zkm-stark`'s public API, which is the gap #8
+// `zkm-gpu-core` into `zkm-stark`'s public API, which is the 
 // Backend abstraction — explicitly out of scope).
 //
 // **Backward compatible** — V1 hook remains.  Dispatch site prefers
@@ -838,17 +838,17 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
     GPU_LAYER_DRAIN_HOOK.get().copied()
 }
 
-/// #383 sub-step 2 — populate the per-shard `LogupTaskScope` with
+/// populate the per-shard `LogupTaskScope` with
 /// device-resident layer payloads at scope-entry.
 ///
 /// **Purpose**: SP1's `generate_gkr_circuit` materializes every GKR
 /// layer up front on device, then hands the per-shard
 /// `LogUpCudaCircuit<'a, TaskScope>` to the per-round prover which
 /// `pop()`s a layer per call (see
-/// `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/tracegen.rs:188-246`).  Ziren's
+/// `sp1-gpu/crates/logup_gkr/src/tracegen.rs:188-246`).  Ziren's
 /// `top_level.rs::prove_shard_logup_gkr_rows` now allocates a
-/// `LogupTaskScope` at the same lifetime boundary (#383 sub-step 1)
-/// and invokes this hook (sub-step 2) so the ziren-gpu side can fill
+/// `LogupTaskScope` at the same lifetime boundary (#383 )
+/// and invokes this hook () so the ziren-gpu side can fill
 /// the scope's `DeviceLogupGkrCircuit` from its own device-resident
 /// per-circuit registry.
 ///
@@ -857,7 +857,7 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
 /// returns `None` when the populator declines (host-only path, env
 /// gate off, populator not yet warmed, etc.) — the V3 dispatch then
 /// falls back to the legacy `take_logup_v3_next_handle` TLS path
-/// installed in sub-step 1.
+/// installed in .
 ///
 /// **Ordering**: `payloads[0]` MUST be the TERMINAL layer (smallest
 /// `num_row_variables`, popped LAST by `scope.next_layer()`), and the
@@ -886,7 +886,7 @@ static GPU_LOGUP_SCOPE_POPULATE_HOOK: std::sync::OnceLock<GpuLogupScopePopulateF
 
 /// Register the populate-at-scope-entry hook.  Idempotent; returns
 /// `Err(existing_hook)` when a hook was already registered.  Called
-/// once at ziren-gpu startup (see sub-step 2b — `basefold/src/
+/// once at ziren-gpu startup (see  — `basefold/src/
 /// logup_scope_populate.rs` in the ziren-gpu repo).
 pub fn register_gpu_logup_scope_populate_hook(
     f: GpuLogupScopePopulateFn,
@@ -903,7 +903,7 @@ pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #376 sub-step 1 — Device-resident `generate_first_layer` regen hook.
+// Device-resident `generate_first_layer` regen hook.
 //
 // Signature port only.  Returns the per-`circuit_id` first-layer payload
 // (opaque `Arc<dyn AnyDeviceHandle>` + shape metadata) so
@@ -989,7 +989,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
 ///
-/// **#191 / H3 (C-full C4 plan §5 sister to E2)** — when
+/// **#191 / H3 ( plan §5 sister to E2)** — when
 /// `ZIREN_GPU_BASEFOLD=1` is set AND ziren-gpu has registered the GPU
 /// open hook (via [`register_gpu_basefold_open_hook`]), the open
 /// dispatches through `FriCudaProver::prove` on device.  Output proof
@@ -1058,7 +1058,7 @@ pub fn open_basefold_late_binding_host(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #191 / H3 (C-full C4 plan §5 sister to E2) — GPU BaseFold open
+// GPU BaseFold open
 // dispatch hook.
 //
 // Mirror of the E2 commit hook ([`register_gpu_basefold_commit_hook`]).
@@ -1331,7 +1331,7 @@ pub mod jagged {
                 chip_traces.len(),
                 "pre_y_per_chip length must match chip_traces length",
             );
-            // C-full D1 empty-chip skip: for empty-trace chips
+            //  empty-chip skip: for empty-trace chips
             // (height==0 || width==0) the GPU dispatch supplies
             // `Vec::new()`; the host fallback (else branch) below
             // would have asserted on `h_padded.trailing_zeros() ==
@@ -1348,7 +1348,7 @@ pub mod jagged {
                 .map(|((_name, trace), r_row_c)| {
                     let h = trace.values.len() / trace.width.max(1);
                     let w = trace.width;
-                    // C-full D1 empty-chip skip: for an empty-trace
+                    //  empty-chip skip: for an empty-trace
                     // chip (h == 0 || w == 0) there are no columns to
                     // reduce; return an empty Vec.  The original
                     // assertion `h_padded.trailing_zeros() ==
@@ -1397,7 +1397,7 @@ pub mod jagged {
         // after round 0 (releasing the 4N base-field buffer before the
         // EF tables for rounds 1..n are built).  Saves one full N-element
         // clone vs the &[InnerVal] entry point.
-        // #107 / G1 dispatch: when ZIREN_GPU_JAGGED_PCS=1 is set AND a
+        // dispatch: when ZIREN_GPU_JAGGED_PCS=1 is set AND a
         // GPU jagged-reduction hook has been registered (by ziren-gpu's
         // `compress_multi_gpu` startup block), route the reduction
         // through the device hook.  The hook is byte-equivalent to
@@ -1665,7 +1665,7 @@ pub mod jagged {
 
         // (5) Open the BaseFold commit at z*.
         //
-        // #249 SP1-port: the jagged sumcheck reduces over `dense_q`
+        // SP1-port: the jagged sumcheck reduces over `dense_q`
         // which has 2^log_dense_size cells.  But the BaseFold
         // commitment covers `prover_data.area` cells (= num_stripes ×
         // batch_size × stack_height after interleaving), which can be
@@ -1704,7 +1704,7 @@ pub mod jagged {
             offsets: packing.offsets.clone(),
             total_values: packing.total_values,
             log_dense_size: packing.log_dense_size,
-            // #95-fix: per-chip *actual* column count, so verifier
+            // fix: per-chip *actual* column count, so verifier
             // does not need to consult `BaseAir::width(chip)`.
             column_counts: packing
                 .chip_infos
@@ -1712,7 +1712,7 @@ pub mod jagged {
                 .map(|ci| ci.column_count)
                 .collect(),
         };
-        // #243 jagged-eval sub-protocol scaffold — produces a
+        // jagged-eval sub-protocol scaffold — produces a
         // structurally-valid placeholder.  Real sumcheck body lands
         // in #243's day-2 work.  Inputs (z_row, z_col, z_trace) come
         // from the existing reduction state:
@@ -1777,7 +1777,7 @@ pub mod jagged {
             return false;
         };
 
-        // #249 SP1-port: extend z_star from log_dense_size to log2(area)
+        // SP1-port: extend z_star from log_dense_size to log2(area)
         // by sampling additional Fiat-Shamir coords, mirroring the
         // prover's extension in `prove_jagged_basefold` step (5).
         // Both sides sample from the same transcript state at the same

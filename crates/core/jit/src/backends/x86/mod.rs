@@ -198,7 +198,7 @@ pub struct TranspilerBackend {
     /// emitted as an absolute call in the syscall lowering.
     pub(crate) syscall_handler: Option<crate::SyscallHandler>,
 
-    /// #316 Phase D.5 step 2: optional mem-read recorder. When set,
+    /// optional mem-read recorder. When set,
     /// load instructions (LW today; LB/LBU/LH/LHU/LWL/LWR queued
     /// behind validation) emit a SysV-ABI call to this fn after the
     /// load, passing `(global_clk, guest_addr, value)`. Default
@@ -250,7 +250,7 @@ impl TranspilerBackend {
         self.clk_bump = clk_bump;
     }
 
-    /// #316 Phase D.5 step 2: register a mem-read recorder. After
+    /// register a mem-read recorder. After
     /// this is set, every JIT'd load instruction (LW today) emits a
     /// post-load SysV-ABI call to `f(global_clk, guest_addr, value)`.
     /// Default unset: codegen byte-identical to pre-D.5.
@@ -418,7 +418,7 @@ impl TranspilerBackend {
         self.emit_register_store(reg, TEMP_A);
     }
 
-    /// #316 Phase D.5 step 2: emit a post-load call to the registered
+    /// emit a post-load call to the registered
     /// mem-read recorder. No-op if no recorder is set.
     ///
     /// Contract:

@@ -1,6 +1,6 @@
 //! Branching-program multilinear polynomial for the jagged-eval
 //! sub-protocol (Ziren port of SP1's
-//! [`BranchingProgram`](file:///tmp/sp1/slop/crates/jagged/src/poly.rs:33-486)).
+//! `BranchingProgram`).
 //!
 //! # Overview
 //!
@@ -119,7 +119,7 @@ pub fn all_bit_states() -> [BitState; 16] {
 /// being read, compute the next state or signal failure.  Reads bits
 /// LSB→MSB.
 ///
-/// Mirrors SP1's [`transition_function`](file:///tmp/sp1/slop/crates/jagged/src/poly.rs:131-165).
+/// Mirrors SP1's `transition_function`.
 #[must_use]
 pub fn transition_function(bs: BitState, ms: MemoryState) -> StateOrFail {
     // Comparison logic: if index_bit == next_prefix_sum_bit, defer
@@ -173,7 +173,7 @@ fn partial_lagrange_4<EF: Field>(point: [EF; 4]) -> [EF; 16] {
 /// Branching-program multilinear polynomial — fixed by `(z_row, z_index)`
 /// at construction; evaluated at column-prefix-sum points.
 ///
-/// Mirrors SP1's [`BranchingProgram`](file:///tmp/sp1/slop/crates/jagged/src/poly.rs:485-563).
+/// Mirrors SP1's `BranchingProgram`.
 #[derive(Clone, Debug)]
 pub struct BranchingProgram<EF: Field> {
     z_row: Vec<EF>,
@@ -227,7 +227,7 @@ impl<EF: Field> BranchingProgram<EF> {
     /// hypercube interpretation; returns the multilinear extension's
     /// value otherwise.
     ///
-    /// Mirrors SP1's [`BranchingProgram::eval`](file:///tmp/sp1/slop/crates/jagged/src/poly.rs:407-466).
+    /// Mirrors SP1's `BranchingProgram::eval`.
     pub fn eval(&self, prefix_sum: &[EF], next_prefix_sum: &[EF]) -> EF {
         // DP: state_by_state_results[s.get_index()] holds the value
         // of the rest of the BP starting from state s.
@@ -314,7 +314,7 @@ pub fn bits_big_endian<EF: Field>(value: usize, num_bits: usize) -> Vec<EF> {
 /// Closed-form evaluation of the jagged polynomial.
 ///
 /// Mirrors SP1's
-/// [`JaggedLittlePolynomialVerifierParams::full_jagged_little_polynomial_evaluation`](file:///tmp/sp1/slop/crates/jagged/src/poly.rs:184-234).
+/// `JaggedLittlePolynomialVerifierParams::full_jagged_little_polynomial_evaluation`.
 ///
 /// `prefix_sums.len()` = num_chips + 1.  Each entry is a usize cumulative
 /// row count; `log_m` is `log2_ceil(prefix_sums.last())`.

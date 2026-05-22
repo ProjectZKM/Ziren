@@ -1,7 +1,7 @@
 //! Shard-level prover assembly entry point.
 //!
 //! Mirror of SP1's `ShardProver::prove_shard_with_data` at
-//! `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792` —
+//! `crates/hypercube/src/prover/shard.rs:650-792` —
 //! orchestrates the LogUp-GKR + zerocheck + jagged-PCS phases
 //! into a single host-side [`super::shard_proof::BasefoldShardProof`].
 //!
@@ -87,7 +87,7 @@ pub fn prove_shard_to_basefold<SC, A>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    // #263 SP1-aligned: per-shard device-trace provider, race-free
+    // SP1-aligned: per-shard device-trace provider, race-free
     // replacement for the global `Mutex<DeviceTraceSnapshot>`.
     // GPU callers (compress_multi_gpu / core_multi_gpu /
     // shard_prover_gpu) build a `DeviceShardTraces` per shard and
@@ -106,7 +106,7 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
-    // Trampoline to the loader-based entry point (C-full D4).
+    // Trampoline to the loader-based entry point ().
     let loader = EagerHostLoader::new(main_traces);
     prove_shard_to_basefold_with_loader::<SC, A, _>(
         chips,
@@ -122,7 +122,7 @@ where
 }
 
 /// Loader-based entry point for the shard-level BaseFold
-/// orchestrator (C-full D4 — task #184).
+/// orchestrator ( — the task).
 ///
 /// Identical to [`prove_shard_to_basefold`] except the per-chip
 /// main traces are pulled from a [`MainTraceLoader`] instead of a
@@ -139,7 +139,7 @@ where
 /// path requirements (Phase 5 cumulative sums + Phase 3 batched
 /// pre-pass + Phase 4 jagged-PCS clone all read every chip).
 ///
-/// Future work (C-full D5+): plumb the loader THROUGH the phase
+/// Future work (+): plumb the loader THROUGH the phase
 /// fns so each consumer pulls only chips it actually needs.  See
 /// `/tmp/c_full_c1_followup.md` for the per-site map of
 /// `main_trace.values` consumers.
@@ -179,7 +179,7 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    // C-full D4 staging: materialize ALL chip main traces upfront
+    //  staging: materialize ALL chip main traces upfront
     // (byte-equivalent to the legacy `&[RowMajorMatrix]` entrypoint).
     // Phase 5 cumulative sums + Phase 3 batched pre-pass + Phase 4
     // jagged-PCS chip_traces clone all read every chip's host trace
@@ -392,7 +392,7 @@ where
         chip_log_heights.insert(name, log_h);
     }
 
-    // META #59 swap 1+2: populate per-chip cumulative_sums.
+    // swap 1+2: populate per-chip cumulative_sums.
     //
     // Mirrors the legacy stark prover at `crates/stark/src/prover.rs:492-502`:
     //   - `global_cumulative_sum`: derived from the main trace's last 14
@@ -405,7 +405,7 @@ where
     //     work to extract from the LogUp-GKR layer 0 output).
     //
     // Verifier still uses zero placeholders unconditionally (Swap 1+2
-    // verifier-side change is the next META #59 step).  Until then,
+    // verifier-side change is the next step).  Until then,
     // populating this map is a no-op for verification, but exercises the
     // wire-format / serde path.
     let chip_cumulative_sums: std::collections::BTreeMap<
@@ -442,7 +442,7 @@ where
     // fields are typed to `LogupGkrProof`/`PartialSumcheckProof`
     // — pass them through directly.
     //
-    // #241 Phase 4c: emit_jagged_pcs_bytes now returns `(bytes,
+    // Phase 4c: emit_jagged_pcs_bytes now returns `(bytes,
     // bundle)`.  The structured bundle gets stuffed into the new
     // `evaluation_proof_bundle` field alongside the legacy bytes.
     // Recursion-circuit consumers can now prefer the structured path
@@ -503,7 +503,7 @@ fn emit_jagged_pcs_bytes<SC, A>(
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
-    // #263: per-shard device-trace provider for jagged-PCS GPU hooks
+    // per-shard device-trace provider for jagged-PCS GPU hooks
     // (eval_at, jagged-sumcheck reduction).  None today; Phase 3 wires
     // the dispatch.
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -542,7 +542,7 @@ where
         .zip(main_traces.iter())
         .map(|(chip, trace)| {
             let name = chip.name().to_string();
-            // #95-fix (May 2 2026): NO pad.  The previous "pad to
+            // fix (May 2 2026): NO pad.  The previous "pad to
             // chip.width()" widened sparsely-exercised chips by up to
             // 24x (e.g. 17 actual cols → 408 declared cols on
             // recursion-runtime workloads), inflating jagged-PCS data
@@ -616,7 +616,7 @@ where
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
-    // #174 (C-full B1) — DEVICE-trace jagged-PCS dispatch.  When
+    // DEVICE-trace jagged-PCS dispatch.  When
     // ziren-gpu's `phase4_device` has registered its device-trace hook
     // (via `register_gpu_jagged_pcs_device_hook`), dispatch through the
     // device-trace `emit_jagged_pcs_bytes_device` path.  The hook reads
@@ -659,7 +659,7 @@ where
         }
     }
 
-    // #113 — GPU jagged-PCS orchestration dispatch.  When the ziren-gpu
+    // GPU jagged-PCS orchestration dispatch.  When the ziren-gpu
     // crate has registered the device-resident orchestrator hook (via
     // `register_gpu_jagged_orchestration_hook`), bypass the host
     // orchestrator (`prove_jagged_basefold` below) and let the device
@@ -700,7 +700,7 @@ where
     // prove_jagged_basefold directly.  The legacy per-chip dispatch
     // (gated on ZIREN_E3_PER_CHIP) was removed since SP1 only uses the
     // single dense flow and the per-chip experiment had unresolved
-    // soundness gaps that surfaced in production reth wrap (#95).
+    // soundness gaps that surfaced in production reth wrap.
     let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, lb_challenger);
     let bytes = bundle.to_bytes();
     (bytes, Some(bundle))

@@ -207,7 +207,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for Poseidon2SkinnyChip
 
     #[cfg(not(feature = "sys"))]
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
-        // Phase A5 (#259): the canonical instruction container is now
+        // Phase A5: the canonical instruction container is now
         // `seq_blocks`; `iter_instructions()` yields `Box<dyn Iterator>`
         // which doesn't impl Clone, so we recompute the count via a
         // separate iterator (cheap — just a walk).

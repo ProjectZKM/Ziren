@@ -124,14 +124,14 @@ pub struct Executor<'a> {
 
     /// Local memory access events.
     ///
-    /// #316 Phase D.4 lifter step 3: switched from `HashMap<…>` (ahash)
+    /// switched from `HashMap<…>` (ahash)
     /// to `IntMap<…>` (NoHashHasher) — u32 keys don't need hash mixing
     /// since the HashMap probe sequence handles collision distribution.
     /// Cuts per-cycle HashMap overhead in half for user-memory accesses
     /// (addresses >= 36) that bypass the register-slot fast path.
     pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
 
-    /// #316 Phase D.4 lifter step 2: fast-path register-slot mirror
+    /// fast-path register-slot mirror
     /// of `local_memory_access`. MIPS register addresses are 0..36
     /// (32 GPRs + HI/LO/BRK/HEAP) and dominate per-cycle access
     /// patterns. Every ALU is 3 register touches; every memory op is
@@ -181,7 +181,7 @@ pub struct Executor<'a> {
     /// The maximum LDE size to allow.
     pub lde_size_threshold: u64,
 
-    /// #316 Phase D.2: optional MinimalTrace collector. When `Some`,
+    /// optional MinimalTrace collector. When `Some`,
     /// each `bump_record()` push also stamps a `TraceChunk` capturing
     /// (clk, pc, registers) so a subsequent parallel `TracingVM` can
     /// replay each shard independently. `None` (default) preserves
@@ -189,7 +189,7 @@ pub struct Executor<'a> {
     /// will populate the same field directly once landed.
     pub minimal_trace_collector: Option<crate::minimal_trace::MinimalTrace>,
 
-    /// #316 Phase D.4 (lifter port step 1): skip replay-irrelevant
+    /// (lifter port step 1): skip replay-irrelevant
     /// bookkeeping in `execute_operation`. When set, the executor:
     ///   - skips `report.opcode_counts` increments (per cycle)
     ///   - skips `local_counts.event_counts` increments (per cycle)
@@ -202,7 +202,7 @@ pub struct Executor<'a> {
     /// Default false; TracingVM workers set true.
     pub skip_replay_bookkeeping: bool,
 
-    /// #316 Phase D — Option B: in-flight buffer for the current
+    /// Option B: in-flight buffer for the current
     /// chunk's mem_reads oracle. Populated by `mr()` whenever the
     /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
     /// when the chunk closes — the accumulated entries become the
@@ -210,7 +210,7 @@ pub struct Executor<'a> {
     pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
 }
 
-/// #316 Phase D.4 lifter step 2: dispatch helper that picks the
+/// dispatch helper that picks the
 /// fastest sink for a local-memory-access update.
 ///
 /// - `override_map`: passed-in syscall-context HashMap; if Some,
@@ -395,7 +395,7 @@ impl<'a> Executor<'a> {
         // Create a default record with the program. Pre-allocate hot event Vecs
         // sized at `shard_size / 8` (matches SP1's pattern in
         // crates/prover/src/worker/prover/core.rs ::new_preallocated), avoiding the
-        // single-thread realloc storm on the trace-emit hot path (#316).
+        // single-thread realloc storm on the trace-emit hot path.
         let event_reservation = (opts.shard_size / 8).max(1);
         let record = ExecutionRecord::new_preallocated(program.clone(), event_reservation);
 
@@ -663,7 +663,7 @@ impl<'a> Executor<'a> {
             );
         }
 
-        // #316 Phase D — Option B: record the read into the in-flight
+        // Option B: record the read into the in-flight
         // chunk's mem_reads oracle, but ONLY for user-memory addresses
         // (>= NUM_REGISTERS). Register reads are reproducible from the
         // chunk's start_registers; recording them would double the
@@ -883,7 +883,7 @@ impl<'a> Executor<'a> {
             );
         }
 
-        // #316 Phase D — Option B: record the previous value for the
+        // Option B: record the previous value for the
         // oracle (writes need this so the worker sees the same
         // prev_value when constructing its MemoryWriteRecord).
         if self.minimal_trace_collector.is_some()
@@ -985,7 +985,7 @@ impl<'a> Executor<'a> {
             );
         }
 
-        // #316 Phase D — Option B: record the previous value for the
+        // Option B: record the previous value for the
         // oracle (writes need this so the worker sees the same
         // prev_value when constructing its MemoryWriteRecord).
         if self.minimal_trace_collector.is_some()
@@ -1068,7 +1068,7 @@ impl<'a> Executor<'a> {
         record.timestamp = timestamp;
 
         if !self.unconstrained {
-            // #316 Phase D.4 step 2 FIX: rw_traced is register write — must go
+            // FIX: rw_traced is register write — must go
             // through upsert_local_mem with is_register=true so the event lands in
             // reg_slots[], matching rr_traced. Without this, register reads land
             // in reg_slots but writes land in local_memory_access — same register
@@ -1610,7 +1610,7 @@ impl<'a> Executor<'a> {
             self.memory_accesses = MemoryAccessRecord::default();
         }
 
-        // #316 Phase D.4 lifter step 1: gate replay-irrelevant
+        // gate replay-irrelevant
         // bookkeeping. In TracingVM workers, `skip_replay_bookkeeping`
         // is set so opcode_counts and local_counts are not
         // re-incremented — they were already computed during the
@@ -1701,7 +1701,7 @@ impl<'a> Executor<'a> {
             let mut prev_a = syscall_id;
             log::trace!("pc: {:X} syscall {}, a0: {:X}, a1: {:X}", self.state.pc, syscall_id, b, c);
 
-            // #316 Phase D.4 lifter step 1: gate syscall bookkeeping
+            // gate syscall bookkeeping
             // for the same reason as opcode counts — replay workers
             // discard these outputs.
             if self.print_report && !self.unconstrained && !self.skip_replay_bookkeeping {
@@ -2322,7 +2322,7 @@ impl<'a> Executor<'a> {
 
     /// Bump the record.
     pub fn bump_record(&mut self) {
-        // #316 Phase D.2: at each shard boundary, stamp a TraceChunk
+        // at each shard boundary, stamp a TraceChunk
         // covering the just-finished shard. The chunk's start_registers/
         // pc_start/clk_start come from the PREVIOUS bump (or program
         // init for the first shard); clk_end is the current clock.
@@ -2339,7 +2339,7 @@ impl<'a> Executor<'a> {
             // Patch the previous chunk's clk_end (if any) to seal it.
             if let Some(prev) = trace.chunks.last_mut() {
                 prev.clk_end = next_chunk_clk;
-                // #316 Phase D — Option B: stamp the recorded mem_reads
+                // Option B: stamp the recorded mem_reads
                 // oracle entries onto the chunk that just closed. Drain
                 // the recording buffer so the next chunk starts fresh.
                 let drained: Vec<crate::minimal_trace::MemValue> =
@@ -2367,7 +2367,7 @@ impl<'a> Executor<'a> {
         self.local_counts = LocalCounts::default();
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
         if self.executor_mode == ExecutorMode::Trace {
-            // #316 Phase D.4 step 2: also drain the register-slot fast-
+            // also drain the register-slot fast-
             // path mirror. Reset each Option<…> slot to None so the next
             // shard starts fresh.
             for slot in self.local_reg_access.iter_mut() {
@@ -2492,7 +2492,7 @@ impl<'a> Executor<'a> {
             self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
         }
 
-        // #316 Phase D.2/D.3: open chunk 0 for the collector. Subsequent
+        //.2/D.3: open chunk 0 for the collector. Subsequent
         // bump_record calls seal the open chunk and open the next.
         if let Some(trace) = self.minimal_trace_collector.as_mut() {
             if trace.chunks.is_empty() {
@@ -2583,7 +2583,7 @@ impl<'a> Executor<'a> {
                 // instruction (executor.rs:2164) so JIT vs interp
                 // cycle counts agree byte-for-byte at run_fast exit.
                 clk_bump: 1,
-                // #316 Phase D.5 step 5: run_fast is the fast-execution
+                // run_fast is the fast-execution
                 // path; trace capture goes through a separate code path
                 // that opts into the recorder. None = byte-identical to
                 // pre-D.5.

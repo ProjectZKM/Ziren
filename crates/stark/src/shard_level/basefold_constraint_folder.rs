@@ -23,7 +23,7 @@
 //! # Reference
 //!
 //! - In-circuit: `crates/recursion/circuit/src/basefold_constraint_folder.rs`
-//! - SP1 source: `/tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:27-34`
+//! - SP1 source: `crates/recursion/circuit/src/zerocheck.rs:27-34`
 
 use std::marker::PhantomData;
 
