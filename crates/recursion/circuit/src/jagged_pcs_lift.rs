@@ -117,15 +117,6 @@ where
         })
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-    if std::env::var("ZIREN_DEBUG_GATE3").is_ok() {
-        eprintln!(
-            "[gate3 lift] rounds={} cc_per_round={:?} total_before_pad={} padded_cols={}",
-            column_counts_by_round.len(),
-            column_counts_by_round.iter().map(|cc| cc.len()).collect::<Vec<_>>(),
-            total_cols_before_pad,
-            padded_cols,
-        );
-    }
     // col_prefix_sums must satisfy `col_prefix_sums.len() - 1 == num_cols`
     // where `num_cols` is the padded column count the MLE is taken over.
     let col_prefix_sums_len = padded_cols + 1;

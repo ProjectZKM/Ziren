@@ -24,9 +24,6 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> WitnessWriter<C>
     for Vec<WitnessBlock<C>>
 {
     fn write_bit(&mut self, value: bool) {
-        if std::env::var("ZIREN_DEBUG_WRITE_TYPES").is_ok() {
-            eprintln!("[write {}] bit", self.len());
-        }
         self.push(Block::from(C::F::from_bool(value)))
     }
 
@@ -35,16 +32,10 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> WitnessWriter<C>
     }
 
     fn write_felt(&mut self, value: <C>::F) {
-        if std::env::var("ZIREN_DEBUG_WRITE_TYPES").is_ok() {
-            eprintln!("[write {}] felt", self.len());
-        }
         self.push(Block::from(value))
     }
 
     fn write_ext(&mut self, value: <C>::EF) {
-        if std::env::var("ZIREN_DEBUG_WRITE_TYPES").is_ok() {
-            eprintln!("[write {}] ext", self.len());
-        }
         self.push(Block::from(value.as_basis_coefficients_slice()))
     }
 }

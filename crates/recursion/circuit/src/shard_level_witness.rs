@@ -769,15 +769,6 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
-    // [#246-debug] minimal reproducer — pre-allocate 32k zero felts to push
-    // variable_count up.  If the failure also fires here, the bug is purely
-    // about high vaddrs.  If not, it's specific to emit_merkle_path's path.
-    if std::env::var("ZIREN_246_REPRO").is_ok() {
-        for _ in 0..32_000 {
-            let _: Felt<C::F> = builder.constant(C::F::ZERO);
-        }
-    }
-
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
     let zero_uni_poly =

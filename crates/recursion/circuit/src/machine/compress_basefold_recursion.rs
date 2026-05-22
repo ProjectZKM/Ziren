@@ -116,9 +116,6 @@ where
         tracing::debug_span!("build compose-basefold-recursion program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
-    if std::env::var("ZIREN_DEBUG_PARALLEL_EMIT").is_ok() {
-        eprintln!("[build_compose_basefold_recursion] entered");
-    }
     verify_compress_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
