@@ -39,7 +39,4 @@ impl<F: Field> RsCodeWord<F> {
         self.data.width
     }
 
-    pub fn into_values(self) -> Vec<F> {
-        self.data.values
-    }
 }

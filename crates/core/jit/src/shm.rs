@@ -83,12 +83,6 @@ impl ShmTraceRing {
         self.shm.as_ptr().cast()
     }
 
-    /// Mutable pointer to the ring header.
-    #[must_use]
-    pub fn header_mut(&mut self) -> *mut ShmTraceRingHeader {
-        self.shm.as_mut_ptr().cast()
-    }
-
     /// Pointer to the start of the event-slot region.
     #[must_use]
     pub fn slots_ptr(&self) -> *const u8 {

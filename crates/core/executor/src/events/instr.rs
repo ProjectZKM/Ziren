@@ -32,13 +32,6 @@ impl AluEvent {
         Self { pc, next_pc: pc + 4, opcode, a, b, c, hi: 0 }
     }
 
-    /// Create a new [`AluEvent`].
-    /// Used for opcode with LO and HI registers
-    /// DIV DIVU MULT MULLTU
-    #[must_use]
-    pub fn new_with_hi(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
-        Self { pc, next_pc: pc + 4, opcode, a, b, c, hi }
-    }
 }
 
 /// Complicated Arithmetic Logic Unit (ALU) Event.
@@ -91,21 +84,6 @@ impl CompAluEvent {
         }
     }
 
-    pub fn new_with_hi(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, hi: u32) -> Self {
-        Self {
-            clk: 0,
-            shard: 0,
-            pc,
-            next_pc: pc + 4,
-            opcode,
-            hi,
-            a,
-            b,
-            c,
-            hi_record_is_real: false,
-            hi_record: MemoryWriteRecord::default(),
-        }
-    }
 }
 
 /// Memory Instruction Event.

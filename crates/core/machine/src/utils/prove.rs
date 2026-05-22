@@ -52,48 +52,6 @@ pub enum ZKMCoreProverError {
     DependenciesGenerationError,
 }
 
-pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
-    config: SC,
-    mut runtime: Executor,
-) -> Result<(MachineProof<SC>, u64), ZKMCoreProverError>
-where
-    SC::Challenger: Clone,
-    OpeningProof<SC>: Send + Sync,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-    // ShardMainData<SC>: Serialize + DeserializeOwned,
-    <SC as StarkGenericConfig>::Val: PrimeField32,
-{
-    // Setup the machine.
-    let machine = MipsAir::machine(config);
-    let prover = P::new(machine);
-    let (pk, _) = prover.setup(runtime.program.as_ref());
-
-    // Set the shard numbers.
-    runtime.records.iter_mut().enumerate().for_each(|(i, shard)| {
-        shard.public_values.shard = (i + 1) as u32;
-    });
-
-    // Prove the program.
-    let mut challenger = prover.config().challenger();
-    let proving_start = Instant::now();
-    let proof =
-        prover.prove(&pk, runtime.records, &mut challenger, ZKMCoreOpts::default()).unwrap();
-    let proving_duration = proving_start.elapsed().as_millis();
-    let nb_bytes = bincode::serialize(&proof).unwrap().len();
-
-    // Print the summary.
-    tracing::info!(
-        "summary: cycles={}, e2e={}, khz={:.2}, proofSize={}",
-        runtime.state.global_clk,
-        proving_duration,
-        (runtime.state.global_clk as f64 / proving_duration as f64),
-        Size::from_bytes(nb_bytes),
-    );
-
-    Ok((proof, runtime.state.global_clk))
-}
-
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
     program: Program,
     stdin: &ZKMStdin,

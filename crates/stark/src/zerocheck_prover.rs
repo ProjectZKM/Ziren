@@ -312,58 +312,8 @@ fn fiat_shamir_challenge<EF: Field>(round_poly: &[EF], round: usize) -> EF {
 }
 
 /// Evaluate the batched AIR constraint polynomial at every row of the
-/// Boolean hypercube.
-///
-/// For a chip with `k` constraints folded by powers of `α`, this returns the
-/// length-`2^m` table
-///
-/// ```text
-///   c[i] = Σⱼ αʲ · Cⱼ(main[i], main[(i+1) mod n], preproc[i], preproc[(i+1) mod n], pub)
-/// ```
-///
-/// Selectors are evaluated on the base trace domain: `is_first_row = 1` at
-/// row 0, `is_last_row = 1` at row `n-1`, `is_transition = 1` except at
-/// the last row.
-///
-/// Values are lifted to the extension field before evaluation so we can
-/// reuse `VerifierConstraintFolder` directly without a new folder type.
-///
-/// # Restrictions
-///
-/// - `main.height()` and `preprocessed.height()` must equal `1 << num_vars`.
-/// - `preprocessed` may be an empty matrix (zero rows / zero width) if the
-///   chip has no preprocessed columns; the caller must still pass a matrix
-///   whose width matches the chip.
-/// - Lookup interactions (`send`/`receive`) are absorbed by the empty
-///   message builder in `VerifierConstraintFolder` and contribute nothing.
-///   Lookup soundness is covered by Logup-GKR (Phase 2b).
-pub fn eval_constraints_on_hypercube<SC, A>(
-    chip: &Chip<Val<SC>, A>,
-    num_vars: usize,
-    main: &RowMajorMatrix<Val<SC>>,
-    preprocessed: &RowMajorMatrix<Val<SC>>,
-    public_values: &[Val<SC>],
-    alpha: Challenge<SC>,
-) -> Vec<Challenge<SC>>
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>> + for<'a> Air<VerifierConstraintFolder<'a, SC>>,
-{
-    eval_constraints_on_hypercube_with_cumsums::<SC, A>(
-        chip,
-        num_vars,
-        main,
-        preprocessed,
-        public_values,
-        alpha,
-        Challenge::<SC>::ZERO,
-        SepticDigest::<Val<SC>>::zero(),
-    )
-}
-
-/// version of [`eval_constraints_on_hypercube`] that
-/// accepts real per-chip `local_cumulative_sum` + `global_cumulative_sum`
-/// instead of zero placeholders.  The recursion verifier's
+/// Boolean hypercube with real per-chip `local_cumulative_sum` +
+/// `global_cumulative_sum`.  The recursion verifier's
 /// `build_opened_values_from_chip_openings_with_cumsums` must pass
 /// MATCHING values (from `BasefoldShardProof.chip_cumulative_sums`) or
 /// the zerocheck sumcheck balance will not close.

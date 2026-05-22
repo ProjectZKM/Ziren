@@ -52,15 +52,6 @@ impl<T: Clone> Block<T> {
         BinomialExtension(arr)
     }
 
-    pub fn as_extension_from_base<AB: ZKMAirBuilder<Var = T>>(
-        &self,
-        base: AB::Expr,
-    ) -> BinomialExtension<AB::Expr> {
-        let mut arr: [AB::Expr; D] = self.0.clone().map(|_| AB::Expr::ZERO);
-        arr[0] = base;
-
-        BinomialExtension(arr)
-    }
 }
 
 impl<T> From<[T; D]> for Block<T> {

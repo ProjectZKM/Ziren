@@ -71,11 +71,6 @@ impl<C: Clone> ShardCommitment<C> {
         self.auxiliary_commits.get(1)
     }
 
-    /// `true` when no auxiliary commitments are present — the
-    /// case for the BaseFold pipeline.
-    pub fn has_no_auxiliary_commits(&self) -> bool {
-        self.auxiliary_commits.is_empty()
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

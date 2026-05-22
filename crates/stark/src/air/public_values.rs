@@ -88,16 +88,6 @@ impl PublicValues<u32, u32> {
     }
 }
 
-impl<F: PrimeField32> PublicValues<Word<F>, F> {
-    /// Returns the commit digest as a vector of little-endian bytes.
-    pub fn commit_digest_bytes(&self) -> Vec<u8> {
-        self.committed_value_digest
-            .iter()
-            .flat_map(|w| w.into_iter().map(|f| f.as_canonical_u32() as u8))
-            .collect_vec()
-    }
-}
-
 impl<T: Clone> Borrow<PublicValues<Word<T>, T>> for [T] {
     fn borrow(&self) -> &PublicValues<Word<T>, T> {
         let size = std::mem::size_of::<PublicValues<Word<u8>, u8>>();

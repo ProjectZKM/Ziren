@@ -313,39 +313,6 @@ pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
     cumulative
 }
 
-/// Hash the Jagged chip metadata for Fiat-Shamir binding.
-///
-/// SECURITY: This hash MUST be absorbed into the Fiat-Shamir challenger
-/// before any PCS commitments or challenges. It binds the chip dimensions
-/// to the transcript, preventing a malicious prover from claiming different
-/// chip sizes than what was committed.
-///
-/// The hash covers: number of chips, and for each chip: (row_count, column_count).
-pub fn hash_chip_infos<F: Field + p3_field::PrimeCharacteristicRing>(
-    chip_infos: &[JaggedChipInfo],
-) -> Vec<F> {
-    let mut elements = Vec::with_capacity(1 + chip_infos.len() * 2);
-    // Number of chips.
-    elements.push(F::from_u32(chip_infos.len() as u32));
-    // Per-chip (row_count, column_count).
-    for info in chip_infos {
-        elements.push(F::from_u32(info.row_count as u32));
-        elements.push(F::from_u32(info.column_count as u32));
-    }
-    elements
-}
-
-/// Validate that an evaluation point index is within the real data region,
-/// not in the zero-padding region.
-///
-/// SECURITY: The verifier MUST call this to reject evaluations that fall
-/// in the padding region (positions >= total_values). Without this check,
-/// a malicious prover could claim false zero evaluations in the padding
-/// region that would be trivially satisfied.
-pub fn validate_eval_in_bounds(eval_index: usize, total_values: usize) -> bool {
-    eval_index < total_values
-}
-
 /// Statistics about the Jagged packing efficiency.
 #[derive(Debug)]
 pub struct JaggedStats {

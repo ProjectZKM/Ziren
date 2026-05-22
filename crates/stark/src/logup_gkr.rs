@@ -147,25 +147,6 @@ pub fn sum_of_fractions<EF: Field>(leaves: &[Fraction<EF>]) -> Fraction<EF> {
     tree.last().unwrap()[0]
 }
 
-/// Evaluate a multilinear polynomial (given as its evaluation table on
-/// `{0,1}^m`) at a point `r ∈ EF^m`.
-///
-/// Uses successive folding of the **last** variable per round, matching
-/// the `MultilinearExt` convention elsewhere in this crate.
-pub fn eval_mle<EF: Field>(table: &[EF], r: &[EF]) -> EF {
-    let mut cur = table.to_vec();
-    for &ri in r {
-        let half = cur.len() / 2;
-        let one_minus_ri = EF::ONE - ri;
-        for i in 0..half {
-            cur[i] = cur[2 * i] * one_minus_ri + cur[2 * i + 1] * ri;
-        }
-        cur.truncate(half);
-    }
-    debug_assert_eq!(cur.len(), 1);
-    cur[0]
-}
-
 // ---------------------------------------------------------------------------
 // Leaf construction from lookup events
 // ---------------------------------------------------------------------------

@@ -48,7 +48,6 @@ mod stark_testing;
 mod types;
 mod verifier;
 mod word;
-mod zerofier_coset;
 
 pub use air::*;
 pub use chip::*;
@@ -67,4 +66,3 @@ pub use record::*;
 pub use types::*;
 pub use verifier::*;
 pub use word::*;
-pub use zerofier_coset::*;

@@ -466,27 +466,6 @@ where
     }
 }
 
-pub fn prove_jagged_reduction(
-    dense_q: &[InnerVal],
-    packing: &JaggedPacking<InnerVal>,
-    r_row_per_chip: &[Vec<InnerChallenge>],
-    y_per_chip: &[Vec<InnerChallenge>],
-    challenger: &mut InnerChallenger,
-) -> JaggedReductionProof<InnerChallenge> {
-    // Backwards-compatible wrapper around the by-value variant: the
-    // by-value path is the memory-efficient one (drops `dense_q`
-    // between round 0 and subsequent rounds) but requires moving the
-    // vector in.  Callers that can share ownership should prefer
-    // [`prove_jagged_reduction_owned`].
-    prove_jagged_reduction_owned(
-        dense_q.to_vec(),
-        packing,
-        r_row_per_chip,
-        y_per_chip,
-        challenger,
-    )
-}
-
 /// Memory-efficient variant: moves `dense_q` in and drops it inside
 /// the round-0 fold, releasing the `4N`-byte buffer before the
 /// extension-field round-1+ tables are built.

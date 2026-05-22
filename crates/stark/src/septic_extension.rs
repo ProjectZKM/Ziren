@@ -700,16 +700,6 @@ impl<T: Clone> SepticBlock<T> {
         SepticExtension(arr)
     }
 
-    /// Takes a single expression into a `SepticExtension` of expressions.
-    pub fn as_extension_from_base<AB: ZKMAirBuilder<Var = T>>(
-        &self,
-        base: AB::Expr,
-    ) -> SepticExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 7] = self.0.clone().map(|_| AB::Expr::ZERO);
-        arr[0] = base;
-
-        SepticExtension(arr)
-    }
 }
 
 impl<T> From<[T; 7]> for SepticBlock<T> {

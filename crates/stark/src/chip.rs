@@ -106,18 +106,6 @@ where
         self.sends.iter().filter(|i| i.kind == LookupKind::Byte).count()
     }
 
-    /// Returns the number of sends of the given kind.
-    #[inline]
-    pub fn num_sends_by_kind(&self, kind: LookupKind) -> usize {
-        self.sends.iter().filter(|i| i.kind == kind).count()
-    }
-
-    /// Returns the number of receives of the given kind.
-    #[inline]
-    pub fn num_receives_by_kind(&self, kind: LookupKind) -> usize {
-        self.receives.iter().filter(|i| i.kind == kind).count()
-    }
-
     /// Generates a permutation trace for the given matrix.
     pub fn generate_permutation_trace<EF: ExtensionField<F>>(
         &self,

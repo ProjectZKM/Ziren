@@ -437,13 +437,6 @@ impl ZKMProofShape {
             )
     }
 
-    pub fn generate_compress_shapes(
-        recursion_shape_config: &'_ RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
-        reduce_batch_size: usize,
-    ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
-        recursion_shape_config.get_all_shape_combinations(reduce_batch_size)
-    }
-
     pub fn generate_maximal_shapes<'a>(
         core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
