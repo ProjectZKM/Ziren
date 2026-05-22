@@ -32,6 +32,7 @@ pub mod basefold_chip_opened_values;
 pub mod basefold_constraint_folder;
 pub mod basefold_verifier;
 pub mod basefold_witness;
+pub mod dummy;
 pub mod jagged_pcs_lift;
 pub mod shard_level_witness;
 pub mod shard_proof_variable_lift;

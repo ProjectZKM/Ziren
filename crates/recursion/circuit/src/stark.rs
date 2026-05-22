@@ -8,7 +8,6 @@ use p3_commit::{Mmcs, Pcs, PolynomialSpace};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
@@ -240,9 +239,20 @@ where
     A: MachineAir<KoalaBear>
         + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
 {
-    use zkm_stark::shard_level::prove_shard_to_basefold;
     use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
 
+    // Build the dummy shard proof by directly zero-filling every
+    // field (chip log heights, cumulative sums, logup-GKR round
+    // proofs, openings, evaluation proof bytes) at the shapes
+    // dictated by the input `shape`. This replaces a previous slow
+    // path that drove `prove_shard_to_basefold` against zero traces
+    // (~15s per call × REDUCE_BATCH_SIZE during pre-warm); the
+    // zero-fill allocator runs in microseconds because no field
+    // arithmetic happens.
+    //
+    // Mirrors SP1's `dummy_shard_proof` at
+    // `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs:28-83`.
+    //
     // Resolve each chip in the shape to a concrete &Chip from the
     // machine. Skip names that don't exist (defensive — real shapes
     // shouldn't include unknown chips).
@@ -254,44 +264,27 @@ where
         })
         .collect();
 
-    // Use the chip's actual widths — width=0 RowMajorMatrix with
-    // empty values is the convention prove_shard_to_basefold's
-    // row_gkr expects when a chip has no preprocessed trace
-    // (matches existing produce_real_basefold_shard_proof in
-    // basefold_programs.rs).
-    let preprocessed_traces: Vec<RowMajorMatrix<KoalaBear>> = chips
+    // Build (name, log_height) pairs in shape order — mirrors the
+    // shape's chip enumeration so the dummy's `chip_log_heights` /
+    // `chip_cumulative_sums` map entries align with what the parity
+    // test (`stark.rs::tests::dummy_basefold_vk_and_shard_proof_shape_stable`)
+    // and the recursion-program builder expect.
+    let chip_log_heights_pairs: Vec<(String, u8)> = chips
         .iter()
         .zip(shape.inner.iter())
         .map(|(chip, (_, log_height))| {
-            let height = 1usize << log_height;
-            let prep_width = MachineAir::<KoalaBear>::preprocessed_width(*chip);
-            RowMajorMatrix::new(vec![KoalaBear::ZERO; prep_width * height], prep_width)
-        })
-        .collect();
-    let main_traces: Vec<RowMajorMatrix<KoalaBear>> = chips
-        .iter()
-        .zip(shape.inner.iter())
-        .map(|(chip, (_, log_height))| {
-            let height = 1usize << log_height;
-            let main_width = <_ as BaseAir<KoalaBear>>::width(*chip);
-            RowMajorMatrix::new(vec![KoalaBear::ZERO; main_width * height], main_width)
+            let name = MachineAir::<KoalaBear>::name(*chip);
+            (name, *log_height as u8)
         })
         .collect();
 
-    let main_commit = std::array::from_fn(|_| KoalaBear::ZERO);
-    let public_values = vec![KoalaBear::ZERO; PROOF_MAX_NUM_PVS];
-    let mut challenger = machine.config().challenger();
+    let max_log_row_count =
+        BasefoldShardVerifier::production_default().max_log_row_count;
 
-    let proof = prove_shard_to_basefold::<KoalaBearPoseidon2, A>(
+    let proof = crate::dummy::dummy_basefold_shard_proof::<KoalaBear, InnerChallenge, A>(
         &chips,
-        &preprocessed_traces,
-        &main_traces,
-        main_commit,
-        public_values,
-        BasefoldShardVerifier::production_default().max_log_row_count,
-        &mut challenger,
-        // #263: host-only verifier-simulation path; no device traces.
-        None,
+        &chip_log_heights_pairs,
+        max_log_row_count,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy
