@@ -329,11 +329,6 @@ impl<V: Copy> PagedMemory<V> {
             .sum()
     }
 
-    /// Estimate the number of addresses in use.
-    pub fn estimate_len(&self) -> usize {
-        self.index.iter().filter(|&i| *i != NO_PAGE).count() * PAGE_LEN
-    }
-
     /// Clears the page table. Drops all `Page`s, but retains the memory used by the table itself.
     pub fn clear(&mut self) {
         self.page_table.clear();

@@ -93,23 +93,23 @@ impl SyscallInstrsChip {
         _blu: &mut impl ByteRecord,
     ) {
         cols.is_real = F::ONE;
-        cols.pc = F::from_canonical_u32(event.pc);
-        cols.next_pc = F::from_canonical_u32(event.next_pc);
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
+        cols.pc = F::from_u32(event.pc);
+        cols.next_pc = F::from_u32(event.next_pc);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
 
         cols.op_a_value = event.a_record.value.into();
         cols.op_b_value = event.arg1.into();
         cols.op_c_value = event.arg2.into();
         cols.prev_a_value = event.a_record.prev_value.into();
-        cols.syscall_id = F::from_canonical_u32(event.syscall_id);
-        let syscall_id = F::from_canonical_u32(event.a_record.prev_value & 0xffff);
+        cols.syscall_id = F::from_u32(event.syscall_id);
+        let syscall_id = F::from_u32(event.a_record.prev_value & 0xffff);
         let num_cycles = cols.prev_a_value[3];
 
         cols.num_extra_cycles = num_cycles;
         cols.is_halt = F::from_bool(
-            syscall_id == F::from_canonical_u32(SyscallCode::HALT.syscall_id())
-                || syscall_id == F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
+            syscall_id == F::from_u32(SyscallCode::HALT.syscall_id())
+                || syscall_id == F::from_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
         );
 
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
@@ -119,42 +119,42 @@ impl SyscallInstrsChip {
         let is_halt_val = cols.is_halt == F::ONE;
 
         // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
-        cols.is_prev_a1_zero.populate_from_field_element(F::from_canonical_u8(prev_a_bytes[1]));
+        cols.is_prev_a1_zero.populate_from_field_element(F::from_u8(prev_a_bytes[1]));
 
         // Populate `is_enter_unconstrained`.
         cols.is_enter_unconstrained.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::ENTER_UNCONSTRAINED.syscall_id()),
         );
 
         // Populate `is_hint_len`.
         cols.is_hint_len.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::SYSHINTLEN.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::SYSHINTLEN.syscall_id()),
         );
 
         // Populate `is_halt`.
         cols.is_halt_check.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::HALT.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::HALT.syscall_id()),
         );
 
         // Populate `is_exit_group`.
         cols.is_exit_group_check.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::SYS_EXT_GROUP.syscall_id()),
         );
 
         // Populate `is_commit`.
         cols.is_commit.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::COMMIT.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::COMMIT.syscall_id()),
         );
 
         // Populate `is_commit_deferred_proofs`.
         cols.is_commit_deferred_proofs.populate_from_field_element(
-            syscall_id - F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
+            syscall_id - F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id()),
         );
 
         // If the syscall is `COMMIT` or `COMMIT_DEFERRED_PROOFS`, set the index bitmap and
         // digest word.
-        if syscall_id == F::from_canonical_u32(SyscallCode::COMMIT.syscall_id())
-            || syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
+        if syscall_id == F::from_u32(SyscallCode::COMMIT.syscall_id())
+            || syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id())
         {
             let digest_idx = cols.op_b_value.to_u32() as usize;
             cols.index_bitmap[digest_idx] = F::ONE;
@@ -162,7 +162,7 @@ impl SyscallInstrsChip {
 
         // Populate unified KoalaBear range check flags and columns.
         let is_commit_deferred =
-            syscall_id == F::from_canonical_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
+            syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
         let op_b_needs_check = send_to_table || is_halt_val;
         let op_c_needs_check = send_to_table || is_commit_deferred;
 

@@ -25,7 +25,7 @@ pub struct SyscallContext<'a, 'b: 'a> {
     /// The runtime.
     pub rt: &'a mut Executor<'b>,
     /// The local memory access events for the syscall.
-    pub local_memory_access: HashMap<u32, MemoryLocalEvent>,
+    pub local_memory_access: nohash_hasher::IntMap<u32, MemoryLocalEvent>,
 }
 
 impl<'a, 'b> SyscallContext<'a, 'b> {
@@ -39,7 +39,7 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
             next_pc: runtime.state.pc.wrapping_add(4),
             exit_code: 0,
             rt: runtime,
-            local_memory_access: HashMap::new(),
+            local_memory_access: nohash_hasher::IntMap::default(),
         }
     }
 
@@ -139,30 +139,23 @@ impl<'a, 'b> SyscallContext<'a, 'b> {
                     self.rt.record.cpu_local_memory_access.push(local_mem_access);
                 }
 
+                // also flush the register-slot
+                // fast-path mirror for register addresses. Without this, the
+                // reg_slots[addr] event keeps its pre-syscall `initial_mem_access`
+                // and gets extended by post-syscall accesses, double-covering the
+                // pre-syscall→syscall interval that should belong to the syscall
+                // event. This produces non-zero global cumulative sum on verify.
+                if (addr as usize) < 36 {
+                    if let Some(reg_event) = self.rt.local_reg_access[addr as usize].take() {
+                        self.rt.record.cpu_local_memory_access.push(reg_event);
+                    }
+                }
+
                 syscall_local_mem_events.push(event);
             }
         }
 
         syscall_local_mem_events
-    }
-
-    /// Get the current value of a register, but doesn't use a memory record.
-    /// This is generally unconstrained, so you must be careful using it.
-    #[must_use]
-    pub fn register_unsafe(&mut self, register: Register) -> u32 {
-        self.rt.register(register)
-    }
-
-    /// Get the current value of a byte, but doesn't use a memory record.
-    #[must_use]
-    pub fn byte_unsafe(&mut self, addr: u32) -> u8 {
-        self.rt.byte(addr)
-    }
-
-    /// Get the current value of a word, but doesn't use a memory record.
-    #[must_use]
-    pub fn word_unsafe(&mut self, addr: u32) -> u32 {
-        self.rt.word(addr)
     }
 
     /// Get a slice of words, but doesn't use a memory record.

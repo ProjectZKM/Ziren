@@ -1,8 +1,8 @@
 use core::borrow::Borrow;
 use instruction::{HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr};
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::*;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
@@ -58,10 +58,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
     }
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
+        // Phase A5: collect instructions into a Vec so we can
+        // par_iter — `iter_instructions()` returns a sequential
+        // iterator, but rayon parallelism here is a meaningful speedup
+        // so we materialize first. `.copied()` flattens
+        // `Iter<Item = &&Instruction<F>>` to `&Instruction<F>` so the
+        // closure body matches the original signature.
+        let instructions: Vec<&Instruction<F>> = program.iter_instructions().collect();
         // Allocating an intermediate `Vec` is faster.
-        let accesses = program
-            .instructions
+        let accesses = instructions
             .par_iter() // Using `rayon` here provides a big speedup.
+            .copied()
             .flat_map_iter(|instruction| match instruction {
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
@@ -152,14 +159,14 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &MemoryCols<AB::Var> = (*local).borrow();
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &MemoryPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (value, access) in zip(local.values, prep_local.accesses) {
@@ -171,7 +178,7 @@ where
 #[cfg(test)]
 mod tests {
     use machine::tests::run_recursion_test_machines;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -197,10 +204,10 @@ mod tests {
     #[test]
     pub fn prove_basic_mem() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -211,10 +218,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_mult() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -225,10 +232,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_address() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
-            ],
+            ]),
             ..Default::default()
         };
 
@@ -239,10 +246,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_value() {
         let program = RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
-            ],
+            ]),
             ..Default::default()
         };
 

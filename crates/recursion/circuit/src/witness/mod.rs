@@ -13,7 +13,7 @@ use zkm_stark::{
 
 use crate::{
     hash::FieldHasherVariable, stark::ShardProofVariable, CircuitConfig, FriProofVariable,
-    KoalaBearFriConfigVariable,
+    KoalaBearFriParametersVariable,
 };
 
 pub trait WitnessWriter<C: CircuitConfig>: Sized {
@@ -92,7 +92,7 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C> for Inn
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        // vec![Block::from(self.as_base_slice())]
+        // vec![Block::from(self.as_basis_coefficients_slice())]
         witness.write_ext(*self);
     }
 }
@@ -130,7 +130,7 @@ impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Vec<T> {
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriConfigVariable<C>>
+impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
     Witnessable<C> for ShardProof<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
@@ -145,12 +145,22 @@ where
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
+        // Jagged fingerprint read disabled — reading it emits
+        // ImmF/ImmE ops that perturb the recursion-AIR's compiled
+        // chip lookup accounting, breaking local_cumulative_sum == 0
+        // on aggregation proofs.  Field gets a builder-allocated
+        // zero value to satisfy the type signature without consuming
+        // witness bytes.
+        let basefold_jagged_fingerprint: [Felt<C::F>; 8] =
+            std::array::from_fn(|_| builder.constant(<C::F as p3_field::PrimeCharacteristicRing>::ZERO));
+
         ShardProofVariable {
             commitment,
             opened_values,
             opening_proof,
             public_values,
             chip_ordering,
+            basefold_jagged_fingerprint,
         }
     }
 
@@ -159,23 +169,30 @@ where
         self.opened_values.write(witness);
         self.opening_proof.write(witness);
         self.public_values.write(witness);
+        // BaseFold-pipeline writes disabled to match the disabled
+        // reads above.  Re-enable when the SP1-style parallel
+        // BasefoldShardVerifier-based recursion machine lands.
     }
 }
 
-impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for ShardCommitment<T> {
+impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for ShardCommitment<T>
+where
+    T::WitnessVariable: Clone,
+{
     type WitnessVariable = ShardCommitment<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commit = self.main_commit.read(builder);
-        let permutation_commit = self.permutation_commit.read(builder);
-        let quotient_commit = self.quotient_commit.read(builder);
-        Self::WitnessVariable { main_commit, permutation_commit, quotient_commit }
+        let auxiliary_commits =
+            self.auxiliary_commits.iter().map(|c| c.read(builder)).collect();
+        Self::WitnessVariable { main_commit, auxiliary_commits }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.main_commit.write(witness);
-        self.permutation_commit.write(witness);
-        self.quotient_commit.write(witness);
+        for c in self.auxiliary_commits.iter() {
+            c.write(witness);
+        }
     }
 }
 

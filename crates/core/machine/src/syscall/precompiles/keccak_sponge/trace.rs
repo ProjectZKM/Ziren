@@ -76,12 +76,12 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         let mut rows = wrapped_rows.unwrap();
         let num_real_rows = rows.len();
 
-        let dummy_keccak_rows = generate_trace_rows::<F>(vec![[0; KECCAK_STATE_U32S / 2]]);
+        let dummy_keccak_rows = generate_trace_rows::<F>(vec![[0; KECCAK_STATE_U32S / 2]], 0);
         let mut dummy_chunk = Vec::new();
         for i in 0..NUM_ROUNDS {
-            let dummy_row = dummy_keccak_rows.row(i);
+            let dummy_row = dummy_keccak_rows.row_slice(i).unwrap();
             let mut row = [F::ZERO; NUM_KECCAK_SPONGE_COLS];
-            row[..NUM_KECCAK_COLS].copy_from_slice(dummy_row.collect::<Vec<_>>().as_slice());
+            row[..NUM_KECCAK_COLS].copy_from_slice(&dummy_row);
             dummy_chunk.push(row);
         }
 
@@ -119,20 +119,20 @@ impl KeccakSpongeChip {
         let mut already_absorbed_u32s = 0_u32;
 
         for i in 0..block_num {
-            let p3_keccak_trace = generate_trace_rows::<F>(vec![event.xored_state_list[i]]);
+            let p3_keccak_trace = generate_trace_rows::<F>(vec![event.xored_state_list[i]], 0);
             for round in 0..NUM_ROUNDS {
                 let mut row = [F::ZERO; NUM_KECCAK_SPONGE_COLS];
-                let p3_keccak_row = p3_keccak_trace.row(round);
+                let p3_keccak_row = p3_keccak_trace.row_slice(round).unwrap();
                 row[..NUM_KECCAK_COLS]
-                    .copy_from_slice(p3_keccak_row.collect::<Vec<_>>().as_slice());
+                    .copy_from_slice(&p3_keccak_row);
 
                 let cols: &mut KeccakSpongeCols<F> = row.as_mut_slice().borrow_mut();
 
-                cols.shard = F::from_canonical_u32(event.shard);
-                cols.clk = F::from_canonical_u32(event.clk);
+                cols.shard = F::from_u32(event.shard);
+                cols.clk = F::from_u32(event.clk);
                 cols.is_real = F::ONE;
-                cols.input_len = F::from_canonical_u32(event.input.len() as u32);
-                cols.already_absorbed_u32s = F::from_canonical_u32(already_absorbed_u32s);
+                cols.input_len = F::from_u32(event.input.len() as u32);
+                cols.already_absorbed_u32s = F::from_u32(already_absorbed_u32s);
                 cols.is_absorbed =
                     F::from_bool((round == (NUM_ROUNDS - 1)) && (i != (block_num - 1)));
                 cols.is_first_input_block = F::from_bool(i == 0);
@@ -140,9 +140,9 @@ impl KeccakSpongeChip {
                 cols.read_block = F::from_bool(round == 0);
                 cols.receive_syscall = F::from_bool(i == 0 && round == 0);
                 cols.write_output = F::from_bool(i == (block_num - 1) && round == (NUM_ROUNDS - 1));
-                cols.output_address = F::from_canonical_u32(event.output_addr);
+                cols.output_address = F::from_u32(event.output_addr);
                 // 4 bytes per u32
-                cols.input_address = F::from_canonical_u32(
+                cols.input_address = F::from_u32(
                     event.input_addr + i as u32 * KECCAK_GENERAL_RATE_U32S as u32 * 4,
                 );
 

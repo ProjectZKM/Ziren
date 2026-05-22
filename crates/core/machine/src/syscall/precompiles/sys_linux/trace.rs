@@ -111,35 +111,35 @@ impl SysLinuxChip {
     ) {
         cols.a0 = event.a0.into();
         cols.a1 = event.a1.into();
-        cols.shard = F::from_canonical_u32(event.shard);
-        cols.clk = F::from_canonical_u32(event.clk);
-        cols.syscall_id = F::from_canonical_u32(event.syscall_code);
+        cols.shard = F::from_u32(event.shard);
+        cols.clk = F::from_u32(event.clk);
+        cols.syscall_id = F::from_u32(event.syscall_code);
         cols.is_real = F::ONE;
         cols.result = event.v0.into();
         cols.output.populate_write(event.write_records[0], blu);
 
         // ── Canonical syscall decoder ──────────────────────────────────
-        let sid = F::from_canonical_u32(event.syscall_code);
+        let sid = F::from_u32(event.syscall_code);
         cols.decode_mmap
-            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_MMAP as u32));
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_MMAP as u32));
         cols.decode_mmap2.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
+            sid - F::from_u32(SyscallCode::SYS_MMAP2 as u32),
         );
         cols.decode_clone.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
+            sid - F::from_u32(SyscallCode::SYS_CLONE as u32),
         );
         cols.decode_exit_group.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
+            sid - F::from_u32(SyscallCode::SYS_EXT_GROUP as u32),
         );
         cols.decode_brk
-            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_BRK as u32));
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_BRK as u32));
         cols.decode_fnctl.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
+            sid - F::from_u32(SyscallCode::SYS_FCNTL as u32),
         );
         cols.decode_read
-            .populate_from_field_element(sid - F::from_canonical_u32(SyscallCode::SYS_READ as u32));
+            .populate_from_field_element(sid - F::from_u32(SyscallCode::SYS_READ as u32));
         cols.decode_write.populate_from_field_element(
-            sid - F::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
+            sid - F::from_u32(SyscallCode::SYS_WRITE as u32),
         );
 
         let is_mmap = event.syscall_code == SyscallCode::SYS_MMAP as u32
@@ -147,14 +147,14 @@ impl SysLinuxChip {
         cols.is_mmap = F::from_bool(is_mmap);
 
         // ── Canonical a0 / a1 decoder ──────────────────────────────────
-        let a0_val = F::from_canonical_u32(event.a0);
+        let a0_val = F::from_u32(event.a0);
         cols.decode_a0_0.populate_from_field_element(a0_val);
         cols.decode_a0_1.populate_from_field_element(a0_val - F::ONE);
         cols.decode_a0_2.populate_from_field_element(a0_val - F::TWO);
 
-        let a1_val = F::from_canonical_u32(event.a1);
+        let a1_val = F::from_u32(event.a1);
         cols.decode_a1_1.populate_from_field_element(a1_val - F::ONE);
-        cols.decode_a1_3.populate_from_field_element(a1_val - F::from_canonical_u32(3));
+        cols.decode_a1_3.populate_from_field_element(a1_val - F::from_u32(3));
 
         // ── Composite flags ────────────────────────────────────────────
         cols.is_mmap_a0_0 = F::from_bool(is_mmap && event.a0 == 0);
@@ -182,17 +182,17 @@ impl SysLinuxChip {
                 let hi_nibble = (a1_bytes[1] >> 4) & 0x0F;
                 for bit in 0..4 {
                     cols.a1_byte1_lo_bits[bit] =
-                        F::from_canonical_u32((lo_nibble as u32 >> bit) & 1);
+                        F::from_u32((lo_nibble as u32 >> bit) & 1);
                 }
                 for bit in 0..4 {
                     cols.a1_byte1_hi_bits[bit] =
-                        F::from_canonical_u32((hi_nibble as u32 >> bit) & 1);
+                        F::from_u32((hi_nibble as u32 >> bit) & 1);
                 }
 
                 let page_off = event.a1 & 0xFFF;
                 let upper = (event.a1 >> 12) << 12;
                 cols.is_page_offset_zero
-                    .populate_from_field_element(F::from_canonical_u32(page_off));
+                    .populate_from_field_element(F::from_u32(page_off));
 
                 if event.a0 == 0 {
                     assert!(event.write_records.len() == 2);

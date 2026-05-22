@@ -43,7 +43,7 @@ pub fn fresh_picus_expr() -> PicusExpr {
     PicusExpr::Var(fresh_picus_var_id())
 }
 
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 
 /// Global, thread-safe holder for the PCL prime field modulus.
 ///
@@ -474,7 +474,7 @@ impl Mul<u64> for PicusExpr {
     }
 }
 
-impl FieldAlgebra for PicusExpr {
+impl PrimeCharacteristicRing for PicusExpr {
     type F = Felt;
 
     const ZERO: Self = PicusExpr::Const(0);

@@ -3,9 +3,9 @@
 use core::borrow::Borrow;
 use itertools::Itertools;
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
@@ -89,8 +89,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_BATCH_FRI_PREPROCESSED_COLS]> = Vec::new();
         program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::BatchFRI(instr) = instruction {
                     Some(instr)
@@ -145,8 +144,7 @@ impl<F: PrimeField32, const DEGREE: usize> MachineAir<F> for BatchFRIChip<DEGREE
         let instrs = unsafe {
             std::mem::transmute::<Vec<&Box<BatchFRIInstr<F>>>, Vec<&Box<BatchFRIInstr<KoalaBear>>>>(
                 program
-                    .instructions
-                    .iter()
+                    .iter_instructions()
                     .filter_map(|instruction| match instruction {
                         Instruction::BatchFRI(x) => Some(x),
                         _ => None,
@@ -345,15 +343,15 @@ impl<const DEGREE: usize> BatchFRIChip<DEGREE> {
 
 impl<AB, const DEGREE: usize> Air<AB> for BatchFRIChip<DEGREE>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.row_slice(0), main.row_slice(1));
+        let (local, next) = (main.current_slice(), main.next_slice());
         let local: &BatchFRICols<AB::Var> = (*local).borrow();
         let next: &BatchFRICols<AB::Var> = (*next).borrow();
-        let prepr = builder.preprocessed();
-        let (prepr_local, prepr_next) = (prepr.row_slice(0), prepr.row_slice(1));
+        let prepr = builder.preprocessed().clone();
+        let (prepr_local, prepr_next) = (prepr.current_slice(), prepr.next_slice());
         let prepr_local: &BatchFRIPreprocessedCols<AB::Var> = (*prepr_local).borrow();
         let prepr_next: &BatchFRIPreprocessedCols<AB::Var> = (*prepr_next).borrow();
 

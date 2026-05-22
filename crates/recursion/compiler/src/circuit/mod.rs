@@ -10,7 +10,7 @@ pub use config::*;
 mod tests {
     use std::sync::Arc;
 
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
 
     use zkm_core_machine::utils::run_test_machine;

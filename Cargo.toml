@@ -14,10 +14,12 @@ members = [
     "crates/core/executor",
     "crates/core/instruction-test-defs",
     "crates/core/machine",
+    "crates/core/jit",
     "crates/cuda",
     "crates/curves",
     "crates/derive",
-    "crates/picus",
+   # "crates/picus",
+    "crates/poly",
     "crates/primitives",
     "crates/prover",
     "crates/recursion/circuit",
@@ -47,27 +49,29 @@ debug-assertions = true
 
 
 [workspace.dependencies]
-p3-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-field = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-commit = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-dft = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-util = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-fri = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-circle = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-mds = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3" }
-p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3" }
+p3-air = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-field = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-challenger = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-commit = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-dft = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-matrix = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-maybe-rayon = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-util = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-fri = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-koala-bear = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-circle = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-keccak = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-keccak-air = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-mds = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-merkle-tree = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-mersenne-31 = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-monty-31 = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-poseidon2 = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-symmetric = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-bn254-fr = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs", package = "p3-bn254" }
+p3-uni-stark = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
+p3-whir = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs", features = ["parallel"] }
+p3-multilinear-util = { git = "https://github.com/ProjectZKM/Plonky3", branch = "zkm/whir-pcs" }
 
 # p3-air = { path = "../patch/Plonky3/air" }
 # p3-field = { path = "../patch/Plonky3/field" }
@@ -95,7 +99,7 @@ itertools = "0.13.0"
 tracing = "0.1.37"
 tracing-subscriber = { version = "0.3.17" }
 tracing-forest = { version = "0.1.6", default-features = false }
-serde = { version = "1.0", default-features = false, features = ["derive", "alloc"] }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc", "rc"] }
 serde_json = "1.0.132"
 
 rand = "0.8.5"
@@ -112,13 +116,14 @@ zkm-instruction-test-defs = { path = "crates/core/instruction-test-defs" }
 zkm-core-machine = { path = "crates/core/machine", default-features = false }
 zkm-derive = { path = "crates/derive" }
 zkm-primitives = { path = "crates/primitives" }
+zkm-poly = { path = "crates/poly" }
 zkm-stark = { path = "crates/stark" }
 zkm-prover = { path = "crates/prover" }
 zkm-build = { path = "crates/build" }
 zkm-sdk = { path = "crates/sdk" }
 zkm-cuda = { path = "crates/cuda" }
 zkm-verifier = { path = "crates/verifier" }
-zkm-picus = {path = "crates/picus"}
+#zkm-picus = {path = "crates/picus"}
 
 zkm-lib = { path = "crates/zkvm/lib", default-features = false }
 zkm-zkvm = { path = "crates/zkvm/entrypoint", default-features = false }
@@ -129,3 +134,8 @@ test-artifacts = { path = "crates/test-artifacts" }
 
 # misc
 hashbrown = "0.14.5"
+
+[patch."https://github.com/ProjectZKM/Ziren.git"]
+zkm-lib = { path = "crates/zkvm/lib" }
+zkm-primitives = { path = "crates/primitives" }
+

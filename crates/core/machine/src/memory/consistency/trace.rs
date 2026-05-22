@@ -74,8 +74,8 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
     ) {
         self.value = current_record.value.into();
 
-        self.prev_shard = F::from_canonical_u32(prev_record.shard);
-        self.prev_clk = F::from_canonical_u32(prev_record.timestamp);
+        self.prev_shard = F::from_u32(prev_record.shard);
+        self.prev_clk = F::from_u32(prev_record.timestamp);
 
         // Fill columns used for verifying current memory access time value is greater than
         // previous's.
@@ -88,9 +88,9 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
 
         let diff_minus_one = (current_time_value - prev_time_value).wrapping_sub(1);
         let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
-        self.diff_16bit_limb = F::from_canonical_u16(diff_16bit_limb);
+        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
         let diff_8bit_limb = (diff_minus_one >> 16) & 0xff;
-        self.diff_8bit_limb = F::from_canonical_u32(diff_8bit_limb);
+        self.diff_8bit_limb = F::from_u32(diff_8bit_limb);
 
         // Add a byte table lookup with the 16Range op.
         output.add_u16_range_check(diff_16bit_limb);

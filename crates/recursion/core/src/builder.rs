@@ -1,7 +1,6 @@
 use std::iter::once;
 
-use p3_air::AirBuilderWithPublicValues;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use zkm_stark::{
     air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
     LookupKind,
@@ -12,7 +11,7 @@ use crate::{air::Block, Address};
 /// A trait which contains all helper methods for building Ziren recursion machine AIRs.
 pub trait ZKMRecursionAirBuilder: MachineAirBuilder + RecursionAirBuilder {}
 
-impl<AB: AirBuilderWithPublicValues + RecursionAirBuilder> ZKMRecursionAirBuilder for AB {}
+impl<AB: RecursionAirBuilder> ZKMRecursionAirBuilder for AB {}
 impl<AB: BaseAirBuilder> RecursionAirBuilder for AB {}
 
 pub trait RecursionAirBuilder: BaseAirBuilder {
@@ -22,7 +21,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.send_block(Address(addr.0.into()), Block(padded_value), mult)
     }
@@ -49,7 +48,7 @@ pub trait RecursionAirBuilder: BaseAirBuilder {
         val: E,
         mult: impl Into<Self::Expr>,
     ) {
-        let mut padded_value = core::array::from_fn(|_| Self::Expr::zero());
+        let mut padded_value = core::array::from_fn(|_| Self::Expr::ZERO);
         padded_value[0] = val.into();
         self.receive_block(Address(addr.0.into()), Block(padded_value), mult)
     }

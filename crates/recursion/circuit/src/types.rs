@@ -1,6 +1,6 @@
 use hashbrown::HashMap;
-use p3_commit::TwoAdicMultiplicativeCoset;
-use p3_field::{FieldAlgebra, TwoAdicField};
+use p3_field::coset::TwoAdicMultiplicativeCoset;
+use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use p3_matrix::Dimensions;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
@@ -9,12 +9,12 @@ use zkm_stark::septic_digest::SepticDigest;
 
 use crate::{
     challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,
-    KoalaBearFriConfigVariable,
+    KoalaBearFriParametersVariable,
 };
 
 /// Reference: [zkm_core::stark::StarkVerifyingKey]
 #[derive(Clone)]
-pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> {
+pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> {
     pub commitment: SC::DigestVariable,
     pub pc_start: Felt<C::F>,
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
@@ -23,25 +23,24 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriC
 }
 
 #[derive(Clone)]
-pub struct PartVerifyingKeyVariable<
-    C: CircuitConfig<F = SC::Val>,
-    SC: KoalaBearFriConfigVariable<C>,
-> {
-    pub commitment: SC::DigestVariable,
-    pub pc_start: Felt<C::F>,
-}
-
-#[derive(Clone)]
 pub struct FriProofVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
     pub commit_phase_commits: Vec<H::DigestVariable>,
+    /// Per-round PoW witnesses (one per commit phase round).
+    pub commit_pow_witnesses: Vec<Felt<C::F>>,
     pub query_proofs: Vec<FriQueryProofVariable<C, H>>,
     pub final_poly: Ext<C::F, C::EF>,
+    /// Query-level PoW witness.
     pub pow_witness: Felt<C::F>,
 }
 
 /// Reference: https://github.com/ProjectZKM/Plonky3/blob/main/fri/src/proof.rs#L35
 #[derive(Clone)]
 pub struct FriCommitPhaseProofStepVariable<C: CircuitConfig, H: FieldHasherVariable<C>> {
+    /// Per-round folding arity (log2).  Currently every commit
+    /// phase round uses arity 2 (log_arity = 1) — binary folding —
+    /// but the field is part of the proof so future variable-arity
+    /// schedules don't break the wire format.
+    pub log_arity: Felt<C::F>,
     pub sibling_value: Ext<C::F, C::EF>,
     pub opening_proof: Vec<H::DigestVariable>,
 }
@@ -86,7 +85,7 @@ pub struct TwoAdicPcsMatsVariable<C: CircuitConfig> {
     pub values: Vec<Vec<Ext<C::F, C::EF>>>,
 }
 
-impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> VerifyingKeyVariable<C, SC> {
+impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> VerifyingKeyVariable<C, SC> {
     pub fn observe_into<Challenger>(&self, builder: &mut Builder<C>, challenger: &mut Challenger)
     where
         Challenger: CanObserveVariable<C, Felt<C::F>> + CanObserveVariable<C, SC::DigestVariable>,
@@ -118,11 +117,11 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriConfigVariable<C>> Verifying
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
-            inputs.push(builder.eval(C::F::from_canonical_usize(domain.log_n)));
-            let size = 1 << domain.log_n;
-            inputs.push(builder.eval(C::F::from_canonical_usize(size)));
-            let g = C::F::two_adic_generator(domain.log_n);
-            inputs.push(builder.eval(domain.shift));
+            inputs.push(builder.eval(C::F::from_usize(domain.log_size())));
+            let size = 1 << domain.log_size();
+            inputs.push(builder.eval(C::F::from_usize(size)));
+            let g = C::F::two_adic_generator(domain.log_size());
+            inputs.push(builder.eval(domain.shift()));
             inputs.push(builder.eval(g));
         }
 

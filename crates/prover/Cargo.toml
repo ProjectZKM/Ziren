@@ -16,7 +16,7 @@ zkm-recursion-core = { workspace = true }
 zkm-recursion-circuit = { workspace = true }
 zkm-recursion-gnark-ffi = { workspace = true }
 zkm-core-machine = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-stark = { workspace = true, features = ["basefold"] }
 p3-symmetric = { workspace = true }
 zkm-core-executor = { workspace = true }
 zkm-primitives = { workspace = true }
@@ -58,6 +58,26 @@ name = "build_compress_vks"
 path = "scripts/build_compress_vks.rs"
 
 [[bin]]
+name = "collect_basefold_vks"
+path = "scripts/collect_basefold_vks.rs"
+
+[[bin]]
+name = "merge_vk_maps"
+path = "scripts/merge_vk_maps.rs"
+
+[[bin]]
+name = "regen_basefold_vks_for_tests"
+path = "scripts/regen_basefold_vks_for_tests.rs"
+
+[[bin]]
+name = "time_prover_new"
+path = "scripts/time_prover_new.rs"
+
+[[bin]]
+name = "write_basefold_vk_map"
+path = "scripts/write_basefold_vk_map.rs"
+
+[[bin]]
 name = "post_trusted_setup"
 path = "scripts/post_trusted_setup.rs"
 
@@ -80,6 +100,14 @@ path = "scripts/find_recursion_shapes.rs"
 [[bin]]
 name = "test_shape_fixing"
 path = "scripts/test_shape_fixing.rs"
+
+[[bin]]
+name = "tendermint_perf"
+path = "scripts/tendermint_perf.rs"
+
+[[bin]]
+name = "sha2_perf"
+path = "scripts/sha2_perf.rs"
 
 [features]
 default = ["native-gnark"]

@@ -13,13 +13,15 @@ use std::{
 };
 use thiserror::Error;
 
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
 use zkm_recursion_circuit::machine::{
-    ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape, ZKMDeferredShape,
+    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
+    ZKMCoreBasefoldWitnessValues, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape,
     ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
+    ZKMWrapBasefoldWitnessValues,
 };
 use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
@@ -338,15 +340,89 @@ pub fn build_vk_map_to_file<C: ZKMProverComponents>(
 }
 
 impl ZKMProofShape {
+    /// Generate all Recursion/Compose/Deferred/Shrink shapes that
+    /// need VK setup.
+    ///
+    /// Recursion shapes come from the size-class quantized
+    /// `zkm_stark::stacked_shapes::create_all_input_shapes` — ≤ 5,000
+    /// `CoreProofShape`s that, after `to_ordered_shape`'s
+    /// uniform-area projection + dedup, collapse to a much smaller
+    /// per-chip `OrderedShape` set (~13-30 unique).  This
+    /// replaces Ziren's legacy ~1.25M-shape per-chip cartesian
+    /// (`CoreShapeConfig::all_shapes`); the task commits to
+    /// stacked_shapes as the sole Recursion-shape source.
+    ///
+    /// The `core_shape_config` argument is retained for API
+    /// stability but is no longer consulted.
     pub fn generate<'a>(
-        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
+        _core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
-        core_shape_config
-            .all_shapes()
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_stark::stacked_shapes::{build_mips_machine_shape, create_all_input_shapes};
+        use zkm_stark::air::MachineAir;
+        use crate::CoreSC;
+
+        // Real chips from the live MIPS machine — needed for two
+        // post-processing steps on each `to_ordered_shape()` output:
+        //
+        //   1. **Name filter**: drop chip names from
+        //      `stacked_shapes/enumerate.rs` that don't match a real
+        //      `MachineAir::name()` (the enumerate list has
+        //      `Bls12381Add` etc., the machine has `Bls12381AddAssign`).
+        //      Without this, `dummy_basefold_vk_and_shard_proof` panics
+        //      in `zip_eq` when `shard_chips_ordered` returns fewer
+        //      chips than the shape names.
+        //
+        //   2. **Byte-lookup overflow cap**: `to_ordered_shape` gives
+        //      every chip a uniform `log_height` (e.g. 22).  But the
+        //      recursion VK setup asserts
+        //      `Σ chip.num_sent_byte_lookups() · 2^log_degree ≤ |F|` —
+        //      with ~22 chips at uniform 2^22 the sum overflows
+        //      KoalaBear's order.  Per-chip we cap log_height to
+        //      `floor(log2(|F| / total_byte_lookups_per_row))` for the
+        //      shape's chip set, so the assertion always holds.
+        let core_machine = MipsAir::machine(CoreSC::default());
+        let chips_by_name: BTreeMap<String, &_> =
+            core_machine.chips().iter().map(|c| (c.name(), c)).collect();
+
+        // KoalaBear order ≈ 2^31 - 2^24 + 1.  Use 2^30 as a safe upper
+        // bound so we have headroom against rounding/per-chip variance.
+        const SAFE_BYTE_LOOKUP_BUDGET: u64 = 1u64 << 30;
+
+        let machine_shape = build_mips_machine_shape();
+        let small_shapes: Vec<OrderedShape> = create_all_input_shapes(&machine_shape)
+            .into_iter()
+            .map(|cps| {
+                let mut shape = cps.to_ordered_shape();
+                shape.inner.retain(|(name, _)| chips_by_name.contains_key(name));
+
+                // Apply per-shape byte-lookup cap.
+                let total_byte_lookups: u64 = shape
+                    .inner
+                    .iter()
+                    .map(|(name, _)| chips_by_name[name].num_sent_byte_lookups() as u64)
+                    .sum();
+                if total_byte_lookups > 0 {
+                    let max_log_height: u32 =
+                        (SAFE_BYTE_LOOKUP_BUDGET / total_byte_lookups.max(1)).trailing_zeros();
+                    for entry in &mut shape.inner {
+                        entry.1 = entry.1.min(max_log_height as usize);
+                    }
+                }
+
+                shape
+            })
+            .filter(|shape| !shape.inner.is_empty())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+
+        small_shapes
+            .into_iter()
             .map(Self::Recursion)
-            .chain((1..=reduce_batch_size).flat_map(|batch_size| {
+            .chain((1..=reduce_batch_size).flat_map(move |batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
             }))
             .chain(
@@ -359,13 +435,6 @@ impl ZKMProofShape {
                     .get_all_shape_combinations(1)
                     .map(|mut x| Self::Shrink(x.pop().unwrap())),
             )
-    }
-
-    pub fn generate_compress_shapes(
-        recursion_shape_config: &'_ RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
-        reduce_batch_size: usize,
-    ) -> impl Iterator<Item = Vec<OrderedShape>> + '_ {
-        recursion_shape_config.get_all_shape_combinations(reduce_batch_size)
     }
 
     pub fn generate_maximal_shapes<'a>(
@@ -407,7 +476,7 @@ impl ZKMProofShape {
     ) -> BTreeMap<[KoalaBear; DIGEST_SIZE], usize> {
         Self::generate(core_shape_config, recursion_shape_config, reduce_batch_size)
             .enumerate()
-            .map(|(i, _)| ([KoalaBear::from_canonical_usize(i); DIGEST_SIZE], i))
+            .map(|(i, _)| ([KoalaBear::from_usize(i); DIGEST_SIZE], i))
             .collect()
     }
 }
@@ -437,27 +506,56 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
+        // Legacy FRI path removed (May 2026); always dispatch to the
+        // basefold program builders.
+        let _ = shrink_shape;
+        self.program_from_shape_basefold(shape)
+    }
+
+    /// Basefold companion to [`Self::program_from_shape`]. Builds a
+    /// recursion program from a cached shape using the basefold-pipeline
+    /// program builders (`recursion_program_basefold`,
+    /// `compose_program_basefold`, etc.) instead of the legacy FRI ones.
+    ///
+    /// step 4. Used by `build_compress_vks` to regenerate
+    /// `vk_map.bin` against the basefold compress programs.
+    pub fn program_from_shape_basefold(
+        &self,
+        shape: ZKMCompressProgramShape,
+    ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
             ZKMCompressProgramShape::Recursion(shape) => {
-                let input = ZKMRecursionWitnessValues::dummy(self.core_prover.machine(), &shape);
-                self.recursion_program(&input)
+                let input = ZKMCoreBasefoldWitnessValues::dummy(
+                    self.core_prover.machine(),
+                    &shape,
+                );
+                self.recursion_program_basefold(&input)
             }
             ZKMCompressProgramShape::Deferred(shape) => {
-                let input = ZKMDeferredWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.deferred_program(&input)
+                let input = ZKMDeferredBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape,
+                );
+                self.deferred_program_basefold(&input)
             }
             ZKMCompressProgramShape::Compress(shape) => {
-                let input =
-                    ZKMCompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.compress_program(&input)
+                // dummy now consumes the full ZKMCompressWithVkeyShape so
+                // its embedded merkle_tree_height sizes the vk-merkle witness.
+                let input = ZKMCompressBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape,
+                );
+                self.compose_program_basefold(&input)
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                let input =
-                    ZKMCompressWithVKeyWitnessValues::dummy(self.compress_prover.machine(), &shape);
-                self.shrink_program(
-                    shrink_shape.unwrap_or_else(ShrinkAir::<KoalaBear>::shrink_shape),
-                    &input,
-                )
+                // SP1 alignment: dummy now consumes the full
+                // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
+                // sizes the vk-merkle witness for the wrap stage too.
+                let input = ZKMWrapBasefoldWitnessValues::dummy(
+                    self.compress_prover.machine(),
+                    &shape,
+                );
+                self.shrink_program_basefold(&input)
             }
         }
     }
@@ -478,5 +576,37 @@ mod tests {
                 .collect::<BTreeSet<_>>();
 
         println!("Number of compress shapes: {}", all_shapes.len());
+    }
+
+    /// Task #32: the Recursion shape count is now strictly bounded
+    /// by stacked_shapes' size-class quantization.  Before this change,
+    /// `ZKMProofShape::generate` sourced ~1.25M shapes from the
+    /// per-chip cartesian `CoreShapeConfig::all_shapes`; now it
+    /// sources from `create_all_input_shapes` followed by
+    /// `to_ordered_shape` dedup, yielding a much smaller set.
+    #[test]
+    fn generate_uses_stacked_shapes_for_recursion() {
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config = RecursionShapeConfig::default();
+        let reduce_batch_size = 2;
+
+        let all: BTreeSet<_> =
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
+                .collect();
+        let recursion_count =
+            all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
+
+        // stacked_shapes → to_ordered_shape with uniform-area projection
+        // and dedup collapses to ≤ ~30 unique OrderedShapes (one per
+        // chip cluster × band that maps to a distinct log_height).
+        assert!(
+            recursion_count <= 100,
+            "Recursion shape count {} should be ≤ 100 (stacked_shapes path)",
+            recursion_count
+        );
+        assert!(
+            recursion_count >= 1,
+            "generate should produce at least 1 Recursion shape"
+        );
     }
 }
