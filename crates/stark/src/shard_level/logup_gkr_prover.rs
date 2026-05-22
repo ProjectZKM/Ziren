@@ -7,7 +7,7 @@
 //!
 //! # Algorithm
 //!
-//! Mirror of `/tmp/sp1/crates/hypercube/src/logup_gkr/prover.rs:70-215`,
+//! Mirror of `crates/hypercube/src/logup_gkr/prover.rs:70-215`,
 //! adapted to Ziren's existing per-chip leaf construction
 //! ([`crate::logup_gkr::build_lookup_leaves`]) and fraction-tree
 //! prover ([`crate::logup_gkr::prove_logup_gkr`]):
@@ -53,7 +53,7 @@ use crate::logup_gkr::{build_lookup_leaves, prove_logup_gkr as prove_logup_gkr_i
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
 
-/// Per-chip MLE `eval_at` dispatch helper (#103).
+/// Per-chip MLE `eval_at` dispatch helper.
 ///
 /// Currently this function ALWAYS delegates to the host
 /// implementation [`evaluate_trace_columns_at_point`].  The GPU
@@ -76,9 +76,9 @@ use crate::Chip;
 /// can be migrated to a single named entry point in a future
 /// follow-up without touching call sites again.
 ///
-/// See `/data/stephen/ziren-gpu/core/src/basefold/per_chip_eval_at.rs`
-/// for the GPU implementation.
-/// #263 perf fix — process-cached env lookup for Step-6 eval_at GPU
+/// See the ziren-gpu basefold crate's `per_chip_eval_at.rs` for the
+/// GPU implementation.
+/// Process-cached env lookup for Step-6 eval_at GPU
 /// dispatch.  Returns true only when `ZIREN_GPU_EVAL_AT=1` is set.
 ///
 /// Kept opt-in: the hook signature has no chip-name or provider arg,
@@ -300,7 +300,7 @@ where
 /// Shard-level LogUp-GKR prover.
 ///
 /// the reference: `prove_logup_gkr` at
-/// `/tmp/sp1/crates/hypercube/src/logup_gkr/prover.rs:70-215`.
+/// `crates/hypercube/src/logup_gkr/prover.rs:70-215`.
 ///
 /// Concrete pipeline:
 ///
@@ -437,7 +437,7 @@ where
 /// output carry the same algebraic content, just different field
 /// names.
 ///
-/// the shape (`/tmp/sp1/crates/hypercube/src/logup_gkr/proof.rs:19-31`):
+/// the shape (`crates/hypercube/src/logup_gkr/proof.rs:19-31`):
 ///   - `numerator_0/1`, `denominator_0/1` — the layer's GKR
 ///     reduction values at last-coordinate 0 and 1.
 ///   - `sumcheck_proof: PartialSumcheckProof` — the round

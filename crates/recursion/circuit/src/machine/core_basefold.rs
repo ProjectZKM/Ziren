@@ -8,7 +8,7 @@
 //!
 //! # Status
 //!
-//! Body port done (task #22.3): verifies every shard via the
+//! Body port done (the task.3): verifies every shard via the
 //! basefold shard verifier, then asserts the same shard-to-shard
 //! consistency chain the legacy [`super::core::ZKMRecursiveVerifier::verify`]
 //! asserts (shard index, execution shard, pc, memory init/finalize
@@ -90,7 +90,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         Vec<u8>,
         Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
     )>,
-    /// META #59 swap 1+2: per-shard per-chip cumulative sums.
+    /// swap 1+2: per-shard per-chip cumulative sums.
     pub chip_cumulative_sums_per_shard: Vec<
         std::collections::BTreeMap<
             String,
@@ -683,7 +683,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
     ///
     /// Sole dummy constructor for the basefold recursion pipeline
     /// (the legacy FRI-shaped counterpart `ZKMRecursionWitnessValues::dummy`
-    /// was retired in #393). Used by `program_from_shape` (#52) to
+    /// was retired in #393). Used by `program_from_shape` to
     /// build basefold recursion programs from cached shapes.
     pub fn dummy(
         machine: &zkm_stark::StarkMachine<

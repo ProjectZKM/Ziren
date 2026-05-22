@@ -1,4 +1,4 @@
-//! Row-only LogUp-GKR backend (task #24, A.2).
+//! Row-only LogUp-GKR backend (the task, A.2).
 //!
 //! Bridges the protocol mismatch documented in
 //! `docs/task_23_blocker.md`: the recursion verifier (ported from SP1)
@@ -8,7 +8,7 @@
 //! single `(num, denom)` root pair.
 //!
 //! This module rewrites the GKR algorithm
-//! (`/tmp/sp1/crates/hypercube/src/logup_gkr/{cpu.rs,execution.rs,prover.rs,proof.rs}`)
+//! (`crates/hypercube/src/logup_gkr/{cpu.rs,execution.rs,prover.rs,proof.rs}`)
 //! against Ziren's MLE/sumcheck APIs — the row dimension reduces
 //! `num_row_variables - 1` times until each layer is a degenerate
 //! 1-row × `2^num_interaction_variables` table; then the output
@@ -16,7 +16,7 @@
 //! sub-MLEs into a single `2^(num_interaction_variables+1)`-length
 //! pair.
 //!
-//! ## Module map (incremental — built in steps per task #24)
+//! ## Module map (incremental — built in steps per the task)
 //!
 //!   - [`layer`] — layer types (`LogUpGkrCpuLayer`,
 //!     `InteractionLayer`, `GkrCircuitLayer`, `LogupGkrCpuCircuit`).

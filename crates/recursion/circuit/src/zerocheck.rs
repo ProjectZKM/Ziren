@@ -20,7 +20,7 @@
 //! # Reference
 //!
 //! Mirrors helper portions of the upstream
-//! [`zerocheck.rs`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs)
+//! crates/recursion/circuit/src/zerocheck.rs
 //! and supporting `slop_multilinear` MLE helpers (`full_geq`,
 //! `Mle::full_lagrange_eval`).
 
@@ -61,7 +61,7 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 ///
 /// # Reference
 ///
-/// Mirrors [`slop_multilinear::full_geq`](file:///tmp/sp1/slop/crates/multilinear/src/mle.rs:398-407).
+/// Mirrors `slop_multilinear::full_geq` (slop/crates/multilinear/src/mle.rs).
 /// Iterates MSB-first (matching the upstream convention) — note
 /// this differs from the LSB-first `partial_lagrange` convention
 /// used elsewhere in Ziren's BaseFold port.
@@ -132,7 +132,7 @@ pub fn eq_eval<C: CircuitConfig>(
 ///
 /// # Reference
 ///
-/// Mirrors [`verify_opening_shape`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:88-109).
+/// Mirrors `verify_opening_shape` (crates/recursion/circuit/src/zerocheck.rs).
 pub fn verify_opening_shape<C, SC, A>(
     chip: &MachineChip<SC, A>,
     opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -400,7 +400,8 @@ where
     ///
     /// # Reference
     ///
-    /// Mirrors [`StarkVerifier::verify_zerocheck`](file:///tmp/sp1/crates/recursion/circuit/src/zerocheck.rs:111-249).
+    /// Mirrors `StarkVerifier::verify_zerocheck`
+    /// (crates/recursion/circuit/src/zerocheck.rs).
     /// Substitutions:
     ///   - `BTreeSet<Chip>` → ordered `&[&MachineChip<SC, A>]`.
     ///   - `openings.degree` (SP1's per-opening field) →

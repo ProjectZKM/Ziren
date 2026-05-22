@@ -120,7 +120,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
         ),
     )>,
-    /// META #59 Phase D: per-input per-chip cumulative sums (witnessed
+    /// per-input per-chip cumulative sums (witnessed
     /// from each input's `BasefoldShardProof.chip_cumulative_sums`).
     /// Same length and order as `vks_and_proofs`.
     pub chip_cumulative_sums_per_input: Vec<
@@ -428,8 +428,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
 
         // Step 5d: opened_values built from the LogUp-GKR
-        // chip_openings via the shared adapter.  META #59 Phase D:
-        // consume real per-chip cumulative_sums from witnessed
+        // chip_openings via the shared adapter.  // consume real per-chip cumulative_sums from witnessed
         // BasefoldShardProof.chip_cumulative_sums (per-input).
         let empty_cumsums_compress = std::collections::BTreeMap::new();
         let cumsums_for_input = chip_cumulative_sums_per_input
@@ -1043,7 +1042,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
     /// for the basefold pipeline. Drives the multi-chip basefold dummy
     /// helper for each input proof shape.
     ///
-    /// Used by `program_from_shape` (#52) to build basefold compress
+    /// Used by `program_from_shape` to build basefold compress
     /// programs from cached shapes.  Takes the full `ZKMCompressWithVkeyShape`
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness —
     /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (#261 fix).

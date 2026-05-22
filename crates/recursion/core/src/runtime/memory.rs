@@ -18,14 +18,14 @@ pub trait Memory<F> {
 
     /// Read from a memory address.
     ///
-    /// #259 Phase B step 2: the previous `mr_mult(addr, mult)` API
-    /// decremented `MemoryEntry::mult` on every read. The decrement
-    /// result was never read by any consumer (chips read mult from the
+    /// The previous `mr_mult(addr, mult)` API decremented
+    /// `MemoryEntry::mult` on every read. The decrement result was
+    /// never read by any consumer (chips read mult from the
     /// instruction-side preprocessed columns, not from `MemoryEntry`),
     /// so the bookkeeping was dead code. Mirroring SP1's `MemVec`
-    /// (`/tmp/sp1/crates/recursion/executor/src/memory.rs:39`), the
-    /// only read API is `mr` — no mult decrement happens at runtime.
-    /// This removes the last barrier to using `ParMemVec` for parallel
+    /// (crates/recursion/executor/src/memory.rs), the only read API
+    /// is `mr` — no mult decrement happens at runtime.  This removes
+    /// the last barrier to using `ParMemVec` for parallel
     /// `SeqBlock::Parallel` execution: with no shared mult counter to
     /// alias, concurrent reads of disjoint addresses are race-free
     /// without atomics.
@@ -38,8 +38,8 @@ pub trait Memory<F> {
     ///
     /// `mult` is stored on the entry but never read at runtime; it is
     /// retained only so the existing tests / future audit hooks can
-    /// inspect the originally-written value. Phase D may drop the
-    /// field entirely once the parallel runtime is wired and the
+    /// inspect the originally-written value. A later cleanup may drop
+    /// the field entirely once the parallel runtime is wired and the
     /// chip-side audit confirms it never reads `MemoryEntry::mult`.
     ///
     /// # Panics
@@ -107,7 +107,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
 
 /// `UnsafeCell` made `Sync`. Replicates the still-unstable
 /// `std::cell::SyncUnsafeCell`. SP1 ref:
-/// `/tmp/sp1/crates/recursion/executor/src/memory.rs:18-22`.
+/// crates/recursion/executor/src/memory.rs::SyncUnsafeCell.
 #[derive(Debug, Default)]
 #[repr(transparent)]
 struct SyncUnsafeCell<T: ?Sized>(UnsafeCell<T>);
@@ -123,14 +123,13 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 /// caller must invoke under the address-disjointness discipline of
 /// `RawProgram::SeqBlock::Parallel`.
 ///
-/// This is the #259 Phase B step 1 foundation — added as an additive
-/// type, not yet wired into the runtime. SP1 ref:
-/// `/tmp/sp1/crates/recursion/executor/src/memory.rs:25-100`.
+/// Additive type, not yet wired into the runtime. SP1 ref:
+/// crates/recursion/executor/src/memory.rs::MemVec.
 ///
 /// Differences from SP1's `MemVec`:
 /// - SP1's `MemoryEntry` is `{ val }` only; Ziren's still carries
 ///   `mult` for binary compatibility with the existing chip preprocessed
-///   layout. #259 Phase B step 2 audit established that `MemoryEntry::mult`
+///   layout. Audit established that `MemoryEntry::mult`
 ///   is **never read** at runtime — chips read mult from the
 ///   instruction-side preprocessed columns, not from `MemoryEntry`. The
 ///   `mr_mult` decrement was therefore dead, and was removed (along with
@@ -149,7 +148,7 @@ impl<F: PrimeField64> ParMemVec<F> {
         // which is `repr(transparent)` over its inner type. This makes
         // the layout of `Vec<SyncUnsafeCell<MaybeUninit<E>>>` identical
         // to `Vec<MaybeUninit<E>>`.
-        // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/memory.rs:30-37`.
+        // SP1 ref: crates/recursion/executor/src/memory.rs::ParMemVec::with_capacity.
         Self(unsafe {
             mem::transmute::<
                 Vec<MaybeUninit<MemoryEntry<F>>>,

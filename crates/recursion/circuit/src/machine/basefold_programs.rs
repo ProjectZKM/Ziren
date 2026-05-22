@@ -1,4 +1,4 @@
-//! Program constructors for SP1-style multi-stage basefold recursion (#19).
+//! Program constructors for SP1-style multi-stage basefold recursion.
 //!
 //! Each function builds + compiles one of the four recursion programs
 //! (Normalize / Compose / Deferred / Wrap) that consume the SP1-style
@@ -78,13 +78,13 @@ where
 /// proofs (from previous Normalize or Compose outputs) and aggregates
 /// their public values into a single output.
 ///
-/// #261 (SP1 pattern): vk_root is sourced from the input witness's
+/// SP1 pattern: vk_root is sourced from the input witness's
 /// `vk_merkle_data.root`, NOT baked as a compile-time constant.  This
 /// makes the compose program structure independent of the vk_map root,
 /// so the program's VK is stable across vk_map regen.  `value_assertions`
 /// controls whether the merkle membership proofs are enforced (true) or
-/// only witnessed (false) — mirrors SP1's `vk_verification` flag at
-/// `/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:124`.
+/// only witnessed (false) — mirrors SP1's `vk_verification` flag in
+/// crates/recursion/circuit/src/machine/vkey_proof.rs.
 pub fn build_compose_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>,
@@ -153,7 +153,7 @@ where
 /// Build the Wrap (terminal) program.  Verifies a single root
 /// recursive proof and reflects its [`RootPublicValues`] to the
 /// outer ring.
-/// #261 SP1 alignment: wrap (terminal) takes `value_assertions` like
+/// SP1 alignment: wrap (terminal) takes `value_assertions` like
 /// compose to control whether merkle membership proofs are enforced
 /// (true) or only witnessed (false). Mirrors SP1's
 /// `SP1CompressRootVerifierWithVKey::verify` `value_assertions` flag.
@@ -188,7 +188,7 @@ where
 }
 
 /// Top-level dispatch enum mirroring SP1's `SP1RecursionProgramShape`
-/// (`/tmp/sp1/crates/prover/src/shapes.rs:84`).  Select a stage and
+/// (crates/prover/src/shapes.rs).  Select a stage and
 /// the dispatch function builds the corresponding program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZKMBasefoldRecursionStage {
@@ -311,7 +311,7 @@ mod tests {
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count,
             &mut challenger,
-            // #263: host-only synthetic-witness builder; no device traces.
+            // Host-only synthetic-witness builder; no device traces.
             None,
         )
     }
@@ -360,7 +360,7 @@ mod tests {
     /// at the right type and can be coerced to a function pointer
     /// with the expected signature.  Validates the type bounds on
     /// the public API without actually running the AsmCompiler
-    /// (which needs valid witness fixtures — see task #23 for the
+    /// (which needs valid witness fixtures — see the task for the
     /// runtime end-to-end test).
     ///
     /// Catches the most common breakage class — generic-bound drift
@@ -420,7 +420,7 @@ mod tests {
     /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
     /// witness whose per-shard `chip_cumulative_sums` cardinality
     /// matches a real shard's chip count — the shape-stability
-    /// invariant for `program_from_shape` (#52) basefold dispatch.
+    /// invariant for `program_from_shape` basefold dispatch.
     #[test]
     fn dummy_core_basefold_witness_shape_stable() {
         use zkm_core_machine::mips::MipsAir;

@@ -374,7 +374,7 @@ where
         // NOT carry "Program" and stay on the FRI path; ALL MIPS shards
         // (including Cpu-less memory-finalize shards) take basefold.
         //
-        // This generalizes the META #59 Phase 2 (v2) side-channel that
+        // This generalizes the Phase 2 (v2) side-channel that
         // used to be added in the FRI path for Cpu-less MIPS shards
         // (was at line 918) — now those shards take the basefold path
         // directly instead of running the dead FRI computation + side-
@@ -384,7 +384,7 @@ where
         // The env-gated `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` switch retired
         // (commit e3569c6b on lib.rs side, this commit on prover.rs side).
         // Dispatch is now TypeId-based per the Phase 3d HYBRID memo
-        // (`project_step5_phase3d_wrap_decision.md`):
+        // (the related design memo):
         //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
         //     + Challenger=LbChallenger)  → basefold path for ALL shards,
         //     including recursion shards (compose/shrink).
@@ -617,7 +617,7 @@ where
         // The entire block below — permutation traces, quotient
         // evaluation, FRI commit, OOD opening (~376 LOC, lines ~580-940)
         // — DELETES WHOLESALE when Step 5 Phase 3 lands and recursion
-        // shards move to basefold (META #59 Phase D continuation).
+        // shards move to basefold (continuation).
         // Until then, this is recursion's prove pipeline.
         //
         // Do not add MIPS-specific logic here.  Per-MIPS observes /
@@ -962,7 +962,7 @@ where
         // The FRI path now serves ONLY recursion shards (no "Program"
         // chip).  Recursion shards must keep basefold_shard_proof=None
         // — the verifier rejects basefold proofs on recursion-shaped
-        // shards.  The META #59 Phase 2 (v2) side-channel that used to
+        // shards.  The Phase 2 (v2) side-channel that used to
         // live here (basefold proof for Cpu-less MIPS memory-only
         // shards) is no longer needed: those shards now take the
         // basefold path directly via the line 370 gate.
@@ -1079,7 +1079,7 @@ impl Error for CpuProverError {}
 
 // ───────────────────────────────────────────────────────────
 // Helper: drive prove_shard_to_basefold from inside StarkMachine::open()
-// for KoalaBearPoseidon2.  Always invoked (#13) — non-KoalaBear configs
+// for KoalaBearPoseidon2.  Always invoked — non-KoalaBear configs
 // short-circuit to None via the TypeId gate inside the helper.
 // ───────────────────────────────────────────────────────────
 
@@ -1092,7 +1092,7 @@ impl Error for CpuProverError {}
 /// `None` otherwise.
 ///
 /// Invoked unconditionally from `StarkMachine::open` for KoalaBear
-/// MIPS shards (#13).  Bridges between the per-chip BaseFold path's
+/// MIPS shards.  Bridges between the per-chip BaseFold path's
 /// in-scope values and the shard-level prover's monomorphic
 /// KoalaBear API.
 #[allow(clippy::too_many_arguments)]
@@ -1222,7 +1222,7 @@ where
     let chips_reborrow: Vec<&crate::Chip<Val<SC>, A>> =
         chips.iter().map(|c| *c as &crate::Chip<Val<SC>, A>).collect();
 
-    // The shard-level prover (#13) covers the production-shape MIPS
+    // The shard-level prover covers the production-shape MIPS
     // shards but the row-only LogUp-GKR backend at
     // `crate::shard_level::row_gkr` still has known shape-handling
     // gaps for shards with mixed per-chip interaction-variable
@@ -1253,7 +1253,7 @@ where
             public_values,
             max_log_row_count,
             &mut shard_challenger,
-            // #263: CPU prover path; no device traces.
+            // CPU prover path; no device traces.
             None,
             // Gap #10: CpuProver path always emits MSB-folded proofs
             // (the GPU LSB packed-pool path is unreachable here).

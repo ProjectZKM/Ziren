@@ -1,6 +1,6 @@
 //! Zero-fill allocator for [`BasefoldShardProof`].
 //!
-//! Port of SP1's `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs::dummy_shard_proof`
+//! Port of SP1's `dummy_shard_proof` (crates/recursion/circuit/src/dummy/shard_proof.rs)
 //! adapted for Ziren's `BasefoldShardProof<F, EF>` struct.  Every
 //! field is zero-filled — no real prove call, no AIR evaluation,
 //! microseconds per invocation instead of seconds.
@@ -32,8 +32,8 @@ use zkm_stark::{
 
 /// Allocator for [`PartialSumcheckProof`] — zero-filled.
 ///
-/// Mirror of SP1's
-/// `/tmp/sp1/crates/recursion/circuit/src/dummy/sumcheck.rs::dummy_sumcheck_proof`.
+/// Mirror of SP1's `dummy_sumcheck_proof`
+/// (crates/recursion/circuit/src/dummy/sumcheck.rs).
 ///
 /// * `num_variables` — number of sumcheck rounds (= number of
 ///   univariate polys, = dimension of `point_and_eval.0`)
@@ -57,8 +57,8 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 /// Allocator for [`LogupGkrProof`] — zero-filled, structurally
 /// SP1-shaped.
 ///
-/// Mirror of SP1's
-/// `/tmp/sp1/crates/recursion/circuit/src/dummy/logup_gkr.rs::dummy_gkr_proof`.
+/// Mirror of SP1's `dummy_gkr_proof`
+/// (crates/recursion/circuit/src/dummy/logup_gkr.rs).
 ///
 /// Key shape rules (mirror SP1 exactly):
 ///

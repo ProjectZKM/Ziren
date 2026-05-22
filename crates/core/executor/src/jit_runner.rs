@@ -1217,7 +1217,7 @@ mod platform {
         /// tracking in the JIT — the host re-derives clk from the
         /// trace ring instead.
         pub clk_bump: u64,
-        /// #316 Phase D.5 step 5: optional mem-read recorder fn
+        /// optional mem-read recorder fn
         /// registered with the JIT codegen. When `Some(f)`, every
         /// LW/LB/LBU/LH/LHU emits a post-load SysV-ABI call to `f`
         /// passing `(global_clk, guest_addr, value)`. `None` = no
@@ -1259,7 +1259,7 @@ mod platform {
         if let Some(handler) = syscall_handler {
             transpiler.register_syscall_handler(handler);
         }
-        // #316 Phase D.5 step 5: register the optional mem-read recorder
+        // register the optional mem-read recorder
         // so load instructions emit the post-load extern call. When
         // `None`, codegen is byte-identical to pre-D.5.
         if let Some(recorder) = params.mem_read_recorder {
@@ -1361,11 +1361,11 @@ mod platform {
     /// Run the JIT'd program AND capture a [`crate::minimal_trace::TraceChunk`]
     /// describing what was executed.
     ///
-    /// Phase B (#316) helper: this is the Stage-1 emit point that produces
-    /// the data Stage 2 (`TracingVM`, Phase C) will consume to re-emit a
+    /// helper: this is the Stage-1 emit point that produces
+    /// the data Stage 2 (`TracingVM`,) will consume to re-emit a
     /// full `ExecutionRecord`. For now the chunk records only the start /
     /// end register snapshot, the pc / clk bounds, and a zero-length
-    /// `mem_reads` oracle — Phase C will populate the oracle and split
+    /// `mem_reads` oracle — a future revision will populate the oracle and split
     /// into per-shard chunks. The single-chunk skeleton is enough to
     /// verify wire-format + serde + plumbing end-to-end.
     ///
@@ -1386,7 +1386,7 @@ mod platform {
         let clk_start = ctx.global_clk;
         let start_registers = ctx.registers.to_vec();
 
-        // #316 Phase D.5 step 4: clear the per-thread recorder buffer
+        // clear the per-thread recorder buffer
         // BEFORE the JIT call so the oracle reflects only THIS chunk's
         // reads (and not leftovers from a previous chunk on the same
         // thread). Safe to call unconditionally — when no recorder was
@@ -1397,7 +1397,7 @@ mod platform {
         // SAFETY: caller's contract.
         unsafe { jit_fn.call(ctx as *mut JitContext) };
 
-        // #316 Phase D.5 step 4: drain recorder into the chunk's
+        // drain recorder into the chunk's
         // mem_reads oracle. Pre-D.5 callers (no recorder configured at
         // build time) get the same empty Vec as before — byte-equivalent.
         // Post-D.5 callers that set `BuildParams.mem_read_recorder` get a
@@ -1710,7 +1710,7 @@ mod platform_diag {
 pub use platform_diag::snapshot as jit_cache_stats;
 
 // ──────────────────────────────────────────────────────────────────
-// #316 Phase D.5 — JIT-side mem_reads oracle (scaffold)
+// JIT-side mem_reads oracle (scaffold)
 // ──────────────────────────────────────────────────────────────────
 //
 // SP1-style two-stage tracing relies on the producer side (which
@@ -1721,7 +1721,7 @@ pub use platform_diag::snapshot as jit_cache_stats;
 //
 // D.5 swaps in the JIT for the same producer role. The JIT runs
 // native code at ~7× the interp speed (per
-// `project_jit_by_default_apr29.md`), so even with a per-memory-op
+// the related design memo), so even with a per-memory-op
 // recorder callback, the producer wins ~3-4× over the interp baseline.
 //
 // **Step 1 (this commit)**: scaffold a C-ABI extern recorder function +

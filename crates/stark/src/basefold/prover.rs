@@ -1,7 +1,7 @@
 //! BaseFold prover.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/basefold-prover/src/prover.rs`](file:///tmp/sp1/slop/crates/basefold-prover/src/prover.rs).
+//! `slop/crates/basefold-prover/src/prover.rs`.
 //!
 //! Two entry points:
 //!   * [`BasefoldProver::commit_mles`] — per-round commitment.  For
@@ -171,7 +171,7 @@ where
     ///
     /// Mirrors [`Self::commit_mles`] but skips the host
     /// [`DftEncoder::encode_batch`] step — used by the GPU dispatch
-    /// path (`#76 / D2 — C-full E2`) where codewords are produced on
+    /// path (`#76 / D2 — `) where codewords are produced on
     /// device by `FriCudaProver::encode_and_commit` and pulled back to
     /// host before this step.
     ///

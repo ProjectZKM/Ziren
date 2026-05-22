@@ -63,7 +63,7 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`shard.rs`](file:///tmp/sp1/crates/recursion/circuit/src/shard.rs)
+//! Mirrors SP1's crates/recursion/circuit/src/shard.rs
 //! from the upstream BaseFold verifier reference.
 
 use std::marker::PhantomData;
@@ -135,7 +135,7 @@ pub struct BasefoldShardProof<F, EF> {
 ///   - `zerocheck_proof` — input to phase 3
 ///   - `evaluation_proof` — input to phase 4
 ///
-/// Mirrors [`ShardProofVariable`](file:///tmp/sp1/crates/recursion/circuit/src/shard.rs:32-45).
+/// Mirrors `ShardProofVariable` (crates/recursion/circuit/src/shard.rs).
 pub struct BasefoldShardProofVariable<C: CircuitConfig> {
     /// Commitment digest to the main trace.
     pub main_commitment: [Felt<C::F>; 8],
@@ -160,7 +160,7 @@ pub struct BasefoldShardProofVariable<C: CircuitConfig> {
 /// initial cumulative-sum digest, and the preprocessed-trace
 /// commitment digest.
 ///
-/// Mirrors [`MachineVerifyingKeyVariable`](file:///tmp/sp1/crates/recursion/circuit/src/shard.rs:47-55).
+/// Mirrors `MachineVerifyingKeyVariable` (crates/recursion/circuit/src/shard.rs).
 pub struct BasefoldVerifyingKeyVariable<C: CircuitConfig> {
     /// Program counter start (3 felts: low, mid, high words).
     pub pc_start: [Felt<C::F>; 3],
@@ -190,7 +190,7 @@ impl<C: CircuitConfig> BasefoldVerifyingKeyVariable<C> {
 /// `max_log_row_count` bound that gates per-chip height
 /// representations.
 ///
-/// Mirrors [`RecursiveShardVerifier`](file:///tmp/sp1/crates/recursion/circuit/src/shard.rs:81-91).
+/// Mirrors `RecursiveShardVerifier` (crates/recursion/circuit/src/shard.rs).
 pub struct BasefoldShardVerifier<P> {
     /// Stacked-PCS verifier wrapping the underlying multilinear
     /// PCS verifier.
@@ -549,7 +549,7 @@ impl<P> BasefoldShardVerifier<P> {
 /// # Reference
 ///
 /// Mirrors the shape-config inputs to SP1's
-/// `dummy_vk_and_shard_proof` (file:///tmp/sp1/crates/recursion/circuit/src/dummy.rs)
+/// `dummy_vk_and_shard_proof` (crates/recursion/circuit/src/dummy.rs)
 /// — but adapted for the BaseFold pipeline's 5-field proof shape
 /// (no permutation/quotient commits; instead an
 /// `evaluation_proof: JaggedPcsProofVariable`).
@@ -583,8 +583,8 @@ pub struct BasefoldProofShape {
 /// witness-stream layout work can use this as a placeholder.
 ///
 /// BaseFold-pipeline analog of SP1's legacy FRI-shaped
-/// `dummy_vk_and_shard_proof` (Ziren's equivalent was retired in
-/// #393). Used by:
+/// `dummy_vk_and_shard_proof` (Ziren's equivalent was retired
+/// when the legacy FRI compress path was removed). Used by:
 ///
 ///   - Recursion-circuit harness tests that compile the verifier
 ///     against a stable proof-shape fixture.

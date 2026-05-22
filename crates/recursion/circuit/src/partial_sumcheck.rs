@@ -18,7 +18,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors the upstream [`PartialSumcheckProof`](file:///tmp/sp1/slop/crates/sumcheck/src/proof.rs)
+//! Mirrors the upstream `PartialSumcheckProof`
+//! (slop/crates/sumcheck/src/proof.rs)
 //! shape so jagged-PCS proofs serialize identically across
 //! interoperating implementations.
 

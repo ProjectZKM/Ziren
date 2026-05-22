@@ -361,7 +361,7 @@ where
     )
 }
 
-/// META #59 Phase C: version of [`eval_constraints_on_hypercube`] that
+/// version of [`eval_constraints_on_hypercube`] that
 /// accepts real per-chip `local_cumulative_sum` + `global_cumulative_sum`
 /// instead of zero placeholders.  The recursion verifier's
 /// `build_opened_values_from_chip_openings_with_cumsums` must pass
@@ -427,7 +427,7 @@ where
 
     // Empty permutation placeholder (WHIR mode skips permutation;
     // lookup integrity is handled by Logup-GKR in phase 2b).
-    // Cumulative sums now come from the caller (META #59 Phase C).
+    // Cumulative sums now come from the caller ().
     let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();
     let zero_challenge: Challenge<SC> = local_cumulative_sum;
     let global_sum: SepticDigest<Val<SC>> = global_cumulative_sum;

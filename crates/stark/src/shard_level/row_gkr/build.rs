@@ -1,8 +1,8 @@
 //! GKR circuit builder — ties together first-layer + transitions +
-//! output extraction (task #24, A.2 step 4.5).
+//! output extraction (the task, A.2 step 4.5).
 //!
 //! Mirrors the data-side flow of
-//! [`generate_gkr_circuit`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/cpu.rs#L75-L133)
+//! `generate_gkr_circuit`
 //! but stops short of the per-round sumcheck (step 5).  The output
 //! is the full layer stack plus the unified [`LogUpGkrOutput`] — the
 //! sumcheck round proofs are layered on top in step 5.
@@ -46,7 +46,7 @@ pub fn build_gkr_circuit<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
-    // #263: per-shard device-trace provider, threaded into the GPU
+    // per-shard device-trace provider, threaded into the GPU
     // first-layer hook through `generate_first_layer`.
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
@@ -226,12 +226,12 @@ where
 ///     can only occur when `first.num_row_variables == 0`, which the
 ///     `>= 2` assertion above already rules out, but this guard keeps
 ///     the device branch robust)
-/// #263/#266 perf fix — process-cached env lookup for the
+/// perf fix — process-cached env lookup for the
 /// layer-transition GPU dispatch.  Returns true when EITHER the
 /// master switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the legacy
 /// `ZIREN_GPU_LAYER_TRANSITION=1` is set.
 ///
-/// Safe under the master switch now (#266) because the call site
+/// Safe under the master switch now because the call site
 /// gates on `gpu_worker_context::current_gpu_pool_worker_device()`
 /// being `Some(_)` — off-pool basefold workers without a
 /// `cudaSetDevice` context have TLS=None and skip GPU dispatch.
@@ -239,7 +239,7 @@ fn layer_transition_env_cached() -> bool {
     use std::sync::OnceLock;
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| {
-        // #380 default ON to match SP1 (sp1-gpu/.../device.rs has no env
+        // default ON to match SP1 (sp1-gpu/.../device.rs has no env
         // gate on the layer-transition device path — it's always engaged
         // when the (F,EF) types match and hooks are registered).
         //
@@ -247,7 +247,7 @@ fn layer_transition_env_cached() -> bool {
         // ZIREN_GPU_DEVICE_HOOKS=0 as kill-switch.  Either explicit `=0`
         // disables the device path; otherwise default to ON.
         //
-        // Combined-config safety (per project_379_combined_incompatible.md):
+        // Combined-config safety (per the related design memo):
         // V3 + LT both ON OOMs at 32 GB on reth.  ziren-gpu's
         // `cuda_setup_mem_pool` auto-sets the mempool release threshold
         // to GPU_MEM/2 on small cards (<= 30 GB) so freed allocations
@@ -267,7 +267,7 @@ where
     EF: ExtensionField<F>,
 {
     // Gate 1: env var.  Either the legacy `ZIREN_GPU_LAYER_TRANSITION=1`
-    // OR the master switch `ZIREN_GPU_DEVICE_HOOKS=1` (#263) engages
+    // OR the master switch `ZIREN_GPU_DEVICE_HOOKS=1` engages
     // the device transition path.  Cached per-process to avoid
     // libc-environ Mutex acquisition cost (per-shard call site).
     //
@@ -365,7 +365,7 @@ where
         num_interaction_variables: layer_as_lb.num_interaction_variables,
     };
 
-    // #230 multi-GPU fix: allocate a fresh circuit_id for this
+    // multi-GPU fix: allocate a fresh circuit_id for this
     // build_gkr_circuit call.  The GPU side keys its registry by
     // (device_id, circuit_id) so concurrent shards on the same GPU
     // don't share a `next_handle` counter.  Threaded through every

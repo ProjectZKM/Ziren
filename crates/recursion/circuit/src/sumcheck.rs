@@ -11,9 +11,8 @@
 //!
 //! # Reference
 //!
-//! Mirrors the upstream
-//! [`verify_sumcheck`](file:///tmp/sp1/crates/recursion/circuit/src/sumcheck/mod.rs:64-121)
-//! function shape.  The Ziren port replaces the upstream's
+//! Mirrors the upstream `verify_sumcheck`
+//! (crates/recursion/circuit/src/sumcheck/mod.rs) function shape.  The Ziren port replaces the upstream's
 //! `SP1FieldConfigVariable<C>` parameter with [`crate::CircuitConfig`]
 //! directly (Ziren's recursion stack is KoalaBear-specialised), and
 //! uses [`Vec<Ext<C::F, C::EF>>`] in place of `slop_multilinear::Point`.

@@ -210,9 +210,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// the program cache and `setup()` is a pure function of the
     /// program.  Mirrors SP1's `RecursionKeys::Exists(pk, vk)`
     /// (recursion.rs:280-345).
-    ///
-    /// See `project_recursion_phase_gpu_audit.md` (May 19, 2026) for
-    /// the bottleneck analysis that motivated this scaffold.
     pub compose_pks_basefold_cache: Mutex<
         BTreeMap<
             usize,
@@ -222,7 +219,7 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
 
     /// Per-arity cache for the basefold compose recursion program.
     ///
-    /// Mirrors SP1's pattern (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`,
+    /// Mirrors SP1's pattern (`crates/prover/src/worker/prover/recursion.rs:446`,
     /// `compose_programs: BTreeMap<usize, Arc<RecursionProgram>>`): the compose
     /// program's structure is determined by arity (count of input proofs)
     /// once per-input shapes are stable, so one program per arity suffices.
@@ -333,21 +330,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // first user `compress()` invocation.
         //
         // INDEPENDENT of program-cache gating (`ZIREN_GPU_RESIDENCY=full`
-        // / legacy `ZIREN_PROGRAM_CACHE=1`, opt-in per
-        // project_256_cache_perf_reverted.md): the cache stores the
+        // / legacy `ZIREN_PROGRAM_CACHE=1`, opt-in): the cache stores the
         // *built* program; pre-warm instead warms the compiler's
         // internal caches (e.g. SeqBlock layout, plonky3 codegen
         // tables, shape-fix tables) that survive across builds even
         // when each per-arity program object is discarded.
         //
         // Opt-in: `ZIREN_GPU_RESIDENCY=full` (legacy
-        // `ZIREN_ENABLE_COMPOSE_PREWARM=1` honored).  Diagnostic in
-        // project_gap_prewarm_regression_diagnosis.md shows the pre-warm
-        // pays ~63.7s upfront for only ~2.4s amortizable compose-compile
+        // `ZIREN_ENABLE_COMPOSE_PREWARM=1` honored).  The pre-warm pays
+        // ~63.7s upfront for only ~2.4s amortizable compose-compile
         // cost (the rest, ~61.3s, is wasted on
-        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
-        // Default flipped from opt-out to opt-in on the gap-prewarm
-        // follow-up branch (May 21 2026).
+        // `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE),
+        // so the default is opt-in rather than opt-out.
         prover.prewarm_compose_programs();
 
         prover
@@ -359,11 +353,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// dummy compose program per arity to amortize first-compile cost.
     ///
     /// Opt-in: only runs under `ZIREN_GPU_RESIDENCY=full` (legacy
-    /// `ZIREN_ENABLE_COMPOSE_PREWARM=1` still honored).
-    /// Default flipped from opt-out to opt-in (May 21 2026): diagnostic
-    /// in project_gap_prewarm_regression_diagnosis.md showed the
-    /// pre-warm pays ~63.7s upfront for only ~2.4s amortizable
-    /// compose-compile cost (the rest, ~61.3s, is wasted on
+    /// `ZIREN_ENABLE_COMPOSE_PREWARM=1` still honored).  The default is
+    /// opt-in because the pre-warm pays ~63.7s upfront for only ~2.4s
+    /// amortizable compose-compile cost (the rest, ~61.3s, is wasted on
     /// `dummy_basefold_vk_and_shard_proof` calls × REDUCE_BATCH_SIZE).
     ///
     /// Also bails when:
@@ -452,9 +444,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Resolved via `crate::residency::compose_pk_cache_enabled()` —
     /// `ZIREN_GPU_RESIDENCY=full` opts in, the legacy
     /// `ZIREN_COMPOSE_PK_CACHE=1` still works (with a deprecation
-    /// warn).  Default OFF; see field docs for the soundness contract
-    /// and project_recursion_phase_gpu_audit.md for the bottleneck
-    /// analysis.
+    /// warn).  Default OFF; see field docs for the soundness contract.
+    /// Motivating bottleneck: per-shard repeated `setup()` cost on the
+    /// recursion-phase GPU dispatch path.
     pub fn compose_pk_cache_enabled() -> bool {
         crate::residency::compose_pk_cache_enabled()
     }
@@ -608,7 +600,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::compress_program`].
     ///
-    /// SP1-style per-arity cache (`/tmp/sp1/crates/prover/src/worker/prover/recursion.rs:446`):
+    /// SP1-style per-arity cache (`crates/prover/src/worker/prover/recursion.rs:446`):
     /// under `ZIREN_GPU_RESIDENCY=full` (legacy `ZIREN_PROGRAM_CACHE=1`
     /// still honored), the program is built once per arity and reused.
     /// With `ZIREN_VERIFY_PROGRAM_CACHE=1` (orthogonal to the residency
@@ -667,12 +659,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
-        // the default. The `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env
-        // toggle and the legacy `build_compose_basefold_program`
-        // branch have been retired — the `_recursion` variant is the
-        // sole production path. See
-        // `project_389_fri_deletion.md` for the deletion punch list.
+        // basefold-for-recursion is now the default. The
+        // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env toggle and the legacy
+        // `build_compose_basefold_program` branch have been retired —
+        // the `_recursion` variant is the sole production path.
         let mut program = build_compose_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
@@ -853,7 +843,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// each input proof. Returns `None` when any deferred proof is
     /// missing the side channel (caller falls back to the legacy path).
     ///
-    /// META #59 Phase 4 (#49). Mirrors the layout of
+    /// Phase 4. Mirrors the layout of
     /// `get_recursion_core_inputs_basefold` — same `if all_have_bf
     /// { Some } else { None }` pattern.
     pub fn get_recursion_deferred_inputs_basefold<'a>(
@@ -990,7 +980,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        // META #59 Phase 4 (#49): when all deferred proofs carry a basefold
+        // Phase 4: when all deferred proofs carry a basefold
         // side channel, emit DeferredBasefold witnesses; otherwise fall
         // back to legacy Deferred.
         if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(

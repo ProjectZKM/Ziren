@@ -13,7 +13,7 @@ enum Mode {
     JitFast,
     InterpFast,
     InterpTrace,
-    InterpTraceLifter,  // #316 Phase D.4: skip_replay_bookkeeping flag ON
+    InterpTraceLifter,  // skip_replay_bookkeeping flag ON
 }
 
 fn run(label: &str, bytes: &[u8], input_n: u32, mode: Mode) {

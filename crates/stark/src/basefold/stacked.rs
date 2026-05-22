@@ -1,7 +1,7 @@
 //! Stacked multilinear PCS — heterogeneous-batch wrapper over BaseFold.
 //!
 //! Source-mapped from
-//! [`/tmp/sp1/slop/crates/stacked`](file:///tmp/sp1/slop/crates/stacked).
+//! `slop/crates/stacked`.
 //!
 //! Lets us commit a `Message<Mle<F>>` whose elements have *different*
 //! widths and heights, by virtually concatenating their values into a
@@ -61,7 +61,7 @@ pub enum StackedVerifierError {
 /// Layout helper: walk a stream of MLEs and pack their values into
 /// fixed-size `[batch_size, 1 << log_stacking_height]` stripes.
 ///
-/// Source: SP1's [`interleave_multilinears_with_fixed_rate`](file:///tmp/sp1/slop/crates/stacked/src/fixed_rate.rs).
+/// Source: SP1's `interleave_multilinears_with_fixed_rate`.
 /// Tail is zero-padded to the next multiple of the stacking row-count.
 pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     batch_size: usize,
@@ -244,7 +244,7 @@ where
     }
 
     /// Convenience accessor for the underlying [`BasefoldProver`].
-    /// Used by the GPU dispatch hook (#76 / D2 — C-full E2) so the
+    /// Used by the GPU dispatch hook (#76 / D2 — ) so the
     /// device-encoded codewords can be committed via
     /// [`BasefoldProver::commit_codewords`] without re-routing through
     /// `interleave_multilinears_with_fixed_rate` twice.
@@ -310,7 +310,7 @@ where
             .map(|d| (d.pcs_batch_data, d.interleaved_mles))
             .unzip();
 
-        // #76 / D2 (C-full C4 plan §5) — GPU dispatch hook for the
+        // GPU dispatch hook for the
         // **OPEN/prove** phase.  The COMMIT side of `ZIREN_GPU_BASEFOLD=1`
         // is wired in `basefold_late_binding::commit_basefold_late_binding`
         // (see `register_gpu_basefold_commit_hook`).  The OPEN side is

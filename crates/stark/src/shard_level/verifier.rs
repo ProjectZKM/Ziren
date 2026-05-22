@@ -1,4 +1,4 @@
-//! Host-side BasefoldShardVerifier — task #28 remaining scaffolding.
+//! Host-side BasefoldShardVerifier — the task remaining scaffolding.
 //!
 //! Mirror of the in-circuit verifier at
 //! [`crates/recursion/circuit/src/shard_basefold.rs::BasefoldShardVerifier::verify_shard`]
@@ -18,7 +18,7 @@
 //! Phase 1 implemented.  Phases 2-4 are structural TODOs — the
 //! substantial sumcheck / PCS verification logic lives in the
 //! recursion circuit today and needs a host-side port.  Each is
-//! its own ~200-300 LOC port effort (see task #28 description).
+//! its own ~200-300 LOC port effort (see the task description).
 
 use alloc::vec::Vec;
 
@@ -71,7 +71,7 @@ impl core::fmt::Display for BasefoldVerifyError {
             Self::Zerocheck(msg) => write!(f, "zerocheck: {msg}"),
             Self::JaggedPcs(msg) => write!(f, "jagged-PCS: {msg}"),
             Self::Unimplemented(phase) => {
-                write!(f, "host-side BasefoldShardVerifier: {phase} not yet implemented (task #28)")
+                write!(f, "host-side BasefoldShardVerifier: {phase} not yet implemented")
             }
         }
     }
@@ -128,7 +128,7 @@ impl BasefoldShardVerifier {
     /// `crate::shard_level::prover::prove_shard_to_basefold`.
     ///
     /// Phases 2-4 return `Err(BasefoldVerifyError::Unimplemented)`
-    /// until their respective host-side ports land (see task #28).
+    /// until their respective host-side ports land (see the task).
     #[allow(clippy::too_many_arguments)]
     pub fn verify_shard<SC, A>(
         &self,
@@ -321,7 +321,7 @@ where
         ))
     })?;
 
-    // #95-fix (May 2 2026): read per-chip `column_count` from the
+    // fix (May 2 2026): read per-chip `column_count` from the
     // bundle's PackingMeta (written by the prover) instead of
     // `BaseAir::width(chip)`.  This eliminates the prover-side width
     // pad — the verifier now agrees with the *actually-exercised*

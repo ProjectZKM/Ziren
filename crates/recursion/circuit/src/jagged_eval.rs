@@ -24,8 +24,9 @@
 //!
 //! # Reference
 //!
-//! Mirrors [`RecursiveJaggedEvalConfig`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:33-48)
-//! and the [`RecursiveTrivialJaggedEvalConfig`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:50-86)
+//! Mirrors SP1's `RecursiveJaggedEvalConfig` and
+//! `RecursiveTrivialJaggedEvalConfig`
+//! (crates/recursion/circuit/src/jagged/jagged_eval.rs)
 //! shapes from the upstream BaseFold verifier reference.
 
 use std::marker::PhantomData;
@@ -129,7 +130,8 @@ impl<C: CircuitConfig> RecursiveJaggedEvalConfig<C, ()> for RecursiveTrivialJagg
 ///
 /// # Reference
 ///
-/// Mirrors [`RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`](file:///tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:91-171).
+/// Mirrors SP1's `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
+/// (crates/recursion/circuit/src/jagged/jagged_eval.rs).
 #[derive(Clone, Debug)]
 pub struct RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
     /// Branching-program evaluator closure.

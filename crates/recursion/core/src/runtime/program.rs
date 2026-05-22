@@ -11,12 +11,12 @@ use crate::*;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
     /// SeqBlock representation of the program — the canonical
-    /// instruction container. Phase A4 (#259) migrated the runtime
-    /// off the flat `instructions` Vec and onto `iter_instructions()`,
-    /// and Phase A5 dropped the redundant `instructions` field
-    /// entirely. The compiler emits one `Basic` block today; Phase C
-    /// will introduce `Parallel` blocks once the memory layer is
-    /// thread-safe.
+    /// instruction container. An earlier refactor migrated the
+    /// runtime off the flat `instructions` Vec and onto
+    /// `iter_instructions()`, and the redundant `instructions`
+    /// field has been dropped entirely. The compiler emits one
+    /// `Basic` block today; a future revision will introduce
+    /// `Parallel` blocks once the memory layer is thread-safe.
     #[serde(default = "RawProgram::default")]
     pub seq_blocks: RawProgram<Instruction<F>>,
     pub total_memory: usize,
@@ -28,11 +28,11 @@ pub struct RecursionProgram<F> {
 impl<F> RecursionProgram<F> {
     /// Iterate over the program's instructions in execution order,
     /// recursing through parallel sub-programs in deterministic vec
-    /// order (the runtime collapses Parallel to sequential today;
-    /// Phase D will dispatch via `par_iter` once the memory layer is
-    /// thread-safe).
+    /// order (the runtime collapses Parallel to sequential today; a
+    /// follow-up will dispatch via `par_iter` once the memory layer
+    /// is thread-safe).
     ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/program.rs::raw::RawProgram::iter`.
+    /// SP1 ref: crates/recursion/executor/src/program.rs::raw::RawProgram::iter.
     pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
         self.seq_blocks.iter()
     }

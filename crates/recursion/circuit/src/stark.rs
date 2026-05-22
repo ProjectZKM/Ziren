@@ -225,8 +225,8 @@ where
 /// witness-stream `read()` count is shape-stable across dummy and
 /// real proofs.
 ///
-/// META #59 Phase 4 — unblocks `program_from_shape` basefold
-/// dispatch (#52) and downstream `dummy()` constructors for
+/// Phase 4 — unblocks `program_from_shape` basefold
+/// dispatch and downstream `dummy()` constructors for
 /// `ZKMCoreBasefoldWitnessValues` etc.
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
@@ -250,8 +250,8 @@ where
     // zero-fill allocator runs in microseconds because no field
     // arithmetic happens.
     //
-    // Mirrors SP1's `dummy_shard_proof` at
-    // `/tmp/sp1/crates/recursion/circuit/src/dummy/shard_proof.rs:28-83`.
+    // Mirrors SP1's `dummy_shard_proof` in
+    // crates/recursion/circuit/src/dummy/shard_proof.rs.
     //
     // Resolve each chip in the shape to a concrete &Chip from the
     // machine. Skip names that don't exist (defensive — real shapes

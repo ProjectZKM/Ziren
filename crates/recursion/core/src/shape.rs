@@ -191,7 +191,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // MemoryConst→16, MemoryVar→14 (rounded up to legacy
             // minimum of 18 to share with smaller shapes).  This entry
             // lets `fix_shape` succeed for basefold programs once
-            // task #51 / #59 enable that path; today the basefold
+            // the task / #59 enable that path; today the basefold
             // builder skips fix_shape entirely.
             [
                 (mem_var.clone(), 18),
@@ -204,7 +204,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=0 (#256). After #249 lifted
+            // Bundle-lift compose level h=0. After #249 lifted
             // the stacked-PCS contract block, tendermint bundle-lift's
             // first compose level (lift outputs → arity-4 compose)
             // panics shape.rs:91 with chip heights none of the above
@@ -226,7 +226,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=1+ (#256). Each compose tree
+            // Bundle-lift compose level h=1+. Each compose tree
             // level grows: h=0 outputs become h=1 inputs, h=1 compose
             // verifies them and produces bigger chip heights still.
             // Tendermint h=1 panic showed roughly 2× h=0:

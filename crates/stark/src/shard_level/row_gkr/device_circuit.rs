@@ -1,7 +1,7 @@
-//! Device-resident LogUp-GKR circuit scaffold (task #368).
+//! Device-resident LogUp-GKR circuit scaffold.
 //!
 //! Direct analogue of SP1's
-//! [`LogUpCudaCircuit`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L151-L161)
+//! `LogUpCudaCircuit`
 //! — a streaming container that yields one circuit layer at a time so
 //! the GKR prover can walk the circuit bottom-up without materializing
 //! every layer up front on host.
@@ -24,7 +24,7 @@
 //! the materialized stack is empty — generates the FirstLayer on
 //! demand from the input data.
 //!
-//! ## Scope of this scaffold (#368)
+//! ## Scope of this scaffold
 //!
 //! * Defines the public types: [`DeviceLogupGkrCircuit`],
 //!   [`DeviceCircuitLayer`], [`DeviceLayerHandle`],
@@ -36,7 +36,7 @@
 //!   cudarc; the actual device payload type is filled in by the GPU
 //!   crate via a side-channel registry (matching the
 //!   [`super::layer::LayerState::Device`] pattern in #218 Q1 /
-//!   #225-#228).
+//!   #228).
 //! * Methods that need device dispatch (e.g. recomputing the first
 //!   layer from raw input data) carry `todo!()` bodies and are gated
 //!   behind a clear `// hook-point` comment so #371 can wire the V3
@@ -140,7 +140,7 @@ impl DeviceLayerHandle {
         &self.inner
     }
 
-    /// #383 sub-step 1 — bridge to the V3 hook's untyped
+    /// bridge to the V3 hook's untyped
     /// [`crate::shard_level::sumcheck_poly::DeviceLayerHandle`]
     /// (`Arc<dyn Any + Send + Sync>`).
     ///
@@ -179,7 +179,7 @@ impl core::fmt::Debug for DeviceLayerHandle {
 /// jagged traces on demand.
 ///
 /// Analogue of SP1's
-/// [`GkrInputData`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L36-L51)
+/// `GkrInputData`
 /// — kept type-erased and device-agnostic on the stark side.
 ///
 /// The GPU crate's registry stores the actual chip + trace pointers
@@ -203,11 +203,11 @@ pub struct DeviceInputData {
     /// log₂ of (total interaction count rounded up to the next power
     /// of two).
     pub num_interaction_variables: u32,
-    /// #376 sub-step 1 — opaque input-data bundle the GPU side
+    /// opaque input-data bundle the GPU side
     /// downcasts when the regen hook fires.
     ///
     /// Analogue of SP1's
-    /// [`GkrInputData`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L36-L51)
+    /// `GkrInputData`
     /// `chip_set` / `all_interactions` / `jagged_trace_data` / `alpha`
     /// / `beta_seed` fields — Ziren keeps them type-erased on the
     /// stark side and lets ziren-gpu own the concrete payload type
@@ -297,7 +297,7 @@ impl core::fmt::Debug for DeviceInputData {
 }
 
 /// A single circuit layer, mirroring SP1's
-/// [`GkrCircuitLayer`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L109-L113).
+/// `GkrCircuitLayer`.
 ///
 /// Three variants:
 /// * [`DeviceCircuitLayer::FirstLayer`] — the bottom-most circuit
@@ -316,7 +316,7 @@ impl core::fmt::Debug for DeviceInputData {
 ///   intermediate round.
 ///
 /// The `_phantom` generics are kept identical to the host-side
-/// [`super::layer::GkrCircuitLayer`] so call-site signatures (#371)
+/// [`super::layer::GkrCircuitLayer`] so call-site signatures
 /// can swap between the two with a single type substitution.
 pub enum DeviceCircuitLayer<F: Field, EF: ExtensionField<F>> {
     /// Materialized first layer (the lowest layer of the GKR
@@ -384,7 +384,7 @@ impl<F: Field, EF: ExtensionField<F>> core::fmt::Debug for DeviceCircuitLayer<F,
 }
 
 /// Device-resident GKR circuit container — analogue of SP1's
-/// [`LogUpCudaCircuit`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs#L151-L161).
+/// `LogUpCudaCircuit`.
 ///
 /// Holds the full layer stack as a vector that callers pop from the
 /// bottom upward via [`Self::next`].  When
@@ -469,7 +469,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// top-of-stack [`DeviceCircuitLayer`] or `None` when the circuit
     /// is exhausted.
     ///
-    /// ## `#398 sub-step 3` — device-resident consumer
+    /// ## `#398 ` — device-resident consumer
     ///
     /// The intermediate-layer consumer in `top_level.rs` uses this
     /// peek to discover the shape of a scope-installed layer BEFORE
@@ -482,7 +482,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// handle via `scope.next_layer().to_sumcheck_handle()`.
     ///
     /// Mirrors SP1's pattern in
-    /// [`LogUpCudaCircuit::next`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/tracegen.rs#L168-L186)
+    /// `LogUpCudaCircuit::next`
     /// — except SP1 doesn't need a peek because its consumer never
     /// has a host fallback path.
     #[inline]
@@ -509,7 +509,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// Pop the next layer in bottom-up order.
     ///
     /// Behavior mirrors SP1's
-    /// [`LogUpCudaCircuit::next`](file:///tmp/sp1/sp1-gpu/crates/logup_gkr/src/tracegen.rs#L168-L186):
+    /// `LogUpCudaCircuit::next`:
     ///
     /// * If `materialized_layers` is non-empty, pop and return the
     ///   bottom-most.
@@ -517,7 +517,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     ///   FirstLayer from `input_data` (one-shot — decrement counter).
     /// * Else, return `None`.
     ///
-    /// ## `#376 sub-step 3 — regen hook dispatch`
+    /// ## `#376  — regen hook dispatch`
     ///
     /// The lazy-regeneration arm consults the registered
     /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
@@ -528,12 +528,12 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// `num_virtual_layers` and returns `None` — the upstream
     /// `gpu_layer_pull_hook` in ziren-gpu already special-cases
     /// "dropped-but-no-regen" with a detailed diagnostic panic (see
-    /// `project_sp1_small_card_substep2.md`).
+    /// the related design memo).
     ///
     /// **Note**: until the ziren-gpu side wires its CUDA
     /// `generate_first_layer` kernel + concrete `input_handle`
     /// downcast (multi-day work — see
-    /// `project_376_first_layer_device_port.md`), callers SHOULD
+    /// the related design memo), callers SHOULD
     /// continue to construct `DeviceLogupGkrCircuit` with
     /// `num_virtual_layers == 0` and rely on the existing
     /// eager-pull-to-host path.  The dispatch here is
@@ -556,7 +556,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         // attempt cleanly returns `None` without re-entering this arm.
         self.num_virtual_layers = 0;
 
-        // #376 sub-step 3 — consult the registered regen hook (gated
+        // consult the registered regen hook (gated
         // on the `basefold` feature; `basefold_late_binding` is itself
         // `#![cfg(feature = "basefold")]`).  When the hook is
         // unregistered (no ziren-gpu CUDA impl yet) OR returns `None`
@@ -593,21 +593,21 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     }
 }
 
-/// #383 — Per-shard LogUp-GKR task scope (Ziren analogue of SP1's
+/// Per-shard LogUp-GKR task scope (Ziren analogue of SP1's
 /// `LogUpCudaCircuit<'a, TaskScope>` lifetime).
 ///
 /// **Why this exists**
 ///
 /// SP1's `LogUpCudaCircuit<'a, A: Backend>` holds the materialized device
 /// layers + input data behind a `TaskScope` lifetime (see
-/// `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/utils.rs:151-161`).  Every
+/// `sp1-gpu/crates/logup_gkr/src/utils.rs:151-161`).  Every
 /// per-round sumcheck call within a shard's GKR walk reuses the same
 /// device-resident state — the scope amortizes one upload across `~18`
 /// layers' worth of `prove_gkr_round` invocations.
 ///
 /// Ziren today re-marshals on every V3 dispatch (`round.rs:3891-3902`):
 /// `flatten_layer + build_eq_table + cast_vec_ef_to_ef4 + hook`.  Profile
-/// data in `project_v3_regression_analysis.md` attributes the **+94%
+/// data in the related design memo attributes the **+94%
 /// tendermint regression** when `ZIREN_GPU_LOGUP_GKR_DEVICE=1` to this
 /// per-layer marshalling × ~3400 calls/shard.
 ///
@@ -659,7 +659,7 @@ pub struct LogupTaskScope<F: Field, EF: ExtensionField<F>> {
     /// `LayerState::Device::circuit_id` convention.
     circuit_id: u64,
     /// Optional pre-materialized device circuit.  When the V3-cache
-    /// populator (sub-step 3 above) lands, this is filled at scope
+    /// populator ( above) lands, this is filled at scope
     /// construction; per-round V3 calls then pop from
     /// `circuit.materialized_layers` rather than re-marshalling host
     /// vecs.  `None` today — scope-as-anchor only.
@@ -686,7 +686,7 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     }
 
     /// Install a freshly-built `DeviceLogupGkrCircuit` into the scope.
-    /// Called by the populator (sub-step 3) once the device-side layer
+    /// Called by the populator () once the device-side layer
     /// transition pipeline materializes the layer stack up-front.
     pub fn install_circuit(&mut self, circuit: DeviceLogupGkrCircuit<F, EF>) {
         self.input_data = Some(circuit.input_data.clone());
@@ -725,7 +725,7 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
         self.circuit.as_mut().and_then(|c| c.next())
     }
 
-    /// #398 sub-step 3 — read-only shape peek on the next layer.
+    /// read-only shape peek on the next layer.
     ///
     /// Returns `(num_row_variables, num_interaction_variables)` of the
     /// top-of-stack layer without consuming it.  `None` when no
@@ -746,14 +746,14 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
         self.circuit.as_ref().and_then(|c| c.peek_next_layer_shape())
     }
 
-    /// #383 sub-step 2 — install a circuit from a populator-provided
+    /// install a circuit from a populator-provided
     /// payload vector.  Each entry becomes a [`DeviceCircuitLayer::
     /// Materialized`]; ordering is bottom-up (matches
     /// `materialized_layers.pop()` semantics — see SP1's
-    /// `generate_gkr_circuit` at `/tmp/sp1/sp1-gpu/crates/logup_gkr/src/
+    /// `generate_gkr_circuit` at `sp1-gpu/crates/logup_gkr/src/
     /// tracegen.rs:188-246` for the canonical order).
     ///
-    /// The populator (a ziren-gpu side hook, sub-step 2b) is responsible
+    /// The populator (a ziren-gpu side hook, ) is responsible
     /// for ordering: index 0 = TERMINAL (smallest `num_row_variables`,
     /// popped LAST), last index = FIRST LAYER (largest, popped FIRST).
     ///
@@ -785,7 +785,7 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     }
 }
 
-/// #383 sub-step 2 — populator payload describing a single device-side
+/// populator payload describing a single device-side
 /// GKR layer's opaque handle + shape metadata.
 ///
 /// Returned by the [`crate::basefold_late_binding::GpuLogupScopePopulateFn`]
@@ -828,7 +828,7 @@ std::thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-/// #383 sub-step 1 — typed pointer slot for the V3 dispatch site.
+/// typed pointer slot for the V3 dispatch site.
 ///
 /// Stores a raw `*mut LogupTaskScope<KoalaBear, Ef4>` for the
 /// production scope (`(F, EF) = (KoalaBear, Ef4)`).  The V3 dispatch
@@ -841,7 +841,7 @@ std::thread_local! {
 ///    [`DeviceLayerHandle::to_sumcheck_handle`].
 /// 3. Skip the per-call `flatten_layer` + `cast_vec_ef_to_ef4` host
 ///    marshalling — projected -500 µs per round per
-///    `project_383_taskscope_logup.md`.
+///    the related design memo.
 ///
 /// **Type erasure rationale**: TLS slots cannot hold generic types,
 /// so we pin the slot to the single concrete `(KoalaBear, Ef4)`
@@ -865,7 +865,7 @@ std::thread_local! {
         const { std::cell::Cell::new(None) };
 }
 
-/// #383 sub-step 1 — typed accessor for the V3 dispatch site.
+/// typed accessor for the V3 dispatch site.
 ///
 /// Invokes `f` with a mutable borrow of the currently-active
 /// production scope, if any.  Returns `None` when:
@@ -903,7 +903,7 @@ pub fn with_production_scope_mut<R>(
 ///
 /// **Drop semantics matter**: today's `LOGUP_V3_NEXT_HANDLE` is never
 /// cleared at shard boundaries (`clear_logup_v3_next_handle` has zero
-/// other call-sites — see grep in `project_v3_regression_analysis.md`).
+/// other call-sites — see grep in the related design memo).
 /// Wrapping `prove_shard_logup_gkr_rows` in a `LogupTaskScopeGuard` is
 /// the smallest fix that introduces a real scope boundary.
 #[must_use = "the guard must be held for the duration of the GKR walk; \
@@ -932,7 +932,7 @@ impl LogupTaskScopeGuard {
         Self { prior, prior_ptr: None }
     }
 
-    /// #383 sub-step 1 — bind a typed scope pointer for the V3
+    /// bind a typed scope pointer for the V3
     /// dispatch site to consult.  Only effective for the production
     /// `(KoalaBear, Ef4)` scope; other generic instantiations behave
     /// like [`Self::enter`] (circuit_id only).
@@ -981,7 +981,7 @@ impl LogupTaskScopeGuard {
     }
 
     /// Returns the currently-active scope `circuit_id`, if any.  Used
-    /// by the V3 dispatch site (sub-step 1 of the roadmap above) to
+    /// by the V3 dispatch site ( of the roadmap above) to
     /// decide whether to consult the scope or fall back to today's
     /// per-call marshalling.
     #[must_use]
@@ -1085,7 +1085,7 @@ mod tests {
         assert!(circuit.next().is_none());
     }
 
-    /// #376 sub-step 3 — when `num_virtual_layers == 1`, the
+    /// when `num_virtual_layers == 1`, the
     /// materialized stack is empty, AND no `GpuGenerateFirstLayerFn`
     /// hook is registered, `next()` returns `None` (rather than
     /// panicking via the old `todo!()` arm).  This is the new safe
@@ -1138,7 +1138,7 @@ mod tests {
         assert!(circuit.next().is_none());
     }
 
-    /// #376 sub-step 3 — `DeviceInputData::new` /
+    /// `DeviceInputData::new` /
     /// `with_input_handle` / `set_input_handle` builders behave as
     /// specced.
     #[test]
@@ -1203,7 +1203,7 @@ mod tests {
         assert_eq!(test_handle.tag, 42);
     }
 
-    /// #383 — empty scope (no circuit installed) reports `None` for both
+    /// empty scope (no circuit installed) reports `None` for both
     /// `circuit()` and `next_layer()`.  This is the production default
     /// today; behavior remains identical to pre-#383 dispatch.
     #[test]
@@ -1215,7 +1215,7 @@ mod tests {
         assert!(scope.next_layer().is_none());
     }
 
-    /// #383 — scope with installed circuit yields layers via `next_layer`
+    /// scope with installed circuit yields layers via `next_layer`
     /// and exposes input-data metadata.  Mirrors SP1's
     /// `LogUpCudaCircuit::next` semantics.
     #[test]
@@ -1246,7 +1246,7 @@ mod tests {
         assert!(scope.next_layer().is_none());
     }
 
-    /// #398 sub-step 3 — `peek_next_layer_shape` reads the shape of
+    /// `peek_next_layer_shape` reads the shape of
     /// the top-of-stack layer without consuming it; verify that
     /// `next_layer` still yields the same layer afterward.
     #[test]
@@ -1286,7 +1286,7 @@ mod tests {
         assert!(scope.peek_next_layer_shape().is_none());
     }
 
-    /// #398 sub-step 3 — `peek_next_layer_shape` returns `None` when
+    /// `peek_next_layer_shape` returns `None` when
     /// no circuit is installed.
     #[test]
     fn peek_next_layer_shape_none_without_circuit() {
@@ -1294,7 +1294,7 @@ mod tests {
         assert!(scope.peek_next_layer_shape().is_none());
     }
 
-    /// #383 — RAII guard binds + unbinds the active circuit_id slot.
+    /// RAII guard binds + unbinds the active circuit_id slot.
     #[test]
     fn task_scope_guard_binds_and_unbinds() {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
@@ -1305,7 +1305,7 @@ mod tests {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
     }
 
-    /// #383 — nested guards restore the prior active id on drop.
+    /// nested guards restore the prior active id on drop.
     /// Production has only a single level today, but tests may nest.
     #[test]
     fn task_scope_guard_nests() {
@@ -1320,9 +1320,9 @@ mod tests {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
     }
 
-    /// #383 — guard drop clears the V3 next-layer handle TLS, closing
+    /// guard drop clears the V3 next-layer handle TLS, closing
     /// the cross-shard race documented in
-    /// `project_v3_regression_analysis.md` (`clear_logup_v3_next_handle`
+    /// the related design memo (`clear_logup_v3_next_handle`
     /// previously had zero callers).
     #[test]
     fn task_scope_guard_clears_v3_handle_on_drop() {
@@ -1344,7 +1344,7 @@ mod tests {
         );
     }
 
-    /// #383 sub-step 1 — `enter_with_scope` for the production
+    /// `enter_with_scope` for the production
     /// `(KoalaBear, Ef4)` type installs the typed pointer so the
     /// dispatch site can pop layers via `with_production_scope_mut`.
     #[test]
@@ -1374,7 +1374,7 @@ mod tests {
         );
     }
 
-    /// #383 sub-step 1 — `enter_with_scope` for a non-production
+    /// `enter_with_scope` for a non-production
     /// `EF` falls back to the untyped behavior: `active_circuit_id`
     /// is bound but `with_production_scope_mut` returns `None`.  This
     /// preserves byte-equivalent behavior for tests / port code that
@@ -1401,7 +1401,7 @@ mod tests {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
     }
 
-    /// #383 sub-step 1 — `to_sumcheck_handle` bridges the typed
+    /// `to_sumcheck_handle` bridges the typed
     /// `device_circuit::DeviceLayerHandle` to the untyped
     /// `sumcheck_poly::DeviceLayerHandle` that the V3 hook accepts,
     /// preserving the underlying Arc payload via trait upcasting.
@@ -1417,7 +1417,7 @@ mod tests {
         assert_eq!(test.tag, 99);
     }
 
-    /// #383 sub-step 2 — `install_circuit_from_payloads` builds a
+    /// `install_circuit_from_payloads` builds a
     /// `DeviceLogupGkrCircuit` from populator-provided payloads and
     /// makes `next_layer()` return them in pop-order (bottom-up
     /// reverse).  Mirrors what the ziren-gpu populator hook will do
@@ -1494,7 +1494,7 @@ mod tests {
         assert!(scope.next_layer().is_none());
     }
 
-    /// #383 sub-step 2 — empty payload vec installs an empty circuit;
+    /// empty payload vec installs an empty circuit;
     /// `next_layer()` returns None immediately.  Populators with no
     /// device-side state to share (e.g. host-only path) hit this case.
     #[test]
@@ -1513,10 +1513,10 @@ mod tests {
         assert!(scope.next_layer().is_none());
     }
 
-    /// #383 sub-step 1 — pop a layer from an installed scope via
+    /// pop a layer from an installed scope via
     /// `with_production_scope_mut`, bridge to a sumcheck handle, and
     /// confirm the round-trip.  This mirrors what
-    /// `try_logup_round_gpu_v3` does on the hot path once sub-step 2
+    /// `try_logup_round_gpu_v3` does on the hot path once 
     /// installs a circuit.
     #[test]
     fn dispatch_site_pop_and_bridge_roundtrip() {

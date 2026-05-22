@@ -1,8 +1,8 @@
 //! Layer transition for the row-only GKR backend
-//! (task #24, A.2 step 3).
+//! (the task, A.2 step 3).
 //!
 //! Port of
-//! [`layer_transition`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/execution.rs#L254-L381)
+//! `layer_transition`
 //! against Ziren's [`RowMajorTable`].
 //!
 //! ## Algorithm
@@ -102,7 +102,7 @@ where
             let next_rows = 1usize << next_num_row_variables;
             let int_count = chip_num_interactions;
 
-            // PaddedMle row optimisation (task #88): only materialise
+            // PaddedMle row optimisation: only materialise
             // rows that pull from at least one real input cell.
             //   next_n0/d0 reads row k (upper half, indices [0, next_rows))
             //   → real iff k < src_real_rows.

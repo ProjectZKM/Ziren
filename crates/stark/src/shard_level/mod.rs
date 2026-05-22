@@ -4,7 +4,7 @@
 //! one `LogupGkrProof` + one `PartialSumcheckProof` per shard
 //! (vs. the legacy per-chip lists, retired in #13).
 //!
-//! Reference: `/tmp/sp1/crates/hypercube/src/{logup_gkr,prover/zerocheck,prover/shard.rs,verifier/proof.rs}`.
+//! Reference: `crates/hypercube/src/{logup_gkr,prover/zerocheck,prover/shard.rs,verifier/proof.rs}`.
 //!
 //! # Module map
 //!
@@ -16,13 +16,13 @@
 //!     opened_values, evaluation_proof).
 //!   - [`logup_gkr_prover`] — shard-level LogUp-GKR prover.
 //!     Mirrors `prove_logup_gkr` from
-//!     `/tmp/sp1/crates/hypercube/src/logup_gkr/prover.rs:70-215`.
+//!     `crates/hypercube/src/logup_gkr/prover.rs:70-215`.
 //!   - [`zerocheck_prover`] — shard-level zerocheck prover.
 //!     Mirrors `ShardProver::zerocheck` from
-//!     `/tmp/sp1/crates/hypercube/src/prover/shard.rs:474-646`.
+//!     `crates/hypercube/src/prover/shard.rs:474-646`.
 //!   - [`prover`] — assembly entry `prove_shard_to_basefold`.
 //!     Mirrors `ShardProver::prove_shard_with_data` from
-//!     `/tmp/sp1/crates/hypercube/src/prover/shard.rs:650-792`.
+//!     `crates/hypercube/src/prover/shard.rs:650-792`.
 
 pub mod basefold_constraint_folder;
 pub mod device_first_layer_context;

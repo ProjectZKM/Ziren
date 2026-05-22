@@ -1,7 +1,7 @@
 //! Host-side `BasefoldShardProof<F, EF>` — the row-reduction 6-field
 //! shard proof shape.
 //!
-//! Mirror of `/tmp/sp1/crates/hypercube/src/verifier/proof.rs:47-60`,
+//! Mirror of `crates/hypercube/src/verifier/proof.rs:47-60`,
 //! adapted for Ziren's type aliases.  The recursion-circuit-side
 //! variable type lives at
 //! `crates/recursion/circuit/src/shard_basefold.rs:139`
@@ -57,9 +57,7 @@ use crate::ShardOpenedValues;
 /// The verifier (`verify_logup_gkr_host`) dispatches on this tag
 /// at the per-round final-eval identity site, eliminating the need
 /// for env-var-driven dispatch (which is broken on the CpuProver
-/// binary that cannot read `ZIREN_DEBUG_LOGUP_PACKED_BROKEN`).  See
-/// `project_baseline_fix_blocked.md` §"Hypothesis" and
-/// `project_sp1_gap_refresh_may21.md` gap #10.
+/// binary that cannot read `ZIREN_DEBUG_LOGUP_PACKED_BROKEN`).
 ///
 /// Wire format: `serde(default)` defaults to `Msb` so older proof
 /// bytes (without this field) deserialize cleanly to the host-CPU
@@ -90,7 +88,7 @@ impl Default for FoldOrientation {
 /// inside [`crate::shard_level::types::ChipEvaluation`]) to avoid
 /// propagating an `F` generic into the LogUp-GKR proof types.
 ///
-/// META #59 swap 1+2 plumbing — populated by `prove_shard_to_basefold`
+/// swap 1+2 plumbing — populated by `prove_shard_to_basefold`
 /// from the per-chip permutation prover output; consumed by the
 /// recursion verifier once `build_opened_values_from_chip_openings`
 /// reads from this map instead of zero placeholders.
@@ -104,7 +102,7 @@ pub struct ChipCumulativeSums<F, EF> {
 /// Host-side BaseFold-pipeline shard proof.
 ///
 /// the reference: `ShardProof` at
-/// `/tmp/sp1/crates/hypercube/src/verifier/proof.rs:47-60`.
+/// `crates/hypercube/src/verifier/proof.rs:47-60`.
 ///
 /// Field declaration order matches the so the wire format
 /// transports byte-identically (modulo the inner-type
@@ -133,7 +131,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub zerocheck_proof: PartialSumcheckProof<EF>,
     /// Per-chip opened values at the zerocheck-reduced point.
     /// Reuses the existing per-chip [`ShardOpenedValues`] —
-    /// the `ShardOpenedValues` (`/tmp/sp1/crates/hypercube/src/verifier/proof.rs:67-72`)
+    /// the `ShardOpenedValues` (`crates/hypercube/src/verifier/proof.rs:67-72`)
     /// is structurally compatible (BTreeMap-of-chip-name →
     /// per-chip openings) once Ziren's switches to BTreeMap
     /// ordering.
@@ -148,7 +146,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub chip_log_heights: std::collections::BTreeMap<String, u8>,
     /// Per-chip (local, global) cumulative sums.  Empty when serde-loaded
     /// from older proof bytes — recursion verifier falls back to zero
-    /// placeholders in that case.  META #59 swap 1+2 plumbing.
+    /// placeholders in that case.  swap 1+2 plumbing.
     #[serde(default = "std::collections::BTreeMap::new")]
     pub chip_cumulative_sums: std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
     /// Jagged-PCS opening proof bytes.
@@ -191,7 +189,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub evaluation_proof_bundle: Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>,
     /// Fold orientation emitted by the prover.  Eliminates env-var
     /// dispatch ambiguity at the verifier — the verifier reads
-    /// this tag (gap #10) instead of consulting
+    /// this tag instead of consulting
     /// `ZIREN_DEBUG_LOGUP_PACKED_BROKEN` which the CpuProver binary
     /// cannot read.  `serde(default)` defaults to [`FoldOrientation::Msb`]
     /// so older proof bytes (every pre-tag CPU/LEGACY/Path-B' proof)

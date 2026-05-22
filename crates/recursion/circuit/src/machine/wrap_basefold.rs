@@ -8,7 +8,7 @@
 //!
 //! # Status
 //!
-//! Body port done (task #22.5).  Wrap is the terminal stage: it
+//! Body port done (the task.5).  Wrap is the terminal stage: it
 //! verifies a single recursive proof (the root of the recursion
 //! tree), asserts its root public values are valid, and commits
 //! them to the output stream.
@@ -72,7 +72,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
         ),
     )>,
-    /// META #59 Phase D: per-input per-chip cumulative sums.
+    /// per-input per-chip cumulative sums.
     pub chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
@@ -216,7 +216,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
             evaluation_proof_var,
             chip_height_bits,
         );
-    // META #59 Phase D: consume real per-chip cumulative_sums for wrap input.
+    // consume real per-chip cumulative_sums for wrap input.
     let empty_cumsums_wrap = std::collections::BTreeMap::new();
     let cumsums_for_input = chip_cumulative_sums_per_input
         .first()

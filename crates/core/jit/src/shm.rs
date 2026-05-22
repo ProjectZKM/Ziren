@@ -2,7 +2,7 @@
 //!
 //! P1 (skeleton): types only.  Functional impls land in P5 (trace ring)
 //! and P6 (fork-based crash isolation).  Modeled on SP1's
-//! [`/tmp/sp1/crates/core/jit/src/shm.rs`](file:///tmp/sp1/crates/core/jit/src/shm.rs).
+//! `crates/core/jit/src/shm.rs`.
 
 #![cfg(all(target_arch = "x86_64", target_os = "linux"))]
 
