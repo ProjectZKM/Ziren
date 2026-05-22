@@ -763,6 +763,117 @@ pub fn get_gpu_constraint_eval_cross_shard_hook()
     GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK.get().copied()
 }
 
+// ────────────────────────────────────────────────────────────────────
+// MERGED-BYTECODE per-shard constraint-eval hook (SP1-shape port).
+// ────────────────────────────────────────────────────────────────────
+//
+// Sister of `GpuConstraintEvalBatchedFn` (above), but with a
+// fundamentally different on-device dispatch strategy: the GPU side
+// merges ALL chips' constraint bytecode into one device-resident
+// buffer at startup, and a SINGLE kernel launch processes the entire
+// shard via packed per-air-block routing info.  This is the wholesale
+// port of SP1's `evaluate_zerocheck` architecture from
+// `/tmp/sp1/sp1-gpu/crates/zerocheck/src/lib.rs:386-481`.
+//
+// ## How it differs from `GpuConstraintEvalBatchedFn`
+//
+// The batched hook accepts a list of (chip_name, traces, ...) per
+// shard and the ziren-gpu side packs them into MEMORY_SIZE-bucketed
+// per-chip descriptors, then launches one kernel per bucket — i.e.,
+// 2-3 launches per shard.  Each launch still does a per-chip
+// bytecode interpretation: chip i's bytecode is uploaded as a
+// `descs[i].bytecode` device pointer, and the kernel switches on
+// `chip_idx`.  Per-chip kernel work scales with chip count.
+//
+// The merged hook expects the ziren-gpu side to have pre-built a
+// MergedEvalProgram during prover startup (mirroring SP1's
+// `initialize_program_cpu`): one giant Instruction16 buffer holding
+// ALL chips' bytecode end-to-end, plus per-air-block offset arrays
+// pointing into it.  At dispatch time, the kernel processes ALL
+// rows of ALL chips in ONE launch: each row reads its `packed_info`
+// (16 bytes encoding is_first|chip_idx|prep_start|main_start), looks
+// up its chip's bytecode start in the merged buffer, and runs the
+// shared interpreter inline.  Per-chip cost amortises across the
+// shard — 1 launch instead of 2-3 per shard, and the GPU work item
+// per row is identical whether the shard has 5 chips or 50.
+//
+// ## Invariants the implementation must preserve
+//
+// Same per-chip output contract as the per-chip + batched variants:
+// `result[i]` is `Some(c_table)` for the i-th input chip (length
+// `1 << num_vars_list[i]`, byte-identical to the host CPU fallback's
+// per-chip `eval_constraints_on_hypercube_with_cumsums` output);
+// `None` for chips the merged dispatch rejected (cache miss / size
+// mismatch / dispatch failure).  Callers fall back to the batched
+// hook, then the per-chip hook, then the host CPU.
+//
+// ## Why a SEPARATE hook (not extending the batched one)
+//
+// The merged hook needs the entire shard's chip set known at HOOK
+// REGISTRATION TIME, not at call time — the MergedEvalProgram is
+// initialised once per process from the chip bytecodes registered
+// via `register_chip_bytecode`.  The batched hook is per-call, so
+// its signature can't carry the pre-built MergedEvalProgram handle.
+// Keeping them separate also preserves bit-identical legacy
+// dispatch when the merged hook is unused — the new code path is
+// opt-in via `ZIREN_GPU_MERGED_BYTECODE=1` (see dispatch site in
+// `crate::shard_level::zerocheck_prover`).
+//
+// ## Status (May 2026)
+//
+// STUB CONTRACT ONLY.  No ziren-gpu side implementation yet.  Hook
+// register/get plumbing lands first so the host stark side can
+// adopt the dispatch contract without waiting for the kernel port.
+// See `project_merged_bytecode_port.md` for the full design memo and
+// the multi-phase implementation roadmap.
+
+/// Merged-bytecode per-shard BaseFold constraint-table builder.
+///
+/// Same signature as [`GpuConstraintEvalBatchedFn`] — the difference
+/// is purely on the ziren-gpu implementation side: this hook expects
+/// a pre-built device-resident MergedEvalProgram (initialised at
+/// process startup from all registered chip bytecodes), enabling
+/// single-kernel dispatch for ALL chips in the shard.
+///
+/// Returns `Vec<Option<Vec<Ef4>>>` of length == `chip_names.len()`,
+/// same per-chip semantics as [`GpuConstraintEvalBatchedFn`].  An
+/// empty return signals total dispatch failure — coordinator falls
+/// back to the batched hook (and then per-chip / host CPU).
+pub type GpuConstraintEvalMergedFn = fn(
+    chip_names: &[&str],
+    main_row_majors: &[&[p3_koala_bear::KoalaBear]],
+    main_widths: &[usize],
+    preprocessed_row_majors: &[&[p3_koala_bear::KoalaBear]],
+    preprocessed_widths: &[usize],
+    public_values: &[p3_koala_bear::KoalaBear],
+    alphas: &[Ef4],
+    local_cumulative_sums: &[Ef4],
+    global_cumulative_sums_xy: &[[p3_koala_bear::KoalaBear; 14]],
+    num_vars_list: &[usize],
+) -> Vec<Option<Vec<Ef4>>>;
+
+static GPU_CONSTRAINT_EVAL_MERGED_HOOK:
+    std::sync::OnceLock<GpuConstraintEvalMergedFn> = std::sync::OnceLock::new();
+
+/// Register the merged-bytecode GPU constraint-eval driver.
+/// Idempotent; returns `Err` when a hook was already registered.
+/// Called once by `ziren-gpu`'s `compress_multi_gpu` startup AFTER
+/// all chips have been added to the per-chip bytecode cache via
+/// `register_chip_bytecode` (the merged hook needs the full chip
+/// set to initialise its MergedEvalProgram).
+pub fn register_gpu_constraint_eval_merged_hook(
+    f: GpuConstraintEvalMergedFn,
+) -> Result<(), GpuConstraintEvalMergedFn> {
+    GPU_CONSTRAINT_EVAL_MERGED_HOOK.set(f)
+}
+
+/// Read the registered merged-bytecode GPU constraint-eval hook,
+/// if any.
+#[must_use]
+pub fn get_gpu_constraint_eval_merged_hook() -> Option<GpuConstraintEvalMergedFn> {
+    GPU_CONSTRAINT_EVAL_MERGED_HOOK.get().copied()
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
 //
