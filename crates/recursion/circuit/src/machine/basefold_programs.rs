@@ -503,6 +503,9 @@ mod tests {
                 zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
             >,
             usize,
+            // #261 SP1-align: build_wrap_basefold_program gained
+            // value_assertions: bool (April 2026).
+            bool,
         ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
             build_wrap_basefold_program::<MipsAir<KoalaBear>>;
     }
