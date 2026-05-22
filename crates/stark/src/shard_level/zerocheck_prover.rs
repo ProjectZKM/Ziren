@@ -1001,13 +1001,21 @@ where
     // computed via the `EmptyMessageBuilder` path on host fallback and
     // through the GPU bytecode interpreter (which compiles the chip's
     // pure-AIR constraints) in the batched hook.
-    // `ZIREN_GPU_MERGED_BYTECODE=1` implicitly enables SPLIT here too —
-    // see paired comment at the per-chip filter for rationale.  Without
-    // coupling, the merged hook receives an empty chip set and is a no-op.
+    //
+    // NOTE (May 2026 merged-bytecode kernel-fix session): the previous
+    // wiring coupled `ZIREN_GPU_MERGED_BYTECODE=1` into SPLIT here so
+    // the merged hook would receive every chip including
+    // permutation-bearing ones.  That cascaded to a null-pointer OOB
+    // in the merged + batched kernels because both pass a zero-cap
+    // `perm_mat` / `perm_challenges` to chips whose pure-AIR bytecode
+    // dereferences the permutation trace.  Drop the coupling so the
+    // merged hook sees the same pure-AIR-only chip set the batched
+    // path sees; perm chips fall through to host CPU as they do today.
+    // When the merged hook later allocates real perm buffers (and the
+    // batched path too), the coupling can return.
     let split_enabled_batched = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
         .map(|v| v == "1")
-        .unwrap_or(false)
-        || merged_enabled;
+        .unwrap_or(false);
     for (i, chip) in chips.iter().enumerate() {
         if !split_enabled_batched && chip.permutation_width() > 0 { continue; }
         let main_trace = &main_traces[i];
