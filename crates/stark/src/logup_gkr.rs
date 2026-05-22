@@ -297,20 +297,6 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F>,
 {
-    // #359 followup: env-gated profile to scope what fraction of wall
-    // this host-pure LogUp-GKR loop consumes on the basefold path. The
-    // chip-sumcheck device-residency port (#343C/#355/#358) targets a
-    // different sumcheck (row_gkr); this function is basefold's
-    // fraction-tree loop and is entirely host-CPU. Measure first to
-    // size the ROI of a future device port. Default OFF.
-    static PROFILE_ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let profile = *PROFILE_ENABLED.get_or_init(|| {
-        std::env::var("ZIREN_BASEFOLD_LOGUP_PROFILE")
-            .map(|v| v == "1")
-            .unwrap_or(false)
-    });
-    let t_total_start = if profile { Some(std::time::Instant::now()) } else { None };
-
     let m = leaves.len().trailing_zeros() as usize;
     let tree = build_fraction_tree(leaves);
     let root = tree.last().unwrap()[0];
@@ -409,17 +395,6 @@ where
         cur_point.push(t);
 
         layers.push(LogUpGkrLayerProof { sumcheck_rounds, final_evals });
-    }
-
-    if profile {
-        let dt = t_total_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
-        // Aggregate across calls — print as soon as one call finishes
-        // (one call per chip per shard, so signal is high-volume).
-        // Caller can `grep BASEFOLD_LOGUP | awk` to sum.
-        eprintln!(
-            "#359_BASEFOLD_LOGUP n_leaves={} m={} n_layers={} total_us={}",
-            leaves.len(), m, layers.len(), dt,
-        );
     }
 
     LogUpGkrProof {

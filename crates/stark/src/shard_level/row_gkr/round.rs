@@ -3533,28 +3533,14 @@ where
         return None;
     }
 
-    // #368 profile probe: per-layer host-side marshal breakdown.
-    // Set ZIREN_LOGUP_V2_PROFILE=1 to emit `[#368] flatten_us=X
-    // eq_us=Y hook_us=Z postproc_us=W vars=N` lines per layer.
-    // Validates the per-call host-marshal hypothesis behind Gap 1
-    // (project_368_369_real_scope.md) before committing to the
-    // multi-week SP1 LogUpCudaCircuit port.
-    let profile = std::env::var("ZIREN_LOGUP_V2_PROFILE")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    let t_start = profile.then(std::time::Instant::now);
-
     let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
         GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
     };
-    let flatten_us = t_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
-    let t_eq = profile.then(std::time::Instant::now);
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
     let eq_row = build_eq_table(row_point);
-    let eq_us = t_eq.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3564,7 +3550,6 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
-    let t_hook = profile.then(std::time::Instant::now);
     let result = gpu_hook_v2(
         cast_vec_ef_to_ef4::<EF>(n0_flat),
         cast_vec_ef_to_ef4::<EF>(d0_flat),
@@ -3577,9 +3562,7 @@ where
         total_vars,
         inner_challenger,
     )?;
-    let hook_us = t_hook.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
-    let t_post = profile.then(std::time::Instant::now);
     let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
         .univariate_polys
         .into_iter()
@@ -3596,14 +3579,6 @@ where
         claimed_sum: claimed_sum_ef,
         point_and_eval: (point, final_eval),
     };
-
-    let postproc_us = t_post.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
-    if profile {
-        eprintln!(
-            "[#368] flatten_us={flatten_us} eq_us={eq_us} hook_us={hook_us} \
-             postproc_us={postproc_us} vars={total_vars}"
-        );
-    }
 
     Some(LogupGkrRoundProof {
         numerator_0: cast_ef4_to_ef::<EF>(result.openings[0]),
@@ -3678,11 +3653,6 @@ where
     if total_vars == 0 {
         return None;
     }
-
-    let profile = std::env::var("ZIREN_LOGUP_V3_PROFILE")
-        .map(|v| v == "1")
-        .unwrap_or(false);
-    let t_start = profile.then(std::time::Instant::now);
 
     // #383 sub-step 1: consult the per-shard LogupTaskScope first.
     //
@@ -3759,7 +3729,6 @@ where
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
     let eq_row = build_eq_table(row_point);
-    let setup_us = t_start.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3769,7 +3738,6 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
-    let t_hook = profile.then(std::time::Instant::now);
     let result = gpu_hook_v3(
         input_handle,
         cast_vec_ef_to_ef4::<EF>(n0_flat),
@@ -3783,12 +3751,12 @@ where
         total_vars,
         inner_challenger,
     )?;
-    let hook_us = t_hook.map(|t| t.elapsed().as_micros() as u64).unwrap_or(0);
 
     // Stash next-layer handle for the subsequent round's call.
     if let Some(next) = result.next_layer.clone() {
         crate::shard_level::sumcheck_poly::publish_logup_v3_next_handle(next);
     }
+    let _ = handle_present;
 
     let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
         .round
@@ -3807,15 +3775,6 @@ where
         claimed_sum: claimed_sum_ef,
         point_and_eval: (point, final_eval),
     };
-
-    if profile {
-        eprintln!(
-            "[#371] handle_in={} setup_us={setup_us} hook_us={hook_us} \
-             handle_out={} vars={total_vars}",
-            if handle_present { 1 } else { 0 },
-            if result.next_layer.is_some() { 1 } else { 0 },
-        );
-    }
 
     Some(LogupGkrRoundProof {
         numerator_0: cast_ef4_to_ef::<EF>(result.round.openings[0]),
