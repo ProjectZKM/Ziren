@@ -236,9 +236,15 @@ where
 {
     use core::any::TypeId;
     use p3_field::PrimeCharacteristicRing;
-    if !std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_FUSION")
-        .map(|v| v == "1").unwrap_or(false)
-    {
+    // Default-on: GPU lambda-RLC fusion. Opt-out via ZIREN_GPU_ZEROCHECK_DEVICE_FUSION_DISABLE=1
+    // (or legacy ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=0/false).
+    let fusion_disabled = std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_FUSION_DISABLE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+        || std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_FUSION")
+            .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false);
+    if fusion_disabled {
         return compute_combined_table_rlc::<SC>(padded, lambda, target_size);
     }
     // Trivial cases — never bother with a device dispatch.
