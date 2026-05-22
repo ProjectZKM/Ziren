@@ -409,9 +409,15 @@ where
         use core::any::TypeId;
         type Ef4Local = p3_field::extension::BinomialExtensionField<
             p3_koala_bear::KoalaBear, 4>;
-        let env_set = std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+        // Consumer gate defaults ON — pairs with ZIREN_GPU_LOGUP_GKR_DEVICE
+        // also defaulting ON at round.rs:3122. Opt-out via
+        // ZIREN_LOGUP_DEVICE_CONSUMER_DISABLE=1 (or legacy =0/false).
+        let env_set = !std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER_DISABLE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+            && !std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER")
+                .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
+                .unwrap_or(false);
         let v3_enabled = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
             .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
             .unwrap_or(true);
