@@ -491,8 +491,19 @@ where
             // Default-OFF until multi-workload byte-equivalence is
             // re-validated.  When OFF, behaviour is byte-identical to
             // pre-#372.
+            // `ZIREN_GPU_MERGED_BYTECODE=1` implicitly enables SPLIT —
+            // the merged-bytecode constraint-eval port (SP1 gap #1) is
+            // ONLY useful when the per-chip filter admits permutation-
+            // bearing chips, which is the SPLIT codepath.  Without this
+            // coupling the merged hook is dormant in production because
+            // every CompressAir chip carries lookups → `permutation_width
+            // > 0` → filter returns `None` → merged hook never invoked.
+            // See project_merged_bytecode_port.md open items.
             let split_enabled =
                 std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+                    .map(|v| v == "1")
+                    .unwrap_or(false)
+                || std::env::var("ZIREN_GPU_MERGED_BYTECODE")
                     .map(|v| v == "1")
                     .unwrap_or(false);
             if !split_enabled && chip.permutation_width() > 0 {
@@ -907,6 +918,19 @@ where
     // return early below so the caller's per-chip/host path runs.
     let merged_enabled = std::env::var("ZIREN_GPU_MERGED_BYTECODE")
         .map(|v| v == "1").unwrap_or(false);
+    // Diagnostic entry trace: prove this pre-pass actually fires for the
+    // production compose dispatch path (gap noted in
+    // project_merged_bytecode_port.md open items).  One-shot per process.
+    if merged_enabled {
+        static PREPASS_ENTRY_ONCE: OnceLock<()> = OnceLock::new();
+        PREPASS_ENTRY_ONCE.get_or_init(|| {
+            tracing::warn!(
+                "SP1 merged-bytecode pre-pass ENTERED \
+                 (ZIREN_GPU_MERGED_BYTECODE=1, chips={}, will dispatch merged hook)",
+                chips.len()
+            );
+        });
+    }
     if merged_enabled {
         if let Some(merged_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_merged_hook()
@@ -982,9 +1006,13 @@ where
     // computed via the `EmptyMessageBuilder` path on host fallback and
     // through the GPU bytecode interpreter (which compiles the chip's
     // pure-AIR constraints) in the batched hook.
+    // `ZIREN_GPU_MERGED_BYTECODE=1` implicitly enables SPLIT here too —
+    // see paired comment at the per-chip filter for rationale.  Without
+    // coupling, the merged hook receives an empty chip set and is a no-op.
     let split_enabled_batched = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
         .map(|v| v == "1")
-        .unwrap_or(false);
+        .unwrap_or(false)
+        || merged_enabled;
     for (i, chip) in chips.iter().enumerate() {
         if !split_enabled_batched && chip.permutation_width() > 0 { continue; }
         let main_trace = &main_traces[i];
