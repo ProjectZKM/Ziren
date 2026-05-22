@@ -303,15 +303,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 local_cumulative_sum,
                 SC::Challenge::ZERO
             );
-            if std::env::var("ZIREN_DEBUG_CUMSUM").is_ok() {
-                for (name, idx) in proof.chip_ordering.iter() {
-                    let c = &proof.opened_values.chips[*idx];
-                    eprintln!(
-                        "[cumsum] chip={} local_cum={:?}",
-                        name, c.local_cumulative_sum
-                    );
-                }
-            }
             return Err(VerificationError::CumulativeSumsError("local cumulative sum is not zero"));
         }
 

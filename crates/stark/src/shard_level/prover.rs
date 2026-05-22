@@ -550,16 +550,6 @@ where
             // `column_count` from the bundle's PackingMeta (#95-fix),
             // so the prover can send `trace.width` directly without
             // mismatching the verifier's expectation.
-            if std::env::var("ZIREN_JAGGED_DIAG").is_ok() {
-                use p3_air::BaseAir;
-                let chip_width = <_ as BaseAir<Val<SC>>>::width(&chip.air);
-                if trace.width != chip_width {
-                    eprintln!(
-                        "[jagged-nopad] chip='{}' trace.width={} chip.width()={} (#95-fix: send trace.width)",
-                        chip.name(), trace.width, chip_width,
-                    );
-                }
-            }
             let values_cloned: Vec<Val<SC>> = trace.values.clone();
             let trace_width = trace.width;
             // SAFETY: Val<SC> == InnerVal at runtime (guarded by
