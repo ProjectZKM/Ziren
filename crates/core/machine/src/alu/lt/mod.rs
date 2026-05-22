@@ -85,14 +85,6 @@ pub struct LtCols<T> {
     pub comparison_bytes: [T; 2],
 }
 
-impl LtCols<u32> {
-    pub fn from_trace_row<F: PrimeField32>(row: &[F]) -> Self {
-        let sized: [u32; NUM_LT_COLS] =
-            row.iter().map(|x| x.as_canonical_u32()).collect::<Vec<u32>>().try_into().unwrap();
-        *sized.as_slice().borrow()
-    }
-}
-
 impl<F: PrimeField32> MachineAir<F> for LtChip {
     type Record = ExecutionRecord;
 

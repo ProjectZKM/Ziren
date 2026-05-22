@@ -141,28 +141,6 @@ pub fn log2_strict_usize(n: usize) -> usize {
     res as usize
 }
 
-pub fn par_for_each_row<P, F>(vec: &mut [F], num_elements_per_event: usize, processor: P)
-where
-    F: Send,
-    P: Fn(usize, &mut [F]) + Send + Sync,
-{
-    // Split the vector into `num_cpus` chunks, but at least `num_cpus` rows per chunk.
-    assert!(vec.len().is_multiple_of(num_elements_per_event));
-    let len = vec.len() / num_elements_per_event;
-    let cpus = num_cpus::get();
-    let ceil_div = len.div_ceil(cpus);
-    let chunk_size = std::cmp::max(ceil_div, cpus);
-
-    vec.chunks_mut(chunk_size * num_elements_per_event).enumerate().par_bridge().for_each(
-        |(i, chunk)| {
-            chunk.chunks_mut(num_elements_per_event).enumerate().for_each(|(j, row)| {
-                assert!(row.len() == num_elements_per_event);
-                processor(i * chunk_size + j, row);
-            });
-        },
-    );
-}
-
 /// Returns whether the `ZKM_DEBUG` environment variable is enabled or disabled.
 ///
 /// This variable controls whether backtraces are attached to compiled circuit programs, as well

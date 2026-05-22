@@ -439,24 +439,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         shape.iter().map(|(air, height)| self.costs[air] * (1 << height)).sum()
     }
 
-    pub fn small_program_shapes(&self) -> Vec<OrderedShape> {
-        self.partial_small_shapes
-            .iter()
-            .map(|log_heights| {
-                OrderedShape::from_log2_heights(
-                    &log_heights
-                        .iter()
-                        .filter(|(_, v)| v[0].is_some())
-                        .map(|(k, v)| (k.to_string(), v.last().unwrap().unwrap()))
-                        .chain(vec![
-                            (MachineAir::<KoalaBear>::name(&ProgramChip), 19),
-                            (MachineAir::<KoalaBear>::name(&ByteChip::default()), 16),
-                        ])
-                        .collect::<Vec<_>>(),
-                )
-            })
-            .collect()
-    }
 }
 
 impl<F: PrimeField32> Default for CoreShapeConfig<F> {
