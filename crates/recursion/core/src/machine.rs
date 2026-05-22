@@ -1,6 +1,5 @@
 use std::ops::{Add, AddAssign};
 
-use hashbrown::HashMap;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use zkm_stark::{
     air::{LookupScope, MachineAir, PicusInfo},
@@ -61,6 +60,11 @@ pub struct RecursionAirEventCount {
     pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
+    /// Counter for commit_pv_hash events (CommitPublicValues match arm
+    /// in `Runtime::run`). Populated by
+    /// `AddAssign<&Instruction>` so `UnsafeRecord::new` can pre-size
+    /// the vec once the runtime walker swaps to offset-based writes.
+    pub commit_pv_hash_events: usize,
 }
 
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
@@ -153,27 +157,26 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_shape() -> RecursionShape {
-        let shape = HashMap::from(
-            [
-                (Self::MemoryVar(MemoryVarChip::default()), 18),
-                (Self::Select(SelectChip), 18),
-                (Self::MemoryConst(MemoryConstChip::default()), 17),
-                (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
-                (Self::BaseAlu(BaseAluChip), 17),
-                (Self::ExtAlu(ExtAluChip), 15),
-                (Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>), 17),
-                (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
-                (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
-            ]
-            .map(|(chip, log_height)| (chip.name(), log_height)),
-        );
+        let shape: std::collections::BTreeMap<String, usize> = [
+            (Self::MemoryVar(MemoryVarChip::default()), 18),
+            (Self::Select(SelectChip), 18),
+            (Self::MemoryConst(MemoryConstChip::default()), 17),
+            (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
+            (Self::BaseAlu(BaseAluChip), 17),
+            (Self::ExtAlu(ExtAluChip), 15),
+            (Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>), 17),
+            (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
+            (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
+        ]
+        .into_iter()
+        .map(|(chip, log_height)| (chip.name(), log_height))
+        .collect();
         RecursionShape { inner: shape }
     }
 
     pub fn heights(program: &RecursionProgram<F>) -> Vec<(String, usize)> {
         let heights = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .fold(RecursionAirEventCount::default(), |heights, instruction| heights + instruction);
 
         [
@@ -216,8 +219,12 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             Instruction::Mem(_) => self.mem_const_events += 1,
             Instruction::Poseidon2(_) => self.poseidon2_wide_events += 1,
             Instruction::Select(_) => self.select_events += 1,
-            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { addrs, .. }) => {
-                self.exp_reverse_bits_len_events += addrs.exp.len()
+            // Runtime emits ONE event per instruction (the event carries
+            // `exp: Vec<F>` of all bits). Was over-counting by exp.len();
+            // benign for push-based reserve, but UB-prone for offset
+            // writes via UnsafeRecord (uninit slots → bad transmute).
+            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { .. }) => {
+                self.exp_reverse_bits_len_events += 1
             }
             Instruction::Hint(HintInstr { output_addrs_mults })
             | Instruction::HintBits(HintBitsInstr {
@@ -228,7 +235,13 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 output_addrs_mults,
                 input_addr: _, // No receive lookup for the hint operation
             }) => self.mem_var_events += output_addrs_mults.len(),
-            Instruction::FriFold(_) => self.fri_fold_events += 1,
+            // FriFold runtime emits ps_at_z.len() events per instruction
+            // (one per polynomial in the batch); was off-by-default-1. Benign
+            // for push-based reserve, but UB-prone for offset writes via
+            // UnsafeRecord (uninit slots → bad transmute).
+            Instruction::FriFold(instr) => {
+                self.fri_fold_events += instr.ext_vec_addrs.ps_at_z.len()
+            }
             Instruction::BatchFRI(instr) => {
                 self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
             }
@@ -240,7 +253,11 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 self.mem_var_events += output_x_addrs_mults.len();
                 self.mem_var_events += output_y_addrs_mults.len();
             }
-            Instruction::CommitPublicValues(_) => {}
+            // Populate the new counters so `UnsafeRecord::new` can
+            // pre-size these vecs once the runtime walker swaps to
+            // offset-based writes. CommitPublicValues emits exactly
+            // one commit_pv_hash event per instruction.
+            Instruction::CommitPublicValues(_) => self.commit_pv_hash_events += 1,
             Instruction::Print(_) => {}
         }
     }
@@ -262,6 +279,87 @@ impl From<RecursionShape> for OrderedShape {
     }
 }
 
+/// Task #382 Phase 3a sub-sprint A: compile-time proof that every
+/// `RecursionAir` chip implements
+/// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+///
+/// The host-side `BasefoldConstraintFolder` (defined at
+/// `zkm-stark::shard_level::basefold_constraint_folder`) is
+/// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
+/// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
+/// (`crates/stark/src/air/builder.rs:581`) and
+/// `AB: BaseAirBuilder => RecursionAirBuilder` (`crates/recursion/core/src/builder.rs:15`)
+/// and `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (`crates/recursion/core/src/builder.rs:14`)
+/// automatically becomes a `ZKMRecursionAirBuilder` — so the existing
+/// generic `impl<AB: ZKMRecursionAirBuilder> Air<AB> for ChipName` on
+/// every recursion chip already covers it.  No new per-chip code is
+/// required; these assertions just make the bound resolution explicit
+/// and act as a regression guard if any chip's bounds tighten.
+///
+/// The in-circuit folder
+/// (`zkm-recursion-circuit::basefold_constraint_folder`) lives in a
+/// downstream crate, so its assertion lives in `zkm-recursion-circuit`
+/// (see `crates/recursion/circuit/src/basefold_constraint_folder.rs`).
+#[cfg(test)]
+mod basefold_air_assertions {
+    use super::*;
+    use crate::chips::{
+        alu_base::BaseAluChip, alu_ext::ExtAluChip, batch_fri::BatchFRIChip,
+        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip,
+        mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
+        poseidon2_skinny::Poseidon2SkinnyChip, poseidon2_wide::Poseidon2WideChip,
+        public_values::PublicValuesChip, select::SelectChip,
+    };
+    use p3_air::Air;
+    use p3_koala_bear::KoalaBear;
+    use zkm_stark::{
+        shard_level::basefold_constraint_folder::BasefoldConstraintFolder, InnerChallenge,
+    };
+
+    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+    fn assert_basefold_air<T>()
+    where
+        T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>,
+    {
+    }
+
+    /// Const used purely to force monomorphisation of all 11 chip
+    /// assertions at compile time.  Never called.
+    #[allow(dead_code)]
+    const _ASSERT_ALL_CHIPS: fn() = || {
+        // 1. MemoryConst
+        assert_basefold_air::<MemoryConstChip<KoalaBear>>();
+        // 2. MemoryVar
+        assert_basefold_air::<MemoryVarChip<KoalaBear>>();
+        // 3. BaseAlu
+        assert_basefold_air::<BaseAluChip>();
+        // 4. ExtAlu
+        assert_basefold_air::<ExtAluChip>();
+        // 5. Poseidon2Wide (DEGREE=9, the production const)
+        assert_basefold_air::<Poseidon2WideChip<9>>();
+        // 6. Poseidon2Skinny (DEGREE=9)
+        assert_basefold_air::<Poseidon2SkinnyChip<9>>();
+        // 7. Select
+        assert_basefold_air::<SelectChip>();
+        // 8. FriFold (DEGREE=9)
+        assert_basefold_air::<FriFoldChip<9>>();
+        // 9. BatchFRI (DEGREE=9)
+        assert_basefold_air::<BatchFRIChip<9>>();
+        // 10. ExpReverseBitsLen (DEGREE=9)
+        assert_basefold_air::<ExpReverseBitsLenChip<9>>();
+        // 11. PublicValues
+        assert_basefold_air::<PublicValuesChip>();
+
+        // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
+        // `impl<AB: ZKMRecursionAirBuilder<F = F>, AB::Var: 'static>
+        // Air<AB> for RecursionAir<F, DEGREE>` (`crates/derive/src/lib.rs:320-328`).
+        // For `AB = BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>`,
+        // `AB::F = KoalaBear` matches `F = KoalaBear` and `AB::Var =
+        // InnerChallenge: 'static`, so the bound resolves.
+        assert_basefold_air::<RecursionAir<KoalaBear, 9>>();
+    };
+}
+
 #[cfg(test)]
 pub mod tests {
 
@@ -270,7 +368,7 @@ pub mod tests {
     use crate::machine::RecursionAir;
     use p3_field::{
         extension::{BinomialExtensionField, HasFrobenius},
-        Field, FieldAlgebra, FieldExtensionAlgebra,
+        BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField,
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
@@ -319,7 +417,10 @@ pub mod tests {
     }
 
     fn test_instructions(instructions: Vec<Instruction<F>>) {
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
         run_recursion_test_machines(program);
     }
 
@@ -370,12 +471,12 @@ pub mod tests {
         let mut addr = 0;
         for _ in 0..100 {
             let inner: [F; 4] = std::iter::repeat_with(|| {
-                core::array::from_fn(|_| rng.sample(rand::distributions::Standard))
+                core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))
             })
             .find(|xs| !xs.iter().all(F::is_zero))
             .unwrap();
-            let x = BinomialExtensionField::<F, D>::from_base_slice(&inner);
-            let gal = x.galois_group();
+            let x = BinomialExtensionField::<F, D>::from_basis_coefficients_slice(&inner).unwrap();
+            let gal = x.galois_orbit();
 
             let mut acc = BinomialExtensionField::ONE;
 
@@ -387,7 +488,7 @@ pub mod tests {
                 addr += 2;
                 acc *= conj;
             }
-            let base_cmp: F = acc.as_base_slice()[0];
+            let base_cmp: F = acc.as_basis_coefficients_slice()[0];
             instructions.push(instr::mem_single(MemAccessKind::Read, 1, addr, base_cmp));
             addr += 1;
         }

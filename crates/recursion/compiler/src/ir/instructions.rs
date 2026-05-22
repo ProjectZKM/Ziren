@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use zkm_recursion_core::air::RecursionPublicValues;
 use zkm_stark::septic_curve::SepticCurve;
 
@@ -305,10 +307,14 @@ pub enum DslIr<C: Config> {
     /// Select's an extension field element based on a condition. (select(cond, true_val,
     /// false_val) => output). Should only be used when target is a gnark circuit.
     CircuitSelectE(Var<C::N>, Ext<C::F, C::EF>, Ext<C::F, C::EF>, Ext<C::F, C::EF>),
-    /// Converts an ext to a slice of felts. Should only be used when target is a gnark circuit.
+    /// Converts an ext to a slice of felts (D=4). Should only be used when target is a gnark circuit.
     CircuitExt2Felt([Felt<C::F>; 4], Ext<C::F, C::EF>),
-    /// Converts a slice of felts to an ext. Should only be used when target is a gnark circuit.
+    /// Converts a slice of felts to an ext (D=4). Should only be used when target is a gnark circuit.
     CircuitFelts2Ext([Felt<C::F>; 4], Ext<C::F, C::EF>),
+    /// Converts an ext to a slice of felts (D=5). Should only be used when target is a gnark circuit.
+    CircuitExt2Felt5([Felt<C::F>; 5], Ext<C::F, C::EF>),
+    /// Converts a slice of felts to an ext (D=5). Should only be used when target is a gnark circuit.
+    CircuitFelts2Ext5([Felt<C::F>; 5], Ext<C::F, C::EF>),
 
     // Debugging instructions.
     /// Executes less than (var = var < var).  This operation is NOT constrained.
@@ -324,4 +330,36 @@ pub enum DslIr<C: Config> {
     ExpReverseBitsLen(Ptr<C::N>, Var<C::N>, Var<C::N>),
     /// Reverse bits exponentiation. Output, base, exponent bits.
     CircuitV2ExpReverseBits(Felt<C::F>, Felt<C::F>, Vec<Felt<C::F>>),
+
+    /// Sub-blocks that may be executed in parallel.
+    ///
+    /// Each sub-block carries a disjoint `addrs_written` range; the
+    /// runtime today walks them sequentially via the existing
+    /// `iter_instructions` traversal (a follow-up will dispatch via
+    /// `par_iter` once the memory layer is thread-safe). Emitted by
+    /// callers via the `IrIter::ir_par_map_collect` extension trait.
+    ///
+    /// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs.
+    Parallel(Vec<DslIrBlock<C>>),
+}
+
+/// A linearly ordered block of DSL IR ops together with the range of
+/// virtual addresses it writes to.
+///
+/// Blocks are produced by `IrIter::ir_par_map_collect` and consumed
+/// by the compiler when lowering `DslIr::Parallel`. The
+/// `addrs_written` range is closed at the lower end and open at the
+/// upper, matching the convention of `Builder::variable_count`.
+///
+/// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs::DslIrBlock.
+#[derive(Clone, Debug)]
+pub struct DslIrBlock<C: Config> {
+    pub ops: TracedVec<DslIr<C>>,
+    pub addrs_written: Range<u32>,
+}
+
+impl<C: Config> Default for DslIrBlock<C> {
+    fn default() -> Self {
+        Self { ops: TracedVec::default(), addrs_written: 0..0 }
+    }
 }

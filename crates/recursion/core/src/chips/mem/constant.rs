@@ -1,8 +1,8 @@
 use core::borrow::Borrow;
 use itertools::Itertools;
-use p3_air::{Air, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeField32;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
@@ -58,8 +58,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| match instruction {
                 Instruction::Mem(MemInstr { addrs, vals, mult, kind }) => {
                     let mult = mult.to_owned();
@@ -147,11 +146,11 @@ impl<F: PrimeField32> MachineAir<F> for MemoryChip<F> {
 
 impl<AB> Air<AB> for MemoryChip<AB::F>
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
-        let prep = builder.preprocessed();
-        let prep_local = prep.row_slice(0);
+        let prep = builder.preprocessed().clone();
+        let prep_local = prep.current_slice();
         let prep_local: &MemoryPreprocessedCols<AB::Var> = (*prep_local).borrow();
 
         for (value, access) in prep_local.values_and_accesses {
@@ -165,7 +164,7 @@ mod tests {
     use std::sync::Arc;
 
     use machine::{tests::run_recursion_test_machines, RecursionAir};
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::{KoalaBear, Poseidon2InternalLayerKoalaBear};
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -217,10 +216,10 @@ mod tests {
     #[test]
     pub fn prove_basic_mem() {
         run_recursion_test_machines(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -229,10 +228,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_mult() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 999, 1, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -241,10 +240,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_address() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 999, 2),
-            ],
+            ]),
             ..Default::default()
         });
     }
@@ -253,10 +252,10 @@ mod tests {
     #[should_panic]
     pub fn basic_mem_bad_value() {
         prove_program(RecursionProgram {
-            instructions: vec![
+            seq_blocks: crate::RawProgram::from_linear(vec![
                 instr::mem(MemAccessKind::Write, 1, 1, 2),
                 instr::mem(MemAccessKind::Read, 1, 1, 999),
-            ],
+            ]),
             ..Default::default()
         });
     }

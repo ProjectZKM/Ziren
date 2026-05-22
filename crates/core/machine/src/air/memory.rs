@@ -1,7 +1,7 @@
 use std::iter::once;
 
 use p3_air::AirBuilder;
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
 use zkm_stark::{
     air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope},
@@ -74,7 +74,7 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
             self.eval_memory_access(
                 shard,
                 clk.clone(),
-                initial_addr.clone().into() + Self::Expr::from_canonical_usize(i * 4),
+                initial_addr.clone().into() + Self::Expr::from_usize(i * 4),
                 access_slice,
                 verify_memory_access,
             );
@@ -121,7 +121,7 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         // `current_comp_val, prev_comp_val` are range-checked to be `<2^24` and as long as we're
         // working in a field larger than `2 * 2^24` (which is true of the KoalaBear and Mersenne31
         // prime).
-        let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::one();
+        let diff_minus_one = current_comp_val - prev_comp_value - Self::Expr::ONE;
 
         // Verify that mem_access.ts_diff = mem_access.ts_diff_16bit_limb
         // + mem_access.ts_diff_8bit_limb * 2^16.
@@ -150,22 +150,22 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         self.when(do_check.clone()).assert_eq(
             value,
             limb_16.clone().into()
-                + limb_8.clone().into() * Self::Expr::from_canonical_u32(1 << 16),
+                + limb_8.clone().into() * Self::Expr::from_u32(1 << 16),
         );
 
         // Send the range checks for the limbs.
         self.send_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U16Range as u8),
+            Self::Expr::from_u8(ByteOpcode::U16Range as u8),
             limb_16,
-            Self::Expr::zero(),
-            Self::Expr::zero(),
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
             do_check.clone(),
         );
 
         self.send_byte(
-            Self::Expr::from_canonical_u8(ByteOpcode::U8Range as u8),
-            Self::Expr::zero(),
-            Self::Expr::zero(),
+            Self::Expr::from_u8(ByteOpcode::U8Range as u8),
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
             limb_8,
             do_check,
         )

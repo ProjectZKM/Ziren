@@ -1,8 +1,7 @@
 use core::borrow::Borrow;
 
-use p3_air::{Air, AirBuilder, BaseAir};
-use p3_field::FieldAlgebra;
-use p3_matrix::Matrix;
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Register};
 use zkm_stark::{
     air::{LookupScope, ZKMAirBuilder},
@@ -32,7 +31,7 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &SysLinuxCols<AB::Var> = (*local).borrow();
 
         // ── Canonical syscall decoder ──────────────────────────────────
@@ -40,49 +39,49 @@ where
 
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_MMAP as u32),
             local.decode_mmap,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_MMAP2 as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_MMAP2 as u32),
             local.decode_mmap2,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_CLONE as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_CLONE as u32),
             local.decode_clone,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_EXT_GROUP as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_EXT_GROUP as u32),
             local.decode_exit_group,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_BRK as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_BRK as u32),
             local.decode_brk,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_FCNTL as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_FCNTL as u32),
             local.decode_fnctl,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid.clone() - AB::Expr::from_canonical_u32(SyscallCode::SYS_READ as u32),
+            sid.clone() - AB::Expr::from_u32(SyscallCode::SYS_READ as u32),
             local.decode_read,
             local.is_real.into(),
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            sid - AB::Expr::from_canonical_u32(SyscallCode::SYS_WRITE as u32),
+            sid - AB::Expr::from_u32(SyscallCode::SYS_WRITE as u32),
             local.decode_write,
             local.is_real.into(),
         );
@@ -139,7 +138,7 @@ where
         );
         IsZeroOperation::<AB::F>::eval(
             builder,
-            a1_reduce - AB::Expr::from_canonical_u32(3),
+            a1_reduce - AB::Expr::from_u32(3),
             local.decode_a1_3,
             local.is_real.into(),
         );
@@ -175,7 +174,7 @@ where
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::A3 as u32),
+            AB::Expr::from_u32(Register::A3 as u32),
             &local.output,
             local.is_real,
         );
@@ -212,7 +211,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::BRK as u32),
+            AB::Expr::from_u32(Register::BRK as u32),
             &local.inorout,
             is_brk,
         );
@@ -265,23 +264,23 @@ impl SysLinuxChip {
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_lo_bits[bit]);
             a1_byte1_lo =
-                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+                a1_byte1_lo + local.a1_byte1_lo_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         let mut a1_byte1_hi = AB::Expr::zero();
         for bit in 0..4 {
             builder.when(local.is_mmap).assert_bool(local.a1_byte1_hi_bits[bit]);
             a1_byte1_hi =
-                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_canonical_u32(1 << bit);
+                a1_byte1_hi + local.a1_byte1_hi_bits[bit] * AB::Expr::from_u32(1 << bit);
         }
         builder.when(local.is_mmap).assert_eq(
             local.a1[1],
-            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_canonical_u32(16),
+            a1_byte1_lo.clone() + a1_byte1_hi.clone() * AB::Expr::from_u32(16),
         );
 
         // Inline page_offset (not stored). upper_address is no longer needed as a
         // single field expression — the mmap_size bytes are constrained directly.
         let page_offset: AB::Expr =
-            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_canonical_u32(256);
+            local.a1[0].into() + a1_byte1_lo * AB::Expr::from_u32(256);
 
         // is_offset_0 = (page_offset == 0), derived from IsZero.
         IsZeroOperation::<AB::F>::eval(
@@ -304,8 +303,8 @@ impl SysLinuxChip {
         // Unaligned case (is_offset_0 = 0): mmap_size = upper_addr + 0x1000
         //   with carry propagation through bytes 1→2→3.
 
-        let base = AB::Expr::from_canonical_u32(256);
-        let sixteen = AB::Expr::from_canonical_u32(16);
+        let base = AB::Expr::from_u32(256);
+        let sixteen = AB::Expr::from_u32(16);
         // not_aligned = is_mmap_a0_0 * (1 - is_offset_0)
         let not_aligned: AB::Expr = local.is_mmap_a0_0.into() * (AB::Expr::one() - is_offset_0);
 
@@ -356,7 +355,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::HEAP as u32),
+            AB::Expr::from_u32(Register::HEAP as u32),
             &local.inorout,
             local.is_mmap_a0_0,
         );
@@ -458,7 +457,7 @@ impl SysLinuxChip {
         builder.eval_memory_access(
             local.shard,
             local.clk,
-            AB::Expr::from_canonical_u32(Register::A2 as u32),
+            AB::Expr::from_u32(Register::A2 as u32),
             &local.inorout,
             is_write,
         );

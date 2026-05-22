@@ -8,8 +8,27 @@ pub mod air;
 mod chip;
 mod config;
 mod debug;
-mod folder;
+pub mod folder;
+pub mod gpu_worker_context;
 mod kb31_poseidon2;
+#[cfg(feature = "basefold")]
+pub mod basefold;
+#[cfg(feature = "basefold")]
+pub mod basefold_late_binding;
+#[cfg(feature = "basefold")]
+pub mod jagged;
+#[cfg(feature = "basefold")]
+pub mod jagged_branching_program;
+#[cfg(feature = "basefold")]
+pub mod jagged_eval_sumcheck;
+#[cfg(feature = "basefold")]
+pub mod jagged_sumcheck;
+pub mod logup_gkr;
+pub mod shard_level;
+// Top-level re-export for `ziren-gpu` callers (basefold/src/device_first_layer.rs)
+// that use the `zkm_stark::device_first_layer_context::*` path.
+pub use shard_level::device_first_layer_context;
+pub mod stacked_shapes;
 mod lookup;
 mod machine;
 mod opts;
@@ -17,6 +36,8 @@ mod permutation;
 mod proof;
 mod prover;
 mod quotient;
+pub mod zerocheck;
+pub mod zerocheck_prover;
 mod record;
 pub mod septic_curve;
 pub mod septic_digest;
@@ -27,7 +48,6 @@ mod stark_testing;
 mod types;
 mod verifier;
 mod word;
-mod zerofier_coset;
 
 pub use air::*;
 pub use chip::*;
@@ -46,4 +66,3 @@ pub use record::*;
 pub use types::*;
 pub use verifier::*;
 pub use word::*;
-pub use zerofier_coset::*;

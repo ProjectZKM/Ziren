@@ -1,7 +1,7 @@
 use std::array;
 
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::ZKMAirBuilder;
 
@@ -32,7 +32,7 @@ pub struct KoalaBearBitDecomposition<T> {
 
 impl<F: Field> KoalaBearBitDecomposition<F> {
     pub fn populate(&mut self, value: u32) {
-        self.bits = array::from_fn(|i| F::from_canonical_u32((value >> i) & 1));
+        self.bits = array::from_fn(|i| F::from_u32((value >> i) & 1));
         let most_sig_byte_decomp = &self.bits[24..32];
         self.and_most_sig_byte_decomp_0_to_2 = most_sig_byte_decomp[0] * most_sig_byte_decomp[1];
         self.and_most_sig_byte_decomp_0_to_3 =
@@ -53,11 +53,11 @@ impl<F: Field> KoalaBearBitDecomposition<F> {
         cols: KoalaBearBitDecomposition<AB::Var>,
         is_real: AB::Expr,
     ) {
-        let mut reconstructed_value = AB::Expr::zero();
+        let mut reconstructed_value = AB::Expr::ZERO;
         for (i, bit) in cols.bits.iter().enumerate() {
             builder.when(is_real.clone()).assert_bool(*bit);
             reconstructed_value =
-                reconstructed_value.clone() + AB::Expr::from_wrapped_u32(1 << i) * *bit;
+                reconstructed_value.clone() + AB::Expr::from_u32(1 << i) * *bit;
         }
 
         // Assert that bits2num(bits) == value.
@@ -100,7 +100,7 @@ impl<F: Field> KoalaBearBitDecomposition<F> {
         );
 
         // If the top bits are all 0, then the lower bits must all be 0.
-        let mut lower_bits_sum: AB::Expr = AB::Expr::zero();
+        let mut lower_bits_sum: AB::Expr = AB::Expr::ZERO;
         for bit in cols.bits[0..24].iter() {
             lower_bits_sum = lower_bits_sum + *bit;
         }

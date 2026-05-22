@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use p3_field::{Field, FieldAlgebra, PrimeField32, PrimeField64};
+use p3_field::{Field, PrimeCharacteristicRing, PrimeField32, PrimeField64};
 use p3_koala_bear::KoalaBear;
 use p3_matrix::Matrix;
 

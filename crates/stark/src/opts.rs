@@ -71,7 +71,10 @@ impl ZKMProverOpts {
         opts.core_opts.split_opts.boolean_circuit_garble /= divisor;
         opts.core_opts.split_opts.memory /= divisor;
 
-        opts.recursion_opts.shard_batch_size = 2;
+        opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or(2);
         opts.recursion_opts.records_and_traces_channel_capacity = 1;
         opts.recursion_opts.trace_gen_workers = 1;
 
@@ -79,32 +82,102 @@ impl ZKMProverOpts {
     }
 
     /// Get the default prover options for a prover on GPU given the amount of CPU and GPU memory.
+    ///
+    /// **Small-card adaptation (SP1 `local_gpu_opts` port — #376)**:
+    /// When `gpu_ram_gb <= 30` (e.g. RTX 4090 24 GB or A10 24 GB) we
+    /// halve the per-shard cycle budget (`log2_shard_size -= 1`) as the
+    /// analogue of SP1's `shard_threshold -= (1<<26) + (1<<25)`
+    /// reduction on `opts.sharding_threshold.element_threshold`.  This
+    /// trades per-shard wall for peak-memory headroom on cards where
+    /// the GKR layer-transition mempool would otherwise blow past
+    /// physical device memory under multi-shard concurrency.
+    ///
+    /// On 32 GB+ cards (the actual prod 5090 box: 32607 MiB → 36 with
+    /// SP1's `ceil() + 4`) the branch is a no-op — full default
+    /// shard_size is used.
+    ///
+    /// Pair with `ZIREN_GPU_RECOMPUTE_FIRST_LAYER=1` (default OFF, scaffold
+    /// only) on ziren-gpu's `layer_transition_dispatch.rs` for the matching
+    /// half of SP1's pattern that drops the first-layer device buffers
+    /// after the second is materialized.  Full first-layer-virtual host
+    /// regen wiring is deferred — see the related design memo.
     #[must_use]
     pub fn gpu(_cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
         let mut opts = ZKMProverOpts::default();
 
         // Set the core options.
         if 24 <= gpu_ram_gb {
-            //let log2_shard_size = 21;
-            //opts.core_opts.shard_size = 1 << log2_shard_size;
             opts.core_opts.shard_batch_size = 1;
 
-            //let log2_deferred_threshold = 14;
-            //opts.core_opts.split_opts = SplitOpts::new(1 << log2_deferred_threshold);
-
-            //opts.core_opts.records_and_traces_channel_capacity = 4;
-            //opts.core_opts.trace_gen_workers = 4;
-
-            //if cpu_ram_gb <= 20 {
-            //    opts.core_opts.records_and_traces_channel_capacity = 1;
-            //    opts.core_opts.trace_gen_workers = 2;
-            //}
+            // SP1 `local_gpu_opts` small-card port: on cards
+            // <= 30 GB, halve the default shard cycle budget. This is
+            // the per-cycle analogue of SP1's element-threshold
+            // reduction; matches SP1's "reduce work per shard so
+            // multi-shard concurrency fits in mempool headroom".
+            //
+            // Override with SHARD_SIZE env to force a specific value
+            // (default ZKMCoreOpts already honours the env). Disable
+            // the auto-shrink with ZIREN_GPU_SMALL_CARD=0.
+            // Threshold bumped from 30 → 36 to catch 32 GB RTX 5090s
+            // under SP1's `ceil() + 4` formula (32 + 4 = 36).  SP1's
+            // original 30 was tuned for 24 GB 4090s (28) and 80 GB
+            // H100s (84), leaving 32 GB 5090s at 36 falling through
+            // to large-card mode.  Production 5090 box OOMs under
+            // V3 + LT default-on when small-card mode doesn't fire;
+            // catching at ≤36 enables the shard-size halving + the
+            // matching mempool/recompute companions on ziren-gpu.
+            if gpu_ram_gb <= 36 {
+                let small_card_enabled = std::env::var("ZIREN_GPU_SMALL_CARD")
+                    .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+                    .unwrap_or(true);
+                let shard_size_overridden = std::env::var("SHARD_SIZE").is_ok();
+                if small_card_enabled && !shard_size_overridden {
+                    let current_log2 = opts.core_opts.shard_size.trailing_zeros() as usize;
+                    let reduced_log2 = current_log2.saturating_sub(1).max(15);
+                    opts.core_opts.shard_size = 1 << reduced_log2;
+                    tracing::info!(
+                        "SP1 small-card adaptation: gpu_ram_gb={} <= 30, halving \
+                         shard_size to 1 << {} ({}); set ZIREN_GPU_SMALL_CARD=0 to disable",
+                        gpu_ram_gb,
+                        reduced_log2,
+                        opts.core_opts.shard_size,
+                    );
+                }
+            }
         } else {
             unreachable!("not enough gpu memory");
         }
 
         // Set the recursion options.
-        opts.recursion_opts.shard_batch_size = 1;
+        // shard_batch_size controls the number of concurrent prover-submit
+        // threads in compress_multi_gpu (one shard per thread at a time).
+        // With shard_batch_size = 1 only one shard is in flight to the GPU
+        // pool, so additional GPUs go idle. Default scales as
+        // `(gpu_count * 2).clamp(4, 8)` from ZKM_GPU_DEVICES:
+        // - 1-2 GPU -> 4: oversubscribing 1 GPU 8x OOMs on reth shards,
+        //   4 keeps the single GPU's memory budget safe.
+        // - 4 GPU -> 8: 2x oversubscribe lets per-shard CPU prep
+        //   (recursion-program build, setup, generate_dependencies)
+        //   overlap with the next shard's GPU work. Compress 42s -> 32s,
+        //   total 101.9s -> 97.1s on reth.
+        // - 8 GPU -> 8: 1:1 mapping fully saturates the pool. Compress
+        //   42s -> 33s, total 99.9s -> 94.4s on reth. SBS=12 plateaus
+        //   then regresses (Core 56.4s -> 62.8s from contention).
+        // Override via RECURSION_SHARD_BATCH_SIZE for >8-GPU boxes,
+        // memory-constrained machines, or experimentation.
+        let gpu_count = env::var("ZKM_GPU_DEVICES")
+            .ok()
+            .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
+            .filter(|&n| n > 0)
+            .unwrap_or(1);
+        opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
+            .ok()
+            .and_then(|s| s.parse::<usize>().ok())
+            .unwrap_or_else(|| (gpu_count * 2).clamp(4, 8));
+        opts.recursion_opts.records_and_traces_channel_capacity =
+            opts.recursion_opts.shard_batch_size.max(2);
+        opts.recursion_opts.trace_gen_workers =
+            opts.recursion_opts.shard_batch_size.max(opts.recursion_opts.trace_gen_workers);
 
         opts
     }

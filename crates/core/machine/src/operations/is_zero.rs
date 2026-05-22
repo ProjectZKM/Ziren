@@ -5,7 +5,7 @@
 //! The idea is that 1 - input * inverse is exactly the boolean value indicating whether the input
 //! is 0.
 use p3_air::AirBuilder;
-use p3_field::{Field, FieldAlgebra};
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
 
 use zkm_stark::air::ZKMAirBuilder;
@@ -23,7 +23,7 @@ pub struct IsZeroOperation<T> {
 
 impl<F: Field> IsZeroOperation<F> {
     pub fn populate(&mut self, a: u32) -> u32 {
-        self.populate_from_field_element(F::from_canonical_u32(a))
+        self.populate_from_field_element(F::from_u32(a))
     }
 
     pub fn populate_from_field_element(&mut self, a: F) -> u32 {

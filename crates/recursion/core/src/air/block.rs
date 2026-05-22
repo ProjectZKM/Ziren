@@ -1,5 +1,5 @@
 use p3_air::AirBuilder;
-use p3_field::{ExtensionField, Field, FieldAlgebra};
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::{BinomialExtension, ExtensionAirBuilder, ZKMAirBuilder};
@@ -42,25 +42,16 @@ impl<T> Block<T> {
         T: Field,
         E: ExtensionField<T>,
     {
-        E::from_base_slice(&self.0)
+        E::from_basis_coefficients_slice(&self.0).unwrap()
     }
 }
 
 impl<T: Clone> Block<T> {
     pub fn as_extension<AB: ExtensionAirBuilder<Var = T>>(&self) -> BinomialExtension<AB::Expr> {
-        let arr: [AB::Expr; 4] = self.0.clone().map(|x| AB::Expr::zero() + x);
+        let arr: [AB::Expr; D] = self.0.clone().map(|x| AB::Expr::ZERO + x);
         BinomialExtension(arr)
     }
 
-    pub fn as_extension_from_base<AB: ZKMAirBuilder<Var = T>>(
-        &self,
-        base: AB::Expr,
-    ) -> BinomialExtension<AB::Expr> {
-        let mut arr: [AB::Expr; 4] = self.0.clone().map(|_| AB::Expr::zero());
-        arr[0] = base;
-
-        BinomialExtension(arr)
-    }
 }
 
 impl<T> From<[T; D]> for Block<T> {
@@ -69,9 +60,11 @@ impl<T> From<[T; D]> for Block<T> {
     }
 }
 
-impl<T: FieldAlgebra> From<T> for Block<T> {
+impl<T: PrimeCharacteristicRing> From<T> for Block<T> {
     fn from(value: T) -> Self {
-        Self([value, T::ZERO, T::ZERO, T::ZERO])
+        let mut arr = [T::ZERO; D];
+        arr[0] = value;
+        Self(arr)
     }
 }
 

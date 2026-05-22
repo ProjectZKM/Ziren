@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::marker::PhantomData;
 
 use hashbrown::HashMap;
@@ -24,17 +25,31 @@ use crate::{
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionShape {
-    pub(crate) inner: HashMap<String, usize>,
+    /// Per-chip log2 height.  `BTreeMap` (not `HashMap`) so the
+    /// iteration order is deterministic across processes — without
+    /// this, the recursion-compiler emits opcodes in a per-process-
+    /// random order, the resulting wrap_program's compiled hint
+    /// sequence shifts, and the witness writer (which walks the
+    /// real proof's deterministic Vec layout) desyncs at runtime.
+    /// Symptom: `OodEvaluationMismatch on chip MemoryVar` /
+    /// `Poseidon2WideDeg3` flakes ~50% of fresh `cargo test` runs.
+    pub(crate) inner: BTreeMap<String, usize>,
 }
 
 impl RecursionShape {
     pub fn clone_into_hash_map(&self) -> HashMap<String, usize> {
-        self.inner.clone()
+        self.inner.iter().map(|(k, v)| (k.clone(), *v)).collect()
     }
 }
 
 impl From<HashMap<String, usize>> for RecursionShape {
     fn from(value: HashMap<String, usize>) -> Self {
+        Self { inner: value.into_iter().collect() }
+    }
+}
+
+impl From<BTreeMap<String, usize>> for RecursionShape {
+    fn from(value: BTreeMap<String, usize>) -> Self {
         Self { inner: value }
     }
 }
@@ -70,7 +85,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         }
 
         if let Some(shape) = closest_shape {
-            let shape = RecursionShape { inner: shape };
+            let shape = RecursionShape { inner: shape.into_iter().collect() };
             *program.shape_mut() = Some(shape);
         } else {
             panic!("no shape found for heights: {heights:?}");
@@ -163,6 +178,69 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (batch_fri.clone(), 21),
                 (base_alu.clone(), 16),
                 (ext_alu.clone(), 19),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // Basefold normalize-sized shape.  The basefold normalize
+            // program produces ~660K instructions with chip heights:
+            // MemoryConst≈33842, MemoryVar≈11253, BaseAlu≈74980,
+            // ExtAlu≈70969, Poseidon2WideDeg3≈2012,
+            // ExpReverseBitsLen≈24, PublicValues≈4.  Powers-of-two
+            // log_heights with headroom: BaseAlu/ExtAlu→17,
+            // MemoryConst→16, MemoryVar→14 (rounded up to legacy
+            // minimum of 18 to share with smaller shapes).  This entry
+            // lets `fix_shape` succeed for basefold programs once
+            // the task / #59 enable that path; today the basefold
+            // builder skips fix_shape entirely.
+            [
+                (mem_var.clone(), 18),
+                (select.clone(), 18),
+                (mem_const.clone(), 17),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 18),
+                (ext_alu.clone(), 18),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // Bundle-lift compose level h=0. After #249 lifted
+            // the stacked-PCS contract block, tendermint bundle-lift's
+            // first compose level (lift outputs → arity-4 compose)
+            // panics shape.rs:91 with chip heights none of the above
+            // shapes fit. Observed:
+            //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
+            //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
+            // Caps with 1-bit headroom on binding dimensions for reth/
+            // geth headroom. Placed before the larger #6 below so h=0
+            // compose programs prefer this smaller cap and pay less
+            // padding.
+            [
+                (mem_var.clone(), 18),
+                (select.clone(), 19),
+                (mem_const.clone(), 19),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 18),
+                (ext_alu.clone(), 18),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // Bundle-lift compose level h=1+. Each compose tree
+            // level grows: h=0 outputs become h=1 inputs, h=1 compose
+            // verifies them and produces bigger chip heights still.
+            // Tendermint h=1 panic showed roughly 2× h=0:
+            //   MemoryConst≈375959 (log≈19), Select≈315840 (log≈19),
+            //   ExtAlu≈306869 (log≈19), BaseAlu≈182828 (log≈18),
+            //   MemoryVar≈102404 (log≈17), Poseidon2WideDeg3≈59776 (log≈16).
+            // Bigger caps fit h=1 + h=2 + reth/geth deeper trees.
+            [
+                (mem_var.clone(), 19),
+                (select.clone(), 20),
+                (mem_const.clone(), 20),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 19),
+                (ext_alu.clone(), 20),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),

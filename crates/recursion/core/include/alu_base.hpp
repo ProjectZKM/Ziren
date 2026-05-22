@@ -32,6 +32,25 @@ __ZKM_HOSTDEV__ void instr_to_row(const BaseAluInstr<F>& instr,
     case BaseAluOpcode::DivF:
       access.is_div = F(1);
       break;
+    case BaseAluOpcode::DivFAssert:
+      access.is_div = F(1);
+      break;
   }
+
+  // `is_div_active = is_div AND mult != 0`.  Regular DivF rows
+  // emitted in dead Select branches carry mult=0; gating the
+  // constraint on `is_div_active` lets the runtime's mult=0
+  // guard skip them without a false-positive AIR obligation.
+  const bool is_div_op = (instr.opcode == BaseAluOpcode::DivF ||
+                          instr.opcode == BaseAluOpcode::DivFAssert);
+  const bool mult_nonzero = !(instr.mult == F(0));
+  access.is_div_active = F(is_div_op && mult_nonzero ? 1 : 0);
+
+  // `is_div_soundness = (opcode == DivFAssert)`.  Assertion-DivF
+  // rows always enforce the soundness constraint regardless of
+  // mult, because their `out` cell has no real reader but must
+  // still trip the constraint when the assertion fails.
+  access.is_div_soundness =
+      F(instr.opcode == BaseAluOpcode::DivFAssert ? 1 : 0);
 }
 }  // namespace zkm_recursion_core_sys::alu_base

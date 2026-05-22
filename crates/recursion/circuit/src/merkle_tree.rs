@@ -48,10 +48,25 @@ impl<F: Field, HV: FieldHasher<F>> MerkleTree<F, HV> {
         let new_len = leaves.len().next_power_of_two();
         let height = log2_strict_usize(new_len);
 
+        // Single-leaf edge case: pad up to 2 leaves so the height-≥1
+        // invariants below (the `0..height-1` loop, the `[last_layer[0],
+        // last_layer[1]]` final compress, and the `2 * new_len - 2`
+        // digest-layer capacity calculation) all hold.  Without this
+        // pad the `0..height-1` range underflows usize when `height == 0`,
+        // hanging the prover constructor in an effectively-infinite loop.
+        // Smallest-possible map (e.g. when `regen_basefold_vks_for_tests`
+        // produces only one unique compress VK hash) hits this.
+        let (new_len, height) = if new_len < 2 {
+            (2, 1)
+        } else {
+            (new_len, height)
+        };
+
         // Pre-allocate the vector.
         let mut digest_layers = Vec::with_capacity(2 * new_len - 2);
 
-        // If `leaves.len()` is not a power of 2, we pad the leaves with default values.
+        // If `leaves.len()` is not a power of 2 (or fewer than 2), pad
+        // with default digests.
         let mut last_layer = leaves;
         let old_len = last_layer.len();
         for _ in old_len..new_len {
@@ -153,10 +168,10 @@ pub fn verify<C: CircuitConfig, HV: FieldHasherVariable<C>>(
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_util::log2_ceil_usize;
-    use rand::rngs::OsRng;
+    use rand::{rngs::StdRng, Rng, SeedableRng};
     use zkhash::ark_ff::UniformRand;
     use zkm_recursion_compiler::{
         config::InnerConfig,
@@ -177,14 +192,14 @@ mod tests {
 
     #[test]
     fn test_merkle_tree_inner() {
-        let mut rng = OsRng;
+        let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         let mut builder = Builder::<InnerConfig>::default();
         // Run five times with different randomness.
         for _ in 0..5 {
             // Test with different number of leaves.
             for j in 2..20 {
                 let leaves: Vec<[F; DIGEST_SIZE]> =
-                    (0..j).map(|_| std::array::from_fn(|_| F::rand(&mut rng))).collect();
+                    (0..j).map(|_| std::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))).collect();
                 let (root, tree) = MerkleTree::<KoalaBear, HV>::commit(leaves.to_vec());
                 for (i, leaf) in leaves.iter().enumerate() {
                     let (_, proof) = MerkleTree::<KoalaBear, HV>::open(&tree, i);
@@ -198,7 +213,7 @@ mod tests {
                             .collect_vec(),
                     );
 
-                    let index_var = builder.constant(KoalaBear::from_canonical_usize(i));
+                    let index_var = builder.constant(KoalaBear::from_usize(i));
                     let index_bits = C::num2bits(&mut builder, index_var, log2_ceil_usize(j));
                     let root_variable: [Felt<_>; 8] =
                         root.iter().map(|x| builder.constant(*x)).collect_vec().try_into().unwrap();

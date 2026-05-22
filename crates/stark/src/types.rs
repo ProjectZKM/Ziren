@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 use std::fmt::Debug;
+use std::sync::Arc;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
@@ -13,8 +14,18 @@ use crate::shape::OrderedShape;
 
 pub type QuotientOpenedValues<T> = Vec<T>;
 
+/// Per-shard main-trace metadata produced by `MachineProver::commit`.
+///
+/// `traces` is `Vec<Arc<M>>` so post-`open()` consumers (the W2
+/// `prove_shard_to_basefold_gpu` device-residency hook) can capture
+/// the per-chip device-side trace matrices via cheap pointer-bump
+/// `Arc::clone` instead of (a) re-uploading from host or (b) cloning
+/// device buffers (impossible — `ColMajorMatrixDevice` /
+/// `DeviceBuffer` are not `Clone`).  Producer in `commit()` wraps each
+/// matrix in `Arc::new`; `open()` and the basefold side-channel both
+/// hold refcounted handles to the same allocation.
 pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
-    pub traces: Vec<M>,
+    pub traces: Vec<Arc<M>>,
     pub main_commit: Com<SC>,
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
@@ -23,7 +34,7 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
     pub const fn new(
-        traces: Vec<M>,
+        traces: Vec<Arc<M>>,
         main_commit: Com<SC>,
         main_data: P,
         chip_ordering: HashMap<String, usize>,
@@ -36,8 +47,30 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardCommitment<C> {
     pub main_commit: C,
-    pub permutation_commit: C,
-    pub quotient_commit: C,
+    /// Auxiliary commitments emitted alongside the main trace
+    /// commit.  Empty in the BaseFold pipeline (no permutation
+    /// trace, no quotient commitment — the soundness work moved
+    /// into a sumcheck-based binding + folded FRI commit).  In the
+    /// legacy 4-batch FRI pipeline this holds two entries in
+    /// strict `[permutation, quotient]` order.
+    pub auxiliary_commits: Vec<C>,
+}
+
+impl<C: Clone> ShardCommitment<C> {
+    /// The permutation-trace commitment, if present.  Accessor
+    /// that preserves the legacy semantic slot after the field
+    /// rename (`auxiliary_commits[0]` in the new layout).
+    pub fn permutation_commit(&self) -> Option<&C> {
+        self.auxiliary_commits.first()
+    }
+
+    /// The quotient-polynomial commitment, if present.  Accessor
+    /// that preserves the legacy semantic slot after the field
+    /// rename (`auxiliary_commits[1]` in the new layout).
+    pub fn quotient_commit(&self) -> Option<&C> {
+        self.auxiliary_commits.get(1)
+    }
+
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,9 +110,40 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    /// FRI opening proof.  In BaseFold mode (default), the prover emits
+    /// an empty `FriProof` placeholder via
+    /// `LateBindingCapable::empty_opening_proof()` and the verifier
+    /// short-circuits before `pcs.verify` (see verifier.rs
+    /// `basefold_mode` branch).  Phase 3 cleanup target: change to
+    /// `Option<OpeningProof<SC>>` once the BaseFold-default proof shape
+    /// stabilizes.
     pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
+    /// Shard-level BaseFold proof (#13 always-on for KoalaBear MIPS shards).
+    ///
+    /// When `Some`, the shard was produced via
+    /// `crate::shard_level::prove_shard_to_basefold` — one LogUp-GKR
+    /// + one zerocheck per shard instead of one per chip.
+    /// `Verifier::verify_shard` dispatches to
+    /// `BasefoldShardVerifier::verify_shard` when this field is
+    /// populated.  `None` for compress / non-KoalaBear shard proofs,
+    /// which take the legacy STARK code path inside
+    /// `Verifier::verify_shard`.
+    ///
+    /// `Box` keeps the ShardProof size footprint flat — the
+    /// BasefoldShardProof is ~KB of nested structs.  Feature-gated
+    /// behind `shard-level-proof` so serde wire format stays stable
+    /// for consumers built without the feature.
+    #[serde(default)]
+    pub basefold_shard_proof: Option<
+        Box<
+            crate::shard_level::shard_proof::BasefoldShardProof<
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        >,
+    >,
 }
 
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {

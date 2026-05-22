@@ -2,10 +2,8 @@ use std::{borrow::Borrow, marker::PhantomData};
 
 use p3_air::Air;
 use p3_commit::Mmcs;
-use p3_field::FieldAlgebra;
-use p3_koala_bear::KoalaBear;
-use p3_matrix::dense::RowMajorMatrix;
-use zkm_recursion_compiler::ir::{Builder, Felt};
+use p3_field::PrimeCharacteristicRing;
+use zkm_recursion_compiler::ir::{SymbolicExt, Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
 use zkm_stark::{air::MachineAir, StarkMachine};
 
@@ -14,7 +12,7 @@ use crate::{
     constraints::RecursiveVerifierConstraintFolder,
     machine::{assert_root_public_values_valid, RootPublicValues},
     stark::StarkVerifier,
-    CircuitConfig, KoalaBearFriConfigVariable,
+    CircuitConfig, KoalaBearFriParametersVariable,
 };
 
 use super::ZKMCompressWitnessVariable;
@@ -27,10 +25,10 @@ pub struct ZKMWrapVerifier<C, SC, A> {
 
 impl<C, SC, A> ZKMWrapVerifier<C, SC, A>
 where
-    SC: KoalaBearFriConfigVariable<C>,
+    SC: KoalaBearFriParametersVariable<C>,
     C: CircuitConfig<F = SC::Val, EF = SC::Challenge>,
-    <SC::ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>: Clone,
     A: MachineAir<SC::Val> + for<'a> Air<RecursiveVerifierConstraintFolder<'a, C>>,
+    SymbolicExt<C::F, C::EF>: p3_field::Algebra<C::EF>,
 {
     /// Verify a batch of recursive proofs and aggregate their public values.
     ///

@@ -1,0 +1,14 @@
+[package]
+name = "zkm-poly"
+description = "Generic polynomial primitives shared between zkm-stark and zkm-curves (#242 architectural split, May 6 2026)"
+readme = "../../README.md"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+itertools = { workspace = true }
+p3-field = { workspace = true }

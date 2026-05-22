@@ -5,15 +5,42 @@ use shape::RecursionShape;
 use zkm_stark::air::{MachineAir, MachineProgram};
 use zkm_stark::septic_digest::SepticDigest;
 
+use crate::runtime::RawProgram;
 use crate::*;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct RecursionProgram<F> {
-    pub instructions: Vec<Instruction<F>>,
+    /// SeqBlock representation of the program — the canonical
+    /// instruction container. An earlier refactor migrated the
+    /// runtime off the flat `instructions` Vec and onto
+    /// `iter_instructions()`, and the redundant `instructions`
+    /// field has been dropped entirely. The compiler emits one
+    /// `Basic` block today; a future revision will introduce
+    /// `Parallel` blocks once the memory layer is thread-safe.
+    #[serde(default = "RawProgram::default")]
+    pub seq_blocks: RawProgram<Instruction<F>>,
     pub total_memory: usize,
     #[serde(skip)]
     pub traces: Vec<Option<Backtrace>>,
     pub shape: Option<RecursionShape>,
+}
+
+impl<F> RecursionProgram<F> {
+    /// Iterate over the program's instructions in execution order,
+    /// recursing through parallel sub-programs in deterministic vec
+    /// order (the runtime collapses Parallel to sequential today; a
+    /// follow-up will dispatch via `par_iter` once the memory layer
+    /// is thread-safe).
+    ///
+    /// SP1 ref: crates/recursion/executor/src/program.rs::raw::RawProgram::iter.
+    pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
+        self.seq_blocks.iter()
+    }
+
+    /// Total instruction count, recursing through parallel sub-programs.
+    pub fn instruction_count(&self) -> usize {
+        self.seq_blocks.instruction_count()
+    }
 }
 
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {

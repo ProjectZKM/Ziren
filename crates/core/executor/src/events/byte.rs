@@ -182,6 +182,6 @@ impl ByteOpcode {
     /// Convert the opcode to a field element.
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
-        F::from_canonical_u8(self as u8)
+        F::from_u8(self as u8)
     }
 }

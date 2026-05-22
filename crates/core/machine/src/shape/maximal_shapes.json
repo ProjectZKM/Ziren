@@ -91768,6 +91768,24 @@
         "CloClz": 12,
         "SyscallCore": 9
       }
+    },
+    {
+      "inner": {
+        "Cpu": 21,
+        "AddSub": 20,
+        "Bitwise": 20,
+        "ShiftRight": 19,
+        "MemoryInstrs": 18,
+        "ShiftLeft": 14,
+        "Lt": 16,
+        "Branch": 15,
+        "Jump": 3,
+        "MemoryLocal": 12,
+        "CloClz": 11,
+        "Mul": 0,
+        "Global": 15,
+        "MovCond": 14
+      }
     }
   ],
   "22": [

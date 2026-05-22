@@ -1,12 +1,12 @@
 use std::borrow::{Borrow, BorrowMut};
 
-use p3_air::{Air, AirBuilder, BaseAir, PairBuilder};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
-use p3_field::FieldAlgebra;
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 #[cfg(feature = "sys")]
 use p3_koala_bear::KoalaBear;
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
 use zkm_stark::air::MachineAir;
@@ -82,8 +82,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
     fn generate_preprocessed_trace(&self, program: &Self::Program) -> Option<RowMajorMatrix<F>> {
         let mut rows: Vec<[F; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
         let commit_pv_hash_instrs = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::CommitPublicValues(instr) = instruction {
                     Some(instr)
@@ -135,8 +134,7 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
         let mut rows: Vec<[KoalaBear; NUM_PUBLIC_VALUES_PREPROCESSED_COLS]> = Vec::new();
         let commit_pv_hash_instrs = program
-            .instructions
-            .iter()
+            .iter_instructions()
             .filter_map(|instruction| {
                 if let Instruction::CommitPublicValues(instr) = instruction {
                     Some(unsafe {
@@ -288,14 +286,14 @@ impl<F: PrimeField32> MachineAir<F> for PublicValuesChip {
 
 impl<AB> Air<AB> for PublicValuesChip
 where
-    AB: ZKMRecursionAirBuilder + PairBuilder,
+    AB: ZKMRecursionAirBuilder,
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let local = main.row_slice(0);
+        let local = main.current_slice();
         let local: &PublicValuesCols<AB::Var> = (*local).borrow();
-        let prepr = builder.preprocessed();
-        let local_prepr = prepr.row_slice(0);
+        let prepr = builder.preprocessed().clone();
+        let local_prepr = prepr.current_slice();
         let local_prepr: &PublicValuesPreprocessedCols<AB::Var> = (*local_prepr).borrow();
         let pv = builder.public_values();
         let pv_elms: [AB::Expr; RECURSIVE_PROOF_NUM_PV_ELTS] =
@@ -321,7 +319,7 @@ mod tests {
     use std::{array, borrow::Borrow};
     use zkm_stark::{air::MachineAir, StarkGenericConfig};
 
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
 
@@ -341,7 +339,7 @@ mod tests {
         type F = <SC as StarkGenericConfig>::Val;
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
-        let mut random_felt = move || -> F { F::from_canonical_u32(rng.gen_range(0..1 << 16)) };
+        let mut random_felt = move || -> F { F::from_u32(rng.gen_range(0..1 << 16)) };
         let random_pv_elms: [F; RECURSIVE_PROOF_NUM_PV_ELTS] = array::from_fn(|_| random_felt());
         let addr = 0u32;
         let public_values_a: [u32; RECURSIVE_PROOF_NUM_PV_ELTS] =
@@ -362,7 +360,10 @@ mod tests {
         let public_values_a: &RecursionPublicValues<u32> = public_values_a.as_slice().borrow();
         instructions.push(instr::commit_public_values(public_values_a));
 
-        let program = RecursionProgram { instructions, ..Default::default() };
+        let program = RecursionProgram {
+            seq_blocks: crate::RawProgram::from_linear(instructions),
+            ..Default::default()
+        };
 
         run_recursion_test_machines(program);
     }
@@ -373,7 +374,7 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(0xDEADBEEF);
         let random_felts: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =
-            array::from_fn(|_| F::from_canonical_u32(rng.gen_range(0..1 << 16)));
+            array::from_fn(|_| F::from_u32(rng.gen_range(0..1 << 16)));
         let random_public_values: &RecursionPublicValues<F> = random_felts.as_slice().borrow();
 
         let shard = ExecutionRecord {

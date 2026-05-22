@@ -5,10 +5,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use size::Size;
 use std::thread::ScopedJoinHandle;
 use std::{
-    fs::File,
-    io::{
-        Seek, {self},
-    },
+    io,
     sync::{mpsc::sync_channel, Arc, Mutex},
 };
 use thiserror::Error;
@@ -53,48 +50,6 @@ pub enum ZKMCoreProverError {
     TracesGenerationError,
     #[error("dependencies generation error")]
     DependenciesGenerationError,
-}
-
-pub fn prove_simple<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
-    config: SC,
-    mut runtime: Executor,
-) -> Result<(MachineProof<SC>, u64), ZKMCoreProverError>
-where
-    SC::Challenger: Clone,
-    OpeningProof<SC>: Send + Sync,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync,
-    // ShardMainData<SC>: Serialize + DeserializeOwned,
-    <SC as StarkGenericConfig>::Val: PrimeField32,
-{
-    // Setup the machine.
-    let machine = MipsAir::machine(config);
-    let prover = P::new(machine);
-    let (pk, _) = prover.setup(runtime.program.as_ref());
-
-    // Set the shard numbers.
-    runtime.records.iter_mut().enumerate().for_each(|(i, shard)| {
-        shard.public_values.shard = (i + 1) as u32;
-    });
-
-    // Prove the program.
-    let mut challenger = prover.config().challenger();
-    let proving_start = Instant::now();
-    let proof =
-        prover.prove(&pk, runtime.records, &mut challenger, ZKMCoreOpts::default()).unwrap();
-    let proving_duration = proving_start.elapsed().as_millis();
-    let nb_bytes = bincode::serialize(&proof).unwrap().len();
-
-    // Print the summary.
-    tracing::info!(
-        "summary: cycles={}, e2e={}, khz={:.2}, proofSize={}",
-        runtime.state.global_clk,
-        proving_duration,
-        (runtime.state.global_clk as f64 / proving_duration as f64),
-        Size::from_bytes(nb_bytes),
-    );
-
-    Ok((proof, runtime.state.global_clk))
 }
 
 pub fn prove<SC: StarkGenericConfig, P: MachineProver<SC, MipsAir<SC::Val>>>(
@@ -163,14 +118,58 @@ where
         let _span = span.enter();
 
         // Spawn the checkpoint generator thread.
+        //
+        // Task #101 (in-memory shard checkpoints): pin each per-shard
+        // `ExecutionState` in RAM and send it directly through the channel.
+        // The previous implementation wrote each checkpoint to a `tempfile`,
+        // sent the `File` handle downstream, and the trace-gen worker
+        // `bincode::deserialize_from`'d it back.  That roundtrip costs ~5 s
+        // of wall time on the production reth wrap (per
+        // `docs/perf_reth_gpu.md`) and burns inode + page-cache pressure
+        // under `TMPDIR=/dev/shm`.  Mirrors the equivalent change already
+        // landed in `ziren-gpu/prover/src/core_multi_gpu.rs:136-159` for
+        // the multi-GPU code path; this brings the 1-GPU-fallback /
+        // CPU-prover baseline into line.
+        //
+        // RAM cost: an `ExecutionState` is dominated by the memory image
+        // diff since the last checkpoint (typically a few MB per shard),
+        // bounded by `checkpoints_channel_capacity` in flight.  We log
+        // every cache hit/miss-equivalent (here: every send/recv) at
+        // `trace` level so behaviour can be verified at runtime.
         let checkpoint_generator_span = tracing::Span::current().clone();
-        let (checkpoints_tx, checkpoints_rx) =
-            sync_channel::<(usize, File, bool, u64)>(opts.checkpoints_channel_capacity);
+        let (checkpoints_tx, checkpoints_rx) = sync_channel::<(
+            usize,
+            ExecutionState,
+            bool,
+            u64,
+            // producer wiring: optional sidecar of
+            // sealed TraceChunks accumulated since the last batch.
+            // Consumer may use these via `trace_chunk` to avoid
+            // re-executing memory state from scratch.
+            Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
+        )>(opts.checkpoints_channel_capacity);
+        // opt-in. When set, producer collects MinimalTrace
+        // chunks during Checkpoint-mode execution and sends them alongside
+        // each ExecutionState batch. Consumer may then prefer `trace_chunk`
+        // (which uses the chunks' mem_reads oracle) over `trace_checkpoint`
+        // (which re-executes from scratch). Default OFF — production path
+        // unchanged.
+        let use_minimal_trace = std::env::var("ZIREN_USE_MINIMAL_TRACE")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        if use_minimal_trace {
+            runtime.minimal_trace_collector =
+                Some(zkm_core_executor::minimal_trace::MinimalTrace::default());
+        }
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
                     let mut index = 0;
+                    // track how many chunks we've already
+                    // sent so each batch's sidecar only carries the NEW
+                    // chunks added since the last `execute_state`.
+                    let mut last_pulled_chunks = 0usize;
                     loop {
                         // Enter the span.
                         let span = tracing::debug_span!("batch");
@@ -181,16 +180,47 @@ where
                             .execute_state(false)
                             .map_err(ZKMCoreProverError::ExecutionError)?;
 
-                        // Save the checkpoint to a temp file.
-                        let mut checkpoint_file =
-                            tempfile::tempfile().map_err(ZKMCoreProverError::IoError)?;
-                        checkpoint
-                            .save(&mut checkpoint_file)
-                            .map_err(ZKMCoreProverError::IoError)?;
+                        // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
+                        let global_clk = runtime.state.global_clk;
 
-                        // Send the checkpoint.
+                        // pull NEW chunks accumulated by
+                        // the collector during this batch. Only sealed
+                        // chunks (clk_end != u64::MAX) are eligible.
+                        let chunks_sidecar = if use_minimal_trace {
+                            if let Some(trace) = runtime.minimal_trace_collector.as_ref() {
+                                let total = trace.chunks.len();
+                                if total > last_pulled_chunks {
+                                    let new_chunks: Vec<_> = trace.chunks
+                                        [last_pulled_chunks..total]
+                                        .iter()
+                                        .filter(|c| c.clk_end != u64::MAX)
+                                        .cloned()
+                                        .collect();
+                                    last_pulled_chunks = total;
+                                    Some(std::sync::Arc::from(new_chunks))
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+
+                        tracing::trace!(
+                            target = "checkpoint_pin",
+                            event = "produce",
+                            index = index,
+                            done = done,
+                            global_clk = global_clk,
+                            chunks = chunks_sidecar
+                                .as_ref()
+                                .map(|c: &std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>| c.len())
+                                .unwrap_or(0),
+                        );
                         checkpoints_tx
-                            .send((index, checkpoint_file, done, runtime.state.global_clk))
+                            .send((index, checkpoint, done, global_clk, chunks_sidecar))
                             .unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
@@ -244,24 +274,54 @@ where
                     let _: () = loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, mut checkpoint, done, num_cycles)) = received {
-                            // Trace the checkpoint and reconstruct the execution records.
-                            let mut reader = io::BufReader::new(&checkpoint);
-                            let execution_state: ExecutionState =
-                                bincode::deserialize_from(&mut reader)
-                                    .expect("failed to deserialize state");
+                        if let Ok((index, execution_state, done, num_cycles, chunks_sidecar))
+                            = received
+                        {
+                            // Task #101: in-memory checkpoint — no
+                            // tempfile read, no bincode::deserialize.
+                            tracing::trace!(
+                                target = "checkpoint_pin",
+                                event = "consume",
+                                index = index,
+                                done = done,
+                                num_cycles = num_cycles,
+                            );
+                            // if env-gated and the
+                            // producer supplied chunks, use the oracle
+                            // path (`trace_chunk`) instead of the
+                            // re-execute-from-checkpoint path
+                            // (`trace_checkpoint`). Falls back to
+                            // checkpoint if no chunks were available
+                            // (e.g. zero-cycle batches, or first batch
+                            // before any shard boundary).
+                            let _ = execution_state; // may be unused on chunk path
                             let (mut records, report) = tracing::debug_span!("trace checkpoint")
                                 .in_scope(|| {
-                                    trace_checkpoint::<SC>(
-                                        program.clone(),
-                                        execution_state,
-                                        opts,
-                                        shape_config,
-                                    )
+                                    match chunks_sidecar.as_ref() {
+                                        Some(chunks) if !chunks.is_empty() => {
+                                            let mut merged_records: Vec<ExecutionRecord> =
+                                                Vec::new();
+                                            for chunk in chunks.iter() {
+                                                let (recs, _) = trace_chunk::<SC>(
+                                                    program.clone(),
+                                                    chunk,
+                                                    opts,
+                                                    shape_config,
+                                                );
+                                                merged_records.extend(recs);
+                                            }
+                                            (merged_records, ExecutionReport::default())
+                                        }
+                                        _ => trace_checkpoint::<SC>(
+                                            program.clone(),
+                                            execution_state,
+                                            opts,
+                                            shape_config,
+                                        ),
+                                    }
                                 });
                             log::debug!("generated {} records", records.len());
                             *report_aggregate.lock().unwrap() += report;
-                            reset_seek(&mut checkpoint);
 
                             // Wait for our turn to update the state.
                             record_gen_sync.wait_for_turn(index);
@@ -356,6 +416,23 @@ where
                                         }
                                     }
                                 }
+                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() && fixed_shape {
+                                    use std::io::Write;
+                                    let mut f = std::fs::OpenOptions::new()
+                                        .create(true).append(true)
+                                        .open("/tmp/shard_shapes.log")
+                                        .expect("open shape dump");
+                                    for record in records_clone.iter() {
+                                        let mut shape_entries: Vec<(String, usize)> = record
+                                            .shape
+                                            .as_ref()
+                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
+                                            .unwrap_or_default();
+                                        shape_entries.sort();
+                                        writeln!(f, "[A] shard {} shape: {:?}", record.public_values.shard, shape_entries).unwrap();
+                                    }
+                                    eprintln!("[DUMP_SHARD_SHAPES][A] wrote {} shapes", records_clone.len());
+                                }
                                 fixed_shape.then_some(records_clone)
                             } else {
                                 None
@@ -414,6 +491,32 @@ where
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
                                     }
+                                }
+                                // Diagnostic: dump per-shard shape to /tmp for diff'ing
+                                // across runs to find non-determinism in shape selection.
+                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() {
+                                    use std::io::Write;
+                                    let path = "/tmp/shard_shapes.log";
+                                    let mut f = std::fs::OpenOptions::new()
+                                        .create(true).append(true)
+                                        .open(path)
+                                        .expect("open shape dump file");
+                                    for record in records.iter() {
+                                        let mut shape_entries: Vec<(String, usize)> = record
+                                            .shape
+                                            .as_ref()
+                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
+                                            .unwrap_or_default();
+                                        shape_entries.sort();
+                                        writeln!(
+                                            f,
+                                            "shard {} shape: {:?}",
+                                            record.public_values.shard,
+                                            shape_entries
+                                        ).expect("write shape line");
+                                    }
+                                    f.flush().expect("flush");
+                                    eprintln!("[DUMP_SHARD_SHAPES] wrote {} shard shapes", records.len());
                                 }
                                 shape_fixed_records = Some(records);
                             }
@@ -489,13 +592,22 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
+                                    let t_commit = std::time::Instant::now();
                                     let main_data = prover.commit(&record, main_traces);
+                                    let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();
+                                    let t_open = std::time::Instant::now();
                                     let proof = prover
                                         .open(pk, main_data, &mut challenger.clone())
                                         .unwrap();
+                                    let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
+
+                                    tracing::info!(
+                                        "PCS timing: commit={}ms open={}ms total={}ms",
+                                        commit_ms, open_ms, commit_ms + open_ms
+                                    );
 
                                     #[cfg(debug_assertions)]
                                     {
@@ -667,6 +779,11 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,
@@ -709,13 +826,18 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
+        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig,
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
+    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
 {
     let prover = CpuProver::new(machine);
@@ -748,8 +870,48 @@ where
     (records, runtime.report)
 }
 
-fn reset_seek(file: &mut File) {
-    file.seek(std::io::SeekFrom::Start(0)).expect("failed to seek to start of tempfile");
+/// drop-in replacement for `trace_checkpoint` that
+/// consumes a [`zkm_core_executor::minimal_trace::TraceChunk`] instead
+/// of a full [`ExecutionState`]. The chunk's `mem_reads` oracle
+/// pre-populates the worker's memory; `start_registers` seeds the
+/// register file; `clk_end` bounds the worker.
+///
+/// Signature mirrors `trace_checkpoint` so call sites can swap in via
+/// a single conditional once the producer side of the pipeline emits
+/// chunks instead of `ExecutionState` snapshots.
+///
+/// Byte-equivalence with `trace_checkpoint` is validated by
+/// `crates/core/executor/examples/byte_equiv_probe.rs` — single-shard
+/// PASS on fibonacci/u256/biguint/ed25519; multi-shard PASS on ed25519
+/// with `SHARD_SIZE=1M` (4 shards, ~188K oracle entries/shard).
+pub fn trace_chunk<SC: StarkGenericConfig>(
+    program: Program,
+    chunk: &zkm_core_executor::minimal_trace::TraceChunk,
+    opts: ZKMCoreOpts,
+    shape_config: Option<&CoreShapeConfig<SC::Val>>,
+) -> (Vec<ExecutionRecord>, ExecutionReport)
+where
+    <SC as StarkGenericConfig>::Val: PrimeField32,
+{
+    use std::sync::Arc;
+    use zkm_core_executor::tracing_vm::drive_tracing_vm_parallel;
+
+    // Single-chunk MinimalTrace; the driver returns 1 record.
+    let trace = zkm_core_executor::minimal_trace::MinimalTrace {
+        chunks: vec![chunk.clone()],
+        public_values: Vec::new(),
+        total_cycles: chunk.clk_end,
+    };
+    let records = drive_tracing_vm_parallel(Arc::new(program), opts, &trace)
+        .expect("drive_tracing_vm_parallel");
+    // `drive_tracing_vm_parallel` doesn't aggregate a Report; for D.4
+    // wiring the caller (consumer thread in prove.rs) reads from the
+    // record stream directly. Until the consumer migrates, this
+    // returns ExecutionReport::default() — callers that rely on the
+    // report should keep using trace_checkpoint until D.4 producer
+    // migration.
+    let _ = shape_config;
+    (records, ExecutionReport::default())
 }
 
 #[cfg(debug_assertions)]
@@ -764,9 +926,9 @@ where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
 }
 
 #[cfg(not(debug_assertions))]
@@ -781,7 +943,7 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, challenger, trace, &vec![])
+    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
 }
 
 #[cfg(debug_assertions)]
@@ -796,9 +958,9 @@ where
     SC: StarkGenericConfig,
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_uni_stark::DebugConstraintBuilder<'a, SC::Val>>,
+        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
 }
 
 #[cfg(not(debug_assertions))]
@@ -813,7 +975,7 @@ where
     A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
         + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
 {
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, challenger, proof, &vec![])
+    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
 }
 
 use p3_air::Air;

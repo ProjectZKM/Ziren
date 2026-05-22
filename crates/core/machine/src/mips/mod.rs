@@ -1192,10 +1192,10 @@ pub mod tests {
         assert_eq!(vk.chip_information.len(), deserialized_vk.chip_information.len());
         for (a, b) in vk.chip_information.iter().zip(deserialized_vk.chip_information.iter()) {
             assert_eq!(a.0, b.0);
-            assert_eq!(a.1.log_n, b.1.log_n);
+            assert_eq!(a.1.log_size, b.1.log_size);
             assert_eq!(a.1.shift, b.1.shift);
-            assert_eq!(a.2.height, b.2.height);
-            assert_eq!(a.2.width, b.2.width);
+            assert_eq!(a.2.1, b.2.1);
+            assert_eq!(a.2.0, b.2.0);
         }
         assert_eq!(vk.chip_ordering, deserialized_vk.chip_ordering);
     }
@@ -1219,9 +1219,9 @@ pub mod tests {
     //   #7  exit_group result zeroed
     //   #8  fnctl(a1==1) result constrained
     //   #9  is_a0_0/1/2 bidirectional
-    //   #10 write: read value = prev_value
-    //   #11 mmap: bytewise heap update via AddOperation
-    //   #12 is_a1_1/3 bidirectional
+    //   write: read value = prev_value
+    //   mmap: bytewise heap update via AddOperation
+    //   is_a1_1/3 bidirectional
     // -----------------------------------------------------------------------
 
     /// Exercises SYS_WRITE, exit_group, mmap, clone, brk, fcntl, and nop

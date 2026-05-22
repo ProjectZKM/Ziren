@@ -9,7 +9,7 @@ use zkm_stark::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
 use num::BigUint;
 
 use p3_air::AirBuilder;
-use p3_field::{FieldAlgebra, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_curves::params::{FieldParameters, Limbs};
 
 use zkm_derive::AlignedBorrow;
@@ -41,8 +41,8 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
             assert!(byte <= modulus_byte);
             if byte < modulus_byte {
                 *flag = 1;
-                self.lhs_comparison_byte = F::from_canonical_u8(*byte);
-                self.rhs_comparison_byte = F::from_canonical_u8(*modulus_byte);
+                self.lhs_comparison_byte = F::from_u8(*byte);
+                self.rhs_comparison_byte = F::from_u8(*modulus_byte);
                 record.add_byte_lookup_event(ByteLookupEvent {
                     opcode: ByteOpcode::LTU,
                     a1: 1,
@@ -55,7 +55,7 @@ impl<F: PrimeField32, P: FieldParameters> FieldLtCols<F, P> {
         }
 
         for (byte, flag) in izip!(byte_flags.iter(), self.byte_flags.0.iter_mut()) {
-            *flag = F::from_canonical_u8(*byte);
+            *flag = F::from_u8(*byte);
         }
     }
 }
@@ -87,7 +87,7 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
         // Check the flags are of valid form.
 
         // Verify that only one flag is set to one.
-        let mut sum_flags: AB::Expr = AB::Expr::zero();
+        let mut sum_flags: AB::Expr = AB::Expr::ZERO;
         for &flag in self.byte_flags.0.iter() {
             // Assert that the flag is boolean.
             builder.when(is_real.clone()).assert_bool(flag);
@@ -101,13 +101,13 @@ impl<V: Copy, P: FieldParameters> FieldLtCols<V, P> {
 
         // A flag to indicate whether an equality check is necessary (this is for all bytes from
         // most significant until the first inequality.
-        let mut is_inequality_visited = AB::Expr::zero();
+        let mut is_inequality_visited = AB::Expr::ZERO;
 
         let rhs: Polynomial<_> = rhs.clone().into();
         let lhs: Polynomial<_> = lhs.clone().into();
 
-        let mut lhs_comparison_byte = AB::Expr::zero();
-        let mut rhs_comparison_byte = AB::Expr::zero();
+        let mut lhs_comparison_byte = AB::Expr::ZERO;
+        let mut rhs_comparison_byte = AB::Expr::ZERO;
         for (lhs_byte, rhs_byte, &flag) in izip!(
             lhs.coefficients().iter().rev(),
             rhs.coefficients().iter().rev(),

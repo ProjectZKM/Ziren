@@ -1,10 +1,10 @@
-use std::{fs::File, path::Path};
+use std::{borrow::Borrow, fs::File, path::Path};
 
 use anyhow::Result;
 use clap::ValueEnum;
-use p3_bn254_fr::Bn254Fr;
-use p3_commit::{Pcs, TwoAdicMultiplicativeCoset};
-use p3_field::{FieldAlgebra, PrimeField, PrimeField32, TwoAdicField};
+use p3_bn254_fr::Bn254;
+use p3_commit::Pcs;
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
@@ -13,6 +13,9 @@ use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 use zkm_recursion_circuit::machine::{
     ZKMCompressWitnessValues, ZKMDeferredWitnessValues, ZKMRecursionWitnessValues,
 };
+use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
+use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
 
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
@@ -47,7 +50,7 @@ pub trait HashableKey {
     /// Hash the key into a digest of  u32 elements.
     fn hash_u32(&self) -> [u32; DIGEST_SIZE];
 
-    fn hash_bn254(&self) -> Bn254Fr {
+    fn hash_bn254(&self) -> Bn254 {
         koalabears_to_bn254(&self.hash_koalabear())
     }
 
@@ -72,24 +75,25 @@ impl HashableKey for ZKMVerifyingKey {
     }
 }
 
-impl<SC: StarkGenericConfig<Val = KoalaBear, Domain = TwoAdicMultiplicativeCoset<KoalaBear>>>
+impl<SC: StarkGenericConfig<Val = KoalaBear>>
     HashableKey for StarkVerifyingKey<SC>
 where
-    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: AsRef<[KoalaBear; DIGEST_SIZE]>,
+    <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
         let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
         let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * prep_domains.len());
         let mut inputs = Vec::with_capacity(num_inputs);
-        inputs.extend(self.commit.as_ref());
+        let cap: &[[KoalaBear; DIGEST_SIZE]] = self.commit.borrow();
+        inputs.extend(&cap[0]);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
         for domain in prep_domains {
-            inputs.push(KoalaBear::from_canonical_usize(domain.log_n));
-            let size = 1 << domain.log_n;
-            inputs.push(KoalaBear::from_canonical_usize(size));
-            let g = KoalaBear::two_adic_generator(domain.log_n);
+            inputs.push(KoalaBear::from_usize(domain.log_size));
+            let size = 1 << domain.log_size;
+            inputs.push(KoalaBear::from_usize(size));
+            let g = KoalaBear::two_adic_generator(domain.log_size);
             inputs.push(domain.shift);
             inputs.push(g);
         }
@@ -233,4 +237,14 @@ pub enum ZKMCircuitWitness {
     Core(ZKMRecursionWitnessValues<CoreSC>),
     Deferred(ZKMDeferredWitnessValues<InnerSC>),
     Compress(ZKMCompressWitnessValues<InnerSC>),
+    /// Basefold-shape normalize input — consumes `BasefoldShardProof`s from
+    /// the core prover (carried on `ShardProof.basefold_shard_proof`).
+    /// Dispatches to `build_normalize_basefold_program` during compress.
+    CoreBasefold(ZKMCoreBasefoldWitnessValues<InnerSC>),
+    /// Basefold-shape compose input — tree-reduction layer.
+    /// Dispatches to `build_compose_basefold_program`.
+    ComposeBasefold(ZKMCompressBasefoldWitnessValues<InnerSC>),
+    /// Basefold-shape deferred input — verifies already-recursed deferred
+    /// branches. Dispatches to `build_deferred_basefold_program`.
+    DeferredBasefold(ZKMDeferredBasefoldWitnessValues<InnerSC>),
 }

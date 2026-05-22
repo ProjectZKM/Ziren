@@ -91,7 +91,7 @@ pub fn populate_external_round<F: PrimeField32, const DEGREE: usize>(
         let round = if r < NUM_EXTERNAL_ROUNDS / 2 { r } else { r + NUM_INTERNAL_ROUNDS };
         let mut add_rc = *round_state;
         for i in 0..WIDTH {
-            add_rc[i] += F::from_wrapped_u32(RC_16_30_U32[round][i]);
+            add_rc[i] += F::from_u32(RC_16_30_U32[round][i]);
         }
 
         // Apply the sboxes.
@@ -127,7 +127,7 @@ pub fn populate_internal_rounds<F: PrimeField32>(
         // Optimization: Since adding a constant is a degree 1 operation, we can avoid adding
         // columns for it, just like for external rounds.
         let round = r + NUM_EXTERNAL_ROUNDS / 2;
-        let add_rc = state[0] + F::from_wrapped_u32(RC_16_30_U32[round][0]);
+        let add_rc = state[0] + F::from_u32(RC_16_30_U32[round][0]);
 
         // Apply the sboxes.
         // Optimization: since the linear layer that comes after the sbox is degree 1, we can
