@@ -889,8 +889,55 @@ where
     use p3_field::PrimeCharacteristicRing;
     use std::sync::OnceLock;
 
-    if !std::env::var("ZIREN_GPU_BATCHED_CONSTRAINT_EVAL")
-        .map(|v| v == "1").unwrap_or(false)
+    // Dispatch precedence (May 2026 — SP1 merged-bytecode port):
+    //
+    //   1. `ZIREN_GPU_MERGED_BYTECODE=1` — try the merged-program hook
+    //      first.  On success (non-empty return), use those results
+    //      verbatim and skip the batched/per-chip paths.  On total
+    //      failure (empty return or hook unregistered), fall through
+    //      to the batched hook below.
+    //   2. `ZIREN_GPU_BATCHED_CONSTRAINT_EVAL=1` — batched per-chip
+    //      bucket dispatch (legacy GPU path).
+    //   3. Neither set → per-chip GPU dispatch (or host CPU).
+    //
+    // The merged dispatch can be ENABLED INDEPENDENTLY of the batched
+    // env — if `ZIREN_GPU_MERGED_BYTECODE=1` is set but the merged
+    // hook is unregistered, the warn fires once and we still try the
+    // batched hook (if its env is set).  If neither env is set we
+    // return early below so the caller's per-chip/host path runs.
+    let merged_enabled = std::env::var("ZIREN_GPU_MERGED_BYTECODE")
+        .map(|v| v == "1").unwrap_or(false);
+    if merged_enabled {
+        if let Some(merged_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_merged_hook()
+        {
+            // Build the same chip-name/trace/alpha vectors the batched
+            // hook consumes — share the construction below via a local
+            // closure deferred until after we've assembled them.  We
+            // can't refactor here without churn, so we'll let the
+            // existing code build the vectors, then try the merged
+            // hook before the batched hook at the dispatch site below.
+            // Set a thread-local sentinel that gates the merged-try
+            // branch later in this function.  (No thread-local needed
+            // in practice — the boolean below carries the intent.)
+            // The actual try happens at the dispatch site labeled
+            // `MERGED_DISPATCH_SITE` below.
+            let _ = merged_hook; // Capture proves availability.
+        } else {
+            static MERGED_MISSING_ONCE: OnceLock<()> = OnceLock::new();
+            MERGED_MISSING_ONCE.get_or_init(|| {
+                tracing::warn!(
+                    "ZIREN_GPU_MERGED_BYTECODE=1 but no merged hook registered; \
+                     ziren-gpu must call register_with_zkm_stark_merged at startup \
+                     after initialize_merged_program. Falling back to batched dispatch."
+                );
+            });
+        }
+    }
+
+    if !merged_enabled
+        && !std::env::var("ZIREN_GPU_BATCHED_CONSTRAINT_EVAL")
+            .map(|v| v == "1").unwrap_or(false)
     {
         return None;
     }
@@ -1005,6 +1052,75 @@ where
     // the cross-shard hook's per-chip descriptor is identical to
     // the per-shard variant's — see `prove_constraints_cross_shard_gpu`
     // docstring in `ziren-gpu/core/src/basefold/constraint_eval.rs`.
+    // ── SP1 merged-bytecode dispatch (preempts batched + cross-shard) ──
+    //
+    // When `ZIREN_GPU_MERGED_BYTECODE=1` AND the merged hook is
+    // registered, dispatch through the merged-program hook first.
+    // The merged hook returns:
+    //   * empty Vec      → total dispatch failure / merged program
+    //                      uninitialised → fall through to batched.
+    //   * len-n with at  → kept results win; we skip batched + cross-shard.
+    //     least one Some
+    //   * len-n all None → no chip matched (shouldn't happen after
+    //                      initialize_merged_program) → fall through.
+    //
+    // The merged path's per-chip output is byte-identical to the
+    // batched path's (same `computeConstraintValuesBatched` kernel,
+    // same per-chip descriptor; only the `eval_program` /
+    // `eval_constants_f` / `eval_constants_ef` pointer source differs
+    // — merged points into shared device pools, batched uploads per
+    // shard).  See ziren-gpu merged_program module docstring.
+    if merged_enabled {
+        if let Some(merged_hook) =
+            crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_merged_hook()
+        {
+            let merged_out = merged_hook(
+                &chip_names_refs, &main_row_majors, &main_widths, &prep_row_majors,
+                &prep_widths, public_values_kb, &alphas, &local_cumulative_sums,
+                &global_cumulative_sums_xy, &num_vars_list,
+            );
+            if !merged_out.is_empty() && merged_out.iter().any(Option::is_some) {
+                static MERGED_FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                MERGED_FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "SP1 merged-bytecode constraint-eval FIRED \
+                         (ZIREN_GPU_MERGED_BYTECODE=1, merged hook dispatched)"
+                    );
+                });
+                debug_assert_eq!(merged_out.len(), keep_idx.len());
+                let mut result: Vec<Option<Vec<Challenge<SC>>>> =
+                    (0..chips.len()).map(|_| None).collect();
+                let mut any_kept_m = false;
+                for (kept_pos, table_opt) in merged_out.into_iter().enumerate() {
+                    let chip_idx = keep_idx[kept_pos];
+                    if let Some(t) = table_opt {
+                        let table_ch: Vec<Challenge<SC>> = unsafe {
+                            let mut me = std::mem::ManuallyDrop::new(t);
+                            Vec::from_raw_parts(
+                                me.as_mut_ptr().cast::<Challenge<SC>>(),
+                                me.len(),
+                                me.capacity(),
+                            )
+                        };
+                        result[chip_idx] = Some(table_ch);
+                        any_kept_m = true;
+                    }
+                }
+                if any_kept_m {
+                    return Some(result);
+                }
+            } else {
+                static MERGED_EMPTY_ONCE: OnceLock<()> = OnceLock::new();
+                MERGED_EMPTY_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        "merged constraint-eval returned empty/no-kept results — \
+                         falling through to batched dispatch"
+                    );
+                });
+            }
+        }
+    }
+
     let batched_out: Vec<Option<Vec<Ef4>>> = if cross_shard_batch_enabled() {
         if let Some(cross_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_cross_shard_hook()
