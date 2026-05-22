@@ -565,32 +565,8 @@ where
             DslIr::PrintV(dst) => f(self.print_f(dst)),
             DslIr::PrintF(dst) => f(self.print_f(dst)),
             DslIr::PrintE(dst) => f(self.print_e(dst)),
-            DslIr::CircuitV2HintFelts(output) => {
-                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
-                    let instr = self.hint(&output);
-                    if let Instruction::Hint(HintInstr { output_addrs_mults }) = &instr {
-                        for (a, _m) in output_addrs_mults {
-                            eprintln!("[read alloc] addr={} type=felt", a.as_usize());
-                        }
-                    }
-                    f(instr)
-                } else {
-                    f(self.hint(&output))
-                }
-            }
-            DslIr::CircuitV2HintExts(output) => {
-                if std::env::var("ZIREN_DEBUG_READ_TYPES").is_ok() {
-                    let instr = self.hint(&output);
-                    if let Instruction::Hint(HintInstr { output_addrs_mults }) = &instr {
-                        for (a, _m) in output_addrs_mults {
-                            eprintln!("[read alloc] addr={} type=ext", a.as_usize());
-                        }
-                    }
-                    f(instr)
-                } else {
-                    f(self.hint(&output))
-                }
-            }
+            DslIr::CircuitV2HintFelts(output) => f(self.hint(&output)),
+            DslIr::CircuitV2HintExts(output) => f(self.hint(&output)),
             DslIr::CircuitExt2Felt(felts, ext) => f(self.ext2felts(felts, ext)),
             DslIr::CycleTrackerV2Enter(name) => {
                 consumer(Err(CompileOneErr::CycleTrackerEnter(name)))
@@ -810,17 +786,6 @@ where
             let mut outcomes: Vec<Outcome<Instruction<C::F>>> = Vec::new();
             match ir_instr {
                 DslIr::Parallel(par_blocks) => {
-                    // #259 unlock-chain diagnostic: count Parallel ops
-                    // reaching the compiler so we can compare against
-                    // the runtime-side parallelism_summary readback.
-                    if std::env::var("ZIREN_DEBUG_PARALLEL_COMPILE").is_ok() {
-                        let total_ops: usize = par_blocks.iter().map(|b| b.ops.vec.len()).sum();
-                        eprintln!(
-                            "[compiler_parallel] sub_blocks={} total_ops={}",
-                            par_blocks.len(),
-                            total_ops
-                        );
-                    }
                     // Flush the in-progress Basic block before opening the
                     // Parallel boundary.
                     if !current_basic.is_empty() {
