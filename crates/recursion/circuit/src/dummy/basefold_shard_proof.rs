@@ -63,9 +63,11 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 /// Key shape rules (mirror SP1 exactly):
 ///
 ///   * `round_proofs.len() == log_max_row_height - 1`
-///   * per-round sumcheck dimension `i + log2_ceil(total_num_interactions) + 1`
+///   * per-round sumcheck dimension `i + log_interactions + 1`
+///     where `log_interactions = log2_ceil(Σ chip.num_lookups.next_pow2())`
 ///   * `logup_evaluations.point.dimension() == log_max_row_height`
-///   * `circuit_output.numerator.len() == 1 << (log2_ceil(total_num_interactions) + 1)`
+///   * `circuit_output.numerator.len() == 1 << (log_interactions + 1)`
+///     (per-chip-padded sum — matches host prover + in-circuit verifier)
 ///   * per-chip `main_trace_evaluations.len() == chip.air.width()`
 ///   * per-chip `preprocessed_trace_evaluations` is `Some(...)` only
 ///     when `chip.preprocessed_width() > 0`
@@ -80,10 +82,29 @@ where
 {
     // Ziren's per-chip "interaction count" = sends + receives, exposed
     // as `Chip::num_lookups()` (see `crates/stark/src/chip.rs:99`).
-    // Equivalent to SP1's `chip.num_interactions()`.
-    let total_num_interactions: usize =
-        chips.iter().map(|chip| chip.num_lookups()).sum();
-    let log_interactions = log2_ceil_usize(total_num_interactions);
+    //
+    // **Sizing convention** (matches host prover + in-circuit verifier):
+    //
+    // Both the host prover (`first_layer.rs:507-508`) and the recursion
+    // verifier (`shard_basefold.rs::chip_metadata_from_chips`) compute
+    // `num_interaction_variables` as
+    //   `log2_ceil(Σ chip.num_lookups().next_power_of_two())`
+    // — per-chip-padded sum, then log-ceil.  SP1 uses raw sum + log-ceil
+    // instead, but Ziren diverged at `shard_basefold.rs:232-244` ("BUG
+    // FIX") to align with the host's column-width padding pattern.
+    //
+    // This dummy MUST mirror the verifier's expectation, otherwise the
+    // recursion-circuit `evaluate_mle_ext` assertion at
+    // `logup_gkr.rs:105` panics with `mle_evals.len() != 1 << dim`
+    // during VK regen / VERIFY_VK=true on shapes where any chip has
+    // a non-power-of-two interaction count (e.g. Recursion shape 0
+    // with [9,9,9]-style chips: raw-sum gives 2^14, padded-sum gives
+    // 2^15 → 16384 vs 32768 left/right mismatch).
+    let total_padded_interactions: usize = chips
+        .iter()
+        .map(|chip| chip.num_lookups().max(1).next_power_of_two())
+        .sum();
+    let log_interactions = log2_ceil_usize(total_padded_interactions);
     let output_size = 1usize << (log_interactions + 1);
 
     let circuit_output = LogUpGkrOutput {
