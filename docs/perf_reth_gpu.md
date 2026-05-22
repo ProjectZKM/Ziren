@@ -241,7 +241,9 @@ export PATH=/usr/local/cuda/bin:/usr/local/go/bin:$PATH
 source ~/.zkm-toolchain/env
 
 # Use a known-free GPU set and pin all the prover knobs.
-export ZIREN_USE_BASEFOLD=1 ZIREN_BASEFOLD_GPU=1 VERIFY_VK=false
+# (ZIREN_USE_BASEFOLD / ZIREN_BASEFOLD_GPU removed in env-phase-1 —
+#  basefold + GPU dispatch is the only path; no env-var selector.)
+export VERIFY_VK=false
 export ZKM_GPU_CORE_MAX_TASKS_PER_DEVICE=1
 export ZKM_GPU_RECURSION_MAX_TASKS_PER_DEVICE=1
 export DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY=512
