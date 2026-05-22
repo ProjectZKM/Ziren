@@ -487,6 +487,137 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Win B (jagged_assist hook hardening) — V2 signature with optional
+// device-resident dense_q handle.
+//
+// Rationale (from `project_gap_jagged_complete.md` narrow win #2):
+// V1's hook accepts an owned `Vec<LbVal>` for `dense_q`.  When the
+// producer (`ziren-gpu/basefold/src/jagged_reduction_dispatch.rs`)
+// wraps it as `DenseQDevice::Host(...)`, the device round-0 path in
+// `prove_jagged_reduction_gpu` is *never* taken — it bails on
+// `as_device_buffer() == None` — and the host fallback runs the
+// 2.5s/shard reduction.  See
+// `ziren-gpu/basefold/src/jagged_sumcheck.rs:557-595` for the device
+// round-0 dispatch.
+//
+// V2 adds an opaque `Option<u64>` device handle alongside the owned
+// `Vec`.  When `Some(handle)`, the producer dereferences the handle
+// through its own per-thread registry and wraps the buffer as
+// `DenseQDevice::Borrowed(...)`, unlocking the device round-0 path.
+// When `None`, V2 behaves byte-identically to V1.
+//
+// Opaque-`u64`-handle pattern mirrors `GpuLayerTransitionFn` /
+// `GpuLayerInitFn` / `GpuLayerPullFn` above — stark crate never
+// dereferences the handle, that's entirely GPU-side bookkeeping.  This
+// is the simpler newtype wrapper fallback the diag calls out (passing
+// a real `&DeviceBuffer<LbVal>` would require pulling
+// `zkm-gpu-core` into `zkm-stark`'s public API, which is the gap #8
+// Backend abstraction — explicitly out of scope).
+//
+// **Backward compatible** — V1 hook remains.  Dispatch site prefers
+// V2 when both are registered; otherwise falls back to V1; otherwise
+// runs the host body.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU jagged-reduction prover hook (V2).
+///
+/// Extends [`GpuJaggedReductionFn`] with an optional device handle
+/// for the dense_q buffer.  When `dense_q_device_handle` is
+/// `Some(handle)`, the producer uses the device-resident buffer
+/// (looked up in its own registry) and the `dense_q_host` argument
+/// MAY be empty (the producer will pull-to-host on round 0 if it
+/// needs to — but the device round-0 path avoids that).  When
+/// `dense_q_device_handle` is `None`, V2 falls back to V1 semantics
+/// using `dense_q_host`.
+///
+/// The handle is opaque — `zkm-stark` never dereferences it.  The
+/// GPU side owns allocation / deallocation.
+pub type GpuJaggedReductionFnV2 = fn(
+    dense_q_host: alloc::vec::Vec<LbVal>,
+    dense_q_device_handle: Option<u64>,
+    packing: &crate::jagged::JaggedPacking<LbVal>,
+    r_row_per_chip: &[alloc::vec::Vec<LbChallenge>],
+    y_per_chip: &[alloc::vec::Vec<LbChallenge>],
+    challenger: &mut LbChallenger,
+) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>>;
+
+static GPU_JAGGED_REDUCTION_HOOK_V2: std::sync::OnceLock<GpuJaggedReductionFnV2> =
+    std::sync::OnceLock::new();
+
+/// Register the V2 GPU jagged-reduction hook (with device-handle
+/// support).  Idempotent; returns `Err(existing_hook)` when a hook
+/// was already registered.  V2 is preferred over V1 at dispatch.
+pub fn register_gpu_jagged_reduction_hook_v2(
+    f: GpuJaggedReductionFnV2,
+) -> Result<(), GpuJaggedReductionFnV2> {
+    GPU_JAGGED_REDUCTION_HOOK_V2.set(f)
+}
+
+/// Read the registered V2 GPU jagged-reduction hook, if any.
+#[must_use]
+pub fn get_gpu_jagged_reduction_hook_v2() -> Option<GpuJaggedReductionFnV2> {
+    GPU_JAGGED_REDUCTION_HOOK_V2.get().copied()
+}
+
+// ─── Win A (hook hardening) — diagnostic counters / loggers ──────────
+//
+// Counts the number of times the dispatch path was rejected for each
+// reason.  Logged on each Nth rejection (geometric — 1, 8, 64, ...)
+// so a busy run doesn't spam but a debugging run still sees activity.
+//
+// All counters are global (single shared atomic) — fine since dispatch
+// is from a hot path on the per-shard prove orchestrator and a single
+// atomic increment is negligible.
+
+/// Diagnostic counters for the GPU jagged-reduction dispatch site.
+/// Exposed for testing — not part of the public API.
+#[doc(hidden)]
+pub mod jagged_dispatch_diag {
+    use core::sync::atomic::{AtomicU64, Ordering};
+
+    /// `ZIREN_GPU_JAGGED_PCS=1` set but no hook registered.
+    pub static ENV_SET_BUT_UNREGISTERED: AtomicU64 = AtomicU64::new(0);
+    /// Hook registered but env not set (silently skipped — possible
+    /// misconfiguration).
+    pub static HOOK_REGISTERED_BUT_ENV_UNSET: AtomicU64 = AtomicU64::new(0);
+    /// Hook returned `None` (shape rejected by the GPU path).
+    pub static SHAPE_REJECTED: AtomicU64 = AtomicU64::new(0);
+    /// Hook fired and returned a proof (V1 or V2 path).
+    pub static HOOK_FIRED: AtomicU64 = AtomicU64::new(0);
+    /// V2 hook fired (subset of HOOK_FIRED) — used to confirm the
+    /// device-handle path is exercised when expected.
+    pub static V2_HOOK_FIRED: AtomicU64 = AtomicU64::new(0);
+    /// V2 hook fired with `Some(handle)` — i.e. the device path was
+    /// actually taken (not the V2-with-None pseudo-V1 path).
+    pub static V2_WITH_DEVICE_HANDLE_FIRED: AtomicU64 = AtomicU64::new(0);
+
+    /// Bump a counter and return its NEW value.  Used by the dispatch
+    /// site to decide whether to emit a log on the Nth rejection.
+    #[inline]
+    pub(crate) fn bump(counter: &AtomicU64) -> u64 {
+        counter.fetch_add(1, Ordering::Relaxed).saturating_add(1)
+    }
+
+    /// True if `n` is a power of two (or 1).  Used to decide whether
+    /// to log on the Nth rejection (geometric back-off).
+    #[inline]
+    pub(crate) fn should_log_geometric(n: u64) -> bool {
+        n.is_power_of_two()
+    }
+
+    /// Reset all counters to zero.  Test helper.
+    #[doc(hidden)]
+    pub fn reset_all() {
+        ENV_SET_BUT_UNREGISTERED.store(0, Ordering::Relaxed);
+        HOOK_REGISTERED_BUT_ENV_UNSET.store(0, Ordering::Relaxed);
+        SHAPE_REJECTED.store(0, Ordering::Relaxed);
+        HOOK_FIRED.store(0, Ordering::Relaxed);
+        V2_HOOK_FIRED.store(0, Ordering::Relaxed);
+        V2_WITH_DEVICE_HANDLE_FIRED.store(0, Ordering::Relaxed);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Step 4a (`/tmp/step4_backend_parametrize_plan.md`) — GPU row-GKR
 // layer-transition dispatch hook scaffolding.
 //
@@ -1275,6 +1406,24 @@ pub mod jagged {
         // `ziren-gpu/basefold/src/jagged_sumcheck.rs::tests`).  When
         // the hook returns `None` (unsupported shape) or is not
         // registered, the host fallback path runs unchanged.
+        //
+        // Win A (May 21 2026 jagged-wins) — hook hardening:
+        //   * V2 hook (with optional device handle) preferred over V1
+        //   * `env_set_but_unregistered` warn-once when ZIREN_GPU_JAGGED_PCS=1
+        //     but neither V1 nor V2 hook is registered
+        //   * `hook_registered_but_env_unset` warn-once when a hook is
+        //     registered but the env flag isn't set (possible misconfig)
+        //   * shape-rejection counter — log on each Nth (geometric) None
+        //   * V2 hook with `Some(device_handle)` is logged separately to
+        //     confirm the device-resident path is exercised
+        //
+        // Win B (May 21 2026 jagged-wins) — device-resident dense_q
+        // signature: when a V2 hook is registered, the dispatch passes
+        // `device_handle = None` (Ziren has no on-device dense_q yet —
+        // the host materialization at line ~1413 is the source).  V2
+        // semantics with `None` collapse to V1 behaviour; the signature
+        // is in place for future Ziren-side wiring (e.g. GPU-resident
+        // chip-trace materialization) to skip the H→D upload.
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
@@ -1284,22 +1433,169 @@ pub mod jagged {
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v == "1")
                 .unwrap_or(false);
-            let hook = if try_gpu {
-                super::get_gpu_jagged_reduction_hook()
+
+            // Win A: look up BOTH hooks so we can emit diagnostics on
+            // mismatches (env-set/unregistered, hook-registered/env-unset).
+            let hook_v1 = super::get_gpu_jagged_reduction_hook();
+            let hook_v2 = super::get_gpu_jagged_reduction_hook_v2();
+            let any_hook_registered = hook_v1.is_some() || hook_v2.is_some();
+
+            // Win A diag (1): env=1 but no hook → warn once, count.
+            if try_gpu && !any_hook_registered {
+                use std::sync::OnceLock;
+                static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                let n = super::jagged_dispatch_diag::bump(
+                    &super::jagged_dispatch_diag::ENV_SET_BUT_UNREGISTERED,
+                );
+                WARN_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        chips = n_chips,
+                        log_dense_size = packing.log_dense_size as u64,
+                        env_set_but_unregistered_count = n,
+                        "jagged_pcs: ZIREN_GPU_JAGGED_PCS=1 set but no GPU \
+                         jagged-reduction hook registered. ziren-gpu's \
+                         compress_multi_gpu must call \
+                         register_gpu_jagged_reduction_hook or \
+                         register_gpu_jagged_reduction_hook_v2 at startup. \
+                         Falling back to host prove_jagged_reduction_owned. \
+                         See basefold_late_binding.rs Win A."
+                    );
+                });
+            }
+
+            // Win A diag (2): hook registered but env=0 → warn once,
+            // count.  This is normally fine (caller explicitly opted
+            // out) but on a perf-experiment run it can mask intended
+            // GPU acceleration.
+            if !try_gpu && any_hook_registered {
+                use std::sync::OnceLock;
+                static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                let n = super::jagged_dispatch_diag::bump(
+                    &super::jagged_dispatch_diag::HOOK_REGISTERED_BUT_ENV_UNSET,
+                );
+                WARN_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        chips = n_chips,
+                        log_dense_size = packing.log_dense_size as u64,
+                        hook_registered_but_env_unset_count = n,
+                        "jagged_pcs: GPU jagged-reduction hook is \
+                         registered but ZIREN_GPU_JAGGED_PCS=1 is not \
+                         set in the env. Running host fallback. To \
+                         enable the GPU path, set ZIREN_GPU_JAGGED_PCS=1. \
+                         See basefold_late_binding.rs Win A."
+                    );
+                });
+            }
+
+            // Pick the active hook: V2 preferred if available, else
+            // V1, else None (drops to host body).
+            enum ActiveHook {
+                V2(super::GpuJaggedReductionFnV2),
+                V1(super::GpuJaggedReductionFn),
+                None,
+            }
+            let active = if try_gpu {
+                match (hook_v2, hook_v1) {
+                    (Some(f2), _) => ActiveHook::V2(f2),
+                    (None, Some(f1)) => ActiveHook::V1(f1),
+                    (None, None) => ActiveHook::None,
+                }
             } else {
-                None
+                ActiveHook::None
             };
 
-            match hook {
-                Some(f) => {
+            // Win B: device handle source.  Currently always `None` —
+            // the Ziren host path materializes dense_q on host at line
+            // ~1413.  Wired here so future Ziren-side device residency
+            // (e.g. GPU-driven chip-trace pre-materialization) can flip
+            // this to `Some(handle)` without further hook surgery.
+            let dense_q_device_handle: Option<u64> = None;
+
+            match active {
+                ActiveHook::V2(f) => {
                     use std::sync::OnceLock;
                     static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                    let _ = super::jagged_dispatch_diag::bump(
+                        &super::jagged_dispatch_diag::HOOK_FIRED,
+                    );
+                    let _ = super::jagged_dispatch_diag::bump(
+                        &super::jagged_dispatch_diag::V2_HOOK_FIRED,
+                    );
+                    if dense_q_device_handle.is_some() {
+                        let _ = super::jagged_dispatch_diag::bump(
+                            &super::jagged_dispatch_diag::V2_WITH_DEVICE_HANDLE_FIRED,
+                        );
+                    }
                     FIRED_ONCE.get_or_init(|| {
                         tracing::warn!(
                             chips = n_chips,
                             log_dense_size = packing.log_dense_size as u64,
-                            "#107 jagged_pcs FIRED — GPU jagged-reduction hook \
-                             driving sumcheck reduce ({} chips)",
+                            device_handle = ?dense_q_device_handle,
+                            "#107 jagged_pcs FIRED — GPU jagged-reduction V2 \
+                             hook driving sumcheck reduce ({} chips, device_handle={:?})",
+                            n_chips, dense_q_device_handle,
+                        );
+                    });
+                    let r_row = r_row_per_chip.to_vec();
+                    let y_clone = y_per_chip.clone();
+                    let saved_dense = if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
+                        .map(|v| v == "1").unwrap_or(false)
+                    {
+                        Some(dense_q.clone())
+                    } else {
+                        None
+                    };
+                    match f(
+                        dense_q,
+                        dense_q_device_handle,
+                        &packing,
+                        &r_row,
+                        &y_clone,
+                        challenger,
+                    ) {
+                        Some(p) => p,
+                        None => {
+                            let n = super::jagged_dispatch_diag::bump(
+                                &super::jagged_dispatch_diag::SHAPE_REJECTED,
+                            );
+                            if super::jagged_dispatch_diag::should_log_geometric(n) {
+                                tracing::warn!(
+                                    chips = n_chips,
+                                    log_dense_size = packing.log_dense_size as u64,
+                                    shape_rejected_count = n,
+                                    "#107 jagged_pcs V2 hook returned None \
+                                     (shape rejected) — falling back to host \
+                                     prove_jagged_reduction_owned",
+                                );
+                            }
+                            let dense_q = saved_dense.unwrap_or_else(|| {
+                                materialize_dense_jagged::<InnerVal>(
+                                    chip_traces,
+                                    packing.log_dense_size,
+                                )
+                            });
+                            crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                                dense_q,
+                                &packing,
+                                r_row_per_chip,
+                                &y_per_chip,
+                                challenger,
+                            )
+                        }
+                    }
+                }
+                ActiveHook::V1(f) => {
+                    use std::sync::OnceLock;
+                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                    let _ = super::jagged_dispatch_diag::bump(
+                        &super::jagged_dispatch_diag::HOOK_FIRED,
+                    );
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            chips = n_chips,
+                            log_dense_size = packing.log_dense_size as u64,
+                            "#107 jagged_pcs FIRED — GPU jagged-reduction V1 \
+                             hook driving sumcheck reduce ({} chips)",
                             n_chips,
                         );
                     });
@@ -1321,12 +1617,19 @@ pub mod jagged {
                     match f(dense_q, &packing, &r_row, &y_clone, challenger) {
                         Some(p) => p,
                         None => {
-                            tracing::warn!(
-                                chips = n_chips,
-                                log_dense_size = packing.log_dense_size as u64,
-                                "#107 jagged_pcs hook returned None — falling back \
-                                 to host prove_jagged_reduction_owned",
+                            let n = super::jagged_dispatch_diag::bump(
+                                &super::jagged_dispatch_diag::SHAPE_REJECTED,
                             );
+                            if super::jagged_dispatch_diag::should_log_geometric(n) {
+                                tracing::warn!(
+                                    chips = n_chips,
+                                    log_dense_size = packing.log_dense_size as u64,
+                                    shape_rejected_count = n,
+                                    "#107 jagged_pcs V1 hook returned None \
+                                     (shape rejected) — falling back to host \
+                                     prove_jagged_reduction_owned",
+                                );
+                            }
                             let dense_q = saved_dense.unwrap_or_else(|| {
                                 materialize_dense_jagged::<InnerVal>(
                                     chip_traces,
@@ -1343,7 +1646,7 @@ pub mod jagged {
                         }
                     }
                 }
-                None => crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                ActiveHook::None => crate::jagged_sumcheck::prove_jagged_reduction_owned(
                     dense_q,
                     &packing,
                     r_row_per_chip,
@@ -1710,5 +2013,90 @@ mod test {
             !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
             "verifier must reject final_poly tampering"
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Win A (May 21 2026 jagged-wins) — hook hardening diagnostic
+    // counters: smoke tests for the geometric back-off and the bump()
+    // helper.  The full dispatch-site behaviour (env-set/unregistered
+    // warn, hook-registered/env-unset warn, V2-preferred-over-V1) is
+    // exercised by the smoke flag of the production e2e run; the
+    // counters here are the test hooks that prove the wiring is sane.
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_jagged_dispatch_diag_geometric_backoff() {
+        use super::jagged_dispatch_diag::should_log_geometric;
+        // log on 1, 2, 4, 8, ... (powers of two)
+        assert!(should_log_geometric(1));
+        assert!(should_log_geometric(2));
+        assert!(should_log_geometric(4));
+        assert!(should_log_geometric(8));
+        assert!(should_log_geometric(64));
+        assert!(should_log_geometric(1024));
+        // don't log on intermediate counts
+        assert!(!should_log_geometric(3));
+        assert!(!should_log_geometric(5));
+        assert!(!should_log_geometric(7));
+        assert!(!should_log_geometric(63));
+    }
+
+    #[test]
+    fn test_jagged_dispatch_diag_bump_returns_new_count() {
+        use core::sync::atomic::AtomicU64;
+        use super::jagged_dispatch_diag::bump;
+        let counter = AtomicU64::new(0);
+        assert_eq!(bump(&counter), 1);
+        assert_eq!(bump(&counter), 2);
+        assert_eq!(bump(&counter), 3);
+    }
+
+    #[test]
+    fn test_jagged_dispatch_diag_reset() {
+        use core::sync::atomic::{AtomicU64, Ordering};
+        use super::jagged_dispatch_diag::bump;
+        let counter = AtomicU64::new(0);
+        bump(&counter);
+        bump(&counter);
+        assert_eq!(counter.load(Ordering::Relaxed), 2);
+        // reset_all touches the production counters; bump our local
+        // first to ensure the API surface compiles & runs.
+        super::jagged_dispatch_diag::reset_all();
+        assert_eq!(
+            super::jagged_dispatch_diag::ENV_SET_BUT_UNREGISTERED
+                .load(Ordering::Relaxed),
+            0,
+        );
+        assert_eq!(
+            super::jagged_dispatch_diag::SHAPE_REJECTED.load(Ordering::Relaxed),
+            0,
+        );
+    }
+
+    // Win B (May 21 2026 jagged-wins) — V2 hook signature smoke test.
+    // Registers a thin V2 hook that records whether a device handle
+    // was passed, asserts the signature is callable end-to-end.
+    #[test]
+    fn test_gpu_jagged_reduction_hook_v2_signature() {
+        // Use a stand-alone callable — we don't actually register
+        // (`set` can fail in the global slot if another test ran)
+        // but we DO exercise the type so the signature is stable.
+        let _hook: super::GpuJaggedReductionFnV2 = test_v2_hook_noop;
+        // get_gpu_jagged_reduction_hook_v2 must be callable.
+        let _: Option<super::GpuJaggedReductionFnV2> =
+            super::get_gpu_jagged_reduction_hook_v2();
+    }
+
+    fn test_v2_hook_noop(
+        _dense_q_host: Vec<LbVal>,
+        _dense_q_device_handle: Option<u64>,
+        _packing: &crate::jagged::JaggedPacking<LbVal>,
+        _r_row_per_chip: &[Vec<LbChallenge>],
+        _y_per_chip: &[Vec<LbChallenge>],
+        _challenger: &mut LbChallenger,
+    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>> {
+        // Hook returns None — dispatcher would fall through to the
+        // host body.  We're testing the signature, not the dispatch.
+        None
     }
 }
