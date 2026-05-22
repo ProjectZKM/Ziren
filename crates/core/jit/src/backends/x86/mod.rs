@@ -262,19 +262,6 @@ impl TranspilerBackend {
         self.mem_read_recorder = Some(f);
     }
 
-    /// Look up the dynamic label for a MIPS PC.  Returns `None` if
-    /// the target falls outside the assembled program (e.g. an
-    /// out-of-program JR target — caller falls back to interpreter
-    /// for that case).
-    #[inline]
-    pub(crate) fn label_for_pc(&self, pc: u32) -> Option<dynasmrt::DynamicLabel> {
-        if pc < self.pc_base {
-            return None;
-        }
-        let idx = ((pc - self.pc_base) / 4) as usize;
-        self.instr_labels.get(idx).copied()
-    }
-
     /// Emit an indirect jump to the JIT entry corresponding to MIPS
     /// `pc_start`.  Called once after the prologue + register-load
     /// sequence so the JIT begins executing at the program's actual
