@@ -314,6 +314,141 @@ where
         // context (#142 design).  Reth A/B showed core stage +16% from
         // this overhead.
         let provider_present = device_traces.is_some();
+        // Path C Phase 1 (#494): when the per-shard `device_traces`
+        // provider holds a device handle for this chip, dispatch the
+        // DEVICE-INPUT hook first.  This skips the per-chip host-side
+        // `main_trace.values.clone()` + width-pad allocation below —
+        // the device handle already carries column-major data on GPU.
+        // Output is byte-identical to the host-input hook (and to the
+        // host fallback) by contract.  On `None` we fall through to
+        // the legacy host-input hook (still uses `device_traces` for
+        // B2 fast path inside the hook impl).
+        {
+            use core::any::TypeId;
+            type Ef4 = p3_field::extension::BinomialExtensionField<
+                p3_koala_bear::KoalaBear,
+                4,
+            >;
+            type Kb = p3_koala_bear::KoalaBear;
+            if provider_present
+                && TypeId::of::<F>() == TypeId::of::<Kb>()
+                && TypeId::of::<EF>() == TypeId::of::<Ef4>()
+            {
+                if let (Some(dev_hook), Some(provider)) = (
+                    crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_device_hook(),
+                    device_traces,
+                ) {
+                    if let Some(dev_handle) = provider.lookup_by_name(&chip.name()) {
+                        use p3_air::BaseAir;
+                        let chip_prep_width = chip.preprocessed_width();
+                        // Pad ONLY prep (tiny: typ. 0-16 cols).
+                        // Main is consumed device-side — no host copy
+                        // needed here, that's the win.
+                        let prep_height = if prep_trace.width == 0 { 0 } else { prep_trace.values.len() / prep_trace.width };
+                        let prep_padded: Vec<F> = if prep_trace.width == chip_prep_width || prep_trace.width == 0 {
+                            prep_trace.values.clone()
+                        } else if prep_trace.width < chip_prep_width {
+                            let mut padded = vec![F::ZERO; prep_height * chip_prep_width];
+                            for r in 0..prep_height {
+                                let src = &prep_trace.values[r * prep_trace.width..(r + 1) * prep_trace.width];
+                                let dst = &mut padded[r * chip_prep_width..r * chip_prep_width + prep_trace.width];
+                                dst.copy_from_slice(src);
+                            }
+                            padded
+                        } else {
+                            prep_trace.values.clone()
+                        };
+                        let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
+                        use std::sync::OnceLock;
+                        static FIRED_ONCE_DEVICE: OnceLock<()> = OnceLock::new();
+                        FIRED_ONCE_DEVICE.get_or_init(|| {
+                            tracing::warn!(
+                                "#494 device-input interaction_eval hook FIRED \
+                                 (chip={}, prep_w={prep_padded_width})", chip.name()
+                            );
+                        });
+                        // SAFETY: TypeId equality guarantees F == Kb
+                        // and EF == Ef4; slice/value reinterp sound.
+                        let r = unsafe {
+                            let prep_kb: &[Kb] = if prep_padded_width > 0 {
+                                core::slice::from_raw_parts(
+                                    prep_padded.as_ptr().cast::<Kb>(),
+                                    prep_padded.len(),
+                                )
+                            } else {
+                                &[]
+                            };
+                            let alpha_ef4: Ef4 = core::mem::transmute_copy(&alpha);
+                            let betas_ef4: &[Ef4] = core::slice::from_raw_parts(
+                                betas.as_ptr().cast::<Ef4>(),
+                                betas.len(),
+                            );
+                            let result = dev_hook(
+                                &chip.name(),
+                                &dev_handle,
+                                prep_kb,
+                                prep_padded_width,
+                                alpha_ef4,
+                                betas_ef4,
+                            );
+                            result.map(|(numer_kb, denom_ef4)| {
+                                let mut me_n = std::mem::ManuallyDrop::new(numer_kb);
+                                let numer_f: Vec<F> = Vec::from_raw_parts(
+                                    me_n.as_mut_ptr().cast::<F>(),
+                                    me_n.len(),
+                                    me_n.capacity(),
+                                );
+                                let mut me_d = std::mem::ManuallyDrop::new(denom_ef4);
+                                let denom_ef: Vec<EF> = Vec::from_raw_parts(
+                                    me_d.as_mut_ptr().cast::<EF>(),
+                                    me_d.len(),
+                                    me_d.capacity(),
+                                );
+                                (numer_f, denom_ef)
+                            })
+                        };
+                        if let Some((numer_v, denom_v)) = r {
+                            let numer_mat = RowMajorMatrix::new(numer_v, num_interactions);
+                            let denom_mat = RowMajorMatrix::new(denom_v, num_interactions);
+                            let chip_height: usize = if num_interactions == 0 {
+                                0
+                            } else {
+                                numer_mat.values.len() / num_interactions
+                            };
+                            let half_logical = 1usize << (num_row_variables - 1);
+                            let real_upper = chip_height.min(half_logical);
+                            let real_lower = chip_height.saturating_sub(half_logical).min(half_logical);
+                            let (n_upper, n_lower) = split_real_msb(numer_mat.values, num_interactions, half_logical, real_upper, real_lower);
+                            let (d_upper, d_lower) = split_real_msb(denom_mat.values, num_interactions, half_logical, real_upper, real_lower);
+                            let log_int_padded = num_interactions.max(1).next_power_of_two().trailing_zeros() as usize;
+                            total_padded_interactions += 1usize << log_int_padded;
+                            let make_table = |cells: Vec<F>, real_rows: usize| -> RowMajorTable<F> {
+                                RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
+                            };
+                            let make_table_ef = |cells: Vec<EF>, real_rows: usize| -> RowMajorTable<EF> {
+                                RowMajorTable::from_padded_cells(cells, num_row_variables - 1, num_interactions, real_rows)
+                            };
+                            numerator_0.push(make_table(n_upper, real_upper));
+                            numerator_1.push(make_table(n_lower, real_lower));
+                            denominator_0.push(make_table_ef(d_upper, real_upper));
+                            denominator_1.push(make_table_ef(d_lower, real_lower));
+                            continue;
+                        }
+                        // device hook returned None → fall through
+                        // to legacy host-input hook below.
+                        static DEVICE_FELL_THROUGH: OnceLock<()> = OnceLock::new();
+                        DEVICE_FELL_THROUGH.get_or_init(|| {
+                            tracing::warn!(
+                                "#494 device-input interaction_eval hook \
+                                 FELL THROUGH (chip={}, GPU returned \
+                                 None); legacy host-input hook used",
+                                chip.name()
+                            );
+                        });
+                    }
+                }
+            }
+        }
         let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present {
             if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
                 use core::any::TypeId;

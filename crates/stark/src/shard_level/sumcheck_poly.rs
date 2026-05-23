@@ -844,6 +844,73 @@ pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Path C Phase 1 (#494) — DEVICE-INPUT interaction-eval hook.
+//
+// Sister of the host-input `GpuInteractionEvalFn` above.  Instead of
+// taking row-major `main`/`prep` host slices and uploading them inside
+// the hook, this variant takes an opaque `Arc<dyn Any + Send + Sync>`
+// device handle that the caller (`generate_first_layer`) has fetched
+// from the per-shard `DeviceTraceProvider`.  The hook downcasts to the
+// concrete device-trace type (`Arc<ColMajorMatrixDevice<KoalaBear>>`)
+// and routes directly to the kernel — skipping the per-chip host-side
+// `main_trace.values.clone()` + width-pad allocation entirely.
+//
+// The host-input hook is preserved as the slow-path fallback for any
+// caller that doesn't have a device handle (e.g. CPU build, chip
+// rejected by provider, TypeId mismatch).
+//
+// Contract:
+//   * Output must be byte-identical to the host-input hook (and
+//     therefore to `build_chip_interaction_tables`).
+//   * `Some` on success; `None` on chip-cache miss, downcast failure,
+//     kernel error, etc.  Caller falls back to the host path.
+//   * Implementor MUST honor the per-shard device handle ownership —
+//     no global Mutex lookups, no shared mutable state.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Per-chip BaseFold LogUp-GKR phase-2 interaction-table builder that
+/// consumes a device-resident main trace handle directly.
+///
+/// Same invariants as `GpuInteractionEvalFn` — output is row-major
+/// `(numer, denom)` of shape `height × num_interactions`, byte-identical
+/// to the host fallback `build_chip_interaction_tables`.
+pub type GpuInteractionEvalDeviceFn = fn(
+    chip_name: &str,
+    // Per-chip device-trace handle obtained by the caller from
+    // `device_traces.lookup_by_name(chip_name)`.  The hook
+    // downcasts to its concrete type (typically
+    // `Arc<ColMajorMatrixDevice<KoalaBear>>`).
+    device_main: &alloc::sync::Arc<dyn core::any::Any + Send + Sync>,
+    // Preprocessed trace still travels host-side (typically tiny;
+    // 0-16 cols).  Width 0 means "no prep" — slice should be empty.
+    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
+    preprocessed_width: usize,
+    alpha: Ef4,
+    betas: &[Ef4],
+) -> Option<(Vec<p3_koala_bear::KoalaBear>, Vec<Ef4>)>;
+
+static GPU_INTERACTION_EVAL_DEVICE_HOOK:
+    std::sync::OnceLock<GpuInteractionEvalDeviceFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU device-input per-chip interaction-eval driver.
+/// Idempotent; returns `Err` when a hook was already registered.
+/// Called once by `ziren-gpu`'s
+/// `interaction_eval::register_with_zkm_stark` at startup.
+pub fn register_gpu_interaction_eval_device_hook(
+    f: GpuInteractionEvalDeviceFn,
+) -> Result<(), GpuInteractionEvalDeviceFn> {
+    GPU_INTERACTION_EVAL_DEVICE_HOOK.set(f)
+}
+
+/// Read the registered GPU device-input interaction-eval hook,
+/// if any.
+#[must_use]
+pub fn get_gpu_interaction_eval_device_hook() -> Option<GpuInteractionEvalDeviceFn> {
+    GPU_INTERACTION_EVAL_DEVICE_HOOK.get().copied()
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // GPU jagged-PCS orchestration hook (sister of #105C / #107).
 //
 // Eliminates the per-shard host orchestrator overhead in
