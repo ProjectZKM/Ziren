@@ -360,10 +360,10 @@ where
 /// loop — see [`ZerocheckRoundPolynomial`] for the per-round
 /// arithmetic and the reduction equality.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_zerocheck<SC, A>(
+pub fn prove_shard_zerocheck<SC, A, L>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-    main_traces: &[RowMajorMatrix<Val<SC>>],
+    main_trace_loader: &L,
     _logup_evaluations: &LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
     max_log_row_count: usize,
@@ -377,8 +377,20 @@ where
     A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+    L: crate::shard_level::main_trace_loader::MainTraceLoader<Val<SC>>,
 {
     use p3_field::PrimeCharacteristicRing;
+
+    // Gap #1 Phase B-3b: materialize main traces from the loader here
+    // so the orchestrator no longer needs to do it upfront.  Identical
+    // perf to today (rayon parallel pull via LazyDeviceLoader); the
+    // structural win is that the materialisation site moves INSIDE
+    // the zerocheck phase, paving the way for per-chip on-demand
+    // pulls (e.g. when the ZIREN_GPU_BATCHED_CONSTRAINT_EVAL device
+    // pre-pass takes over a chip's C-table without needing the host
+    // values).
+    let main_traces: Vec<RowMajorMatrix<Val<SC>>> = main_trace_loader.materialize_all();
+    let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
 
     // Per-shard zerocheck sub-phase timing.  Three sub-phases:
     //   (a) per-chip C-table build (Step 2 par_iter — typically the

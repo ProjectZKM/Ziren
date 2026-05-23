@@ -270,10 +270,10 @@ where
     let _t_phase3 = std::time::Instant::now();
     let zerocheck_proof = {
         let _span = tracing::info_span!("phase_zerocheck").entered();
-        prove_shard_zerocheck::<SC, A>(
+        prove_shard_zerocheck::<SC, A, _>(
             chips,
             preprocessed_traces,
-            main_traces,
+            main_trace_loader,
             &logup_gkr_proof.logup_evaluations,
             &public_values,
             max_log_row_count,
