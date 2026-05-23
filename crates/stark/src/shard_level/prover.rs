@@ -638,12 +638,39 @@ where
             });
             let chip_names: Vec<alloc::string::String> =
                 chip_traces.iter().map(|(name, _)| name.clone()).collect();
+            // #496 Path C Phase 3: pass the already-materialized host
+            // `chip_traces` (built above from the orchestrator's
+            // `materialize_all()`) so the hook can skip the per-chip
+            // `to_host_naive()` device-snapshot pull.  Byte-identical
+            // data; same chip-iteration order.
+            //
+            // SAFETY (cast): `chip_traces` is `Vec<(String,
+            // RowMajorMatrix<InnerVal>)>` where `InnerVal == KoalaBear`
+            // by the TypeId gate above.  The hook signature expects
+            // `&[(String, RowMajorMatrix<KoalaBear>)]`; the underlying
+            // `RowMajorMatrix<T>` layout depends only on T, and InnerVal
+            // is the canonical `KoalaBear` type alias, so the slice
+            // reference is layout-identical.
+            let host_chip_traces_kb: &[(alloc::string::String,
+                RowMajorMatrix<p3_koala_bear::KoalaBear>)] = unsafe {
+                core::mem::transmute::<
+                    &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+                    &[(alloc::string::String,
+                       RowMajorMatrix<p3_koala_bear::KoalaBear>)],
+                >(chip_traces.as_slice())
+            };
             // GPU hook only returns bytes — bundle stays None on the
             // device path until the hook signature is extended.  The
             // recursion-circuit consumers fall back to the bytes path
             // when bundle is None.
             return (
-                hook(&chip_names, &r_row_per_chip, lb_challenger, _device_traces),
+                hook(
+                    &chip_names,
+                    &r_row_per_chip,
+                    lb_challenger,
+                    _device_traces,
+                    Some(host_chip_traces_kb),
+                ),
                 None,
             );
         }

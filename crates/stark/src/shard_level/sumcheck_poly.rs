@@ -955,6 +955,8 @@ mod jagged_pcs_device_hook {
     use super::Ef4;
     use alloc::string::String;
     use alloc::vec::Vec;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
 
     /// Signature of the GPU jagged-PCS device-trace orchestration
     /// driver.  Inputs are the chip NAMES (in chip-iteration order;
@@ -963,6 +965,16 @@ mod jagged_pcs_device_hook {
     /// + per-chip `r_row` + the outer `LbChallenger`.  Returns the
     /// rmp-serde-encoded `JaggedBasefoldBundle` bytes, byte-identical
     /// to host `bundle.to_bytes()`.
+    ///
+    /// `host_chip_traces` (Path C Phase 3): the already-materialized
+    /// per-chip host (name, RowMajorMatrix<KoalaBear>) pairs the host
+    /// orchestrator built from `MainTraceLoader::materialize_all()`.
+    /// When provided (`Some`), the hook MUST reuse it instead of
+    /// re-pulling each chip via `to_host_naive()` on the device snapshot
+    /// — the data is byte-identical (same `Val<SC> == InnerVal ==
+    /// KoalaBear` reinterpretation already done at the call site).
+    /// When `None`, the hook falls back to the device-snapshot pull
+    /// (legacy path, preserved for callers that haven't been updated).
     pub type GpuJaggedPcsDeviceFn = fn(
         chip_names: &[String],
         r_row_per_chip: &[Vec<Ef4>],
@@ -973,6 +985,12 @@ mod jagged_pcs_device_hook {
         // does).  Borrowed reference scoped to a single shard's
         // prove call — concurrent shards each pass their own.
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // #496 Path C Phase 3: already-materialized host chip traces
+        // built by the orchestrator's `materialize_all()`.  The hook
+        // reuses these instead of duplicating the per-chip D→H pull.
+        // Same chip-iteration order as `chip_names`.  `None` keeps the
+        // legacy device-snapshot pull path.
+        host_chip_traces: Option<&[(String, RowMajorMatrix<KoalaBear>)]>,
     ) -> Vec<u8>;
 
     static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =
