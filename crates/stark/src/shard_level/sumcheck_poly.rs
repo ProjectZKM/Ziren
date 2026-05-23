@@ -764,6 +764,68 @@ pub fn get_gpu_constraint_eval_cross_shard_hook()
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// DEVICE-RESIDENT variant of GpuConstraintEvalFn (#495 Path C Phase 2).
+// ─────────────────────────────────────────────────────────────────────
+//
+// Same per-chip semantics as `GpuConstraintEvalFn` (above), but accepts
+// an `Arc<dyn Any + Send + Sync>` carrying the chip's main trace as a
+// device-resident handle (typically `Arc<ColMajorMatrixDevice<KoalaBear>>`
+// in `ziren-gpu`).  This skips the per-call host-to-device upload of
+// the main trace bytes — the dominant cost when the trace already
+// lives on the GPU from earlier phases (LogUp-GKR producer / jagged
+// PCS).  All other inputs (`preprocessed_row_major`, `public_values`,
+// alpha, cumulative sums) are still host-side; the hook uploads
+// them just like the host-input variant.
+//
+// Caller path: in `prove_shard_zerocheck`, when a `DeviceTraceProvider`
+// is supplied AND `lookup(chip_name, height, main_width)` returns
+// `Some(arc)` AND a device-hook is registered, the device hook runs.
+// On `None` (chip not on device, or hook returned None) the caller
+// falls through to the existing host-input hook block unchanged.
+//
+// Output: byte-identical to `GpuConstraintEvalFn` for the same chip
+// — same bytecode cache, same kernel, same alpha/cumsum wiring.
+
+/// Per-chip BaseFold device-input constraint-table builder.  See module
+/// comment above for invariants and dispatch rules.
+///
+/// `main_device` is an `Arc<dyn Any + Send + Sync>` (erased so
+/// `zkm-stark` stays CUDA-agnostic); the implementation downcasts to
+/// its concrete device-trace type (typically
+/// `Arc<ColMajorMatrixDevice<KoalaBear>>`).  On downcast failure the
+/// hook must return `None`.
+pub type GpuConstraintEvalDeviceFn = fn(
+    chip_name: &str,
+    main_device: alloc::sync::Arc<dyn core::any::Any + Send + Sync>,
+    main_width: usize,
+    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
+    preprocessed_width: usize,
+    public_values: &[p3_koala_bear::KoalaBear],
+    alpha: Ef4,
+    local_cumulative_sum: Ef4,
+    global_cumulative_sum_xy: [p3_koala_bear::KoalaBear; 14],
+    num_vars: usize,
+) -> Option<Vec<Ef4>>;
+
+static GPU_CONSTRAINT_EVAL_DEVICE_HOOK: std::sync::OnceLock<GpuConstraintEvalDeviceFn> =
+    std::sync::OnceLock::new();
+
+/// Register the device-input GPU constraint-eval driver.  Idempotent;
+/// returns `Err` when a hook was already registered.  Called once by
+/// `ziren-gpu`'s `compress_multi_gpu` at startup.
+pub fn register_gpu_constraint_eval_device_hook(
+    f: GpuConstraintEvalDeviceFn,
+) -> Result<(), GpuConstraintEvalDeviceFn> {
+    GPU_CONSTRAINT_EVAL_DEVICE_HOOK.set(f)
+}
+
+/// Read the registered device-input GPU constraint-eval hook, if any.
+#[must_use]
+pub fn get_gpu_constraint_eval_device_hook() -> Option<GpuConstraintEvalDeviceFn> {
+    GPU_CONSTRAINT_EVAL_DEVICE_HOOK.get().copied()
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // GPU per-chip LogUp-GKR phase-2 interaction-eval hook.
 //
 // Sister of the #111 constraint-eval hook above, but for the OTHER

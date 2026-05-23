@@ -551,6 +551,111 @@ where
             };
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
+            // #495 Path C Phase 2: DEVICE-INPUT constraint-eval hook.
+            //
+            // When a per-shard `DeviceTraceProvider` is supplied AND the
+            // device-input GPU hook is registered AND the chip's main
+            // trace is on-device for this shard AND `(Val,Challenge)` ==
+            // (KoalaBear, Ef4), route the per-row constraint walk
+            // through the device-input GPU hook.  This skips the
+            // per-call host-to-device upload of the main trace bytes
+            // (the dominant cost when the trace already lives on the
+            // GPU from earlier phases).  Byte-identical output to the
+            // host-input dispatch below and the host fallback.
+            //
+            // On `None` (lookup miss, downcast fail, or GPU rejected)
+            // the existing host-input dispatch block runs.
+            if let Some(provider) = _device_traces {
+                if let Some(device_hook) = crate::shard_level::sumcheck_poly::
+                    get_gpu_constraint_eval_device_hook()
+                {
+                    use core::any::TypeId;
+                    type Ef4 = p3_field::extension::BinomialExtensionField<
+                        p3_koala_bear::KoalaBear,
+                        4,
+                    >;
+                    type Kb = p3_koala_bear::KoalaBear;
+                    if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>()
+                        && TypeId::of::<Val<SC>>() == TypeId::of::<Kb>()
+                    {
+                        // Device-trace lookup with shape validation
+                        // (height, main_width).  `lookup` returns the
+                        // erased `Arc<dyn Any + Send + Sync>` that the
+                        // hook downcasts.
+                        let height_for_lookup = main_trace.values.len()
+                            / main_trace.width.max(1);
+                        if let Some(arc) = provider.lookup(
+                            &chip.name(),
+                            height_for_lookup,
+                            main_trace.width,
+                        ) {
+                            use std::sync::OnceLock;
+                            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                            FIRED_ONCE.get_or_init(|| {
+                                tracing::info!(
+                                    "#495 device constraint_eval hook fired chip={}",
+                                    chip.name()
+                                );
+                            });
+                            // SAFETY: TypeId equality guarantees Val<SC> == Kb
+                            // and Challenge<SC> == Ef4; slice/value reinterp
+                            // is sound.
+                            let gpu_table = unsafe {
+                                let preproc_kb: &[Kb] = core::slice::from_raw_parts(
+                                    preproc_trace.values.as_ptr().cast::<Kb>(),
+                                    preproc_trace.values.len(),
+                                );
+                                let pv_kb: &[Kb] = core::slice::from_raw_parts(
+                                    public_values.as_ptr().cast::<Kb>(),
+                                    public_values.len(),
+                                );
+                                let alpha_ef4: Ef4 =
+                                    core::mem::transmute_copy(&alpha);
+                                let lcs_ef4: Ef4 =
+                                    core::mem::transmute_copy(&local_cumulative_sum);
+                                let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
+                                for j in 0..7 {
+                                    gcs_xy[j] = core::mem::transmute_copy(
+                                        &global_cumulative_sum.0.x.0[j],
+                                    );
+                                    gcs_xy[j + 7] = core::mem::transmute_copy(
+                                        &global_cumulative_sum.0.y.0[j],
+                                    );
+                                }
+                                device_hook(
+                                    &chip.name(),
+                                    arc,
+                                    main_trace.width,
+                                    preproc_kb,
+                                    preproc_trace.width,
+                                    pv_kb,
+                                    alpha_ef4,
+                                    lcs_ef4,
+                                    gcs_xy,
+                                    log_height,
+                                )
+                            };
+                            if let Some(t) = gpu_table {
+                                // SAFETY: TypeId guard above guarantees
+                                // Vec<Ef4> can be reinterpreted as
+                                // Vec<Challenge<SC>>.
+                                let table_ch: Vec<Challenge<SC>> = unsafe {
+                                    let mut me = std::mem::ManuallyDrop::new(t);
+                                    Vec::from_raw_parts(
+                                        me.as_mut_ptr().cast::<Challenge<SC>>(),
+                                        me.len(),
+                                        me.capacity(),
+                                    )
+                                };
+                                return Some((log_height, table_ch));
+                            }
+                            // Device hook returned None — fall through
+                            // to existing host-input dispatch block.
+                        }
+                    }
+                }
+            }
+
             // dispatch hook: when ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1
             // AND a GPU hook is registered AND `Challenge<SC>` is the
             // production `Ef4` type, route the per-row constraint walk
