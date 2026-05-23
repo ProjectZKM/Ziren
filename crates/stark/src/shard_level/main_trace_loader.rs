@@ -196,12 +196,23 @@ impl<'a, F: Clone + Send + Sync> MainTraceLoader<F> for EagerHostLoader<'a, F> {
 /// The closure runs on the calling thread, so the GPU caller's
 /// CUDA device context is preserved.
 ///
-/// Note: this initial impl does NOT memoize — each call to
-/// [`MainTraceLoader::get`] re-invokes the closure.  Today's
-/// orchestrator only calls `materialize_all` once upfront so
-/// memoization is unnecessary; future per-phase callers should
-/// add a `OnceLock`-backed wrapper if they begin calling `get`
-/// multiple times per chip.
+/// # Per-chip memoization (gap #1 Phase B follow-up)
+///
+/// `LazyDeviceLoader` memoizes each chip's `(self.pull)(i)`
+/// result in a `Vec<OnceLock<RowMajorMatrix<F>>>` of length
+/// `n_chips` (allocated lazily on first cache hit; before then
+/// the slots themselves are zero-overhead).  This lets the three
+/// per-phase consumers — Phase 2 LogUp-GKR, Phase 3 zerocheck,
+/// Phase 4 jagged-PCS — each call `materialize_all()` or `get(i)`
+/// without re-paying the PCIe pull cost.  Before this
+/// memoization the per-shard cost was `3 ×` the par_iter pull
+/// (one per phase) since
+/// [`super::prover::prove_shard_to_basefold_with_loader`]
+/// dropped the orchestrator-level fence in Phase B-4.  With the
+/// cache the second and third phases hit the populated
+/// `OnceLock` slots and only clone the cached
+/// `RowMajorMatrix<F>` (a `Vec<F>` copy in host RAM, not a
+/// device round-trip).
 pub struct LazyDeviceLoader<F, Pull>
 where
     Pull: Fn(usize) -> RowMajorMatrix<F>,
@@ -221,6 +232,17 @@ where
     /// `get(i)`) is used — preserves the legacy behaviour of
     /// [`Self::new`].
     dims: Option<Vec<(usize, usize)>>,
+    /// Per-chip memoization cache (gap #1 Phase B follow-up).
+    ///
+    /// `cache[i]` holds the materialized host trace for chip `i`
+    /// once any caller has invoked `get(i)` or `materialize_all`.
+    /// The `Vec<OnceLock<...>>` is built lazily on first access
+    /// so loaders that are never queried pay zero allocation
+    /// cost.  Each slot is independently fillable via
+    /// `OnceLock::get_or_init`, so concurrent rayon workers that
+    /// race on the same chip serialize on the OnceLock and only
+    /// one `(self.pull)(i)` executes per chip.
+    cache: std::sync::OnceLock<Vec<std::sync::OnceLock<RowMajorMatrix<F>>>>,
     _marker: core::marker::PhantomData<F>,
 }
 
@@ -243,6 +265,7 @@ where
             n_chips,
             pull,
             dims: None,
+            cache: std::sync::OnceLock::new(),
             _marker: core::marker::PhantomData,
         }
     }
@@ -272,8 +295,18 @@ where
             n_chips,
             pull,
             dims: Some(dims),
+            cache: std::sync::OnceLock::new(),
             _marker: core::marker::PhantomData,
         }
+    }
+
+    /// Lazily allocate the per-chip OnceLock cache vec on first
+    /// access.  Returns a borrowed slice of empty OnceLocks ready
+    /// for `get_or_init`.
+    fn cache_slots(&self) -> &[std::sync::OnceLock<RowMajorMatrix<F>>] {
+        self.cache
+            .get_or_init(|| (0..self.n_chips).map(|_| std::sync::OnceLock::new()).collect())
+            .as_slice()
     }
 }
 
@@ -287,7 +320,13 @@ where
     }
 
     fn get(&self, i: usize) -> RowMajorMatrix<F> {
-        (self.pull)(i)
+        // gap #1 Phase B follow-up: memoize per-chip.  Subsequent
+        // calls for the same `i` return a clone of the cached
+        // `RowMajorMatrix<F>` rather than re-issuing the device
+        // pull.  Clone is a `Vec<F>` copy in host RAM (~10ms for a
+        // tendermint-scale chip) vs the device pull (~5-15s).
+        let slot = &self.cache_slots()[i];
+        slot.get_or_init(|| (self.pull)(i)).clone()
     }
 
     /// Parallel materialization (#268 Phase 1).  Overrides the
@@ -302,21 +341,30 @@ where
     /// `to_host_naive` — see
     /// `ziren-gpu/basefold/src/shard_prover.rs::prove_shard_to_basefold_gpu`
     /// for the per-rayon-worker `set_device` pattern.
+    ///
+    /// gap #1 Phase B follow-up: each chip's pull is memoized via
+    /// the per-chip `OnceLock` cache, so the second + third
+    /// `materialize_all` invocations (Phase 3 zerocheck, Phase 4
+    /// jagged-PCS) skip the device round-trip entirely and only
+    /// pay a host-RAM clone of the cached vec.  Eliminates the
+    /// ~2× per-shard regression introduced when Phase B-4
+    /// removed the orchestrator-level `materialize_all()` fence.
     fn materialize_all(&self) -> Vec<RowMajorMatrix<F>> {
         use p3_maybe_rayon::prelude::*;
+        let slots = self.cache_slots();
         (0..self.n_chips)
             .into_par_iter()
-            .map(|i| (self.pull)(i))
+            .map(|i| slots[i].get_or_init(|| (self.pull)(i)).clone())
             .collect()
     }
 
     /// O(1) metadata read when `with_dims` supplied dims;
-    /// falls back to the default `get(i)` pull otherwise.
+    /// falls back to the cached `get(i)` pull otherwise.
     fn chip_height(&self, i: usize) -> usize {
         match &self.dims {
             Some(d) if i < d.len() => d[i].0,
             _ => {
-                let t = (self.pull)(i);
+                let t = self.get(i);
                 if t.width == 0 {
                     1
                 } else {
@@ -327,11 +375,11 @@ where
     }
 
     /// O(1) metadata read when `with_dims` supplied dims;
-    /// falls back to the default `get(i)` pull otherwise.
+    /// falls back to the cached `get(i)` pull otherwise.
     fn chip_width(&self, i: usize) -> usize {
         match &self.dims {
             Some(d) if i < d.len() => d[i].1,
-            _ => (self.pull)(i).width,
+            _ => self.get(i).width,
         }
     }
 
