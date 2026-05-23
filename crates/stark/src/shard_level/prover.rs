@@ -344,9 +344,9 @@ where
     let _t_phase4 = std::time::Instant::now();
     let (evaluation_proof, evaluation_proof_bundle_opt) = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
-        emit_jagged_pcs_bytes::<SC, A>(
+        emit_jagged_pcs_bytes::<SC, A, _>(
             chips,
-            main_traces,
+            main_trace_loader,
             &logup_gkr_proof.logup_evaluations.point,
             challenger,
             _device_traces,
@@ -510,9 +510,9 @@ where
 /// field on `BasefoldShardProof`, bundle for the new structured
 /// `evaluation_proof_bundle` field (#241 Phase 4c).  Bundle is `None`
 /// when the SC config doesn't match the KoalaBear monomorphization.
-fn emit_jagged_pcs_bytes<SC, A>(
+fn emit_jagged_pcs_bytes<SC, A, L>(
     chips: &[&Chip<Val<SC>, A>],
-    main_traces: &[RowMajorMatrix<Val<SC>>],
+    main_trace_loader: &L,
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     // per-shard device-trace provider for jagged-PCS GPU hooks
@@ -526,10 +526,19 @@ where
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
+    L: crate::shard_level::main_trace_loader::MainTraceLoader<Val<SC>>,
 {
     use core::any::{Any, TypeId};
     use crate::basefold_late_binding::jagged::prove_jagged_basefold;
     use crate::{InnerChallenge, InnerVal};
+
+    // Gap #1 Phase B-3c: materialize main traces from the loader here
+    // so the orchestrator no longer needs to do it upfront.  Identical
+    // perf to today; structural surface for future per-chip on-demand
+    // pulls (e.g. jagged-PCS GPU hook taking device-resident traces
+    // directly).
+    let main_traces: Vec<RowMajorMatrix<Val<SC>>> = main_trace_loader.materialize_all();
+    let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
 
     // Gate on Val<SC> == InnerVal, Challenge<SC> == InnerChallenge,
     // AND SC::Challenger == LbChallenger (all three must match for
