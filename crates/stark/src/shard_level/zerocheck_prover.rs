@@ -565,7 +565,33 @@ where
             //
             // On `None` (lookup miss, downcast fail, or GPU rejected)
             // the existing host-input dispatch block runs.
+            // Diag (one-shot per process): trace the device-hook gate
+            // path so operators can see WHY #495 isn't firing.
+            use std::sync::OnceLock;
+            static DIAG_GATE_NO_PROVIDER: OnceLock<()> = OnceLock::new();
+            static DIAG_GATE_NO_DEVICE_HOOK: OnceLock<()> = OnceLock::new();
+            static DIAG_GATE_TYPEID: OnceLock<()> = OnceLock::new();
+            static DIAG_GATE_LOOKUP_MISS: OnceLock<()> = OnceLock::new();
+            if _device_traces.is_none() {
+                DIAG_GATE_NO_PROVIDER.get_or_init(|| {
+                    tracing::warn!(
+                        "#495 device constraint_eval gate: provider=None \
+                         (caller did not pass DeviceTraceProvider through \
+                         prove_shard_zerocheck — phase 2 hook silently skipped)"
+                    );
+                });
+            }
             if let Some(provider) = _device_traces {
+                if crate::shard_level::sumcheck_poly::
+                    get_gpu_constraint_eval_device_hook().is_none() {
+                    DIAG_GATE_NO_DEVICE_HOOK.get_or_init(|| {
+                        tracing::warn!(
+                            "#495 device constraint_eval gate: device_hook=None \
+                             (ziren-gpu's register_with_zkm_stark did not register \
+                             the device-input hook — phase 2 silently skipped)"
+                        );
+                    });
+                }
                 if let Some(device_hook) = crate::shard_level::sumcheck_poly::
                     get_gpu_constraint_eval_device_hook()
                 {
@@ -575,6 +601,16 @@ where
                         4,
                     >;
                     type Kb = p3_koala_bear::KoalaBear;
+                    if TypeId::of::<Challenge<SC>>() != TypeId::of::<Ef4>()
+                        || TypeId::of::<Val<SC>>() != TypeId::of::<Kb>()
+                    {
+                        DIAG_GATE_TYPEID.get_or_init(|| {
+                            tracing::warn!(
+                                "#495 device constraint_eval gate: TypeId mismatch \
+                                 (Val,Challenge) != (Kb,Ef4) — phase 2 silently skipped"
+                            );
+                        });
+                    }
                     if TypeId::of::<Challenge<SC>>() == TypeId::of::<Ef4>()
                         && TypeId::of::<Val<SC>>() == TypeId::of::<Kb>()
                     {
@@ -584,11 +620,22 @@ where
                         // hook downcasts.
                         let height_for_lookup = main_trace.values.len()
                             / main_trace.width.max(1);
-                        if let Some(arc) = provider.lookup(
+                        let arc_opt = provider.lookup(
                             &chip.name(),
                             height_for_lookup,
                             main_trace.width,
-                        ) {
+                        );
+                        if arc_opt.is_none() {
+                            DIAG_GATE_LOOKUP_MISS.get_or_init(|| {
+                                tracing::warn!(
+                                    "#495 device constraint_eval gate: \
+                                     provider.lookup MISS chip={} h={} w={} \
+                                     (drain mode? shape mismatch? — phase 2 silently skipped)",
+                                    chip.name(), height_for_lookup, main_trace.width,
+                                );
+                            });
+                        }
+                        if let Some(arc) = arc_opt {
                             use std::sync::OnceLock;
                             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                             FIRED_ONCE.get_or_init(|| {
