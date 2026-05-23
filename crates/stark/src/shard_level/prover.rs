@@ -245,10 +245,10 @@ where
     let _t_phase2 = std::time::Instant::now();
     let logup_gkr_proof = {
         let _span = tracing::info_span!("phase_logup_gkr").entered();
-        prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
+        prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger, _>(
             chips,
             preprocessed_traces,
-            main_traces,
+            main_trace_loader,
             max_log_row_count,
             challenger,
             _device_traces,

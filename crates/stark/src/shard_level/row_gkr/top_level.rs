@@ -43,6 +43,7 @@ use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+use crate::shard_level::main_trace_loader::MainTraceLoader;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
@@ -67,10 +68,10 @@ use crate::Chip;
 /// `2^(num_interaction_variables + 1)` — matching the recursion
 /// verifier's expected shape.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
+pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger, L>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
-    main_traces: &[RowMajorMatrix<F>],
+    main_trace_loader: &L,
     max_log_row_count: usize,
     challenger: &mut Challenger,
     // #263: per-shard device-trace provider (SP1-aligned param pattern).
@@ -84,7 +85,18 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
+    L: MainTraceLoader<F>,
 {
+    // Gap #1 Phase B-3a: materialize main traces from the loader here
+    // so the orchestrator no longer needs to do it upfront.  Today's
+    // behaviour is byte-equivalent — `LazyDeviceLoader::materialize_all`
+    // fans out the per-chip device→host pull across rayon workers
+    // (same as the eager-host path).  Future optimisations can replace
+    // this with per-chip on-demand pulls inside `build_gkr_circuit` /
+    // Step 6 once the device-resident LogUp consumer (#398 sub-step 3)
+    // takes over the hot path.
+    let main_traces: Vec<RowMajorMatrix<F>> = main_trace_loader.materialize_all();
+    let main_traces: &[RowMajorMatrix<F>] = &main_traces;
     // #383 sub-step 1 — RAII LogUp-GKR task scope wired via
     // `enter_with_scope` so the V3 dispatch site (`round.rs::
     // try_logup_round_gpu_v3`) can consult the typed scope pointer
