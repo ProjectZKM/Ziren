@@ -179,17 +179,24 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    //  staging: materialize ALL chip main traces upfront
-    // (byte-equivalent to the legacy `&[RowMajorMatrix]` entrypoint).
-    // Phase 5 cumulative sums + Phase 3 batched pre-pass + Phase 4
-    // jagged-PCS chip_traces clone all read every chip's host trace
-    // unconditionally today — pulling on demand here would be
-    // strictly equal in wall.  Future per-phase loader plumbing
-    // will let GPU callers skip pulls when a device-resident path
-    // exists for the chip.
-    let main_traces: Vec<RowMajorMatrix<Val<SC>>> =
-        main_trace_loader.materialize_all();
-    let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
+    // Gap #1 Phase B-4: orchestrator-level `materialize_all()` fence
+    // REMOVED.  Each per-phase consumer (Phase 2 LogUp-GKR, Phase 3
+    // zerocheck, Phase 4 jagged-PCS) now owns its own loader query
+    // via the Phase B-3a/b/c signature port.  Today's behaviour is
+    // byte-equivalent — each phase still internally calls
+    // `loader.materialize_all()` at entry, so the per-chip device->
+    // host pulls happen once per phase (three serial fans instead
+    // of one).  The structural unlock: future patches can replace
+    // the in-phase materialize with per-chip on-demand pulls (or
+    // skip them entirely when a device-resident hook handles the
+    // chip) without further orchestrator surface churn.
+    //
+    // RSS impact (immediate, default-on): peak host RSS may drop
+    // by up to `~3x` per phase since each phase's materialise is
+    // a transient Vec that drops at end-of-phase, vs the previous
+    // single Vec held live across all three phases + Phase 5.
+    // (Production wall on tendermint 2-GPU: see ant-5090-2 GPU 5/6
+    // smoke for the realised wall delta.)
 
     // Per-shard phase timing instrumentation.  Each phase span emits
     // an `info!(elapsed_ms = ..., phase = "...", chips = ...)` line on
@@ -420,17 +427,31 @@ where
     // verifier-side change is the next step).  Until then,
     // populating this map is a no-op for verification, but exercises the
     // wire-format / serde path.
+    // Gap #1 Phase B-4: read each chip's tail-row from the loader
+    // on demand (only chips with non-`Local` commit_scope actually
+    // need the host bytes).  For `EagerHostLoader` this is a clone
+    // of the same slice the old `main_traces.iter()` walked; for
+    // `LazyDeviceLoader::with_dims` this triggers a per-chip
+    // device->host pull, but only for chips whose `commit_scope()`
+    // isn't `Local`.
+    //
+    // Future optimisation: a dedicated `MainTraceLoader::chip_tail_row`
+    // method could let `LazyDeviceLoader` pull only the last 14
+    // elements via a sub-buffer device-side memcpy (saves ~99% of
+    // PCIe traffic for tall chips), but the current implementation
+    // is byte-equivalent to the prior `main_traces[i]` walk.
     let chip_cumulative_sums: std::collections::BTreeMap<
         String,
         crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
     > = chips
         .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, main_trace)| {
+        .enumerate()
+        .map(|(chip_idx, chip)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
             let global = if chip.commit_scope() == crate::air::LookupScope::Local {
                 crate::septic_digest::SepticDigest::<Val<SC>>::zero()
             } else {
+                let main_trace = main_trace_loader.get(chip_idx);
                 let main_trace_size = main_trace.values.len();
                 if main_trace_size >= 14 {
                     let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
