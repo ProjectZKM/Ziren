@@ -13,6 +13,42 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
+/// Parse `ZKM_GPU_DEVICES` into a device count; returns 1 when unset / empty / unparseable.
+///
+/// Used to auto-derive trace-gen worker count and recursion shard-batch size so a
+/// single env var (`ZKM_GPU_DEVICES`) is sufficient for sweep harnesses without
+/// also tuning `TRACE_GEN_WORKERS`.
+fn gpu_device_count() -> usize {
+    env::var("ZKM_GPU_DEVICES")
+        .ok()
+        .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
+        .filter(|&n| n > 0)
+        .unwrap_or(1)
+}
+
+/// Auto-derive a sensible `trace_gen_workers` from GPU count when env unset.
+///
+/// Heuristic: `max(2 * n_gpu, 4)`. Per the TGW sweep findings on tendermint
+/// (project_trace_gen_workers_sweep.md): 1-GPU plateau at 4, 2-GPU optimum at 4,
+/// 4-GPU optimum at 8, 6+ GPU within noise around 8-12. Floor of 4 prevents
+/// over-spawning that hurt 2-GPU runs with the prior `max(n_gpu, 8)` formula.
+/// Explicit `TRACE_GEN_WORKERS` always wins.
+fn auto_trace_gen_workers() -> usize {
+    match env::var("TRACE_GEN_WORKERS") {
+        Ok(s) => s.parse::<usize>().unwrap_or(DEFAULT_TRACE_GEN_WORKERS),
+        Err(_) => {
+            let n_gpu = gpu_device_count();
+            // Only auto-derive when at least one GPU is configured; otherwise stay
+            // at the legacy default of 1 to preserve CPU-only behaviour.
+            if n_gpu > 1 || env::var("ZKM_GPU_DEVICES").is_ok() {
+                (2 * n_gpu).max(4)
+            } else {
+                DEFAULT_TRACE_GEN_WORKERS
+            }
+        }
+    }
+}
+
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ZKMProverOpts {
@@ -165,11 +201,7 @@ impl ZKMProverOpts {
         //   then regresses (Core 56.4s -> 62.8s from contention).
         // Override via RECURSION_SHARD_BATCH_SIZE for >8-GPU boxes,
         // memory-constrained machines, or experimentation.
-        let gpu_count = env::var("ZKM_GPU_DEVICES")
-            .ok()
-            .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
-            .filter(|&n| n > 0)
-            .unwrap_or(1);
+        let gpu_count = gpu_device_count();
         opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
@@ -220,10 +252,7 @@ impl Default for ZKMCoreOpts {
                 |s| s.parse::<usize>().unwrap_or(default_shard_batch_size),
             ),
             split_opts: SplitOpts::new(MAX_DEFERRED_SPLIT_THRESHOLD),
-            trace_gen_workers: env::var("TRACE_GEN_WORKERS").map_or_else(
-                |_| DEFAULT_TRACE_GEN_WORKERS,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_TRACE_GEN_WORKERS),
-            ),
+            trace_gen_workers: auto_trace_gen_workers(),
             checkpoints_channel_capacity: env::var("CHECKPOINTS_CHANNEL_CAPACITY").map_or_else(
                 |_| DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY,
                 |s| s.parse::<usize>().unwrap_or(DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY),
@@ -285,10 +314,7 @@ impl ZKMCoreOpts {
                 |s| s.parse::<usize>().unwrap_or(MAX_SHARD_BATCH_SIZE),
             ),
             split_opts: SplitOpts::new(split_threshold),
-            trace_gen_workers: env::var("TRACE_GEN_WORKERS").map_or_else(
-                |_| DEFAULT_TRACE_GEN_WORKERS,
-                |s| s.parse::<usize>().unwrap_or(DEFAULT_TRACE_GEN_WORKERS),
-            ),
+            trace_gen_workers: auto_trace_gen_workers(),
             checkpoints_channel_capacity: env::var("CHECKPOINTS_CHANNEL_CAPACITY").map_or_else(
                 |_| DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY,
                 |s| s.parse::<usize>().unwrap_or(DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY),
@@ -378,5 +404,55 @@ mod tests {
 
         let opts = ZKMProverOpts::auto();
         println!("auto: {:?}", opts.core_opts);
+    }
+
+    /// Lock the `auto_trace_gen_workers` heuristic so subsequent perf sweeps see
+    /// the same scaling that `project_trace_gen_workers_sweep.md` measured.
+    ///
+    /// Env reads are process-global, so this test temporarily mutates env vars
+    /// and restores them. It is single-threaded by virtue of running serially
+    /// within this module (cargo runs `#[test]`s in parallel across modules but
+    /// not within a single test function).
+    #[test]
+    fn test_auto_trace_gen_workers_heuristic() {
+        // Snapshot + clear pre-existing values so the test is deterministic.
+        let prev_tgw = env::var("TRACE_GEN_WORKERS").ok();
+        let prev_dev = env::var("ZKM_GPU_DEVICES").ok();
+        env::remove_var("TRACE_GEN_WORKERS");
+        env::remove_var("ZKM_GPU_DEVICES");
+
+        // No GPU env -> legacy default (1), preserves CPU-only behaviour.
+        assert_eq!(auto_trace_gen_workers(), DEFAULT_TRACE_GEN_WORKERS);
+
+        // 1 GPU -> floor of 4 (2*1=2, max(2,4)=4).
+        env::set_var("ZKM_GPU_DEVICES", "0");
+        assert_eq!(auto_trace_gen_workers(), 4);
+
+        // 2 GPUs -> 4.
+        env::set_var("ZKM_GPU_DEVICES", "0,1");
+        assert_eq!(auto_trace_gen_workers(), 4);
+
+        // 4 GPUs -> 8.
+        env::set_var("ZKM_GPU_DEVICES", "0,1,2,3");
+        assert_eq!(auto_trace_gen_workers(), 8);
+
+        // 6 GPUs -> 12.
+        env::set_var("ZKM_GPU_DEVICES", "0,1,2,3,4,5");
+        assert_eq!(auto_trace_gen_workers(), 12);
+
+        // Explicit TRACE_GEN_WORKERS always wins, regardless of GPU count.
+        env::set_var("TRACE_GEN_WORKERS", "3");
+        env::set_var("ZKM_GPU_DEVICES", "0,1,2,3");
+        assert_eq!(auto_trace_gen_workers(), 3);
+
+        // Restore.
+        env::remove_var("TRACE_GEN_WORKERS");
+        env::remove_var("ZKM_GPU_DEVICES");
+        if let Some(v) = prev_tgw {
+            env::set_var("TRACE_GEN_WORKERS", v);
+        }
+        if let Some(v) = prev_dev {
+            env::set_var("ZKM_GPU_DEVICES", v);
+        }
     }
 }
