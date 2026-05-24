@@ -955,6 +955,8 @@ mod jagged_pcs_device_hook {
     use super::Ef4;
     use alloc::string::String;
     use alloc::vec::Vec;
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
 
     /// Signature of the GPU jagged-PCS device-trace orchestration
     /// driver.  Inputs are the chip NAMES (in chip-iteration order;
@@ -973,6 +975,18 @@ mod jagged_pcs_device_hook {
         // does).  Borrowed reference scoped to a single shard's
         // prove call — concurrent shards each pass their own.
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // Pre-materialized host (name, trace) pairs from the host
+        // orchestrator's `MainTraceLoader::materialize_all()`.  When
+        // `Some` AND index-aligned by name to `chip_names`, the hook
+        // reuses these for the `prove_jagged_basefold_with_y_per_chip`
+        // chip_traces input AND for the per-chip y-eval host fallback
+        // (eliminates the canonical `host_eval_chip_columns_at_point`
+        // OOB panic under `ZIREN_GPU_DENSE_FIRST_LAYER_PACK=1` where
+        // device snapshot height can exceed `1 << r_row.len()` —
+        // walking those rows on the device side would index beyond
+        // the orchestrator-built eq table).  `None` for legacy
+        // callers preserves the device-snapshot-pull path bit-for-bit.
+        host_chip_traces: Option<&[(String, RowMajorMatrix<KoalaBear>)]>,
     ) -> Vec<u8>;
 
     static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =
