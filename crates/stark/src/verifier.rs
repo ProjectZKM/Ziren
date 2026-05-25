@@ -46,11 +46,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     {
         use itertools::izip;
 
-        // KoalaBear MIPS shards always carry a shard-level BaseFold
-        // proof (#13 always-on); dispatch to BasefoldShardVerifier.
-        // The FRI/STARK code path below remains for compress and
-        // non-KoalaBear shard proofs, which never populate
-        // basefold_shard_proof.
+        // KoalaBear/LbChallenger shard proofs carry a shard-level
+        // BaseFold proof; dispatch to BasefoldShardVerifier whenever the
+        // envelope contains one.  Proofs without this field continue
+        // through the legacy FRI/STARK verifier below.
         if let Some(basefold_proof) = proof.basefold_shard_proof.as_ref() {
             let shard_verifier =
                 crate::shard_level::verifier::BasefoldShardVerifier::production_default();
@@ -150,9 +149,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
 
         let alpha = challenger.sample_algebra_element::<SC::Challenge>();
 
-        // Observe the quotient commitments.  Compress / non-KoalaBear
-        // shards take this code path (KoalaBear MIPS shards short-circuit
-        // to BasefoldShardVerifier above).
+        // Observe the quotient commitments for proofs that did not carry
+        // a shard-level BaseFold proof and therefore stayed on the legacy
+        // FRI/STARK verifier path.
         if let Some(qc) = quotient_commit.as_ref() {
             challenger.observe(qc.clone());
         }

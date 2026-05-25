@@ -357,9 +357,10 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
-        // === BASEFOLD FAST PATH (default) ===
+        // === BASEFOLD FAST PATH (KoalaBear/LbChallenger default) ===
         // BaseFold + jagged late-binding + zerocheck + LogUp-GKR is the
-        // default proof system for MIPS shards.
+        // default proof system whenever the generic config is the
+        // KoalaBear/LbChallenger stack.
         //
         // (Historical note: this path was originally named "WHIR fast
         // path" while the WHIR PCS was the planned soundness pillar.
@@ -368,19 +369,14 @@ where
         // prep + main commit/open, with soundness now carried by the
         // BaseFold per-shard proof generated below.)
         //
-        // Gate on "Program" (MIPS-specific preprocessed trace) — this
-        // distinguishes MIPS shards (Cpu and memory-only) from recursion
-        // shards (BaseAlu/ExtAlu/Poseidon2 only).  Recursion programs do
-        // NOT carry "Program" and stay on the FRI path; ALL MIPS shards
-        // (including Cpu-less memory-finalize shards) take basefold.
+        // The older dispatch keyed off the MIPS-only "Program" chip:
+        // MIPS shards took BaseFold, recursion shards stayed on FRI, and
+        // Cpu-less memory shards used a side-channel BaseFold proof.  That
+        // path is retired.  Dispatch is now purely TypeId-based, so the
+        // KoalaBear/LbChallenger stack takes BaseFold for MIPS and
+        // recursion shards alike.
         //
-        // This generalizes the Phase 2 (v2) side-channel that
-        // used to be added in the FRI path for Cpu-less MIPS shards
-        // (was at line 918) — now those shards take the basefold path
-        // directly instead of running the dead FRI computation + side-
-        // channel basefold proof.
-        //
-        // === Step 5 Phase 3e (May 19 2026): basefold-for-recursion is default ===
+        // === Step 5 Phase 3e (May 19 2026): BaseFold for recursion is default ===
         // The env-gated `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` switch retired
         // (commit e3569c6b on lib.rs side, this commit on prover.rs side).
         // Dispatch is now TypeId-based per the Phase 3d HYBRID memo
@@ -438,21 +434,19 @@ where
             let _alpha: SC::Challenge = challenger.sample_algebra_element();
 
             // No quotient commit to observe (skipped).
-            // Sample zeta (evaluation point) so the BaseFold-mode FRI
-            // skip below has a value in scope.  Ignored at verify
-            // time when the verifier's `legacy_quotient_skipped`
-            // short-circuit fires.
+            // Sample zeta (evaluation point) for the legacy prep/main
+            // opening fields that are still carried in the shard-proof
+            // envelope.  Permutation and quotient are intentionally
+            // absent in the BaseFold path.
             let _zeta: SC::Challenge = challenger.sample_algebra_element();
 
             // === Phase 3: skip FRI open of perm/quotient in BaseFold mode ===
             //
             // In the BaseFold fast path the zeta-point FRI opening is
             // restricted to prep + main; perm + quotient are not
-            // committed.  The empty-FriProof short-circuit that used
-            // to live here (paired with the verifier's legacy
-            // short-circuit) retired with #13 — KoalaBear MIPS shards
-            // now produce a `BasefoldShardProof` instead, and the
-            // legacy verifier shortcut is gone.
+            // committed.  Soundness is carried by the
+            // `BasefoldShardProof` generated below, and the legacy
+            // verifier shortcut is gone.
             let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
                 .iter()
                 .zip(chips.iter())
@@ -563,25 +557,12 @@ where
                 })
                 .collect::<Vec<_>>();
 
-            // Phase 2c late-binding: per-chip per-column BaseFold proofs
-            // that bind `logup_row_openings.main_at_r_row` to a
-            // (separate) BaseFold commitment of the main trace.
-            // (Originally written for WHIR; the pcs migration in Apr
-            // 2026 swapped WHIR → BaseFold but kept the same shape.)
-            //
-            // Dispatched via TypeId match on `SC` so this generic
-            // function can call into the KoalaBear-specific
-            // `LateBindingCapable` impl.  When SC matches, we commit
-            // ── Task #13 always-on: populate basefold_shard_proof ────
-            //
-            // For KoalaBearPoseidon2 (gated inside the helper),
-            // drive the shard-level prover unconditionally and carry
-            // the result alongside the legacy per-chip fields.
-            // `Verifier::verify_shard`'s dispatch (verifier.rs:50)
-            // routes to `BasefoldShardVerifier` whenever this is
-            // `Some(_)`, so the legacy per-chip code path is dead
-            // for KoalaBear MIPS shards (kept only for compress /
-            // non-KoalaBear configs).
+            // Populate the shard-level BaseFold proof.  The helper has
+            // the same KoalaBear/LbChallenger TypeId guard as the outer
+            // branch, then drives LogUp-GKR, zerocheck, and jagged PCS.
+            // The legacy prep/main opening fields above remain in the
+            // envelope, but `Verifier::verify_shard` dispatches to
+            // `BasefoldShardVerifier` whenever this field is `Some(_)`.
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
                 &chips,
                 &pk.traces,
@@ -606,22 +587,13 @@ where
         }
 
         // ─────────────────────────────────────────────────────────────
-        // === FRI PATH — RECURSION SHARDS ONLY (Step 5 Phase 3 target) ===
+        // === FRI PATH — non-BaseFold configs ===
         //
-        // After Step 5 Phase 1 (commit 2a21f10f), the basefold branch
-        // above serves ALL MIPS shards (Cpu and memory-only).  Reaching
-        // this point means `data.chip_ordering` lacks the "Program"
-        // chip, which only happens for recursion shards (BaseAlu /
-        // ExtAlu / Poseidon2 / FriFold / BatchFRI).
-        //
-        // The entire block below — permutation traces, quotient
-        // evaluation, FRI commit, OOD opening (~376 LOC, lines ~580-940)
-        // — DELETES WHOLESALE when Step 5 Phase 3 lands and recursion
-        // shards move to basefold (continuation).
-        // Until then, this is recursion's prove pipeline.
-        //
-        // Do not add MIPS-specific logic here.  Per-MIPS observes /
-        // commits / cumsums all live in the basefold branch above.
+        // Reaching this point means the generic config did not match the
+        // KoalaBear/LbChallenger TypeId gate above.  Today this primarily
+        // serves the outer wrap path (`OuterSC` with
+        // `MultiField32Challenger`), which intentionally stays on the
+        // legacy FRI/STARK pipeline.
         // ─────────────────────────────────────────────────────────────
 
         // Generate the permutation traces.
@@ -959,13 +931,10 @@ where
             )
             .collect::<Vec<_>>();
 
-        // The FRI path now serves ONLY recursion shards (no "Program"
-        // chip).  Recursion shards must keep basefold_shard_proof=None
-        // — the verifier rejects basefold proofs on recursion-shaped
-        // shards.  The Phase 2 (v2) side-channel that used to
-        // live here (basefold proof for Cpu-less MIPS memory-only
-        // shards) is no longer needed: those shards now take the
-        // basefold path directly via the line 370 gate.
+        // Non-BaseFold configs return the legacy shard proof envelope
+        // without a shard-level BaseFold proof.  The verifier therefore
+        // continues through the FRI/STARK path instead of dispatching to
+        // `BasefoldShardVerifier`.
         Ok(ShardProof::<SC> {
             commitment: ShardCommitment {
                 main_commit: data.main_commit.clone(),
@@ -1091,10 +1060,9 @@ impl Error for CpuProverError {}
 /// `crate::shard_level::prover::emit_jagged_pcs_bytes`) and
 /// `None` otherwise.
 ///
-/// Invoked unconditionally from `StarkMachine::open` for KoalaBear
-/// MIPS shards.  Bridges between the per-chip BaseFold path's
-/// in-scope values and the shard-level prover's monomorphic
-/// KoalaBear API.
+/// Invoked from the KoalaBear/LbChallenger BaseFold path.  Bridges
+/// between the generic `StarkMachine::open` state and the shard-level
+/// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn try_prove_shard_to_basefold_boxed<SC, A>(
     chips: &[&MachineChip<SC, A>],

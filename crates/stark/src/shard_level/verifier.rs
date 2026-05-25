@@ -1,4 +1,4 @@
-//! Host-side BasefoldShardVerifier — the task remaining scaffolding.
+//! Host-side BasefoldShardVerifier.
 //!
 //! Mirror of the in-circuit verifier at
 //! [`crates/recursion/circuit/src/shard_basefold.rs::BasefoldShardVerifier::verify_shard`]
@@ -8,17 +8,21 @@
 //! # Pipeline
 //!
 //! 1. Transcript prologue — observe public values, main commitment,
-//!    per-chip (height, name) metadata.  (implemented in this file)
-//! 2. LogUp-GKR sumcheck verification.  (TODO)
-//! 3. Zerocheck sumcheck verification.  (TODO)
-//! 4. Jagged-PCS opening verification.  (TODO)
+//!    and per-chip metadata.
+//! 2. LogUp-GKR sumcheck verification.
+//! 3. Zerocheck sumcheck verification for Ziren's direct
+//!    `Σ_b C(b) == 0` proof shape.
+//! 4. Jagged-PCS opening verification via the BaseFold late-binding
+//!    bundle.
 //!
 //! # Status
 //!
-//! Phase 1 implemented.  Phases 2-4 are structural TODOs — the
-//! substantial sumcheck / PCS verification logic lives in the
-//! recursion circuit today and needs a host-side port.  Each is
-//! its own ~200-300 LOC port effort (see the task description).
+//! The host path now verifies the active BaseFold shard proof flow:
+//! transcript prologue, LogUp-GKR, direct zerocheck sumcheck, and
+//! jagged-PCS opening.  The SP1-shape zerocheck cross-chip identity is
+//! available as a separate helper for callers that produce that proof
+//! shape, but it is not wired into the active Ziren direct-sumcheck
+//! path.
 
 use alloc::vec::Vec;
 
@@ -53,8 +57,8 @@ pub enum BasefoldVerifyError {
     Zerocheck(String),
     /// Jagged-PCS opening verification failed.
     JaggedPcs(String),
-    /// One of the unimplemented phases — indicates the host-side
-    /// port hasn't landed yet for that phase.
+    /// Reserved for staged verifier ports and defensive call sites that
+    /// intentionally reject an unsupported proof sub-flow.
     Unimplemented(&'static str),
 }
 
@@ -119,16 +123,9 @@ impl BasefoldShardVerifier {
     /// Verify a shard-level BaseFold proof against the machine's
     /// chip set, verifying key, and public values.
     ///
-    /// # Current implementation
-    ///
-    /// Phase 1 (transcript prologue) is implemented — observes
-    /// public_values, main_commitment, and per-chip (height, name)
-    /// metadata into the challenger, exactly mirroring the
-    /// shard-level prover's ordering at
-    /// `crate::shard_level::prover::prove_shard_to_basefold`.
-    ///
-    /// Phases 2-4 return `Err(BasefoldVerifyError::Unimplemented)`
-    /// until their respective host-side ports land (see the task).
+    /// The verifier mirrors the shard-level prover transcript order:
+    /// prologue observations, LogUp-GKR verification, direct zerocheck
+    /// sumcheck verification, and jagged-PCS opening verification.
     #[allow(clippy::too_many_arguments)]
     pub fn verify_shard<SC, A>(
         &self,
@@ -222,24 +219,18 @@ impl BasefoldShardVerifier {
 
         // ── Phase 3: Zerocheck sumcheck verification ────────────
         //
-        // Partial port from
+        // Host port of the active Ziren zerocheck proof shape.  It
+        // samples the same phase challenges as the in-circuit verifier,
+        // checks the direct `Σ_b C(b) == 0` sumcheck, and observes the
+        // per-chip openings that feed the following jagged-PCS phase.
+        //
+        // The SP1-shape cross-chip RLC / GKR sum-modification identity is
+        // implemented in `verify_zerocheck_cryptographic_identity_host`
+        // for callers that produce that proof shape; it is intentionally
+        // not invoked for the current direct-sumcheck proof.
+        //
+        // Reference:
         //   crates/recursion/circuit/src/zerocheck.rs::BasefoldZerocheckVerifier::verify_zerocheck
-        //
-        // Fully implemented:
-        //   - Challenge sampling (alpha, gkr_batch_open, lambda)
-        //   - Chip count / opening shape / point dimension checks
-        //   - Zerocheck sumcheck verification via verify_sumcheck_host
-        //   - Per-chip opening transcript observations
-        //
-        // Deferred (Unimplemented) — requires BasefoldConstraintFolder
-        // host port (its own task):
-        //   - AIR constraint evaluation (eval_constraints_basefold)
-        //   - Padded-row adjustment (compute_padded_row_adjustment_basefold)
-        //   - Cross-chip RLC identity check (step 5 of the circuit version)
-        //   - GKR sum-modification identity (step 7)
-        //
-        // The partial port catches all structural/shape failures in
-        // the zerocheck phase; full soundness requires the folder port.
         verify_zerocheck_host::<SC, A>(
             chips,
             &proof.zerocheck_proof,
