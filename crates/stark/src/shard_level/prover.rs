@@ -140,8 +140,9 @@ where
         "shard phase done"
     );
 
-    // Phase 3: zerocheck. Receives LogUp-GKR per-chip evaluations
-    // so it can build initial sumcheck claims.
+    // Phase 3: zerocheck over the lambda-RLC'd per-chip constraint
+    // tables. Lookup soundness is handled by Phase 2 (LogUp-GKR), so
+    // the zerocheck doesn't take any LogUp evaluations as input.
     let _t_phase3 = std::time::Instant::now();
     let zerocheck_proof = {
         let _span = tracing::info_span!("phase_zerocheck").entered();
@@ -149,7 +150,6 @@ where
             chips,
             preprocessed_traces,
             main_traces,
-            &logup_gkr_proof.logup_evaluations,
             &public_values,
             max_log_row_count,
             challenger,

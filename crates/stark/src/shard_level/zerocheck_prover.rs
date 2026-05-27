@@ -57,7 +57,7 @@ use super::sumcheck_poly::{
     reduce_sumcheck_to_evaluation, ComponentPoly, SumcheckPoly, SumcheckPolyBase,
     SumcheckPolyFirstRound,
 };
-use super::types::{LogUpEvaluations, PartialSumcheckProof, UnivariatePolynomial};
+use super::types::{PartialSumcheckProof, UnivariatePolynomial};
 use crate::air::MachineAir;
 use crate::folder::VerifierConstraintFolder;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
@@ -331,7 +331,6 @@ pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
-    _logup_evaluations: &LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
@@ -436,8 +435,11 @@ where
             let height = main_trace.values.len() / main_trace.width.max(1);
             let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
-            // local_cumulative_sum: zero (future: thread real local
-            // sum from LogUp-GKR layer 0).
+            // local_cumulative_sum is held at ZERO: the sole consumer
+            // (eval_permutation_constraints) short-circuits in the
+            // BaseFold path when perm_width == 0 — see permutation.rs:243.
+            // Lookup soundness is enforced by LogUp-GKR (Phase 2), not
+            // by this zerocheck.
             let global_cumulative_sum = chip_global_cumulative_sum(*chip, main_trace);
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
