@@ -802,7 +802,11 @@ where
         num_vars_list.push(log_height);
     }
 
-    if chip_names.is_empty() { return Some(vec![None; chips.len()]); }
+    // All chips were filtered out — the GPU hook was never invoked.
+    // Return None (not Some(vec![None; ...])) so the caller's match on
+    // gpu_batched_results.is_some() correctly reflects that no batched
+    // pre-pass ran; the per-chip path handles every chip from scratch.
+    if chip_names.is_empty() { return None; }
 
     let chip_names_refs: Vec<&str> = chip_names.iter().map(String::as_str).collect();
 
@@ -915,6 +919,7 @@ fn cross_shard_batch_enabled() -> bool {
 // pool-worker shards into one combined hook call, amortizing per-
 // shard kernel-launch overhead. Bounded by batch size or a timeout.
 mod cross_shard_coordinator {
+    use std::collections::HashMap;
     use std::sync::{Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
@@ -932,13 +937,19 @@ mod cross_shard_coordinator {
         local_cumulative_sums: Vec<Ef4>,
         global_cumulative_sums_xy: Vec<[p3_koala_bear::KoalaBear; 14]>,
         num_vars_list: Vec<usize>,
-        slot: usize,
+        slot: u64,
     }
 
+    // HashMap-keyed slots instead of a Vec + reset scheme. Slots are
+    // removed when the submitter takes its result, so memory is bounded
+    // by in-flight count without needing a cross-batch cleanup pass.
+    // Eliminates the index-out-of-bounds class entirely: a waiter that
+    // wakes after its slot was somehow removed sees `get(&slot) == None`
+    // instead of panicking on `done[slot]` with a shrunk Vec.
     struct State {
         pending: Vec<Submission>,
-        done: Vec<Option<Vec<Option<Vec<Ef4>>>>>,
-        next_slot: usize,
+        done: HashMap<u64, Vec<Option<Vec<Ef4>>>>,
+        next_slot: u64,
         dispatching: bool,
     }
 
@@ -952,7 +963,7 @@ mod cross_shard_coordinator {
         C.get_or_init(|| Coordinator {
             state: Mutex::new(State {
                 pending: Vec::new(),
-                done: Vec::new(),
+                done: HashMap::new(),
                 next_slot: 0,
                 dispatching: false,
             }),
@@ -1037,7 +1048,9 @@ mod cross_shard_coordinator {
             let mut state = coord.state.lock().unwrap();
             my_slot = state.next_slot;
             state.next_slot += 1;
-            state.done.push(None);
+            // Slot is keyed by monotonic u64 in a HashMap: removed on
+            // take, so no cross-batch reset is needed and a stale
+            // my_slot can never index out of bounds.
             sub.slot = my_slot;
             state.pending.push(sub);
             coord.cv.notify_all();
@@ -1045,14 +1058,7 @@ mod cross_shard_coordinator {
 
         loop {
             let mut state = coord.state.lock().unwrap();
-            if let Some(out) = state.done[my_slot].take() {
-                if state.done.iter().all(Option::is_none)
-                    && state.pending.is_empty()
-                    && !state.dispatching
-                {
-                    state.done.clear();
-                    state.next_slot = 0;
-                }
+            if let Some(out) = state.done.remove(&my_slot) {
                 if out.is_empty() {
                     return None;
                 }
@@ -1135,12 +1141,12 @@ mod cross_shard_coordinator {
                 let mut state = coord.state.lock().unwrap();
                 if dispatch_failed {
                     for s in &drained {
-                        state.done[s.slot] = Some(Vec::new());
+                        state.done.insert(s.slot, Vec::new());
                     }
                 } else {
                     debug_assert_eq!(hook_out.len(), drained.len());
                     for (s, out) in drained.iter().zip(hook_out.into_iter()) {
-                        state.done[s.slot] = Some(out);
+                        state.done.insert(s.slot, out);
                     }
                 }
                 state.dispatching = false;
