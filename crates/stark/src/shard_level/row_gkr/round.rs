@@ -832,7 +832,7 @@ where
 
     let first_layer = match circuit {
         GkrCircuitLayer::FirstLayer(l) => l,
-        GkrCircuitLayer::Layer(_) => {
+        GkrCircuitLayer::Layer(_) | GkrCircuitLayer::DeviceShape { .. } => {
             return None;
         }
     };
@@ -2358,6 +2358,9 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         let (num_row_variables, num_interaction_variables) = match circuit {
             GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
             GkrCircuitLayer::FirstLayer(l) => (l.num_row_variables, l.num_interaction_variables),
+            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
+                (*num_row_variables, *num_interaction_variables)
+            }
         };
         let total_vars = num_row_variables + num_interaction_variables;
         assert_eq!(
@@ -2387,6 +2390,10 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         let chip_state: ChipLayerState<EF> = match circuit {
             GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
+            GkrCircuitLayer::DeviceShape { .. } => unreachable!(
+                "LogupRoundPolynomial::new is the host-path builder; \
+                 DeviceShape must be handled by V3 dispatch upstream"
+            ),
         };
 
         let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
@@ -3057,6 +3064,9 @@ where
             GkrCircuitLayer::FirstLayer(l) => {
                 l.num_row_variables + l.num_interaction_variables
             }
+            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
+                num_row_variables + num_interaction_variables
+            }
         };
         if v3_threshold_vars > 0
             && total_vars_for_threshold < v3_threshold_vars
@@ -3287,6 +3297,8 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
+        // V1 requires host cells to flatten; DeviceShape has none.
+        GkrCircuitLayer::DeviceShape { .. } => return None,
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3297,6 +3309,9 @@ where
     let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
         GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+        GkrCircuitLayer::DeviceShape { .. } => unreachable!(
+            "V1 declined DeviceShape above; flatten branch is unreachable"
+        ),
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
@@ -3424,6 +3439,8 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
+        // V2 also requires host cells to flatten; DeviceShape has none.
+        GkrCircuitLayer::DeviceShape { .. } => return None,
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3433,6 +3450,9 @@ where
     let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
         GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+        GkrCircuitLayer::DeviceShape { .. } => unreachable!(
+            "V2 declined DeviceShape above; flatten branch is unreachable"
+        ),
     };
 
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
@@ -3545,6 +3565,11 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
+        // V3 IS the device-resident path; DeviceShape carries shape metadata
+        // and the actual data lives on the device via the active LogupTaskScope.
+        GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
+            (*num_row_variables, *num_interaction_variables)
+        }
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3621,6 +3646,16 @@ where
         match circuit {
             GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+            // DeviceShape with no handle = invariant violation: V3 was
+            // supposed to consume the layer from the scope but neither
+            // the scope nor the TLS handle is populated. Caller in
+            // top_level.rs must publish a handle before constructing
+            // a DeviceShape (or pull the layer to host first).
+            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => panic!(
+                "V3 dispatch received DeviceShape (num_rv={num_row_variables}, \
+                 num_iv={num_interaction_variables}) but no device handle is \
+                 present in scope or TLS — host fallback has no cells to read."
+            ),
         }
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);

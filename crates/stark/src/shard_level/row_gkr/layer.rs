@@ -210,16 +210,30 @@ pub struct InteractionLayer<F, EF> {
     pub num_interaction_variables: usize,
 }
 
-/// Discriminated union over circuit layers — `FirstLayer` keeps
-/// numerators in the base field while all subsequent `Layer`s have
-/// EF numerators.
+/// Discriminated union over circuit layers.
 ///
-/// Port of
-/// `GkrCircuitLayer<F, EF>`.
+/// * `FirstLayer` keeps numerators in the base field while all
+///   subsequent `Layer`s have EF numerators.
+/// * `DeviceShape` carries only dimension metadata — host cells are
+///   absent because the data lives on the GPU under the active
+///   [`crate::shard_level::row_gkr::device_circuit::LogupTaskScope`].
+///   Mirrors SP1's `GkrCircuitLayer::FirstLayerVirtual` pattern: a
+///   distinct variant so every consumer's `match` is exhaustive
+///   and the host fallback path is unreachable at compile time
+///   (rather than relying on a runtime invariant that the V3 hook
+///   will consume the layer before any consumer reads its cells).
 #[allow(clippy::large_enum_variant)]
 pub enum GkrCircuitLayer<F: Field, EF: ExtensionField<F>> {
     Layer(LogUpGkrCpuLayer<EF, EF>),
     FirstLayer(LogUpGkrCpuLayer<F, EF>),
+    /// Layer whose data is resident on the device via the active
+    /// `LogupTaskScope`. Only `prove_gkr_round` handles this variant
+    /// (via the V3 hook); every other consumer must short-circuit
+    /// because there are no host cells to operate on.
+    DeviceShape {
+        num_row_variables: usize,
+        num_interaction_variables: usize,
+    },
 }
 
 impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
@@ -228,6 +242,7 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
         match self {
             Self::Layer(l) => l.num_row_variables,
             Self::FirstLayer(l) => l.num_row_variables,
+            Self::DeviceShape { num_row_variables, .. } => *num_row_variables,
         }
     }
 
@@ -236,63 +251,24 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
         match self {
             Self::Layer(l) => l.num_interaction_variables,
             Self::FirstLayer(l) => l.num_interaction_variables,
+            Self::DeviceShape { num_interaction_variables, .. } => {
+                *num_interaction_variables
+            }
         }
     }
 
-    /// construct a SHAPE-ONLY proxy carrying just
-    /// the dimension metadata (`num_row_variables`,
-    /// `num_interaction_variables`), with empty `cells` vectors on
-    /// every per-chip [`RowMajorTable`].
-    ///
-    /// ## When this is sound
-    ///
-    /// **Only safe to pass to [`prove_gkr_round`] when the V3
-    /// dispatch is GUARANTEED to consume the layer from the
-    /// device-resident [`crate::shard_level::row_gkr::device_circuit::
-    /// LogupTaskScope`]** — i.e. when:
-    /// 1. The scope's installed circuit has a layer whose
-    ///    `(num_row_variables, num_interaction_variables)` matches
-    ///    this proxy's shape (verify via
-    ///    `LogupTaskScope::peek_next_layer_shape`).
-    /// 2. The V3 hook (`ZIREN_GPU_LOGUP_GKR_DEVICE=1`) is registered
-    ///    and accepts this layer's size (no threshold-skip).
-    /// 3. The V3 hook reads its inputs from the scope handle (NOT
-    ///    from the host `cells` vectors).
-    ///
-    /// When any of those conditions is violated, the host fallback
-    /// path inside `prove_gkr_round` will read the empty `cells`
-    /// vectors and panic via the `flatten_layer` shape assertions.
-    /// The consumer in `top_level.rs` enforces all three conditions
-    /// before constructing a proxy.
-    ///
-    /// ## SP1 parity
-    ///
-    /// SP1 has no analog — its consumer never has a host fallback.
-    /// This proxy is Ziren-specific scaffolding for the
-    /// device-resident consumer migration; the long-term direction
-    /// (full ) is to delete the host fallback entirely,
-    /// at which point this proxy can be removed in favor of the
-    /// existing `DeviceCircuitLayer` enum.
+    /// Construct a [`Self::DeviceShape`] proxy carrying just the
+    /// dimension metadata. Safe to pass to [`prove_gkr_round`] only
+    /// when the V3 dispatch (`ZIREN_GPU_LOGUP_GKR_DEVICE=1` + scope
+    /// shape match) will consume the layer from the device-resident
+    /// scope. The compiler enforces that every other consumer handles
+    /// this variant explicitly.
     #[must_use]
-    pub fn shape_only_layer_proxy(
+    pub const fn shape_only_layer_proxy(
         num_row_variables: usize,
         num_interaction_variables: usize,
     ) -> Self {
-        let empty_table = RowMajorTable::<EF> {
-            cells: Vec::new(),
-            num_row_variables,
-            num_interaction_variables,
-            num_interactions: 0,
-            num_real_rows: 0,
-        };
-        Self::Layer(LogUpGkrCpuLayer {
-            numerator_0: vec![empty_table.clone()],
-            denominator_0: vec![empty_table.clone()],
-            numerator_1: vec![empty_table.clone()],
-            denominator_1: vec![empty_table],
-            num_row_variables,
-            num_interaction_variables,
-        })
+        Self::DeviceShape { num_row_variables, num_interaction_variables }
     }
 }
 
@@ -441,23 +417,20 @@ mod tests {
     /// when the V3 dispatch will consume the layer from the
     /// device-resident scope.
     #[test]
-    fn shape_only_layer_proxy_carries_metadata_with_empty_cells() {
+    fn shape_only_layer_proxy_is_device_shape_variant() {
         let proxy = GkrCircuitLayer::<KoalaBear, EF>::shape_only_layer_proxy(5, 3);
         assert_eq!(proxy.num_row_variables(), 5);
         assert_eq!(proxy.num_interaction_variables(), 3);
         match proxy {
-            GkrCircuitLayer::Layer(l) => {
-                assert_eq!(l.num_row_variables, 5);
-                assert_eq!(l.num_interaction_variables, 3);
-                assert!(l.numerator_0[0].cells.is_empty());
-                assert!(l.denominator_0[0].cells.is_empty());
-                assert!(l.numerator_1[0].cells.is_empty());
-                assert!(l.denominator_1[0].cells.is_empty());
-                assert_eq!(l.numerator_0[0].num_real_rows, 0);
-                assert_eq!(l.numerator_0[0].num_interactions, 0);
+            GkrCircuitLayer::DeviceShape {
+                num_row_variables,
+                num_interaction_variables,
+            } => {
+                assert_eq!(num_row_variables, 5);
+                assert_eq!(num_interaction_variables, 3);
             }
-            GkrCircuitLayer::FirstLayer(_) => {
-                panic!("shape_only_layer_proxy must produce Layer variant");
+            GkrCircuitLayer::Layer(_) | GkrCircuitLayer::FirstLayer(_) => {
+                panic!("shape_only_layer_proxy must produce DeviceShape variant");
             }
         }
     }

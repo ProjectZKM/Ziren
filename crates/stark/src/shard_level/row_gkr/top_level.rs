@@ -17,7 +17,6 @@ use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
-use crate::shard_level::sumcheck_poly::take_logup_v3_next_handle;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
@@ -268,10 +267,13 @@ where
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
         // Owner slot (vs Vec) drops the previous round's host
-        // materialization before the next round allocates.
+        // materialization before the next round allocates. When V3 is
+        // expected to consume the layer from the device-resident scope,
+        // construct a `GkrCircuitLayer::DeviceShape` carrying only the
+        // dimensions — the type system then forces every downstream
+        // consumer to handle the variant explicitly (no silent host
+        // fallback reading empty cells).
         let _t_pull_start = std::time::Instant::now();
-        let mut handed_shape_only_proxy = false;
-        let mut shape_only_proxy_shape: Option<(usize, usize)> = None;
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
             super::layer::LayerState::Device {
@@ -309,8 +311,6 @@ where
                 };
 
                 if scope_shape_matches {
-                    handed_shape_only_proxy = true;
-                    shape_only_proxy_shape = Some((*state_num_rv, *state_num_iv));
                     Some(super::layer::GkrCircuitLayer::<F, EF>::shape_only_layer_proxy(
                         *state_num_rv,
                         *state_num_iv,
@@ -329,7 +329,11 @@ where
         };
         acc_pull_us += _t_pull_start.elapsed().as_micros() as u64;
 
-        // Run the sumcheck.
+        // Run the sumcheck. The `GkrCircuitLayer::DeviceShape` variant
+        // (constructed above when V3 will consume from the scope) is
+        // matched explicitly by V3 in `try_logup_round_gpu_v3` and
+        // panics loudly in V1/V2/host fallback paths — no silent
+        // wrong-proof on V3 decline.
         let _t_prove_start = std::time::Instant::now();
         let round_proof = prove_gkr_round::<F, EF, _>(
             layer,
@@ -340,26 +344,6 @@ where
             challenger,
         );
         acc_prove_us += _t_prove_start.elapsed().as_micros() as u64;
-
-        // When we handed a shape-only proxy (empty cells), V3 MUST have
-        // consumed the published device handle. If the handle is still
-        // pending in the TLS slot, V3 declined mid-walk (hook absent,
-        // threshold guard tripped, CUDA error) and prove_gkr_round's
-        // host fallback read the proxy's empty cells — producing a
-        // silently-wrong proof. Fail loudly instead.
-        if handed_shape_only_proxy {
-            if let Some(leaked) = take_logup_v3_next_handle() {
-                drop(leaked);
-                let (rv, iv) = shape_only_proxy_shape.unwrap_or((0, 0));
-                panic!(
-                    "shape-only proxy invariant violated: V3 did not consume \
-                     the device handle for layer (num_rv={rv}, num_iv={iv}); \
-                     host fallback would have read empty cells producing a \
-                     wrong proof. Disable ZIREN_LOGUP_DEVICE_CONSUMER_DISABLE=1 \
-                     or check V3 hook registration / threshold guards."
-                );
-            }
-        }
 
         let _t_observe_start = std::time::Instant::now();
         // Observe order MUST match verifier: n0, n1, d0, d1.
