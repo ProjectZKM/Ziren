@@ -239,10 +239,8 @@ where
         chip_log_heights.insert(name, log_h);
     }
 
-    // global_cumulative_sum from main trace's last 14 elements
-    // (x: 0..7, y: 7..14) when commit_scope != Local; local sum is
-    // ZERO (the basefold path doesn't materialize the permutation
-    // trace — future: thread from LogUp-GKR layer 0).
+    // local sum is ZERO (the basefold path doesn't materialize the
+    // permutation trace — future: thread from LogUp-GKR layer 0).
     let chip_cumulative_sums: std::collections::BTreeMap<
         String,
         crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
@@ -251,19 +249,10 @@ where
         .zip(main_traces.iter())
         .map(|(chip, main_trace)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
-            let global = if chip.commit_scope() == crate::air::LookupScope::Local {
-                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-            } else {
-                let main_trace_size = main_trace.values.len();
-                if main_trace_size >= 14 {
-                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                    let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j]);
-                    let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j + 7]);
-                    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
-                } else {
-                    crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-                }
-            };
+            let global =
+                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum(
+                    *chip, main_trace,
+                );
             let local = Challenge::<SC>::ZERO;
             (
                 name,

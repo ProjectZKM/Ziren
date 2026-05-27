@@ -436,29 +436,9 @@ where
             let height = main_trace.values.len() / main_trace.width.max(1);
             let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
-            // global_cumulative_sum: last 14 elements of the main trace
-            // when commit_scope() != Local. local_cumulative_sum: zero
-            // (future: thread real local sum from LogUp-GKR layer 0).
-            let global_cumulative_sum = if chip.commit_scope()
-                != crate::air::LookupScope::Local
-            {
-                let main_trace_size = main_trace.values.len();
-                if main_trace_size >= 14 {
-                    use p3_field::BasedVectorSpace;
-                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                    let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
-                        |j| last_row[j],
-                    );
-                    let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(
-                        |j| last_row[j + 7],
-                    );
-                    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
-                } else {
-                    crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-                }
-            } else {
-                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-            };
+            // local_cumulative_sum: zero (future: thread real local
+            // sum from LogUp-GKR layer 0).
+            let global_cumulative_sum = chip_global_cumulative_sum(*chip, main_trace);
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
             // Opt-in GPU constraint-eval dispatch under TypeId guard
@@ -680,6 +660,34 @@ where
     proof
 }
 
+/// Derive a chip's global cumulative sum from the last 14 elements of
+/// its main trace (x = elements 0..7, y = elements 7..14). Zero when
+/// the chip commits to the local scope or has too few rows.
+pub fn chip_global_cumulative_sum<F, A>(
+    chip: &crate::Chip<F, A>,
+    main_trace: &RowMajorMatrix<F>,
+) -> crate::septic_digest::SepticDigest<F>
+where
+    F: PrimeField,
+    A: MachineAir<F>,
+{
+    if chip.commit_scope() == crate::air::LookupScope::Local {
+        return crate::septic_digest::SepticDigest::<F>::zero();
+    }
+    let sz = main_trace.values.len();
+    if sz < 14 {
+        return crate::septic_digest::SepticDigest::<F>::zero();
+    }
+    let last_row = &main_trace.values[sz - 14..sz];
+    let x = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
+        |j| last_row[j],
+    );
+    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
+        |j| last_row[j + 7],
+    );
+    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+}
+
 /// Packed view of a chip's host trace + cumulative-sum metadata in
 /// the shape the GPU constraint-eval hooks expect.
 struct ChipGpuPack<'a> {
@@ -795,20 +803,7 @@ where
         let preproc_trace = &preprocessed_traces[i];
         let height = main_trace.values.len() / main_trace.width.max(1);
         let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
-        // Mirror per-chip path's gcs/lcs computation (zerocheck_prover.rs Step 2).
-        let global_cumulative_sum = if chip.commit_scope() != crate::air::LookupScope::Local {
-            let sz = main_trace.values.len();
-            if sz >= 14 {
-                let last = &main_trace.values[sz - 14..sz];
-                let x = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last[j]);
-                let y = crate::septic_extension::SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last[j + 7]);
-                crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
-            } else {
-                crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-            }
-        } else {
-            crate::septic_digest::SepticDigest::<Val<SC>>::zero()
-        };
+        let global_cumulative_sum = chip_global_cumulative_sum(*chip, main_trace);
         let local_cumulative_sum = Challenge::<SC>::ZERO;
         // SAFETY: TypeId guard at line 733-737 has already verified
         // Val<SC> == KoalaBear; pack_chip_for_gpu's precondition holds.
