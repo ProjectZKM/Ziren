@@ -47,7 +47,6 @@
 //! final point lies on the hypercube reduction trajectory and whose
 //! `point_and_eval.1` matches that closing identity.
 
-#![cfg(feature = "basefold")]
 
 use alloc::vec::Vec;
 

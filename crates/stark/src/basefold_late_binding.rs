@@ -15,7 +15,6 @@
 //! evaluation point, no jagged sumcheck reduction yet.  Wiring into
 //! [`crate::jagged`]'s sumcheck flow is C2/C3.
 
-#![cfg(feature = "basefold")]
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -1080,7 +1079,6 @@ pub fn verify_basefold_late_binding(
 // `jagged_sumcheck.rs` (PCS-agnostic reduction math) — both moved
 // out of the whir feature gate as part of E1.
 
-#[cfg(feature = "basefold")]
 pub mod jagged {
     use alloc::vec::Vec;
 

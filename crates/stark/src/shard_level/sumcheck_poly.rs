@@ -555,7 +555,6 @@ pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
 // Whole-pipeline GPU jagged-PCS driver: commit, y-evals, sumcheck
 // reduction, BaseFold open. Concrete-typed on `(KoalaBear, Ef4,
 // LbChallenger)`; generic-EF callers take the host orchestrator.
-#[cfg(feature = "basefold")]
 mod jagged_orchestration_hook {
     use super::Ef4;
     use alloc::string::String;
@@ -592,7 +591,6 @@ mod jagged_orchestration_hook {
     }
 }
 
-#[cfg(feature = "basefold")]
 pub use jagged_orchestration_hook::{
     GpuJaggedOrchestrationFn, get_gpu_jagged_orchestration_hook,
     register_gpu_jagged_orchestration_hook,
@@ -601,7 +599,6 @@ pub use jagged_orchestration_hook::{
 // Device-trace variant of the jagged-PCS orchestration hook: takes
 // chip names instead of host traces and consults the per-shard
 // `DeviceTraceProvider`, avoiding the per-chip device→host pull.
-#[cfg(feature = "basefold")]
 mod jagged_pcs_device_hook {
     use super::Ef4;
     use alloc::string::String;
@@ -641,7 +638,6 @@ mod jagged_pcs_device_hook {
     }
 }
 
-#[cfg(feature = "basefold")]
 pub use jagged_pcs_device_hook::{
     GpuJaggedPcsDeviceFn, get_gpu_jagged_pcs_device_hook,
     register_gpu_jagged_pcs_device_hook,

@@ -14,7 +14,6 @@
 //! here must mirror the WHIR copy and vice versa until the WHIR copy
 //! is deleted.
 
-#![cfg(feature = "basefold")]
 
 use alloc::string::String;
 use alloc::vec::Vec;

@@ -438,28 +438,23 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         // attempt cleanly returns `None` without re-entering this arm.
         self.num_virtual_layers = 0;
 
-        // consult the registered regen hook (gated
-        // on the `basefold` feature; `basefold_late_binding` is itself
-        // `#![cfg(feature = "basefold")]`).  When the hook is
-        // unregistered (no ziren-gpu CUDA impl yet) OR returns `None`
-        // (downcast failed / kernel error), surface `None` to the
-        // caller — the upstream pull-stub panic in ziren-gpu's
-        // `gpu_layer_pull_hook` remains the primary signal that the
-        // regen path was needed but unavailable.
-        #[cfg(feature = "basefold")]
+        // Consult the registered regen hook. When unregistered (no
+        // ziren-gpu CUDA impl yet) OR it returns None (downcast failed
+        // / kernel error), surface None to the caller — the upstream
+        // pull-stub panic in ziren-gpu's `gpu_layer_pull_hook` remains
+        // the primary signal that the regen path was needed but
+        // unavailable.
+        if let Some(hook) =
+            crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
         {
-            if let Some(hook) =
-                crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
-            {
-                if let Some(payload) = hook(self.input_data.circuit_id) {
-                    let handle = DeviceLayerHandle::new(
-                        payload.inner,
-                        payload.num_row_variables,
-                        payload.num_interaction_variables,
-                        self.input_data.circuit_id,
-                    );
-                    return Some(DeviceCircuitLayer::FirstLayer(handle, PhantomData));
-                }
+            if let Some(payload) = hook(self.input_data.circuit_id) {
+                let handle = DeviceLayerHandle::new(
+                    payload.inner,
+                    payload.num_row_variables,
+                    payload.num_interaction_variables,
+                    self.input_data.circuit_id,
+                );
+                return Some(DeviceCircuitLayer::FirstLayer(handle, PhantomData));
             }
         }
         None

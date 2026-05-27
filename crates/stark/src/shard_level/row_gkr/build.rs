@@ -182,20 +182,9 @@ where
     if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
         return None;
     }
-    #[cfg(feature = "basefold")]
-    {
-        try_run_device_path_basefold::<F, EF>(last_ef_layer, layers)
-    }
-    #[cfg(not(feature = "basefold"))]
-    {
-        // Without the basefold feature there are no GPU hooks; the env
-        // var is silently ignored.  Suppress unused-variable warnings.
-        let _ = (last_ef_layer, layers);
-        None
-    }
+    try_run_device_path_basefold::<F, EF>(last_ef_layer, layers)
 }
 
-#[cfg(feature = "basefold")]
 fn try_run_device_path_basefold<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,

@@ -68,7 +68,6 @@ pub struct BasefoldShardProof<F, EF> {
     /// per-element encoding. Concretely typed on
     /// `InnerVal`/`InnerChallenge` because the in-circuit verifier
     /// only operates on those regardless of the outer `<F, EF>`.
-    #[cfg(feature = "basefold")]
     #[serde(default)]
     pub evaluation_proof_bundle: Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>,
     /// Fold orientation tag read by the verifier in place of an
@@ -93,7 +92,6 @@ where
             chip_log_heights: std::collections::BTreeMap::new(),
             chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: Vec::new(),
-            #[cfg(feature = "basefold")]
             evaluation_proof_bundle: None,
             fold_orientation: FoldOrientation::Msb,
         }

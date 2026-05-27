@@ -489,7 +489,6 @@ where
 /// registered — both indicate a programmer error: `build_gkr_circuit`
 /// requires the EF match and all three hooks before producing any
 /// `Device` entries.
-#[cfg(feature = "basefold")]
 fn pull_device_layer_to_host<F, EF>(
     circuit_id: u64,
     handle: u64,
@@ -527,18 +526,4 @@ where
     };
 
     super::layer::GkrCircuitLayer::Layer(pulled_ef)
-}
-
-/// Without the `basefold` feature, no Device entries can be
-/// constructed in the first place.
-#[cfg(not(feature = "basefold"))]
-fn pull_device_layer_to_host<F, EF>(
-    _circuit_id: u64,
-    _handle: u64,
-) -> super::layer::GkrCircuitLayer<F, EF>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    unreachable!("LayerState::Device without `basefold` feature");
 }

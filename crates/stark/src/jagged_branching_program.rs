@@ -31,7 +31,6 @@
 //! that the [`crate::jagged_eval_sumcheck::prove_jagged_evaluation`]
 //! sumcheck reduces.
 
-#![cfg(feature = "basefold")]
 
 use alloc::vec::Vec;
 use core::array;

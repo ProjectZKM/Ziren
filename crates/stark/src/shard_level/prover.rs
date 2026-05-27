@@ -281,7 +281,6 @@ where
         chip_log_heights,
         chip_cumulative_sums,
         evaluation_proof,
-        #[cfg(feature = "basefold")]
         evaluation_proof_bundle: evaluation_proof_bundle_opt,
         fold_orientation: orientation,
     };

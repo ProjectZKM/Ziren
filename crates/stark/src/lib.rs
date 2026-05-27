@@ -11,17 +11,11 @@ mod debug;
 pub mod folder;
 pub mod gpu_worker_context;
 mod kb31_poseidon2;
-#[cfg(feature = "basefold")]
 pub mod basefold;
-#[cfg(feature = "basefold")]
 pub mod basefold_late_binding;
-#[cfg(feature = "basefold")]
 pub mod jagged;
-#[cfg(feature = "basefold")]
 pub mod jagged_branching_program;
-#[cfg(feature = "basefold")]
 pub mod jagged_eval_sumcheck;
-#[cfg(feature = "basefold")]
 pub mod jagged_sumcheck;
 pub mod logup_gkr;
 pub mod shard_level;
