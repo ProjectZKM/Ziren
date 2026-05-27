@@ -1,27 +1,4 @@
 //! Shard-level proof types — pure data, no prover/verifier logic.
-//!
-//! Mirror of the hypercube proof shapes:
-//!   - `UnivariatePolynomial<K>` from
-//!     `slop/crates/algebra/src/univariate.rs`
-//!   - `PartialSumcheckProof<K>` from
-//!     `slop/crates/sumcheck/src/proof.rs`
-//!   - `LogUpGkrOutput`, `LogupGkrRoundProof`, `LogupGkrProof`,
-//!     `ChipEvaluation`, `LogUpEvaluations` from
-//!     `crates/hypercube/src/logup_gkr/proof.rs`
-//!
-//! These types are used by:
-//!   - the shard-level prover (`crate::shard_level::prover::prove_shard_to_basefold`)
-//!   - the recursion-circuit verifier via the Witnessable bridge
-//!     at `crates/recursion/circuit/src/shard_level_witness.rs`
-//!     and the type-lift adapters at
-//!     `crates/recursion/circuit/src/shard_proof_variable_lift.rs`
-//!
-//! The recursion-circuit's pre-existing copies of these types
-//! (`crate::logup_proof`, `crate::partial_sumcheck`,
-//! `crate::univariate`) are kept for the legacy verifier path;
-//! the shard-level pipeline uses these stark-side definitions
-//! and bridges them via the lift adapters.  Both sets coexist
-//! during the parallel-codebase window.
 
 use std::collections::BTreeMap;
 
@@ -29,9 +6,6 @@ use p3_field::{Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 
 /// Univariate polynomial in coefficient form, low-degree-first.
-///
-/// `K` is bounded by [`PrimeCharacteristicRing`] so this can carry
-/// both concrete field elements and symbolic algebra elements.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct UnivariatePolynomial<K> {
     pub coefficients: Vec<K>,
@@ -46,9 +20,7 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
         Self { coefficients: vec![K::ZERO; degree + 1] }
     }
 
-    /// Evaluate the polynomial at `point` via Horner's method.
-    /// Returns the constant term `coefficients[0]` for an empty
-    /// polynomial.
+    /// Evaluate via Horner's method; returns `K::ZERO` for empty.
     pub fn eval_at_point(&self, point: K) -> K {
         let mut acc = K::ZERO;
         for &c in self.coefficients.iter().rev() {
@@ -58,9 +30,8 @@ impl<K: PrimeCharacteristicRing + Copy> UnivariatePolynomial<K> {
     }
 }
 
-/// A sumcheck proof carrying the per-round univariate polynomials
-/// and the final point/eval pair, but **no** evaluation proofs for
-/// the component polynomials (the "partial" qualifier).
+/// Sumcheck proof carrying per-round polys and final (point, eval)
+/// but no evaluation proofs for component polys — the "partial".
 #[derive(Serialize, Deserialize, Debug, Clone, Eq, PartialEq)]
 pub struct PartialSumcheckProof<K> {
     pub univariate_polys: Vec<UnivariatePolynomial<K>>,
@@ -69,8 +40,7 @@ pub struct PartialSumcheckProof<K> {
 }
 
 impl<K: Field> PartialSumcheckProof<K> {
-    /// Empty placeholder proof for testing / shape fixtures.
-    /// **Not a valid proof.**
+    /// Empty placeholder for shape fixtures; not a valid proof.
     #[must_use]
     pub fn dummy() -> Self {
         Self {
@@ -81,8 +51,8 @@ impl<K: Field> PartialSumcheckProof<K> {
     }
 }
 
-/// Top-of-stack circuit output for the LogUp-GKR protocol — the
-/// numerator and denominator MLEs over the chip-index hypercube.
+/// LogUp-GKR circuit output: numerator/denominator MLEs over the
+/// chip-index hypercube.
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct LogUpGkrOutput<EF> {
     pub numerator: Vec<EF>,
@@ -105,16 +75,9 @@ pub struct LogupGkrRoundProof<EF> {
 pub struct ChipEvaluation<EF> {
     pub main_trace_evaluations: Vec<EF>,
     pub preprocessed_trace_evaluations: Option<Vec<EF>>,
-    /// `log2(main_trace.height())` for this chip in this shard.
-    /// Drives the recursion verifier's `degree_bits` (zerocheck-reduced
-    /// padded-row mask). Defaults to 0 when serde-loaded from older
-    /// proof bytes — verifier treats 0 as "uniform max_log_row_count
-    /// padding" (legacy placeholder behavior).
-    ///
-    /// swap 4 plumbing — populated by `prove_shard_to_basefold`
-    /// from the host trace heights; consumed by the recursion verifier
-    /// once `build_opened_values_from_chip_openings_with_heights`
-    /// becomes the default code path.
+    /// `log2(main_trace.height())`; drives the verifier's
+    /// padded-row mask. Defaults to 0 on older proof bytes —
+    /// verifier treats 0 as uniform-max-log-row-count padding.
     #[serde(default)]
     pub log_degree: u8,
 }
@@ -126,20 +89,18 @@ pub struct LogUpEvaluations<EF> {
     pub chip_openings: BTreeMap<String, ChipEvaluation<EF>>,
 }
 
-/// Shard-level LogUp-GKR proof — replaces Ziren's `Vec<LogUpGkrProof<EF>>`
-/// (per-chip) with a single shard-level proof per the design.
+/// Shard-level LogUp-GKR proof.
 #[derive(Debug, Serialize, Deserialize, Clone, Eq, PartialEq)]
 pub struct LogupGkrProof<F, EF> {
     pub circuit_output: LogUpGkrOutput<EF>,
     pub round_proofs: Vec<LogupGkrRoundProof<EF>>,
     pub logup_evaluations: LogUpEvaluations<EF>,
-    /// Grinding witness — proof-of-work output gating the initial
-    /// alpha sample.
+    /// Proof-of-work output gating the initial alpha sample.
     pub witness: F,
 }
 
 impl<F: Field, EF: Field> LogupGkrProof<F, EF> {
-    /// Empty placeholder for shape fixtures.  Not a valid proof.
+    /// Empty placeholder for shape fixtures; not a valid proof.
     #[must_use]
     pub fn dummy() -> Self {
         Self {
@@ -164,10 +125,6 @@ mod tests {
     type F = p3_koala_bear::KoalaBear;
     type EF = p3_field::extension::BinomialExtensionField<F, 4>;
 
-    /// Wire-format roundtrip: LogupGkrProof + nested types
-    /// serialize via rmp and deserialize back to a structurally-
-    /// identical proof.  Validates the SP1-shape stays
-    /// serde-compatible.
     #[test]
     fn logup_gkr_proof_rmp_roundtrip() {
         use p3_field::PrimeCharacteristicRing;
@@ -210,8 +167,6 @@ mod tests {
         assert_eq!(opening.main_trace_evaluations, vec![v(14)]);
     }
 
-    /// Wire-format roundtrip: PartialSumcheckProof serializes
-    /// via rmp and deserializes back exactly.
     #[test]
     fn partial_sumcheck_proof_rmp_roundtrip() {
         use p3_field::PrimeCharacteristicRing;
@@ -233,8 +188,6 @@ mod tests {
         assert_eq!(back.point_and_eval.1, v(99));
     }
 
-    /// Verify dummy proofs are structurally minimal (no
-    /// allocated rounds/polys).
     #[test]
     fn dummy_proofs_are_minimal() {
         let psp: PartialSumcheckProof<EF> = PartialSumcheckProof::dummy();
@@ -265,7 +218,6 @@ mod tests {
         assert_eq!(p.coefficients.len(), 4); // degree+1
     }
 
-    /// Edge case: degree-0 polynomial (constant) has 1 coefficient.
     #[test]
     fn univariate_zero_degree_zero() {
         use p3_field::PrimeCharacteristicRing;
@@ -274,8 +226,6 @@ mod tests {
         assert_eq!(p.coefficients[0], EF::ZERO);
     }
 
-    /// UnivariatePolynomial::new(coefs) preserves the input
-    /// length and order.
     #[test]
     fn univariate_new_preserves_input() {
         use p3_field::PrimeCharacteristicRing;

@@ -1,40 +1,14 @@
-//! First-layer generator for the row-only GKR backend
-//! (the task, A.2 step 2).
+//! First-layer generator for the row-only GKR backend.
 //!
-//! Port of
-//! `generate_first_layer`
-//! against Ziren's [`Lookup`]/[`VirtualPairCol`]/`RowMajorMatrix`
-//! types instead of the `Interaction`/`PaddedMle`/`Mle`.
-//!
-//! ## Algorithm
-//!
-//! For each chip:
-//!   1. Walk every interaction (sends + receives) and compute, for
-//!      every row of the chip's main+preprocessed traces:
-//!      `(numerator, denominator) =`
-//!      [`generate_interaction_vals`].
-//!   2. Pack into a row-major `(height × num_interactions)` table.
-//!   3. Pad the row dimension up to the shared
-//!      `num_row_variables = log₂(max chip height)` (zero-fill for
-//!      numerator, one-fill for denominator — preserves the
-//!      sum-of-fractions identity).
-//!   4. Split the row MSB: produce `numerator_0` (upper half of rows)
-//!      and `numerator_1` (lower half).  Same for denominator.
-//!
-//! Each chip's per-table column count stays at its own
-//! `num_interactions` — we don't pad to a global power-of-two.  The
-//! shared `num_interaction_variables` is the global aggregate (used
-//! by [`extract_outputs`](super::extract) to interleave per-chip
-//! outputs into the unified MLE).
-//!
-//! ## Variable-ordering convention
+//! Per chip: walk interactions to build `(numerator, denominator)`
+//! per row, pack into a row-major `(height × num_interactions)`
+//! table, pad rows to the shared `num_row_variables` (zero-fill for
+//! numerator, one-fill for denominator to preserve the
+//! sum-of-fractions identity), then split on the row MSB.
 //!
 //! Row-major flat storage: `cells[row * num_interactions + col]`.
-//! When viewed as a multilinear extension, the row's MSB becomes the
-//! "last variable" — so `fix_last_variable(0)` selects the upper half
-//! of rows (indices `0 .. 2^(R-1)`) and `fix_last_variable(1)` selects
-//! the lower half (indices `2^(R-1) .. 2^R`).  Matches slop's
-//! convention used by SP1.
+//! Viewed as an MLE, the row MSB is the "last variable" — so
+//! `fix_last_variable(0)` selects rows `0 .. 2^(R-1)`.
 
 use alloc::vec::Vec;
 
@@ -46,15 +20,9 @@ use crate::air::MachineAir;
 use crate::lookup::Lookup;
 use crate::Chip;
 
-/// Per-row, per-interaction `(numerator, denominator)` evaluator.
-///
-/// Direct port of
-/// `generate_interaction_vals`.
-///
-/// `denominator = α + Σ β_k · v_k` where `v_0 = argument_index` and
-/// `v_k = lookup.values[k-1].apply(prep_row, main_row)`.  The
-/// numerator is the (signed) multiplicity — `+mult` for sends,
-/// `-mult` for receives.
+/// `denominator = α + Σ β_k · v_k` with `v_0 = argument_index` and
+/// `v_k = lookup.values[k-1].apply(prep_row, main_row)`. Numerator
+/// is the signed multiplicity (`+mult` send / `-mult` receive).
 pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
     interaction: &Lookup<F>,
     preprocessed_row: &[F],
@@ -295,24 +263,10 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        // full K1: device-resident first-layer dispatch.
-        // The legacy env-gated opt-in (`ZIREN_GPU_INTERACTION_EVAL_DEVICE`
-        // / `ZIREN_GPU_BUILD_GKR_DEVICE` + master `ZIREN_GPU_DEVICE_HOOKS`)
-        // was removed: the hook-registration check + `provider_present`
-        // short-circuit + `(F, EF) == (KoalaBear, Ef4)` TypeId gate are
-        // the source-of-truth gates; the env layer was a redundant
-        // defensive bypass.  Output is byte-identical to
-        // `build_chip_interaction_tables`; on `None` (chip rejected,
-        // unknown name, etc.) the host fallback runs unconditionally.
-        //
-        // The `provider_present` short-circuit (#263 follow-up) skips
-        // the GPU dispatch when no per-shard `DeviceTraceProvider` was
-        // passed.  Without a provider, the hook can only fall back to
-        // the global Mutex (empty in production) and then to a
-        // host-upload kernel launch from the CALLING thread — which
-        // on the off-pool basefold rayon worker has no `cudaSetDevice`
-        // context (#142 design).  Reth A/B showed core stage +16% from
-        // this overhead.
+        // `provider_present` is load-bearing: without it the hook
+        // would fall back to a host-upload launch from the calling
+        // thread, which on off-pool basefold rayon workers has no
+        // `cudaSetDevice` context and would dispatch to the wrong GPU.
         let provider_present = device_traces.is_some();
         let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present {
             if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
@@ -325,12 +279,10 @@ where
                 if TypeId::of::<F>() == TypeId::of::<Kb>()
                     && TypeId::of::<EF>() == TypeId::of::<Ef4>()
                 {
-                    // FIX (perf23 pre-mortem #112 width-pad bug):
-                    // descriptors were built with chip's *declared* width
-                    // (BaseAir::width(chip.air)), runtime trace may be
-                    // narrower → cache lookup silently rejected.
-                    // Pad main/prep traces to chip widths here, mirroring
-                    // the #95 jagged-pad fix at prover.rs:386.
+                    // Pad main/prep traces to the chip's declared
+                    // width; otherwise the cache lookup keyed on
+                    // declared width silently misses on narrower
+                    // runtime traces.
                     use p3_air::BaseAir;
                     let chip_main_width = <_ as BaseAir<F>>::width(&chip.air);
                     let chip_prep_width = chip.preprocessed_width();
@@ -364,15 +316,12 @@ where
                     };
                     let main_padded_width = if main_trace.width == 0 { 0 } else { chip_main_width };
                     let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
-                    // Debug instrumentation: one-shot warn on first
-                    // successful GPU dispatch.
                     use std::sync::OnceLock;
                     static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                     FIRED_ONCE.get_or_init(|| {
                         tracing::warn!(
-                            "#112 interaction_eval hook FIRED \
-                             ((F,EF)=(Kb,Ef4), gpu_hook dispatched, \
-                             chip={})", chip.name()
+                            "interaction_eval hook FIRED (chip={})",
+                            chip.name()
                         );
                     });
                     // SAFETY: TypeId equality guarantees F == Kb and
@@ -404,11 +353,6 @@ where
                             prep_padded_width,
                             alpha_ef4,
                             betas_ef4,
-                            // per-shard device-trace provider
-                            // threaded from prove_shard_to_basefold's
-                            // caller (compress_multi_gpu / shard_prover_gpu).
-                            // Hook implementation downcast-uses the per-chip
-                            // handle to skip the H→D upload path when present.
                             device_traces,
                         );
                         result.map(|(numer_kb, denom_ef4)| {
@@ -431,12 +375,11 @@ where
                         })
                     };
                     if r.is_none() {
-                        // Debug instrumentation: GPU declined chip.
                         static REJECT_ONCE: OnceLock<()> = OnceLock::new();
                         REJECT_ONCE.get_or_init(|| {
                             tracing::warn!(
-                                "#112 interaction_eval hook FELL THROUGH \
-                                 (chip={}, GPU returned None); host fallback used",
+                                "interaction_eval hook FELL THROUGH \
+                                 (chip={}, GPU returned None)",
                                 chip.name()
                             );
                         });
@@ -447,17 +390,12 @@ where
                     static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
                     MISMATCH_ONCE.get_or_init(|| {
                         tracing::warn!(
-                            "#112 interaction_eval hook FELL THROUGH \
-                             (TypeId mismatch: (F,EF) != (Kb,Ef4)); \
-                             host fallback used"
+                            "interaction_eval hook FELL THROUGH ((F,EF) != (Kb,Ef4))"
                         );
                     });
                     None
                 }
             } else {
-                // Hook not registered (e.g. CPU-only build, or
-                // ziren-gpu hasn't called register_gpu_interaction_eval_hook
-                // yet on the call path).  Host CPU used.
                 None
             }
         } else {

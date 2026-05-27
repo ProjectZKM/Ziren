@@ -1,28 +1,6 @@
-//! Host-side BasefoldShardVerifier.
-//!
-//! Mirror of the in-circuit verifier at
-//! [`crates/recursion/circuit/src/shard_basefold.rs::BasefoldShardVerifier::verify_shard`]
-//! but executing directly against host types instead of building
-//! symbolic AIR in a `Builder<C>`.
-//!
-//! # Pipeline
-//!
-//! 1. Transcript prologue — observe public values, main commitment,
-//!    and per-chip metadata.
-//! 2. LogUp-GKR sumcheck verification.
-//! 3. Zerocheck sumcheck verification for Ziren's direct
-//!    `Σ_b C(b) == 0` proof shape.
-//! 4. Jagged-PCS opening verification via the BaseFold late-binding
-//!    bundle.
-//!
-//! # Status
-//!
-//! The host path now verifies the active BaseFold shard proof flow:
-//! transcript prologue, LogUp-GKR, direct zerocheck sumcheck, and
-//! jagged-PCS opening.  The SP1-shape zerocheck cross-chip identity is
-//! available as a separate helper for callers that produce that proof
-//! shape, but it is not wired into the active Ziren direct-sumcheck
-//! path.
+//! Host-side BasefoldShardVerifier: transcript prologue + LogUp-GKR
+//! + zerocheck + jagged-PCS verification, executing directly against
+//! host types rather than symbolic AIR.
 
 use alloc::vec::Vec;
 

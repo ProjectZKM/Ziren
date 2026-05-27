@@ -1,96 +1,37 @@
-//! Layer types for the row-only GKR backend (the task, A.2 step 1).
-//!
-//! Direct port of
-//! `crates/hypercube/src/logup_gkr/cpu.rs:27-73`
-//! with the `slop_*` types replaced by Ziren-native containers:
-//!
-//! | the                          | Ziren equivalent                              |
-//! |------------------------------|-----------------------------------------------|
-//! | `Vec<PaddedMle<F>>`          | `Vec<RowMajorTable<F>>` (defined below)       |
-//! | `Arc<Mle<F>>`                | `Vec<F>` of length `2^num_variables`          |
-//! | `slop_multilinear::Point<EF>`| `Vec<EF>`                                     |
-//!
-//! ## Indexing convention
+//! Layer types for the row-only GKR backend.
 //!
 //! Each per-chip table is indexed `[row, interaction]` row-major.
-//! `num_row_variables` = log₂ of row count; `num_interaction_variables`
-//! = log₂ of (max chip-interaction count rounded up).  The layer
-//! enforces a single shared `(num_row_variables, num_interaction_variables)`
-//! across all chips — chips with fewer interactions are padded with
-//! identity fractions (`(0, 1)`).
-//!
-//! ## Why `RowMajorTable` and not `RowMajorMatrix`
-//!
-//! `p3_matrix::dense::RowMajorMatrix` exists but its API is column-
-//! major in a row-major-storage sense (`.row(i)` returns the i-th
-//! row's slice).  For GKR's row × interaction folding we need both
-//! axes addressable, and the per-cell algorithms are simpler with
-//! a thin wrapper that exposes `(row, interaction) -> idx`.
+//! All chips share `(num_row_variables, num_interaction_variables)`
+//! at the layer level; chips with fewer interactions virtually pad
+//! with identity fractions `(0, 1)`.
 
 use alloc::vec::Vec;
 use core::marker::PhantomData;
 
 use p3_field::{ExtensionField, Field};
 
-/// A 2-D table indexed `[row, interaction]` row-major.
-///
-/// Storage layout: `cells.len() == (1 << num_row_variables) * num_interactions`.
-/// `num_interactions` is the **raw** per-chip column count (not padded
-/// to a power of two) — keeping storage small for chips with few
-/// interactions while still letting the GKR sumcheck virtually pad to
-/// `2^num_interaction_variables` cells via zero/one fill at access
-/// time (mirrors SP1's `PaddedMle` pattern; see
-/// `crates/hypercube/src/logup_gkr/execution.rs:222-242`).
-///
-/// `num_interaction_variables` is the log₂ of the per-chip padded width
-/// (`num_interactions.next_power_of_two().trailing_zeros()`) — used as
-/// metadata for the row-only GKR's per-chip dimension reporting.  The
-/// LAYER's `num_interaction_variables` is the global aggregate
-/// (computed in `first_layer`) and may exceed any single chip's value.
+/// 2-D table indexed `[row, interaction]` row-major. Only the
+/// `num_real_rows` prefix is materialized; readers fill the
+/// virtual tail with `0` (numerator) or `1` (denominator).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RowMajorTable<F> {
-    /// Cells in row-major layout: `cells[row * num_interactions + col]`.
-    /// When `num_real_rows < (1 << num_row_variables)` the storage holds
-    /// only the **real** prefix (= `num_real_rows * num_interactions`
-    /// cells).  Virtual rows in `[num_real_rows, 1 << num_row_variables)`
-    /// are NOT materialized — readers consult the per-call padding tag
-    /// (LogUp-GKR uses `F::ZERO` for numerators, `F::ONE` for
-    /// denominators).  This mirrors SP1's `PaddedMle::Constant` pattern
-    /// (`slop/crates/multilinear/src/padded.rs`) — see
-    /// `crate::basefold::padded::PaddedMle` for the standalone version.
+    /// Row-major: `cells[row * num_interactions + col]`, length
+    /// `num_real_rows * num_interactions`.
     pub cells: Vec<F>,
-    /// log₂ of LOGICAL row count.  The actual allocated storage may be
-    /// smaller — see `num_real_rows` for the materialized prefix.
+    /// log₂ of logical row count.
     pub num_row_variables: usize,
-    /// log₂ of `num_interactions.next_power_of_two()` — virtual padded
-    /// column dimension for sumcheck purposes.
+    /// log₂ of `num_interactions.next_power_of_two()`.
     pub num_interaction_variables: usize,
-    /// Raw per-chip column count (= number of interactions in this
-    /// chip's lookup set).  Storage stride.  Always ≤ `1 << num_interaction_variables`.
+    /// Storage stride (raw per-chip interaction count).
     pub num_interactions: usize,
-    /// Number of materialized rows in `cells`.  Always
-    /// `<= 1 << num_row_variables`.  When equal, the table is "fully
-    /// real" — virtual rows in `[num_real_rows, 1 << num_row_variables)`
-    /// would carry the per-quadrant identity-fraction value (0 for
-    /// numerators, 1 for denominators).  This skips materializing
-    /// padding cells for chips whose real height is far below the
-    /// shard-wide row dimension.
+    /// Number of materialized rows; `<= 1 << num_row_variables`.
     pub num_real_rows: usize,
 }
 
 impl<F: Clone> RowMajorTable<F> {
-    /// Same shape as the raw filled builder but skips the per-cell init.
-    /// Caller MUST write every cell of `cells[0..total]` before any read.
-    /// Used by hot-path constructors (e.g. `layer_transition`) that
-    /// would otherwise spend most of their time in `vec![fill; total]`
-    /// before unconditionally overwriting every slot.
-    ///
-    /// # Safety
-    ///
-    /// Caller is responsible for initializing all `cells[0..total]`
-    /// slots before any read.  `F: Copy` is sufficient because Copy
-    /// types have no Drop semantics, so leaking uninitialized memory
-    /// on panic is sound.
+    /// Caller MUST write every cell before any read. `F: Copy` is
+    /// sufficient because Copy has no Drop, so leaking on panic is
+    /// sound.
     #[must_use]
     pub unsafe fn filled_raw_uninit(
         num_row_variables: usize,
@@ -356,67 +297,16 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
 }
 
 /// Backend-parametrized layer storage — Step 4a scaffolding from
-/// `/tmp/step4_backend_parametrize_plan.md`.
+/// Per-layer storage: host-resident `Host(GkrCircuitLayer)` or an
+/// opaque `Device` handle into the GPU prover's side-channel
+/// registry. `u64` handle keeps device types out of stark.
 ///
-/// # Why this exists
-///
-/// `build_gkr_circuit` currently runs every host-side layer transition
-/// upfront and stuffs the resulting `Vec<RowMajorTable<F>>` cells into
-/// `GkrCircuitLayer::{FirstLayer, Layer}` BEFORE any sumcheck round
-/// executes.  Three previous attempts (#218 Q1, #219 Q2, #220 R1)
-/// wired a transition CUDA kernel via a side-channel registry, but
-/// because `build_gkr_circuit` STILL ran the host transitions on the
-/// way down, the GPU kernel was redundant — the circuit always held a
-/// host materialization, so the GPU result was never observed.
-///
-/// The fix is to migrate the layer storage from host-only
-/// (`GkrCircuitLayer<F, EF>`) to a sum type (`LayerState`) that can
-/// carry EITHER a host `GkrCircuitLayer` OR an opaque `u64` handle
-/// pointing into a side-channel registry the GPU prover installs.
-/// Once that migration is complete, the GPU prover can install a
-/// `GpuLayerTransitionFn` (see [`crate::basefold_late_binding`]) that
-/// evolves the device-resident layer state in place across rounds —
-/// `build_gkr_circuit` no longer needs to materialize anything on host.
-///
-/// # Migration plan
-///
-/// * **Step 4a (this commit)** — introduce `LayerState` + the
-///   `GpuLayerTransitionFn` hook signature + the registry, both
-///   unused.  No behavior change.
-/// * **Step 4b** — switch `LogupGkrCpuCircuit::layers` to
-///   `Vec<LayerState<F, EF>>`; round.rs / extract.rs gain a
-///   `match` on the variant, with `Device` arms still routed to host
-///   via on-demand materialization.
-/// * **Step 4c** — make `build_gkr_circuit` skip the host transition
-///   loop when the GPU hook is registered, dispatching through the
-///   `GpuLayerTransitionFn` instead.
-/// * **Step 4d** — add a streaming/lazy variant for the row-only
-///   sumcheck so the device handle is consumed in-place by the
-///   per-round prover.
-///
-/// See `/tmp/step4_backend_parametrize_plan.md` for the full
-/// rationale + per-step cut points.
+/// `circuit_id` scopes the handle to one `build_gkr_circuit` call so
+/// concurrent shards on the same GPU stay isolated; the registry is
+/// keyed by `(device_id, circuit_id)`.
 #[allow(dead_code)]
 pub enum LayerState<F: Field, EF: ExtensionField<F>> {
-    /// Host-resident layer (current production path).  The
-    /// `GkrCircuitLayer` carries the `Vec<RowMajorTable<F | EF>>`
-    /// cells materialized on the way down through `build_gkr_circuit`.
     Host(GkrCircuitLayer<F, EF>),
-    /// Opaque handle into a side-channel registry installed by the
-    /// GPU prover.  The registry stores device-resident layer state;
-    /// the handle is `u64` so we don't pull device types into stark.
-    ///
-    /// `num_row_variables` / `num_interaction_variables` are mirrored
-    /// here so callers that only need shape metadata (e.g. the
-    /// sumcheck round dispatcher) can read them without consulting
-    /// the registry.
-    ///
-    /// `circuit_id` (#230 multi-GPU fix) scopes the handle to a single
-    /// `build_gkr_circuit` invocation.  The GPU side keys its registry
-    /// by `(device_id, circuit_id)` so concurrent shards on the same
-    /// GPU stay isolated — `pull_device_layer_to_host` threads this ID
-    /// through to the pull hook so it can locate the right per-circuit
-    /// bucket regardless of which other shards are in flight.
     Device {
         circuit_id: u64,
         handle: u64,
@@ -450,20 +340,8 @@ impl<F: Field, EF: ExtensionField<F>> LayerState<F, EF> {
 
 }
 
-/// The full GKR circuit — layers indexed top-down (layer 0 = first /
-/// largest, layer N-1 = terminal interaction-only).
-///
-/// Port of
-/// `LogupGkrCpuCircuit<F, EF>`.
-///
-/// Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `layers` now
-/// stores [`LayerState`] entries so the per-layer storage can be
-/// EITHER host-resident (current production path,
-/// `LayerState::Host(GkrCircuitLayer)`) OR device-resident
-/// (`LayerState::Device { handle, .. }`) without changing the outer
-/// container type.  Step 4c will wire the GPU prover to install
-/// `Device` entries on the way down through `build_gkr_circuit` —
-/// only `Host` is constructed today.
+/// Layers indexed top-down: layer 0 is the first / largest;
+/// layer N-1 is the terminal interaction-only layer.
 pub struct LogupGkrCpuCircuit<F: Field, EF: ExtensionField<F>> {
     pub layers: Vec<LayerState<F, EF>>,
     _phantom: PhantomData<(F, EF)>,

@@ -140,10 +140,9 @@ where
                         .enumerate()
                         .for_each(|(k, (n0_row, d0_row))| {
                             let row_upper = k;
-                            // PaddedMle (#88 bugfix): each source quadrant
-                            // can have its own num_real_rows. Substitute
-                            // the identity-fraction value when the source
-                            // row is in the padding region.
+                            // Each source quadrant has its own
+                            // num_real_rows; substitute the identity-
+                            // fraction in the padding region.
                             let n0_real = row_upper < n0.num_real_rows;
                             let d0_real = row_upper < d0.num_real_rows;
                             let n1_real = row_upper < n1.num_real_rows;
@@ -169,8 +168,7 @@ where
                         .enumerate()
                         .for_each(|(k, (n1_row, d1_row))| {
                             let row_lower = k + next_rows;
-                            // PaddedMle (#88 bugfix): per-quadrant real-rows
-                            // check (same as upper-half block above).
+                            // Per-quadrant real-rows check, same as upper-half block.
                             let n0_real = row_lower < n0.num_real_rows;
                             let d0_real = row_lower < d0.num_real_rows;
                             let n1_real = row_lower < n1.num_real_rows;

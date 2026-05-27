@@ -1,53 +1,10 @@
 //! Device-resident LogUp-GKR circuit scaffold.
 //!
-//! Direct analogue of SP1's
-//! `LogUpCudaCircuit`
-//! — a streaming container that yields one circuit layer at a time so
-//! the GKR prover can walk the circuit bottom-up without materializing
-//! every layer up front on host.
-//!
-//! ## Why this exists
-//!
-//! Today's `build_gkr_circuit` + `LogupGkrCpuCircuit` (see
-//! [`super::layer`]) eagerly walks every layer transition on host
-//! **before** any sumcheck round executes.  Profile data (see
-//! `project_359_*` memory notes) shows `flatten_layer` consuming
-//! 77% of per-layer cost on fibonacci / 58% on tendermint —
-//! eliminating per-call flatten via persistent device-resident layer
-//! state is projected to save ~20% wall.
-//!
-//! The fix mirrors SP1's design exactly: the prover side holds a
-//! [`DeviceLogupGkrCircuit`] that stores a `Vec<DeviceCircuitLayer>`
-//! plus an optional virtual `FirstLayerVirtual` placeholder.  Each
-//! call to [`DeviceLogupGkrCircuit::next`] pops the bottom-most
-//! materialized layer, or — when `recompute_first_layer` is on and
-//! the materialized stack is empty — generates the FirstLayer on
-//! demand from the input data.
-//!
-//! ## Scope of this scaffold
-//!
-//! * Defines the public types: [`DeviceLogupGkrCircuit`],
-//!   [`DeviceCircuitLayer`], [`DeviceLayerHandle`],
-//!   [`DeviceInputData`].
-//! * Defines iterator-style API: [`DeviceLogupGkrCircuit::next`],
-//!   [`DeviceLogupGkrCircuit::new`], [`DeviceLogupGkrCircuit::len`].
-//! * Stays **device-agnostic**: handles are opaque `Arc<...>`
-//!   placeholders.  The stark crate must not depend on ziren-gpu /
-//!   cudarc; the actual device payload type is filled in by the GPU
-//!   crate via a side-channel registry (matching the
-//!   [`super::layer::LayerState::Device`] pattern in #218 Q1 /
-//!   #228).
-//! * Methods that need device dispatch (e.g. recomputing the first
-//!   layer from raw input data) carry `todo!()` bodies and are gated
-//!   behind a clear `// hook-point` comment so #371 can wire the V3
-//!   hook signature in cleanly.
-//!
-//! ## Out of scope (#371 — next task)
-//!
-//! * Plumbing `DeviceLogupGkrCircuit` into [`super::round`] /
-//!   [`super::top_level`].  This task only defines the type.
-//! * Modifying any existing caller of `LogupGkrCpuCircuit`.
-//! * Wiring CUDA dependencies into the stark crate.
+//! Streaming container yielding one layer at a time so the GKR
+//! prover can walk the circuit bottom-up without materializing
+//! every layer up front. Handles are opaque `Arc<...>` so the stark
+//! crate stays CUDA-agnostic; the GPU crate fills in concrete
+//! payloads via a side-channel registry.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -55,51 +12,22 @@ use core::marker::PhantomData;
 
 use p3_field::{ExtensionField, Field};
 
-/// Opaque handle to a device-resident layer payload.
-///
-/// The stark crate has no knowledge of the underlying device payload
-/// type — that lives in the basefold/GPU crate and is keyed by a
-/// `(device_id, circuit_id, handle_id)` triple in the per-process
-/// registry (see `crate::basefold_late_binding` for the existing
-/// `LayerState::Device` hooks introduced by #218 Q1 / #225-#228).
-///
-/// `Arc<dyn AnyDeviceHandle>` keeps the type erased while preserving
-/// reference-counted ownership across rayon workers; the actual
-/// payload is dropped via the registry's pull/release hook when the
-/// last `Arc` clone is dropped.
-///
-/// **#371 hook-point:** When the V3 hook lands, this is the type that
-/// will flow into the sumcheck round prover.  The marker trait
-/// `AnyDeviceHandle: Any + Send + Sync` keeps the abstraction
-/// device-agnostic while letting the GPU side downcast via
-/// `Arc::downcast`.
+/// Opaque handle to a device-resident layer payload. Keyed in the
+/// GPU registry by `(device_id, circuit_id, handle_id)` so
+/// concurrent shards on the same GPU stay isolated.
 #[derive(Clone)]
 pub struct DeviceLayerHandle {
-    /// Opaque type-erased payload — populated by the GPU crate's
-    /// registry, never inspected on the stark side.
     inner: Arc<dyn AnyDeviceHandle>,
-    /// Mirrored shape metadata so callers that only need dimensions
-    /// can read them without dereferencing through the registry
-    /// (matches the [`super::layer::LayerState::Device`] pattern).
     num_row_variables: usize,
-    /// log₂ of (max chip-interaction count rounded up).
     num_interaction_variables: usize,
-    /// Multi-GPU scoping ID — keyed per-`build_device_gkr_circuit`
-    /// invocation so concurrent shards stay isolated (mirrors the
-    /// `LayerState::Device::circuit_id` field added in #230).
     circuit_id: u64,
 }
 
-/// Marker trait that any device-side handle payload must implement.
-///
-/// This lives in the stark crate only as an opaque erased pointer;
-/// the GPU crate provides concrete impls keyed in its registry.
 pub trait AnyDeviceHandle: core::any::Any + Send + Sync {}
 
 impl DeviceLayerHandle {
-    /// Constructor used by the GPU registry when a fresh device
-    /// layer is materialized.  Stark-side callers should not invoke
-    /// this directly — the GPU crate's hook is the only legal caller.
+    /// GPU registry constructor; stark-side callers should not
+    /// invoke this directly.
     #[must_use]
     pub fn new(
         inner: Arc<dyn AnyDeviceHandle>,
@@ -179,68 +107,29 @@ impl core::fmt::Debug for DeviceLayerHandle {
 /// jagged traces on demand.
 ///
 /// Analogue of SP1's
-/// `GkrInputData`
-/// — kept type-erased and device-agnostic on the stark side.
-///
-/// The GPU crate's registry stores the actual chip + trace pointers
-/// and looks them up via `circuit_id`.  Stark-side callers only need
-/// the shape metadata to dispatch on, so we don't pull the heavy
-/// `JaggedTraceMle` / chip-set types in here.
-///
-/// **#371 / #376 hook-point:** The
-/// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
-/// accepts a `circuit_id` and consults the ziren-gpu side's
-/// per-circuit registry — the [`DeviceInputData::input_handle`]
-/// payload below carries the matching opaque chip/trace bundle.
+/// Type-erased input bundle handed to the GPU regen hook. The GPU
+/// crate's registry resolves the actual chip / trace data via
+/// `circuit_id`.
 #[derive(Clone)]
 pub struct DeviceInputData {
-    /// Multi-GPU scoping ID (matches [`DeviceLayerHandle::circuit_id`]).
     pub circuit_id: u64,
-    /// log₂ of the maximum padded row count across the shard's chips.
-    /// `generate_first_layer` reduces this by 1, mirroring SP1's
-    /// `num_row_variables = input.num_row_variables - 1` convention.
+    /// log₂ of the shard's max padded row count; the first-layer
+    /// generator reduces this by 1.
     pub num_row_variables: u32,
-    /// log₂ of (total interaction count rounded up to the next power
-    /// of two).
     pub num_interaction_variables: u32,
-    /// opaque input-data bundle the GPU side
-    /// downcasts when the regen hook fires.
-    ///
-    /// Analogue of SP1's
-    /// `GkrInputData`
-    /// `chip_set` / `all_interactions` / `jagged_trace_data` / `alpha`
-    /// / `beta_seed` fields — Ziren keeps them type-erased on the
-    /// stark side and lets ziren-gpu own the concrete payload type
-    /// (typically wrapping the per-shard
-    /// [`crate::shard_level::DeviceTraceProvider`] + the alpha/beta
-    /// challenges + the chip ordering vec).
-    ///
-    /// **Lifetime contract**: when present, the payload MUST stay
-    /// alive for as long as the GKR-circuit walk could fire the
-    /// regen hook on this `circuit_id`.  In practice the ziren-gpu
-    /// side stashes the payload in its `PerCircuitRegistry` (keyed
-    /// by `circuit_id`) at `gpu_layer_init_hook` time and drops it
-    /// alongside the rest of the bucket at
-    /// `gpu_layer_drain_circuit_hook`.
-    ///
-    /// **`None` semantics**: the regen hook is unavailable for this
-    /// circuit (no recompute mode armed, or older ziren-gpu build).
-    /// `DeviceLogupGkrCircuit::next` translates the missing payload
-    /// into a return-`None`, surfacing the existing pull-stub panic
-    /// in ziren-gpu when the drop path was taken without a regen hook.
+    /// Opaque payload the GPU side downcasts. Lifetime contract:
+    /// must outlive every regen-hook call on this `circuit_id` —
+    /// ziren-gpu drops it at `gpu_layer_drain_circuit_hook` time.
+    /// `None` => regen unavailable; `next()` returns `None` and
+    /// surfaces the pull-stub panic if the drop path was taken
+    /// without a regen hook.
     pub input_handle: Option<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
 }
 
 impl DeviceInputData {
-    /// Construct a `DeviceInputData` with `input_handle = None` —
-    /// the minimal shape needed by today's call sites (#368 / #383
-    /// scaffold, which carries no regen payload).
-    ///
-    /// Use [`Self::with_input_handle`] (or the builder-style
-    /// [`Self::set_input_handle`]) to install the regen payload
-    /// before handing the struct off to a [`DeviceLogupGkrCircuit`]
-    /// that may need to invoke
-    /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`].
+    /// Builds without a regen payload; use
+    /// [`Self::with_input_handle`] / [`Self::set_input_handle`] to
+    /// install one before any path that may invoke the regen hook.
     #[must_use]
     pub fn new(
         circuit_id: u64,
@@ -389,7 +278,7 @@ impl<F: Field, EF: ExtensionField<F>> core::fmt::Debug for DeviceCircuitLayer<F,
 /// Holds the full layer stack as a vector that callers pop from the
 /// bottom upward via [`Self::next`].  When
 /// `num_virtual_layers > 0` and the materialized stack is empty,
-/// `next()` will (in a future V3 hook landing — #371) materialize the
+/// `next()` will (in a future V3 hook landing) materialize the
 /// FirstLayer on demand from `input_data` rather than keeping it in
 /// device memory across every intermediate round.
 ///
@@ -469,7 +358,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// top-of-stack [`DeviceCircuitLayer`] or `None` when the circuit
     /// is exhausted.
     ///
-    /// ## `#398 ` — device-resident consumer
+    /// ## `device-resident consumer` — device-resident consumer
     ///
     /// The intermediate-layer consumer in `top_level.rs` uses this
     /// peek to discover the shape of a scope-installed layer BEFORE
@@ -506,20 +395,13 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         ))
     }
 
-    /// Pop the next layer in bottom-up order.
+    /// Pop the next layer bottom-up:
+    /// * `materialized_layers` non-empty → pop and return.
+    /// * `num_virtual_layers > 0` → regenerate the FirstLayer via
+    ///   the registered hook (one-shot, decrement counter).
+    /// * Otherwise `None`.
     ///
-    /// Behavior mirrors SP1's
-    /// `LogUpCudaCircuit::next`:
-    ///
-    /// * If `materialized_layers` is non-empty, pop and return the
-    ///   bottom-most.
-    /// * Else, if `num_virtual_layers > 0`, regenerate the
-    ///   FirstLayer from `input_data` (one-shot — decrement counter).
-    /// * Else, return `None`.
-    ///
-    /// ## `#376  — regen hook dispatch`
-    ///
-    /// The lazy-regeneration arm consults the registered
+    /// The regen arm consults the
     /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
     /// (when the `basefold` feature is on) via `circuit_id`.  When the
     /// hook is registered AND returns `Some(payload)`, we wrap it in a
@@ -617,7 +499,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 /// invocation:
 ///
 /// * **Construction** binds a fresh `circuit_id` (multi-GPU isolation —
-///   matches `LayerState::Device::circuit_id` from #230) and stashes the
+///   matches `LayerState::Device::circuit_id` per multi-GPU isolation) and stashes the
 ///   scope handle in a thread-local slot so the V3 dispatch site
 ///   (`try_logup_round_gpu_v3`) can consult it without threading new
 ///   arguments through Ziren's per-round signatures.
@@ -847,7 +729,7 @@ std::thread_local! {
 /// so we pin the slot to the single concrete `(KoalaBear, Ef4)`
 /// production scope.  Non-production callers (e.g. test code with a
 /// different EF) see `None` here and fall through to the existing
-/// `take_logup_v3_next_handle` path — byte-equivalent to pre-#383.
+/// `take_logup_v3_next_handle` path — byte-equivalent to legacy.
 ///
 /// **Safety contract**: the pointer is set exclusively by
 /// [`LogupTaskScopeGuard::enter_with_scope`] from a `&mut
@@ -1189,7 +1071,7 @@ mod tests {
     }
 
     /// `DeviceLayerHandle` plumbs `circuit_id` through unchanged
-    /// (multi-GPU isolation, see #230).
+    /// (multi-GPU isolation, multi-GPU isolation).
     #[test]
     fn handle_carries_circuit_id() {
         let h = make_handle(42, 4, 3);
@@ -1205,7 +1087,7 @@ mod tests {
 
     /// empty scope (no circuit installed) reports `None` for both
     /// `circuit()` and `next_layer()`.  This is the production default
-    /// today; behavior remains identical to pre-#383 dispatch.
+    /// today; behavior remains identical to legacy dispatch.
     #[test]
     fn task_scope_empty_yields_none() {
         let mut scope = LogupTaskScope::<KoalaBear, EF>::new(123);
@@ -1374,16 +1256,10 @@ mod tests {
         );
     }
 
-    /// `enter_with_scope` for a non-production
-    /// `EF` falls back to the untyped behavior: `active_circuit_id`
-    /// is bound but `with_production_scope_mut` returns `None`.  This
-    /// preserves byte-equivalent behavior for tests / port code that
-    /// use a different EF type.
-    ///
-    /// The test type alias `EF = Challenge<KoalaBearPoseidon2>` happens
-    /// to resolve to the production `Ef4` (BinomialExtensionField<KoalaBear, 4>),
-    /// so we use `KoalaBear` for both F and EF here (degree-1 self
-    /// extension) to get a genuinely non-production type pair.
+    /// Non-production EF: `active_circuit_id` still binds but
+    /// `with_production_scope_mut` returns `None`. We use `KoalaBear`
+    /// for both F and EF (degree-1 self extension) because the test
+    /// `Challenge<KoalaBearPoseidon2>` happens to alias production `Ef4`.
     #[test]
     fn enter_with_scope_non_production_falls_back_to_untyped() {
         let mut scope = LogupTaskScope::<KoalaBear, KoalaBear>::new(303);

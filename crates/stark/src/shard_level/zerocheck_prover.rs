@@ -175,15 +175,9 @@ where
     acc
 }
 
-/// Strictly-serial reference implementation of the lambda-RLC fold.
-///
-/// Mirrors the pre-B3 serial outer loop (zerocheck_prover.rs line
-/// 473-485, prior to the parallel rewrite).  Used ONLY when
-/// `ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1` is set, to assert
-/// byte-equivalence between the parallel host fold and a known-
-/// correct reference.  Once the full device-resident fusion lands,
-/// the same flag will assert byte-equivalence between the device
-/// path and this reference.
+/// Serial reference for the lambda-RLC fold, used by
+/// `ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1` to assert
+/// equivalence against the parallel / device path.
 fn compute_combined_table_rlc_serial<SC>(
     padded: &[Vec<Challenge<SC>>],
     lambda: Challenge<SC>,
@@ -208,23 +202,10 @@ where
     acc
 }
 
-///  — opt-in device fusion path for the lambda-RLC step.
-///
-/// When `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a GPU combine
-/// hook is registered (via
-/// [`crate::shard_level::sumcheck_poly::register_gpu_zerocheck_combine_hook`])
-/// AND `Challenge<SC> == Ef4`, dispatch the `Σ_i λ^i · padded[i]` fold
-/// through the registered CUDA kernel
-/// (`combine_ctables_with_lambda_powers` in
-/// `ziren-gpu/cuda/basefold/zerocheck_combine.cuh`).  Otherwise (or on
-/// dispatch failure) fall back to the host parallel
-/// [`compute_combined_table_rlc`].
-///
-/// **Byte-identity:** EF addition is associative; the per-chip lambda
-/// power is identical regardless of which thread or device computes
-/// it.  Output matches the host serial reference bit-for-bit.  When
-/// `ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1` is also set, the
-/// caller asserts equality against `compute_combined_table_rlc_serial`.
+/// Device-fusion path for the lambda-RLC step. Dispatches the
+/// `Σ_i λ^i · padded[i]` fold through a registered GPU hook when
+/// `Challenge<SC> == Ef4` and falls back to the host parallel fold
+/// otherwise (or on hook absence / failure).
 fn compute_combined_table_rlc_with_device<SC>(
     padded: &[Vec<Challenge<SC>>],
     lambda: Challenge<SC>,
@@ -338,27 +319,13 @@ where
 
 /// Shard-level zerocheck prover.
 ///
-/// SP1 reference: `ShardProver::zerocheck` at
-/// `crates/hypercube/src/prover/shard.rs:474-646`.
-///
-/// # Pipeline
-///
-///   1. Sample three EF challenges from the transcript:
-///      `alpha` (per-chip constraint batching), `gkr_batch_open`
-///      (transcript alignment with the verifier — D1 fix), and
+/// Pipeline:
+///   1. Sample `alpha` (per-chip constraint batching),
+///      `gkr_batch_open` (transcript alignment with the verifier),
 ///      `lambda` (inter-chip RLC).
-///   2. Build per-chip constraint tables `C_i: {0,1}^{m_i} → EF`
-///      via [`crate::zerocheck_prover::eval_constraints_on_hypercube_with_cumsums`]
-///      (per-chip rayon parallel — W3).
-///   3. Pad each table to `2^max_log_degree` and lambda-RLC them
-///      into a single combined table.
-///   4. Run the combined table through the trait-driven sumcheck
-///      driver [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
-///      via [`ZerocheckRoundPolynomial`] (Tier 1 Phase 3 cutover).
-///
-/// The transcript bytes are byte-identical to the prior ad-hoc
-/// loop — see [`ZerocheckRoundPolynomial`] for the per-round
-/// arithmetic and the reduction equality.
+///   2. Build per-chip constraint tables `C_i: {0,1}^{m_i} → EF`.
+///   3. Pad to `2^max_log_degree` and lambda-RLC into one table.
+///   4. Reduce via `reduce_sumcheck_to_evaluation`.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -368,8 +335,6 @@ pub fn prove_shard_zerocheck<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    // per-shard device-trace provider (SP1-aligned).  None today;
-    // Phase 3 wires the zerocheck device-resident ctable hooks.
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> PartialSumcheckProof<Challenge<SC>>
 where
@@ -422,19 +387,9 @@ where
     // than being pulled into many short-lived inner-loop tasks.
     //
     // `IndexedParallelIterator::collect()` preserves source
-    // order, so `chip_tables` is byte-identical to the
-    // sequential equivalent — proof output is unchanged.
-    //
-    // ── BATCHED-GPU PRE-PASS (opt-in) ──
-    // When `ZIREN_GPU_BATCHED_CONSTRAINT_EVAL=1` AND a batched hook is
-    // registered AND `(Val,Challenge)=(Kb,Ef4)`, compute ALL eligible
-    // chips' C-tables in a single multi-chip kernel-launch bucket
-    // pass, replacing N per-chip launches with ~3 (one per MEMORY_SIZE
-    // bucket).  Output is byte-identical to per-chip dispatch.  Per-
-    // chip slots that come back as `None` (cache miss, dispatch
-    // failure, etc.) fall through to the per-chip GPU/CPU path inside
-    // the par_iter — each chip's `gpu_batched_results[idx]` is checked
-    // at the top of the per-chip body.
+    // Batched-GPU pre-pass: when enabled, replaces N per-chip launches
+    // with ~3 bucket launches. Per-chip `None` slots fall through to
+    // the per-chip path below.
     let _t_ctable = std::time::Instant::now();
     let _ctable_span = tracing::info_span!("zerocheck_ctable_build").entered();
     let gpu_batched_results: Option<Vec<Option<Vec<Challenge<SC>>>>> =
@@ -451,8 +406,6 @@ where
         .zip(preprocessed_traces.par_iter())
         .enumerate()
         .filter_map(|(chip_idx, ((chip, main_trace), preproc_trace))| {
-            // Batched-GPU pre-pass hit: skip both GPU per-chip and host
-            // fallback below — the table is already computed.
             if let Some(ref batched) = gpu_batched_results {
                 if let Some(Some(table)) = batched.get(chip_idx) {
                     let height = main_trace.values.len() / main_trace.width.max(1);
@@ -461,74 +414,31 @@ where
                     return Some((log_height, table.clone()));
                 }
             }
-            // pure-AIR / permutation-bearing chip split.
-            //
-            // Historically Ziren skipped permutation-bearing chips
-            // (those with `permutation_width() > 0`) entirely so the
-            // hypercube evaluator did not have to synthesize a
-            // permutation column it did not own.  But the host-side
-            // [`VerifierConstraintFolder`] is an `EmptyMessageBuilder`
-            // (see `folder.rs:430`), which means every `builder.send`
-            // / `builder.receive` call performed by the chip's
-            // `Air::eval` is a no-op.  In other words, the per-row
-            // constraint walk evaluates ONLY the chip's pure-AIR
-            // assertions even for permutation-bearing chips — the
-            // lookups are already discharged by LogUp-GKR.
-            //
-            // The all-or-nothing filter therefore masks the #111 GPU
-            // constraint-eval hook (production chips all carry
-            // lookups → `permutation_width > 0` → filter returns
-            // `None`, so the GPU dispatch site below is unreachable).
-            //
-            // Under `ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=1` we drop the
-            // skip and emit the pure-AIR c-table for every chip,
-            // mirroring SP1's `prover/shard.rs:474` zerocheck which
-            // also iterates over every chip without filtering.
-            // The cryptographic identity exercised by the recursion
-            // verifier (`BasefoldZerocheckVerifier::verify_zerocheck`)
-            // and the host opt-in
-            // [`verify_zerocheck_cryptographic_identity_host`] already
-            // computes `eval_constraints_basefold` for every chip via
-            // `BasefoldConstraintFolder`, which is likewise an
-            // `EmptyMessageBuilder` (see
-            // `basefold_constraint_folder.rs:152`) — so dropping the
-            // prover-side filter is verifier-consistent.
-            //
-            // Default-OFF until multi-workload byte-equivalence is
-            // re-validated.  When OFF, behaviour is byte-identical to
-            // pre-#372.
+            // Historically permutation-bearing chips were skipped; the
+            // host folder is an `EmptyMessageBuilder` so lookups
+            // discharge to no-ops in the per-row walk anyway. The
+            // split flag drops the skip and emits a pure-AIR c-table
+            // for every chip (default OFF until cross-workload
+            // equivalence is re-validated).
             let split_enabled =
                 std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
                     .map(|v| v == "1")
                     .unwrap_or(false);
             if !split_enabled && chip.permutation_width() > 0 {
-                // Empty placeholder — chip's contribution to the
-                // shard zerocheck is the zero polynomial.
                 return None;
             }
-            // Chips that did not produce any rows in this shard get
-            // skipped under both filter modes: the host evaluator
-            // (`eval_constraints_on_hypercube_with_cumsums`) asserts
-            // `main.height() == 2^num_vars`, which fails for the
-            // zero-height degenerate case.  The previous all-or-
-            // nothing filter masked this incidentally by also
-            // dropping permutation-bearing chips; under #372 we
-            // must explicitly preserve the no-rows skip.
+            // Zero-height chips would trip the evaluator's
+            // `main.height() == 2^num_vars` assert; the legacy filter
+            // masked this incidentally so preserve the skip here.
             if split_enabled && (main_trace.values.is_empty() || main_trace.width == 0) {
                 return None;
             }
             let height = main_trace.values.len() / main_trace.width.max(1);
             let log_height = height.max(1).next_power_of_two().trailing_zeros() as usize;
 
-            // compute real per-chip cumulative sums so the
-            // zerocheck hypercube table reflects the chip's real AIR
-            // evaluation (matches what the recursion verifier will check via
-            // `build_opened_values_from_chip_openings_with_cumsums` when
-            // it consumes BasefoldShardProof.chip_cumulative_sums).
-            //   - global_cumulative_sum: from main trace's last 14 elements
-            //     when commit_scope() != Local (mirrors legacy prover.rs:492-502).
-            //   - local_cumulative_sum: zero (matches legacy basefold path;
-            //     future work: thread real local sum from LogUp-GKR layer 0).
+            // global_cumulative_sum: last 14 elements of the main trace
+            // when commit_scope() != Local. local_cumulative_sum: zero
+            // (future: thread real local sum from LogUp-GKR layer 0).
             let global_cumulative_sum = if chip.commit_scope()
                 != crate::air::LookupScope::Local
             {
@@ -551,18 +461,8 @@ where
             };
             let local_cumulative_sum = Challenge::<SC>::ZERO;
 
-            // dispatch hook: when ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1
-            // AND a GPU hook is registered AND `Challenge<SC>` is the
-            // production `Ef4` type, route the per-row constraint walk
-            // through the registered GPU bytecode interpreter (mirrors
-            // legacy FRI quotient kernel).  Output is byte-identical to
-            // `eval_constraints_on_hypercube_with_cumsums`; on `None`
-            // (chip rejected by GPU, e.g. oversized memory or unknown
-            // chip name) the host fallback runs unconditionally.
-            //
-            // The GPU table is materialized as `Vec<Ef4>` and reinterpreted
-            // back to `Vec<Challenge<SC>>` under TypeId equality (same
-            // `transmute` pattern used for the #106 zerocheck hook).
+            // Opt-in GPU constraint-eval dispatch under TypeId guard
+            // on (Val,Challenge)=(Kb,Ef4); falls back to host on miss.
             if std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_DEVICE")
                 .map(|v| v == "1")
                 .unwrap_or(false)
@@ -585,10 +485,8 @@ where
                         static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                         FIRED_ONCE.get_or_init(|| {
                             tracing::warn!(
-                                "#111 constraint_eval hook FIRED \
-                                 (ZIREN_GPU_CONSTRAINT_EVAL_DEVICE=1, \
-                                 (Val,Challenge)=(Kb,Ef4), gpu_hook dispatched; \
-                                 chip={})", chip.name()
+                                "constraint_eval hook FIRED \
+                                 (chip={})", chip.name()
                             );
                         });
                         // SAFETY: TypeId equality guarantees Val<SC> == Kb
@@ -649,11 +547,10 @@ where
                             };
                             return Some((log_height, table_ch));
                         }
-                        // GPU rejected (None) — fall through to host.
                         static REJECT_ONCE: OnceLock<()> = OnceLock::new();
                         REJECT_ONCE.get_or_init(|| {
                             tracing::warn!(
-                                "#111 constraint_eval hook FELL THROUGH \
+                                "constraint_eval hook FELL THROUGH \
                                  (chip={}, GPU returned None); host fallback used",
                                 chip.name()
                             );
@@ -663,9 +560,8 @@ where
                         static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
                         MISMATCH_ONCE.get_or_init(|| {
                             tracing::warn!(
-                                "#111 constraint_eval hook FELL THROUGH \
-                                 (TypeId mismatch: (Val,Challenge) != (Kb,Ef4)); \
-                                 host fallback used"
+                                "constraint_eval hook FELL THROUGH \
+                                 (TypeId mismatch: (Val,Challenge) != (Kb,Ef4))"
                             );
                         });
                     }
@@ -674,11 +570,8 @@ where
                     static WARN_ONCE: OnceLock<()> = OnceLock::new();
                     WARN_ONCE.get_or_init(|| {
                         tracing::warn!(
-                            "#111 constraint_eval hook FELL THROUGH \
-                             (env=set, hook=None); ziren-gpu's \
-                             compress_multi_gpu must call \
-                             register_gpu_constraint_eval_hook at \
-                             startup. Host CPU used."
+                            "constraint_eval hook FELL THROUGH \
+                             (env=set, hook=None)"
                         );
                     });
                 }
@@ -706,16 +599,9 @@ where
         "zerocheck sub-phase done"
     );
 
-    // Step 3: determine the shard's max log_degree (== sumcheck
-    // round count) and pad each chip table up to that size.
-    //
-    // Shard-level invariant: the sumcheck must run over exactly
-    // `shard_log_row_count` variables (== the shared shard-padded
-    // height), which equals `log2(max trace height)` across all
-    // chips — whether or not they were skipped in step 2.  The
-    // recursion verifier enforces
-    // `zerocheck_point.dim == pcs_max_log_row_count` at
-    // `recursion/circuit/src/zerocheck.rs:488`.
+    // Step 3: pad each chip table up to `2^max_log_degree`. Verifier
+    // enforces `zerocheck_point.dim == max_log_row_count`, so extra
+    // rounds folding zero-padded tables are still required.
     let _t_rlc = std::time::Instant::now();
     let _rlc_span = tracing::info_span!("zerocheck_lambda_rlc").entered();
     let shard_log_row_count: usize = main_traces
@@ -726,12 +612,6 @@ where
         })
         .max()
         .unwrap_or(0);
-    // The verifier enforces `zerocheck_point.dim == max_log_row_count`
-    // (recursion/circuit/src/zerocheck.rs:488 and shard_level verifier
-    // line 421).  Pad the sumcheck out to the verifier's configured
-    // global max, regardless of whether this specific shard fills it —
-    // extra rounds fold zero-padded tables, which is a no-op for
-    // correctness but preserves the shape invariant.
     let max_log_degree = chip_tables
         .iter()
         .map(|(d, _)| *d)
@@ -749,47 +629,14 @@ where
         })
         .collect();
 
-    // Step 4: lambda-RLC the padded tables into a single combined
-    // table.  combined = Σ_i λ^i · padded[i].
-    //
-    //  (Apr 2026) — fused host-side RLC.
-    //
-    // Previously: serial outer loop over chips, serial inner loop over
-    // table elements (≈100-300ms/shard, no SIMD/par per A4 plan §3).
-    //
-    // Now: precompute λ^i powers once, then chunk the output buffer
-    // and let rayon distribute chunks across threads.  Each thread
-    // computes `acc[k] = Σ_i powers[i] · padded[i][k]` over a slice
-    // of `k` indices — the inner loop is contiguous EF mul-adds,
-    // hot in L2.  This is byte-identical to the serial loop because
-    // EF addition is associative and the per-chip `λ^i` weight is
-    // identical regardless of accumulation order.
-    //
-    // The full device-resident fusion (combined-table on GPU, no
-    // host pad, no host RLC, hand the device handle straight into
-    // GPU sumcheck) is the architectural target documented
-    // in /tmp/c_full_a4_plan.md §3 and the deferred follow-up
-    // /tmp/c_full_b3_followup.md.   (this revision) ships
-    // the device fusion kernel (`combine_ctables_with_lambda_powers`)
-    // without yet eliminating the host pad — when
-    // `ZIREN_GPU_ZEROCHECK_DEVICE_FUSION=1` is set AND a hook is
-    // registered AND `Challenge<SC> == Ef4`, the lambda-RLC fold runs
-    // on device.  Output is byte-identical to the host serial /
-    // parallel fold (associative EF addition) and the dual-run
-    // verifier below asserts equality.  Falls back to the host
-    // parallel fold on any dispatch failure.
+    // Step 4: combined = Σ_i λ^i · padded[i]. Routes through the
+    // device fusion path when available, host parallel fold otherwise.
     let combined: Vec<Challenge<SC>> = compute_combined_table_rlc_with_device::<SC>(
         &padded, lambda, target_size,
     );
 
-    // Optional debug invariant: when ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1
-    // is set, recompute the combined table via the prior strictly-serial
-    // implementation and assert byte-equivalence.  This is the
-    // "dual-run" verification harness called for in
-    // /tmp/c_full_a4_plan.md §4 — once the full device-resident path
-    // lands, the same flag will run both the host RLC and the
-    // GPU-fused RLC and assert equality.  Cheap (one extra `2^max_log_degree`
-    // EF buffer per shard) and only enabled under the env flag.
+    // Dual-run verifier: recompute via the serial reference and
+    // assert equivalence.
     if std::env::var("ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY")
         .map(|v| v == "1")
         .unwrap_or(false)
@@ -814,7 +661,7 @@ where
         FIRED_ONCE.get_or_init(|| {
             tracing::warn!(
                 "ZIREN_GPU_ZEROCHECK_DEVICE_RESIDENT_VERIFY=1: dual-run \
-                 byte-equivalence PASSED (n_chips={}, target_size={})",
+                 equivalence PASSED (n_chips={}, target_size={})",
                 padded.len(), target_size,
             );
         });
@@ -828,18 +675,8 @@ where
         "zerocheck sub-phase done"
     );
 
-    // Step 5: run a single shard-level sumcheck on the combined
-    // table, using the SumcheckPoly trait machinery introduced in
-    // Tier 1 Phase 3.  The wrapping `ZerocheckRoundPolynomial<EF>`
-    // produces a per-round `[c0, c1, ZERO, ZERO]` 4-coefficient
-    // polynomial (degree-1 padded to the verifier's
-    // `expected_degree = 3` shape — matching
-    // `verify_sumcheck_host` at line 882).  See the trait impls
-    // below for the round-poly arithmetic; the byte-identity proof
-    // (this driver path produces the same coefficients, transcript
-    // observations, reduced point, and final claim as the prior
-    // ad-hoc loop) is documented on
-    // [`ZerocheckRoundPolynomial`].
+    // Step 5: shard-level sumcheck on the combined table; each round
+    // emits `[c0, c1, ZERO, ZERO]` padded to verifier's degree-3.
     let _t_sumcheck = std::time::Instant::now();
     let _sumcheck_span = tracing::info_span!("zerocheck_sumcheck").entered();
     let proof = prove_shard_zerocheck_via_trait::<SC>(combined, max_log_degree, challenger);
@@ -853,30 +690,10 @@ where
     proof
 }
 
-/// Trait-driven sumcheck for the shard-level zerocheck.
-///
-/// Wraps the combined per-shard C-table in a
-/// [`ZerocheckRoundPolynomial`] and dispatches to the generic
-/// [`reduce_sumcheck_to_evaluation`] driver.  Result is byte-identical
-/// to the prior `prove_shard_zerocheck_sumcheck_sp1_transcript`:
-///
-/// * Each round emits a 4-coefficient `[c0, c1, ZERO, ZERO]` polynomial
-///   (degree-1 padded to the verifier's `expected_degree = 3` shape).
-/// * Each round observes all 4 coefficients into the challenger via
-///   `BasedVectorSpace::as_basis_coefficients_slice`.
-/// * The reduced point is `insert(0, alpha)`-built — round 0's α
-///   ends up at `point[n-1]`, round (n-1)'s α at `point[0]`.
-/// * `claimed_sum = ZERO` (a true zerocheck).
-/// * `point_and_eval.1 = c_table[0]` after the final fold, which
-///   equals `poly_eval(last_round_poly, alpha_last)` (the driver
-///   computes the latter; both equal because `Σ c_table_new == p(α)`
-///   under MSB fold).
-///
-/// Multi-chip batched constraint-eval pre-pass — see top-of-step-2 comment.
-/// Returns `Some(per_chip_results)` where `[i]` is `Some(c_table)` for
-/// chips the batched GPU produced or `None` (caller falls back to per-
-/// chip GPU/host); returns outer `None` when batched mode is disabled or
-/// `(Val,Challenge) != (Kb,Ef4)`.
+/// Multi-chip batched constraint-eval pre-pass. Returns
+/// `Some(per_chip_results)` where each slot is `Some(c_table)` when
+/// the batched GPU produced it; outer `None` when batched mode is
+/// disabled or `(Val,Challenge) != (Kb,Ef4)`.
 #[allow(clippy::type_complexity, clippy::needless_pass_by_value)]
 fn compute_gpu_batched_pre_pass<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -935,12 +752,6 @@ where
     let public_values_kb: &[Kb] = unsafe {
         core::slice::from_raw_parts(public_values.as_ptr().cast::<Kb>(), public_values.len())
     };
-    // same env-gated split as the per-chip path.  When
-    // `ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=1`, the batched pre-pass also
-    // includes permutation-bearing chips.  The pure-AIR c-table is
-    // computed via the `EmptyMessageBuilder` path on host fallback and
-    // through the GPU bytecode interpreter (which compiles the chip's
-    // pure-AIR constraints) in the batched hook.
     let split_enabled_batched = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
         .map(|v| v == "1")
         .unwrap_or(false);
@@ -995,22 +806,8 @@ where
 
     let chip_names_refs: Vec<&str> = chip_names.iter().map(String::as_str).collect();
 
-    // ── #147 cross-shard batching dispatch ──
-    //
-    // When `ZIREN_GPU_CROSS_SHARD_BATCH=1` is set AND a cross-shard
-    // hook is registered, route through the per-process coordinator
-    // (cross_shard_coordinator) which blocks the calling worker
-    // thread until either `ZIREN_GPU_CROSS_SHARD_BATCH_N` (default
-    // 4) shards have submitted or a timeout fires (default 100 ms).
-    // The coordinator dispatches one cross-shard hook call covering
-    // all submitted shards (typically 4-8 shards × 2-3 MEMORY_SIZE
-    // buckets ≈ 8-12 launches in place of N×K per-chip launches),
-    // then scatters the per-shard outputs back to each caller.
-    //
-    // Output is byte-identical to per-shard `batched_hook` because
-    // the cross-shard hook's per-chip descriptor is identical to
-    // the per-shard variant's — see `prove_constraints_cross_shard_gpu`
-    // docstring in `ziren-gpu/core/src/basefold/constraint_eval.rs`.
+    // Cross-shard coordinator: gathers up to `BATCH_N` per-shard
+    // submissions (or timeout) and issues one combined hook call.
     let batched_out: Vec<Option<Vec<Ef4>>> = if cross_shard_batch_enabled() {
         if let Some(cross_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_constraint_eval_cross_shard_hook()
@@ -1031,10 +828,7 @@ where
                 Some(v) => {
                     static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                     FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "#147 cross-shard constraint-eval coordinator FIRED \
-                             (ZIREN_GPU_CROSS_SHARD_BATCH=1, cross_shard_hook dispatched)"
-                        );
+                        tracing::warn!("cross-shard constraint-eval coordinator FIRED");
                     });
                     v
                 }
@@ -1042,9 +836,8 @@ where
                     static FELL_ONCE: OnceLock<()> = OnceLock::new();
                     FELL_ONCE.get_or_init(|| {
                         tracing::warn!(
-                            "#147 cross-shard coordinator FELL THROUGH \
-                             (returned None — total dispatch failure or empty batch); \
-                             falling back to per-shard batched dispatch"
+                            "cross-shard coordinator FELL THROUGH; \
+                             per-shard batched dispatch used"
                         );
                     });
                     batched_hook(
@@ -1059,9 +852,7 @@ where
             static MISSING_ONCE: OnceLock<()> = OnceLock::new();
             MISSING_ONCE.get_or_init(|| {
                 tracing::warn!(
-                    "#147 ZIREN_GPU_CROSS_SHARD_BATCH=1 but no cross-shard hook \
-                     registered; ziren-gpu must call register_cross_shard_hook \
-                     at startup. Falling back to per-shard batched dispatch."
+                    "ZIREN_GPU_CROSS_SHARD_BATCH=1 but no cross-shard hook registered"
                 );
             });
             batched_hook(
@@ -1106,10 +897,8 @@ where
     Some(result)
 }
 
-/// Module-level concrete `Ef4` alias used by the cross-shard
-/// coordinator and the cross-shard hook signature.  Production
-/// extension type for `KoalaBearPoseidon2` (matches `Challenge<SC>`
-/// under TypeId guard).
+/// Production extension type for `KoalaBearPoseidon2`; matches
+/// `Challenge<SC>` under TypeId guard.
 type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
 
 /// Returns `true` iff `ZIREN_GPU_CROSS_SHARD_BATCH=1` is set.  Cached
@@ -1122,29 +911,9 @@ fn cross_shard_batch_enabled() -> bool {
     })
 }
 
-// ─────────────────────────────────────────────────────────────────────
-// cross-shard constraint-eval coordinator.
-//
-// `compute_gpu_batched_pre_pass` is invoked from `prove_shard_zerocheck`
-// once per shard.  In the multi-GPU compress orchestrator, several
-// shard workers run concurrently (one per GPU device), so multiple
-// per-shard `batched_hook` calls fire in parallel.  Each per-shard
-// dispatch issues ~3 CUDA launches (one per MEMORY_SIZE bucket).
-// Across 4-8 in-flight shard workers that's ~12-24 separate launches
-// per round of the orchestrator's pipeline, leaving the GPU
-// under-utilised on the constraint-eval phase (kernel-launch overhead
-// exceeds per-bucket work).
-//
-// The cross-shard coordinator gathers per-shard submissions in a
-// process-global queue and, once `ZIREN_GPU_CROSS_SHARD_BATCH_N`
-// shards have arrived (or `ZIREN_GPU_CROSS_SHARD_BATCH_TIMEOUT_MS`
-// elapses), dispatches the registered cross-shard hook ONCE on the
-// entire gathered batch.  Per-shard outputs are scattered back to
-// the calling threads via per-submission slots.
-//
-// Output is byte-identical to per-shard `batched_hook` because the
-// cross-shard hook's per-chip ChipDesc is identical to the per-shard
-// variant's.
+// Cross-shard coordinator: gather submissions from concurrent
+// pool-worker shards into one combined hook call, amortizing per-
+// shard kernel-launch overhead. Bounded by batch size or a timeout.
 mod cross_shard_coordinator {
     use std::sync::{Condvar, Mutex, OnceLock};
     use std::time::{Duration, Instant};
@@ -1396,11 +1165,8 @@ where
     debug_assert_eq!(c_table.len(), 1 << num_vars);
 
     if num_vars == 0 {
-        // Edge case: zero-variable poly.  No rounds to run; the
-        // claim is just `c_table[0]` (which equals 0 for a true
-        // zerocheck since Σ_b C(b) = C() = 0).  This matches the
-        // prior ad-hoc loop's behaviour (the loop body never
-        // executes; final_claim falls through to c_table[0]).
+        // Zero-variable poly: no rounds to run; the claim is
+        // `c_table[0]` (= 0 for a true zerocheck).
         let final_claim = if c_table.is_empty() {
             Challenge::<SC>::ZERO
         } else {
@@ -1413,16 +1179,8 @@ where
         };
     }
 
-    // Task #106 dispatch hook (sister of #102 GPU sumcheck): when
-    // ZIREN_GPU_ZEROCHECK=1 AND a GPU driver is registered via
-    // `crate::shard_level::sumcheck_poly::register_gpu_zerocheck_hook`
-    // AND `Challenge<SC>` is the concrete `Ef4` type used in production
-    // reth, route the inner degree-1 sumcheck loop to the registered
-    // GPU function-pointer.  Otherwise fall back to the host trait-driven
-    // path below.  Output is byte-identical (same per-round shape, same
-    // observe pattern, same MSB fold + insert(0, alpha) point).
-    // GPU zerocheck is default-on; per-shard sumcheck ~10x faster on device.
-    // Opt-out via ZIREN_GPU_ZEROCHECK_DISABLE=1 (or legacy ZIREN_GPU_ZEROCHECK=0).
+    // GPU zerocheck is default-on under TypeId(Ef4) guard; opt-out
+    // via ZIREN_GPU_ZEROCHECK_DISABLE=1 or legacy ZIREN_GPU_ZEROCHECK=0.
     let gpu_zc_disabled = std::env::var("ZIREN_GPU_ZEROCHECK_DISABLE")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
@@ -1444,11 +1202,7 @@ where
                 use std::sync::OnceLock;
                 static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                 FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "#106 zerocheck hook FIRED \
-                         (ZIREN_GPU_ZEROCHECK=1, Challenge=Ef4, \
-                         dispatched, num_vars={})", num_vars
-                    );
+                    tracing::warn!("zerocheck hook FIRED (num_vars={})", num_vars);
                 });
                 // SAFETY: TypeId equality guarantees `Challenge<SC>` is
                 // `Ef4` at runtime — slice/value reinterpretation is
@@ -1474,21 +1228,14 @@ where
                 use std::sync::OnceLock;
                 static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
                 MISMATCH_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "#106 zerocheck hook FELL THROUGH \
-                         (TypeId mismatch: Challenge != Ef4); host used"
-                    );
+                    tracing::warn!("zerocheck hook FELL THROUGH (Challenge != Ef4)");
                 });
             }
         } else {
             use std::sync::OnceLock;
             static WARN_ONCE: OnceLock<()> = OnceLock::new();
             WARN_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "#106 zerocheck hook FELL THROUGH (env=set, hook=None); \
-                     ziren-gpu's compress_multi_gpu must call \
-                     register_gpu_zerocheck_hook at startup. Host used."
-                );
+                tracing::warn!("zerocheck hook FELL THROUGH (hook=None)");
             });
         }
     }
@@ -1506,73 +1253,27 @@ where
         1,
         Challenge::<SC>::ONE,
     );
-    // `claimed_sum` returned by the driver is `rlc_eval(&claims, λ) =
-    // ZERO` (single-poly RLC degenerates to the lone claim).  This
-    // equals the prior implementation's `claimed_sum: ZERO`.  Mark
-    // the field explicitly to make the byte-identity invariant
-    // self-evident at the call site.
+    // Single-poly RLC degenerates to the lone claim; force-zero to
+    // make the byte-identity with the prior loop self-evident.
     proof.claimed_sum = Challenge::<SC>::ZERO;
     proof
 }
 
 /// Trait-shaped wrapper around the combined per-shard zerocheck
-/// C-table, plumbed through
-/// [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
-/// (Tier 1 Phase 3).
+/// C-table for `reduce_sumcheck_to_evaluation`.
 ///
-/// # Round-poly arithmetic
-///
-/// The combined constraint table `C: {0,1}^n → EF` (built upstream by
-/// the lambda-RLC of per-chip C-tables) is multilinear, so the
-/// per-round polynomial under MSB fold is **linear in X**:
-///
-/// ```text
-///   p(X) = Σ_{b' ∈ {0,1}^{remaining-1}} C(b', X)
-///        = (1 - X) · Σ_{b'} C(b', 0) + X · Σ_{b'} C(b', 1)
-///        = sum_lo + X · (sum_hi - sum_lo)
-/// ```
-///
-/// where `sum_lo = Σ_{i < half} C[i]` and `sum_hi = Σ_{i < half}
-/// C[i + half]` (the low/high halves of the current `c_table`).
-///
-/// We pad the resulting `[sum_lo, sum_hi - sum_lo]` to four
-/// coefficients with trailing zeros — matching the verifier's
-/// `expected_degree = 3` shape check
-/// ([`crate::shard_level::verifier::verify_sumcheck_host`] line 882)
-/// and the prior ad-hoc loop's transcript bytes byte-for-byte.
-///
-/// # Vs the LogUp-GKR `LogupRoundPolynomial`
-///
-/// LogUp-GKR's round poly is degree-3 (4-eval form) because it
-/// multiplies an `eq` factor against a degree-3 numerator/denominator
-/// bracket.  The zerocheck round poly here is degree-1 (no `eq` factor,
-/// pure C-table sum) — but both pass through the same generic driver,
-/// so the trait machinery is shape-agnostic.
-///
-/// # Component poly evals
-///
-/// Zerocheck consumers don't read the component openings (only the
-/// `PartialSumcheckProof` is forwarded downstream via
-/// [`crate::shard_level::shard_proof::BasefoldShardProof::zerocheck_proof`]).
-/// We return `vec![c_table[0]]` after the final fold so the trait
-/// contract is well-formed; the value is discarded by the caller.
+/// The combined multilinear table makes each round linear in X:
+/// `p(X) = sum_lo + X · (sum_hi - sum_lo)`. Padded to 4 coefficients
+/// to match the verifier's `expected_degree = 3` shape.
 pub struct ZerocheckRoundPolynomial<EF> {
-    /// Current folded C-table.  Length is `2^remaining_vars`; halves
-    /// each round under the MSB-fold convention `out[g] = lo + α·(hi -
-    /// lo)`.
+    /// Length `2^remaining_vars`; halves each round under the MSB
+    /// fold `out[g] = lo + α·(hi - lo)`.
     c_table: Vec<EF>,
-    /// log₂ of the remaining table size — tracked separately so
-    /// `num_variables()` is O(1) and the construction-time
-    /// `num_vars` is preserved across folds (the table shrinks by 2×
-    /// per round, so `c_table.len() == 1 << remaining_vars` always
-    /// holds).
     remaining_vars: usize,
 }
 
 impl<EF: Field + Send + Sync> ZerocheckRoundPolynomial<EF> {
-    /// Construct from an already-built combined C-table.  The table's
-    /// length must be a power of two (caller pads to `2^max_log_degree`
-    /// upstream).
+    /// The caller must pad to `2^max_log_degree`.
     pub fn new(c_table: Vec<EF>) -> Self {
         debug_assert!(
             c_table.len().is_power_of_two(),
@@ -1592,9 +1293,7 @@ impl<EF: Field + Send + Sync> SumcheckPolyBase for ZerocheckRoundPolynomial<EF> 
 
 impl<EF: Field + Send + Sync> ComponentPoly<EF> for ZerocheckRoundPolynomial<EF> {
     fn get_component_poly_evals(&self) -> Vec<EF> {
-        // After all rounds the table has folded to a single element.
-        // Zerocheck consumers don't actually use component openings —
-        // we expose the final fold value to satisfy the trait contract.
+        // Trait contract only; zerocheck consumers discard this.
         debug_assert_eq!(
             self.c_table.len(),
             1,
@@ -1607,10 +1306,6 @@ impl<EF: Field + Send + Sync> ComponentPoly<EF> for ZerocheckRoundPolynomial<EF>
 
 impl<EF: Field + Send + Sync> SumcheckPoly<EF> for ZerocheckRoundPolynomial<EF> {
     fn fix_last_variable(mut self, alpha: EF) -> Self {
-        // MSB fold: out[g] = c_table[g] + α·(c_table[g+half] -
-        // c_table[g]).  Allocates a fresh `Vec<EF>` (matches the prior
-        // loop's `vec![ZERO; half] + write` pattern); the truncation
-        // is implicit in the new vector's size.
         debug_assert!(
             self.c_table.len() >= 2,
             "fix_last_variable: requires >= 2 entries"
@@ -1628,13 +1323,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for ZerocheckRoundPolynomial<EF> 
     }
 
     fn sum_as_poly_in_last_variable(&self, _claim: Option<EF>) -> UnivariatePolynomial<EF> {
-        // We compute p(0) = sum_lo and p(1) = sum_hi directly rather
-        // than using the 3-eval trick (`p(0) = claim - p(1)`).  This
-        // matches the prior loop's transcript bytes exactly: the
-        // emitted `[c0, c1, ZERO, ZERO]` is built from the same
-        // sum_lo/sum_hi pair the prior loop computed.  The `claim`
-        // argument is unused because the round poly is degree 1 and
-        // cheap to compute directly.
         let half = self.c_table.len() / 2;
         let mut p0 = EF::ZERO;
         let mut p1 = EF::ZERO;
@@ -1671,29 +1359,8 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for ZerocheckRoundPolyn
     }
 }
 
-/// Project Ziren's per-round 3-evaluation tuple into a degree-2
-/// `UnivariatePolynomial` via Lagrange interpolation over
-/// `{0, 1, 2}`.
-///
-/// Ziren's `ZerocheckProof::rounds[i]: [EF; 3]` carries the
-/// values `(p_i(0), p_i(1), p_i(2))` of the round polynomial at
-/// the canonical sample points.  SP1's
-/// `UnivariatePolynomial::coefficients` carries the polynomial in
-/// the monomial basis (`coeff[k]` is the coefficient of `X^k`).
-///
-/// Lagrange formula for degree-2 over `{0, 1, 2}`:
-/// ```text
-///   p(X) = p(0) · ((X-1)(X-2))/((0-1)(0-2))
-///        + p(1) · ((X-0)(X-2))/((1-0)(1-2))
-///        + p(2) · ((X-0)(X-1))/((2-0)(2-1))
-/// ```
-///
-/// Expanded:
-/// ```text
-///   c0 = p(0)
-///   c1 = -p(0) · 3/2  +  2 p(1)  -  p(2) / 2
-///   c2 =  p(0) / 2    -  p(1)    +  p(2) / 2
-/// ```
+/// Lagrange-interpolate a degree-2 polynomial from
+/// `(p(0), p(1), p(2))` into monomial-basis coefficients.
 pub fn samples_to_monomial_degree_2<EF>(samples: [EF; 3]) -> UnivariatePolynomial<EF>
 where
     EF: Field,
@@ -1709,21 +1376,11 @@ where
     let c1 = -(three_halves * p0) + EF::from_u64(2) * p1 - half * p2;
     // c2 = 1/2·p0 - p1 + 1/2·p2
     let c2 = half * p0 - p1 + half * p2;
-    // The verifier's shape check expects degree_3 (4 coefficients) even
-    // though the underlying Ziren zerocheck only samples 3 points — for
-    // a true degree-2 poly the leading coefficient is zero.  Appending
-    // EF::ZERO satisfies the shape invariant without changing any
-    // evaluation.  When a degree-3 backend lands, produce 4 coefficients
-    // natively and drop this pad.
+    // Trailing zero pads to the verifier's degree-3 shape check.
     UnivariatePolynomial { coefficients: vec![c0, c1, c2, EF::ZERO] }
 }
 
-/// Project Ziren's per-chip ZerocheckProof shape into SP1's
-/// shard-level PartialSumcheckProof shape.
-///
-/// Pure type translation given the per-round samples.  Used by
-/// [`prove_shard_zerocheck`] once the underlying combined-table
-/// sumcheck is wired.
+/// Per-round samples → shard-level `PartialSumcheckProof`.
 pub fn ziren_zerocheck_to_partial_sumcheck<EF>(
     rounds: &[[EF; 3]],
     eval_point: Vec<EF>,
@@ -1743,16 +1400,13 @@ where
     }
 }
 
-/// Per-chip max log_degree across a slice of chips' main traces.
-///
-/// Used to determine the shard-level zerocheck round count
-/// (`= max_log_degree` per SP1's design).
+/// Max log_degree across a shard's main traces; equals the
+/// shard-level zerocheck round count.
 pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usize {
     main_traces
         .iter()
         .map(|t| {
             let h = t.values.len() / t.width.max(1);
-            // log2 via trailing_zeros after rounding up to the next pow2.
             let pad = h.max(1).next_power_of_two();
             pad.trailing_zeros() as usize
         })
@@ -1760,21 +1414,14 @@ pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usiz
         .unwrap_or(0)
 }
 
-// Anchor BTreeMap dependency for the future per-chip iteration
-// pattern (when ZeroCheckPoly + per-chip C-tables are wired).
+// Anchor BTreeMap dependency for future per-chip iteration.
 #[allow(dead_code)]
 fn _btreemap_anchor() -> BTreeMap<String, ()> {
     BTreeMap::new()
 }
 
-// ────────────────────────────────────────────────────────────────────
-// Internal helpers for the GPU zerocheck dispatch hook
-// ────────────────────────────────────────────────────────────────────
-
-/// Type-erased adapter that forwards the GPU zerocheck hook's
-/// `observe_ef` / `sample_ef` calls into the host's concrete
-/// `SC::Challenger`.  Lives behind `&mut dyn GpuZerocheckChallenger` so
-/// the hook signature does not depend on `SC`.
+/// Adapter that forwards the GPU zerocheck hook's challenger calls
+/// to the concrete `SC::Challenger`; kept SC-agnostic behind `dyn`.
 struct ChallengerAdapterEf4<'a, SC: StarkGenericConfig>
 where
     Val<SC>: PrimeField,
@@ -1794,20 +1441,13 @@ where
         &mut self,
         v: p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
     ) {
-        // SAFETY: This adapter is only constructed inside
-        // `prove_shard_zerocheck_via_trait` after a TypeId check that
-        // guarantees `Challenge<SC> == Ef4` and (via the codebase's
-        // single SC choice for the basefold path) `Val<SC> == KoalaBear`.
-        // `transmute_copy` round-trips bytes through identical
-        // representations.
+        // SAFETY: constructed only behind a TypeId-Ef4 guard.
         let v_ef: Challenge<SC> = unsafe {
             core::mem::transmute_copy::<
                 p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>,
                 Challenge<SC>,
             >(&v)
         };
-        // Mirror `observe_ext` from sumcheck_poly.rs: decompose the
-        // EF into base coefficients and observe each one.
         for c in v_ef.as_basis_coefficients_slice() {
             <SC::Challenger as p3_challenger::CanObserve<Val<SC>>>::observe(self.inner, *c);
         }
@@ -1827,14 +1467,9 @@ where
     }
 }
 
-/// Reinterpret a `PartialSumcheckProof<A>` as `PartialSumcheckProof<B>`
-/// when `A` and `B` are the same concrete type at runtime (verified by
-/// a `TypeId` guard at the call site).
-///
-/// Walks the inner `Vec`s by hand because `transmute_copy` of a
-/// `PartialSumcheckProof` would attempt to copy the `Vec` headers
-/// directly (correct in this case, but going through `Vec::from_raw_parts`
-/// is more explicit and avoids any layout assumptions).
+/// Reinterpret a `PartialSumcheckProof<A>` as `<B>` when `A == B`
+/// at runtime (caller verifies via `TypeId`). Walks Vec headers
+/// explicitly to avoid layout assumptions.
 unsafe fn transmute_partial_sumcheck<A, B>(
     proof: PartialSumcheckProof<A>,
 ) -> PartialSumcheckProof<B> {

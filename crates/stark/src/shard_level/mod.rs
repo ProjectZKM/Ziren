@@ -1,28 +1,5 @@
-//! Shard-level BaseFold proof pipeline.
-//!
-//! Production proof shape for KoalaBear MIPS shards as of #13:
-//! one `LogupGkrProof` + one `PartialSumcheckProof` per shard
-//! (vs. the legacy per-chip lists, retired in #13).
-//!
-//! Reference: `crates/hypercube/src/{logup_gkr,prover/zerocheck,prover/shard.rs,verifier/proof.rs}`.
-//!
-//! # Module map
-//!
-//!   - [`types`] — pure data types (`LogupGkrProof`,
-//!     `PartialSumcheckProof`, `LogUpEvaluations`, etc.)
-//!   - [`shard_proof`] — host-side `BasefoldShardProof<F, EF>`
-//!     mirroring the `ShardProof` (6 fields: public_values,
-//!     main_commitment, logup_gkr_proof, zerocheck_proof,
-//!     opened_values, evaluation_proof).
-//!   - [`logup_gkr_prover`] — shard-level LogUp-GKR prover.
-//!     Mirrors `prove_logup_gkr` from
-//!     `crates/hypercube/src/logup_gkr/prover.rs:70-215`.
-//!   - [`zerocheck_prover`] — shard-level zerocheck prover.
-//!     Mirrors `ShardProver::zerocheck` from
-//!     `crates/hypercube/src/prover/shard.rs:474-646`.
-//!   - [`prover`] — assembly entry `prove_shard_to_basefold`.
-//!     Mirrors `ShardProver::prove_shard_with_data` from
-//!     `crates/hypercube/src/prover/shard.rs:650-792`.
+//! Shard-level BaseFold proof pipeline: one `LogupGkrProof` + one
+//! `PartialSumcheckProof` per shard.
 
 pub mod basefold_constraint_folder;
 pub mod device_first_layer_context;

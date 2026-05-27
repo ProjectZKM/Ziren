@@ -1,11 +1,5 @@
-//! GKR circuit builder — ties together first-layer + transitions +
-//! output extraction (the task, A.2 step 4.5).
-//!
-//! Mirrors the data-side flow of
-//! `generate_gkr_circuit`
-//! but stops short of the per-round sumcheck (step 5).  The output
-//! is the full layer stack plus the unified [`LogUpGkrOutput`] — the
-//! sumcheck round proofs are layered on top in step 5.
+//! GKR circuit builder: first layer + transitions + output
+//! extraction. Stops short of the per-round sumcheck driver.
 
 use alloc::vec::Vec;
 
@@ -46,8 +40,6 @@ pub fn build_gkr_circuit<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
-    // per-shard device-trace provider, threaded into the GPU
-    // first-layer hook through `generate_first_layer`.
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
@@ -67,68 +59,18 @@ where
         device_traces,
     );
 
-    // generate_first_layer reduces num_row_variables by 1 (per its
-    // docstring: "set to original - 1"). So:
-    //
-    //   input num_row_variables=N → first.num_row_variables=N-1
-    //
-    // Two distinct degenerate cases to handle:
-    //
-    //   N=1 input → first.num=0 → no transitions possible. Terminal
-    //               extraction needs num=1; we don't have it. Reject
-    //               at entry (#80 fix below — but realistically
-    //               num_row_variables=1 doesn't appear in production
-    //               shapes since shard padding hits ≥ 2).
-    //
-    //   N=2 input → first.num=1 → the FirstLayer IS the terminal.
-    //               Previously the code only checked layers[len-2]
-    //               for an EF Layer and panicked when it found a
-    //               FirstLayer there. Fix: F→EF-promote the FirstLayer
-    //               into a regular Layer at the same row count, then
-    //               treat it as the terminal.
-    //
-    //   N≥3 input → first.num≥2 → ≥1 transitions, terminal Layer
-    //               with num=1 ends up at layers[len-2]. Original
-    //               flow.
+    // `generate_first_layer` reduces num_row_variables by 1. Three
+    // shapes: N=1 has no terminal (rejected here); N=2 uses the
+    // F→EF-promoted FirstLayer as the terminal; N≥3 finds the
+    // terminal at layers[len-2].
     assert!(num_row_variables >= 2,
         "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
          num_row_variables=1 produces no terminal EF layer for output extraction");
 
-    // Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `layers` now
-    // stores `LayerState<F, EF>` so a future GPU prover (Step 4c) can
-    // install `LayerState::Device { handle, .. }` entries on the way
-    // down.  Today every entry is `LayerState::Host(GkrCircuitLayer)`,
-    // so behavior is byte-identical to the pre-4b path.
-    //
-    // ─────────────────────────────────────────────────────────────────
-    // Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — opt-in GPU
-    // dispatch path:
-    //
-    //   * Env var:  ZIREN_GPU_LAYER_TRANSITION=1
-    //   * Hooks:    register_gpu_layer_init_hook
-    //               register_gpu_layer_transition_hook
-    //               register_gpu_layer_pull_hook
-    //               (all three must be installed by ziren-gpu at startup;
-    //                if any are missing we fall through to the host path)
-    //   * Type req: F == LbVal && EF == LbChallenge (TypeId-checked at
-    //               runtime; recursion-circuit / wrap-circuit
-    //               instantiations don't satisfy this and stay host-only)
-    //
-    // When all conditions hold, the FIRST EF layer (produced by the
-    // F→EF host transition out of the FirstLayer) is uploaded to device
-    // via `GpuLayerInitFn`; subsequent transitions evolve the
-    // device-resident layer state in place via `GpuLayerTransitionFn`;
-    // the terminal device handle is materialized back to host via
-    // `GpuLayerPullFn` so `extract_outputs` can run on host unchanged.
-    //
-    // The first EF layer is computed on host (one round, the F→EF
-    // promotion happens here) so the device hook sees uniform-EF
-    // input; this avoids an init contract that branches on the
-    // base-vs-extension state of the input layer.
-    //
-    // Default behavior (env var unset OR any hook missing OR TypeId
-    // mismatch) is byte-identical to the pre-4c path.
-    // ─────────────────────────────────────────────────────────────────
+    // `layers` carries `LayerState<F, EF>` so the GPU dispatch path
+    // can install `LayerState::Device` entries on the way down. The
+    // first EF layer is computed on host so the device hook sees
+    // uniform-EF input.
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
 
     // Special case: num_row_variables=2 input → first.num=1 → use
@@ -155,10 +97,6 @@ where
     }
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
-    // Step 4c device-path probe: only enter the device branch if env
-    // var is set, all three hooks registered, types match, AND there is
-    // at least one EF layer in hand (i.e. at least one host transition
-    // happened, so `last_ef_layer` is `Some`).
     let device_terminal: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> =
         try_run_device_path::<F, EF>(&mut last_ef_layer, &mut layers);
 
@@ -198,60 +136,25 @@ where
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
             LayerState::Device { .. } => unreachable!(
-                "Step 4c: when the device path was taken, `device_terminal` \
-                 carries the pulled host EF layer; the layers[len-2] arm is \
-                 only entered on the host-only path where every entry is Host."
+                "device path returns the terminal via `device_terminal`; \
+                 the layers[len-2] arm is only entered on the host-only path"
             ),
         }
     };
     (output, LogupGkrCpuCircuit::new(layers))
 }
 
-/// Step 4c device-path entry point.  Returns `Some(terminal)` when
-/// the device path was taken (terminal layer pulled back to host for
-/// `extract_outputs`), `None` otherwise (host path runs unchanged).
+/// Device path returns `Some(terminal)` when it ran end-to-end and
+/// pulled the terminal layer back to host; `None` falls back to host.
+/// Side effects on `Some`: `last_ef_layer` consumed; `layers` gains
+/// one `LayerState::Device` per intermediate.
 ///
-/// Side effects when `Some` is returned:
-///   * `last_ef_layer` is consumed (set to `None`) — the device branch
-///     drives all remaining transitions, no further host work needed.
-///   * `layers` gains one `LayerState::Device { .. }` entry per
-///     intermediate device-resident layer (matching the count the host
-///     path would have pushed).
-///
-/// Returns `None` when ANY of the following:
-///   * `ZIREN_GPU_LAYER_TRANSITION` env var is unset / not "1"
-///   * any of the three GPU hooks (init, transition, pull) is unregistered
-///   * `F != LbVal` or `EF != LbChallenge` (TypeId check)
-///   * `last_ef_layer` is `None` on entry (no host transition happened —
-///     can only occur when `first.num_row_variables == 0`, which the
-///     `>= 2` assertion above already rules out, but this guard keeps
-///     the device branch robust)
-/// perf fix — process-cached env lookup for the
-/// layer-transition GPU dispatch.  Returns true when EITHER the
-/// master switch `ZIREN_GPU_DEVICE_HOOKS=1` OR the legacy
-/// `ZIREN_GPU_LAYER_TRANSITION=1` is set.
-///
-/// Safe under the master switch now because the call site
-/// gates on `gpu_worker_context::current_gpu_pool_worker_device()`
-/// being `Some(_)` — off-pool basefold workers without a
-/// `cudaSetDevice` context have TLS=None and skip GPU dispatch.
+/// Process-cached env: default ON, opt out with either
+/// `ZIREN_GPU_DEVICE_HOOKS=0` or `ZIREN_GPU_LAYER_TRANSITION=0`.
 fn layer_transition_env_cached() -> bool {
     use std::sync::OnceLock;
     static CACHED: OnceLock<bool> = OnceLock::new();
     *CACHED.get_or_init(|| {
-        // default ON to match SP1 (sp1-gpu/.../device.rs has no env
-        // gate on the layer-transition device path — it's always engaged
-        // when the (F,EF) types match and hooks are registered).
-        //
-        // Opt-OUT with ZIREN_GPU_LAYER_TRANSITION=0 or
-        // ZIREN_GPU_DEVICE_HOOKS=0 as kill-switch.  Either explicit `=0`
-        // disables the device path; otherwise default to ON.
-        //
-        // Combined-config safety (per the related design memo):
-        // V3 + LT both ON OOMs at 32 GB on reth.  ziren-gpu's
-        // `cuda_setup_mem_pool` auto-sets the mempool release threshold
-        // to GPU_MEM/2 on small cards (<= 30 GB) so freed allocations
-        // return to OS — the defensive layer for the combined config.
         let disabled = std::env::var("ZIREN_GPU_DEVICE_HOOKS").as_deref() == Ok("0")
             || std::env::var("ZIREN_GPU_LAYER_TRANSITION").as_deref() == Ok("0");
         !disabled
@@ -266,27 +169,15 @@ where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    // Gate 1: env var.  Either the legacy `ZIREN_GPU_LAYER_TRANSITION=1`
-    // OR the master switch `ZIREN_GPU_DEVICE_HOOKS=1` engages
-    // the device transition path.  Cached per-process to avoid
-    // libc-environ Mutex acquisition cost (per-shard call site).
-    //
-    // Gate 1b (#266 fix): also require a GPU pool worker TLS context.
-    // Without this, dispatching from an off-pool basefold rayon worker
-    // hits the wrong cudaSetDevice context — kernel either fails or
-    // runs on GPU 0, paying full PCIe + launch overhead.  Reth A/B
-    // showed +16% core regression from this exact failure mode.
     if !layer_transition_env_cached() {
         return None;
     }
+    // Require a GPU pool worker TLS context: off-pool basefold rayon
+    // workers have no `cudaSetDevice` and would dispatch to the wrong
+    // GPU (or GPU 0 by default), paying full PCIe + launch overhead.
     if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
         return None;
     }
-
-    // Gate 2: feature + concrete-type + hooks all available.  The
-    // device path is only meaningful when the basefold feature is
-    // compiled in (the hooks live there) and when the generic types
-    // resolve to the production stack.
     #[cfg(feature = "basefold")]
     {
         try_run_device_path_basefold::<F, EF>(last_ef_layer, layers)
