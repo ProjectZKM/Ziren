@@ -17,6 +17,24 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
+/// Generate the boilerplate static + register/get pair for a GPU hook
+/// slot. Each slot is a process-global `OnceLock` that ziren-gpu's
+/// startup registers once and the stark prover consults per call.
+macro_rules! gpu_hook_accessors {
+    ($static:ident: $fn_ty:ty => $register:ident, $getter:ident) => {
+        static $static: std::sync::OnceLock<$fn_ty> = std::sync::OnceLock::new();
+
+        pub fn $register(f: $fn_ty) -> Result<(), $fn_ty> {
+            $static.set(f)
+        }
+
+        #[must_use]
+        pub fn $getter() -> Option<$fn_ty> {
+            $static.get().copied()
+        }
+    };
+}
+
 pub trait SumcheckPolyBase {
     fn num_variables(&self) -> u32;
 }
@@ -261,23 +279,8 @@ pub type GpuSumcheckEvalsFn = fn(
     current_claim: Ef4,
 ) -> [Ef4; 4];
 
-static GPU_SUMCHECK_HOOK: std::sync::OnceLock<GpuSumcheckEvalsFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU sumcheck round-poly evaluator.  Called once by
-/// the ziren-gpu prover crate at startup (or first use).  Returns
-/// `Err` if a hook has already been registered.
-pub fn register_gpu_sumcheck_hook(
-    f: GpuSumcheckEvalsFn,
-) -> Result<(), GpuSumcheckEvalsFn> {
-    GPU_SUMCHECK_HOOK.set(f)
-}
-
-/// Read the registered GPU sumcheck hook, if any.
-#[must_use]
-pub fn get_gpu_sumcheck_hook() -> Option<GpuSumcheckEvalsFn> {
-    GPU_SUMCHECK_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_SUMCHECK_HOOK: GpuSumcheckEvalsFn
+    => register_gpu_sumcheck_hook, get_gpu_sumcheck_hook);
 
 // GPU per-chip eval_at hook for LogUp-GKR Step 6.
 type Kb = p3_koala_bear::KoalaBear;
@@ -292,19 +295,8 @@ pub type GpuEvalAtFn = fn(
     eval_point: &[Ef4],
 ) -> Vec<Ef4>;
 
-static GPU_EVAL_AT_HOOK: std::sync::OnceLock<GpuEvalAtFn> = std::sync::OnceLock::new();
-
-/// Register the GPU per-chip eval_at evaluator.  Idempotent; returns
-/// `Err` if a hook was already registered.
-pub fn register_gpu_eval_at_hook(f: GpuEvalAtFn) -> Result<(), GpuEvalAtFn> {
-    GPU_EVAL_AT_HOOK.set(f)
-}
-
-/// Read the registered GPU eval_at hook, if any.
-#[must_use]
-pub fn get_gpu_eval_at_hook() -> Option<GpuEvalAtFn> {
-    GPU_EVAL_AT_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_EVAL_AT_HOOK: GpuEvalAtFn
+    => register_gpu_eval_at_hook, get_gpu_eval_at_hook);
 
 // Registration slot for round-0 alpha binding hook. No in-tree
 // caller today; provided so ziren-gpu's startup registration compiles.
@@ -315,19 +307,8 @@ pub type GpuFixRoundZeroFn = fn(
     eq_interaction: &[Ef4],
 ) -> Option<Vec<Ef4>>;
 
-static GPU_FIX_ROUND_ZERO_HOOK: std::sync::OnceLock<GpuFixRoundZeroFn> =
-    std::sync::OnceLock::new();
-
-pub fn register_gpu_fix_round_zero_hook(
-    f: GpuFixRoundZeroFn,
-) -> Result<(), GpuFixRoundZeroFn> {
-    GPU_FIX_ROUND_ZERO_HOOK.set(f)
-}
-
-#[must_use]
-pub fn get_gpu_fix_round_zero_hook() -> Option<GpuFixRoundZeroFn> {
-    GPU_FIX_ROUND_ZERO_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_FIX_ROUND_ZERO_HOOK: GpuFixRoundZeroFn
+    => register_gpu_fix_round_zero_hook, get_gpu_fix_round_zero_hook);
 
 // GPU shard-zerocheck driver. Invariants the impl must preserve:
 //   * per-round univariate `[c0, c1, ZERO, ZERO]` (4 coeffs);
@@ -348,21 +329,8 @@ pub trait GpuZerocheckChallenger {
     fn sample_ef(&mut self) -> Ef4;
 }
 
-static GPU_ZEROCHECK_HOOK: std::sync::OnceLock<GpuZerocheckFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU shard-zerocheck driver.  Idempotent; returns `Err`
-/// when a hook was already registered.  Called once by `ziren-gpu`'s
-/// `compress_multi_gpu` at startup.
-pub fn register_gpu_zerocheck_hook(f: GpuZerocheckFn) -> Result<(), GpuZerocheckFn> {
-    GPU_ZEROCHECK_HOOK.set(f)
-}
-
-/// Read the registered GPU zerocheck hook, if any.
-#[must_use]
-pub fn get_gpu_zerocheck_hook() -> Option<GpuZerocheckFn> {
-    GPU_ZEROCHECK_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_ZEROCHECK_HOOK: GpuZerocheckFn
+    => register_gpu_zerocheck_hook, get_gpu_zerocheck_hook);
 
 // ────────────────────────────────────────────────────────────────────
 // GPU lambda-RLC combine hook.
@@ -375,24 +343,8 @@ pub type GpuZerocheckCombineFn = fn(
     target_size: usize,
 ) -> Option<Vec<Ef4>>;
 
-static GPU_ZEROCHECK_COMBINE_HOOK: std::sync::OnceLock<GpuZerocheckCombineFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU lambda-RLC combine hook.  Idempotent; returns
-/// `Err` when a hook was already registered.  Called once by
-/// `ziren-gpu`'s `compress_multi_gpu` at startup (alongside the
-/// `register_gpu_zerocheck_hook` call above).
-pub fn register_gpu_zerocheck_combine_hook(
-    f: GpuZerocheckCombineFn,
-) -> Result<(), GpuZerocheckCombineFn> {
-    GPU_ZEROCHECK_COMBINE_HOOK.set(f)
-}
-
-/// Read the registered GPU lambda-RLC combine hook, if any.
-#[must_use]
-pub fn get_gpu_zerocheck_combine_hook() -> Option<GpuZerocheckCombineFn> {
-    GPU_ZEROCHECK_COMBINE_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_ZEROCHECK_COMBINE_HOOK: GpuZerocheckCombineFn
+    => register_gpu_zerocheck_combine_hook, get_gpu_zerocheck_combine_hook);
 
 /// Per-row BaseFold constraint-table builder keyed by chip name.
 ///
@@ -419,23 +371,8 @@ pub type GpuConstraintEvalFn = fn(
     num_vars: usize,
 ) -> Option<Vec<Ef4>>;
 
-static GPU_CONSTRAINT_EVAL_HOOK: std::sync::OnceLock<GpuConstraintEvalFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU per-chip constraint-eval driver.  Idempotent;
-/// returns `Err` when a hook was already registered.  Called once by
-/// `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_constraint_eval_hook(
-    f: GpuConstraintEvalFn,
-) -> Result<(), GpuConstraintEvalFn> {
-    GPU_CONSTRAINT_EVAL_HOOK.set(f)
-}
-
-/// Read the registered GPU constraint-eval hook, if any.
-#[must_use]
-pub fn get_gpu_constraint_eval_hook() -> Option<GpuConstraintEvalFn> {
-    GPU_CONSTRAINT_EVAL_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_HOOK: GpuConstraintEvalFn
+    => register_gpu_constraint_eval_hook, get_gpu_constraint_eval_hook);
 
 /// Multi-chip batched variant of `GpuConstraintEvalFn`. Returns
 /// `Vec<Option<Vec<Ef4>>>` of length `chip_names.len()`; `None`
@@ -453,22 +390,9 @@ pub type GpuConstraintEvalBatchedFn = fn(
     num_vars_list: &[usize],
 ) -> Vec<Option<Vec<Ef4>>>;
 
-static GPU_CONSTRAINT_EVAL_BATCHED_HOOK:
-    std::sync::OnceLock<GpuConstraintEvalBatchedFn> = std::sync::OnceLock::new();
-
-/// Register the batched GPU constraint-eval driver.  Idempotent;
-/// returns `Err` when a hook was already registered.
-pub fn register_gpu_constraint_eval_batched_hook(
-    f: GpuConstraintEvalBatchedFn,
-) -> Result<(), GpuConstraintEvalBatchedFn> {
-    GPU_CONSTRAINT_EVAL_BATCHED_HOOK.set(f)
-}
-
-/// Read the registered batched GPU constraint-eval hook, if any.
-#[must_use]
-pub fn get_gpu_constraint_eval_batched_hook() -> Option<GpuConstraintEvalBatchedFn> {
-    GPU_CONSTRAINT_EVAL_BATCHED_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_BATCHED_HOOK: GpuConstraintEvalBatchedFn
+    => register_gpu_constraint_eval_batched_hook,
+       get_gpu_constraint_eval_batched_hook);
 
 /// Cross-shard batched variant of `GpuConstraintEvalBatchedFn`;
 /// outer slice indexes shard. Output `result[s][i] = None` falls
@@ -488,25 +412,9 @@ pub type GpuConstraintEvalCrossShardFn = fn(
     num_vars_list_per_shard: &[&[usize]],
 ) -> Vec<Vec<Option<Vec<Ef4>>>>;
 
-static GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK:
-    std::sync::OnceLock<GpuConstraintEvalCrossShardFn> = std::sync::OnceLock::new();
-
-/// Register the cross-shard batched GPU constraint-eval driver.
-/// Idempotent; returns `Err` when a hook was already registered.
-/// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_constraint_eval_cross_shard_hook(
-    f: GpuConstraintEvalCrossShardFn,
-) -> Result<(), GpuConstraintEvalCrossShardFn> {
-    GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK.set(f)
-}
-
-/// Read the registered cross-shard batched GPU constraint-eval hook,
-/// if any.
-#[must_use]
-pub fn get_gpu_constraint_eval_cross_shard_hook()
-    -> Option<GpuConstraintEvalCrossShardFn> {
-    GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK: GpuConstraintEvalCrossShardFn
+    => register_gpu_constraint_eval_cross_shard_hook,
+       get_gpu_constraint_eval_cross_shard_hook);
 
 /// GPU per-chip LogUp-GKR phase-2 interaction-table builder.
 ///
@@ -534,23 +442,8 @@ pub type GpuInteractionEvalFn = fn(
     device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> Option<(Vec<p3_koala_bear::KoalaBear>, Vec<Ef4>)>;
 
-static GPU_INTERACTION_EVAL_HOOK: std::sync::OnceLock<GpuInteractionEvalFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU per-chip interaction-eval driver.  Idempotent;
-/// returns `Err` when a hook was already registered.  Called once by
-/// `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_interaction_eval_hook(
-    f: GpuInteractionEvalFn,
-) -> Result<(), GpuInteractionEvalFn> {
-    GPU_INTERACTION_EVAL_HOOK.set(f)
-}
-
-/// Read the registered GPU interaction-eval hook, if any.
-#[must_use]
-pub fn get_gpu_interaction_eval_hook() -> Option<GpuInteractionEvalFn> {
-    GPU_INTERACTION_EVAL_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_INTERACTION_EVAL_HOOK: GpuInteractionEvalFn
+    => register_gpu_interaction_eval_hook, get_gpu_interaction_eval_hook);
 
 // Whole-pipeline GPU jagged-PCS driver: commit, y-evals, sumcheck
 // reduction, BaseFold open. Concrete-typed on `(KoalaBear, Ef4,
@@ -575,16 +468,12 @@ mod jagged_orchestration_hook {
     static GPU_JAGGED_ORCHESTRATION_HOOK: std::sync::OnceLock<GpuJaggedOrchestrationFn> =
         std::sync::OnceLock::new();
 
-    /// Register the GPU jagged-PCS orchestration driver.  Idempotent;
-    /// returns `Err` when a hook was already registered.  Called once
-    /// by `ziren-gpu`'s `compress_multi_gpu` at startup.
     pub fn register_gpu_jagged_orchestration_hook(
         f: GpuJaggedOrchestrationFn,
     ) -> Result<(), GpuJaggedOrchestrationFn> {
         GPU_JAGGED_ORCHESTRATION_HOOK.set(f)
     }
 
-    /// Read the registered GPU jagged-PCS orchestration hook, if any.
     #[must_use]
     pub fn get_gpu_jagged_orchestration_hook() -> Option<GpuJaggedOrchestrationFn> {
         GPU_JAGGED_ORCHESTRATION_HOOK.get().copied()
@@ -622,16 +511,12 @@ mod jagged_pcs_device_hook {
     static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =
         std::sync::OnceLock::new();
 
-    /// Register the device-trace jagged-PCS orchestration driver.
-    /// Idempotent; returns `Err` when a hook was already registered.
-    /// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
     pub fn register_gpu_jagged_pcs_device_hook(
         f: GpuJaggedPcsDeviceFn,
     ) -> Result<(), GpuJaggedPcsDeviceFn> {
         GPU_JAGGED_PCS_DEVICE_HOOK.set(f)
     }
 
-    /// Read the registered device-trace jagged-PCS hook, if any.
     #[must_use]
     pub fn get_gpu_jagged_pcs_device_hook() -> Option<GpuJaggedPcsDeviceFn> {
         GPU_JAGGED_PCS_DEVICE_HOOK.get().copied()
@@ -675,24 +560,8 @@ pub type GpuLogupRoundProverFn = fn(
     sample_ef: &dyn Fn() -> Ef4,
 ) -> Option<GpuLogupRoundResult>;
 
-static GPU_LOGUP_ROUND_HOOK: std::sync::OnceLock<GpuLogupRoundProverFn> =
-    std::sync::OnceLock::new();
-
-/// Register the device-resident LogUp-GKR per-layer sumcheck prover.
-/// Idempotent; returns `Err` if a hook was already registered.
-/// Called once by `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_logup_round_hook(
-    f: GpuLogupRoundProverFn,
-) -> Result<(), GpuLogupRoundProverFn> {
-    GPU_LOGUP_ROUND_HOOK.set(f)
-}
-
-/// Read the registered device-resident LogUp-GKR per-layer sumcheck
-/// prover, if any.
-#[must_use]
-pub fn get_gpu_logup_round_hook() -> Option<GpuLogupRoundProverFn> {
-    GPU_LOGUP_ROUND_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK: GpuLogupRoundProverFn
+    => register_gpu_logup_round_hook, get_gpu_logup_round_hook);
 
 // Chip-structured sumcheck round-poly (rounds 1..N with
 // `chip_rows > 1`, data still in per-chip `Vec<Vec<EF>>` form).
@@ -712,21 +581,9 @@ pub type GpuChipStructuredSumcheckFn = fn(
     current_claim: Ef4,
 ) -> [Ef4; 4];
 
-static GPU_CHIP_STRUCTURED_SUMCHECK_HOOK: std::sync::OnceLock<
-    GpuChipStructuredSumcheckFn,
-> = std::sync::OnceLock::new();
-
-pub fn register_gpu_chip_structured_sumcheck_hook(
-    f: GpuChipStructuredSumcheckFn,
-) -> Result<(), GpuChipStructuredSumcheckFn> {
-    GPU_CHIP_STRUCTURED_SUMCHECK_HOOK.set(f)
-}
-
-#[must_use]
-pub fn get_gpu_chip_structured_sumcheck_hook(
-) -> Option<GpuChipStructuredSumcheckFn> {
-    GPU_CHIP_STRUCTURED_SUMCHECK_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_CHIP_STRUCTURED_SUMCHECK_HOOK: GpuChipStructuredSumcheckFn
+    => register_gpu_chip_structured_sumcheck_hook,
+       get_gpu_chip_structured_sumcheck_hook);
 
 // Device-resident chip-structured sumcheck with per-round state:
 //   - `sumcheck_id` keys a thread-local device cache; caller picks
@@ -756,21 +613,9 @@ pub type GpuChipStructuredSumcheckDeviceFn = fn(
     alpha_prev: Option<Ef4>,
 ) -> Option<[Ef4; 4]>;
 
-static GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK: std::sync::OnceLock<
-    GpuChipStructuredSumcheckDeviceFn,
-> = std::sync::OnceLock::new();
-
-pub fn register_gpu_chip_structured_sumcheck_device_hook(
-    f: GpuChipStructuredSumcheckDeviceFn,
-) -> Result<(), GpuChipStructuredSumcheckDeviceFn> {
-    GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK.set(f)
-}
-
-#[must_use]
-pub fn get_gpu_chip_structured_sumcheck_device_hook(
-) -> Option<GpuChipStructuredSumcheckDeviceFn> {
-    GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK: GpuChipStructuredSumcheckDeviceFn
+    => register_gpu_chip_structured_sumcheck_device_hook,
+       get_gpu_chip_structured_sumcheck_device_hook);
 
 // ──────────────────────────────────────────────────────────────────
 // fixup: V2 logup-round hook + first-round hook stubs.
@@ -801,19 +646,8 @@ pub type GpuLogupRoundProverFnV2 = fn(
     challenger: &mut crate::InnerChallenger,
 ) -> Option<GpuLogupRoundResult>;
 
-static GPU_LOGUP_ROUND_HOOK_V2: std::sync::OnceLock<GpuLogupRoundProverFnV2> =
-    std::sync::OnceLock::new();
-
-pub fn register_gpu_logup_round_hook_v2(
-    f: GpuLogupRoundProverFnV2,
-) -> Result<(), GpuLogupRoundProverFnV2> {
-    GPU_LOGUP_ROUND_HOOK_V2.set(f)
-}
-
-#[must_use]
-pub fn get_gpu_logup_round_hook_v2() -> Option<GpuLogupRoundProverFnV2> {
-    GPU_LOGUP_ROUND_HOOK_V2.get().copied()
-}
+gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_V2: GpuLogupRoundProverFnV2
+    => register_gpu_logup_round_hook_v2, get_gpu_logup_round_hook_v2);
 
 // V3 device-handle logup-round hook: SP1-aligned signature that
 // accepts an opaque device-buffer handle instead of host
@@ -857,23 +691,8 @@ pub type GpuLogupRoundProverFnV3 = fn(
     challenger: &mut crate::InnerChallenger,
 ) -> Option<GpuLogupRoundResultV3>;
 
-static GPU_LOGUP_ROUND_HOOK_V3: std::sync::OnceLock<GpuLogupRoundProverFnV3> =
-    std::sync::OnceLock::new();
-
-/// Register the V3 device-handle LogUp-GKR per-layer sumcheck prover.
-/// Idempotent; returns `Err` if a hook was already registered.
-/// Called once by ziren-gpu at startup (follow-up sprint).
-pub fn register_gpu_logup_round_hook_v3(
-    f: GpuLogupRoundProverFnV3,
-) -> Result<(), GpuLogupRoundProverFnV3> {
-    GPU_LOGUP_ROUND_HOOK_V3.set(f)
-}
-
-/// Read the registered V3 LogUp-GKR per-layer sumcheck prover, if any.
-#[must_use]
-pub fn get_gpu_logup_round_hook_v3() -> Option<GpuLogupRoundProverFnV3> {
-    GPU_LOGUP_ROUND_HOOK_V3.get().copied()
-}
+gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_V3: GpuLogupRoundProverFnV3
+    => register_gpu_logup_round_hook_v3, get_gpu_logup_round_hook_v3);
 
 // TLS slot threading `DeviceLayerHandle` between V3 hook calls
 // within one shard's GKR walk. Orchestrator must `clear` at shard
@@ -913,19 +732,8 @@ pub type GpuFirstRoundHookFn = fn(
     alpha: Ef4,
 ) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
 
-static GPU_FIRST_ROUND_HOOK: std::sync::OnceLock<GpuFirstRoundHookFn> =
-    std::sync::OnceLock::new();
-
-pub fn register_gpu_first_round_hook(
-    f: GpuFirstRoundHookFn,
-) -> Result<(), GpuFirstRoundHookFn> {
-    GPU_FIRST_ROUND_HOOK.set(f)
-}
-
-#[must_use]
-pub fn get_gpu_first_round_hook() -> Option<GpuFirstRoundHookFn> {
-    GPU_FIRST_ROUND_HOOK.get().copied()
-}
+gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
+    => register_gpu_first_round_hook, get_gpu_first_round_hook);
 
 #[cfg(test)]
 mod tests {
