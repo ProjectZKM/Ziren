@@ -607,16 +607,6 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     /// Returns `(num_row_variables, num_interaction_variables)` of the
     /// top-of-stack layer without consuming it.  `None` when no
     /// circuit was installed or the stack is exhausted.
-    ///
-    /// Used by the device-resident consumer path in `top_level.rs` to
-    /// validate that the scope-installed layer matches the
-    /// `LayerState::Device` entry's shape BEFORE skipping
-    /// `pull_device_layer_to_host`.  When the shapes match AND the
-    /// `ZIREN_LOGUP_DEVICE_CONSUMER` flag is set, the consumer skips
-    /// the host pull and passes a shape-only proxy to
-    /// `prove_gkr_round`.  Byte-equivalent to the legacy path when
-    /// the V3 hook (which reads from the scope handle) is registered
-    /// and active.
     #[inline]
     #[must_use]
     pub fn peek_next_layer_shape(&self) -> Option<(usize, usize)> {

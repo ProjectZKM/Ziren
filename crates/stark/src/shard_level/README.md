@@ -119,8 +119,7 @@ requires this port.
 
 - `row_gkr`: unit tests on layer types, first-layer generation,
   transitions, extraction, sumcheck rounds, build orchestrator
-  (`shape_only_layer_proxy_is_device_shape_variant`,
-  `prove_gkr_round_*`, etc.)
+  (`prove_gkr_round_*`, etc.)
 - `verifier`: unit tests for construction, error display
 - `shard_proof`: rmp round-trip, empty/large pv-count, fold-orientation
 - Recursion smoke: `build_normalize_basefold_program_*` in

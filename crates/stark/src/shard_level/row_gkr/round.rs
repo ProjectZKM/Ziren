@@ -20,7 +20,7 @@ use alloc::vec::Vec;
 use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 
-use super::layer::{GkrCircuitLayer, LogUpGkrCpuLayer};
+use super::layer::{GkrCircuitLayer, LayerState, LogUpGkrCpuLayer};
 use crate::shard_level::sumcheck_poly::{
     reduce_sumcheck_to_evaluation, ComponentPoly, SumcheckPoly, SumcheckPolyBase,
     SumcheckPolyFirstRound,
@@ -832,9 +832,7 @@ where
 
     let first_layer = match circuit {
         GkrCircuitLayer::FirstLayer(l) => l,
-        GkrCircuitLayer::Layer(_) | GkrCircuitLayer::DeviceShape { .. } => {
-            return None;
-        }
+        GkrCircuitLayer::Layer(_) => return None,
     };
 
     let n_chips = first_layer.numerator_0.len();
@@ -2358,9 +2356,6 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         let (num_row_variables, num_interaction_variables) = match circuit {
             GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
             GkrCircuitLayer::FirstLayer(l) => (l.num_row_variables, l.num_interaction_variables),
-            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
-                (*num_row_variables, *num_interaction_variables)
-            }
         };
         let total_vars = num_row_variables + num_interaction_variables;
         assert_eq!(
@@ -2390,10 +2385,6 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         let chip_state: ChipLayerState<EF> = match circuit {
             GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
-            GkrCircuitLayer::DeviceShape { .. } => unreachable!(
-                "LogupRoundPolynomial::new is the host-path builder; \
-                 DeviceShape must be handled by V3 dispatch upstream"
-            ),
         };
 
         let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
@@ -2985,7 +2976,7 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// the same challenger state for downstream layers.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_gkr_round<F, EF, Challenger>(
-    circuit: &GkrCircuitLayer<F, EF>,
+    state: &LayerState<F, EF>,
     eval_point: &[EF],
     numerator_eval: EF,
     denominator_eval: EF,
@@ -2997,6 +2988,26 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
+    // Resolve a host-resident layer view. For `LayerState::Device`, pull
+    // the cells from the GPU registry up front. The V3 dispatch below
+    // still consults the per-shard `LogupTaskScope` for its
+    // device-resident handle (so it skips host marshalling on the hot
+    // path), but the pulled cells are always present as the fallback for
+    // V1/V2/host paths when V3 declines mid-shard or isn't registered.
+    // This removes the previous shape-only-proxy design where V3 decline
+    // panicked downstream consumers reading empty cells.
+    let pulled_owner: Option<GkrCircuitLayer<F, EF>> = match state {
+        LayerState::Host(_) => None,
+        LayerState::Device { circuit_id, handle, .. } => Some(
+            super::top_level::pull_device_layer_to_host::<F, EF>(*circuit_id, *handle),
+        ),
+    };
+    let circuit: &GkrCircuitLayer<F, EF> = match state {
+        LayerState::Host(layer) => layer,
+        LayerState::Device { .. } => pulled_owner
+            .as_ref()
+            .expect("Device variant always populates pulled_owner above"),
+    };
 
     // C-full H2 — device-resident per-layer LogUp-GKR sumcheck.
     //
@@ -3063,9 +3074,6 @@ where
             }
             GkrCircuitLayer::FirstLayer(l) => {
                 l.num_row_variables + l.num_interaction_variables
-            }
-            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
-                num_row_variables + num_interaction_variables
             }
         };
         if v3_threshold_vars > 0
@@ -3297,8 +3305,6 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
-        // V1 requires host cells to flatten; DeviceShape has none.
-        GkrCircuitLayer::DeviceShape { .. } => return None,
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3309,9 +3315,6 @@ where
     let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
         GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
-        GkrCircuitLayer::DeviceShape { .. } => unreachable!(
-            "V1 declined DeviceShape above; flatten branch is unreachable"
-        ),
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
@@ -3439,8 +3442,6 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
-        // V2 also requires host cells to flatten; DeviceShape has none.
-        GkrCircuitLayer::DeviceShape { .. } => return None,
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3450,9 +3451,6 @@ where
     let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
         GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
         GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
-        GkrCircuitLayer::DeviceShape { .. } => unreachable!(
-            "V2 declined DeviceShape above; flatten branch is unreachable"
-        ),
     };
 
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
@@ -3565,11 +3563,6 @@ where
         GkrCircuitLayer::FirstLayer(l) => {
             (l.num_row_variables, l.num_interaction_variables)
         }
-        // V3 IS the device-resident path; DeviceShape carries shape metadata
-        // and the actual data lives on the device via the active LogupTaskScope.
-        GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => {
-            (*num_row_variables, *num_interaction_variables)
-        }
     };
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
@@ -3646,16 +3639,6 @@ where
         match circuit {
             GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
-            // DeviceShape with no handle = invariant violation: V3 was
-            // supposed to consume the layer from the scope but neither
-            // the scope nor the TLS handle is populated. Caller in
-            // top_level.rs must publish a handle before constructing
-            // a DeviceShape (or pull the layer to host first).
-            GkrCircuitLayer::DeviceShape { num_row_variables, num_interaction_variables } => panic!(
-                "V3 dispatch received DeviceShape (num_rv={num_row_variables}, \
-                 num_iv={num_interaction_variables}) but no device handle is \
-                 present in scope or TLS — host fallback has no cells to read."
-            ),
         }
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
@@ -3949,7 +3932,7 @@ mod tests {
             num_row_variables: 1,
             num_interaction_variables: 0,
         };
-        let circuit = GkrCircuitLayer::<KoalaBear, EF>::Layer(layer);
+        let state = LayerState::<KoalaBear, EF>::Host(GkrCircuitLayer::Layer(layer));
 
         // Pick an eval point, compute the claimed numerator/denominator eval.
         let point: Vec<EF> = vec![EF::from_u32(13)];
@@ -3968,7 +3951,7 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            &circuit,
+            &state,
             &point,
             n_eval,
             d_eval,
@@ -4020,14 +4003,14 @@ mod tests {
             num_row_variables: 1,
             num_interaction_variables: 1, // 2 chips × 1 col each
         };
-        let circuit = GkrCircuitLayer::<KoalaBear, EF>::Layer(layer);
+        let state = LayerState::<KoalaBear, EF>::Host(GkrCircuitLayer::Layer(layer));
 
         // Compute the TRUE numerator/denominator MLE evaluations at
         // `point` so the first-round sumcheck identity holds.
         let point = vec![EF::from_u32(7), EF::from_u32(11)];
         let lambda = EF::from_u32(13);
-        let layer_ref = match &circuit {
-            GkrCircuitLayer::Layer(l) => l,
+        let layer_ref = match &state {
+            LayerState::Host(GkrCircuitLayer::Layer(l)) => l,
             _ => unreachable!(),
         };
         let (n0f, d0f, n1f, d1f) = flatten_layer::<EF, EF>(layer_ref);
@@ -4060,7 +4043,7 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            &circuit, &point, n_eval, d_eval, lambda, &mut ch,
+            &state, &point, n_eval, d_eval, lambda, &mut ch,
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.

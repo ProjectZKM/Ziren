@@ -135,10 +135,6 @@ where
             LayerState::Host(GkrCircuitLayer::FirstLayer(_)) => unreachable!(
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
-            LayerState::Host(GkrCircuitLayer::DeviceShape { .. }) => unreachable!(
-                "DeviceShape is constructed only inside the per-round dispatch \
-                 in top_level.rs; build.rs never wraps one in LayerState::Host"
-            ),
             LayerState::Device { .. } => unreachable!(
                 "device path returns the terminal via `device_terminal`; \
                  the layers[len-2] arm is only entered on the host-only path"

@@ -215,105 +215,32 @@ where
     // Merkle commit phase.
     let mut device_circuit_id_to_drain: Option<u64> = None;
 
-    // Device-resident consumer: when the scope has an installed
-    // circuit AND the V3 GPU hook is enabled AND the production EF
-    // gate matches, hand `prove_gkr_round` a
-    // `GkrCircuitLayer::DeviceShape` and let V3 consume the scope
-    // handle directly. Type-level exhaustive match makes the
-    // silent-wrong-proof class unreachable; V1/V2/host paths decline
-    // or panic with a descriptive message instead of reading empty
-    // cells.
-    let device_consumer_enabled: bool = {
-        use core::any::TypeId;
-        type Ef4Local = p3_field::extension::BinomialExtensionField<
-            p3_koala_bear::KoalaBear, 4>;
-        // Consumer gate defaults ON — pairs with ZIREN_GPU_LOGUP_GKR_DEVICE
-        // also defaulting ON at round.rs:3122. Opt-out via
-        // ZIREN_LOGUP_DEVICE_CONSUMER_DISABLE=1 (or legacy =0/false).
-        let env_set = !std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER_DISABLE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-            && !std::env::var("ZIREN_LOGUP_DEVICE_CONSUMER")
-                .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
-                .unwrap_or(false);
-        let v3_enabled = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-            .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-            .unwrap_or(true);
-        let ef_gate = TypeId::of::<F>() == TypeId::of::<p3_koala_bear::KoalaBear>()
-            && TypeId::of::<EF>() == TypeId::of::<Ef4Local>();
-        env_set && v3_enabled && ef_gate
-    };
-
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
-        // Owner slot (vs Vec) drops the previous round's host
-        // materialization before the next round allocates. When V3 is
-        // expected to consume the layer from the device-resident scope,
-        // construct a `GkrCircuitLayer::DeviceShape` carrying only the
-        // dimensions — the type system then forces every downstream
-        // consumer to handle the variant explicitly (no silent host
-        // fallback reading empty cells).
-        let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
-            super::layer::LayerState::Host(_) => None,
-            super::layer::LayerState::Device {
-                circuit_id,
-                handle,
-                num_row_variables: state_num_rv,
-                num_interaction_variables: state_num_iv,
-            } => {
-                // Every Device entry from the same build_gkr_circuit
-                // call shares one circuit_id, so a single Option
-                // suffices for the post-loop drain.
-                if device_circuit_id_to_drain.is_none() {
-                    device_circuit_id_to_drain = Some(*circuit_id);
-                } else {
-                    debug_assert_eq!(
-                        device_circuit_id_to_drain,
-                        Some(*circuit_id),
-                        "all Device layers in one build_gkr_circuit call must \
-                         share circuit_id"
-                    );
-                }
-
-                // Require shape parity with the Device entry to
-                // guard against ordering mismatches between the
-                // populator's bottom-up Vec and the consumer's order.
-                let scope_shape_matches = if device_consumer_enabled {
-                    super::device_circuit::with_production_scope_mut(|scope| {
-                        scope.peek_next_layer_shape()
-                    })
-                    .flatten()
-                    .map(|(rv, iv)| rv == *state_num_rv && iv == *state_num_iv)
-                    .unwrap_or(false)
-                } else {
-                    false
-                };
-
-                if scope_shape_matches {
-                    Some(super::layer::GkrCircuitLayer::<F, EF>::shape_only_layer_proxy(
-                        *state_num_rv,
-                        *state_num_iv,
-                    ))
-                } else {
-                    Some(pull_device_layer_to_host::<F, EF>(*circuit_id, *handle))
-                }
+        // Capture the per-shard device circuit_id for the post-loop
+        // drain hook. All Device entries from the same build_gkr_circuit
+        // call share one circuit_id, so a single Option suffices.
+        if let super::layer::LayerState::Device { circuit_id, .. } = state {
+            if device_circuit_id_to_drain.is_none() {
+                device_circuit_id_to_drain = Some(*circuit_id);
+            } else {
+                debug_assert_eq!(
+                    device_circuit_id_to_drain,
+                    Some(*circuit_id),
+                    "all Device layers in one build_gkr_circuit call must \
+                     share circuit_id"
+                );
             }
-        };
+        }
 
-        let layer: &super::layer::GkrCircuitLayer<F, EF> = match state {
-            super::layer::LayerState::Host(layer) => layer,
-            super::layer::LayerState::Device { .. } => {
-                pulled_owner.as_ref().expect("Device variant always assigns Some above")
-            }
-        };
-
-        // Run the sumcheck. `GkrCircuitLayer::DeviceShape` (constructed
-        // above when V3 will consume from the scope) is matched
-        // explicitly by V3 in `try_logup_round_gpu_v3`; V1/V2/host
-        // paths decline or panic with a descriptive message.
+        // `prove_gkr_round` resolves `LayerState::Device` to a host-
+        // resident layer internally (via `pull_device_layer_to_host`)
+        // so V1/V2/host fallback paths always have real cells. V3 still
+        // consumes the device-resident handle from the active
+        // `LogupTaskScope` on its hot path.
         let round_proof = prove_gkr_round::<F, EF, _>(
-            layer,
+            state,
             &eval_point,
             numerator_eval,
             denominator_eval,
@@ -489,7 +416,7 @@ where
 /// registered — both indicate a programmer error: `build_gkr_circuit`
 /// requires the EF match and all three hooks before producing any
 /// `Device` entries.
-fn pull_device_layer_to_host<F, EF>(
+pub(super) fn pull_device_layer_to_host<F, EF>(
     circuit_id: u64,
     handle: u64,
 ) -> super::layer::GkrCircuitLayer<F, EF>
