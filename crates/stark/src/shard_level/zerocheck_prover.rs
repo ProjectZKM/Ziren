@@ -418,11 +418,12 @@ where
             // host folder is an `EmptyMessageBuilder` so lookups
             // discharge to no-ops in the per-row walk anyway. The
             // split flag drops the skip and emits a pure-AIR c-table
-            // for every chip (default OFF until cross-workload
-            // equivalence is re-validated).
+            // for every chip. Default ON to match SP1 (no per-chip
+            // filter); set ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=0 to
+            // restore the legacy permutation-bearing-chip skip.
             let split_enabled =
-                std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
-                    .map(|v| v == "1")
+                !std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+                    .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
                     .unwrap_or(false);
             if !split_enabled && chip.permutation_width() > 0 {
                 return None;
@@ -794,8 +795,10 @@ where
     let public_values_kb: &[Kb] = unsafe {
         core::slice::from_raw_parts(public_values.as_ptr().cast::<Kb>(), public_values.len())
     };
-    let split_enabled_batched = std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
-        .map(|v| v == "1")
+    // Default ON to match SP1 (no per-chip filter); opt-out via
+    // ZIREN_GPU_CONSTRAINT_EVAL_SPLIT=0.
+    let split_enabled_batched = !std::env::var("ZIREN_GPU_CONSTRAINT_EVAL_SPLIT")
+        .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
         .unwrap_or(false);
     for (i, chip) in chips.iter().enumerate() {
         if !split_enabled_batched && chip.permutation_width() > 0 { continue; }
