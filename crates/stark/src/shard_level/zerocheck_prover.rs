@@ -489,18 +489,19 @@ where
                                  (chip={})", chip.name()
                             );
                         });
-                        // SAFETY: TypeId equality guarantees Val<SC> == Kb
-                        // and Challenge<SC> == Ef4; slice/value reinterp
-                        // is sound.
+                        // SAFETY: TypeId equality above guarantees
+                        // Val<SC> == Kb and Challenge<SC> == Ef4;
+                        // pack_chip_for_gpu's contract holds. The
+                        // remaining reinterps (alpha/local_sum to Ef4,
+                        // public_values to &[Kb]) are sound under the
+                        // same guard.
+                        let pack = unsafe {
+                            pack_chip_for_gpu::<Val<SC>>(
+                                main_trace, preproc_trace,
+                                &global_cumulative_sum,
+                            )
+                        };
                         let gpu_table = unsafe {
-                            let main_kb: &[Kb] = core::slice::from_raw_parts(
-                                main_trace.values.as_ptr().cast::<Kb>(),
-                                main_trace.values.len(),
-                            );
-                            let preproc_kb: &[Kb] = core::slice::from_raw_parts(
-                                preproc_trace.values.as_ptr().cast::<Kb>(),
-                                preproc_trace.values.len(),
-                            );
                             let pv_kb: &[Kb] = core::slice::from_raw_parts(
                                 public_values.as_ptr().cast::<Kb>(),
                                 public_values.len(),
@@ -509,27 +510,16 @@ where
                                 core::mem::transmute_copy(&alpha);
                             let lcs_ef4: Ef4 =
                                 core::mem::transmute_copy(&local_cumulative_sum);
-                            // Pack 7+7 SepticDigest x|y into a flat
-                            // [Kb; 14] for the hook signature.
-                            let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
-                            for j in 0..7 {
-                                gcs_xy[j] = core::mem::transmute_copy(
-                                    &global_cumulative_sum.0.x.0[j],
-                                );
-                                gcs_xy[j + 7] = core::mem::transmute_copy(
-                                    &global_cumulative_sum.0.y.0[j],
-                                );
-                            }
                             gpu_hook(
                                 &chip.name(),
-                                main_kb,
+                                pack.main_kb,
                                 main_trace.width,
-                                preproc_kb,
+                                pack.preproc_kb,
                                 preproc_trace.width,
                                 pv_kb,
                                 alpha_ef4,
                                 lcs_ef4,
-                                gcs_xy,
+                                pack.gcs_xy,
                                 log_height,
                             )
                         };
@@ -690,6 +680,50 @@ where
     proof
 }
 
+/// Packed view of a chip's host trace + cumulative-sum metadata in
+/// the shape the GPU constraint-eval hooks expect.
+struct ChipGpuPack<'a> {
+    main_kb: &'a [p3_koala_bear::KoalaBear],
+    preproc_kb: &'a [p3_koala_bear::KoalaBear],
+    gcs_xy: [p3_koala_bear::KoalaBear; 14],
+}
+
+/// Pack one chip for GPU dispatch. SAFETY contract: caller MUST have
+/// already TypeId-verified that `Val<SC> == KoalaBear`; the slice
+/// reinterpretation and the per-element transmute_copy of the septic
+/// digest's coefficients both rely on that bit-level equivalence.
+#[inline]
+unsafe fn pack_chip_for_gpu<'a, F>(
+    main_trace: &'a RowMajorMatrix<F>,
+    preproc_trace: &'a RowMajorMatrix<F>,
+    global_cumulative_sum: &crate::septic_digest::SepticDigest<F>,
+) -> ChipGpuPack<'a>
+where
+    F: PrimeField,
+{
+    type Kb = p3_koala_bear::KoalaBear;
+    let main_kb: &[Kb] = unsafe {
+        core::slice::from_raw_parts(
+            main_trace.values.as_ptr().cast::<Kb>(),
+            main_trace.values.len(),
+        )
+    };
+    let preproc_kb: &[Kb] = unsafe {
+        core::slice::from_raw_parts(
+            preproc_trace.values.as_ptr().cast::<Kb>(),
+            preproc_trace.values.len(),
+        )
+    };
+    let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
+    for j in 0..7 {
+        unsafe {
+            gcs_xy[j] = core::mem::transmute_copy(&global_cumulative_sum.0.x.0[j]);
+            gcs_xy[j + 7] = core::mem::transmute_copy(&global_cumulative_sum.0.y.0[j]);
+        }
+    }
+    ChipGpuPack { main_kb, preproc_kb, gcs_xy }
+}
+
 /// Multi-chip batched constraint-eval pre-pass. Returns
 /// `Some(per_chip_results)` where each slot is `Some(c_table)` when
 /// the batched GPU produced it; outer `None` when batched mode is
@@ -776,29 +810,21 @@ where
             crate::septic_digest::SepticDigest::<Val<SC>>::zero()
         };
         let local_cumulative_sum = Challenge::<SC>::ZERO;
-        let mut gcs_xy: [Kb; 14] = [Kb::default(); 14];
-        for j in 0..7 {
-            unsafe {
-                gcs_xy[j] = core::mem::transmute_copy(&global_cumulative_sum.0.x.0[j]);
-                gcs_xy[j + 7] = core::mem::transmute_copy(&global_cumulative_sum.0.y.0[j]);
-            }
-        }
-        let main_kb: &[Kb] = unsafe {
-            core::slice::from_raw_parts(main_trace.values.as_ptr().cast::<Kb>(), main_trace.values.len())
-        };
-        let preproc_kb: &[Kb] = unsafe {
-            core::slice::from_raw_parts(preproc_trace.values.as_ptr().cast::<Kb>(), preproc_trace.values.len())
+        // SAFETY: TypeId guard at line 733-737 has already verified
+        // Val<SC> == KoalaBear; pack_chip_for_gpu's precondition holds.
+        let pack = unsafe {
+            pack_chip_for_gpu::<Val<SC>>(main_trace, preproc_trace, &global_cumulative_sum)
         };
         chip_names.push(chip.name().to_string());
         keep_idx.push(i);
-        main_row_majors.push(main_kb);
+        main_row_majors.push(pack.main_kb);
         main_widths.push(main_trace.width);
-        prep_row_majors.push(preproc_kb);
+        prep_row_majors.push(pack.preproc_kb);
         prep_widths.push(preproc_trace.width);
         alphas.push(alpha_ef4);
         let lcs_ef4: Ef4 = unsafe { core::mem::transmute_copy(&local_cumulative_sum) };
         local_cumulative_sums.push(lcs_ef4);
-        global_cumulative_sums_xy.push(gcs_xy);
+        global_cumulative_sums_xy.push(pack.gcs_xy);
         num_vars_list.push(log_height);
     }
 
