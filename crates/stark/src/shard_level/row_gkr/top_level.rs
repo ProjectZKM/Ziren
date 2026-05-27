@@ -205,41 +205,24 @@ where
 
     let _t_layers = std::time::Instant::now();
     let _layers_span = tracing::info_span!("logup_gkr_layer_transitions").entered();
-    // Step 4b (`/tmp/step4_backend_parametrize_plan.md`) — `circuit.layers`
-    // is now `Vec<LayerState>`.  Skip the num_row_variables == 0 terminal
-    // (unused — only there to enable clean termination of the build
-    // loop), then dispatch on the LayerState variant.
+    // `circuit.layers` is `Vec<LayerState>`. Skip the
+    // num_row_variables == 0 terminal (only there to enable clean
+    // termination of the build loop), then dispatch on the variant.
     //
-    // Step 4d — when `LayerState::Device { handle, .. }` appears (only
-    // possible when the calling thread has a `gpu_worker_context` TLS +
-    // all three GPU hooks registered + `(F, EF) == (LbVal, LbChallenge)`
-    // — see `build_gkr_circuit`'s gates), invoke the registered
-    // `GpuLayerPullFn` to materialize the device-resident layer back to
-    // host as a `LogUpGkrCpuLayer<LbChallenge, LbChallenge>`, wrap it as
-    // a `GkrCircuitLayer::Layer`, and run the existing per-round
-    // sumcheck on it.  This is the "MVP Path-A" from the plan: pull-back
-    // per round.  A subsequent optimization (H2 — see
-    // `prove_gkr_round`'s `ZIREN_GPU_LOGUP_GKR_DEVICE` branch) keeps
-    // the round computation device-resident; that's a follow-up.
-    //
-    // After the pull loop, drain the GPU side's per-circuit
-    // intermediate state buffers — `pull_hook` only removes the
-    // handle it materialized, so without an explicit drain ~18
-    // layers' worth of buffers stay resident across all shards and
-    // OOM the following Merkle commit phase.
+    // After the layer walk, drain the GPU's per-circuit intermediate
+    // state buffers — without an explicit drain ~18 layers' worth of
+    // buffers stay resident across all shards and OOM the following
+    // Merkle commit phase.
     let mut device_circuit_id_to_drain: Option<u64> = None;
-    let mut acc_pull_us: u64 = 0;
-    let mut acc_prove_us: u64 = 0;
-    let mut acc_observe_us: u64 = 0;
-    let mut acc_other_us: u64 = 0;
 
     // Device-resident consumer: when the scope has an installed
     // circuit AND the V3 GPU hook is enabled AND the production EF
-    // gate matches, pass a shape-only proxy and let V3 consume the
-    // scope handle directly. Soundness depends on V3 actually
-    // consuming the handle — if V3 declines, the host fallback in
-    // `prove_gkr_round` reads the empty cells and panics; the V3 env
-    // gate must therefore stay coupled to this gate.
+    // gate matches, hand `prove_gkr_round` a
+    // `GkrCircuitLayer::DeviceShape` and let V3 consume the scope
+    // handle directly. Type-level exhaustive match makes the
+    // silent-wrong-proof class unreachable; V1/V2/host paths decline
+    // or panic with a descriptive message instead of reading empty
+    // cells.
     let device_consumer_enabled: bool = {
         use core::any::TypeId;
         type Ef4Local = p3_field::extension::BinomialExtensionField<
@@ -262,8 +245,6 @@ where
     };
 
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
-        let _t_iter_start = std::time::Instant::now();
-        // Sample lambda for this round.
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
         // Owner slot (vs Vec) drops the previous round's host
@@ -273,7 +254,6 @@ where
         // dimensions — the type system then forces every downstream
         // consumer to handle the variant explicitly (no silent host
         // fallback reading empty cells).
-        let _t_pull_start = std::time::Instant::now();
         let pulled_owner: Option<super::layer::GkrCircuitLayer<F, EF>> = match state {
             super::layer::LayerState::Host(_) => None,
             super::layer::LayerState::Device {
@@ -327,14 +307,11 @@ where
                 pulled_owner.as_ref().expect("Device variant always assigns Some above")
             }
         };
-        acc_pull_us += _t_pull_start.elapsed().as_micros() as u64;
 
-        // Run the sumcheck. The `GkrCircuitLayer::DeviceShape` variant
-        // (constructed above when V3 will consume from the scope) is
-        // matched explicitly by V3 in `try_logup_round_gpu_v3` and
-        // panics loudly in V1/V2/host fallback paths — no silent
-        // wrong-proof on V3 decline.
-        let _t_prove_start = std::time::Instant::now();
+        // Run the sumcheck. `GkrCircuitLayer::DeviceShape` (constructed
+        // above when V3 will consume from the scope) is matched
+        // explicitly by V3 in `try_logup_round_gpu_v3`; V1/V2/host
+        // paths decline or panic with a descriptive message.
         let round_proof = prove_gkr_round::<F, EF, _>(
             layer,
             &eval_point,
@@ -343,16 +320,13 @@ where
             lambda,
             challenger,
         );
-        acc_prove_us += _t_prove_start.elapsed().as_micros() as u64;
 
-        let _t_observe_start = std::time::Instant::now();
         // Observe order MUST match verifier: n0, n1, d0, d1.
         // Mismatched order desyncs the transcript at line_challenge.
         observe_ext::<F, EF, _>(challenger, round_proof.numerator_0);
         observe_ext::<F, EF, _>(challenger, round_proof.numerator_1);
         observe_ext::<F, EF, _>(challenger, round_proof.denominator_0);
         observe_ext::<F, EF, _>(challenger, round_proof.denominator_1);
-        acc_observe_us += _t_observe_start.elapsed().as_micros() as u64;
 
         // Take the reduced point from the sumcheck as the base for the
         // next layer's eval_point; extend by the line challenge.
@@ -370,11 +344,6 @@ where
 
         eval_point = next_eval_point;
         round_proofs.push(round_proof);
-        let iter_total_us = _t_iter_start.elapsed().as_micros() as u64;
-        acc_other_us += iter_total_us
-            .saturating_sub(acc_pull_us)
-            .saturating_sub(acc_prove_us)
-            .saturating_sub(acc_observe_us);
     }
     let n_layers = round_proofs.len();
 
