@@ -1,39 +1,11 @@
-//! Output extraction for the row-only GKR backend
-//! (the task, A.2 step 4).
+//! Output extraction for the row-only GKR backend.
 //!
-//! Port of
-//! `extract_outputs`
-//! against [`RowMajorTable`].
-//!
-//! ## Purpose
-//!
-//! Convert the **terminal** layer (`num_row_variables == 1`,
-//! per-chip 2-row × W-col tables for the 4 sub-MLEs) into the unified
-//! `(numerator, denominator)` MLEs that the recursion verifier
-//! expects in [`circuit_output`](crate::shard_level::types::LogUpGkrOutput).
-//!
-//! Each output MLE has length `2^(num_interaction_variables + 1)`.
-//! The "+1" comes from the terminal row dimension (the single row
-//! variable promotes into the unified MLE's variable list).
-//!
-//! ## Algorithm
-//!
-//! For each per-chip table with shape `(2 rows × cols)`, where
-//! `cols = 2^num_interaction_variables_chip`:
-//!   1. Split into `row_0` (first `cols` cells) and `row_1` (last
-//!      `cols` cells) — slop's `fix_last_variable(0)` /
-//!      `fix_last_variable(1)` on the row MSB.
-//!   2. Interleave: `[r0[0], r1[0], r0[1], r1[1], ...]` — produces
-//!      `2 * cols` entries per chip.
-//!   3. Concatenate across chips into one `Vec<EF>` per sub-MLE
-//!      (`numerator_0_int`, `numerator_1_int`, `denominator_0_int`,
-//!      `denominator_1_int`).
-//!   4. Pad each list up to `2^(global_num_interaction_variables + 1)`
-//!      with `EF::ZERO` (numerators) / `EF::ONE` (denominators).
-//!
-//! Then combine via the fraction-sum identity at every position:
-//!   - `numerator[i]   = n_0[i] * d_1[i] + n_1[i] * d_0[i]`
-//!   - `denominator[i] = d_0[i] * d_1[i]`
+//! Converts the terminal layer (`num_row_variables == 1`) into the
+//! unified `(numerator, denominator)` MLEs of length
+//! `2^(num_interaction_variables + 1)`. Per-chip 2-row tables are
+//! interleaved on the row MSB, concatenated, padded
+//! (zero for numerators, one for denominators), then combined via
+//! `n = n0·d1 + n1·d0`, `d = d0·d1`.
 
 use alloc::vec::Vec;
 
@@ -41,26 +13,16 @@ use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
 use super::layer::{LogUpGkrCpuLayer, RowMajorTable};
 
-/// Unified output of the GKR circuit's row-reduction phase.
-///
-/// Mirrors SP1's
-/// `LogUpGkrOutput<EF>`.
-/// Each MLE has length `2^(num_interaction_variables + 1)` and is
-/// what the recursion verifier consumes as `circuit_output`.
+/// Each MLE has length `2^(num_interaction_variables + 1)`; consumed
+/// by the recursion verifier as `circuit_output`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogUpGkrOutput<EF> {
     pub numerator: Vec<EF>,
     pub denominator: Vec<EF>,
 }
 
-/// Interleave a per-chip `(2 rows × cols)` table along the row axis
-/// — produces `[r0[0], r1[0], r0[1], r1[1], ...]` of length `2 * cols`.
-///
-/// Equivalent to slop's
-/// `fix_last_variable(0).interleave(fix_last_variable(1))` on the
-/// chip's MLE.
-// TODO: only exercised by row-GKR unit tests today; keep until the
-// terminal-layer interleave path is wired into the production prover.
+/// Interleave `(2 rows × cols)` along the row axis →
+/// `[r0[0], r1[0], r0[1], r1[1], …]`.
 #[allow(dead_code)]
 fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
     debug_assert_eq!(
@@ -68,8 +30,6 @@ fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
         "interleave_chip expects terminal-layer table (num_row_variables == 1)"
     );
     let cols = table.num_interactions;
-    // PaddedMle: test helper assumes the table is fully real
-    // (num_real_rows == 2).  Only used by row-GKR unit tests today.
     debug_assert_eq!(table.num_real_rows, 2);
     debug_assert_eq!(table.cells.len(), 2 * cols);
     let row_0 = &table.cells[..cols];
@@ -82,11 +42,7 @@ fn interleave_chip<F: Clone>(table: &RowMajorTable<F>) -> Vec<F> {
     out
 }
 
-/// Extract the unified GKR circuit output from the terminal layer.
-///
-/// **Panics** if the layer doesn't satisfy `num_row_variables == 1`.
-/// Drive the layer down to that depth via repeated [`super::layer_transition`]
-/// calls before invoking this.
+/// Panics unless `layer.num_row_variables == 1`.
 pub fn extract_outputs<EF>(layer: &LogUpGkrCpuLayer<EF, EF>) -> LogUpGkrOutput<EF>
 where
     EF: ExtensionField<EF> + Field + PrimeCharacteristicRing,

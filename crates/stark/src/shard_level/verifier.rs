@@ -1,24 +1,6 @@
-//! Host-side BasefoldShardVerifier — the task remaining scaffolding.
-//!
-//! Mirror of the in-circuit verifier at
-//! [`crates/recursion/circuit/src/shard_basefold.rs::BasefoldShardVerifier::verify_shard`]
-//! but executing directly against host types instead of building
-//! symbolic AIR in a `Builder<C>`.
-//!
-//! # Pipeline
-//!
-//! 1. Transcript prologue — observe public values, main commitment,
-//!    per-chip (height, name) metadata.  (implemented in this file)
-//! 2. LogUp-GKR sumcheck verification.  (TODO)
-//! 3. Zerocheck sumcheck verification.  (TODO)
-//! 4. Jagged-PCS opening verification.  (TODO)
-//!
-//! # Status
-//!
-//! Phase 1 implemented.  Phases 2-4 are structural TODOs — the
-//! substantial sumcheck / PCS verification logic lives in the
-//! recursion circuit today and needs a host-side port.  Each is
-//! its own ~200-300 LOC port effort (see the task description).
+//! Host-side BasefoldShardVerifier: transcript prologue + LogUp-GKR
+//! + zerocheck + jagged-PCS verification, executing directly against
+//! host types rather than symbolic AIR.
 
 use alloc::vec::Vec;
 
