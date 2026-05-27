@@ -49,37 +49,28 @@ where
     let cols = 1usize << layer.num_interaction_variables;
     let total = rows * cols;
 
-    // We unconditionally fill every slot inside the parallel scatter
-    // below, EXCEPT for trailing per-chip-padding columns where each
-    // chip writes only `chip_cols` entries per row.  The unwritten
-    // tail of each row needs identity-fraction padding (n0=0, d0=1,
-    // n1=0, d1=1).  Skip the global zero/one init for the n0/n1 vecs
-    // (every n* slot is written by the scatter — `n0_chip` covers all
-    // chip_cols entries that map to n0_row[chip_off..chip_off+chip_cols]
-    // — but only for slots in [0, sum(chip_cols)).  Slots beyond
-    // sum(chip_cols) require explicit zero).  Use uninit for the
-    // FULLY-COVERED slots and padded init for the rest.
-    //
-    // Implementation: pre-allocate without init, then ensure the
-    // padding tail per row is correctly set.  For simplicity, init
-    // n0/n1 to zero and d0/d1 to one only for the padding tail.
+    // The scatter loop below writes every slot in [0, cols) for every
+    // row (chip contributions in [0, total_chip_cols), identity-fraction
+    // padding in [total_chip_cols, cols)), so we allocate uninit and
+    // skip the initial fill — the previous par_init was dead work
+    // (~4 × total × 16 B of redundant memory traffic per call).
     let total_chip_cols: usize =
         layer.numerator_0.iter().map(|c| c.num_interactions).sum();
-    let pad_per_row = cols.saturating_sub(total_chip_cols);
-    // Parallel-init the four flat buffers. Each chunk's `fill` writes
-    // every slot, so uninit-set_len is never observable.
     use p3_maybe_rayon::prelude::*;
-    let par_init = |fill: EF| -> Vec<EF> {
+    let alloc_uninit = || -> Vec<EF> {
         let mut v: Vec<EF> = Vec::with_capacity(total);
-        // SAFETY: We immediately write every slot below via par_chunks_mut.
-        unsafe { v.set_len(total); }
-        v.par_chunks_mut(1usize << 16).for_each(|c| c.fill(fill));
+        // SAFETY: every slot is written by the scatter below before any
+        // read. `EF` is `Copy` with trivial drop, so dropping the Vec on
+        // an early panic does not read uninit memory.
+        unsafe {
+            v.set_len(total);
+        }
         v
     };
-    let mut n0_flat: Vec<EF> = par_init(EF::ZERO);
-    let mut d0_flat: Vec<EF> = par_init(EF::ONE);
-    let mut n1_flat: Vec<EF> = par_init(EF::ZERO);
-    let mut d1_flat: Vec<EF> = par_init(EF::ONE);
+    let mut n0_flat: Vec<EF> = alloc_uninit();
+    let mut d0_flat: Vec<EF> = alloc_uninit();
+    let mut n1_flat: Vec<EF> = alloc_uninit();
+    let mut d1_flat: Vec<EF> = alloc_uninit();
 
     // Per-chip column offsets so the row scatter can fan out
     // across rayon workers.
@@ -132,8 +123,6 @@ where
                 d1_row[flat_col] = EF::ONE;
             }
         });
-    // Suppress unused warning when pad_per_row is computed for the assertion.
-    let _ = pad_per_row;
 
     (n0_flat, d0_flat, n1_flat, d1_flat)
 }
