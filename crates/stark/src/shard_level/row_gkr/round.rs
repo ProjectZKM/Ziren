@@ -56,7 +56,6 @@ where
     // (~4 × total × 16 B of redundant memory traffic per call).
     let total_chip_cols: usize =
         layer.numerator_0.iter().map(|c| c.num_interactions).sum();
-    use p3_maybe_rayon::prelude::*;
     let alloc_uninit = || -> Vec<EF> {
         let mut v: Vec<EF> = Vec::with_capacity(total);
         // SAFETY: every slot is written by the scatter below before any
@@ -408,7 +407,6 @@ fn from_strided_post_fix<EF: Field + Copy>(
     per_int_h: &[u32],
     chip_rows_post_fix: usize,
 ) -> Option<ChipLayerState<EF>> {
-    use p3_field::PrimeCharacteristicRing as _;
     if chip_offsets.len() != per_int_h.len() + 1 {
         return None;
     }
@@ -470,7 +468,6 @@ fn from_strided_post_fix<EF: Field + Copy>(
 /// Hand-computable 1-chip 4-row 1-col synthetic case run once via
 /// OnceLock for diffing the SP1 vs Ziren conventions.
 fn synthetic_diff_test_step7z() {
-    use core::any::TypeId;
     use p3_field::PrimeCharacteristicRing as _;
     use p3_field::BasedVectorSpace as _;
     type ProdF = p3_koala_bear::KoalaBear;
@@ -1376,7 +1373,6 @@ where
     // to sum_half = chip_eq_int_sum_c * (sum_eq_lo + sum_eq_hi),
     // to eq_sum = chip_eq_int_sum_c (one per pair = chip_eq_int_sum total).
     {
-        use p3_field::PrimeCharacteristicRing as _;
         let mut sum_eq_lo_local = EF::ZERO;
         let mut sum_eq_hi_local = EF::ZERO;
         let r_half = layer_chip_rows / 2;

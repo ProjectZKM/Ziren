@@ -35,7 +35,7 @@
 use alloc::vec::Vec;
 use core::array;
 
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{ExtensionField, Field};
 
 /// Memory state of the branching program: 2 booleans = 4 states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

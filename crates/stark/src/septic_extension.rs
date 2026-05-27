@@ -9,7 +9,7 @@ use std::fmt::Display;
 use std::iter::{Product, Sum};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Neg, Sub, SubAssign};
 
-use crate::air::{SepticExtensionAirBuilder, ZKMAirBuilder};
+use crate::air::SepticExtensionAirBuilder;
 
 /// A septic extension with an irreducible polynomial `z^7 + 2z - 8`.
 ///

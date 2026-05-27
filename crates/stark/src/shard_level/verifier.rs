@@ -833,8 +833,6 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F> + Copy,
     Challenger: FieldChallenger<F>,
 {
-    use p3_field::PrimeCharacteristicRing;
-
     let n = proof.univariate_polys.len();
     if n != expected_num_variables {
         return Err(BasefoldVerifyError::LogupGkr(format!(

@@ -8,8 +8,6 @@
 //! row-major shape semantics that the `commit_phase_round` reshape
 //! ("merge even/odd into adjacent columns") relies on.
 
-use alloc::vec::Vec;
-
 use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 

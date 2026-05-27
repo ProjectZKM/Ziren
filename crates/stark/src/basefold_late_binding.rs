@@ -19,7 +19,7 @@
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
-use p3_challenger::{CanObserve, FieldChallenger};
+use p3_challenger::CanObserve;
 use p3_dft::Radix2DitParallel;
 use p3_field::PrimeCharacteristicRing;
 use p3_matrix::dense::RowMajorMatrix;
@@ -1088,10 +1088,7 @@ pub mod jagged {
 
     use crate::basefold::StackedBasefoldProof;
     use crate::jagged::{JaggedChipInfo, JaggedPacking, compute_jagged_metadata, materialize_dense_jagged};
-    use crate::jagged_sumcheck::{
-        JaggedReductionProof, prove_jagged_reduction_streaming,
-        verify_jagged_reduction,
-    };
+    use crate::jagged_sumcheck::{JaggedReductionProof, verify_jagged_reduction};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
     use super::{
@@ -1736,6 +1733,7 @@ pub mod jagged {
 #[cfg(test)]
 mod test {
     use super::*;
+    use p3_challenger::FieldChallenger;
     use p3_field::BasedVectorSpace;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};

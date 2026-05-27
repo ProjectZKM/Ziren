@@ -76,7 +76,6 @@ where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
     C: GrindingChallenger<Witness = F>,
 {
-    use p3_field::PrimeCharacteristicRing;
     use p3_maybe_rayon::prelude::*;
     if bits == 0 {
         return F::ZERO;

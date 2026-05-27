@@ -38,7 +38,7 @@
 use alloc::vec::Vec;
 
 use p3_challenger::FieldChallenger;
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing, PrimeField};
+use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 
 use crate::lookup::Lookup;
 use crate::zerocheck_prover::{eq_mle_table, fold_table_first};
@@ -753,6 +753,7 @@ pub fn estimate_savings(
 mod tests {
     use super::*;
     use p3_field::extension::BinomialExtensionField;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;

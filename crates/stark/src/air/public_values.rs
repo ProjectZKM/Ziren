@@ -1,8 +1,7 @@
 use core::{fmt::Debug, mem::size_of};
 use std::borrow::{Borrow, BorrowMut};
 
-use itertools::Itertools;
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 
 use crate::{Word, PROOF_MAX_NUM_PVS};

@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 use crate::jagged_branching_program::{
     bits_big_endian, full_jagged_evaluation, BranchingProgram,
 };
-use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
+use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 /// Jagged-eval sub-protocol proof — wraps a [`PartialSumcheckProof`]
