@@ -221,12 +221,13 @@ where
 // Returned tuple shape:
 //   (main_commitment_felts, public_values_felts,
 //    logup_gkr_proof_var, zerocheck_proof_var,
-//    evaluation_proof_bytes_passthrough)
+//    evaluation_proof_passthrough)
 //
-// `evaluation_proof_bytes_passthrough` carries the raw bytes
-// out of the witness so the next stage (jagged-PCS variable
-// reconstruction) can consume them without re-routing through
-// the witness layer.
+// `evaluation_proof_passthrough` carries the host-side
+// [`EvaluationProof`] enum out of the witness so the jagged-PCS
+// variable-reconstruction step downstream can match the variant
+// directly (Bundle → bundle lift; Bytes → bytes lift; Empty →
+// placeholder).
 impl<C> Witnessable<C>
     for zkm_stark::shard_level::shard_proof::BasefoldShardProof<InnerVal, InnerChallenge>
 where
@@ -237,15 +238,7 @@ where
         Vec<Felt<C::F>>,
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
-        Vec<u8>,
-        // #241 Phase 4d: structured bundle host-side passthrough.
-        // When `Some`, machine flows can call
-        // [`lift_jagged_basefold_bundle`] directly instead of going
-        // through bytes deserialization (kills the rmp-serde varint
-        // cascade — the actual determinism fix #240).  When `None`
-        // (GPU device path / older proofs), call sites fall back to
-        // [`lift_evaluation_proof_via_bundle`] which deserializes bytes.
-        Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
+        zkm_stark::shard_level::shard_proof::EvaluationProof,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -254,18 +247,16 @@ where
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
-        // evaluation_proof passes through as raw bytes — the
-        // jagged-PCS-variable reconstruction step consumes them
-        // separately (no felt-level witness reads here).
-        let evaluation_proof_bytes = self.evaluation_proof.clone();
-        let evaluation_proof_bundle = self.evaluation_proof_bundle.clone();
+        // evaluation_proof passes through as the host enum — the
+        // jagged-PCS-variable reconstruction step consumes it directly
+        // (no felt-level witness reads here).
+        let evaluation_proof = self.evaluation_proof.clone();
         (
             main_commitment_arr,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
-            evaluation_proof_bytes,
-            evaluation_proof_bundle,
+            evaluation_proof,
         )
     }
 

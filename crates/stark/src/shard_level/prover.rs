@@ -204,7 +204,7 @@ where
     // Phase 4: jagged-PCS opening. Per-chip `r_row` is the trailing
     // log(chip_height) coords of the LogUp-GKR final eval_point.
     let _t_phase4 = std::time::Instant::now();
-    let (evaluation_proof, evaluation_proof_bundle_opt) = {
+    let evaluation_proof = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
         emit_jagged_pcs_bytes::<SC, A>(
             chips,
@@ -270,7 +270,6 @@ where
         chip_log_heights,
         chip_cumulative_sums,
         evaluation_proof,
-        evaluation_proof_bundle: evaluation_proof_bundle_opt,
         fold_orientation: orientation,
     };
     drop(_phase5_span);
@@ -283,18 +282,18 @@ where
     proof
 }
 
-/// Returns `(bytes, bundle)`. Runs only when SC monomorphizes to
-/// the KoalaBear / `LbChallenger` config; otherwise returns empty
-/// bytes + `None`. The outer challenger is downcast to
-/// `&mut LbChallenger` so the jagged-PCS transcript stays bound to
-/// the shard's outer state.
+/// Returns an [`EvaluationProof`] tagged with the path that produced
+/// it. Runs only when SC monomorphizes to the KoalaBear /
+/// `LbChallenger` config; otherwise returns `EvaluationProof::Empty`.
+/// The outer challenger is downcast to `&mut LbChallenger` so the
+/// jagged-PCS transcript stays bound to the shard's outer state.
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
-) -> (Vec<u8>, Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>)
+) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -304,6 +303,7 @@ where
 {
     use core::any::{Any, TypeId};
     use crate::basefold_late_binding::jagged::prove_jagged_basefold;
+    use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
 
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
@@ -311,7 +311,7 @@ where
         || TypeId::of::<SC::Challenger>()
             != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
     {
-        return (Vec::new(), None);
+        return EvaluationProof::Empty;
     }
 
     // Send `trace.width` directly; the verifier reads each chip's
@@ -404,16 +404,13 @@ where
                        RowMajorMatrix<p3_koala_bear::KoalaBear>)],
                 >(chip_traces.as_slice())
             };
-            return (
-                hook(
-                    &chip_names,
-                    &r_row_per_chip,
-                    lb_challenger,
-                    _device_traces,
-                    Some(host_chip_traces_kb),
-                ),
-                None,
-            );
+            return EvaluationProof::Bytes(hook(
+                &chip_names,
+                &r_row_per_chip,
+                lb_challenger,
+                _device_traces,
+                Some(host_chip_traces_kb),
+            ));
         }
     }
 
@@ -430,12 +427,11 @@ where
                 chip_traces.len()
             );
         });
-        return (hook(&chip_traces, &r_row_per_chip, lb_challenger), None);
+        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, lb_challenger));
     }
 
     let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, lb_challenger);
-    let bytes = bundle.to_bytes();
-    (bytes, Some(bundle))
+    EvaluationProof::Bundle(bundle)
 }
 
 

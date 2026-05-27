@@ -28,6 +28,31 @@ pub struct ChipCumulativeSums<F, EF> {
     pub global: SepticDigest<F>,
 }
 
+/// Per-shard jagged-PCS opening. Exactly one variant is populated by
+/// the producer per shard (decided by which path emitted it), so
+/// downstream consumers match a single enum instead of resolving the
+/// prior dual-field (`Vec<u8>` + `Option<Bundle>`) ambiguity.
+///
+/// * `Empty` — non-KoalaBear / non-MIPS shards that don't run the
+///   jagged-PCS pipeline at all.
+/// * `Bytes(_)` — GPU device hooks emit pre-serialized rmp bytes.
+///   In-circuit consumers lift via `lift_evaluation_proof_bytes`.
+/// * `Bundle(_)` — host path emits a structured bundle. Preferred in
+///   the bundle-lift recursion shape because it skips rmp varint
+///   reparsing (the original determinism fix).
+#[derive(Clone, Serialize, Deserialize)]
+pub enum EvaluationProof {
+    Empty,
+    Bytes(Vec<u8>),
+    Bundle(crate::basefold_late_binding::jagged::JaggedBasefoldBundle),
+}
+
+impl Default for EvaluationProof {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
 /// Host-side BaseFold-pipeline shard proof. No `Debug` derive: the
 /// embedded `JaggedBasefoldBundle::MT::Proof` has no `Debug` bound.
 #[derive(Clone, Serialize, Deserialize)]
@@ -52,16 +77,10 @@ pub struct BasefoldShardProof<F, EF> {
     /// proof bytes.
     #[serde(default = "std::collections::BTreeMap::new")]
     pub chip_cumulative_sums: std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
-    /// Jagged-PCS opening as rmp bytes; superseded by
-    /// `evaluation_proof_bundle` below (rmp varint encoding broke
-    /// compress_vk determinism). Kept until all consumers migrate.
-    pub evaluation_proof: Vec<u8>,
-    /// Structured jagged-PCS bundle with deterministic-length
-    /// per-element encoding. Concretely typed on
-    /// `InnerVal`/`InnerChallenge` because the in-circuit verifier
-    /// only operates on those regardless of the outer `<F, EF>`.
+    /// Jagged-PCS opening — tagged union over the three producer
+    /// paths. See [`EvaluationProof`] for the variants.
     #[serde(default)]
-    pub evaluation_proof_bundle: Option<crate::basefold_late_binding::jagged::JaggedBasefoldBundle>,
+    pub evaluation_proof: EvaluationProof,
     /// Fold orientation tag read by the verifier in place of an
     /// env-var the CpuProver binary cannot see.
     #[serde(default)]
@@ -83,8 +102,7 @@ where
             opened_values: ShardOpenedValues { chips: Default::default() },
             chip_log_heights: std::collections::BTreeMap::new(),
             chip_cumulative_sums: std::collections::BTreeMap::new(),
-            evaluation_proof: Vec::new(),
-            evaluation_proof_bundle: None,
+            evaluation_proof: EvaluationProof::Empty,
             fold_orientation: FoldOrientation::Msb,
         }
     }
@@ -109,7 +127,7 @@ mod tests {
             rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
         assert_eq!(back.public_values.len(), proof.public_values.len());
         assert_eq!(back.main_commitment.len(), proof.main_commitment.len());
-        assert_eq!(back.evaluation_proof, proof.evaluation_proof);
+        assert!(matches!(back.evaluation_proof, EvaluationProof::Empty));
         assert_eq!(back.opened_values.chips.len(), 0);
     }
 
@@ -155,7 +173,7 @@ mod tests {
         assert_eq!(proof.main_commitment.len(), 8);
         assert!(proof.logup_gkr_proof.round_proofs.is_empty());
         assert!(proof.zerocheck_proof.univariate_polys.is_empty());
-        assert!(proof.evaluation_proof.is_empty());
+        assert!(matches!(proof.evaluation_proof, EvaluationProof::Empty));
         assert_eq!(proof.opened_values.chips.len(), 0);
     }
 }

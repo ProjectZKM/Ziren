@@ -116,8 +116,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             zkm_stark::shard_level::types::PartialSumcheckProof<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
-            Vec<u8>,
-            Option<zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle>,
+            zkm_stark::shard_level::shard_proof::EvaluationProof,
         ),
     )>,
     /// per-input per-chip cumulative sums (witnessed
@@ -272,8 +271,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
-            evaluation_proof_bytes,
-            evaluation_proof_bundle_opt,
+            evaluation_proof,
         ) = proof_tuple;
         // Clone public_values for the aggregate pass — it's moved into
         // `assemble_basefold_shard_proof_variable` below.
@@ -311,35 +309,41 @@ pub fn verify_compress_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![preprocessed_widths_pre, main_widths_pre];
 
-        // Bundle lift is the production path post multi-GPU
-        // determinism cascade closure.  ZIREN_LEGACY_NONBUNDLE_LIFT
-        // (set to any value) falls back to the placeholder per-shard
-        // lift; preserved as a kill switch for forensics when bundle-
-        // lift recursion shape registration regresses.  Default unset
-        // = bundle path.
-        let evaluation_proof_var = if std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_err() {
-            match evaluation_proof_bundle_opt.as_ref() {
-                Some(bundle) => crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+        // Bundle lift is the production path post multi-GPU determinism
+        // cascade closure.  ZIREN_LEGACY_NONBUNDLE_LIFT (set to any
+        // value) falls back to the bytes lift; preserved as a forensic
+        // kill switch when bundle-lift recursion shape registration
+        // regresses.
+        use zkm_stark::shard_level::shard_proof::EvaluationProof;
+        let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
+        let evaluation_proof_var = match &evaluation_proof {
+            EvaluationProof::Bundle(bundle) if !legacy_lift => {
+                crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
                     builder,
                     bundle,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
-                ),
-                None => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
-                    builder,
-                    &evaluation_proof_bytes,
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                ),
+                )
             }
-        } else {
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            EvaluationProof::Bundle(bundle) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
                 builder,
-                &evaluation_proof_bytes,
+                &bundle.to_bytes(),
                 max_log_row_count,
                 &column_counts_by_round_pre,
-            )
+            ),
+            EvaluationProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                builder,
+                bytes,
+                max_log_row_count,
+                &column_counts_by_round_pre,
+            ),
+            EvaluationProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+                builder,
+                &[],
+                max_log_row_count,
+                &column_counts_by_round_pre,
+            ),
         };
 
         let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
@@ -464,24 +468,20 @@ pub fn verify_compress_basefold<C, SC, A>(
         // hit `basefold_verifier.rs:779` (`rounds.len() != num_variables`)
         // when small shards triggered `pick_log_stacking_height` clamping.
         let per_proof_verifier;
-        let active_verifier =
-            if std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_err() {
-                if let Some(bundle) = evaluation_proof_bundle_opt.as_ref() {
-                    let bundle_num_vars =
-                        bundle.basefold_proof.basefold_proof.fri_commitments.len();
-                    per_proof_verifier =
-                        crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
-                            max_log_row_count,
-                            bundle.commit.log_stacking_height,
-                            bundle_num_vars,
-                        );
-                    &per_proof_verifier
-                } else {
-                    &_basefold_shard_verifier
-                }
-            } else {
-                &_basefold_shard_verifier
-            };
+        let active_verifier = match &evaluation_proof {
+            EvaluationProof::Bundle(bundle) if !legacy_lift => {
+                let bundle_num_vars =
+                    bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                per_proof_verifier =
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
+                        max_log_row_count,
+                        bundle.commit.log_stacking_height,
+                        bundle_num_vars,
+                    );
+                &per_proof_verifier
+            }
+            _ => &_basefold_shard_verifier,
+        };
 
         active_verifier
             .verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(

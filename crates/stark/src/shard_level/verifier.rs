@@ -249,7 +249,7 @@ impl BasefoldShardVerifier {
 fn verify_jagged_pcs_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_eval_point: &[Challenge<SC>],
-    evaluation_proof_bytes: &[u8],
+    evaluation_proof: &super::shard_proof::EvaluationProof,
     _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
@@ -263,6 +263,7 @@ where
     use core::any::{Any, TypeId};
     use crate::basefold_late_binding::jagged::{verify_jagged_basefold, JaggedBasefoldBundle};
     use crate::jagged::JaggedChipInfo;
+    use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
 
     // Type gate (same as prover-side emit_jagged_pcs_bytes).
@@ -271,23 +272,25 @@ where
         || TypeId::of::<SC::Challenger>()
             != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
     {
-        // Non-KoalaBear — skip (prover emitted empty bytes too).
+        // Non-KoalaBear — skip (prover emitted Empty too).
         return Ok(());
     }
 
-    // Empty bytes means the prover didn't emit a jagged-PCS opening
-    // (e.g., non-KoalaBear config).  Accept as a no-op.
-    if evaluation_proof_bytes.is_empty() {
-        return Ok(());
-    }
-
-    // Deserialise the bundle.
-    let bundle = JaggedBasefoldBundle::from_bytes(evaluation_proof_bytes).ok_or_else(|| {
-        BasefoldVerifyError::JaggedPcs(format!(
-            "rmp-serde deserialize failed ({} bytes)",
-            evaluation_proof_bytes.len()
-        ))
-    })?;
+    // Resolve to a bundle. Empty means no jagged-PCS proof to verify;
+    // Bundle is the host-emitted structured form; Bytes is a device
+    // hook's pre-serialized form that we deserialize here.
+    let bundle = match evaluation_proof {
+        EvaluationProof::Empty => return Ok(()),
+        EvaluationProof::Bundle(b) => b.clone(),
+        EvaluationProof::Bytes(bytes) => {
+            JaggedBasefoldBundle::from_bytes(bytes).ok_or_else(|| {
+                BasefoldVerifyError::JaggedPcs(format!(
+                    "rmp-serde deserialize failed ({} bytes)",
+                    bytes.len()
+                ))
+            })?
+        }
+    };
 
     // fix (May 2 2026): read per-chip `column_count` from the
     // bundle's PackingMeta (written by the prover) instead of

@@ -200,8 +200,7 @@ where
 /// | `opened_values`        | `ShardOpenedValues { chips: Vec::new() }` (matches real prover at `prover.rs:365`) |
 /// | `chip_log_heights`     | one entry per chip from input shape    |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
-/// | `evaluation_proof`     | `Vec::new()` — lift adapter ignores bytes content |
-/// | `evaluation_proof_bundle` | `None` — lift adapter handles None branch |
+/// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
 pub fn dummy_basefold_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
     chip_log_heights_pairs: &[(String, u8)],
@@ -266,13 +265,6 @@ where
             })
             .collect();
 
-    // `evaluation_proof_bundle` is `#[cfg(feature = "basefold")]`
-    // on the host-side struct.  In the recursion-circuit build the
-    // basefold feature is always active (transitively via
-    // zkm-stark's default features), so the field always exists at
-    // this site — set unconditionally.  If the feature ever gets
-    // cfg-gated off in this crate, this line will fail to compile
-    // and the caller can switch back to a cfg-gated init.
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
         public_values,
@@ -282,8 +274,7 @@ where
         opened_values,
         chip_log_heights,
         chip_cumulative_sums,
-        evaluation_proof: Vec::new(),
-        evaluation_proof_bundle: None,
+        evaluation_proof: zkm_stark::shard_level::shard_proof::EvaluationProof::Empty,
         // Gap #10: verifier-simulation dummy emits MSB-folded proofs
         // (host-CPU convention — matches the CpuProver call site).
         fold_orientation: FoldOrientation::Msb,
