@@ -351,50 +351,6 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         self.materialized_layers.is_empty() && self.num_virtual_layers == 0
     }
 
-    /// Peek at the shape of the next layer that [`Self::next`] would
-    /// yield, WITHOUT consuming it.
-    ///
-    /// Returns `(num_row_variables, num_interaction_variables)` of the
-    /// top-of-stack [`DeviceCircuitLayer`] or `None` when the circuit
-    /// is exhausted.
-    ///
-    /// ## `device-resident consumer` — device-resident consumer
-    ///
-    /// The intermediate-layer consumer in `top_level.rs` uses this
-    /// peek to discover the shape of a scope-installed layer BEFORE
-    /// deciding whether to skip `pull_device_layer_to_host`.  When the
-    /// peek's shape matches the `LayerState::Device` entry's
-    /// `(num_row_variables, num_interaction_variables)`, the consumer
-    /// can construct a shape-only `GkrCircuitLayer` proxy (empty cell
-    /// vectors) and skip the host pull entirely — the V3 dispatch
-    /// site reads the actual data from the scope-attached device
-    /// handle via `scope.next_layer().to_sumcheck_handle()`.
-    ///
-    /// Mirrors SP1's pattern in
-    /// `LogUpCudaCircuit::next`
-    /// — except SP1 doesn't need a peek because its consumer never
-    /// has a host fallback path.
-    #[inline]
-    #[must_use]
-    pub fn peek_next_layer_shape(&self) -> Option<(usize, usize)> {
-        if let Some(last) = self.materialized_layers.last() {
-            return Some((last.num_row_variables(), last.num_interaction_variables()));
-        }
-        if self.num_virtual_layers == 0 {
-            return None;
-        }
-        debug_assert_eq!(
-            self.num_virtual_layers, 1,
-            "DeviceLogupGkrCircuit: lazy regeneration only supports a single virtual layer"
-        );
-        // Lazy first-layer placeholder shape — reduces `num_row_variables`
-        // by one to match SP1's `generate_first_layer` convention.
-        Some((
-            (self.input_data.num_row_variables.saturating_sub(1)) as usize,
-            self.input_data.num_interaction_variables as usize,
-        ))
-    }
-
     /// Pop the next layer bottom-up:
     /// * `materialized_layers` non-empty → pop and return.
     /// * `num_virtual_layers > 0` → regenerate the FirstLayer via
@@ -600,17 +556,6 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     /// a free-standing TLS.
     pub fn next_layer(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         self.circuit.as_mut().and_then(|c| c.next())
-    }
-
-    /// read-only shape peek on the next layer.
-    ///
-    /// Returns `(num_row_variables, num_interaction_variables)` of the
-    /// top-of-stack layer without consuming it.  `None` when no
-    /// circuit was installed or the stack is exhausted.
-    #[inline]
-    #[must_use]
-    pub fn peek_next_layer_shape(&self) -> Option<(usize, usize)> {
-        self.circuit.as_ref().and_then(|c| c.peek_next_layer_shape())
     }
 
     /// install a circuit from a populator-provided
@@ -1111,54 +1056,6 @@ mod tests {
         let l1 = scope.next_layer().expect("terminal layer");
         assert!(matches!(l1, DeviceCircuitLayer::Materialized(_, _)));
         assert!(scope.next_layer().is_none());
-    }
-
-    /// `peek_next_layer_shape` reads the shape of
-    /// the top-of-stack layer without consuming it; verify that
-    /// `next_layer` still yields the same layer afterward.
-    #[test]
-    fn peek_next_layer_shape_is_non_consuming() {
-        let input_data = DeviceInputData {
-            circuit_id: 91,
-            num_row_variables: 3,
-            num_interaction_variables: 2,
-            input_handle: None,
-        };
-        let layers = vec![
-            // bottom-up: terminal first (popped LAST), first_layer last (popped FIRST)
-            DeviceCircuitLayer::<KoalaBear, EF>::Materialized(make_handle(7, 1, 2), PhantomData),
-            DeviceCircuitLayer::<KoalaBear, EF>::FirstLayer(make_handle(8, 2, 2), PhantomData),
-        ];
-        let circuit = DeviceLogupGkrCircuit::<KoalaBear, EF>::new(layers, input_data, 0);
-
-        let mut scope = LogupTaskScope::<KoalaBear, EF>::new(91);
-        scope.install_circuit(circuit);
-
-        // Peek the top of stack — should be the FirstLayer (last entry).
-        let peek1 = scope.peek_next_layer_shape().expect("peek non-empty");
-        assert_eq!(peek1, (2, 2));
-
-        // Re-peek without pop yields the same shape.
-        let peek2 = scope.peek_next_layer_shape().expect("peek non-empty");
-        assert_eq!(peek2, (2, 2));
-
-        // Now pop and verify the next peek shifts to the underlying layer.
-        let popped = scope.next_layer().expect("pop FirstLayer");
-        assert!(matches!(popped, DeviceCircuitLayer::FirstLayer(_, _)));
-        let peek3 = scope.peek_next_layer_shape().expect("peek terminal");
-        assert_eq!(peek3, (1, 2));
-
-        // Pop terminal — peek returns None.
-        let _popped = scope.next_layer().expect("pop terminal");
-        assert!(scope.peek_next_layer_shape().is_none());
-    }
-
-    /// `peek_next_layer_shape` returns `None` when
-    /// no circuit is installed.
-    #[test]
-    fn peek_next_layer_shape_none_without_circuit() {
-        let scope = LogupTaskScope::<KoalaBear, EF>::new(42);
-        assert!(scope.peek_next_layer_shape().is_none());
     }
 
     /// RAII guard binds + unbinds the active circuit_id slot.
