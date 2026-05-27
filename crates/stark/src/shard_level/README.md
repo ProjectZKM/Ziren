@@ -4,22 +4,22 @@ This module implements the shard-level proof shape — one
 `LogupGkrProof` + one `PartialSumcheckProof` + one jagged-PCS
 opening per shard, instead of Ziren's legacy per-chip lists.
 
-**Status: structurally complete end-to-end.** Enabled by default
-via the `shard-level-proof` Cargo feature (`default = ["shard-level-proof"]`
-as of task #21).  Production cutover coexists with the legacy
-per-chip path via a dual-path compat shim on `ShardProof<SC>`; see
-"Cutover model" below.
+Always-on for KoalaBear MIPS shards (no feature gate). The
+`BasefoldShardProof` rides as a side-channel field on
+`ShardProof<SC>`; the verifier dispatches to
+`BasefoldShardVerifier::verify_shard` when it's populated and falls
+through to the legacy STARK path otherwise.
 
 ## Module map
 
 | Module | Purpose |
 |---|---|
 | `types` | Pure data: `LogupGkrProof`, `PartialSumcheckProof`, `LogUpEvaluations`, `ChipEvaluation`, `LogUpGkrOutput`, `LogupGkrRoundProof`, `UnivariatePolynomial` |
-| `shard_proof` | Host-side `BasefoldShardProof<F, EF>` — the 6-field shard proof |
+| `shard_proof` | Host-side `BasefoldShardProof<F, EF>` |
 | `logup_gkr_prover` | Legacy (fraction-tree) per-chip LogUp-GKR prover + helpers; kept for interop |
-| `zerocheck_prover` | Shard-level zerocheck prover + helpers |
-| `row_gkr/` | Row-only LogUp-GKR backend — `layer.rs`, `first_layer.rs`, `transition.rs`, `extract.rs`, `build.rs`, `round.rs`, `top_level.rs` (30 unit tests) |
-| `prover` | Top-level orchestrator `prove_shard_to_basefold` + opt-in SDK wiring `try_prove_shard_to_basefold_boxed` |
+| `zerocheck_prover` | Shard-level zerocheck prover + helpers (lambda-RLC of per-chip C-tables, sumcheck driver, optional GPU batched pre-pass) |
+| `row_gkr/` | Row-only LogUp-GKR backend — `layer.rs`, `first_layer.rs`, `transition.rs`, `extract.rs`, `build.rs`, `round.rs`, `top_level.rs` |
+| `prover` | Top-level orchestrator `prove_shard_to_basefold` + SDK wiring `try_prove_shard_to_basefold_boxed` |
 | `verifier` | Host-side `BasefoldShardVerifier` with 4-phase verification |
 
 ## Pipeline (prover → verifier)
@@ -49,32 +49,30 @@ per-chip path via a dual-path compat shim on `ShardProof<SC>`; see
 The host and in-circuit verifiers are kept in lockstep by running
 the same 4 phases in the same challenger ordering.
 
-## Cutover model (task #28)
+## Cutover model
 
-`ShardProof<SC>` carries a new feature-gated field:
+`ShardProof<SC>` carries the side-channel field unconditionally:
 
 ```rust
-#[cfg(feature = "shard-level-proof")]
 #[serde(default)]
 pub basefold_shard_proof: Option<Box<BasefoldShardProof<Val<SC>, Challenge<SC>>>>,
 ```
 
-- **KoalaBear MIPS shards**: `basefold_shard_proof = Some(_)`; verifier
-  dispatches to `BasefoldShardVerifier::verify_shard` (#13 always-on).
+- **KoalaBear MIPS shards**: `basefold_shard_proof = Some(_)`; the
+  verifier dispatches to `BasefoldShardVerifier::verify_shard`.
 - **Compress / non-KoalaBear configs**: `basefold_shard_proof = None`;
-  `Verifier::verify_shard` runs the legacy STARK code path.  These
-  proofs aren't BaseFold shard proofs — the legacy code path is the
-  correct verifier for them.
+  `Verifier::verify_shard` runs the legacy STARK code path. Those
+  proofs aren't BaseFold shard proofs and the legacy verifier is the
+  correct one for them.
 
-KoalaBear gating is via runtime `TypeId::of::<SC::Challenger>()` check
-inside `try_prove_shard_to_basefold_boxed`.
+KoalaBear gating is via runtime `TypeId::of::<SC::Challenger>()`
+check inside `try_prove_shard_to_basefold_boxed`.
 
 ## Usage
 
-Default build already includes `shard-level-proof`:
-
 ```rust
 use zkm_stark::shard_level::prover::prove_shard_to_basefold;
+use zkm_stark::shard_level::shard_proof::FoldOrientation;
 use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
 
 // Prove
@@ -84,19 +82,16 @@ let proof = prove_shard_to_basefold::<SC, A>(
     &main_traces,
     main_commitment,
     public_values,
+    max_log_row_count,
     &mut challenger,
+    None,                  // device_traces: host-only here
+    FoldOrientation::Msb,
 );
 // proof: BasefoldShardProof<F, EF>
 
 // Verify
 let verifier = BasefoldShardVerifier::production_default();
-verifier.verify_shard::<SC, A>(
-    &vk,
-    &chips,
-    &proof,
-    &mut challenger,
-    num_pv_elts,
-)?;
+verifier.verify_shard::<SC, A>(&vk, &chips, &proof, &mut challenger, num_pv_elts)?;
 ```
 
 The recursion-circuit counterpart lives at
@@ -122,26 +117,13 @@ requires this port.
 
 ## Test coverage
 
-- `row_gkr`: 30 unit tests (layer types, first-layer generation,
-  transitions, extraction, sumcheck rounds, build orchestrator)
-- `verifier`: 4 unit tests (construction, error display)
-- Recursion smoke: `build_normalize_basefold_program_compiles_dummy_witness`
-  at `crates/recursion/circuit/src/machine/basefold_programs.rs:385`
+- `row_gkr`: unit tests on layer types, first-layer generation,
+  transitions, extraction, sumcheck rounds, build orchestrator
+  (`shape_only_layer_proxy_is_device_shape_variant`,
+  `prove_gkr_round_*`, etc.)
+- `verifier`: unit tests for construction, error display
+- `shard_proof`: rmp round-trip, empty/large pv-count, fold-orientation
+- Recursion smoke: `build_normalize_basefold_program_*` in
+  `crates/recursion/circuit/src/machine/basefold_programs.rs`
   exercises the full in-circuit pipeline against a real
   `prove_shard_to_basefold`-emitted proof.
-
-## Related tasks
-
-- #18-#22: Initial scope — host types, prover orchestration,
-  recursion machine ports.
-- #23: End-to-end smoke test (green).
-- #24: Row-only GKR backend port (closed the protocol-mismatch documented
-  in `docs/task_23_blocker.md`).
-- #25: zerocheck permutation short-circuit + jagged-PCS single-chip
-  fixes.
-- #26/#27: Real jagged-PCS bytes emission + lift adapter.
-- #28: SDK cutover — dual-path compat shim, prover populator,
-  verifier dispatch.
-- #29/#30/#31: Host verifier phases 2/3/4.
-- **Pending #13**: retire legacy per-chip `ShardProof` fields once
-  the shard-level path is validated on production workloads.
