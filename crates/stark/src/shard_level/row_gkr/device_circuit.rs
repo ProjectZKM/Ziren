@@ -455,12 +455,10 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 ///   (`try_logup_round_gpu_v3`) can consult it without threading new
 ///   arguments through Ziren's per-round signatures.
 ///
-/// * **Drop** clears the slot AND the V3 next-layer TLS
-///   (`clear_logup_v3_next_handle`), preventing the last shard's terminal
-///   handle from leaking into the next shard's first V3 call.  Today
-///   `clear_logup_v3_next_handle` has zero call-sites — confirmed via
-///   grep against `crates/stark/src/` — and the regression analysis
-///   identifies this lack of scope boundary as a contributing factor.
+/// * **Drop** clears the slot AND the V3 next-layer TLS via
+///   `clear_logup_v3_next_handle`, preventing the prior shard's
+///   terminal handle from leaking into the next shard's first V3 call.
+///   The drop is the sole production call site for that clear.
 ///
 /// **Smallest-sub-step (this commit) — scaffold, zero behavior change**
 ///
@@ -713,11 +711,10 @@ pub fn with_production_scope_mut<R>(
 /// restores the prior slot values AND clears the V3 next-layer TLS so
 /// the next shard's first V3 call starts from a clean state.
 ///
-/// **Drop semantics matter**: today's `LOGUP_V3_NEXT_HANDLE` is never
-/// cleared at shard boundaries (`clear_logup_v3_next_handle` has zero
-/// other call-sites — see grep in the related design memo).
-/// Wrapping `prove_shard_logup_gkr_rows` in a `LogupTaskScopeGuard` is
-/// the smallest fix that introduces a real scope boundary.
+/// **Drop semantics**: `Drop` calls `clear_logup_v3_next_handle` so the
+/// per-shard handle TLS resets at the guard's lexical scope end.
+/// Wrapping `prove_shard_logup_gkr_rows` in this guard makes the shard
+/// boundary structurally enforced rather than caller-discipline.
 #[must_use = "the guard must be held for the duration of the GKR walk; \
               drop clears the per-shard handle TLS"]
 pub struct LogupTaskScopeGuard {
@@ -811,8 +808,6 @@ impl Drop for LogupTaskScopeGuard {
         LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.set(self.prior));
         // Clear the per-V3-call handle TLS — prevents the terminal
         // layer's handle from leaking into the next shard's first call.
-        // Today `clear_logup_v3_next_handle` has zero other callers; this
-        // closes that gap structurally.
         crate::shard_level::sumcheck_poly::clear_logup_v3_next_handle();
     }
 }
