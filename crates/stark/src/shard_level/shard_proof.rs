@@ -7,14 +7,22 @@ use crate::septic_digest::SepticDigest;
 use crate::shard_level::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::ShardOpenedValues;
 
-/// Fold direction for the per-shard LogUp-GKR proof. The legacy
-/// `Lsb` variant was forensics-only and known-broken at round 1+;
-/// removed after no production caller used it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Fold direction for the per-shard LogUp-GKR proof; the verifier
+/// reverses `eval_point` for `Lsb`. `serde(default)` falls back to
+/// `Msb` for older proof bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FoldOrientation {
     /// High-order variable folded first.
-    #[default]
     Msb,
+    /// Low-order variable folded first; known broken at round 1+,
+    /// retained only as a forensics opt-in.
+    Lsb,
+}
+
+impl Default for FoldOrientation {
+    fn default() -> Self {
+        FoldOrientation::Msb
+    }
 }
 
 
@@ -152,15 +160,17 @@ mod tests {
 
     #[test]
     fn basefold_shard_proof_fold_orientation_roundtrip() {
-        let mut proof: BasefoldShardProof<F, EF> = BasefoldShardProof::empty(
-            std::array::from_fn(|_| F::ZERO),
-            4,
-        );
-        proof.fold_orientation = FoldOrientation::Msb;
-        let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
-        let back: BasefoldShardProof<F, EF> =
-            rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
-        assert_eq!(back.fold_orientation, FoldOrientation::Msb);
+        for orientation in [FoldOrientation::Msb, FoldOrientation::Lsb] {
+            let mut proof: BasefoldShardProof<F, EF> = BasefoldShardProof::empty(
+                std::array::from_fn(|_| F::ZERO),
+                4,
+            );
+            proof.fold_orientation = orientation;
+            let bytes = rmp_serde::to_vec(&proof).expect("serializes via rmp");
+            let back: BasefoldShardProof<F, EF> =
+                rmp_serde::from_slice(&bytes).expect("deserializes via rmp");
+            assert_eq!(back.fold_orientation, orientation);
+        }
     }
 
     #[test]

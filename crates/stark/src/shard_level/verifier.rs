@@ -12,7 +12,7 @@ use super::basefold_constraint_folder::{
     compute_padded_row_adjustment_basefold_host, eval_constraints_basefold_host,
     BasefoldConstraintFolder,
 };
-use super::shard_proof::BasefoldShardProof;
+use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::types::{AirOpenedValues, ChipOpenedValues};
@@ -191,6 +191,7 @@ impl BasefoldShardVerifier {
             &proof.logup_gkr_proof,
             self.max_log_row_count,
             beta_seed_dim,
+            proof.fold_orientation,
             challenger,
         )?;
 
@@ -956,6 +957,7 @@ fn verify_logup_gkr_host<SC>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
     max_log_row_count: usize,
     beta_seed_dim: usize,
+    fold_orientation: FoldOrientation,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
@@ -1060,7 +1062,14 @@ where
         // proof tag instead of env vars).
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
-        let eq_val = eq_eval_host(sumcheck_point, &eval_point);
+        let eq_val = match fold_orientation {
+            FoldOrientation::Msb => eq_eval_host(sumcheck_point, &eval_point),
+            FoldOrientation::Lsb => {
+                let mut rev = eval_point.clone();
+                rev.reverse();
+                eq_eval_host(sumcheck_point, &rev)
+            }
+        };
         let n0 = round_proof.numerator_0;
         let n1 = round_proof.numerator_1;
         let d0 = round_proof.denominator_0;
