@@ -27,6 +27,104 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// (`verify_jagged_basefold_no_observe`) matches.  When `None`, the
 /// legacy two-commit flow runs (FRI commit upstream, jagged-PCS
 /// re-commits in Phase 4).
+/// Option B auto-precompute helper (GPU pipeline path).
+///
+/// When `precomputed_commit` is already `Some` (the host CPU path,
+/// which precomputes in `commit_basefold_path`) or the config is not
+/// the KoalaBear jagged-PCS config, this is a no-op — the inputs pass
+/// through unchanged.
+///
+/// Otherwise it runs the BaseFold pre-commit on the supplied
+/// (already-materialized) `main_traces` via
+/// [`crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit`]
+/// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
+/// registered), returns the 8-felt BaseFold digest as the new
+/// `main_commitment`, and returns `Some(precomputed)` so the caller
+/// threads it into Phase 4.  The matrices are moved into a named-tuple
+/// Vec for the commit and moved back out — no trace data is copied.
+fn maybe_auto_precompute_basefold<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    main_commitment: [Val<SC>; 8],
+    precomputed_commit: Option<
+        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+    >,
+) -> (
+    Vec<RowMajorMatrix<Val<SC>>>,
+    [Val<SC>; 8],
+    Option<crate::basefold_late_binding::jagged::PrecomputedJaggedCommit>,
+)
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static,
+{
+    use core::any::TypeId;
+    use crate::{InnerChallenge, InnerVal};
+
+    // Host path already supplied a precompute, or non-KoalaBear config
+    // (no jagged-PCS): pass through untouched.
+    if precomputed_commit.is_some()
+        || TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
+        || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
+        || TypeId::of::<SC::Challenger>()
+            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+    {
+        return (main_traces, main_commitment, precomputed_commit);
+    }
+
+    // Build named tuples, MOVING each matrix in (the `values` Vec is
+    // reinterpreted Val<SC> -> InnerVal under the TypeId gate; identical
+    // layout, no copy).
+    let named_inner: alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
+        .iter()
+        .zip(main_traces.into_iter())
+        .map(|(chip, trace)| {
+            let name = chip.name().to_string();
+            let width = trace.width;
+            let values = trace.values;
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(values);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            // SAFETY: Val<SC> == InnerVal under the TypeId gate above.
+            let values_inner: alloc::vec::Vec<InnerVal> =
+                unsafe { alloc::vec::Vec::from_raw_parts(ptr as *mut InnerVal, len, cap) };
+            (name, RowMajorMatrix::new(values_inner, width))
+        })
+        .collect();
+
+    let precomputed =
+        crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit(&named_inner);
+    let digest_inner: [InnerVal; 8] =
+        crate::basefold_late_binding::basefold_commit_digest(&precomputed.commit);
+
+    // Move matrices back out (same reinterpret, no copy).
+    let main_traces: Vec<RowMajorMatrix<Val<SC>>> = named_inner
+        .into_iter()
+        .map(|(_, trace)| {
+            let width = trace.width;
+            let values = trace.values;
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(values);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            // SAFETY: InnerVal == Val<SC> under the TypeId gate above.
+            let values_outer: alloc::vec::Vec<Val<SC>> =
+                unsafe { alloc::vec::Vec::from_raw_parts(ptr as *mut Val<SC>, len, cap) };
+            RowMajorMatrix::new(values_outer, width)
+        })
+        .collect();
+
+    // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the TypeId gate.
+    let main_commitment: [Val<SC>; 8] =
+        unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
+
+    (main_traces, main_commitment, Some(precomputed))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_to_basefold<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -97,6 +195,27 @@ where
 
     let main_traces: Vec<RowMajorMatrix<Val<SC>>> =
         main_trace_loader.materialize_all();
+
+    // Option B auto-precompute (GPU pipeline path). The host CPU prover
+    // supplies `Some(precomputed)` from `commit_basefold_path` / `open()`;
+    // the GPU pipeline cannot (it has no host-side commit step) and passes
+    // `None`.  Because the verifier ALWAYS uses
+    // `verify_jagged_basefold_no_observe` (Option B), a `None` here would
+    // make the prover observe the BaseFold commit in-band while the
+    // verifier skips it → transcript desync.  So when no precomputed
+    // commit was supplied and this is the KoalaBear jagged-PCS config, run
+    // the BaseFold pre-commit now (GPU-accelerated via the
+    // ZIREN_GPU_BASEFOLD hook) on the already-materialized traces, override
+    // `main_commitment` with its 8-felt digest, and thread the result into
+    // Phase 4 so the in-band observe is skipped.  Matrices move in/out of
+    // the named-tuple Vec with zero data copy.
+    let (main_traces, main_commitment, precomputed_commit) =
+        maybe_auto_precompute_basefold::<SC, A>(
+            chips,
+            main_traces,
+            main_commitment,
+            precomputed_commit,
+        );
     let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
 
     let n_chips = chips.len();
