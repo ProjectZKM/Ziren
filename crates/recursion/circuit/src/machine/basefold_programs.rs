@@ -313,6 +313,11 @@ mod tests {
             &mut challenger,
             // Host-only synthetic-witness builder; no device traces.
             None,
+            // CpuProver-equivalent orientation.
+            zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
+            // Option B precomputed-commit not used for synthetic
+            // witness builder — legacy in-band commit flow.
+            None,
         )
     }
 

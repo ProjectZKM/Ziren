@@ -18,6 +18,15 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// CPU callers pass `FoldOrientation::Msb`; GPU callers select per
 /// dispatch path. `device_traces` is per-shard per-worker and never
 /// shared across pool workers.
+///
+/// `precomputed_commit` (Option B single-main-commit flow): when
+/// `Some`, the BaseFold jagged-PCS commit was produced up-front by
+/// the orchestrator and its 8-felt digest IS `main_commitment`.  The
+/// Phase 4 jagged-PCS body skips its own commit step and the in-band
+/// commit observe; the verifier counterpart
+/// (`verify_jagged_basefold_no_observe`) matches.  When `None`, the
+/// legacy two-commit flow runs (FRI commit upstream, jagged-PCS
+/// re-commits in Phase 4).
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_to_basefold<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -29,6 +38,9 @@ pub fn prove_shard_to_basefold<SC, A>(
     challenger: &mut SC::Challenger,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
+    precomputed_commit: Option<
+        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+    >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -47,6 +59,7 @@ where
         challenger,
         device_traces,
         orientation,
+        precomputed_commit,
     )
 }
 
@@ -65,6 +78,9 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
+    precomputed_commit: Option<
+        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+    >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
@@ -212,6 +228,7 @@ where
             &logup_gkr_proof.logup_evaluations.point,
             challenger,
             _device_traces,
+            precomputed_commit,
         )
     };
     tracing::info!(
@@ -287,12 +304,23 @@ where
 /// `LbChallenger` config; otherwise returns `EvaluationProof::Empty`.
 /// The outer challenger is downcast to `&mut LbChallenger` so the
 /// jagged-PCS transcript stays bound to the shard's outer state.
+///
+/// When `precomputed_commit` is `Some`, the BaseFold commit was
+/// produced up-front by the orchestrator (Option B single-main-commit
+/// flow); steps (1)+(2) of the jagged-PCS pipeline are skipped and
+/// the in-band commit observe is suppressed — the commit's 8-felt
+/// digest was already observed in the Phase 1 prologue as
+/// `main_commitment`.  GPU jagged-PCS hooks (which do their own
+/// commit) are bypassed in that case to avoid a double-commit.
 fn emit_jagged_pcs_bytes<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
+    precomputed_commit: Option<
+        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+    >,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig,
@@ -302,7 +330,9 @@ where
     SC::Challenger: 'static,
 {
     use core::any::{Any, TypeId};
-    use crate::basefold_late_binding::jagged::prove_jagged_basefold;
+    use crate::basefold_late_binding::jagged::{
+        prove_jagged_basefold, prove_jagged_basefold_with_precomputed,
+    };
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
 
@@ -370,6 +400,31 @@ where
     let lb_challenger = challenger_any
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
+
+    // Option B single-main-commit fast path: when the orchestrator
+    // pre-computed the BaseFold commit, drive the host
+    // `prove_jagged_basefold_with_precomputed` body directly.  GPU
+    // hooks own their own commit, so they're bypassed in this mode to
+    // avoid double-committing — the GPU-driven Option B path is a
+    // separate (future) concern.
+    if let Some(precomputed) = precomputed_commit {
+        use std::sync::OnceLock;
+        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+        FIRED_ONCE.get_or_init(|| {
+            tracing::warn!(
+                "jagged_pcs Option B precomputed-commit path FIRED (n_chips={})",
+                chip_traces.len()
+            );
+        });
+        let bundle = prove_jagged_basefold_with_precomputed(
+            &chip_traces,
+            &r_row_per_chip,
+            precomputed,
+            None,
+            lb_challenger,
+        );
+        return EvaluationProof::Bundle(bundle);
+    }
 
     // Device jagged-PCS dispatch: the `_device_traces.is_some()`
     // guard is load-bearing — off-pool basefold workers pass `None`
