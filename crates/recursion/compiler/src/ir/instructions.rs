@@ -298,6 +298,23 @@ pub enum DslIr<C: Config> {
     CircuitV2BatchFRI(
         Box<(Ext<C::F, C::EF>, Vec<Ext<C::F, C::EF>>, Vec<Ext<C::F, C::EF>>, Vec<Felt<C::F>>)>,
     ),
+    /// Executes a PrefixSumChecks reduction. Per-row accumulator
+    /// update: new_acc = acc * ((1-x1)(1-x2) + x1*x2); new_field_acc =
+    /// x1 + 2 * field_acc. Tuple shape (matches SP1):
+    ///   (zero_const, one_const, accs_out, field_accs_out, x1_in, x2_in)
+    /// where `accs_out`/`field_accs_out` are pre-allocated slots
+    /// receiving the per-row outputs; final values land at the last
+    /// entry of each.
+    CircuitV2PrefixSumChecks(
+        Box<(
+            Felt<C::F>,                  // zero (constant)
+            Ext<C::F, C::EF>,            // one (constant)
+            Vec<Ext<C::F, C::EF>>,       // accs (one per row)
+            Vec<Felt<C::F>>,             // field_accs (one per row)
+            Vec<Felt<C::F>>,             // x1 inputs (boolean bits)
+            Vec<Ext<C::F, C::EF>>,       // x2 inputs (ext points)
+        )>,
+    ),
     /// Select's a variable based on a condition. (select(cond, true_val, false_val) => output).
     /// Should only be used when target is a gnark circuit.
     CircuitSelectV(Var<C::N>, Var<C::N>, Var<C::N>, Var<C::N>),

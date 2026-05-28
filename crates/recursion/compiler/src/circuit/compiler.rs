@@ -408,6 +408,40 @@ where
         }))
     }
 
+    fn prefix_sum_checks(
+        &mut self,
+        zero: Felt<C::F>,
+        one: Ext<C::F, C::EF>,
+        accs: Vec<Ext<C::F, C::EF>>,
+        field_accs: Vec<Felt<C::F>>,
+        x1: Vec<Felt<C::F>>,
+        x2: Vec<Ext<C::F, C::EF>>,
+    ) -> Instruction<C::F> {
+        // Write addresses for the per-row outputs first (mults backfilled later).
+        let acc_write_addrs: Vec<_> =
+            accs.clone().into_iter().map(|r| r.write(self)).collect();
+        let field_acc_write_addrs: Vec<_> =
+            field_accs.clone().into_iter().map(|r| r.write(self)).collect();
+        // Then read all but the last — the chip writes each acc/field_acc
+        // ONCE and the NEXT row reads it (last row's output is consumed
+        // by whoever called prefix_sum_checks_v2).
+        let _: Vec<_> = accs.iter().take(accs.len() - 1).map(|r| r.read(self)).collect();
+        let _: Vec<_> =
+            field_accs.iter().take(field_accs.len() - 1).map(|r| r.read(self)).collect();
+        Instruction::PrefixSumChecks(Box::new(PrefixSumChecksInstr {
+            addrs: PrefixSumChecksIo {
+                zero: zero.read(self),
+                one: one.read(self),
+                x1: x1.into_iter().map(|r| r.read(self)).collect(),
+                x2: x2.into_iter().map(|r| r.read(self)).collect(),
+                accs: acc_write_addrs,
+                field_accs: field_acc_write_addrs,
+            },
+            acc_mults: vec![C::F::ZERO; accs.len()],
+            field_acc_mults: vec![C::F::ZERO; field_accs.len()],
+        }))
+    }
+
     fn commit_public_values(
         &mut self,
         public_values: &RecursionPublicValues<Felt<C::F>>,
@@ -555,6 +589,9 @@ where
             }
             DslIr::CircuitV2FriFold(data) => f(self.fri_fold(data.0, data.1)),
             DslIr::CircuitV2BatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
+            DslIr::CircuitV2PrefixSumChecks(data) => {
+                f(self.prefix_sum_checks(data.0, data.1, data.2, data.3, data.4, data.5))
+            }
             DslIr::CircuitV2CommitPublicValues(public_values) => {
                 f(self.commit_public_values(&public_values))
             }

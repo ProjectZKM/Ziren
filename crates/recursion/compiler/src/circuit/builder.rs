@@ -26,6 +26,11 @@ pub trait CircuitV2Builder<C: Config> {
         p_at_zs: Vec<Ext<C::F, C::EF>>,
         p_at_xs: Vec<Felt<C::F>>,
     ) -> Ext<C::F, C::EF>;
+    fn prefix_sum_checks_v2(
+        &mut self,
+        x1: Vec<Felt<C::F>>,
+        x2: Vec<Ext<C::F, C::EF>>,
+    ) -> (Ext<C::F, C::EF>, Felt<C::F>);
     fn poseidon2_permute_v2(&mut self, state: [Felt<C::F>; WIDTH]) -> [Felt<C::F>; WIDTH];
     fn poseidon2_hash_v2(&mut self, array: &[Felt<C::F>]) -> [Felt<C::F>; DIGEST_SIZE];
     fn poseidon2_compress_v2(
@@ -138,6 +143,44 @@ impl<C: Config<F = KoalaBear>> CircuitV2Builder<C> for Builder<C> {
         let output: Ext<_, _> = self.uninit();
         self.push_op(DslIr::CircuitV2BatchFRI(Box::new((output, alpha_pows, p_at_zs, p_at_xs))));
         output
+    }
+
+    /// A version of `prefix_sum_checks` that uses the PrefixSumChecks
+    /// precompile. Inputs are the parallel boolean-bit vector `x1` and
+    /// the ext-point vector `x2`, both of even length. Returns
+    /// `(full_acc, mid_field_acc)`:
+    ///   full_acc = Π_k ((1-x1[k])(1-x2[k]) + x1[k]*x2[k])
+    ///   mid_field_acc = Horner-recompose x1[..len/2] (LSB-first)
+    ///
+    /// The "len % 2 == 0 / mid" shape matches SP1's caller in
+    /// `jagged_eval.rs`: it passes `merged_prefix_sum = current ++ next`
+    /// columns so the returned felt is the Horner sum of the FIRST
+    /// half (the `current` column).
+    fn prefix_sum_checks_v2(
+        &mut self,
+        x1: Vec<Felt<C::F>>,
+        x2: Vec<Ext<C::F, C::EF>>,
+    ) -> (Ext<C::F, C::EF>, Felt<C::F>) {
+        let len = x1.len();
+        assert_eq!(len, x2.len());
+        assert_eq!(len % 2, 0, "merged prefix sum must be even length");
+        let accs: Vec<Ext<_, _>> =
+            std::iter::from_fn(|| Some(self.uninit())).take(len).collect();
+        let field_accs: Vec<Felt<_>> =
+            std::iter::from_fn(|| Some(self.uninit())).take(len).collect();
+        let one: Ext<_, _> = self.uninit();
+        let zero: Felt<_> = self.uninit();
+        self.push_op(DslIr::ImmE(one, C::EF::ONE));
+        self.push_op(DslIr::ImmF(zero, C::F::ZERO));
+        self.push_op(DslIr::CircuitV2PrefixSumChecks(Box::new((
+            zero,
+            one,
+            accs.clone(),
+            field_accs.clone(),
+            x1,
+            x2,
+        ))));
+        (accs[len - 1], field_accs[len / 2 - 1])
     }
 
     /// Applies the Poseidon2 permutation to the given array.
