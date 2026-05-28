@@ -226,8 +226,26 @@ where
     .entered();
 
     // Phase 1: transcript prologue. Chip metadata observe (count +
-    // name length + name bytes) binds post-commit challenges to the
-    // shard's chip-set identity.
+    // per-chip log-height + name length + name bytes) binds post-
+    // commit challenges to the shard's chip-set identity AND each
+    // chip's row count.
+    //
+    // The per-chip height felt observe is gap #2 from
+    // `project_sp1_parity_three_tracks.md`: SP1 binds
+    // `num_real_entries` here (`/tmp/sp1/crates/hypercube/src/prover/
+    // shard.rs:687-694`); SP1 GPU mirror binds `poly_size`
+    // (`/tmp/sp1/sp1-gpu/crates/shard_prover/src/prover.rs:665-672`).
+    // Ziren observes `log_height` as a single felt — the value the
+    // recursion verifier already binds in this slot via
+    // `chip_height_bits` Horner-recompose (recursion/circuit/src/
+    // machine/shard_basefold.rs:410-424). The host verifier mirror
+    // in `shard_level::verifier::verify_shard_basefold` observes the
+    // same value sourced from `proof.chip_log_heights`.
+    //
+    // Order matches SP1:
+    //   public_values → main_commitment → num_chips →
+    //   per-chip { height_felt, name_len, name_bytes }
+    use p3_matrix::Matrix;
     let _t_phase1 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_transcript_prologue").entered();
@@ -239,7 +257,18 @@ where
         }
         let num_chips = Val::<SC>::from_u64(chips.len() as u64);
         challenger.observe(num_chips);
-        for chip in chips.iter() {
+        for (chip, trace) in chips.iter().zip(main_traces.iter()) {
+            // Per-chip log-height observe (gap #2). Source matches
+            // the `chip_log_heights` BTreeMap populated below.
+            let h = trace.height().max(1);
+            let log_h = if h.is_power_of_two() {
+                h.trailing_zeros() as u64
+            } else {
+                (usize::BITS - h.leading_zeros()) as u64
+            };
+            challenger.observe(Val::<SC>::from_u64(log_h));
+
+            // Name length + name bytes (unchanged).
             let name_bytes = chip.name();
             let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
             challenger.observe(len_felt);
@@ -362,7 +391,6 @@ where
     let _phase5_span = tracing::info_span!("phase_assembly").entered();
     let opened_values = ShardOpenedValues { chips: Vec::new() };
 
-    use p3_matrix::Matrix;
     let mut chip_log_heights = std::collections::BTreeMap::new();
     for (chip, trace) in chips.iter().zip(main_traces.iter()) {
         let h = trace.height().max(1);
