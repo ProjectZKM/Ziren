@@ -2973,14 +2973,86 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // Resolve a host-resident layer view. For `LayerState::Device`, pull
-    // the cells from the GPU registry up front. The V3 dispatch below
-    // still consults the per-shard `LogupTaskScope` for its
-    // device-resident handle (so it skips host marshalling on the hot
-    // path), but the pulled cells are always present as the fallback for
-    // V1/V2/host paths when V3 declines mid-shard or isn't registered.
-    // This removes the previous shape-only-proxy design where V3 decline
-    // panicked downstream consumers reading empty cells.
+    // ── Lazy device-resident V3 fast path (SP1-style full residency) ──
+    //
+    // The per-layer LogUp-GKR sumcheck state stays device-resident across
+    // layers: when the prior layer's V3 call stashed a device-output handle
+    // (every subsequent layer in a shard's GKR walk), V3 reads its
+    // (n0,d0,n1,d1) quadrants straight from that device buffer and needs NO
+    // host cells.  So for those layers we SKIP pulling the device layer to
+    // host entirely and run V3 device-resident — eliminating the
+    // device→host→device round-trip that dominated the reth wall.
+    //
+    // Only the first layer of a shard (no handle yet) or a V3 *decline*
+    // (e.g. the 28-var first layer above the device-vars cap) falls through
+    // to the host pull below, which feeds V2/V1/host.  Pull-on-decline keeps
+    // the fallback correct — vs the earlier eager-pull / shape-only-proxy
+    // that either always copied or panicked on empty cells when V3 declined.
+    //
+    // Dims come from the layer STATE — no pull needed to compute them.
+    let env_logup_device_on = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
+        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+        .unwrap_or(true);
+    let dims = (state.num_row_variables(), state.num_interaction_variables());
+    let total_vars_state = dims.0 + dims.1;
+    let v3_threshold_vars: usize = {
+        static THRESH: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+        *THRESH.get_or_init(|| {
+            std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0)
+        })
+    };
+    let v3_threshold_ok = !(v3_threshold_vars > 0 && total_vars_state < v3_threshold_vars);
+
+    let mut lazy_v3_attempted = false;
+    if env_logup_device_on && v3_threshold_ok && matches!(state, LayerState::Device { .. }) {
+        use core::any::TypeId;
+        type Ef4Lazy =
+            p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+        // The scope-based handle (`with_production_scope_mut`) is dormant
+        // today (no `install_circuit` populator), so the active handle is the
+        // TLS slot — peeking it (non-consuming) tells us whether the next V3
+        // call will run device-resident.  If the scope populator is wired
+        // later, this peek must also consult the scope.
+        if TypeId::of::<EF>() == TypeId::of::<Ef4Lazy>()
+            && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
+            && crate::shard_level::sumcheck_poly::peek_logup_v3_next_handle()
+        {
+            if let Some(gpu_hook_v3) =
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
+            {
+                use std::sync::OnceLock;
+                static LAZY_V3_FIRED: OnceLock<()> = OnceLock::new();
+                LAZY_V3_FIRED.get_or_init(|| {
+                    tracing::warn!(
+                        "V3 logup-round LAZY device-resident path FIRED (device \
+                         handle present, host pull skipped — SP1 full residency)"
+                    );
+                });
+                lazy_v3_attempted = true;
+                if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
+                    dims,
+                    None,
+                    eval_point,
+                    numerator_eval,
+                    denominator_eval,
+                    lambda,
+                    challenger,
+                    gpu_hook_v3,
+                ) {
+                    return proof;
+                }
+                // V3 declined → fall through to the host pull + V2/V1/host.
+            }
+        }
+    }
+
+    // Host-resident layer view.  For `LayerState::Device` this pulls the
+    // cells from the GPU registry — reached only when the lazy V3 fast path
+    // above didn't handle this layer (first layer, V3 decline, or V3 not
+    // eligible).  Feeds the V3 first-layer marshalling + V2/V1/host fallback.
     let pulled_owner: Option<GkrCircuitLayer<F, EF>> = match state {
         LayerState::Host(_) => None,
         LayerState::Device { circuit_id, handle, .. } => Some(
@@ -3089,9 +3161,10 @@ where
             // from the prior layer's output so flatten_layer is skipped.
             // Handle threading is via TLS (per project_368_369 design) — this
             // dispatch site stays signature-compatible with V2.
-            if let Some(gpu_hook_v3) =
-                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
-            {
+            if let (false, Some(gpu_hook_v3)) = (
+                lazy_v3_attempted,
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3(),
+            ) {
                 use std::sync::OnceLock;
                 static V3_FIRED_ONCE: OnceLock<()> = OnceLock::new();
                 V3_FIRED_ONCE.get_or_init(|| {
@@ -3102,7 +3175,8 @@ where
                     );
                 });
                 if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
-                    circuit,
+                    dims,
+                    Some(circuit),
                     eval_point,
                     numerator_eval,
                     denominator_eval,
@@ -3499,7 +3573,8 @@ where
 /// publishes the returned `next_layer` for the next round.
 #[allow(clippy::too_many_arguments)]
 fn try_logup_round_gpu_v3<F, EF, Challenger>(
-    circuit: &GkrCircuitLayer<F, EF>,
+    dims: (usize, usize),
+    circuit: Option<&GkrCircuitLayer<F, EF>>,
     eval_point: &[EF],
     numerator_eval: EF,
     denominator_eval: EF,
@@ -3543,12 +3618,7 @@ where
         unsafe { Vec::from_raw_parts(ptr.cast::<Ef4>(), len, cap) }
     }
 
-    let (num_row_variables, num_interaction_variables) = match circuit {
-        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
-        GkrCircuitLayer::FirstLayer(l) => {
-            (l.num_row_variables, l.num_interaction_variables)
-        }
-    };
+    let (num_row_variables, num_interaction_variables) = dims;
     let total_vars = num_row_variables + num_interaction_variables;
     if total_vars == 0 {
         return None;
@@ -3621,9 +3691,16 @@ where
     let (n0_flat, d0_flat, n1_flat, d1_flat) = if handle_present {
         (Vec::new(), Vec::new(), Vec::new(), Vec::new())
     } else {
+        // No device handle → this is the first-layer (or a decline-retry)
+        // call that must marshal host cells.  The lazy-pull dispatch only
+        // passes `circuit: None` when it expects a handle; if no handle
+        // materialized (stale peek / scope race) we decline so the caller
+        // pulls the real layer and retries via V2/host — never flatten an
+        // absent layer.
         match circuit {
-            GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
-            GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
+            Some(GkrCircuitLayer::Layer(l)) => flatten_layer::<EF, EF>(l),
+            Some(GkrCircuitLayer::FirstLayer(l)) => flatten_layer::<F, EF>(l),
+            None => return None,
         }
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);

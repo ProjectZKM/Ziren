@@ -708,6 +708,18 @@ pub fn take_logup_v3_next_handle() -> Option<DeviceLayerHandle> {
     LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take())
 }
 
+/// Non-consuming check for a stashed V3 device-layer handle.
+///
+/// Used by `prove_gkr_round`'s lazy-pull fast path to decide — WITHOUT
+/// consuming the handle or pulling the device layer to host — whether the
+/// next V3 call will run fully device-resident (handle present → reads
+/// quadrants from device, no host cells needed).  `take_logup_v3_next_handle`
+/// still consumes it inside the V3 driver.
+#[must_use]
+pub fn peek_logup_v3_next_handle() -> bool {
+    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow().is_some())
+}
+
 pub fn publish_logup_v3_next_handle(handle: DeviceLayerHandle) {
     LOGUP_V3_NEXT_HANDLE.with(|c| *c.borrow_mut() = Some(handle));
 }
