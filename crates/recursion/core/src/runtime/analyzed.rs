@@ -139,16 +139,6 @@ impl<F> RawProgram<Instruction<F>> {
                 Instruction::ExpReverseBitsLen(_) => {
                     incr(&mut counts.exp_reverse_bits_len_events, 1)
                 }
-                // FriFold: runtime emits ps_at_z.len() events per instruction
-                // (one per polynomial in the batch). Was off-by-default-1.
-                Instruction::FriFold(instr) => incr(
-                    &mut counts.fri_fold_events,
-                    instr.ext_vec_addrs.ps_at_z.len(),
-                ),
-                Instruction::BatchFRI(instr) => incr(
-                    &mut counts.batch_fri_events,
-                    instr.base_vec_addrs.p_at_x.len(),
-                ),
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
                     output_addrs_mults,

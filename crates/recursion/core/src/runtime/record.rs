@@ -8,8 +8,8 @@ use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 use crate::machine::RecursionAirEventCount;
 
 use super::{
-    BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
-    FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
+    BaseAluEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
+    MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
 };
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -36,8 +36,6 @@ pub struct ExecutionRecord<F> {
     pub poseidon2_events: Vec<Poseidon2Event<F>>,
     pub select_events: Vec<SelectEvent<F>>,
     pub exp_reverse_bits_len_events: Vec<ExpReverseBitsEvent<F>>,
-    pub fri_fold_events: Vec<FriFoldEvent<F>>,
-    pub batch_fri_events: Vec<BatchFRIEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
 }
 
@@ -52,7 +50,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
 
         stats.insert("poseidon2_events".to_string(), self.poseidon2_events.len());
         stats.insert("exp_reverse_bits_events".to_string(), self.exp_reverse_bits_len_events.len());
-        stats.insert("fri_fold_events".to_string(), self.fri_fold_events.len());
 
         stats
     }
@@ -70,8 +67,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             poseidon2_events,
             select_events,
             exp_reverse_bits_len_events,
-            fri_fold_events,
-            batch_fri_events,
             commit_pv_hash_events,
         } = self;
         base_alu_events.append(&mut other.base_alu_events);
@@ -81,8 +76,6 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         poseidon2_events.append(&mut other.poseidon2_events);
         select_events.append(&mut other.select_events);
         exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
-        fri_fold_events.append(&mut other.fri_fold_events);
-        batch_fri_events.append(&mut other.batch_fri_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
     }
 
@@ -133,8 +126,6 @@ pub struct UnsafeRecord<F> {
     pub poseidon2_events: Vec<MaybeUninit<UnsafeCell<Poseidon2Event<F>>>>,
     pub select_events: Vec<MaybeUninit<UnsafeCell<SelectEvent<F>>>>,
     pub exp_reverse_bits_len_events: Vec<MaybeUninit<UnsafeCell<ExpReverseBitsEvent<F>>>>,
-    pub fri_fold_events: Vec<MaybeUninit<UnsafeCell<FriFoldEvent<F>>>>,
-    pub batch_fri_events: Vec<MaybeUninit<UnsafeCell<BatchFRIEvent<F>>>>,
     pub commit_pv_hash_events: Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
 }
 
@@ -170,8 +161,6 @@ impl<F> UnsafeRecord<F> {
             exp_reverse_bits_len_events: create_uninit_vec(
                 event_counts.exp_reverse_bits_len_events,
             ),
-            fri_fold_events: create_uninit_vec(event_counts.fri_fold_events),
-            batch_fri_events: create_uninit_vec(event_counts.batch_fri_events),
             // Pre-size from the counters added to RecursionAirEventCount
             // so all 11 event vecs are ready for offset-based writes.
             commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
@@ -222,14 +211,6 @@ impl<F> UnsafeRecord<F> {
                 Vec<MaybeUninit<UnsafeCell<ExpReverseBitsEvent<F>>>>,
                 Vec<ExpReverseBitsEvent<F>>,
             >(self.exp_reverse_bits_len_events),
-            fri_fold_events: std::mem::transmute::<
-                Vec<MaybeUninit<UnsafeCell<FriFoldEvent<F>>>>,
-                Vec<FriFoldEvent<F>>,
-            >(self.fri_fold_events),
-            batch_fri_events: std::mem::transmute::<
-                Vec<MaybeUninit<UnsafeCell<BatchFRIEvent<F>>>>,
-                Vec<BatchFRIEvent<F>>,
-            >(self.batch_fri_events),
             commit_pv_hash_events: std::mem::transmute::<
                 Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
                 Vec<CommitPublicValuesEvent<F>>,

@@ -11,9 +11,7 @@ use crate::{
     chips::{
         alu_base::{BaseAluChip, NUM_BASE_ALU_ENTRIES_PER_ROW},
         alu_ext::{ExtAluChip, NUM_EXT_ALU_ENTRIES_PER_ROW},
-        batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
-        fri_fold::FriFoldChip,
         mem::{
             constant::NUM_CONST_MEM_ENTRIES_PER_ROW, variable::NUM_VAR_MEM_ENTRIES_PER_ROW,
             MemoryConstChip, MemoryVarChip,
@@ -43,8 +41,6 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE>),
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
     Select(SelectChip),
-    FriFold(FriFoldChip<DEGREE>),
-    BatchFRI(BatchFRIChip<DEGREE>),
     ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE>),
     PublicValues(PublicValuesChip),
 }
@@ -56,8 +52,6 @@ pub struct RecursionAirEventCount {
     pub base_alu_events: usize,
     pub ext_alu_events: usize,
     pub poseidon2_wide_events: usize,
-    pub fri_fold_events: usize,
-    pub batch_fri_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
     /// Counter for commit_pv_hash events (CommitPublicValues match arm
@@ -78,8 +72,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
             RecursionAir::PublicValues(PublicValuesChip),
@@ -100,8 +92,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
             RecursionAir::PublicValues(PublicValuesChip),
@@ -120,7 +110,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
             RecursionAir::PublicValues(PublicValuesChip),
@@ -146,7 +135,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
@@ -157,13 +145,16 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     }
 
     pub fn shrink_shape() -> RecursionShape {
+        // Track 2 (BatchFRI/FriFold retirement): the alpha-power RLC
+        // formerly batched in BatchFRI now expands into ~3 ExtAlu rows
+        // per term (SubEF + MulE + AddE). Bump ExtAlu cap from 15 to 18
+        // to absorb migrated rows; BatchFRI entry removed entirely.
         let shape: std::collections::BTreeMap<String, usize> = [
             (Self::MemoryVar(MemoryVarChip::default()), 18),
             (Self::Select(SelectChip), 18),
             (Self::MemoryConst(MemoryConstChip::default()), 17),
-            (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
             (Self::BaseAlu(BaseAluChip), 17),
-            (Self::ExtAlu(ExtAluChip), 15),
+            (Self::ExtAlu(ExtAluChip), 18),
             (Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>), 17),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
@@ -197,7 +188,6 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
                 heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
             ),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
-            (Self::BatchFRI(BatchFRIChip::<DEGREE>), heights.batch_fri_events),
             (Self::Select(SelectChip), heights.select_events),
             (
                 Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
@@ -235,16 +225,6 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
                 output_addrs_mults,
                 input_addr: _, // No receive lookup for the hint operation
             }) => self.mem_var_events += output_addrs_mults.len(),
-            // FriFold runtime emits ps_at_z.len() events per instruction
-            // (one per polynomial in the batch); was off-by-default-1. Benign
-            // for push-based reserve, but UB-prone for offset writes via
-            // UnsafeRecord (uninit slots → bad transmute).
-            Instruction::FriFold(instr) => {
-                self.fri_fold_events += instr.ext_vec_addrs.ps_at_z.len()
-            }
-            Instruction::BatchFRI(instr) => {
-                self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
-            }
             Instruction::HintAddCurve(HintAddCurveInstr {
                 output_x_addrs_mults,
                 output_y_addrs_mults,
@@ -304,8 +284,8 @@ impl From<RecursionShape> for OrderedShape {
 mod basefold_air_assertions {
     use super::*;
     use crate::chips::{
-        alu_base::BaseAluChip, alu_ext::ExtAluChip, batch_fri::BatchFRIChip,
-        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip,
+        alu_base::BaseAluChip, alu_ext::ExtAluChip,
+        exp_reverse_bits::ExpReverseBitsLenChip,
         mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
         poseidon2_skinny::Poseidon2SkinnyChip, poseidon2_wide::Poseidon2WideChip,
         public_values::PublicValuesChip, select::SelectChip,
@@ -341,13 +321,9 @@ mod basefold_air_assertions {
         assert_basefold_air::<Poseidon2SkinnyChip<9>>();
         // 7. Select
         assert_basefold_air::<SelectChip>();
-        // 8. FriFold (DEGREE=9)
-        assert_basefold_air::<FriFoldChip<9>>();
-        // 9. BatchFRI (DEGREE=9)
-        assert_basefold_air::<BatchFRIChip<9>>();
-        // 10. ExpReverseBitsLen (DEGREE=9)
+        // 8. ExpReverseBitsLen (DEGREE=9)
         assert_basefold_air::<ExpReverseBitsLenChip<9>>();
-        // 11. PublicValues
+        // 9. PublicValues
         assert_basefold_air::<PublicValuesChip>();
 
         // Enum-level: the `#[derive(MachineAir)]` macro emits a generic

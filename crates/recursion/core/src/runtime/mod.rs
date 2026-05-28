@@ -95,8 +95,6 @@ pub struct WalkerState<F: Default + Copy> {
     pub nb_base_ops: usize,
     pub nb_memory_ops: usize,
     pub nb_branch_ops: usize,
-    pub nb_fri_fold: usize,
-    pub nb_batch_fri: usize,
     pub nb_print_f: usize,
     pub nb_print_e: usize,
 }
@@ -131,10 +129,6 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     pub nb_select: usize,
 
     pub nb_exp_reverse_bits: usize,
-
-    pub nb_fri_fold: usize,
-
-    pub nb_batch_fri: usize,
 
     pub nb_print_f: usize,
 
@@ -262,8 +256,6 @@ where
             nb_base_ops: 0,
             nb_memory_ops: 0,
             nb_branch_ops: 0,
-            nb_fri_fold: 0,
-            nb_batch_fri: 0,
             nb_print_f: 0,
             nb_print_e: 0,
             clk: F::ZERO,
@@ -285,11 +277,9 @@ where
         tracing::debug!("Poseidon Skinny Operations: {}", self.nb_poseidons);
         tracing::debug!("Poseidon Wide Operations: {}", self.nb_wide_poseidons);
         tracing::debug!("Exp Reverse Bits Operations: {}", self.nb_exp_reverse_bits);
-        tracing::debug!("FriFold Operations: {}", self.nb_fri_fold);
         tracing::debug!("Field Operations: {}", self.nb_base_ops);
         tracing::debug!("Select Operations: {}", self.nb_select);
         tracing::debug!("Extension Operations: {}", self.nb_ext_ops);
-        tracing::debug!("BatchFRI Operations: {}", self.nb_batch_fri);
         tracing::debug!("Memory Operations: {}", self.nb_memory_ops);
         tracing::debug!("Branch Operations: {}", self.nb_branch_ops);
         for (name, entry) in self.cycle_tracker.iter().sorted_by_key(|(name, _)| *name) {
@@ -397,8 +387,6 @@ where
             nb_base_ops: self.nb_base_ops,
             nb_memory_ops: self.nb_memory_ops,
             nb_branch_ops: self.nb_branch_ops,
-            nb_fri_fold: self.nb_fri_fold,
-            nb_batch_fri: self.nb_batch_fri,
             nb_print_f: self.nb_print_f,
             nb_print_e: self.nb_print_e,
         };
@@ -433,8 +421,6 @@ where
         self.nb_base_ops = state.nb_base_ops;
         self.nb_memory_ops = state.nb_memory_ops;
         self.nb_branch_ops = state.nb_branch_ops;
-        self.nb_fri_fold = state.nb_fri_fold;
-        self.nb_batch_fri = state.nb_batch_fri;
         self.nb_print_f = state.nb_print_f;
         self.nb_print_e = state.nb_print_e;
         walker_result?;
@@ -740,122 +726,6 @@ where
                     }
                 }
 
-                Instruction::FriFold(instr) => {
-                    let FriFoldInstr {
-                        base_single_addrs,
-                        ext_single_addrs,
-                        ext_vec_addrs,
-                        alpha_pow_mults,
-                        ro_mults,
-                    } = *instr;
-                    state.nb_fri_fold += 1;
-                    let x = self.mr_us(base_single_addrs.x).val[0];
-                    let z = self.mr_us(ext_single_addrs.z).val;
-                    let z: EF = z.ext();
-                    let alpha = self.mr_us(ext_single_addrs.alpha).val;
-                    let alpha: EF = alpha.ext();
-                    let mat_opening = ext_vec_addrs
-                        .mat_opening
-                        .iter()
-                        .map(|addr| self.mr_us(*addr).val)
-                        .collect_vec();
-                    let ps_at_z = ext_vec_addrs
-                        .ps_at_z
-                        .iter()
-                        .map(|addr| self.mr_us(*addr).val)
-                        .collect_vec();
-
-                    for m in 0..ps_at_z.len() {
-                        // let m = F::from_u32(m);
-                        // Get the opening values.
-                        let p_at_x = mat_opening[m];
-                        let p_at_x: EF = p_at_x.ext();
-                        let p_at_z = ps_at_z[m];
-                        let p_at_z: EF = p_at_z.ext();
-
-                        // Calculate the quotient and update the values
-                        let quotient = (-p_at_z + p_at_x) / (-z + x);
-
-                        // First we peek to get the current value.
-                        let alpha_pow: EF =
-                            self.mr_us(ext_vec_addrs.alpha_pow_input[m]).val.ext();
-
-                        let ro: EF = self.mr_us(ext_vec_addrs.ro_input[m]).val.ext();
-
-                        let new_ro = ro + alpha_pow * quotient;
-                        let new_alpha_pow = alpha_pow * alpha;
-
-                        let _ = self.mw_us(
-                            ext_vec_addrs.ro_output[m],
-                            Block::from(new_ro.as_basis_coefficients_slice()),
-                            ro_mults[m],
-                        );
-
-                        let _ = self.mw_us(
-                            ext_vec_addrs.alpha_pow_output[m],
-                            Block::from(new_alpha_pow.as_basis_coefficients_slice()),
-                            alpha_pow_mults[m],
-                        );
-
-                        unsafe { Self::raw_write_ev(&rec.fri_fold_events[_offset + m], FriFoldEvent {
-                                base_single: FriFoldBaseIo { x },
-                                ext_single: FriFoldExtSingleIo {
-                                    z: Block::from(z.as_basis_coefficients_slice()),
-                                    alpha: Block::from(alpha.as_basis_coefficients_slice()),
-                                },
-                                ext_vec: FriFoldExtVecIo {
-                                    mat_opening: Block::from(p_at_x.as_basis_coefficients_slice()),
-                                    ps_at_z: Block::from(p_at_z.as_basis_coefficients_slice()),
-                                    alpha_pow_input: Block::from(alpha_pow.as_basis_coefficients_slice()),
-                                    ro_input: Block::from(ro.as_basis_coefficients_slice()),
-                                    alpha_pow_output: Block::from(new_alpha_pow.as_basis_coefficients_slice()),
-                                    ro_output: Block::from(new_ro.as_basis_coefficients_slice()),
-                                },
-                            }); }
-                    }
-                }
-                Instruction::BatchFRI(instr) => {
-                    let BatchFRIInstr { base_vec_addrs, ext_single_addrs, ext_vec_addrs, acc_mult } =
-                        *instr;
-
-                    let mut acc = EF::ZERO;
-                    let p_at_xs = base_vec_addrs
-                        .p_at_x
-                        .iter()
-                        .map(|addr| self.mr_us(*addr).val[0])
-                        .collect_vec();
-                    let p_at_zs = ext_vec_addrs
-                        .p_at_z
-                        .iter()
-                        .map(|addr| self.mr_us(*addr).val.ext::<EF>())
-                        .collect_vec();
-                    let alpha_pows: Vec<_> = ext_vec_addrs
-                        .alpha_pow
-                        .iter()
-                        .map(|addr| self.mr_us(*addr).val.ext::<EF>())
-                        .collect_vec();
-
-                    state.nb_batch_fri += p_at_zs.len();
-                    for m in 0..p_at_zs.len() {
-                        acc += alpha_pows[m] * (p_at_zs[m] - EF::from(p_at_xs[m]));
-                        unsafe { Self::raw_write_ev(&rec.batch_fri_events[_offset + m], BatchFRIEvent {
-                                base_vec: BatchFRIBaseVecIo { p_at_x: p_at_xs[m] },
-                                ext_single: BatchFRIExtSingleIo {
-                                    acc: Block::from(acc.as_basis_coefficients_slice()),
-                                },
-                                ext_vec: BatchFRIExtVecIo {
-                                    p_at_z: Block::from(p_at_zs[m].as_basis_coefficients_slice()),
-                                    alpha_pow: Block::from(alpha_pows[m].as_basis_coefficients_slice()),
-                                },
-                            }); }
-                    }
-
-                    let _ = self.mw_us(
-                        ext_single_addrs.acc,
-                        Block::from(acc.as_basis_coefficients_slice()),
-                        acc_mult,
-                    );
-                }
                 Instruction::CommitPublicValues(instr) => {
                     let pv_addrs = instr.pv_addrs.as_array();
                     let pv_values: [F; RECURSIVE_PROOF_NUM_PV_ELTS] =

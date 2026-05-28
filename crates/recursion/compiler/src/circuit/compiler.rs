@@ -357,57 +357,6 @@ where
         })
     }
 
-    fn fri_fold(
-        &mut self,
-        CircuitV2FriFoldOutput { alpha_pow_output, ro_output }: CircuitV2FriFoldOutput<C>,
-        CircuitV2FriFoldInput {
-            z,
-            alpha,
-            x,
-            mat_opening,
-            ps_at_z,
-            alpha_pow_input,
-            ro_input,
-        }: CircuitV2FriFoldInput<C>,
-    ) -> Instruction<C::F> {
-        Instruction::FriFold(Box::new(FriFoldInstr {
-            // Calculate before moving the vecs.
-            alpha_pow_mults: vec![C::F::ZERO; alpha_pow_output.len()],
-            ro_mults: vec![C::F::ZERO; ro_output.len()],
-
-            base_single_addrs: FriFoldBaseIo { x: x.read(self) },
-            ext_single_addrs: FriFoldExtSingleIo { z: z.read(self), alpha: alpha.read(self) },
-            ext_vec_addrs: FriFoldExtVecIo {
-                mat_opening: mat_opening.into_iter().map(|e| e.read(self)).collect(),
-                ps_at_z: ps_at_z.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow_input: alpha_pow_input.into_iter().map(|e| e.read(self)).collect(),
-                ro_input: ro_input.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow_output: alpha_pow_output.into_iter().map(|e| e.write(self)).collect(),
-                ro_output: ro_output.into_iter().map(|e| e.write(self)).collect(),
-            },
-        }))
-    }
-
-    fn batch_fri(
-        &mut self,
-        acc: Ext<C::F, C::EF>,
-        alpha_pows: Vec<Ext<C::F, C::EF>>,
-        p_at_zs: Vec<Ext<C::F, C::EF>>,
-        p_at_xs: Vec<Felt<C::F>>,
-    ) -> Instruction<C::F> {
-        Instruction::BatchFRI(Box::new(BatchFRIInstr {
-            base_vec_addrs: BatchFRIBaseVecIo {
-                p_at_x: p_at_xs.into_iter().map(|e| e.read(self)).collect(),
-            },
-            ext_single_addrs: BatchFRIExtSingleIo { acc: acc.write(self) },
-            ext_vec_addrs: BatchFRIExtVecIo {
-                p_at_z: p_at_zs.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow: alpha_pows.into_iter().map(|e| e.read(self)).collect(),
-            },
-            acc_mult: C::F::ZERO,
-        }))
-    }
-
     fn commit_public_values(
         &mut self,
         public_values: &RecursionPublicValues<Felt<C::F>>,
@@ -553,8 +502,6 @@ where
             DslIr::CircuitV2HintBitsF(output, value) => {
                 f(self.hint_bit_decomposition(value, output))
             }
-            DslIr::CircuitV2FriFold(data) => f(self.fri_fold(data.0, data.1)),
-            DslIr::CircuitV2BatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
             DslIr::CircuitV2CommitPublicValues(public_values) => {
                 f(self.commit_public_values(&public_values))
             }
@@ -662,26 +609,6 @@ where
                         output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
-                    }
-                    Instruction::FriFold(instr) => {
-                        let FriFoldInstr {
-                            ext_vec_addrs:
-                                FriFoldExtVecIo { ref alpha_pow_output, ref ro_output, .. },
-                            alpha_pow_mults,
-                            ro_mults,
-                            ..
-                        } = instr.as_mut();
-                        // Using `.chain` seems to be less performant.
-                        alpha_pow_mults.iter_mut().zip(alpha_pow_output).for_each(&mut backfill);
-                        ro_mults.iter_mut().zip(ro_output).for_each(&mut backfill);
-                    }
-                    Instruction::BatchFRI(instr) => {
-                        let BatchFRIInstr {
-                            ext_single_addrs: BatchFRIExtSingleIo { ref acc },
-                            acc_mult,
-                            ..
-                        } = instr.as_mut();
-                        backfill((acc_mult, acc));
                     }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
@@ -872,8 +799,6 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Select(_) => "Select",
         Instruction::ExpReverseBitsLen(_) => "ExpReverseBitsLen",
         Instruction::HintBits(_) => "HintBits",
-        Instruction::FriFold(_) => "FriFold",
-        Instruction::BatchFRI(_) => "BatchFRI",
         Instruction::Print(_) => "Print",
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
         Instruction::Hint(_) => "Hint",
@@ -1188,60 +1113,6 @@ mod tests {
             let expected_felt: Felt<_> = builder.eval(expected);
             builder.assert_felt_eq(result_felt, expected_felt);
         }
-        test_operations(builder.into_operations());
-    }
-
-    #[test]
-    fn test_fri_fold() {
-        setup_logger();
-
-        let mut builder = AsmBuilder::<F, EF>::default();
-
-        let mut felt_iter = rand_felt_iter(0xFEB29);
-        let mut random_felt = move || -> F { felt_iter.next().unwrap() };
-        let mut ext_iter = rand_felt4_iter(0x0451);
-        let mut random_ext = move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
-
-        for i in 2..17 {
-            // Generate random values for the inputs.
-            let x = random_felt();
-            let z = random_ext();
-            let alpha = random_ext();
-
-            let alpha_pow_input = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-            let ro_input = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-
-            let ps_at_z = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-            let mat_opening = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-
-            // Compute the outputs from the inputs.
-            let alpha_pow_output = (0..i).map(|i| alpha_pow_input[i] * alpha).collect::<Vec<EF>>();
-            let ro_output = (0..i)
-                .map(|i| {
-                    ro_input[i] + alpha_pow_input[i] * (-ps_at_z[i] + mat_opening[i]) / (-z + x)
-                })
-                .collect::<Vec<EF>>();
-
-            // Compute inputs and outputs through the builder.
-            let input_vars = CircuitV2FriFoldInput {
-                z: builder.eval(z.cons()),
-                alpha: builder.eval(alpha.cons()),
-                x: builder.eval(x),
-                mat_opening: mat_opening.iter().map(|e| builder.eval(e.cons())).collect(),
-                ps_at_z: ps_at_z.iter().map(|e| builder.eval(e.cons())).collect(),
-                alpha_pow_input: alpha_pow_input.iter().map(|e| builder.eval(e.cons())).collect(),
-                ro_input: ro_input.iter().map(|e| builder.eval(e.cons())).collect(),
-            };
-
-            let output_vars = builder.fri_fold_v2(input_vars);
-            for (lhs, rhs) in std::iter::zip(output_vars.alpha_pow_output, alpha_pow_output) {
-                builder.assert_ext_eq(lhs, rhs.cons());
-            }
-            for (lhs, rhs) in std::iter::zip(output_vars.ro_output, ro_output) {
-                builder.assert_ext_eq(lhs, rhs.cons());
-            }
-        }
-
         test_operations(builder.into_operations());
     }
 

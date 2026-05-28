@@ -32,20 +32,6 @@ extern void alu_ext_instr_to_row_koalabear(
       *reinterpret_cast<ExtAluAccessCols<kb31_t>*>(access));
 }
 
-extern void batch_fri_event_to_row_koalabear(const BatchFRIEvent<KoalaBearP3>* io,
-                                            BatchFRICols<KoalaBearP3>* cols) {
-  batch_fri::event_to_row<kb31_t>(
-      *reinterpret_cast<const BatchFRIEvent<kb31_t>*>(io),
-      *reinterpret_cast<BatchFRICols<kb31_t>*>(cols));
-}
-extern void batch_fri_instr_to_row_koalabear(
-    const BatchFRIInstrFFI<KoalaBearP3>* instr,
-    BatchFRIPreprocessedCols<KoalaBearP3>* cols, size_t index) {
-  batch_fri::instr_to_row<kb31_t>(
-      *reinterpret_cast<const BatchFRIInstrFFI<kb31_t>*>(instr),
-      *reinterpret_cast<BatchFRIPreprocessedCols<kb31_t>*>(cols), index);
-}
-
 extern void exp_reverse_bits_event_to_row_koalabear(
     const ExpReverseBitsEventFFI<KoalaBearP3>* io, size_t i,
     ExpReverseBitsLenCols<KoalaBearP3>* cols) {
@@ -59,20 +45,6 @@ extern void exp_reverse_bits_instr_to_row_koalabear(
   exp_reverse_bits::instr_to_row<kb31_t>(
       *reinterpret_cast<const ExpReverseBitsInstrFFI<kb31_t>*>(instr), i, len,
       *reinterpret_cast<ExpReverseBitsLenPreprocessedCols<kb31_t>*>(cols));
-}
-
-extern void fri_fold_event_to_row_koalabear(const FriFoldEvent<KoalaBearP3>* io,
-                                           FriFoldCols<KoalaBearP3>* cols) {
-  fri_fold::event_to_row<kb31_t>(
-      *reinterpret_cast<const FriFoldEvent<kb31_t>*>(io),
-      *reinterpret_cast<FriFoldCols<kb31_t>*>(cols));
-}
-extern void fri_fold_instr_to_row_koalabear(
-    const FriFoldInstrFFI<KoalaBearP3>* instr, size_t i,
-    FriFoldPreprocessedCols<KoalaBearP3>* cols) {
-  fri_fold::instr_to_row<kb31_t>(
-      *reinterpret_cast<const FriFoldInstrFFI<kb31_t>*>(instr), i,
-      *reinterpret_cast<FriFoldPreprocessedCols<kb31_t>*>(cols));
 }
 
 extern void public_values_event_to_row_koalabear(
