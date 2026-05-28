@@ -683,6 +683,18 @@ where
                         } = instr.as_mut();
                         backfill((acc_mult, acc));
                     }
+                    Instruction::PrefixSumChecks(instr) => {
+                        // Each step writes one acc + one field_acc address; the
+                        // per-step mult lives in the parallel `*_mults` vec at
+                        // the matching index.
+                        let PrefixSumChecksInstr {
+                            addrs: PrefixSumChecksIo { accs, field_accs, .. },
+                            acc_mults,
+                            field_acc_mults,
+                        } = instr.as_mut();
+                        acc_mults.iter_mut().zip(accs.iter()).for_each(&mut backfill);
+                        field_acc_mults.iter_mut().zip(field_accs.iter()).for_each(&mut backfill);
+                    }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
                     }) => {
@@ -874,6 +886,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::HintBits(_) => "HintBits",
         Instruction::FriFold(_) => "FriFold",
         Instruction::BatchFRI(_) => "BatchFRI",
+        Instruction::PrefixSumChecks(_) => "PrefixSumChecks",
         Instruction::Print(_) => "Print",
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
         Instruction::Hint(_) => "Hint",

@@ -149,6 +149,10 @@ impl<F> RawProgram<Instruction<F>> {
                     &mut counts.batch_fri_events,
                     instr.base_vec_addrs.p_at_x.len(),
                 ),
+                Instruction::PrefixSumChecks(instr) => incr(
+                    &mut counts.prefix_sum_checks_events,
+                    instr.addrs.x1.len(),
+                ),
                 Instruction::Hint(HintInstr { output_addrs_mults })
                 | Instruction::HintBits(HintBitsInstr {
                     output_addrs_mults,

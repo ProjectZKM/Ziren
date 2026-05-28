@@ -58,6 +58,7 @@ pub struct RecursionAirEventCount {
     pub poseidon2_wide_events: usize,
     pub fri_fold_events: usize,
     pub batch_fri_events: usize,
+    pub prefix_sum_checks_events: usize,
     pub select_events: usize,
     pub exp_reverse_bits_len_events: usize,
     /// Counter for commit_pv_hash events (CommitPublicValues match arm
@@ -244,6 +245,9 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             }
             Instruction::BatchFRI(instr) => {
                 self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
+            }
+            Instruction::PrefixSumChecks(instr) => {
+                self.prefix_sum_checks_events += instr.addrs.x1.len()
             }
             Instruction::HintAddCurve(HintAddCurveInstr {
                 output_x_addrs_mults,

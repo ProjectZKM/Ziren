@@ -11,6 +11,7 @@ use super::{
     BaseAluEvent, BatchFRIEvent, CommitPublicValuesEvent, ExpReverseBitsEvent, ExtAluEvent,
     FriFoldEvent, MemEvent, Poseidon2Event, RecursionProgram, RecursionPublicValues, SelectEvent,
 };
+use crate::PrefixSumChecksEvent;
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 #[serde(bound(serialize = "F: Serialize", deserialize = "F: Deserialize<'de> + Default"))]
@@ -38,6 +39,7 @@ pub struct ExecutionRecord<F> {
     pub exp_reverse_bits_len_events: Vec<ExpReverseBitsEvent<F>>,
     pub fri_fold_events: Vec<FriFoldEvent<F>>,
     pub batch_fri_events: Vec<BatchFRIEvent<F>>,
+    pub prefix_sum_checks_events: Vec<PrefixSumChecksEvent<F>>,
     pub commit_pv_hash_events: Vec<CommitPublicValuesEvent<F>>,
 }
 
@@ -72,6 +74,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
             exp_reverse_bits_len_events,
             fri_fold_events,
             batch_fri_events,
+            prefix_sum_checks_events,
             commit_pv_hash_events,
         } = self;
         base_alu_events.append(&mut other.base_alu_events);
@@ -83,6 +86,7 @@ impl<F: PrimeField32> MachineRecord for ExecutionRecord<F> {
         exp_reverse_bits_len_events.append(&mut other.exp_reverse_bits_len_events);
         fri_fold_events.append(&mut other.fri_fold_events);
         batch_fri_events.append(&mut other.batch_fri_events);
+        prefix_sum_checks_events.append(&mut other.prefix_sum_checks_events);
         commit_pv_hash_events.append(&mut other.commit_pv_hash_events);
     }
 
@@ -135,6 +139,8 @@ pub struct UnsafeRecord<F> {
     pub exp_reverse_bits_len_events: Vec<MaybeUninit<UnsafeCell<ExpReverseBitsEvent<F>>>>,
     pub fri_fold_events: Vec<MaybeUninit<UnsafeCell<FriFoldEvent<F>>>>,
     pub batch_fri_events: Vec<MaybeUninit<UnsafeCell<BatchFRIEvent<F>>>>,
+    pub prefix_sum_checks_events:
+        Vec<MaybeUninit<UnsafeCell<PrefixSumChecksEvent<F>>>>,
     pub commit_pv_hash_events: Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
 }
 
@@ -172,6 +178,9 @@ impl<F> UnsafeRecord<F> {
             ),
             fri_fold_events: create_uninit_vec(event_counts.fri_fold_events),
             batch_fri_events: create_uninit_vec(event_counts.batch_fri_events),
+            prefix_sum_checks_events: create_uninit_vec(
+                event_counts.prefix_sum_checks_events,
+            ),
             // Pre-size from the counters added to RecursionAirEventCount
             // so all 11 event vecs are ready for offset-based writes.
             commit_pv_hash_events: create_uninit_vec(event_counts.commit_pv_hash_events),
@@ -230,6 +239,10 @@ impl<F> UnsafeRecord<F> {
                 Vec<MaybeUninit<UnsafeCell<BatchFRIEvent<F>>>>,
                 Vec<BatchFRIEvent<F>>,
             >(self.batch_fri_events),
+            prefix_sum_checks_events: std::mem::transmute::<
+                Vec<MaybeUninit<UnsafeCell<PrefixSumChecksEvent<F>>>>,
+                Vec<PrefixSumChecksEvent<F>>,
+            >(self.prefix_sum_checks_events),
             commit_pv_hash_events: std::mem::transmute::<
                 Vec<MaybeUninit<UnsafeCell<CommitPublicValuesEvent<F>>>>,
                 Vec<CommitPublicValuesEvent<F>>,

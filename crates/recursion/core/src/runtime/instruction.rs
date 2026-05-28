@@ -17,6 +17,7 @@ pub enum Instruction<F> {
     HintAddCurve(HintAddCurveInstr<F>),
     FriFold(Box<FriFoldInstr<F>>),
     BatchFRI(Box<BatchFRIInstr<F>>),
+    PrefixSumChecks(Box<PrefixSumChecksInstr<F>>),
     Print(PrintInstr<F>),
     HintExt2Felts(HintExt2FeltsInstr<F>),
     CommitPublicValues(Box<CommitPublicValuesInstr<F>>),
@@ -252,6 +253,31 @@ pub fn batch_fri<F: PrimeCharacteristicRing>(
             alpha_pow: alpha_pows.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
         },
         acc_mult: F::from_u32(acc_mult),
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn prefix_sum_checks<F: PrimeCharacteristicRing>(
+    zero: u32,
+    one: u32,
+    x1: Vec<u32>,
+    x2: Vec<u32>,
+    accs: Vec<u32>,
+    field_accs: Vec<u32>,
+    acc_mults: Vec<u32>,
+    field_acc_mults: Vec<u32>,
+) -> Instruction<F> {
+    Instruction::PrefixSumChecks(Box::new(PrefixSumChecksInstr {
+        addrs: PrefixSumChecksIo {
+            zero: Address(F::from_u32(zero)),
+            one: Address(F::from_u32(one)),
+            x1: x1.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
+            x2: x2.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
+            accs: accs.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
+            field_accs: field_accs.iter().map(|elm| Address(F::from_u32(*elm))).collect(),
+        },
+        acc_mults: acc_mults.iter().map(|mult| F::from_u32(*mult)).collect(),
+        field_acc_mults: field_acc_mults.iter().map(|mult| F::from_u32(*mult)).collect(),
     }))
 }
 

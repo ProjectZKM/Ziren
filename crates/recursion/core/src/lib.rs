@@ -437,6 +437,51 @@ pub struct BatchFRIEvent<F> {
     pub ext_vec: BatchFRIExtVecIo<Block<F>>,
 }
 
+/// The address inputs/outputs for the `PrefixSumChecks` operation.
+///
+/// Direct port of SP1's `PrefixSumChecksIo`. One row of the chip
+/// consumes one `(x1, x2)` pair and produces one new `(acc, field_acc)`.
+/// `zero` and `one` are constant-address handles for the boundary
+/// accumulator initial values; this avoids per-call rematerialization.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrefixSumChecksIo<V> {
+    pub zero: V,
+    pub one: V,
+    pub x1: Vec<V>,
+    pub x2: Vec<V>,
+    pub accs: Vec<V>,
+    pub field_accs: Vec<V>,
+}
+
+/// Instruction invoking a single `PrefixSumChecks` reduction:
+/// streams over the parallel `x1`/`x2` vectors and emits one event
+/// per pair. Final accumulators land at the last entries of `accs`
+/// and `field_accs`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrefixSumChecksInstr<F> {
+    pub addrs: PrefixSumChecksIo<Address<F>>,
+    pub acc_mults: Vec<F>,
+    pub field_acc_mults: Vec<F>,
+}
+
+/// Per-row event of the `PrefixSumChecks` chip. SP1-aligned shape:
+/// `new_acc = acc * (1 - (x1 + x2) + 2 * x1 * x2)` and
+/// `new_field_acc = x1 + 2 * field_acc` (Horner step). Boolean-ness
+/// of `x1` is constrained in the chip; callers must supply boolean
+/// `x1` addresses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[repr(C)]
+pub struct PrefixSumChecksEvent<F> {
+    pub x1: F,
+    pub x2: Block<F>,
+    pub zero: F,
+    pub one: Block<F>,
+    pub acc: Block<F>,
+    pub new_acc: Block<F>,
+    pub field_acc: F,
+    pub new_field_acc: F,
+}
+
 /// An instruction that will save the public values to the execution record and will commit to
 /// it's digest.
 #[derive(Clone, Debug, Serialize, Deserialize)]

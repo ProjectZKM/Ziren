@@ -97,6 +97,7 @@ pub struct WalkerState<F: Default + Copy> {
     pub nb_branch_ops: usize,
     pub nb_fri_fold: usize,
     pub nb_batch_fri: usize,
+    pub nb_prefix_sum_checks: usize,
     pub nb_print_f: usize,
     pub nb_print_e: usize,
 }
@@ -135,6 +136,8 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     pub nb_fri_fold: usize,
 
     pub nb_batch_fri: usize,
+
+    pub nb_prefix_sum_checks: usize,
 
     pub nb_print_f: usize,
 
@@ -264,6 +267,7 @@ where
             nb_branch_ops: 0,
             nb_fri_fold: 0,
             nb_batch_fri: 0,
+            nb_prefix_sum_checks: 0,
             nb_print_f: 0,
             nb_print_e: 0,
             clk: F::ZERO,
@@ -399,6 +403,7 @@ where
             nb_branch_ops: self.nb_branch_ops,
             nb_fri_fold: self.nb_fri_fold,
             nb_batch_fri: self.nb_batch_fri,
+            nb_prefix_sum_checks: self.nb_prefix_sum_checks,
             nb_print_f: self.nb_print_f,
             nb_print_e: self.nb_print_e,
         };
@@ -855,6 +860,66 @@ where
                         Block::from(acc.as_basis_coefficients_slice()),
                         acc_mult,
                     );
+                }
+                Instruction::PrefixSumChecks(instr) => {
+                    let PrefixSumChecksInstr {
+                        addrs: PrefixSumChecksIo { zero, one, x1, x2, accs, field_accs },
+                        acc_mults,
+                        field_acc_mults,
+                    } = *instr;
+
+                    let zero_val = self.mr_us(zero).val[0];
+                    let one_val_ef = self.mr_us(one).val.ext::<EF>();
+
+                    let x1_f: Vec<F> =
+                        x1.iter().map(|addr| self.mr_us(*addr).val[0]).collect();
+                    let x2_ef: Vec<EF> =
+                        x2.iter().map(|addr| self.mr_us(*addr).val.ext::<EF>()).collect();
+
+                    state.nb_prefix_sum_checks += x1_f.len();
+
+                    let mut acc = EF::ONE;
+                    let mut field_acc = F::ZERO;
+                    for m in 0..x1_f.len() {
+                        let x1_ef: EF = EF::from(x1_f[m]);
+                        let product: EF = x1_ef * x2_ef[m];
+                        // (1 - x1 - x2 + 2*x1*x2) — algebraically equal
+                        // to (1 - x1)(1 - x2) + x1*x2 = eq(x1, x2)
+                        // (when x1 is boolean): the per-bit Lagrange factor.
+                        let lagrange_term: EF =
+                            EF::ONE - x1_ef - x2_ef[m] + product + product;
+                        let new_field_acc: F = x1_f[m] + field_acc.double();
+                        let new_acc: EF = acc * lagrange_term;
+
+                        unsafe {
+                            Self::raw_write_ev(
+                                &rec.prefix_sum_checks_events[_offset + m],
+                                PrefixSumChecksEvent {
+                                    zero: zero_val,
+                                    one: Block::from(one_val_ef.as_basis_coefficients_slice()),
+                                    x1: x1_f[m],
+                                    x2: Block::from(x2_ef[m].as_basis_coefficients_slice()),
+                                    acc: Block::from(acc.as_basis_coefficients_slice()),
+                                    new_acc: Block::from(new_acc.as_basis_coefficients_slice()),
+                                    field_acc,
+                                    new_field_acc,
+                                },
+                            );
+                        }
+
+                        acc = new_acc;
+                        field_acc = new_field_acc;
+                        let _ = self.mw_us(
+                            accs[m],
+                            Block::from(acc.as_basis_coefficients_slice()),
+                            acc_mults[m],
+                        );
+                        let _ = self.mw_us(
+                            field_accs[m],
+                            Block::from(field_acc),
+                            field_acc_mults[m],
+                        );
+                    }
                 }
                 Instruction::CommitPublicValues(instr) => {
                     let pv_addrs = instr.pv_addrs.as_array();
