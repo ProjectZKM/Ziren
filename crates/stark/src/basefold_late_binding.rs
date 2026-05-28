@@ -913,6 +913,48 @@ pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Device-resident GKR layer fetch-and-publish hook (full residency).
+//
+// `prove_gkr_round` calls this BEFORE deciding whether to pull the
+// device layer to host.  Given the per-shard `circuit_id` and THIS
+// round's `num_variables`, the ziren-gpu impl:
+//   1. populates the per-shard V3 layer cache from the layer-transition
+//      registry on first call (idempotent; filtered to adoptable layers
+//      so the over-cap first layer never blocks the cache front),
+//   2. match-pops the cache entry whose flat length == `1 << num_variables`
+//      (match-aware: small interleaved layers find no front-match and
+//      return false), and
+//   3. on a hit, wraps the device-resident `DeviceLogupLayerState` in a
+//      `DeviceLayerHandle` and publishes it to the V3 TLS handle slot
+//      (`publish_logup_v3_next_handle`).
+//
+// Returns `true` iff a matching device layer was published — in which
+// case `prove_gkr_round` SKIPS `pull_device_layer_to_host` and the V3
+// hook adopts the device buffers directly (no device→host→device
+// round-trip).  Returns `false` (no publish) for: cache miss, shape
+// mismatch (small/over-cap layer), hook unregistered, or CUDA error —
+// the caller then pulls + runs the host/V2 fallback exactly as before.
+pub type GpuV3FetchPublishFn = fn(circuit_id: u64, num_variables: usize) -> bool;
+
+static GPU_V3_FETCH_PUBLISH_HOOK: std::sync::OnceLock<GpuV3FetchPublishFn> =
+    std::sync::OnceLock::new();
+
+/// Register the device-resident GKR layer fetch-and-publish hook.
+/// Idempotent; `Err(existing)` if already registered.  Called once at
+/// ziren-gpu startup.
+pub fn register_gpu_v3_fetch_publish_hook(
+    f: GpuV3FetchPublishFn,
+) -> Result<(), GpuV3FetchPublishFn> {
+    GPU_V3_FETCH_PUBLISH_HOOK.set(f)
+}
+
+/// Read the registered fetch-and-publish hook, if any.
+#[must_use]
+pub fn get_gpu_v3_fetch_publish_hook() -> Option<GpuV3FetchPublishFn> {
+    GPU_V3_FETCH_PUBLISH_HOOK.get().copied()
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Device-resident `generate_first_layer` regen hook.
 //
 // Signature port only.  Returns the per-`circuit_id` first-layer payload

@@ -3007,44 +3007,57 @@ where
     let v3_threshold_ok = !(v3_threshold_vars > 0 && total_vars_state < v3_threshold_vars);
 
     let mut lazy_v3_attempted = false;
-    if env_logup_device_on && v3_threshold_ok && matches!(state, LayerState::Device { .. }) {
+    if env_logup_device_on && v3_threshold_ok {
         use core::any::TypeId;
         type Ef4Lazy =
             p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        // The scope-based handle (`with_production_scope_mut`) is dormant
-        // today (no `install_circuit` populator), so the active handle is the
-        // TLS slot — peeking it (non-consuming) tells us whether the next V3
-        // call will run device-resident.  If the scope populator is wired
-        // later, this peek must also consult the scope.
-        if TypeId::of::<EF>() == TypeId::of::<Ef4Lazy>()
-            && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
-            && crate::shard_level::sumcheck_poly::peek_logup_v3_next_handle()
-        {
-            if let Some(gpu_hook_v3) =
-                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
+        if let LayerState::Device { circuit_id, .. } = state {
+            if TypeId::of::<EF>() == TypeId::of::<Ef4Lazy>()
+                && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
             {
-                use std::sync::OnceLock;
-                static LAZY_V3_FIRED: OnceLock<()> = OnceLock::new();
-                LAZY_V3_FIRED.get_or_init(|| {
-                    tracing::warn!(
-                        "V3 logup-round LAZY device-resident path FIRED (device \
-                         handle present, host pull skipped — SP1 full residency)"
-                    );
-                });
-                lazy_v3_attempted = true;
-                if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
-                    dims,
-                    None,
-                    eval_point,
-                    numerator_eval,
-                    denominator_eval,
-                    lambda,
-                    challenger,
-                    gpu_hook_v3,
-                ) {
-                    return proof;
+                // Full residency: ask the device-side cache to publish THIS
+                // layer's device-resident state to the V3 TLS handle.  The hook
+                // is match-aware on `num_variables` and filters to adoptable
+                // layers, so small/interleaved/over-cap layers (e.g. the 28-var
+                // first layer) return `false` and fall through to the host pull.
+                // On success the V3 hook adopts the device buffers directly —
+                // no device→host→device round-trip.
+                let published =
+                    crate::basefold_late_binding::get_gpu_v3_fetch_publish_hook()
+                        .map(|h| h(*circuit_id, total_vars_state))
+                        .unwrap_or(false);
+                if published {
+                    if let Some(gpu_hook_v3) =
+                        crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
+                    {
+                        use std::sync::OnceLock;
+                        static LAZY_V3_FIRED: OnceLock<()> = OnceLock::new();
+                        LAZY_V3_FIRED.get_or_init(|| {
+                            tracing::warn!(
+                                "V3 logup-round LAZY device-resident path FIRED \
+                                 (cache published device layer to TLS, host pull \
+                                 skipped — SP1 full residency)"
+                            );
+                        });
+                        lazy_v3_attempted = true;
+                        if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
+                            dims,
+                            None,
+                            eval_point,
+                            numerator_eval,
+                            denominator_eval,
+                            lambda,
+                            challenger,
+                            gpu_hook_v3,
+                        ) {
+                            return proof;
+                        }
+                        // V3 declined (should not happen for a published,
+                        // adoptable layer) → fall through to the host pull +
+                        // V2/V1/host.  The TLS handle was consumed by
+                        // try_logup_round_gpu_v3, so no stale handle leaks.
+                    }
                 }
-                // V3 declined → fall through to the host pull + V2/V1/host.
             }
         }
     }
