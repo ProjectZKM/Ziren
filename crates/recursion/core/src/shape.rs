@@ -16,6 +16,7 @@ use crate::{
         exp_reverse_bits::ExpReverseBitsLenChip,
         mem::{MemoryConstChip, MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
+        prefix_sum_checks::PrefixSumChecksChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
     },
@@ -140,6 +141,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let poseidon2_wide =
             RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>).name();
         let batch_fri = RecursionAir::<F, DEGREE>::BatchFRI(BatchFRIChip::<DEGREE>).name();
+        let prefix_sum_checks =
+            RecursionAir::<F, DEGREE>::PrefixSumChecks(PrefixSumChecksChip).name();
         let select = RecursionAir::<F, DEGREE>::Select(SelectChip).name();
         let exp_reverse_bits_len =
             RecursionAir::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>).name();
@@ -153,6 +156,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 18),
                 (mem_const.clone(), 16),
                 (batch_fri.clone(), 17),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 15),
                 (ext_alu.clone(), 15),
                 (exp_reverse_bits_len.clone(), 17),
@@ -165,6 +169,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 19),
                 (mem_const.clone(), 17),
                 (batch_fri.clone(), 19),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 16),
                 (ext_alu.clone(), 16),
                 (exp_reverse_bits_len.clone(), 18),
@@ -176,6 +181,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 20),
                 (mem_const.clone(), 18),
                 (batch_fri.clone(), 21),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 16),
                 (ext_alu.clone(), 19),
                 (exp_reverse_bits_len.clone(), 18),
@@ -198,6 +204,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 18),
                 (mem_const.clone(), 17),
                 (batch_fri.clone(), 21),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
                 (exp_reverse_bits_len.clone(), 18),
@@ -220,6 +227,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 19),
                 (mem_const.clone(), 19),
                 (batch_fri.clone(), 21),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 18),
                 (ext_alu.clone(), 18),
                 (exp_reverse_bits_len.clone(), 18),
@@ -239,6 +247,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (select.clone(), 20),
                 (mem_const.clone(), 20),
                 (batch_fri.clone(), 21),
+                (prefix_sum_checks.clone(), 18),
                 (base_alu.clone(), 19),
                 (ext_alu.clone(), 20),
                 (exp_reverse_bits_len.clone(), 18),
