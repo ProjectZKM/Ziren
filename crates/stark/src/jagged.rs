@@ -93,7 +93,16 @@ pub struct JaggedPacking<F> {
     /// Per-chip metadata (row count, column count).
     pub chip_infos: Vec<JaggedChipInfo>,
     /// Cumulative offsets: `offsets[k]` is the starting index of the
-    /// k-th column in `dense_values`.
+    /// k-th column in `dense_values`.  SP1 parity (Phase 1 of gap #1,
+    /// May 28 2026): the slice carries `total_cols + 1` entries with
+    /// the final sentinel `offsets[total_cols] = total_values`,
+    /// matching SP1's `JaggedLittlePolynomialProverParams::col_prefix_sums_usize`
+    /// (slop/crates/jagged/src/poly.rs:236-254).  The recursion lift
+    /// (`shard_level_witness.rs:lift_jagged_basefold_bundle`) emits
+    /// `col_prefix_sums.len() = num_cols + 1` regardless; the sentinel
+    /// closes the host/recursion length gap and unblocks wiring
+    /// `prove_jagged_evaluation` (which expects
+    /// `num_chips = prefix_sums.len() - 1`) into the production path.
     pub offsets: Vec<usize>,
     /// Total number of values in the dense vector.
     pub total_values: usize,
@@ -132,6 +141,17 @@ pub fn compute_jagged_metadata<F: Field>(
             total_values += height;
         }
     }
+    // SP1 parity (gap #1 Phase 1): append final sentinel
+    // `offsets[total_cols] = total_values`.  Mirrors SP1
+    // `JaggedLittlePolynomialProverParams::new`
+    // (slop/crates/jagged/src/poly.rs:236-254) which closes
+    // `col_prefix_sums_usize` with `prefix_sums.last() + row_counts.last()`.
+    // Without it `prove_jagged_evaluation` would compute
+    // `num_chips = offsets.len() - 1 = total_cols - 1`, off by one
+    // versus the recursion verifier which sees
+    // `col_prefix_sums.len() == total_cols + 1` (see
+    // `recursion/circuit/src/recursive_jagged_pcs.rs:178`).
+    offsets.push(total_values);
 
     let log_dense_size = if total_values == 0 {
         0
@@ -279,6 +299,9 @@ pub fn pack_traces_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
+    // SP1 parity (gap #1 Phase 1): final sentinel — see
+    // `compute_jagged_metadata` for the rationale.
+    offsets.push(total_values);
 
     // Pad to next power of two.
     let log_dense_size = if total_values == 0 {
@@ -467,6 +490,9 @@ pub fn pack_folded_tables_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
+    // SP1 parity (gap #1 Phase 1): final sentinel — see
+    // `compute_jagged_metadata` for the rationale.
+    offsets.push(total_values);
     let log_dense_size = if total_values == 0 {
         0
     } else {

@@ -323,13 +323,18 @@ where
 
     // Patch row_count from bundle.packing.offsets.
     //
-    // Important: `offsets` has ONE ENTRY PER COLUMN (prover's
-    // compute_jagged_metadata pushes `chip.width` offsets per chip),
-    // not per chip.  Within a single chip's run of columns, consecutive
-    // offsets differ by exactly that chip's row_count (all columns
-    // have the same height).  So we walk offsets with a column-index
-    // cursor and read `offsets[col_idx + 1] - offsets[col_idx]` to get
-    // the height.
+    // Important: `offsets` has ONE ENTRY PER COLUMN plus a final
+    // sentinel `offsets[total_cols] = total_values` (gap #1 Phase 1,
+    // SP1 parity — see `crate::jagged::JaggedPacking::offsets`).  The
+    // prover's `compute_jagged_metadata` pushes `chip.width` offsets
+    // per chip and closes the slice with the sentinel.  Within a
+    // single chip's run of columns, consecutive offsets differ by
+    // exactly that chip's row_count (all columns have the same
+    // height).  So we walk offsets with a column-index cursor and
+    // read `offsets[col_idx + 1] - offsets[col_idx]` to get the
+    // height — the sentinel keeps the `col_idx + 1` lookup in-bounds
+    // for the last column too.  The `else if` fallback remains for
+    // legacy bundles serialized before the sentinel was added.
     let mut chip_infos = chip_infos;
     {
         let mut col_idx = 0usize;
