@@ -278,6 +278,51 @@ pub fn commit_basefold_late_binding_host(
     (commit, prover_data)
 }
 
+/// GPU-dispatched no-observe variant — Option B precompute uses this
+/// so the main-trace BaseFold commit runs on the device when
+/// `ZIREN_GPU_BASEFOLD=1` AND the hook is registered.  The hook's
+/// internal `challenger.observe` is absorbed by a throwaway challenger
+/// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
+/// observe is the real transcript binding).  Falls through to
+/// [`commit_basefold_late_binding_host_no_observe`] when the env is
+/// unset, the hook is unregistered, or the hook returns `Err`.
+pub fn commit_basefold_late_binding_no_observe(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+        if let Some(hook) = get_gpu_basefold_commit_hook() {
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            let mut throwaway: LbChallenger =
+                LbChallenger::new(zkm_primitives::poseidon2_init());
+            match hook(chip_traces, &mut throwaway) {
+                Ok(out) => {
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit FIRED (no-observe variant, \
+                             Option B precompute, area={}, log_stacking_height={})",
+                            out.0.area,
+                            out.0.log_stacking_height,
+                        );
+                    });
+                    return out;
+                }
+                Err(returned_traces) => {
+                    FELLBACK_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit hook returned Err on no-observe \
+                             variant — falling back to host."
+                        );
+                    });
+                    return commit_basefold_late_binding_host_no_observe(returned_traces);
+                }
+            }
+        }
+    }
+    commit_basefold_late_binding_host_no_observe(chip_traces)
+}
+
 /// Same as [`commit_basefold_late_binding_host`] but does NOT observe
 /// the commitment into the challenger.  Used by the Option B
 /// single-main-commit flow, where the BaseFold commit happens BEFORE
@@ -1246,7 +1291,7 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            crate::basefold_late_binding::commit_basefold_late_binding_host_no_observe(
+            crate::basefold_late_binding::commit_basefold_late_binding_no_observe(
                 dense_traces,
             )
         };
