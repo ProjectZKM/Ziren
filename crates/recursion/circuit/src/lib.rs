@@ -253,7 +253,23 @@ impl CircuitConfig for InnerConfig {
         p_at_zs: Vec<Ext<<Self as Config>::F, <Self as Config>::EF>>,
         p_at_xs: Vec<Felt<<Self as Config>::F>>,
     ) -> Ext<<Self as Config>::F, <Self as Config>::EF> {
-        builder.batch_fri_v2(alpha_pows, p_at_zs, p_at_xs)
+        // BatchFRI retirement (SP1 parity): express the alpha-power
+        // batched-opening RLC `acc = Σ alpha_pow·(p_at_z − p_at_x)` as
+        // generic ExtAlu ops instead of the dedicated BatchFRI chip
+        // (mirrors OuterConfig, which already inlines this). Lets the
+        // BatchFRI chip be dropped from the recursion machine.
+        let mut acc: Ext<_, _> = builder.uninit();
+        builder.push_op(DslIr::ImmE(acc, <Self as Config>::EF::ZERO));
+        for (alpha_pow, p_at_z, p_at_x) in izip!(alpha_pows, p_at_zs, p_at_xs) {
+            let temp_1: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::SubEF(temp_1, p_at_z, p_at_x));
+            let temp_2: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::MulE(temp_2, alpha_pow, temp_1));
+            let temp_3: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::AddE(temp_3, acc, temp_2));
+            acc = temp_3;
+        }
+        acc
     }
 
     fn num2bits(
@@ -381,7 +397,23 @@ impl CircuitConfig for WrapConfig {
         p_at_zs: Vec<Ext<<Self as Config>::F, <Self as Config>::EF>>,
         p_at_xs: Vec<Felt<<Self as Config>::F>>,
     ) -> Ext<<Self as Config>::F, <Self as Config>::EF> {
-        builder.batch_fri_v2(alpha_pows, p_at_zs, p_at_xs)
+        // BatchFRI retirement (SP1 parity): express the alpha-power
+        // batched-opening RLC `acc = Σ alpha_pow·(p_at_z − p_at_x)` as
+        // generic ExtAlu ops instead of the dedicated BatchFRI chip
+        // (mirrors OuterConfig, which already inlines this). Lets the
+        // BatchFRI chip be dropped from the recursion machine.
+        let mut acc: Ext<_, _> = builder.uninit();
+        builder.push_op(DslIr::ImmE(acc, <Self as Config>::EF::ZERO));
+        for (alpha_pow, p_at_z, p_at_x) in izip!(alpha_pows, p_at_zs, p_at_xs) {
+            let temp_1: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::SubEF(temp_1, p_at_z, p_at_x));
+            let temp_2: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::MulE(temp_2, alpha_pow, temp_1));
+            let temp_3: Ext<_, _> = builder.uninit();
+            builder.push_op(DslIr::AddE(temp_3, acc, temp_2));
+            acc = temp_3;
+        }
+        acc
     }
 
     fn num2bits(
