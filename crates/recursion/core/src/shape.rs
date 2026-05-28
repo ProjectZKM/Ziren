@@ -12,7 +12,6 @@ use crate::{
     chips::{
         alu_base::BaseAluChip,
         alu_ext::ExtAluChip,
-        batch_fri::BatchFRIChip,
         exp_reverse_bits::ExpReverseBitsLenChip,
         mem::{MemoryConstChip, MemoryVarChip},
         poseidon2_wide::Poseidon2WideChip,
@@ -139,22 +138,25 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let ext_alu = RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip).name();
         let poseidon2_wide =
             RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>).name();
-        let batch_fri = RecursionAir::<F, DEGREE>::BatchFRI(BatchFRIChip::<DEGREE>).name();
         let select = RecursionAir::<F, DEGREE>::Select(SelectChip).name();
         let exp_reverse_bits_len =
             RecursionAir::<F, DEGREE>::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>).name();
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
 
-        // Specify allowed shapes.
+        // Track 2 (BatchFRI/FriFold retirement): each retired
+        // BatchFRI row expands into 3 ExtAlu ops (SubEF + MulE + AddE).
+        // The BatchFRI column caps used to be 17..=21; the same number
+        // of underlying terms now lives in ExtAlu, so each shape gets
+        // a +3 bump on ext_alu (worst-case 21 → 24) to absorb the
+        // migrated rows. BatchFRI entries are removed entirely.
         let allowed_shapes = [
             // Fastest shape.
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 18),
                 (mem_const.clone(), 16),
-                (batch_fri.clone(), 17),
                 (base_alu.clone(), 15),
-                (ext_alu.clone(), 15),
+                (ext_alu.clone(), 18),
                 (exp_reverse_bits_len.clone(), 17),
                 (poseidon2_wide.clone(), 16),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
@@ -164,9 +166,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (mem_var.clone(), 19),
                 (select.clone(), 19),
                 (mem_const.clone(), 17),
-                (batch_fri.clone(), 19),
                 (base_alu.clone(), 16),
-                (ext_alu.clone(), 16),
+                (ext_alu.clone(), 20),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 17),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
@@ -175,72 +176,41 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (mem_var.clone(), 20),
                 (select.clone(), 20),
                 (mem_const.clone(), 18),
-                (batch_fri.clone(), 21),
                 (base_alu.clone(), 16),
-                (ext_alu.clone(), 19),
+                (ext_alu.clone(), 22),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Basefold normalize-sized shape.  The basefold normalize
-            // program produces ~660K instructions with chip heights:
-            // MemoryConst≈33842, MemoryVar≈11253, BaseAlu≈74980,
-            // ExtAlu≈70969, Poseidon2WideDeg3≈2012,
-            // ExpReverseBitsLen≈24, PublicValues≈4.  Powers-of-two
-            // log_heights with headroom: BaseAlu/ExtAlu→17,
-            // MemoryConst→16, MemoryVar→14 (rounded up to legacy
-            // minimum of 18 to share with smaller shapes).  This entry
-            // lets `fix_shape` succeed for basefold programs once
-            // the task / #59 enable that path; today the basefold
-            // builder skips fix_shape entirely.
+            // Basefold normalize-sized shape.
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 18),
                 (mem_const.clone(), 17),
-                (batch_fri.clone(), 21),
                 (base_alu.clone(), 18),
-                (ext_alu.clone(), 18),
+                (ext_alu.clone(), 22),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=0. After #249 lifted
-            // the stacked-PCS contract block, tendermint bundle-lift's
-            // first compose level (lift outputs → arity-4 compose)
-            // panics shape.rs:91 with chip heights none of the above
-            // shapes fit. Observed:
-            //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
-            //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
-            // Caps with 1-bit headroom on binding dimensions for reth/
-            // geth headroom. Placed before the larger #6 below so h=0
-            // compose programs prefer this smaller cap and pay less
-            // padding.
+            // Bundle-lift compose level h=0.
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 19),
                 (mem_const.clone(), 19),
-                (batch_fri.clone(), 21),
                 (base_alu.clone(), 18),
-                (ext_alu.clone(), 18),
+                (ext_alu.clone(), 22),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=1+. Each compose tree
-            // level grows: h=0 outputs become h=1 inputs, h=1 compose
-            // verifies them and produces bigger chip heights still.
-            // Tendermint h=1 panic showed roughly 2× h=0:
-            //   MemoryConst≈375959 (log≈19), Select≈315840 (log≈19),
-            //   ExtAlu≈306869 (log≈19), BaseAlu≈182828 (log≈18),
-            //   MemoryVar≈102404 (log≈17), Poseidon2WideDeg3≈59776 (log≈16).
-            // Bigger caps fit h=1 + h=2 + reth/geth deeper trees.
+            // Bundle-lift compose level h=1+.
             [
                 (mem_var.clone(), 19),
                 (select.clone(), 20),
                 (mem_const.clone(), 20),
-                (batch_fri.clone(), 21),
                 (base_alu.clone(), 19),
-                (ext_alu.clone(), 20),
+                (ext_alu.clone(), 23),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),

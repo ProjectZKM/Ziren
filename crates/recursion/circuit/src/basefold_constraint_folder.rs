@@ -290,8 +290,8 @@ mod basefold_air_assertions_circuit {
     use p3_air::Air;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_core::chips::{
-        alu_base::BaseAluChip, alu_ext::ExtAluChip, batch_fri::BatchFRIChip,
-        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip,
+        alu_base::BaseAluChip, alu_ext::ExtAluChip,
+        exp_reverse_bits::ExpReverseBitsLenChip,
         mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
         poseidon2_skinny::Poseidon2SkinnyChip, poseidon2_wide::Poseidon2WideChip,
         public_values::PublicValuesChip, select::SelectChip,
@@ -326,13 +326,9 @@ mod basefold_air_assertions_circuit {
         assert_basefold_air_circuit::<Poseidon2SkinnyChip<9>>();
         // 7. Select
         assert_basefold_air_circuit::<SelectChip>();
-        // 8. FriFold
-        assert_basefold_air_circuit::<FriFoldChip<9>>();
-        // 9. BatchFRI
-        assert_basefold_air_circuit::<BatchFRIChip<9>>();
-        // 10. ExpReverseBitsLen
+        // 8. ExpReverseBitsLen
         assert_basefold_air_circuit::<ExpReverseBitsLenChip<9>>();
-        // 11. PublicValues
+        // 9. PublicValues
         assert_basefold_air_circuit::<PublicValuesChip>();
 
         // Enum-level: derive-generated
