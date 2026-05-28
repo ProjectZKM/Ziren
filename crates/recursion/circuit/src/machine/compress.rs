@@ -104,6 +104,7 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
     pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self
     where
         A: MachineAir<KoalaBear>
@@ -113,8 +114,11 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                let (vk, proof) =
-                    dummy_recursion_basefold_vk_and_shard_proof(machine, proof_shape);
+                let (vk, proof) = dummy_recursion_basefold_vk_and_shard_proof(
+                    machine,
+                    proof_shape,
+                    log2_combined_leaves,
+                );
                 (vk, proof)
             })
             .collect();

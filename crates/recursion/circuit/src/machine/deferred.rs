@@ -102,13 +102,17 @@ impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
     pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMDeferredShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self
     where
         A: MachineAir<KoalaBear>
             + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
     {
-        let inner_witness =
-            ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.inner);
+        let inner_witness = ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(
+            machine,
+            &shape.inner,
+            log2_combined_leaves,
+        );
         let vks_and_proofs = inner_witness.vks_and_proofs;
 
         let vk_merkle_data = ZKMMerkleProofWitnessValues::dummy(vks_and_proofs.len(), shape.height);

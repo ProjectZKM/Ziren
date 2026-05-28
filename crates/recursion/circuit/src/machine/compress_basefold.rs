@@ -1052,6 +1052,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             A,
         >,
         shape: &super::ZKMCompressWithVkeyShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self
     where
         A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
@@ -1067,7 +1068,11 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(
+                    machine,
+                    proof_shape,
+                    log2_combined_leaves,
+                )
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(

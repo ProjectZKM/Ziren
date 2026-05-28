@@ -31,20 +31,29 @@ use zkm_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir, ZKMProver};
 
+/// Per-shape proof-fixture descriptor enumerated by
+/// [`ZKMProofShape::generate`].
+///
+/// Each variant carries an optional `log2_combined_leaves` override
+/// (`None` = legacy `log_max_row_height - 1` rule) — this axis was
+/// added per #514 / Option C to cover all real-runtime variants of
+/// `m = log2(aggregate_chip_leaves)` that the host-prover may emit.
+/// Without this axis the enumerator collapsed 1554 input shapes to 19
+/// unique VKs because every dummy used the same hardcoded `m = 21`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
-    Recursion(OrderedShape),
-    Compress(Vec<OrderedShape>),
-    Deferred(OrderedShape),
-    Shrink(OrderedShape),
+    Recursion(OrderedShape, Option<usize>),
+    Compress(Vec<OrderedShape>, Option<usize>),
+    Deferred(OrderedShape, Option<usize>),
+    Shrink(OrderedShape, Option<usize>),
 }
 
 #[derive(Debug, Clone, Hash)]
 pub enum ZKMCompressProgramShape {
-    Recursion(ZKMRecursionShape),
-    Compress(ZKMCompressWithVkeyShape),
-    Deferred(ZKMDeferredShape),
-    Shrink(ZKMCompressWithVkeyShape),
+    Recursion(ZKMRecursionShape, Option<usize>),
+    Compress(ZKMCompressWithVkeyShape, Option<usize>),
+    Deferred(ZKMDeferredShape, Option<usize>),
+    Shrink(ZKMCompressWithVkeyShape, Option<usize>),
 }
 
 impl ZKMCompressProgramShape {
@@ -204,7 +213,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
                         let compile_ns = compile_start.elapsed().as_nanos() as u64;
                         compile_total_ns.fetch_add(compile_ns, Ordering::Relaxed);
                         compile_count.fetch_add(1, Ordering::Relaxed);
-                        let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(_));
+                        let is_shrink = matches!(shape, ZKMCompressProgramShape::Shrink(..));
                         match program {
                             Ok(program) => program_tx.send((i, program, is_shrink)).unwrap(),
                             Err(e) => {
@@ -419,22 +428,48 @@ impl ZKMProofShape {
             .into_iter()
             .collect();
 
-        small_shapes
+        // Per #514 Option C: add `log2_combined_leaves` axis so the
+        // enumerator pre-builds compose programs for every realistic
+        // `m = log2(combined_leaves)` value the host prover may emit
+        // at runtime.  Without this, 1554 enumerated shapes collapsed
+        // to ~19 unique VKs because every dummy used `m = 21`.
+        //
+        // Range chosen per the diagnosis in `project_shape_enumerator_gap.md`:
+        // empirically observed runtime `m` lies in `{6..=21}`.
+        const LOG2_COMBINED_LEAVES_AXIS: std::ops::RangeInclusive<usize> = 6..=21;
+        let m_axis = || LOG2_COMBINED_LEAVES_AXIS.map(Some);
+
+        let recursion_shapes_iter = small_shapes
             .into_iter()
-            .map(Self::Recursion)
-            .chain((1..=reduce_batch_size).flat_map(move |batch_size| {
-                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
-            }))
-            .chain(
+            .flat_map(move |shape| m_axis().map(move |m| Self::Recursion(shape.clone(), m)));
+
+        let compress_shapes_iter =
+            (1..=reduce_batch_size).flat_map(move |batch_size| {
                 recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Deferred(x.pop().unwrap())),
-            )
-            .chain(
-                recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Shrink(x.pop().unwrap())),
-            )
+                    .get_all_shape_combinations(batch_size)
+                    .flat_map(move |proof_shapes| {
+                        m_axis().map(move |m| Self::Compress(proof_shapes.clone(), m))
+                    })
+            });
+
+        let deferred_shapes_iter = recursion_shape_config
+            .get_all_shape_combinations(1)
+            .flat_map(move |mut x| {
+                let proof_shape = x.pop().unwrap();
+                m_axis().map(move |m| Self::Deferred(proof_shape.clone(), m))
+            });
+
+        let shrink_shapes_iter = recursion_shape_config
+            .get_all_shape_combinations(1)
+            .flat_map(move |mut x| {
+                let proof_shape = x.pop().unwrap();
+                m_axis().map(move |m| Self::Shrink(proof_shape.clone(), m))
+            });
+
+        recursion_shapes_iter
+            .chain(compress_shapes_iter)
+            .chain(deferred_shapes_iter)
+            .chain(shrink_shapes_iter)
     }
 
     pub fn generate_maximal_shapes<'a>(
@@ -448,24 +483,33 @@ impl ZKMProofShape {
         } else {
             core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
         };
+        // Default `None` for the maximal-shape sanity-check path —
+        // this iterator drives shape soundness checks (not VK regen),
+        // and the dummy's legacy `log_max_row_height - 1` fallback
+        // suffices when only the OrderedShape variation needs probing.
         core_shape_iter
             .map(|core_shape| {
-                Self::Recursion(OrderedShape {
-                    inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
-                })
+                Self::Recursion(
+                    OrderedShape {
+                        inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+                    },
+                    None,
+                )
             })
             .chain((1..=reduce_batch_size).flat_map(|batch_size| {
-                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
+                recursion_shape_config
+                    .get_all_shape_combinations(batch_size)
+                    .map(|s| Self::Compress(s, None))
             }))
             .chain(
                 recursion_shape_config
                     .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Deferred(x.pop().unwrap())),
+                    .map(|mut x| Self::Deferred(x.pop().unwrap(), None)),
             )
             .chain(
                 recursion_shape_config
                     .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Shrink(x.pop().unwrap())),
+                    .map(|mut x| Self::Shrink(x.pop().unwrap(), None)),
             )
     }
 
@@ -484,18 +528,24 @@ impl ZKMProofShape {
 impl ZKMCompressProgramShape {
     pub fn from_proof_shape(shape: ZKMProofShape, height: usize) -> Self {
         match shape {
-            ZKMProofShape::Recursion(proof_shape) => Self::Recursion(proof_shape.into()),
-            ZKMProofShape::Deferred(proof_shape) => {
-                Self::Deferred(ZKMDeferredShape::new(vec![proof_shape].into(), height))
+            ZKMProofShape::Recursion(proof_shape, m) => Self::Recursion(proof_shape.into(), m),
+            ZKMProofShape::Deferred(proof_shape, m) => {
+                Self::Deferred(ZKMDeferredShape::new(vec![proof_shape].into(), height), m)
             }
-            ZKMProofShape::Compress(proof_shapes) => Self::Compress(ZKMCompressWithVkeyShape {
-                compress_shape: proof_shapes.into(),
-                merkle_tree_height: height,
-            }),
-            ZKMProofShape::Shrink(proof_shape) => Self::Shrink(ZKMCompressWithVkeyShape {
-                compress_shape: vec![proof_shape].into(),
-                merkle_tree_height: height,
-            }),
+            ZKMProofShape::Compress(proof_shapes, m) => Self::Compress(
+                ZKMCompressWithVkeyShape {
+                    compress_shape: proof_shapes.into(),
+                    merkle_tree_height: height,
+                },
+                m,
+            ),
+            ZKMProofShape::Shrink(proof_shape, m) => Self::Shrink(
+                ZKMCompressWithVkeyShape {
+                    compress_shape: vec![proof_shape].into(),
+                    merkle_tree_height: height,
+                },
+                m,
+            ),
         }
     }
 }
@@ -524,36 +574,40 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         match shape {
-            ZKMCompressProgramShape::Recursion(shape) => {
+            ZKMCompressProgramShape::Recursion(shape, log2_combined_leaves) => {
                 let input = ZKMCoreBasefoldWitnessValues::dummy(
                     self.core_prover.machine(),
                     &shape,
+                    log2_combined_leaves,
                 );
                 self.recursion_program_basefold(&input)
             }
-            ZKMCompressProgramShape::Deferred(shape) => {
+            ZKMCompressProgramShape::Deferred(shape, log2_combined_leaves) => {
                 let input = ZKMDeferredBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
                     &shape,
+                    log2_combined_leaves,
                 );
                 self.deferred_program_basefold(&input)
             }
-            ZKMCompressProgramShape::Compress(shape) => {
+            ZKMCompressProgramShape::Compress(shape, log2_combined_leaves) => {
                 // dummy now consumes the full ZKMCompressWithVkeyShape so
                 // its embedded merkle_tree_height sizes the vk-merkle witness.
                 let input = ZKMCompressBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
                     &shape,
+                    log2_combined_leaves,
                 );
                 self.compose_program_basefold(&input)
             }
-            ZKMCompressProgramShape::Shrink(shape) => {
+            ZKMCompressProgramShape::Shrink(shape, log2_combined_leaves) => {
                 // SP1 alignment: dummy now consumes the full
                 // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
                 // sizes the vk-merkle witness for the wrap stage too.
                 let input = ZKMWrapBasefoldWitnessValues::dummy(
                     self.compress_prover.machine(),
                     &shape,
+                    log2_combined_leaves,
                 );
                 self.shrink_program_basefold(&input)
             }
@@ -594,7 +648,7 @@ mod tests {
             ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, reduce_batch_size)
                 .collect();
         let recursion_count =
-            all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
+            all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(..))).count();
 
         // stacked_shapes → to_ordered_shape with uniform-area projection
         // and dedup collapses to ≤ ~30 unique OrderedShapes (one per
