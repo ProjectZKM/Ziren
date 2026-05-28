@@ -265,6 +265,36 @@ where
 
         let pcs = self.config().pcs();
 
+        // Option B single-main-commit gate — KoalaBear/LbChallenger
+        // config skips the legacy FRI `pcs.commit(main_traces)` and
+        // instead computes the BaseFold jagged-PCS commit up-front
+        // (the one Phase 4 of the shard-level prover would otherwise
+        // produce).  Its 8-felt digest becomes the `main_commitment`
+        // observed in the Phase 1 prologue, eliminating the
+        // double-commit (FRI + BaseFold) on the same trace data.
+        // Non-KoalaBear configs (BN254 wrap / OuterSC) fall through to
+        // the legacy FRI commit body below.
+        let use_basefold_path = {
+            use core::any::TypeId;
+            TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>()
+                && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
+                    == TypeId::of::<crate::InnerChallenge>()
+                && TypeId::of::<SC::Challenger>()
+                    == TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+        };
+
+        if use_basefold_path
+            && !std::env::var("ZIREN_TEST_SKIP_BASEFOLD")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false)
+        {
+            return commit_basefold_path::<SC, Self::DeviceMatrix, Self::DeviceProverData>(
+                pcs,
+                record.public_values(),
+                named_traces,
+            );
+        }
+
         let domains_and_traces = named_traces
             .iter()
             .map(|(_, trace)| {
@@ -296,6 +326,7 @@ where
             main_data,
             chip_ordering,
             public_values: record.public_values(),
+            precomputed_basefold: None,
         }
     }
 
@@ -440,41 +471,23 @@ where
             // absent in the BaseFold path.
             let _zeta: SC::Challenge = challenger.sample_algebra_element();
 
-            // === Phase 3: skip FRI open of perm/quotient in BaseFold mode ===
+            // === Option B single-main-commit: placeholder pcs.open ===
             //
-            // In the BaseFold fast path the zeta-point FRI opening is
-            // restricted to prep + main; perm + quotient are not
-            // committed.  Soundness is carried by the
-            // `BasefoldShardProof` generated below, and the legacy
-            // verifier shortcut is gone.
-            let main_trace_opening_points: Vec<Vec<SC::Challenge>> = trace_domains
-                .iter()
-                .zip(chips.iter())
-                .map(|(domain, chip)| {
-                    if !chip.local_only() {
-                        vec![_zeta, domain.next_point(_zeta).unwrap()]
-                    } else {
-                        vec![_zeta]
-                    }
-                })
-                .collect();
-            let preprocessed_opening_points: Vec<Vec<SC::Challenge>> = pk.traces
-                .iter()
-                .zip(pk.local_only.iter())
-                .map(|(trace, local_only)| {
-                    let domain = pcs.natural_domain_for_degree(trace.height());
-                    if !local_only {
-                        vec![_zeta, domain.next_point(_zeta).unwrap()]
-                    } else {
-                        vec![_zeta]
-                    }
-                })
-                .collect();
-            let (openings, opening_proof) = pcs.open(
-                vec![
-                    (&pk.data, preprocessed_opening_points),
-                    (&data.main_data, main_trace_opening_points),
-                ],
+            // The basefold verifier dispatches via
+            // `basefold_shard_proof.is_some()` at the top of
+            // `Verifier::verify_shard` and never calls `pcs.verify` on
+            // the legacy FRI fields.  We run a *minimal* placeholder
+            // `pcs.open` on a single 1×1 dummy point against the
+            // placeholder `main_data` produced by
+            // `commit_basefold_path` so the existing
+            // `ShardProof.opening_proof: OpeningProof<SC>` shape stays
+            // valid (a real `FriProof` value with empty FRI work).
+            // Cost is microseconds vs the seconds of the real
+            // multi-trace FRI open this replaces.
+            let main_trace_opening_points_placeholder: Vec<Vec<SC::Challenge>> =
+                vec![vec![_zeta]];
+            let (_openings_unused, opening_proof) = pcs.open(
+                vec![(&data.main_data, main_trace_opening_points_placeholder)],
                 challenger,
             );
 
@@ -486,54 +499,24 @@ where
                 if let Ok(mut f) = std::fs::OpenOptions::new()
                     .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
                 {
-                    let _ = writeln!(f, "BASEFOLD_PATH total={}ms (no perm, no quotient)", basefold_path_ms);
+                    let _ = writeln!(
+                        f,
+                        "BASEFOLD_PATH total={}ms (Option B single-main-commit, placeholder pcs.open)",
+                        basefold_path_ms,
+                    );
                 }
             }
 
-            // Build opened values with empty permutation/quotient.
-            let [preprocessed_values, main_values] = openings.try_into().unwrap();
-            let preprocessed_opened_values = preprocessed_values
-                .into_iter()
-                .zip(pk.local_only.iter())
-                .map(|(op, local_only)| {
-                    if !local_only {
-                        let [local, next] = op.try_into().unwrap();
-                        AirOpenedValues { local, next }
-                    } else {
-                        let [local] = op.try_into().unwrap();
-                        let width = local.len();
-                        AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let main_opened_values = main_values
-                .into_iter()
-                .zip(chips.iter())
-                .map(|(op, chip)| {
-                    if !chip.local_only() {
-                        let [local, next] = op.try_into().unwrap();
-                        AirOpenedValues { local, next }
-                    } else {
-                        let [local] = op.try_into().unwrap();
-                        let width = local.len();
-                        AirOpenedValues { local, next: vec![SC::Challenge::ZERO; width] }
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let opened_values = main_opened_values
-                .into_iter()
+            // Build empty per-chip opened values — the basefold
+            // verifier reads opening evidence from `basefold_shard_proof`
+            // instead of these legacy fields.
+            let opened_values = chips
+                .iter()
                 .zip(log_degrees.iter())
                 .enumerate()
-                .map(|(i, (main, log_degree))| {
-                    let preprocessed = pk
-                        .chip_ordering
-                        .get(&chips[i].name())
-                        .map(|&index| preprocessed_opened_values[index].clone())
-                        .unwrap_or(AirOpenedValues { local: vec![], next: vec![] });
+                .map(|(i, (chip, log_degree))| {
                     // Extract cumulative sums matching what was observed into the transcript.
-                    let global_cumulative_sum = if chips[i].commit_scope() == LookupScope::Local {
+                    let global_cumulative_sum = if chip.commit_scope() == LookupScope::Local {
                         SepticDigest::<Val<SC>>::zero()
                     } else {
                         let main_trace = &traces[i];
@@ -546,8 +529,8 @@ where
                     };
 
                     ChipOpenedValues {
-                        preprocessed,
-                        main,
+                        preprocessed: AirOpenedValues { local: vec![], next: vec![] },
+                        main: AirOpenedValues { local: vec![], next: vec![] },
                         permutation: AirOpenedValues { local: vec![], next: vec![] },
                         quotient: vec![],
                         global_cumulative_sum,
@@ -563,6 +546,13 @@ where
             // The legacy prep/main opening fields above remain in the
             // envelope, but `Verifier::verify_shard` dispatches to
             // `BasefoldShardVerifier` whenever this field is `Some(_)`.
+            //
+            // Option B single-main-commit: pass the precomputed
+            // BaseFold commit (stashed by `commit()` in
+            // `data.precomputed_basefold`) through to the shard-level
+            // prover, which routes it to Phase 4's jagged-PCS body to
+            // skip the in-band commit step + observe.
+            let precomputed_basefold_taken = data.precomputed_basefold;
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
                 &chips,
                 &pk.traces,
@@ -571,6 +561,7 @@ where
                 &data.main_commit,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
+                precomputed_basefold_taken,
             );
 
             return Ok(ShardProof::<SC> {
@@ -1072,6 +1063,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
     main_commit: &Com<SC>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
+    precomputed_basefold: Option<Box<dyn std::any::Any + Send + Sync>>,
 ) -> Option<
     Box<
         crate::shard_level::shard_proof::BasefoldShardProof<
@@ -1212,6 +1204,26 @@ where
     // `&[Arc<RowMajorMatrix>]`, drop this materialization step.
     let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
         main_traces.iter().map(|arc| (**arc).clone()).collect();
+
+    // Option B: downcast the precomputed BaseFold commit (if any) to
+    // the concrete `PrecomputedJaggedCommit` type so the shard-level
+    // prover can skip the Phase 4 in-band commit.  The TypeId gate
+    // above guarantees Val<SC> == InnerVal, so when the orchestrator
+    // (commit_basefold_path) populated this slot the downcast MUST
+    // succeed — panic on type mismatch instead of silently degrading
+    // to the in-band commit (which would double-observe vs the
+    // verifier's Phase 1 prologue that already saw the digest).
+    let precomputed_concrete = precomputed_basefold.map(|boxed| {
+        *boxed
+            .downcast::<crate::basefold_late_binding::jagged::PrecomputedJaggedCommit>()
+            .unwrap_or_else(|_| {
+                panic!(
+                    "try_prove_shard_to_basefold_boxed: precomputed_basefold present but \
+                     downcast to PrecomputedJaggedCommit failed (expected Option B flow)",
+                )
+            })
+    });
+
     let proof_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
             &chips_reborrow,
@@ -1226,6 +1238,7 @@ where
             // Gap #10: CpuProver path always emits MSB-folded proofs
             // (the GPU LSB packed-pool path is unreachable here).
             crate::shard_level::shard_proof::FoldOrientation::Msb,
+            precomputed_concrete,
         )
     }));
 
@@ -1238,5 +1251,151 @@ where
             );
             None
         }
+    }
+}
+
+/// Option B single-main-commit `commit()` body for the
+/// KoalaBear/LbChallenger config: compute the BaseFold jagged-PCS
+/// commit up-front (the one Phase 4 of the shard-level prover would
+/// otherwise produce), seed `main_commit` with its 8-felt digest, and
+/// stash the precomputed-commit state in `precomputed_basefold` so
+/// `open()` / `try_prove_shard_to_basefold_boxed` can route it into
+/// the shard-level Phase 4 jagged-PCS body (skipping the
+/// double-commit + in-band observe).
+///
+/// Runs a *placeholder* `pcs.commit` on a single 1×1 dummy trace to
+/// satisfy the type signature of `main_data` — `open()` mirrors this
+/// with a placeholder `pcs.open`.  The placeholder cost is
+/// microseconds vs the seconds of a real main-trace FRI commit.
+fn commit_basefold_path<SC, M, P>(
+    pcs: &<SC as StarkGenericConfig>::Pcs,
+    public_values: Vec<Val<SC>>,
+    named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+) -> ShardMainData<SC, M, P>
+where
+    SC: StarkGenericConfig,
+    Val<SC>: 'static,
+    Com<SC>: 'static,
+    PcsProverData<SC>: 'static,
+    M: 'static,
+    P: 'static,
+{
+    use core::any::Any;
+    use p3_symmetric::MerkleCap;
+
+    // Run the BaseFold pre-commit on the real main traces (transmuted
+    // to InnerVal — the TypeId gate in `commit()` already verified
+    // Val<SC> == InnerVal).
+    //
+    // SAFETY: the caller (`commit()` body's `use_basefold_path` gate)
+    // has type-gated on Val<SC> == InnerVal, so the transmute below
+    // reinterprets a Vec<(String, RowMajorMatrix<Val<SC>>)> as
+    // Vec<(String, RowMajorMatrix<InnerVal>)>.  Both element types
+    // have the same layout under the gate.
+    let named_traces_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> = unsafe {
+        let mut v = core::mem::ManuallyDrop::new(named_traces);
+        let ptr = v.as_mut_ptr();
+        let len = v.len();
+        let cap = v.capacity();
+        Vec::from_raw_parts(
+            ptr as *mut (String, RowMajorMatrix<crate::InnerVal>),
+            len,
+            cap,
+        )
+    };
+
+    let precomputed =
+        crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit(
+            &named_traces_inner,
+        );
+    let digest_inner: [crate::InnerVal; 8] =
+        crate::basefold_late_binding::basefold_commit_digest(&precomputed.commit);
+
+    // Build the placeholder `Com<SC>` carrying the BaseFold digest.
+    // For KoalaBearPoseidon2, Com<SC> == MerkleCap<InnerVal, [InnerVal; 8]>.
+    let cap = MerkleCap::<crate::InnerVal, [crate::InnerVal; 8]>::new(vec![digest_inner]);
+    let cap_any: Box<dyn Any> = Box::new(cap);
+    let main_commit: Com<SC> = *cap_any
+        .downcast::<Com<SC>>()
+        .unwrap_or_else(|_| {
+            panic!(
+                "commit_basefold_path: failed to downcast MerkleCap<InnerVal,[InnerVal;8]> \
+                 to Com<SC> (size_of Com<SC> = {})",
+                core::mem::size_of::<Com<SC>>(),
+            )
+        });
+
+    // Move named_traces back from the InnerVal alias (we still need
+    // them for the placeholder `pcs.commit` + the per-chip Arc list).
+    let named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)> = unsafe {
+        let mut v = core::mem::ManuallyDrop::new(named_traces_inner);
+        let ptr = v.as_mut_ptr();
+        let len = v.len();
+        let cap_ = v.capacity();
+        Vec::from_raw_parts(
+            ptr as *mut (String, RowMajorMatrix<Val<SC>>),
+            len,
+            cap_,
+        )
+    };
+
+    // Placeholder `pcs.commit` on a single 1×1 dummy trace.  Cheap
+    // (microseconds) but produces a valid `(_, PcsProverData<SC>)`
+    // pair so `main_data` has the right type and `open()` can drive a
+    // matching placeholder `pcs.open` against it.
+    let dummy_trace: RowMajorMatrix<Val<SC>> =
+        RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
+    let dummy_domain = pcs.natural_domain_for_degree(1);
+    let (_placeholder_commit, main_data_concrete): (
+        Com<SC>,
+        PcsProverData<SC>,
+    ) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+    // Downcast PcsProverData<SC> to the generic P.  For CpuProver
+    // (the only consumer of this helper), P == PcsProverData<SC>
+    // (see the trait impl in this file's `MachineProver for CpuProver`
+    // block), so the downcast is sound under the TypeId gate.
+    let main_data_any: Box<dyn Any> = Box::new(main_data_concrete);
+    let main_data: P = *main_data_any
+        .downcast::<P>()
+        .unwrap_or_else(|_| {
+            panic!(
+                "commit_basefold_path: failed to downcast PcsProverData<SC> to generic P",
+            )
+        });
+
+    // Get the chip ordering.
+    let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
+        .iter()
+        .enumerate()
+        .map(|(i, (name, _))| (name.to_owned(), i))
+        .collect();
+
+    // Wrap each trace in `Arc::new` — but we need the wrapper type to
+    // match `Self::DeviceMatrix = M` which for `CpuProver` is
+    // `RowMajorMatrix<Val<SC>>`.  Use Any-downcast on the Vec<Arc<...>>.
+    //
+    // SAFETY: caller's TypeId gate guarantees this `CpuProver`-shape
+    // monomorphization always has `M == RowMajorMatrix<Val<SC>>`.
+    let traces_rm: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>> = named_traces
+        .into_iter()
+        .map(|(_, trace)| std::sync::Arc::new(trace))
+        .collect();
+    let traces_any: Box<dyn Any> = Box::new(traces_rm);
+    let traces: Vec<std::sync::Arc<M>> = *traces_any
+        .downcast::<Vec<std::sync::Arc<M>>>()
+        .unwrap_or_else(|_| {
+            panic!(
+                "commit_basefold_path: failed to downcast Vec<Arc<RowMajorMatrix<Val<SC>>>> \
+                 to Vec<Arc<M>>",
+            )
+        });
+
+    ShardMainData {
+        traces,
+        main_commit,
+        main_data,
+        chip_ordering,
+        public_values,
+        precomputed_basefold: Some(Box::new(precomputed)),
     }
 }

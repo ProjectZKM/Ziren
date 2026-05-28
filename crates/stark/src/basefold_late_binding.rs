@@ -272,6 +272,72 @@ pub fn commit_basefold_late_binding_host(
     chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
     challenger: &mut LbChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    let (commit, prover_data) =
+        commit_basefold_late_binding_host_no_observe(chip_traces);
+    challenger.observe(commit.commitment.clone());
+    (commit, prover_data)
+}
+
+/// GPU-dispatched no-observe variant — Option B precompute uses this
+/// so the main-trace BaseFold commit runs on the device when
+/// `ZIREN_GPU_BASEFOLD=1` AND the hook is registered.  The hook's
+/// internal `challenger.observe` is absorbed by a throwaway challenger
+/// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
+/// observe is the real transcript binding).  Falls through to
+/// [`commit_basefold_late_binding_host_no_observe`] when the env is
+/// unset, the hook is unregistered, or the hook returns `Err`.
+pub fn commit_basefold_late_binding_no_observe(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+        if let Some(hook) = get_gpu_basefold_commit_hook() {
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            let mut throwaway: LbChallenger =
+                LbChallenger::new(zkm_primitives::poseidon2_init());
+            match hook(chip_traces, &mut throwaway) {
+                Ok(out) => {
+                    FIRED_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit FIRED (no-observe variant, \
+                             Option B precompute, area={}, log_stacking_height={})",
+                            out.0.area,
+                            out.0.log_stacking_height,
+                        );
+                    });
+                    return out;
+                }
+                Err(returned_traces) => {
+                    FELLBACK_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            "GPU BaseFold commit hook returned Err on no-observe \
+                             variant — falling back to host."
+                        );
+                    });
+                    return commit_basefold_late_binding_host_no_observe(returned_traces);
+                }
+            }
+        }
+    }
+    commit_basefold_late_binding_host_no_observe(chip_traces)
+}
+
+/// Same as [`commit_basefold_late_binding_host`] but does NOT observe
+/// the commitment into the challenger.  Used by the Option B
+/// single-main-commit flow, where the BaseFold commit happens BEFORE
+/// the shard-level Phase 1 prologue and the prologue's 8-felt
+/// `main_commitment` observe IS the BaseFold-digest observation —
+/// observing again here would desync the prover transcript vs the
+/// verifier.
+///
+/// Callers MUST observe `commit.commitment` separately into the
+/// challenger at the same transcript position as the verifier.  The
+/// verifier counterpart is
+/// [`jagged::verify_jagged_basefold_no_observe`].
+pub fn commit_basefold_late_binding_host_no_observe(
+    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
     let total_entries: usize = mles.iter().map(|m| m.guts.values.len()).sum();
     let log_stacking_height = pick_log_stacking_height(total_entries);
@@ -279,7 +345,6 @@ pub fn commit_basefold_late_binding_host(
 
     let (prover, _verifier, _mmcs) = build_pcs(log_stacking_height);
     let (commitment, stacked_data) = prover.commit_multilinears(mles);
-    challenger.observe(commitment.clone());
 
     let commit = BasefoldLateBindingCommit {
         commitment: commitment.clone(),
@@ -294,6 +359,24 @@ pub fn commit_basefold_late_binding_host(
         log_stacking_height,
     };
     (commit, prover_data)
+}
+
+/// Extract the 8-felt MMCS digest from a [`BasefoldLateBindingCommit`].
+/// The digest is the value the verifier's Phase 1 prologue observes as
+/// `main_commitment` in the Option B single-main-commit flow.
+///
+/// The commitment is a `MerkleCap<KoalaBear, [KoalaBear; 8]>` (the
+/// Plonky3 `MerkleTreeMmcs::Commitment` for `InnerValMmcs`).  This
+/// helper pulls out the first cap root — the same byte sequence
+/// `DuplexChallenger::observe(MerkleCap)` consumes.
+#[must_use]
+pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [LbVal; 8] {
+    let roots = commit.commitment.roots();
+    assert!(
+        !roots.is_empty(),
+        "BasefoldLateBindingCommit MerkleCap must have at least one root",
+    );
+    roots[0]
 }
 
 /// Production-grade FRI config used by the late-binding pipeline.
@@ -830,6 +913,48 @@ pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Device-resident GKR layer fetch-and-publish hook (full residency).
+//
+// `prove_gkr_round` calls this BEFORE deciding whether to pull the
+// device layer to host.  Given the per-shard `circuit_id` and THIS
+// round's `num_variables`, the ziren-gpu impl:
+//   1. populates the per-shard V3 layer cache from the layer-transition
+//      registry on first call (idempotent; filtered to adoptable layers
+//      so the over-cap first layer never blocks the cache front),
+//   2. match-pops the cache entry whose flat length == `1 << num_variables`
+//      (match-aware: small interleaved layers find no front-match and
+//      return false), and
+//   3. on a hit, wraps the device-resident `DeviceLogupLayerState` in a
+//      `DeviceLayerHandle` and publishes it to the V3 TLS handle slot
+//      (`publish_logup_v3_next_handle`).
+//
+// Returns `true` iff a matching device layer was published — in which
+// case `prove_gkr_round` SKIPS `pull_device_layer_to_host` and the V3
+// hook adopts the device buffers directly (no device→host→device
+// round-trip).  Returns `false` (no publish) for: cache miss, shape
+// mismatch (small/over-cap layer), hook unregistered, or CUDA error —
+// the caller then pulls + runs the host/V2 fallback exactly as before.
+pub type GpuV3FetchPublishFn = fn(circuit_id: u64, num_variables: usize) -> bool;
+
+static GPU_V3_FETCH_PUBLISH_HOOK: std::sync::OnceLock<GpuV3FetchPublishFn> =
+    std::sync::OnceLock::new();
+
+/// Register the device-resident GKR layer fetch-and-publish hook.
+/// Idempotent; `Err(existing)` if already registered.  Called once at
+/// ziren-gpu startup.
+pub fn register_gpu_v3_fetch_publish_hook(
+    f: GpuV3FetchPublishFn,
+) -> Result<(), GpuV3FetchPublishFn> {
+    GPU_V3_FETCH_PUBLISH_HOOK.set(f)
+}
+
+/// Read the registered fetch-and-publish hook, if any.
+#[must_use]
+pub fn get_gpu_v3_fetch_publish_hook() -> Option<GpuV3FetchPublishFn> {
+    GPU_V3_FETCH_PUBLISH_HOOK.get().copied()
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Device-resident `generate_first_layer` regen hook.
 //
 // Signature port only.  Returns the per-`circuit_id` first-layer payload
@@ -1156,6 +1281,74 @@ pub mod jagged {
         }
     }
 
+    /// Pre-computed jagged-PCS commit bundle for the Option B
+    /// single-main-commit flow.  Produced by
+    /// [`precompute_jagged_basefold_commit`] before the shard-level
+    /// Phase 1 prologue, then consumed by
+    /// [`prove_jagged_basefold_with_precomputed`] in Phase 4.
+    ///
+    /// The 8-felt digest of `commit.commitment` (via
+    /// [`crate::basefold_late_binding::basefold_commit_digest`]) is the
+    /// `main_commitment` that the prologue + verifier observe.
+    pub struct PrecomputedJaggedCommit {
+        pub packing: crate::jagged::JaggedPacking<InnerVal>,
+        pub commit: crate::basefold_late_binding::BasefoldLateBindingCommit,
+        pub prover_data: crate::basefold_late_binding::BasefoldLateBindingProverData,
+    }
+
+    /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
+    /// up-front, WITHOUT observing the commitment into a challenger.
+    /// Returns the packing metadata plus the BaseFold commit + prover
+    /// data — enough state for
+    /// [`prove_jagged_basefold_with_precomputed`] to skip the in-band
+    /// commit and run steps (3)+(4)+(5) against an aligned transcript.
+    ///
+    /// Caller MUST surface `commit.commitment` (or its 8-felt digest)
+    /// to the verifier (via the shard-level proof's
+    /// `main_commitment` field) at the same transcript position the
+    /// verifier observes it.
+    pub fn precompute_jagged_basefold_commit(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+    ) -> PrecomputedJaggedCommit {
+        let n_chips = chip_traces.len();
+
+        let _t_meta = std::time::Instant::now();
+        let _meta_span = tracing::info_span!("jagged_compute_metadata_pre").entered();
+        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        drop(_meta_span);
+        tracing::info!(
+            elapsed_ms = _t_meta.elapsed().as_millis() as u64,
+            chips = n_chips,
+            sub_phase = "compute_metadata_pre",
+            "jagged sub-phase done"
+        );
+
+        let _t_commit = std::time::Instant::now();
+        let _commit_span = tracing::info_span!("jagged_dense_commit_pre").entered();
+        let (commit, prover_data) = {
+            let dense_q =
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
+            let dense_traces = vec![(
+                alloc::string::String::from("<jagged-dense>"),
+                RowMajorMatrix::new(dense_q, 1),
+            )];
+            crate::basefold_late_binding::commit_basefold_late_binding_no_observe(
+                dense_traces,
+            )
+        };
+        drop(_commit_span);
+        tracing::info!(
+            elapsed_ms = _t_commit.elapsed().as_millis() as u64,
+            chips = n_chips,
+            log_dense_size = packing.log_dense_size as u64,
+            sub_phase = "dense_commit_pre",
+            "jagged sub-phase done"
+        );
+
+        PrecomputedJaggedCommit { packing, commit, prover_data }
+    }
+
     /// **Prover-side one-call entry point** — full pipeline:
     /// commit chip traces (via BaseFold-stacked), run jagged sumcheck
     /// reduction, open dense at the reduction's `z*` via BaseFold,
@@ -1173,6 +1366,30 @@ pub mod jagged {
         )
     }
 
+    /// Option B single-main-commit variant: run steps (3)+(4)+(5)
+    /// using a `precompute_jagged_basefold_commit` result.  Does NOT
+    /// observe `precomputed.commit.commitment` into the challenger —
+    /// the orchestrator/Phase 1 prologue already observed the 8-felt
+    /// digest as `main_commitment`, and the verifier counterpart
+    /// [`verify_jagged_basefold_no_observe`] also skips the in-band
+    /// observe.  Wire bytes match the
+    /// `prove_jagged_basefold_with_y_per_chip` shape exactly.
+    pub fn prove_jagged_basefold_with_precomputed(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        precomputed: PrecomputedJaggedCommit,
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> JaggedBasefoldBundle {
+        prove_jagged_basefold_inner(
+            chip_traces,
+            r_row_per_chip,
+            pre_y_per_chip,
+            Some(precomputed),
+            challenger,
+        )
+    }
+
     /// Variant of [`prove_jagged_basefold`] that lets the caller pass a
     /// pre-computed `y_per_chip` (e.g. computed device-resident on
     /// GPU).  When `pre_y_per_chip` is `Some`, step (3) — the host
@@ -1184,6 +1401,28 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
+        prove_jagged_basefold_inner(
+            chip_traces,
+            r_row_per_chip,
+            pre_y_per_chip,
+            None,
+            challenger,
+        )
+    }
+
+    /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
+    /// observe-inside flow) and [`prove_jagged_basefold_with_precomputed`]
+    /// (Option B single-commit flow).  When `precomputed` is `Some`,
+    /// steps (1) + (2) are skipped and the in-band commit observe is
+    /// suppressed (the caller already observed the digest at the Phase 1
+    /// prologue position).
+    fn prove_jagged_basefold_inner(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        precomputed: Option<PrecomputedJaggedCommit>,
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
         // (incl. dense materialize + BaseFold encode), (3) per-chip
@@ -1191,50 +1430,62 @@ pub mod jagged {
         // open at z*.
         let n_chips = chip_traces.len();
 
-        // (1) Pack metadata.
-        let _t_meta = std::time::Instant::now();
-        let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
-        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        drop(_meta_span);
-        tracing::info!(
-            elapsed_ms = _t_meta.elapsed().as_millis() as u64,
-            chips = n_chips,
-            sub_phase = "compute_metadata",
-            "jagged sub-phase done"
-        );
+        // (1) + (2): Pack metadata + commit dense as a single Mle via
+        // BaseFold-stacked.  When `precomputed` is `Some`, both steps
+        // were run up-front by the orchestrator's Option B path —
+        // single-main-commit flow has already observed the 8-felt
+        // digest of `commit.commitment` as `main_commitment` in the
+        // shard-level Phase 1 prologue.  Skip the in-band commit
+        // observe in that case to keep transcripts aligned with the
+        // verifier (which uses `verify_jagged_basefold_no_observe`).
+        let (packing, commit, prover_data) = if let Some(pre) = precomputed {
+            tracing::debug!(
+                chips = n_chips,
+                "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
+            );
+            (pre.packing, pre.commit, pre.prover_data)
+        } else {
+            let _t_meta = std::time::Instant::now();
+            let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
+            let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+            drop(_meta_span);
+            tracing::info!(
+                elapsed_ms = _t_meta.elapsed().as_millis() as u64,
+                chips = n_chips,
+                sub_phase = "compute_metadata",
+                "jagged sub-phase done"
+            );
 
-        // (2) Commit dense as a single Mle via BaseFold-stacked.  The
-        // stacked PCS interleaves into stripes of bounded size — the
-        // 16× LDE never materializes for the whole 2^N vector.
-        //
-        // Memory-critical ordering (E3 partial): materialize `dense_q`
-        // ONLY long enough to hand it to the commit — move, don't
-        // clone — then drop it and re-materialize for the reduction.
-        // Previous flow kept a duplicate live across (commit + reduction)
-        // which doubled peak RSS on wide workloads (tendermint OOM'd at
-        // 112 GB RSS).  Re-materialization is a cheap linear pass over
-        // `chip_traces` compared to the LDE / stripe work already done
-        // in the commit.
-        let _t_commit = std::time::Instant::now();
-        let _commit_span = tracing::info_span!("jagged_dense_commit").entered();
-        let (commit, prover_data) = {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
-            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
-            let dense_traces = vec![(
-                alloc::string::String::from("<jagged-dense>"),
-                RowMajorMatrix::new(dense_q, 1),
-            )];
-            commit_basefold_late_binding(dense_traces, challenger)
+            // Memory-critical ordering (E3 partial): materialize `dense_q`
+            // ONLY long enough to hand it to the commit — move, don't
+            // clone — then drop it and re-materialize for the reduction.
+            // Previous flow kept a duplicate live across (commit + reduction)
+            // which doubled peak RSS on wide workloads (tendermint OOM'd at
+            // 112 GB RSS).  Re-materialization is a cheap linear pass over
+            // `chip_traces` compared to the LDE / stripe work already done
+            // in the commit.
+            let _t_commit = std::time::Instant::now();
+            let _commit_span = tracing::info_span!("jagged_dense_commit").entered();
+            let (commit, prover_data) = {
+                let dense_q =
+                    materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
+                let dense_traces = vec![(
+                    alloc::string::String::from("<jagged-dense>"),
+                    RowMajorMatrix::new(dense_q, 1),
+                )];
+                commit_basefold_late_binding(dense_traces, challenger)
+            };
+            drop(_commit_span);
+            tracing::info!(
+                elapsed_ms = _t_commit.elapsed().as_millis() as u64,
+                chips = n_chips,
+                log_dense_size = packing.log_dense_size as u64,
+                sub_phase = "dense_commit",
+                "jagged sub-phase done"
+            );
+            (packing, commit, prover_data)
         };
-        drop(_commit_span);
-        tracing::info!(
-            elapsed_ms = _t_commit.elapsed().as_millis() as u64,
-            chips = n_chips,
-            log_dense_size = packing.log_dense_size as u64,
-            sub_phase = "dense_commit",
-            "jagged sub-phase done"
-        );
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
@@ -1672,8 +1923,49 @@ pub mod jagged {
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> bool {
-        // Replay the commit observation.
-        challenger.observe(bundle.commit.commitment.clone());
+        verify_jagged_basefold_inner(
+            chip_infos,
+            r_row_per_chip,
+            bundle,
+            challenger,
+            /* skip_commit_observe = */ false,
+        )
+    }
+
+    /// Option B variant: verifier counterpart of
+    /// [`prove_jagged_basefold_with_precomputed`].  Skips the in-band
+    /// `challenger.observe(commitment)` because the orchestrator's
+    /// Phase 1 prologue already observed the BaseFold commit's 8-felt
+    /// digest as `main_commitment`.
+    pub fn verify_jagged_basefold_no_observe(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        bundle: &JaggedBasefoldBundle,
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+    ) -> bool {
+        verify_jagged_basefold_inner(
+            chip_infos,
+            r_row_per_chip,
+            bundle,
+            challenger,
+            /* skip_commit_observe = */ true,
+        )
+    }
+
+    fn verify_jagged_basefold_inner(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        bundle: &JaggedBasefoldBundle,
+        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        skip_commit_observe: bool,
+    ) -> bool {
+        // Replay the commit observation — unless the caller is the
+        // Option B single-main-commit flow, which observed the 8-felt
+        // digest earlier (Phase 1 prologue) under the
+        // `main_commitment` slot.
+        if !skip_commit_observe {
+            challenger.observe(bundle.commit.commitment.clone());
+        }
 
         // Verify jagged sumcheck reduction (verifier-side).  We
         // recompose the full `JaggedPacking` from the `chip_infos`

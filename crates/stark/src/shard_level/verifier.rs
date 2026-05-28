@@ -262,7 +262,9 @@ where
     SC::Challenger: 'static,
 {
     use core::any::{Any, TypeId};
-    use crate::basefold_late_binding::jagged::{verify_jagged_basefold, JaggedBasefoldBundle};
+    use crate::basefold_late_binding::jagged::{
+        verify_jagged_basefold_no_observe, JaggedBasefoldBundle,
+    };
     use crate::jagged::JaggedChipInfo;
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
@@ -383,9 +385,16 @@ where
         .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
 
     // Delegate to the existing host-side verifier.
-    if !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &bundle, lb_challenger) {
+    //
+    // Option B single-main-commit: the prover's Phase 1 prologue
+    // already observed the BaseFold commit's 8-felt digest as
+    // `main_commitment` (this verifier mirrors that at lines 152-153).
+    // Use the `_no_observe` variant so the verifier doesn't observe
+    // the same digest a second time (which would desync the
+    // transcript vs the prover).
+    if !verify_jagged_basefold_no_observe(&chip_infos, &r_row_per_chip, &bundle, lb_challenger) {
         return Err(BasefoldVerifyError::JaggedPcs(
-            "verify_jagged_basefold rejected the bundle".into(),
+            "verify_jagged_basefold_no_observe rejected the bundle".into(),
         ));
     }
 

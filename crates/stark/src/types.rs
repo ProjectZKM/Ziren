@@ -27,20 +27,53 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
     pub main_commit: Com<SC>,
+    /// FRI prover data for the main-trace commit.  In BaseFold mode
+    /// (Option B single-main-commit flow), this is a *placeholder*
+    /// FRI prover-data produced by committing to a single 1×1 dummy
+    /// trace (microseconds-cost vs the multi-second real main-trace
+    /// commit).  The basefold `open()` path drives a placeholder 1×1
+    /// `pcs.open` against it to populate `ShardProof.opening_proof`
+    /// with matching dummy bytes; the verifier short-circuits before
+    /// `pcs.verify`.  In the non-BaseFold FRI path this is the real
+    /// main-trace FRI prover data.
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
+    /// Option B single-main-commit side channel: when `Some`, the
+    /// BaseFold jagged-PCS commit was produced up-front by `commit()`
+    /// (KoalaBear/LbChallenger config), `main_commit` carries its
+    /// 8-felt digest (so the existing `Com<SC>` shape is preserved
+    /// for the legacy fields), and `main_data` carries a placeholder.
+    /// `open()` retrieves this in the basefold branch and passes it
+    /// as the `precomputed_commit` argument to
+    /// `prove_shard_to_basefold`, which threads it into the Phase 4
+    /// jagged-PCS body (skipping the double-commit + in-band
+    /// observe).  `None` in the legacy FRI path (BN254 wrap /
+    /// OuterSC).
+    ///
+    /// `Box<dyn Any>` to avoid plumbing `PrecomputedJaggedCommit`
+    /// through the generic SC/M/P type parameters — only the `open()`
+    /// body (which already type-gates on KoalaBear) downcasts and
+    /// consumes the value.
+    pub precomputed_basefold: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
-    pub const fn new(
+    pub fn new(
         traces: Vec<Arc<M>>,
         main_commit: Com<SC>,
         main_data: P,
         chip_ordering: HashMap<String, usize>,
         public_values: Vec<Val<SC>>,
     ) -> Self {
-        Self { traces, main_commit, main_data, chip_ordering, public_values }
+        Self {
+            traces,
+            main_commit,
+            main_data,
+            chip_ordering,
+            public_values,
+            precomputed_basefold: None,
+        }
     }
 }
 
@@ -110,13 +143,15 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    /// FRI opening proof.  In BaseFold mode (default), the prover emits
-    /// an empty `FriProof` placeholder via
-    /// `LateBindingCapable::empty_opening_proof()` and the verifier
-    /// short-circuits before `pcs.verify` (see verifier.rs
-    /// `basefold_mode` branch).  Phase 3 cleanup target: change to
-    /// `Option<OpeningProof<SC>>` once the BaseFold-default proof shape
-    /// stabilizes.
+    /// FRI opening proof.  In BaseFold mode (Option B
+    /// single-main-commit flow — default for KoalaBear), the prover
+    /// emits a *placeholder* FRI proof produced by opening a 1×1
+    /// dummy trace (microseconds-cost vs the multi-second real
+    /// main-trace open).  The verifier short-circuits before
+    /// `pcs.verify` (see verifier.rs `basefold_shard_proof.is_some()`
+    /// branch) so the placeholder bytes are never consumed.  In the
+    /// non-BaseFold FRI/STARK path (BN254 wrap / OuterSC) this is a
+    /// real proof.
     pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
