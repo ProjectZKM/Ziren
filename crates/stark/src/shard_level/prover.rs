@@ -593,6 +593,7 @@ where
             return EvaluationProof::Bytes(hook(
                 &chip_names,
                 &r_row_per_chip,
+                z_row,
                 lb_challenger,
                 _device_traces,
                 Some(host_chip_traces_kb),
@@ -613,7 +614,7 @@ where
                 chip_traces.len()
             );
         });
-        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, lb_challenger));
+        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
     }
 
     let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, z_row, lb_challenger);
