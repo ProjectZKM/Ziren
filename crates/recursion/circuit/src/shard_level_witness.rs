@@ -762,10 +762,6 @@ where
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
-    let zero_uni_poly =
-        |b: &mut Builder<C>, degree: usize| -> UnivariatePolynomial<Ext<C::F, C::EF>> {
-            UnivariatePolynomial { coefficients: (0..=degree).map(|_| zero_ext(b)).collect() }
-        };
 
     // ── Padding shape (mirror of jagged_pcs_lift.rs:111-137) ──
     let total_cols_before_pad: usize = column_counts_by_round
@@ -848,23 +844,18 @@ where
         original_commitments.push(core::array::from_fn(|_| zero_felt(builder)));
     }
 
-    // ── PLACEHOLDER (Phase 4b): jagged_eval_proof + params + row_counts ──
-    //
-    // jagged_eval_proof: the sub-protocol proof.  Ziren's bundle
-    // does not carry this — the prover only emits the outer
-    // reduction sumcheck.  Until SP1's full eval-sub-protocol is
-    // ported, keep a degree-1 zero placeholder of the right shape.
+    // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
+    // The host prover now emits SP1's branching-program jagged-eval
+    // sub-protocol (basefold_late_binding.rs, between the reduction and
+    // the BaseFold open).  Lift its `PartialSumcheckProof` to circuit
+    // variables via the same const-promotion path as the outer
+    // reduction so the in-circuit `real_jagged_evaluator_fn`
+    // (compress_basefold.rs) verifies a non-vacuous closing identity.
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
-        partial_sumcheck_proof: PartialSumcheckProof {
-            univariate_polys: (0..num_col_variables)
-                .map(|_| zero_uni_poly(builder, 1))
-                .collect(),
-            claimed_sum: zero_ext(builder),
-            point_and_eval: (
-                (0..num_col_variables).map(|_| zero_ext(builder)).collect(),
-                zero_ext(builder),
-            ),
-        },
+        partial_sumcheck_proof: host_sumcheck_to_const_var::<C>(
+            builder,
+            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+        ),
     };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion ──
@@ -995,6 +986,38 @@ where
         row_counts,
         original_commitments,
         expected_eval,
+    }
+}
+
+/// Bridge a stark-side [`st::PartialSumcheckProof`] into the local
+/// recursion-circuit [`PartialSumcheckProof`] type used by
+/// [`host_sumcheck_to_const_var`] and the in-circuit jagged-PCS
+/// verifier.
+///
+/// **Why this exists**: the two structs are *structurally identical*
+/// (`Vec<UnivariatePolynomial<K>>` + `K` + `(Vec<K>, K)`) but live in
+/// different crates (`zkm_stark::shard_level::types` vs
+/// `crate::partial_sumcheck`), with each carrying its own local
+/// `UnivariatePolynomial` — so the compiler treats them as distinct
+/// types (E0308 at call sites that cross the boundary).  The
+/// host-side jagged-eval sub-protocol prover emits the stark variant
+/// (`bundle.jagged_eval.partial_sumcheck_proof`); the in-circuit
+/// lifter consumes the local variant.  This adapter performs a
+/// field-by-field rebuild between the two — zero data transformation,
+/// purely a type re-wrap.
+///
+/// Gap #1 Phase 3 unblock — see #508 diagnosis.
+fn stark_to_local_psp(
+    host: &st::PartialSumcheckProof<InnerChallenge>,
+) -> PartialSumcheckProof<InnerChallenge> {
+    PartialSumcheckProof {
+        univariate_polys: host
+            .univariate_polys
+            .iter()
+            .map(|p| UnivariatePolynomial { coefficients: p.coefficients.clone() })
+            .collect(),
+        claimed_sum: host.claimed_sum,
+        point_and_eval: (host.point_and_eval.0.clone(), host.point_and_eval.1),
     }
 }
 

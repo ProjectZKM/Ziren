@@ -38,10 +38,17 @@ pub struct JaggedReductionProof<EF> {
     pub q_at_z: EF,
 }
 
+/// SP1-aligned column mixing: the per-global-column weight is
+/// `z_col_lagrange[k]` (= `eq(z_col, k)`), NOT `gamma^k`.  This makes
+/// the reduction's claimed sum equal `Σ_k eq(z_col,k)·column_claim_k`,
+/// matching the recursion verifier's `evaluate_mle_ext(column_claims,
+/// z_col)` (recursive_jagged_pcs.rs).  `z_col_lagrange` must have at
+/// least `num_global_columns` entries (the partial-Lagrange table over
+/// `z_col`); padding columns beyond the real count are never indexed.
 fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
-    gamma: InnerChallenge,
+    z_col_lagrange: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
     let n = 1usize << packing.log_dense_size;
     let mut w = vec![InnerChallenge::ZERO; n];
@@ -61,7 +68,6 @@ fn build_weight_table(
         .collect();
 
     let mut k: usize = 0;
-    let mut gamma_pow = InnerChallenge::ONE;
     for (c_idx, info) in packing.chip_infos.iter().enumerate() {
         let h_c = info.row_count;
         let eq_c = &eq_per_chip[c_idx];
@@ -87,14 +93,115 @@ fn build_weight_table(
                 info.name, off + h_c,
                 packing.chip_infos.len(), packing.offsets.len(), packing.total_values,
             );
+            let zc = z_col_lagrange[k];
             for row in 0..h_c {
-                w[off + row] = gamma_pow * eq_c[row];
+                w[off + row] = zc * eq_c[row];
             }
-            gamma_pow *= gamma;
             k += 1;
         }
     }
     w
+}
+
+/// Interpolate a degree-2 round polynomial from evals at {0,1,2} and
+/// observe its coefficients into the transcript.  MUST match the lift's
+/// `interpolate_3point_evals_at_012` (recursion `univariate.rs`) so the
+/// host prover's Fiat-Shamir challenges align with the in-circuit
+/// `verify_sumcheck`, which observes *coefficients* (not evals).
+fn observe_round_poly_coeffs(challenger: &mut InnerChallenger, evals: [InnerChallenge; 3]) {
+    let [p0, p1, p2] = evals;
+    let two_inv = InnerChallenge::from_u8(2).inverse();
+    let c0 = p0;
+    let three_halves_p0 = (p0 + p0 + p0) * two_inv;
+    let half_p2 = p2 * two_inv;
+    let c1 = -three_halves_p0 + p1 + p1 - half_p2;
+    let half_p0 = p0 * two_inv;
+    let c2 = half_p0 - p1 + half_p2;
+    challenger.observe_algebra_element(c0);
+    challenger.observe_algebra_element(c1);
+    challenger.observe_algebra_element(c2);
+}
+
+/// MSB fold: bind the high bit of `table`, pairing index `i` with
+/// `i + half`.  The recursion `verify_sumcheck` accumulates the point
+/// via `insert(0, α)` (reverse sample order), so the prover must bind
+/// the highest variable first for the final `q_at_z` to correspond to
+/// the recorded (reversed) point under BaseFold's LSB-first opening.
+fn par_fold_table_first_msb(table: &[InnerChallenge], r: InnerChallenge) -> Vec<InnerChallenge> {
+    let half = table.len() / 2;
+    let mut out: Vec<InnerChallenge> = vec![InnerChallenge::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        let lo = table[i];
+        let hi = table[i + half];
+        *dst = lo + r * (hi - lo);
+    });
+    out
+}
+
+fn par_fold_table_first_base_msb(
+    q_base: &[InnerVal],
+    r: InnerChallenge,
+) -> Vec<InnerChallenge> {
+    let half = q_base.len() / 2;
+    let mut out: Vec<InnerChallenge> = vec![InnerChallenge::ZERO; half];
+    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
+        let q0: InnerChallenge = q_base[i].into();
+        let q1: InnerChallenge = q_base[i + half].into();
+        *dst = q0 + r * (q1 - q0);
+    });
+    out
+}
+
+fn jagged_round_evals_msb(
+    q: &[InnerChallenge],
+    w: &[InnerChallenge],
+    half: usize,
+) -> [InnerChallenge; 3] {
+    let zero = InnerChallenge::ZERO;
+    (0..half)
+        .into_par_iter()
+        .map(|i| {
+            let q0 = q[i];
+            let q1 = q[i + half];
+            let w0 = w[i];
+            let w1 = w[i + half];
+            let p0 = q0 * w0;
+            let p1 = q1 * w1;
+            let q2 = q1.double() - q0;
+            let w2 = w1.double() - w0;
+            let p2 = q2 * w2;
+            [p0, p1, p2]
+        })
+        .reduce(
+            || [zero, zero, zero],
+            |a, b| [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+        )
+}
+
+fn jagged_round_evals_base_msb(
+    q_base: &[InnerVal],
+    w: &[InnerChallenge],
+    half: usize,
+) -> [InnerChallenge; 3] {
+    let zero = InnerChallenge::ZERO;
+    (0..half)
+        .into_par_iter()
+        .map(|i| {
+            let q0: InnerChallenge = q_base[i].into();
+            let q1: InnerChallenge = q_base[i + half].into();
+            let w0 = w[i];
+            let w1 = w[i + half];
+            let p0 = w0 * q0;
+            let p1 = w1 * q1;
+            let q2 = q1.double() - q0;
+            let w2 = w1.double() - w0;
+            let p2 = w2 * q2;
+            [p0, p1, p2]
+        })
+        .reduce(
+            || [zero, zero, zero],
+            |a, b| [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
+        )
 }
 
 fn par_fold_table_first(table: &[InnerChallenge], r: InnerChallenge) -> Vec<InnerChallenge> {
@@ -481,58 +588,57 @@ pub fn prove_jagged_reduction_owned(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
+    z_col: &[InnerChallenge],
     challenger: &mut InnerChallenger,
 ) -> JaggedReductionProof<InnerChallenge> {
     assert_eq!(packing.chip_infos.len(), r_row_per_chip.len());
     assert_eq!(packing.chip_infos.len(), y_per_chip.len());
 
-    for y_c in y_per_chip {
-        for &val in y_c {
-            challenger.observe_algebra_element(val);
-        }
-    }
-    let gamma: InnerChallenge = challenger.sample_algebra_element();
-    let w = build_weight_table(packing, r_row_per_chip, gamma);
+    // SP1-aligned column mixing: `z_col` (one challenge per column
+    // variable) is sampled by the caller at the verifier-matching
+    // transcript position; here we weight columns by the partial-
+    // Lagrange table over it.  Column claims (`y_per_chip`) are already
+    // bound into the transcript by earlier phases, so not re-observed.
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
+    let w = build_weight_table(packing, r_row_per_chip, &z_col_lagrange);
 
     let n = packing.log_dense_size;
     assert_eq!(dense_q.len(), 1usize << n);
     assert_eq!(w.len(), 1usize << n);
 
     let mut rounds: Vec<JaggedReductionRound<InnerChallenge>> = Vec::with_capacity(n);
+    // Point is accumulated in the verifier's `insert(0, α)` (reverse
+    // sample) order so it matches `verify_sumcheck`'s `point_and_eval.0`.
     let mut eval_point: Vec<InnerChallenge> = Vec::with_capacity(n);
     let mut w_table: Vec<InnerChallenge>;
 
     let q_table_round_0: Vec<InnerChallenge>;
     {
         let half = dense_q.len() / 2;
-        let evals = jagged_round_evals_base(&dense_q, &w, half);
-        for &e in &evals {
-            challenger.observe_algebra_element(e);
-        }
+        let evals = jagged_round_evals_base_msb(&dense_q, &w, half);
+        observe_round_poly_coeffs(challenger, evals);
         let r_0: InnerChallenge = challenger.sample_algebra_element();
-        eval_point.push(r_0);
+        eval_point.insert(0, r_0);
         rounds.push(JaggedReductionRound { evals });
 
-        q_table_round_0 = par_fold_table_first_base(&dense_q, r_0);
+        q_table_round_0 = par_fold_table_first_base_msb(&dense_q, r_0);
         // dense_q is no longer needed (rounds 1..n operate on EF
         // tables only).  Release the 4N-byte base-field buffer.
         drop(dense_q);
-        w_table = par_fold_table_first(&w, r_0);
+        w_table = par_fold_table_first_msb(&w, r_0);
     }
     drop(w);
 
     let mut q_table: Vec<InnerChallenge> = q_table_round_0;
     for _round in 1..n {
         let half = q_table.len() / 2;
-        let evals = jagged_round_evals(&q_table, &w_table, half);
-        for &e in &evals {
-            challenger.observe_algebra_element(e);
-        }
+        let evals = jagged_round_evals_msb(&q_table, &w_table, half);
+        observe_round_poly_coeffs(challenger, evals);
         let r_i: InnerChallenge = challenger.sample_algebra_element();
-        eval_point.push(r_i);
+        eval_point.insert(0, r_i);
 
-        q_table = par_fold_table_first(&q_table, r_i);
-        w_table = par_fold_table_first(&w_table, r_i);
+        q_table = par_fold_table_first_msb(&q_table, r_i);
+        w_table = par_fold_table_first_msb(&w_table, r_i);
 
         rounds.push(JaggedReductionRound { evals });
     }
@@ -549,6 +655,7 @@ pub fn verify_jagged_reduction(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
+    z_col: &[InnerChallenge],
     challenger: &mut InnerChallenger,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
     if proof.rounds.len() != packing.log_dense_size
@@ -559,43 +666,48 @@ pub fn verify_jagged_reduction(
         return None;
     }
 
-    for y_c in y_per_chip {
-        for &val in y_c {
-            challenger.observe_algebra_element(val);
-        }
-    }
-    let gamma: InnerChallenge = challenger.sample_algebra_element();
+    // SP1-aligned: `z_col` is sampled by the caller at the matching
+    // transcript position; form the claimed sum as the z_col-weighted
+    // column mix.  Column claims are already in the transcript.
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
 
     let mut t = InnerChallenge::ZERO;
-    let mut gamma_pow = InnerChallenge::ONE;
+    let mut k = 0usize;
     for y_c in y_per_chip {
         for &val in y_c {
-            t += gamma_pow * val;
-            gamma_pow *= gamma;
+            t += z_col_lagrange[k] * val;
+            k += 1;
         }
     }
 
+    let n = proof.rounds.len();
     let mut current_claim = t;
-    let mut z_star: Vec<InnerChallenge> = Vec::with_capacity(proof.rounds.len());
+    let mut sampled: Vec<InnerChallenge> = Vec::with_capacity(n);
     for (round_idx, round) in proof.rounds.iter().enumerate() {
         let [p0, p1, p2] = round.evals;
-        challenger.observe_algebra_element(p0);
-        challenger.observe_algebra_element(p1);
-        challenger.observe_algebra_element(p2);
+        // Observe coefficients (not evals) so the transcript matches
+        // the recursion `verify_sumcheck` and the host prover.
+        observe_round_poly_coeffs(challenger, [p0, p1, p2]);
         if p0 + p1 != current_claim {
             tracing::debug!("jagged sumcheck round {} identity failed", round_idx);
             return None;
         }
         let r_i: InnerChallenge = challenger.sample_algebra_element();
-        if r_i != proof.eval_point[round_idx] {
-            tracing::debug!("jagged sumcheck round {} eval-point mismatch", round_idx);
-            return None;
-        }
+        sampled.push(r_i);
         current_claim = jagged_eval_round_poly([p0, p1, p2], r_i);
-        z_star.push(r_i);
     }
 
-    let w_table = build_weight_table(packing, r_row_per_chip, gamma);
+    // The recorded point is in `insert(0, α)` (reverse sample) order;
+    // verify it matches the challenges this verifier sampled.
+    for (i, &s) in sampled.iter().enumerate() {
+        if s != proof.eval_point[n - 1 - i] {
+            tracing::debug!("jagged sumcheck round {} eval-point mismatch", i);
+            return None;
+        }
+    }
+    let z_star = proof.eval_point.clone();
+
+    let w_table = build_weight_table(packing, r_row_per_chip, &z_col_lagrange);
     let w_mle = crate::zerocheck_prover::MultilinearExt::new(w_table);
     let w_at_z = w_mle.evaluate(&z_star);
 

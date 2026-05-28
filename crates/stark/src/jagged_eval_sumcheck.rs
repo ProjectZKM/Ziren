@@ -606,6 +606,32 @@ pub fn prove_jagged_evaluation(
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 
+/// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]
+/// writes, without re-deriving the polynomial.  Host verifiers (e.g.
+/// `verify_jagged_basefold`) call this to keep the challenger in sync
+/// past the jagged-eval sub-protocol before the PCS open.  The full
+/// branching-program soundness check is performed by the recursion
+/// verifier (`real_jagged_evaluator_fn`); the host self-check needs
+/// only transcript fidelity.
+pub fn replay_jagged_evaluation_transcript(
+    proof: &JaggedSumcheckEvalProof<InnerChallenge>,
+    challenger: &mut InnerChallenger,
+) {
+    let psp = &proof.partial_sumcheck_proof;
+    // `prove_jagged_evaluation` observes the claimed sum first — it
+    // observes ZERO in the degenerate (<2 prefix sums) case, where the
+    // dummy proof's `claimed_sum` is also ZERO — then, per sumcheck
+    // round, observes the round polynomial's coefficients and samples
+    // one challenge.
+    challenger.observe_algebra_element(psp.claimed_sum);
+    for poly in &psp.univariate_polys {
+        for &c in &poly.coefficients {
+            challenger.observe_algebra_element(c);
+        }
+        let _alpha: InnerChallenge = challenger.sample_algebra_element();
+    }
+}
+
 // Suppress unused-import warning for bits_big_endian (re-exported
 // for downstream use; not directly called here once naive prover
 // lands).
