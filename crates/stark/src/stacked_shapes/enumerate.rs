@@ -68,10 +68,59 @@ fn core_base_chips() -> &'static [&'static str] {
     ]
 }
 
+/// #517 / Phase A: "minimal core" subset for simple CPU programs that
+/// don't exercise every ALU/control chip.  Real-shard chips are filtered
+/// by `MachineAir::included(&shard)` (e.g.
+/// `crates/core/machine/src/alu/clo_clz/mod.rs:168` — CloClz only
+/// included when `cloclz_events` non-empty).  A fibonacci-style
+/// arithmetic loop calls `AddSub` + `DivRem` + `Branch` + `Jump` +
+/// `MemoryInstrs` + `MemoryLocal` + `SyscallCore`/`SyscallInstrs` + the
+/// `Cpu` clock — strict subset of [`core_base_chips`].  Without this
+/// cluster the runtime shape_key (which hashes chip names + per-chip
+/// widths in `LogUpEvaluations.chip_openings`) misses every enumerator
+/// dummy keyed on the 17-chip `core_base` set.  See `#516`
+/// `project_optionC_enumerator_fix.md` for the missing-VK trace.
+fn minimal_core_chips() -> &'static [&'static str] {
+    &[
+        "Cpu",
+        "AddSub",
+        "DivRem",
+        "Branch",
+        "Jump",
+        "MemoryInstrs",
+        "MemoryLocal",
+        "MiscInstrs",
+        "SyscallInstrs",
+        "SyscallCore",
+    ]
+}
+
 /// Memory-shard chip set — adds the global memory init/finalize chips
 /// that only appear in the first and last shards.
 fn memory_cluster_extras() -> &'static [&'static str] {
     &["MemoryGlobalInit", "MemoryGlobalFinalize", "Global"]
+}
+
+/// #517: bare memory-boundary chip set (no CPU/ALU).  When
+/// `pack_memory_events_into_last_record` is false (e.g. when the
+/// program emits precompile shards) `record::split` emits a dedicated
+/// shard containing only global memory + the `Global` infrastructure
+/// chip.  Mirrors SP1's `memory_boundary_cluster`
+/// (`/tmp/sp1/crates/core/machine/src/riscv/mod.rs:391`).
+fn memory_boundary_only_extras() -> &'static [&'static str] {
+    &["MemoryGlobalInit", "MemoryGlobalFinalize", "Global"]
+}
+
+/// #517: shared per-precompile-shard infrastructure (no CPU/ALU).
+/// Mirrors SP1's `base_precompile_cluster`
+/// (`/tmp/sp1/crates/core/machine/src/riscv/mod.rs:324`).  Precompile
+/// shards never contain `Cpu` (see
+/// `crates/core/machine/src/cpu/trace.rs:107` —
+/// `Cpu::included = shard.contains_cpu()`); they include only the
+/// precompile-specific chips + `SyscallPrecompile` + `MemoryLocal` +
+/// `Global`.
+fn precompile_base_chips() -> &'static [&'static str] {
+    &["SyscallPrecompile", "MemoryLocal", "Global"]
 }
 
 /// Per-precompile chip family extras.  Each is added on top of
@@ -146,8 +195,13 @@ fn extend_cluster(base: &BTreeSet<String>, extra: &[&str]) -> BTreeSet<String> {
     s
 }
 
-/// Build the full [`MachineShape`] for Ziren — 12 curated clusters
+/// Build the full [`MachineShape`] for Ziren — curated clusters
 /// covering every production workload class.
+///
+/// #517: post-Phase-A this returns ~28 clusters (was 13 in #516):
+/// 4 core variants × {bare, +memory_boundary} + 1 memory-boundary-only
+/// + 12 precompile-only clusters (no CPU, mirrors SP1's structure).
+/// See `project_enumerator_chipset_axis.md`.
 #[must_use]
 pub fn build_mips_machine_shape() -> MachineShape {
     let preprocessed = set_from(preprocessed_chips());
@@ -158,11 +212,43 @@ pub fn build_mips_machine_shape() -> MachineShape {
         }
         s
     };
+    let minimal_core = {
+        let mut s = preprocessed.clone();
+        for name in minimal_core_chips() {
+            s.insert(name.to_string());
+        }
+        s
+    };
     let memory = extend_cluster(&core_base, memory_cluster_extras());
+    let memory_minimal = extend_cluster(&minimal_core, memory_cluster_extras());
+    // Memory-boundary-only cluster (no CPU/ALU) — for shards that
+    // contain only global memory init/finalize events.
+    let memory_only =
+        extend_cluster(&preprocessed, memory_boundary_only_extras());
+    // Per-precompile base (preprocessed + SyscallPrecompile +
+    // MemoryLocal + Global; no CPU).
+    let precompile_base = extend_cluster(&preprocessed, precompile_base_chips());
 
-    let mut clusters: Vec<BTreeSet<String>> = vec![core_base.clone(), memory.clone()];
+    let mut clusters: Vec<BTreeSet<String>> = vec![
+        // Core variants (no precompile chips).
+        minimal_core.clone(),
+        memory_minimal.clone(),
+        core_base.clone(),
+        memory.clone(),
+        // Memory-boundary-only (no CPU).
+        memory_only,
+    ];
+    // Per-precompile clusters: WITH core_base (matches legacy
+    // 13-cluster enumeration — keep for backwards compat so workloads
+    // already covered by #516 stay covered).
     for (_, extras) in precompile_families() {
         clusters.push(extend_cluster(&memory, extras));
+    }
+    // #517: per-precompile clusters WITHOUT core_base (matches SP1's
+    // per-precompile shard pattern — these fire when a program emits
+    // dedicated precompile shards).
+    for (_, extras) in precompile_families() {
+        clusters.push(extend_cluster(&precompile_base, extras));
     }
 
     MachineShape::new(clusters)
@@ -278,8 +364,15 @@ mod tests {
     #[test]
     fn machine_shape_has_expected_cluster_count() {
         let ms = build_mips_machine_shape();
-        // 2 base (core-only, core+memory) + 11 precompile families.
-        assert_eq!(ms.chip_clusters.len(), 13);
+        // #517 (Phase A): post-restructure clusters =
+        //   2 minimal-core (bare + memory_boundary)
+        // + 2 core_base    (bare + memory_boundary)
+        // + 1 memory_boundary_only
+        // + 12 per-precompile WITH core (legacy)
+        // + 12 per-precompile WITHOUT core (SP1-style)
+        // = 29.  (Was 13 in #516.)
+        let pc = precompile_families().len();
+        assert_eq!(ms.chip_clusters.len(), 5 + 2 * pc);
     }
 
     #[test]
@@ -291,25 +384,44 @@ mod tests {
         }
     }
 
+    /// #517: not every cluster contains Cpu after Phase A — the
+    /// memory-boundary-only + precompile-only clusters intentionally
+    /// have no CPU (mirrors runtime shard boundaries).  At least one
+    /// cluster MUST contain Cpu so simple CPU workloads have a target.
     #[test]
-    fn all_clusters_contain_core_cpu() {
+    fn at_least_one_cluster_contains_core_cpu() {
         let ms = build_mips_machine_shape();
-        for cluster in &ms.chip_clusters {
-            assert!(cluster.contains("Cpu"), "cluster missing Cpu: {:?}", cluster);
-        }
+        assert!(
+            ms.chip_clusters.iter().any(|c| c.contains("Cpu")),
+            "no cluster contains Cpu — simple CPU workloads have no target",
+        );
+    }
+
+    /// #517: the memory-boundary-only cluster covers shards emitted by
+    /// `record::split` when `pack_memory_events_into_last_record` is
+    /// false.  Verify it exists + has the right shape (no Cpu, has
+    /// MemoryGlobal*).
+    #[test]
+    fn memory_boundary_only_cluster_present() {
+        let ms = build_mips_machine_shape();
+        let mbo = ms.chip_clusters.iter().find(|c| {
+            !c.contains("Cpu")
+                && c.contains("MemoryGlobalInit")
+                && c.contains("MemoryGlobalFinalize")
+        });
+        assert!(mbo.is_some(), "memory_boundary_only cluster missing");
     }
 
     #[test]
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // After porting to SP1-style consecutive-integer enumeration
-        // (#75 fix): MAX_AREA_MULTIPLE=12 → 13 clusters × 12 × 12 ×
-        // 5 × 5 = 46,800 shapes. Bumped from the old 20K cap which
-        // assumed power-of-2 area multiples [1,2,4,8,16,32].
+        // #517: MAX_AREA_MULTIPLE=12 with ~29 clusters →
+        // 29 × 12 × 12 × 5 × 5 = 104,400 shapes. Bumped cap to 120K
+        // (was 50K when only 13 clusters).
         assert!(
-            shapes.len() <= 50_000,
-            "shape count {} exceeds 50000 — tune MAX_AREA_MULTIPLE/paddings",
+            shapes.len() <= 120_000,
+            "shape count {} exceeds 120000 — tune MAX_AREA_MULTIPLE/paddings",
             shapes.len()
         );
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
