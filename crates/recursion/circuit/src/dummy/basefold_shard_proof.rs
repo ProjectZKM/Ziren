@@ -55,24 +55,44 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 }
 
 /// Allocator for [`LogupGkrProof`] — zero-filled, structurally
-/// SP1-shaped.
+/// aligned with the runtime [`prove_shard_logup_gkr_rows`] output.
 ///
 /// Mirror of SP1's `dummy_gkr_proof`
 /// (crates/recursion/circuit/src/dummy/logup_gkr.rs).
 ///
-/// Key shape rules (mirror SP1 exactly):
+/// Key shape rules (mirror runtime emission exactly):
 ///
-///   * `round_proofs.len() == log_max_row_height - 1`
-///   * per-round sumcheck dimension `i + log_interactions + 1`
-///     where `log_interactions = log2_ceil(Σ chip.num_lookups.next_pow2())`
+///   * `round_proofs.len() == max_chip_log_height - 1` where
+///     `max_chip_log_height = max(2, log2_ceil(max(per_chip_height)))` —
+///     matches `prove_shard_logup_gkr_rows`'s `num_row_variables - 1`
+///     (each layer transition reduces row dim by 1; the terminal layer
+///     with `num_row_variables == 0` is dropped at `top_level.rs:218`).
+///   * per-round sumcheck dimension `(i + 1) + log_interactions` where
+///     `log_interactions = log2_ceil(Σ chip.num_lookups.next_pow2())`.
+///     Runtime per-layer `total_vars = num_row_variables_i +
+///     num_interaction_variables`; layers iterate post-reverse from
+///     1-row-var to (nrv-1)-row-var, so layer i has
+///     `num_row_variables_i = i + 1`.
 ///   * `logup_evaluations.point.dimension() == log_max_row_height`
+///     (verifier left-pads runtime's `eval_point` to `max_log_row_count`
+///     at `top_level.rs:381`; dummy uses the same height for stability).
 ///   * `circuit_output.numerator.len() == 1 << (log_interactions + 1)`
-///     (per-chip-padded sum — matches host prover + in-circuit verifier)
-///   * per-chip `main_trace_evaluations.len() == chip.air.width()`
+///     (per-chip-padded sum — matches host prover + in-circuit verifier).
+///   * per-chip `main_trace_evaluations.len() == chip.air.width()`.
 ///   * per-chip `preprocessed_trace_evaluations` is `Some(...)` only
-///     when `chip.preprocessed_width() > 0`
+///     when `chip.preprocessed_width() > 0`.
+///
+/// # Parameters
+///
+/// * `chips` — per-chip references resolved from the input shape.
+/// * `max_chip_log_height` — `max(per_chip_log_height, 2)` from the
+///   shape (drives `round_proofs.len()` and per-round sumcheck dim).
+/// * `log_max_row_height` — shard-level bound used only for the
+///   `logup_evaluations.point` length (verifier left-pads runtime's
+///   point to this width).
 pub fn dummy_logup_gkr_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
+    max_chip_log_height: usize,
     log_max_row_height: usize,
 ) -> LogupGkrProof<F, EF>
 where
@@ -112,12 +132,15 @@ where
         denominator: vec![EF::ZERO; output_size],
     };
 
-    // SP1 emits `log_max_row_height - 1` rounds — guard against
-    // underflow in degenerate single-row shapes (would never happen
-    // in production, but the saturating sub keeps the allocator
-    // total since it can be called with any shape during fixture
-    // generation / probing).
-    let round_count = log_max_row_height.saturating_sub(1);
+    // Runtime emits `num_row_variables - 1` rounds where
+    // `num_row_variables = max(2, log2_ceil(max(per_chip_height)))`
+    // (see `prove_shard_logup_gkr_rows` at `top_level.rs:88` and the
+    // post-reverse filter at `top_level.rs:218`).  Mirror that here so
+    // each (chip-set, max-height) tuple yields a distinct dummy →
+    // distinct compose-program → distinct VK, closing the cache-key
+    // collision diagnosed in #514/#516/#517.  Saturating sub guards
+    // against degenerate empty inputs during fixture generation.
+    let round_count = max_chip_log_height.max(2).saturating_sub(1);
     let round_proofs: Vec<LogupGkrRoundProof<EF>> = (0..round_count)
         .map(|i| LogupGkrRoundProof {
             numerator_0: EF::ZERO,
@@ -214,8 +237,22 @@ where
     let public_values = vec![F::ZERO; PROOF_MAX_NUM_PVS];
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
 
+    // Runtime `num_row_variables` is driven by the MAX per-chip
+    // height (`top_level.rs:83-88`), not the shard-level
+    // `max_log_row_count` upper bound.  Pull the max height from the
+    // input shape so the dummy's `round_proofs.len()` matches what
+    // the real prover emits for shapes whose tallest chip is shorter
+    // than the production-default 22.  Each (chip-set, max-height)
+    // pair now produces a distinct dummy → distinct compose-program
+    // → distinct VK, closing the structural enumerator gap.
+    let max_chip_log_height: usize = chip_log_heights_pairs
+        .iter()
+        .map(|(_, h)| *h as usize)
+        .max()
+        .unwrap_or(0);
+
     let logup_gkr_proof =
-        dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
+        dummy_logup_gkr_proof::<F, EF, A>(chips, max_chip_log_height, max_log_row_count);
 
     // SP1 uses degree 4 for zerocheck rounds (max_log_row_count
     // rounds total).
@@ -342,5 +379,92 @@ mod tests {
             dummy_partial_sumcheck_proof(0, 4);
         assert_eq!(proof.univariate_polys.len(), 0);
         assert_eq!(proof.point_and_eval.0.len(), 0);
+    }
+
+    /// `dummy_basefold_shard_proof` derives `round_proofs.len()` from
+    /// the MAX per-chip height in the shape, not the shard-level
+    /// `max_log_row_count` upper bound.  This is the structural
+    /// alignment with runtime `prove_shard_logup_gkr_rows`
+    /// (`top_level.rs:83-88`): runtime emits `num_row_variables - 1`
+    /// round_proofs where `num_row_variables = max(2,
+    /// log2_ceil(max(per_chip_height)))`.
+    ///
+    /// Two shapes with the SAME chip set but DIFFERENT max heights
+    /// must produce dummies with DIFFERENT `round_proofs.len()` so
+    /// each (chip-set, max-height) tuple keys to a distinct compose
+    /// program and thus a distinct VK.
+    #[test]
+    fn dummy_round_count_tracks_max_chip_log_height() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+        use zkm_stark::shape::OrderedShape;
+
+        let machine = MipsAir::<KoalaBear>::machine(KoalaBearPoseidon2::default());
+
+        // Pick a small deterministic chip set.
+        let chip_names = ["AddSub", "Bitwise"];
+        let chips: Vec<_> = machine
+            .chips()
+            .iter()
+            .filter(|c| chip_names.contains(&zkm_stark::air::MachineAir::<KoalaBear>::name(*c).as_str()))
+            .collect();
+        assert_eq!(chips.len(), chip_names.len(), "test fixture chips must resolve");
+
+        // Two shapes with the same chip set, different max heights.
+        let pairs_low: Vec<(String, u8)> =
+            chip_names.iter().map(|n| (n.to_string(), 5u8)).collect();
+        let pairs_high: Vec<(String, u8)> =
+            chip_names.iter().map(|n| (n.to_string(), 10u8)).collect();
+
+        let proof_low = dummy_basefold_shard_proof::<F, EF, MipsAir<KoalaBear>>(
+            &chips, &pairs_low, 22,
+        );
+        let proof_high = dummy_basefold_shard_proof::<F, EF, MipsAir<KoalaBear>>(
+            &chips, &pairs_high, 22,
+        );
+
+        // Expected: round_count = max(2, max_height) - 1.
+        assert_eq!(proof_low.logup_gkr_proof.round_proofs.len(), 5 - 1,
+            "round_proofs.len() must equal max_chip_log_height - 1");
+        assert_eq!(proof_high.logup_gkr_proof.round_proofs.len(), 10 - 1,
+            "round_proofs.len() must equal max_chip_log_height - 1");
+
+        // Per-round sumcheck dim still derives from log_interactions.
+        // Just check rounds 0 and round_count-1 differ structurally.
+        if proof_low.logup_gkr_proof.round_proofs.len() > 1
+            && proof_high.logup_gkr_proof.round_proofs.len() > 1
+        {
+            // Round i has (i+1) + log_interactions univariate polys;
+            // since log_interactions is chip-set-static, round i's dim
+            // is the SAME across the two shapes for the same i.
+            assert_eq!(
+                proof_low.logup_gkr_proof.round_proofs[0]
+                    .sumcheck_proof.univariate_polys.len(),
+                proof_high.logup_gkr_proof.round_proofs[0]
+                    .sumcheck_proof.univariate_polys.len(),
+                "round 0 dim is chip-set-static, must agree",
+            );
+        }
+
+        // OrderedShape end-to-end via dummy_basefold_vk_and_shard_proof
+        // also responds: low vs high max-height shape yield different
+        // round counts.
+        let shape_low = OrderedShape::from_log2_heights(
+            &chip_names.iter().map(|n| (n.to_string(), 5)).collect::<Vec<_>>(),
+        );
+        let shape_high = OrderedShape::from_log2_heights(
+            &chip_names.iter().map(|n| (n.to_string(), 10)).collect::<Vec<_>>(),
+        );
+        let (_, p_low) = crate::stark::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
+            &machine, &shape_low,
+        );
+        let (_, p_high) = crate::stark::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
+            &machine, &shape_high,
+        );
+        assert_ne!(
+            p_low.logup_gkr_proof.round_proofs.len(),
+            p_high.logup_gkr_proof.round_proofs.len(),
+            "max-height variation MUST flow into round count for distinct shape_key",
+        );
     }
 }
