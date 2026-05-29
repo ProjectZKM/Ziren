@@ -451,6 +451,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let witness = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy(
                 self.compress_prover.machine(),
                 &shape,
+                None,
             );
             let per_arity_start = std::time::Instant::now();
             // Discard the result — we want the JIT/compile-cache
@@ -1892,6 +1893,7 @@ pub mod tests {
             ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy::<CompressAir<KoalaBear>>(
                 &compress_machine,
                 &shape,
+                None,
             );
         assert_eq!(
             witness.vks_and_proofs.len(),
@@ -2006,7 +2008,7 @@ pub mod tests {
         if env::var("COLLECT_SHAPES").is_ok() {
             let mut shapes = BTreeSet::new();
             for proof in core_proof.proof.0.iter() {
-                let shape = ZKMProofShape::Recursion(proof.shape());
+                let shape = ZKMProofShape::Recursion(proof.shape(), None);
                 tracing::info!("shape: {:?}", shape);
                 shapes.insert(shape);
             }

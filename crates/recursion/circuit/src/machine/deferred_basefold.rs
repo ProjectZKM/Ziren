@@ -395,6 +395,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             A,
         >,
         shape: &super::deferred::ZKMDeferredShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self
     where
         A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
@@ -415,7 +416,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
         };
         let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
-        >::dummy::<A>(machine, &inner_shape);
+        >::dummy::<A>(machine, &inner_shape, log2_combined_leaves);
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
             inner.vks_and_proofs.len(),
             shape.height,

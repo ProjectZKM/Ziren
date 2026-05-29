@@ -107,6 +107,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 pub fn dummy_recursion_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
+    log2_combined_leaves: Option<usize>,
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
 where
     A: MachineAir<KoalaBear>
@@ -115,7 +116,8 @@ where
     // Produce the basefold shard proof + matching VK using the
     // existing infrastructure.  The chip set and per-chip shapes
     // come from the machine + shape pair.
-    let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape);
+    let (vk, basefold_proof) =
+        dummy_basefold_vk_and_shard_proof::<A>(machine, shape, log2_combined_leaves);
 
     // Build the empty FRI placeholder fields matching the real
     // basefold-path prover output at `prover.rs:600-610`.  Empty
@@ -231,6 +233,7 @@ where
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
+    log2_combined_leaves: Option<usize>,
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
     zkm_stark::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
@@ -285,6 +288,7 @@ where
         &chips,
         &chip_log_heights_pairs,
         max_log_row_count,
+        log2_combined_leaves,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy
@@ -719,7 +723,7 @@ pub mod tests {
             ("Bitwise".to_string(), 3),
         ]);
         let (vk, proof) = super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
-            &machine, &shape,
+            &machine, &shape, None,
         );
         assert_eq!(
             vk.chip_ordering.len(),

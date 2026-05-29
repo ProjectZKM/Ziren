@@ -445,7 +445,7 @@ mod tests {
             is_complete: false,
         };
         let witness =
-            super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
+            super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape, None);
         assert_eq!(witness.shard_proofs.len(), 2);
         assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
         assert_eq!(witness.shard_proofs[1].chip_cumulative_sums.len(), 1);

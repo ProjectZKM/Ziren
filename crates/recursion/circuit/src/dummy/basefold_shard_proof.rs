@@ -62,7 +62,10 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 ///
 /// Key shape rules (mirror SP1 exactly):
 ///
-///   * `round_proofs.len() == log_max_row_height - 1`
+///   * `round_proofs.len() == log2_combined_leaves` (was previously
+///     hardcoded to `log_max_row_height - 1`; per #514 / Option C
+///     this is now an iteration axis so the enumerator can cover all
+///     real runtime variants of `m = log2(aggregate_chip_leaves)`)
 ///   * per-round sumcheck dimension `i + log_interactions + 1`
 ///     where `log_interactions = log2_ceil(Σ chip.num_lookups.next_pow2())`
 ///   * `logup_evaluations.point.dimension() == log_max_row_height`
@@ -71,9 +74,22 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 ///   * per-chip `main_trace_evaluations.len() == chip.air.width()`
 ///   * per-chip `preprocessed_trace_evaluations` is `Some(...)` only
 ///     when `chip.preprocessed_width() > 0`
+///
+/// # `log2_combined_leaves`
+///
+/// When `Some(m)`, the dummy emits `m` round-proofs — matching the
+/// real prover output `inner_proof.layers.len() = log2(combined_leaves)`
+/// at `crates/stark/src/shard_level/logup_gkr_prover.rs:337-349`.
+///
+/// When `None`, falls back to the legacy `log_max_row_height - 1`
+/// rule for the production-default upper bound.  Used by call sites
+/// that haven't yet been audited for per-shape `m` knowledge (i.e.
+/// runtime prewarm at `prover/src/lib.rs:447` which doesn't know the
+/// shape upfront).
 pub fn dummy_logup_gkr_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
     log_max_row_height: usize,
+    log2_combined_leaves: Option<usize>,
 ) -> LogupGkrProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -112,12 +128,14 @@ where
         denominator: vec![EF::ZERO; output_size],
     };
 
-    // SP1 emits `log_max_row_height - 1` rounds — guard against
-    // underflow in degenerate single-row shapes (would never happen
-    // in production, but the saturating sub keeps the allocator
-    // total since it can be called with any shape during fixture
-    // generation / probing).
-    let round_count = log_max_row_height.saturating_sub(1);
+    // Per-shape `m = log2(combined_leaves)` override (Option C, #514).
+    // When `None`, fall back to SP1's `log_max_row_height - 1` rule —
+    // guards against underflow in degenerate single-row shapes (would
+    // never happen in production, but the saturating sub keeps the
+    // allocator total since it can be called with any shape during
+    // fixture generation / probing).
+    let round_count = log2_combined_leaves
+        .unwrap_or_else(|| log_max_row_height.saturating_sub(1));
     let round_proofs: Vec<LogupGkrRoundProof<EF>> = (0..round_count)
         .map(|i| LogupGkrRoundProof {
             numerator_0: EF::ZERO,
@@ -205,6 +223,7 @@ pub fn dummy_basefold_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
     chip_log_heights_pairs: &[(String, u8)],
     max_log_row_count: usize,
+    log2_combined_leaves: Option<usize>,
 ) -> BasefoldShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -215,7 +234,7 @@ where
     let main_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
 
     let logup_gkr_proof =
-        dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
+        dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count, log2_combined_leaves);
 
     // SP1 uses degree 4 for zerocheck rounds (max_log_row_count
     // rounds total).
@@ -342,5 +361,51 @@ mod tests {
             dummy_partial_sumcheck_proof(0, 4);
         assert_eq!(proof.univariate_polys.len(), 0);
         assert_eq!(proof.point_and_eval.0.len(), 0);
+    }
+
+    /// `log2_combined_leaves` override (Option C, #514) drives
+    /// `round_proofs.len()` so the shape enumerator can cover every
+    /// real-runtime `m = log2(aggregate_chip_leaves)` value.
+    ///
+    /// When `None`, falls back to the legacy
+    /// `log_max_row_height - 1` rule.
+    #[test]
+    fn logup_gkr_proof_log2_combined_leaves_override_drives_round_count() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_stark::air::MachineAir;
+        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+
+        let machine: zkm_stark::StarkMachine<KoalaBearPoseidon2, MipsAir<F>> =
+            MipsAir::<F>::machine(KoalaBearPoseidon2::default());
+        let chips: Vec<&_> = machine.chips().iter().take(2).collect();
+
+        // None → legacy rule: round_count = log_max_row_height - 1.
+        let log_max_row_height = 22;
+        let proof_default: LogupGkrProof<F, EF> =
+            dummy_logup_gkr_proof::<F, EF, MipsAir<F>>(&chips, log_max_row_height, None);
+        assert_eq!(proof_default.round_proofs.len(), log_max_row_height - 1);
+
+        // Some(m) → override applied; round_count == m.
+        for m in [6usize, 12, 17, 21] {
+            let proof: LogupGkrProof<F, EF> =
+                dummy_logup_gkr_proof::<F, EF, MipsAir<F>>(&chips, log_max_row_height, Some(m));
+            assert_eq!(
+                proof.round_proofs.len(),
+                m,
+                "round_proofs.len() must match log2_combined_leaves override",
+            );
+            // Per-round sumcheck dimension still follows i + log_int + 1.
+            let log_int = log2_ceil_usize(
+                chips.iter().map(|c| c.num_lookups().max(1).next_power_of_two()).sum(),
+            );
+            for (i, round) in proof.round_proofs.iter().enumerate() {
+                let expected_dim = i + log_int + 1;
+                assert_eq!(
+                    round.sumcheck_proof.univariate_polys.len(),
+                    expected_dim,
+                    "per-round sumcheck dim must be i + log_interactions + 1",
+                );
+            }
+        }
     }
 }

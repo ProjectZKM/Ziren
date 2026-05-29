@@ -151,13 +151,17 @@ impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
     pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressWithVkeyShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self
     where
         A: MachineAir<KoalaBear>
             + for<'b> p3_air::Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
     {
-        let compress_val =
-            ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.compress_shape);
+        let compress_val = ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(
+            machine,
+            &shape.compress_shape,
+            log2_combined_leaves,
+        );
         let num_proofs = compress_val.vks_and_proofs.len();
         let merkle_val = ZKMMerkleProofWitnessValues::<KoalaBearPoseidon2>::dummy(
             num_proofs,

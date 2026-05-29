@@ -692,6 +692,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
         shape: &super::core::ZKMRecursionShape,
+        log2_combined_leaves: Option<usize>,
     ) -> Self {
         let (mut vks, shard_proofs): (Vec<_>, Vec<_>) = shape
             .proof_shapes
@@ -699,7 +700,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
             .map(|s| {
                 crate::stark::dummy_basefold_vk_and_shard_proof::<
                     zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-                >(machine, s)
+                >(machine, s, log2_combined_leaves)
             })
             .unzip();
         let vk = vks.pop().unwrap_or_else(|| StarkVerifyingKey {

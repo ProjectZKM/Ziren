@@ -115,9 +115,12 @@ fn main() {
         catch_unwind(AssertUnwindSafe(|| {
             prover.shrink_prover.setup(&prover.program_from_shape(
                 zkm_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
-                    ZKMProofShape::Shrink(OrderedShape {
-                        inner: answer.clone().into_iter().collect::<Vec<_>>(),
-                    }),
+                    ZKMProofShape::Shrink(
+                        OrderedShape {
+                            inner: answer.clone().into_iter().collect::<Vec<_>>(),
+                        },
+                        None,
+                    ),
                     5,
                 ),
                 Some(shrink_shape.clone().into()),
@@ -138,9 +141,12 @@ fn main() {
                 done = catch_unwind(AssertUnwindSafe(|| {
                     prover.shrink_prover.setup(&prover.program_from_shape(
                         zkm_prover::shapes::ZKMCompressProgramShape::from_proof_shape(
-                            ZKMProofShape::Shrink(OrderedShape {
-                                inner: answer.clone().into_iter().collect::<Vec<_>>(),
-                            }),
+                            ZKMProofShape::Shrink(
+                                OrderedShape {
+                                    inner: answer.clone().into_iter().collect::<Vec<_>>(),
+                                },
+                                None,
+                            ),
                             5,
                         ),
                         Some(shrink_shape.clone().into()),
