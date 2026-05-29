@@ -459,9 +459,14 @@ mod jagged_orchestration_hook {
     /// commit + observe + per-chip y-evals + sumcheck reduction +
     /// BaseFold open + serialize. `r_row_per_chip` lengths must
     /// equal `log2(padded_height)` per chip.
+    ///
+    /// `z_row` is the full shared zerocheck eval point used by the
+    /// Phase 3 branching-program jagged-eval sub-protocol (matches
+    /// the host `prove_jagged_basefold` 3rd param).
     pub type GpuJaggedOrchestrationFn = fn(
         chip_traces: &[(String, RowMajorMatrix<KoalaBear>)],
         r_row_per_chip: &[Vec<Ef4>],
+        z_row: &[Ef4],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> Vec<u8>;
 
@@ -500,9 +505,14 @@ mod jagged_pcs_device_hook {
     /// the hook drive the per-chip y-eval host fallback against the
     /// orchestrator-built trace — required when device snapshot
     /// heights can exceed `1 << r_row.len()` (would OOB the eq table).
+    ///
+    /// `z_row` is the full shared zerocheck eval point used by the
+    /// Phase 3 branching-program jagged-eval sub-protocol (matches
+    /// the host `prove_jagged_basefold` 3rd param).
     pub type GpuJaggedPcsDeviceFn = fn(
         chip_names: &[String],
         r_row_per_chip: &[Vec<Ef4>],
+        z_row: &[Ef4],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         host_chip_traces: Option<&[(String, RowMajorMatrix<KoalaBear>)]>,

@@ -543,6 +543,17 @@ where
         })
         .collect();
 
+    // z_row for the branching-program jagged-eval is the full shared
+    // zerocheck point (the recursion verifier uses
+    // `zerocheck_proof.point_and_eval.0`).  SAFETY: Challenge<SC> ==
+    // InnerChallenge under the TypeId gate asserted above.
+    let z_row: &[InnerChallenge] = unsafe {
+        core::slice::from_raw_parts(
+            shared_eval_point.as_ptr() as *const InnerChallenge,
+            shared_eval_point.len(),
+        )
+    };
+
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
         .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
@@ -566,6 +577,7 @@ where
         let bundle = prove_jagged_basefold_with_precomputed(
             &chip_traces,
             &r_row_per_chip,
+            z_row,
             precomputed,
             None,
             lb_challenger,
@@ -609,6 +621,7 @@ where
             return EvaluationProof::Bytes(hook(
                 &chip_names,
                 &r_row_per_chip,
+                z_row,
                 lb_challenger,
                 _device_traces,
                 Some(host_chip_traces_kb),
@@ -629,10 +642,10 @@ where
                 chip_traces.len()
             );
         });
-        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, lb_challenger));
+        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
     }
 
-    let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, lb_challenger);
+    let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, z_row, lb_challenger);
     EvaluationProof::Bundle(bundle)
 }
 

@@ -1356,11 +1356,13 @@ pub mod jagged {
     pub fn prove_jagged_basefold(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_with_y_per_chip(
             chip_traces,
             r_row_per_chip,
+            z_row,
             None,
             challenger,
         )
@@ -1377,6 +1379,7 @@ pub mod jagged {
     pub fn prove_jagged_basefold_with_precomputed(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
         precomputed: PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
@@ -1384,6 +1387,7 @@ pub mod jagged {
         prove_jagged_basefold_inner(
             chip_traces,
             r_row_per_chip,
+            z_row,
             pre_y_per_chip,
             Some(precomputed),
             challenger,
@@ -1398,12 +1402,14 @@ pub mod jagged {
     pub fn prove_jagged_basefold_with_y_per_chip(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
             r_row_per_chip,
+            z_row,
             pre_y_per_chip,
             None,
             challenger,
@@ -1419,6 +1425,7 @@ pub mod jagged {
     fn prove_jagged_basefold_inner(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: Option<PrecomputedJaggedCommit>,
         challenger: &mut crate::basefold_late_binding::LbChallenger,
@@ -1598,6 +1605,18 @@ pub mod jagged {
         // semantics with `None` collapse to V1 behaviour; the signature
         // is in place for future Ziren-side wiring (e.g. GPU-resident
         // chip-trace materialization) to skip the H→D upload.
+        // SP1-aligned: sample `z_col` (one challenge per column
+        // variable) at the verifier-matching transcript position —
+        // after the commit observe, immediately before the jagged
+        // sumcheck reduction.  Used both to weight the column mix in the
+        // reduction and as the column point for the branching-program
+        // jagged-eval sub-protocol.  Mirrors recursive_jagged_pcs.rs.
+        let num_cols = packing.offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
+            .map(|_| challenger.sample_algebra_element())
+            .collect();
+
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
@@ -1753,6 +1772,7 @@ pub mod jagged {
                                 &packing,
                                 r_row_per_chip,
                                 &y_per_chip,
+                                &z_col,
                                 challenger,
                             )
                         }
@@ -1815,6 +1835,7 @@ pub mod jagged {
                                 &packing,
                                 r_row_per_chip,
                                 &y_per_chip,
+                                &z_col,
                                 challenger,
                             )
                         }
@@ -1825,6 +1846,7 @@ pub mod jagged {
                     &packing,
                     r_row_per_chip,
                     &y_per_chip,
+                    &z_col,
                     challenger,
                 ),
             }
@@ -1835,6 +1857,23 @@ pub mod jagged {
             chips = n_chips,
             sub_phase = "sumcheck_reduce",
             "jagged sub-phase done"
+        );
+
+        // (4b) Jagged-eval sub-protocol — SP1's branching-program proof
+        // that the per-column geometry (prefix sums) is consistent with
+        // the reduced point.  Runs BETWEEN the reduction and the open so
+        // the transcript order matches the recursion verifier
+        // (recursive_jagged_pcs.rs: verify_sumcheck → jagged_evaluator_fn
+        // → PCS open).  Coordinate mapping (resolved against the live
+        // verifier): col_prefix_sums = packing.offsets (per-column,
+        // incl. total); z_row = shared zerocheck point; z_col as sampled;
+        // z_trace/z_index = the outer reduction's eval_point (z*).
+        let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+            &packing.offsets,
+            z_row,
+            &z_col,
+            &reduction.eval_point,
+            challenger,
         );
 
         // (5) Open the BaseFold commit at z*.
@@ -1886,27 +1925,6 @@ pub mod jagged {
                 .map(|ci| ci.column_count)
                 .collect(),
         };
-        // jagged-eval sub-protocol scaffold — produces a
-        // structurally-valid placeholder.  Real sumcheck body lands
-        // in #243's day-2 work.  Inputs (z_row, z_col, z_trace) come
-        // from the existing reduction state:
-        //   z_row    = r_row_per_chip[0] (or a flattened canonical
-        //              choice — TODO: align with verifier expectation)
-        //   z_col    = derived from gamma + chip indices (TODO)
-        //   z_trace  = reduction.eval_point (the outer sumcheck's z*)
-        let prefix_sums_for_eval: Vec<usize> = {
-            let mut acc = 0usize;
-            let mut out = Vec::with_capacity(packing.chip_infos.len() + 1);
-            out.push(0);
-            for info in &packing.chip_infos {
-                acc += info.row_count;
-                out.push(acc);
-            }
-            out
-        };
-        let _ = prefix_sums_for_eval; // wired-but-unused until #243 day-2
-        let jagged_eval = crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy();
-
         JaggedBasefoldBundle {
             reduction,
             basefold_proof: proof,
@@ -1980,17 +1998,36 @@ pub mod jagged {
             total_values: bundle.packing.total_values,
             log_dense_size: bundle.packing.log_dense_size,
         };
+        // SP1-aligned: sample z_col at the matching transcript position
+        // (after the commit observe, before the reduction), mirroring
+        // the prover.
+        let num_cols = packing.offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
+            .map(|_| challenger.sample_algebra_element())
+            .collect();
         let red_result = verify_jagged_reduction(
             &bundle.reduction,
             &packing,
             r_row_per_chip,
             &bundle.y_per_chip,
+            &z_col,
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
             eprintln!("[basefold verify] jagged sumcheck reduction REJECTED");
             return false;
         };
+
+        // Replay the jagged-eval sub-protocol transcript so the
+        // challenger stays in sync with the prover before the BaseFold
+        // open.  (Full branching-program verification is done by the
+        // recursion verifier; the host self-check needs only transcript
+        // fidelity here.)
+        crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
+            &bundle.jagged_eval,
+            challenger,
+        );
 
         // SP1-port: extend z_star from log_dense_size to log2(area)
         // by sampling additional Fiat-Shamir coords, mirroring the
@@ -2158,7 +2195,13 @@ mod test {
             .collect();
 
         let mut p_chal = build_challenger();
-        let bundle = prove_jagged_basefold(&traces, &r_row_per_chip, &mut p_chal);
+        let z_row_test: Vec<LbChallenge> = r_row_per_chip
+            .iter()
+            .max_by_key(|v| v.len())
+            .cloned()
+            .unwrap_or_default();
+        let bundle =
+            prove_jagged_basefold(&traces, &r_row_per_chip, &z_row_test, &mut p_chal);
 
         // Verifier reconstructs chip_infos from the same traces it
         // already has access to via the protocol's outer loop.
@@ -2198,7 +2241,13 @@ mod test {
             .collect();
 
         let mut p_chal = build_challenger();
-        let bundle = prove_jagged_basefold(&traces, &r_row_per_chip, &mut p_chal);
+        let z_row_test: Vec<LbChallenge> = r_row_per_chip
+            .iter()
+            .max_by_key(|v| v.len())
+            .cloned()
+            .unwrap_or_default();
+        let bundle =
+            prove_jagged_basefold(&traces, &r_row_per_chip, &z_row_test, &mut p_chal);
         let chip_infos =
             crate::jagged::compute_jagged_metadata::<LbVal>(&traces).chip_infos;
 
