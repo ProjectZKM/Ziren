@@ -7,6 +7,7 @@ mod machine;
 mod picus_info;
 mod polynomial;
 mod public_values;
+mod public_values_air;
 mod sub_builder;
 
 pub use builder::*;
@@ -16,4 +17,5 @@ pub use machine::*;
 pub use picus_info::*;
 pub use polynomial::*;
 pub use public_values::*;
+pub use public_values_air::*;
 pub use sub_builder::*;
