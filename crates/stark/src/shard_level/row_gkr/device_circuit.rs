@@ -358,7 +358,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
     /// * Otherwise `None`.
     ///
     /// The regen arm consults the
-    /// [`crate::basefold_late_binding::GpuGenerateFirstLayerFn`] hook
+    /// [`crate::jagged_pcs::GpuGenerateFirstLayerFn`] hook
     /// (when the `basefold` feature is on) via `circuit_id`.  When the
     /// hook is registered AND returns `Some(payload)`, we wrap it in a
     /// fresh [`DeviceCircuitLayer::FirstLayer`] and return it.  When
@@ -401,7 +401,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
         // the primary signal that the regen path was needed but
         // unavailable.
         if let Some(hook) =
-            crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
+            crate::jagged_pcs::get_gpu_generate_first_layer_hook()
         {
             if let Some(payload) = hook(self.input_data.circuit_id) {
                 let handle = DeviceLayerHandle::new(
@@ -598,7 +598,7 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
 /// populator payload describing a single device-side
 /// GKR layer's opaque handle + shape metadata.
 ///
-/// Returned by the [`crate::basefold_late_binding::GpuLogupScopePopulateFn`]
+/// Returned by the [`crate::jagged_pcs::GpuLogupScopePopulateFn`]
 /// hook and consumed by [`LogupTaskScope::install_circuit_from_payloads`]
 /// to build the per-shard `DeviceLogupGkrCircuit` at scope-entry without
 /// pulling any device-side types into the stark crate.
@@ -914,7 +914,7 @@ mod tests {
         // test happens to register it, we tolerate `Some(...)` here
         // because the contract is "return whatever the hook says".
         let hook_present =
-            crate::basefold_late_binding::get_gpu_generate_first_layer_hook()
+            crate::jagged_pcs::get_gpu_generate_first_layer_hook()
                 .is_some();
 
         let input_data = DeviceInputData {

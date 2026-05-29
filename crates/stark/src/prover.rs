@@ -271,7 +271,7 @@ where
 
         let pcs = self.config().pcs();
 
-        // Option B single-main-commit gate — KoalaBear/LbChallenger
+        // Option B single-main-commit gate — KoalaBear/JaggedChallenger
         // config skips the legacy FRI `pcs.commit(main_traces)` and
         // instead computes the BaseFold jagged-PCS commit up-front
         // (the one Phase 4 of the shard-level prover would otherwise
@@ -286,7 +286,7 @@ where
                 && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                     == TypeId::of::<crate::InnerChallenge>()
                 && TypeId::of::<SC::Challenger>()
-                    == TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+                    == TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
         };
 
         if use_basefold_path
@@ -394,10 +394,10 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
-        // === BASEFOLD FAST PATH (KoalaBear/LbChallenger default) ===
-        // BaseFold + jagged late-binding + zerocheck + LogUp-GKR is the
+        // === BASEFOLD FAST PATH (KoalaBear/JaggedChallenger default) ===
+        // BaseFold + jagged jagged-PCS + zerocheck + LogUp-GKR is the
         // default proof system whenever the generic config is the
-        // KoalaBear/LbChallenger stack.
+        // KoalaBear/JaggedChallenger stack.
         //
         // (Historical note: this path was originally named "WHIR fast
         // path" while the WHIR PCS was the planned soundness pillar.
@@ -410,7 +410,7 @@ where
         // MIPS shards took BaseFold, recursion shards stayed on FRI, and
         // Cpu-less memory shards used a side-channel BaseFold proof.  That
         // path is retired.  Dispatch is now purely TypeId-based, so the
-        // KoalaBear/LbChallenger stack takes BaseFold for MIPS and
+        // KoalaBear/JaggedChallenger stack takes BaseFold for MIPS and
         // recursion shards alike.
         //
         // === Step 5 Phase 3e (May 19 2026): BaseFold for recursion is default ===
@@ -419,7 +419,7 @@ where
         // Dispatch is now TypeId-based per the Phase 3d HYBRID memo
         // (the related design memo):
         //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
-        //     + Challenger=LbChallenger)  → basefold path for ALL shards,
+        //     + Challenger=JaggedChallenger)  → basefold path for ALL shards,
         //     including recursion shards (compose/shrink).
         //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
         //     → fall through to the FRI body below.  Wrap stays on FRI
@@ -436,7 +436,7 @@ where
                 && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                     == TypeId::of::<crate::InnerChallenge>()
                 && TypeId::of::<SC::Challenger>()
-                    == TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+                    == TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
         };
 
         if use_basefold_path {
@@ -547,7 +547,7 @@ where
                 .collect::<Vec<_>>();
 
             // Populate the shard-level BaseFold proof.  The helper has
-            // the same KoalaBear/LbChallenger TypeId guard as the outer
+            // the same KoalaBear/JaggedChallenger TypeId guard as the outer
             // branch, then drives LogUp-GKR, zerocheck, and jagged PCS.
             // The legacy prep/main opening fields above remain in the
             // envelope, but `Verifier::verify_shard` dispatches to
@@ -587,7 +587,7 @@ where
         // === FRI PATH — non-BaseFold configs ===
         //
         // Reaching this point means the generic config did not match the
-        // KoalaBear/LbChallenger TypeId gate above.  Today this primarily
+        // KoalaBear/JaggedChallenger TypeId gate above.  Today this primarily
         // serves the outer wrap path (`OuterSC` with
         // `MultiField32Challenger`), which intentionally stays on the
         // legacy FRI/STARK pipeline.
@@ -1003,7 +1003,7 @@ where
 }
 
 /// Late-binding dispatch helper: if `SC` is the KoalaBear config that
-/// implements `LateBindingCapable`, run per-chip late-binding commits
+/// implements `LateBindingCapable`, run per-chip jagged-PCS commits
 /// + opens with a fresh challenger and return the per-chip serialised
 /// bytes.  Otherwise return `None`.
 ///
@@ -1057,7 +1057,7 @@ impl Error for CpuProverError {}
 /// `crate::shard_level::prover::emit_jagged_pcs_bytes`) and
 /// `None` otherwise.
 ///
-/// Invoked from the KoalaBear/LbChallenger BaseFold path.  Bridges
+/// Invoked from the KoalaBear/JaggedChallenger BaseFold path.  Bridges
 /// between the generic `StarkMachine::open` state and the shard-level
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
@@ -1119,7 +1119,7 @@ where
         || TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
             != TypeId::of::<InnerChallenge>()
         || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         return None;
     }
@@ -1228,7 +1228,7 @@ where
     // verifier's Phase 1 prologue that already saw the digest).
     let precomputed_concrete = precomputed_basefold.map(|boxed| {
         *boxed
-            .downcast::<crate::basefold_late_binding::jagged::PrecomputedJaggedCommit>()
+            .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>()
             .unwrap_or_else(|_| {
                 panic!(
                     "try_prove_shard_to_basefold_boxed: precomputed_basefold present but \
@@ -1268,7 +1268,7 @@ where
 }
 
 /// Option B single-main-commit `commit()` body for the
-/// KoalaBear/LbChallenger config: compute the BaseFold jagged-PCS
+/// KoalaBear/JaggedChallenger config: compute the BaseFold jagged-PCS
 /// commit up-front (the one Phase 4 of the shard-level prover would
 /// otherwise produce), seed `main_commit` with its 8-felt digest, and
 /// stash the precomputed-commit state in `precomputed_basefold` so
@@ -1318,11 +1318,11 @@ where
     };
 
     let precomputed =
-        crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit(
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
             &named_traces_inner,
         );
     let digest_inner: [crate::InnerVal; 8] =
-        crate::basefold_late_binding::basefold_commit_digest(&precomputed.commit);
+        crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
     // Build the placeholder `Com<SC>` carrying the BaseFold digest.
     // For KoalaBearPoseidon2, Com<SC> == MerkleCap<InnerVal, [InnerVal; 8]>.

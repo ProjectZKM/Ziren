@@ -33,7 +33,7 @@ through to the legacy STARK path otherwise.
   │   Phase 1: transcript prologue                   │
   │   Phase 2: LogUp-GKR sumcheck (row_gkr backend)  │
   │   Phase 3: zerocheck sumcheck                    │
-  │   Phase 4: jagged-PCS opening (LbChallenger)     │
+  │   Phase 4: jagged-PCS opening (JaggedChallenger)     │
   │   Output: BasefoldShardProof<F, EF>              │
   └──────────────────────────────────────────────────┘
                             │

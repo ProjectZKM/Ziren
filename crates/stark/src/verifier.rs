@@ -46,7 +46,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     {
         use itertools::izip;
 
-        // KoalaBear/LbChallenger shard proofs carry a shard-level
+        // KoalaBear/JaggedChallenger shard proofs carry a shard-level
         // BaseFold proof; dispatch to BasefoldShardVerifier whenever the
         // envelope contains one.  Proofs without this field continue
         // through the legacy FRI/STARK verifier below.
@@ -557,7 +557,7 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     /// LogUp-GKR verification failed (combine identity, transcript, or leaf
     /// claim mismatch).
     LogUpGkrFailed,
-    /// Jagged late-binding bundle verification failed (sumcheck reduction
+    /// Jagged jagged-PCS bundle verification failed (sumcheck reduction
     /// mismatch or BaseFold open rejection).
     JaggedLateBindingFailed,
     /// Zerocheck proofs attached but number does not match number of chips.
@@ -621,7 +621,7 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
                 write!(f, "LogUp-GKR verification failed")
             }
             VerificationError::JaggedLateBindingFailed => {
-                write!(f, "jagged late-binding bundle verification failed")
+                write!(f, "jagged jagged-PCS bundle verification failed")
             }
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
@@ -658,7 +658,7 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
                 write!(f, "LogUp-GKR verification failed")
             }
             VerificationError::JaggedLateBindingFailed => {
-                write!(f, "jagged late-binding bundle verification failed")
+                write!(f, "jagged jagged-PCS bundle verification failed")
             }
             VerificationError::InvalidProofShape => {
                 write!(f, "invalid proof shape (zerocheck proof count mismatch)")
@@ -673,7 +673,7 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
 impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
 
 // `try_verify_late_binding_proofs`, `try_verify_jagged_late_binding_proof`,
-// and the per-KB jagged-late-binding helper retired alongside the legacy
+// and the per-KB jagged-jagged-PCS helper retired alongside the legacy
 // MIPS verify path.  BaseFold MIPS verification now lives in
 // `BasefoldShardVerifier::verify_shard`
 // (`crates/stark/src/shard_level/verifier.rs`), dispatched from

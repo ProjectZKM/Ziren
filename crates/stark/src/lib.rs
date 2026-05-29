@@ -12,7 +12,7 @@ pub mod folder;
 pub mod gpu_worker_context;
 mod kb31_poseidon2;
 pub mod basefold;
-pub mod basefold_late_binding;
+pub mod jagged_pcs;
 pub mod jagged;
 pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;

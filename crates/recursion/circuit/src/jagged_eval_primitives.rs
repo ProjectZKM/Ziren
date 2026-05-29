@@ -7,7 +7,7 @@
 //!
 //! # `emit_branching_program_eval`
 //!
-//! Mirrors [`zkm_stark::basefold_late_binding::jagged::BranchingProgram::eval`]
+//! Mirrors [`zkm_stark::jagged_pcs::jagged::BranchingProgram::eval`]
 //! (host).  The branching program is a DP over `num_vars + 1`
 //! layers.  At each layer we fetch 4 bits (one each from `z_row`,
 //! `z_index`, `prefix_sum`, `next_prefix_sum`), expand their
@@ -31,8 +31,8 @@
 //! # Reference
 //!
 //! Host-side implementations:
-//!   - [`BranchingProgram`](https://github.com/ProjectZKM/Ziren (basefold_late_binding::jagged))
-//!   - [`partial_lagrange_lsb`](https://github.com/ProjectZKM/Ziren (basefold_late_binding::jagged))
+//!   - [`BranchingProgram`](https://github.com/ProjectZKM/Ziren (jagged_pcs::jagged))
+//!   - [`partial_lagrange_lsb`](https://github.com/ProjectZKM/Ziren (jagged_pcs::jagged))
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt, SymbolicFelt};

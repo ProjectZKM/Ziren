@@ -143,7 +143,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             }
         }
         // SP1-port (verifier side): mirror the prover's eval_point
-        // extension in `crates/stark/src/basefold_late_binding.rs`
+        // extension in `crates/stark/src/jagged_pcs.rs`
         // step (5) of `prove_jagged_basefold`.  The prover sampled
         // additional Fiat-Shamir coords to extend the sumcheck output
         // from log_dense_size to log2(commit_area).  Sample matching

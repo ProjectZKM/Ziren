@@ -41,7 +41,7 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub public_values: Vec<SC::Val>,
     /// Option B single-main-commit side channel: when `Some`, the
     /// BaseFold jagged-PCS commit was produced up-front by `commit()`
-    /// (KoalaBear/LbChallenger config), `main_commit` carries its
+    /// (KoalaBear/JaggedChallenger config), `main_commit` carries its
     /// 8-felt digest (so the existing `Com<SC>` shape is preserved
     /// for the legacy fields), and `main_data` carries a placeholder.
     /// `open()` retrieves this in the basefold branch and passes it

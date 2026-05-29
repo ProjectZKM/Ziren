@@ -3,7 +3,7 @@
 //! ## Purpose
 //!
 //! Some GPU dispatch hooks (e.g. `GpuLayerTransitionFn` in
-//! [`crate::basefold_late_binding`]) operate on opaque GPU
+//! [`crate::jagged_pcs`]) operate on opaque GPU
 //! handles managed by per-GPU stream pools.  When the dispatch
 //! happens from a thread that has the right `cudaSetDevice`
 //! context (typically a `MultiGpuDevicePool` worker), the handle

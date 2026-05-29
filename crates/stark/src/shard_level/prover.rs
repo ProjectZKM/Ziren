@@ -36,7 +36,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 ///
 /// Otherwise it runs the BaseFold pre-commit on the supplied
 /// (already-materialized) `main_traces` via
-/// [`crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit`]
+/// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]
 /// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
 /// registered), returns the 8-felt BaseFold digest as the new
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
@@ -47,12 +47,12 @@ fn maybe_auto_precompute_basefold<SC, A>(
     main_traces: Vec<RowMajorMatrix<Val<SC>>>,
     main_commitment: [Val<SC>; 8],
     precomputed_commit: Option<
-        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
     >,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
-    Option<crate::basefold_late_binding::jagged::PrecomputedJaggedCommit>,
+    Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
 )
 where
     SC: StarkGenericConfig,
@@ -70,7 +70,7 @@ where
         || TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
         || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         return (main_traces, main_commitment, precomputed_commit);
     }
@@ -97,9 +97,9 @@ where
         .collect();
 
     let precomputed =
-        crate::basefold_late_binding::jagged::precompute_jagged_basefold_commit(&named_inner);
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(&named_inner);
     let digest_inner: [InnerVal; 8] =
-        crate::basefold_late_binding::basefold_commit_digest(&precomputed.commit);
+        crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
     // Move matrices back out (same reinterpret, no copy).
     let main_traces: Vec<RowMajorMatrix<Val<SC>>> = named_inner
@@ -137,7 +137,7 @@ pub fn prove_shard_to_basefold<SC, A>(
     device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     precomputed_commit: Option<
-        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
@@ -185,7 +185,7 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     precomputed_commit: Option<
-        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
@@ -464,8 +464,8 @@ where
 
 /// Returns an [`EvaluationProof`] tagged with the path that produced
 /// it. Runs only when SC monomorphizes to the KoalaBear /
-/// `LbChallenger` config; otherwise returns `EvaluationProof::Empty`.
-/// The outer challenger is downcast to `&mut LbChallenger` so the
+/// `JaggedChallenger` config; otherwise returns `EvaluationProof::Empty`.
+/// The outer challenger is downcast to `&mut JaggedChallenger` so the
 /// jagged-PCS transcript stays bound to the shard's outer state.
 ///
 /// When `precomputed_commit` is `Some`, the BaseFold commit was
@@ -482,7 +482,7 @@ fn emit_jagged_pcs_bytes<SC, A>(
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     precomputed_commit: Option<
-        crate::basefold_late_binding::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
     >,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
@@ -493,7 +493,7 @@ where
     SC::Challenger: 'static,
 {
     use core::any::{Any, TypeId};
-    use crate::basefold_late_binding::jagged::{
+    use crate::jagged_pcs::jagged::{
         prove_jagged_basefold, prove_jagged_basefold_with_precomputed,
     };
     use crate::shard_level::shard_proof::EvaluationProof;
@@ -502,7 +502,7 @@ where
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
         || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         return EvaluationProof::Empty;
     }
@@ -572,8 +572,8 @@ where
 
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
-        .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
-        .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
+        .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
+        .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
     // Option B single-main-commit fast path: when the orchestrator
     // pre-computed the BaseFold commit, drive the host

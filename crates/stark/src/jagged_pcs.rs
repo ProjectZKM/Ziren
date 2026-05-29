@@ -1,4 +1,4 @@
-//! Per-chip BaseFold late-binding adapter.
+//! Per-chip BaseFold jagged-PCS adapter.
 //!
 //! Replaces [`crate::whir_late_binding`] / [`crate::jagged_late_binding`]
 //! for the OOM-blocker chip-trace commit step.  The structural win:
@@ -30,17 +30,17 @@ use crate::basefold::{
 };
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerValMmcs};
 
-pub type LbVal = crate::kb31_poseidon2::InnerVal;
-pub type LbChallenge = InnerChallenge;
-pub type LbDft = Radix2DitParallel<LbVal>;
-pub type LbMmcs = InnerValMmcs;
-pub type LbChallenger = InnerChallenger;
+pub type JaggedVal = crate::kb31_poseidon2::InnerVal;
+pub type JaggedChallenge = InnerChallenge;
+pub type JaggedDft = Radix2DitParallel<JaggedVal>;
+pub type JaggedMmcs = InnerValMmcs;
+pub type JaggedChallenger = InnerChallenger;
 
 /// One committed batch of chip traces, plus the per-chip metadata
 /// needed to recompute evaluation points on the verifier side.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct BasefoldLateBindingCommit {
-    pub commitment: <LbMmcs as p3_commit::Mmcs<LbVal>>::Commitment,
+    pub commitment: <JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     /// Per-chip `(width, log_height_padded)` so the verifier can
     /// reconstruct the same Mle shapes when checking openings.
     pub chip_dims: Vec<(usize, u32)>,
@@ -53,7 +53,7 @@ pub struct BasefoldLateBindingCommit {
 }
 
 pub struct BasefoldLateBindingProverData {
-    pub stacked_data: StackedBasefoldProverData<LbVal, LbMmcs>,
+    pub stacked_data: StackedBasefoldProverData<JaggedVal, JaggedMmcs>,
     pub chip_dims: Vec<(usize, u32)>,
     pub area: usize,
     pub log_stacking_height: u32,
@@ -102,30 +102,30 @@ pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
 fn build_pcs(
     log_stacking_height: u32,
 ) -> (
-    StackedPcsProver<LbVal, LbChallenge, LbMmcs, LbDft>,
-    StackedPcsVerifier<LbVal, LbChallenge, LbMmcs>,
-    LbMmcs,
+    StackedPcsProver<JaggedVal, JaggedChallenge, JaggedMmcs, JaggedDft>,
+    StackedPcsVerifier<JaggedVal, JaggedChallenge, JaggedMmcs>,
+    JaggedMmcs,
 ) {
     let perm: crate::kb31_poseidon2::InnerPerm =
         zkm_primitives::poseidon2_init();
     let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = LbMmcs::new(hash, compress, 0);
+    let mmcs = JaggedMmcs::new(hash, compress, 0);
 
     // Route through `from_env_or_default` so `ZIREN_BASEFOLD_LOG_BLOWUP`
     // can override the rate for memory-measurement runs (see
     // `FriConfig::from_env_or_default`).
-    let fri = FriConfig::<LbVal>::from_env_or_default();
-    let dft = Arc::new(LbDft::default());
+    let fri = FriConfig::<JaggedVal>::from_env_or_default();
+    let dft = Arc::new(JaggedDft::default());
 
-    let basefold_prover = BasefoldProver::<LbVal, LbChallenge, _, _>::new(
+    let basefold_prover = BasefoldProver::<JaggedVal, JaggedChallenge, _, _>::new(
         fri.clone(),
         dft,
         mmcs.clone(),
         1, // num_expected_commitments — one round per shard
     );
     let basefold_verifier =
-        BasefoldVerifier::<LbVal, LbChallenge, _>::new(fri, mmcs.clone(), 1);
+        BasefoldVerifier::<JaggedVal, JaggedChallenge, _>::new(fri, mmcs.clone(), 1);
 
     let prover = StackedPcsProver::new(
         basefold_prover,
@@ -137,7 +137,7 @@ fn build_pcs(
     (prover, verifier, mmcs)
 }
 
-/// Convert chip traces into per-chip `Mle<LbVal>`s, padding each
+/// Convert chip traces into per-chip `Mle<JaggedVal>`s, padding each
 /// trace's row count up to the next power of two.  No dense
 /// concatenation — each chip stays in its own Mle for the stacked
 /// commit to interleave.
@@ -149,8 +149,8 @@ fn build_pcs(
 /// (`4N` bytes for the dense vec) on the hot path.
 #[allow(dead_code)]
 fn chips_to_mles(
-    chip_traces: &[(String, RowMajorMatrix<LbVal>)],
-) -> (Vec<Arc<Mle<LbVal>>>, Vec<(usize, u32)>) {
+    chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+) -> (Vec<Arc<Mle<JaggedVal>>>, Vec<(usize, u32)>) {
     let mut mles = Vec::with_capacity(chip_traces.len());
     let mut dims = Vec::with_capacity(chip_traces.len());
     for (_, trace) in chip_traces {
@@ -160,7 +160,7 @@ fn chips_to_mles(
         let log_h = padded_height.trailing_zeros();
 
         let mut padded = trace.values.clone();
-        padded.resize(padded_height * width, LbVal::ZERO);
+        padded.resize(padded_height * width, JaggedVal::ZERO);
 
         mles.push(Arc::new(Mle::new(RowMajorMatrix::new(padded, width))));
         dims.push((width, log_h));
@@ -172,8 +172,8 @@ fn chips_to_mles(
 /// device-side commit path needs to run the same MLE-construction +
 /// padding logic as the host before invoking the GPU encoder.
 pub fn chips_to_mles_owned(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
-) -> (Vec<Arc<Mle<LbVal>>>, Vec<(usize, u32)>) {
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+) -> (Vec<Arc<Mle<JaggedVal>>>, Vec<(usize, u32)>) {
     let mut mles = Vec::with_capacity(chip_traces.len());
     let mut dims = Vec::with_capacity(chip_traces.len());
     for (_, trace) in chip_traces.into_iter() {
@@ -186,7 +186,7 @@ pub fn chips_to_mles_owned(
             trace.values
         } else {
             let mut padded = trace.values;
-            padded.resize(padded_height * width, LbVal::ZERO);
+            padded.resize(padded_height * width, JaggedVal::ZERO);
             padded
         };
 
@@ -207,12 +207,12 @@ pub fn chips_to_mles_owned(
 /// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
 /// device.  Output `(commit, prover_data)` must be byte-identical to
 /// the host path (the device hook host-side observes the same digest
-/// into the same `LbChallenger`).  Falls through to the host
+/// into the same `JaggedChallenger`).  Falls through to the host
 /// implementation on any of: env unset, hook unregistered, hook
 /// returns `Err` (shape unsupported / device error).
-pub fn commit_basefold_late_binding(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
-    challenger: &mut LbChallenger,
+pub fn commit_jagged_pcs(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    challenger: &mut JaggedChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
         if let Some(hook) = get_gpu_basefold_commit_hook() {
@@ -240,12 +240,12 @@ pub fn commit_basefold_late_binding(
                     FELLBACK_ONCE.get_or_init(|| {
                         tracing::warn!(
                             "GPU BaseFold commit hook returned Err — falling \
-                             back to host commit_basefold_late_binding. The \
+                             back to host commit_jagged_pcs. The \
                              device side could not handle this shape; the \
                              host commit is the source of truth."
                         );
                     });
-                    return commit_basefold_late_binding_host(returned_traces, challenger);
+                    return commit_jagged_pcs_host(returned_traces, challenger);
                 }
             }
         } else {
@@ -261,19 +261,19 @@ pub fn commit_basefold_late_binding(
             });
         }
     }
-    commit_basefold_late_binding_host(chip_traces, challenger)
+    commit_jagged_pcs_host(chip_traces, challenger)
 }
 
-/// Pure host-side implementation of [`commit_basefold_late_binding`]
+/// Pure host-side implementation of [`commit_jagged_pcs`]
 /// — extracted so the GPU dispatch hook can fall back to it on
 /// shape-unsupported / runtime errors without re-entering the env-flag
 /// dispatch loop.  Always runs the CPU BaseFold + Plonky3 MMCS commit.
-pub fn commit_basefold_late_binding_host(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
-    challenger: &mut LbChallenger,
+pub fn commit_jagged_pcs_host(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    challenger: &mut JaggedChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     let (commit, prover_data) =
-        commit_basefold_late_binding_host_no_observe(chip_traces);
+        commit_jagged_pcs_host_no_observe(chip_traces);
     challenger.observe(commit.commitment.clone());
     (commit, prover_data)
 }
@@ -284,18 +284,18 @@ pub fn commit_basefold_late_binding_host(
 /// internal `challenger.observe` is absorbed by a throwaway challenger
 /// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
 /// observe is the real transcript binding).  Falls through to
-/// [`commit_basefold_late_binding_host_no_observe`] when the env is
+/// [`commit_jagged_pcs_host_no_observe`] when the env is
 /// unset, the hook is unregistered, or the hook returns `Err`.
-pub fn commit_basefold_late_binding_no_observe(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+pub fn commit_jagged_pcs_no_observe(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
         if let Some(hook) = get_gpu_basefold_commit_hook() {
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
-            let mut throwaway: LbChallenger =
-                LbChallenger::new(zkm_primitives::poseidon2_init());
+            let mut throwaway: JaggedChallenger =
+                JaggedChallenger::new(zkm_primitives::poseidon2_init());
             match hook(chip_traces, &mut throwaway) {
                 Ok(out) => {
                     FIRED_ONCE.get_or_init(|| {
@@ -315,15 +315,15 @@ pub fn commit_basefold_late_binding_no_observe(
                              variant — falling back to host."
                         );
                     });
-                    return commit_basefold_late_binding_host_no_observe(returned_traces);
+                    return commit_jagged_pcs_host_no_observe(returned_traces);
                 }
             }
         }
     }
-    commit_basefold_late_binding_host_no_observe(chip_traces)
+    commit_jagged_pcs_host_no_observe(chip_traces)
 }
 
-/// Same as [`commit_basefold_late_binding_host`] but does NOT observe
+/// Same as [`commit_jagged_pcs_host`] but does NOT observe
 /// the commitment into the challenger.  Used by the Option B
 /// single-main-commit flow, where the BaseFold commit happens BEFORE
 /// the shard-level Phase 1 prologue and the prologue's 8-felt
@@ -335,8 +335,8 @@ pub fn commit_basefold_late_binding_no_observe(
 /// challenger at the same transcript position as the verifier.  The
 /// verifier counterpart is
 /// [`jagged::verify_jagged_basefold_no_observe`].
-pub fn commit_basefold_late_binding_host_no_observe(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
+pub fn commit_jagged_pcs_host_no_observe(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
     let total_entries: usize = mles.iter().map(|m| m.guts.values.len()).sum();
@@ -370,7 +370,7 @@ pub fn commit_basefold_late_binding_host_no_observe(
 /// helper pulls out the first cap root — the same byte sequence
 /// `DuplexChallenger::observe(MerkleCap)` consumes.
 #[must_use]
-pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [LbVal; 8] {
+pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal; 8] {
     let roots = commit.commitment.roots();
     assert!(
         !roots.is_empty(),
@@ -379,12 +379,12 @@ pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [LbVal; 8] 
     roots[0]
 }
 
-/// Production-grade FRI config used by the late-binding pipeline.
+/// Production-grade FRI config used by the jagged-PCS pipeline.
 /// Public so the GPU dispatch hook can construct a matching
 /// device-side encoder (same `log_blowup`, same coset shift) without
 /// re-creating the env-overrides logic.
-pub fn lb_fri_config() -> FriConfig<LbVal> {
-    FriConfig::<LbVal>::from_env_or_default()
+pub fn lb_fri_config() -> FriConfig<JaggedVal> {
+    FriConfig::<JaggedVal>::from_env_or_default()
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -392,7 +392,7 @@ pub fn lb_fri_config() -> FriConfig<LbVal> {
 //
 // Mirror of the #174 () jagged-PCS device-trace hook pattern
 // in `crate::shard_level::sumcheck_poly::jagged_pcs_device_hook`.  The
-// hook receives the same inputs as `commit_basefold_late_binding` and
+// hook receives the same inputs as `commit_jagged_pcs` and
 // returns a byte-identical `(commit, prover_data)` — the device side
 // is responsible for:
 //
@@ -402,12 +402,12 @@ pub fn lb_fri_config() -> FriConfig<LbVal> {
 //     post-processing step (C4 risk #3) so the digest matches Plonky3
 //     `MerkleTreeMmcs`,
 //   * observing the resulting commitment into the supplied
-//     `LbChallenger` (so the transcript stays in lock-step with the
+//     `JaggedChallenger` (so the transcript stays in lock-step with the
 //     host path),
 //   * assembling a `BasefoldLateBindingProverData` whose
 //     `stacked_data.pcs_batch_data.prover_data` is shape-compatible
 //     with the host `MerkleTreeMmcs::ProverData` consumed downstream by
-//     `open_basefold_late_binding`.  The shape compatibility risk is
+//     `open_jagged_pcs`.  The shape compatibility risk is
 //     C4 risk #1 — until the open-path adapter lands the device hook
 //     can return `Err` on un-handled shapes and we fall back to host.
 //
@@ -418,16 +418,16 @@ pub fn lb_fri_config() -> FriConfig<LbVal> {
 // ─────────────────────────────────────────────────────────────────────
 
 /// Signature of the GPU BaseFold commit driver.  Same inputs as
-/// [`commit_basefold_late_binding`].  On success returns the
+/// [`commit_jagged_pcs`].  On success returns the
 /// byte-equivalent `(commit, prover_data)`.  On unrecoverable
 /// shape/runtime error returns the original `chip_traces` so the host
 /// fallback can run without losing ownership.
 pub type GpuBasefoldCommitFn = fn(
-    chip_traces: Vec<(String, RowMajorMatrix<LbVal>)>,
-    challenger: &mut LbChallenger,
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    challenger: &mut JaggedChallenger,
 ) -> Result<
     (BasefoldLateBindingCommit, BasefoldLateBindingProverData),
-    Vec<(String, RowMajorMatrix<LbVal>)>,
+    Vec<(String, RowMajorMatrix<JaggedVal>)>,
 >;
 
 static GPU_BASEFOLD_COMMIT_HOOK: std::sync::OnceLock<GpuBasefoldCommitFn> =
@@ -471,12 +471,12 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 /// hard fall-through to the host body (e.g. when shape constraints
 /// the GPU path doesn't support are detected).
 pub type GpuJaggedReductionFn = fn(
-    dense_q: alloc::vec::Vec<LbVal>,
-    packing: &crate::jagged::JaggedPacking<LbVal>,
-    r_row_per_chip: &[alloc::vec::Vec<LbChallenge>],
-    y_per_chip: &[alloc::vec::Vec<LbChallenge>],
-    challenger: &mut LbChallenger,
-) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>>;
+    dense_q: alloc::vec::Vec<JaggedVal>,
+    packing: &crate::jagged::JaggedPacking<JaggedVal>,
+    r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    challenger: &mut JaggedChallenger,
+) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
 
 static GPU_JAGGED_REDUCTION_HOOK: std::sync::OnceLock<GpuJaggedReductionFn> =
     std::sync::OnceLock::new();
@@ -501,7 +501,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // device-resident dense_q handle.
 //
 // Rationale (from the related design memo narrow win #2):
-// V1's hook accepts an owned `Vec<LbVal>` for `dense_q`.  When the
+// V1's hook accepts an owned `Vec<JaggedVal>` for `dense_q`.  When the
 // producer (`ziren-gpu/basefold/src/jagged_reduction_dispatch.rs`)
 // wraps it as `DenseQDevice::Host(...)`, the device round-0 path in
 // `prove_jagged_reduction_gpu` is *never* taken — it bails on
@@ -520,7 +520,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // `GpuLayerInitFn` / `GpuLayerPullFn` above — stark crate never
 // dereferences the handle, that's entirely GPU-side bookkeeping.  This
 // is the simpler newtype wrapper fallback the diag calls out (passing
-// a real `&DeviceBuffer<LbVal>` would require pulling
+// a real `&DeviceBuffer<JaggedVal>` would require pulling
 // `zkm-gpu-core` into `zkm-stark`'s public API, which is the 
 // Backend abstraction — explicitly out of scope).
 //
@@ -543,13 +543,13 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 /// The handle is opaque — `zkm-stark` never dereferences it.  The
 /// GPU side owns allocation / deallocation.
 pub type GpuJaggedReductionFnV2 = fn(
-    dense_q_host: alloc::vec::Vec<LbVal>,
+    dense_q_host: alloc::vec::Vec<JaggedVal>,
     dense_q_device_handle: Option<u64>,
-    packing: &crate::jagged::JaggedPacking<LbVal>,
-    r_row_per_chip: &[alloc::vec::Vec<LbChallenge>],
-    y_per_chip: &[alloc::vec::Vec<LbChallenge>],
-    challenger: &mut LbChallenger,
-) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>>;
+    packing: &crate::jagged::JaggedPacking<JaggedVal>,
+    r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    challenger: &mut JaggedChallenger,
+) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
 
 static GPU_JAGGED_REDUCTION_HOOK_V2: std::sync::OnceLock<GpuJaggedReductionFnV2> =
     std::sync::OnceLock::new();
@@ -704,18 +704,18 @@ pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
 //                            terminal extraction can run on host.
 //
 // `HostLayerView<'a>` is the borrowed-cells shape passed to the init
-// hook.  It carries borrowed `RowMajorTable<LbChallenge>` slices for
+// hook.  It carries borrowed `RowMajorTable<JaggedChallenge>` slices for
 // each of the four sub-MLEs plus the layer dimensions.  Borrows-only
 // keeps the upload zero-copy on the host side; the GPU side decides
 // whether to memcpy into device memory or pin + dma.
 //
-// All three hooks are typed concretely on `LbVal`/`LbChallenge` (the
+// All three hooks are typed concretely on `JaggedVal`/`JaggedChallenge` (the
 // production field stack — `KoalaBear` + `BinomialExtensionField<..,4>`).
 // `build_gkr_circuit` is generic over `F`/`EF`, so the dispatch site
 // uses `core::any::TypeId` to confirm the generics match before calling
 // the hook; on type mismatch the host path runs unchanged.  This
 // matches the architecture in #76 / D2 (commit hook) where the device
-// only ever sees concrete LbVal/LbChallenge buffers.
+// only ever sees concrete JaggedVal/JaggedChallenge buffers.
 // ─────────────────────────────────────────────────────────────────────
 
 /// Borrowed-cells view of an EF row-GKR layer suitable for the GPU
@@ -723,13 +723,13 @@ pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
 /// stays zero-copy on the host side; the GPU side is responsible for
 /// the memcpy / pin + dma into device memory.
 ///
-/// Lifetime borrows from the `LogUpGkrCpuLayer<LbChallenge, LbChallenge>`
+/// Lifetime borrows from the `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>`
 /// the dispatch site holds across the call.
 pub struct HostLayerView<'a> {
-    pub numerator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
-    pub denominator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
-    pub numerator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
-    pub denominator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<LbChallenge>],
+    pub numerator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<JaggedChallenge>],
+    pub denominator_0: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<JaggedChallenge>],
+    pub numerator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<JaggedChallenge>],
+    pub denominator_1: &'a [crate::shard_level::row_gkr::layer::RowMajorTable<JaggedChallenge>],
     pub num_row_variables: usize,
     pub num_interaction_variables: usize,
 }
@@ -742,8 +742,8 @@ pub struct HostLayerView<'a> {
 /// Step 4c: declared but only invoked when this hook + the transition
 /// hook + the pull hook are all registered, the calling thread has a
 /// `gpu_worker_context` TLS (i.e. a `MultiGpuDevicePool` worker), AND
-/// the `build_gkr_circuit` generic types resolve to (`LbVal`,
-/// `LbChallenge`).
+/// the `build_gkr_circuit` generic types resolve to (`JaggedVal`,
+/// `JaggedChallenge`).
 ///
 /// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
 /// GKR-circuit build call.  See `GpuLayerTransitionFn` docs for the
@@ -770,7 +770,7 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 
 /// Signature of the GPU row-GKR layer-pull driver.  Materializes a
 /// device-resident layer back to host as a
-/// `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` so the terminal
+/// `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` so the terminal
 /// extraction (`extract_outputs`) can run on host without an
 /// additional device-side primitive.
 ///
@@ -787,7 +787,7 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 pub type GpuLayerPullFn = fn(
     circuit_id: u64,
     handle: u64,
-) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge>;
+) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>;
 
 static GPU_LAYER_PULL_HOOK: std::sync::OnceLock<GpuLayerPullFn> =
     std::sync::OnceLock::new();
@@ -1047,15 +1047,15 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// dispatches through `FriCudaProver::prove` on device.  Output proof
 /// must be byte-identical to the host path (the device hook host-side
 /// observes the same digests + univariate messages into the supplied
-/// `LbChallenger`).  Falls through to the host implementation on any
+/// `JaggedChallenger`).  Falls through to the host implementation on any
 /// of: env unset, hook unregistered, hook returns `Err` (shape
 /// unsupported / device error — `Err` returns ownership of the
 /// `prover_data` so the host fallback can run without losing it).
-pub fn open_basefold_late_binding(
+pub fn open_jagged_pcs(
     prover_data: BasefoldLateBindingProverData,
-    eval_point: Vec<LbChallenge>,
-    challenger: &mut LbChallenger,
-) -> StackedBasefoldProof<LbVal, LbChallenge, LbMmcs> {
+    eval_point: Vec<JaggedChallenge>,
+    challenger: &mut JaggedChallenger,
+) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
         if let Some(hook) = get_gpu_basefold_open_hook() {
             use std::sync::OnceLock;
@@ -1075,12 +1075,12 @@ pub fn open_basefold_late_binding(
                     FELLBACK_ONCE.get_or_init(|| {
                         tracing::warn!(
                             "GPU BaseFold open hook returned Err — falling \
-                             back to host open_basefold_late_binding. The \
+                             back to host open_jagged_pcs. The \
                              device side could not handle this shape; the \
                              host open is the source of truth."
                         );
                     });
-                    return open_basefold_late_binding_host(
+                    return open_jagged_pcs_host(
                         returned_prover_data,
                         returned_eval_point,
                         challenger,
@@ -1092,19 +1092,19 @@ pub fn open_basefold_late_binding(
         // already emits its own one-shot WARN_ONCE for the same
         // env-set + no-hook condition; we don't need to double up).
     }
-    open_basefold_late_binding_host(prover_data, eval_point, challenger)
+    open_jagged_pcs_host(prover_data, eval_point, challenger)
 }
 
-/// Pure host-side implementation of [`open_basefold_late_binding`] —
+/// Pure host-side implementation of [`open_jagged_pcs`] —
 /// extracted so the GPU dispatch hook can fall back to it on
 /// shape-unsupported / runtime errors without re-entering the env-flag
 /// dispatch loop.  Always runs the CPU StackedPcsProver
 /// `prove_trusted_evaluation` body.
-pub fn open_basefold_late_binding_host(
+pub fn open_jagged_pcs_host(
     prover_data: BasefoldLateBindingProverData,
-    eval_point: Vec<LbChallenge>,
-    challenger: &mut LbChallenger,
-) -> StackedBasefoldProof<LbVal, LbChallenge, LbMmcs> {
+    eval_point: Vec<JaggedChallenge>,
+    challenger: &mut JaggedChallenger,
+) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
     let (prover, _verifier, _mmcs) = build_pcs(prover_data.log_stacking_height);
     prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
 }
@@ -1114,7 +1114,7 @@ pub fn open_basefold_late_binding_host(
 // dispatch hook.
 //
 // Mirror of the E2 commit hook ([`register_gpu_basefold_commit_hook`]).
-// The hook receives the same inputs as `open_basefold_late_binding` and
+// The hook receives the same inputs as `open_jagged_pcs` and
 // returns a byte-identical `StackedBasefoldProof` — the device side is
 // responsible for:
 //
@@ -1125,29 +1125,29 @@ pub fn open_basefold_late_binding_host(
 //   * running `FriCudaProver::prove` (the existing 1349 LOC device
 //     prove driver in `ziren-gpu/basefold/src/fri.rs`),
 //   * observing the per-round univariate-poly evals + Merkle commits +
-//     PoW witness into the supplied `LbChallenger` so the transcript
+//     PoW witness into the supplied `JaggedChallenger` so the transcript
 //     stays in lock-step with the host path,
 //   * assembling a `StackedBasefoldProof` whose `basefold_proof.*` is
 //     shape-compatible with the host path consumed by
-//     `verify_basefold_late_binding`.
+//     `verify_jagged_pcs`.
 //
 // The hook returns `Result<.., (prover_data, eval_point)>` so the device
 // side can tunnel ownership of the host inputs back to the host fallback
-// on error (mirrors the `commit_basefold_late_binding` hook contract).
+// on error (mirrors the `commit_jagged_pcs` hook contract).
 // ─────────────────────────────────────────────────────────────────────
 
 /// Signature of the GPU BaseFold open driver.  Same inputs as
-/// [`open_basefold_late_binding`].  On success returns the byte-
+/// [`open_jagged_pcs`].  On success returns the byte-
 /// equivalent `StackedBasefoldProof`.  On unrecoverable shape/runtime
 /// error returns the original `(prover_data, eval_point)` so the host
 /// fallback can run without losing ownership.
 pub type GpuBasefoldOpenFn = fn(
     prover_data: BasefoldLateBindingProverData,
-    eval_point: Vec<LbChallenge>,
-    challenger: &mut LbChallenger,
+    eval_point: Vec<JaggedChallenge>,
+    challenger: &mut JaggedChallenger,
 ) -> Result<
-    StackedBasefoldProof<LbVal, LbChallenge, LbMmcs>,
-    (BasefoldLateBindingProverData, Vec<LbChallenge>),
+    StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
+    (BasefoldLateBindingProverData, Vec<JaggedChallenge>),
 >;
 
 static GPU_BASEFOLD_OPEN_HOOK: std::sync::OnceLock<GpuBasefoldOpenFn> =
@@ -1169,14 +1169,14 @@ pub fn get_gpu_basefold_open_hook() -> Option<GpuBasefoldOpenFn> {
 }
 
 /// Verify the proof against a previously observed commitment.
-pub fn verify_basefold_late_binding(
-    commitment: &<LbMmcs as p3_commit::Mmcs<LbVal>>::Commitment,
+pub fn verify_jagged_pcs(
+    commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
     area: usize,
     log_stacking_height: u32,
-    eval_point: &[LbChallenge],
-    evaluation_claim: LbChallenge,
-    proof: &StackedBasefoldProof<LbVal, LbChallenge, LbMmcs>,
-    challenger: &mut LbChallenger,
+    eval_point: &[JaggedChallenge],
+    evaluation_claim: JaggedChallenge,
+    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
+    challenger: &mut JaggedChallenger,
 ) -> Result<(), crate::basefold::StackedVerifierError> {
     let (_prover, verifier, _mmcs) = build_pcs(log_stacking_height);
     verifier.verify_trusted_evaluation(
@@ -1218,8 +1218,8 @@ pub mod jagged {
 
     use super::{
         BasefoldLateBindingCommit,
-        commit_basefold_late_binding, open_basefold_late_binding,
-        verify_basefold_late_binding,
+        commit_jagged_pcs, open_jagged_pcs,
+        verify_jagged_pcs,
     };
 
     /// Wire-format jagged metadata: only the per-bundle quantities
@@ -1252,7 +1252,7 @@ pub mod jagged {
         pub basefold_proof: StackedBasefoldProof<
             InnerVal,
             InnerChallenge,
-            crate::basefold_late_binding::LbMmcs,
+            crate::jagged_pcs::JaggedMmcs,
         >,
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
         pub commit: BasefoldLateBindingCommit,
@@ -1271,7 +1271,7 @@ pub mod jagged {
 
     impl JaggedBasefoldBundle {
         /// Wire-format bytes (rmp-serde — matches the existing WHIR
-        /// late-binding bundle's serializer choice).
+        /// jagged-PCS bundle's serializer choice).
         pub fn to_bytes(&self) -> Vec<u8> {
             rmp_serde::to_vec(self).expect("JaggedBasefoldBundle serializes")
         }
@@ -1288,12 +1288,12 @@ pub mod jagged {
     /// [`prove_jagged_basefold_with_precomputed`] in Phase 4.
     ///
     /// The 8-felt digest of `commit.commitment` (via
-    /// [`crate::basefold_late_binding::basefold_commit_digest`]) is the
+    /// [`crate::jagged_pcs::basefold_commit_digest`]) is the
     /// `main_commitment` that the prologue + verifier observe.
     pub struct PrecomputedJaggedCommit {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
-        pub commit: crate::basefold_late_binding::BasefoldLateBindingCommit,
-        pub prover_data: crate::basefold_late_binding::BasefoldLateBindingProverData,
+        pub commit: crate::jagged_pcs::BasefoldLateBindingCommit,
+        pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverData,
     }
 
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
@@ -1333,7 +1333,7 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            crate::basefold_late_binding::commit_basefold_late_binding_no_observe(
+            crate::jagged_pcs::commit_jagged_pcs_no_observe(
                 dense_traces,
             )
         };
@@ -1357,7 +1357,7 @@ pub mod jagged {
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_with_y_per_chip(
             chip_traces,
@@ -1382,7 +1382,7 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         precomputed: PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -1404,7 +1404,7 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -1428,7 +1428,7 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: Option<PrecomputedJaggedCommit>,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
@@ -1481,7 +1481,7 @@ pub mod jagged {
                     alloc::string::String::from("<jagged-dense>"),
                     RowMajorMatrix::new(dense_q, 1),
                 )];
-                commit_basefold_late_binding(dense_traces, challenger)
+                commit_jagged_pcs(dense_traces, challenger)
             };
             drop(_commit_span);
             tracing::info!(
@@ -1651,7 +1651,7 @@ pub mod jagged {
                          register_gpu_jagged_reduction_hook or \
                          register_gpu_jagged_reduction_hook_v2 at startup. \
                          Falling back to host prove_jagged_reduction_owned. \
-                         See basefold_late_binding.rs Win A."
+                         See jagged_pcs.rs Win A."
                     );
                 });
             }
@@ -1675,7 +1675,7 @@ pub mod jagged {
                          registered but ZIREN_GPU_JAGGED_PCS=1 is not \
                          set in the env. Running host fallback. To \
                          enable the GPU path, set ZIREN_GPU_JAGGED_PCS=1. \
-                         See basefold_late_binding.rs Win A."
+                         See jagged_pcs.rs Win A."
                     );
                 });
             }
@@ -1900,7 +1900,7 @@ pub mod jagged {
         }
         let _t_open = std::time::Instant::now();
         let _open_span = tracing::info_span!("jagged_basefold_open").entered();
-        let proof = open_basefold_late_binding(
+        let proof = open_jagged_pcs(
             prover_data,
             extended_eval_point,
             challenger,
@@ -1939,7 +1939,7 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         bundle: &JaggedBasefoldBundle,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
             chip_infos,
@@ -1959,7 +1959,7 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         bundle: &JaggedBasefoldBundle,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
             chip_infos,
@@ -1974,7 +1974,7 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         bundle: &JaggedBasefoldBundle,
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
         // Replay the commit observation — unless the caller is the
@@ -2043,7 +2043,7 @@ pub mod jagged {
 
         // Verify the BaseFold opening: claim is q_at_z, point is the
         // extended z*.
-        let res = verify_basefold_late_binding(
+        let res = verify_jagged_pcs(
             &bundle.commit.commitment,
             bundle.commit.area,
             bundle.commit.log_stacking_height,
@@ -2067,34 +2067,34 @@ mod test {
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
 
-    fn rand_kb<R: Rng>(rng: &mut R) -> LbVal {
-        LbVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
+    fn rand_kb<R: Rng>(rng: &mut R) -> JaggedVal {
+        JaggedVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
     }
 
-    fn rand_ef<R: Rng>(rng: &mut R) -> LbChallenge {
-        <LbChallenge as BasedVectorSpace<LbVal>>::from_basis_coefficients_iter(
+    fn rand_ef<R: Rng>(rng: &mut R) -> JaggedChallenge {
+        <JaggedChallenge as BasedVectorSpace<JaggedVal>>::from_basis_coefficients_iter(
             (0..4).map(|_| rand_kb(rng)),
         )
         .unwrap()
     }
 
-    fn build_challenger() -> LbChallenger {
+    fn build_challenger() -> JaggedChallenger {
         let perm: crate::kb31_poseidon2::InnerPerm =
             zkm_primitives::poseidon2_init();
-        LbChallenger::new(perm)
+        JaggedChallenger::new(perm)
     }
 
     /// End-to-end: commit a small batch of heterogeneous chip traces,
     /// open at a random point, verify.  This is the OOM-cure flow
     /// (per-chip Mles → stacked PCS → BaseFold) on a toy size.
     #[test]
-    fn test_basefold_late_binding_roundtrip() {
+    fn test_jagged_pcs_roundtrip() {
         let mut rng = StdRng::seed_from_u64(0xBA5E_F01D_5EED);
 
         // Two synthetic chip traces of different shapes; both must
         // pad to power-of-2 row counts inside the stacking height.
-        let mk_trace = |width: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<LbVal> {
-            let v: Vec<LbVal> = (0..width * h).map(|_| rand_kb(rng)).collect();
+        let mk_trace = |width: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<JaggedVal> {
+            let v: Vec<JaggedVal> = (0..width * h).map(|_| rand_kb(rng)).collect();
             RowMajorMatrix::new(v, width)
         };
         let traces = vec![
@@ -2104,7 +2104,7 @@ mod test {
 
         let mut p_chal = build_challenger();
         let (commit, prover_data) =
-            commit_basefold_late_binding(traces.clone(), &mut p_chal);
+            commit_jagged_pcs(traces.clone(), &mut p_chal);
 
         // Compute the eval point + claim for the stacked PCS.  Claim
         // is the multilinear-extension of the *flattened*
@@ -2113,15 +2113,15 @@ mod test {
         let num_stripes = commit.area >> stack_dim;
         let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
         let total_vars = num_batch_vars + stack_dim;
-        let eval_point: Vec<LbChallenge> =
+        let eval_point: Vec<JaggedChallenge> =
             (0..total_vars).map(|_| rand_ef(&mut rng)).collect();
 
-        let stack_point: Vec<LbChallenge> = eval_point[..stack_dim].to_vec();
-        let batch_evals_flat: Vec<LbChallenge> = prover_data
+        let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
+        let batch_evals_flat: Vec<JaggedChallenge> = prover_data
             .stacked_data
             .interleaved_mles
             .iter()
-            .flat_map(|m| m.eval_at::<LbChallenge>(&stack_point))
+            .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
             .collect();
 
         // Honest evaluation_claim = MLE of batch_evals_flat at
@@ -2130,8 +2130,8 @@ mod test {
         let batch_point = &eval_point[stack_dim..];
         let evaluation_claim = {
             let target = 1usize << batch_point.len();
-            let mut current: Vec<LbChallenge> = batch_evals_flat.clone();
-            current.resize(target, LbChallenge::ZERO);
+            let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
+            current.resize(target, JaggedChallenge::ZERO);
             for &r in batch_point.iter().rev() {
                 let half = current.len() / 2;
                 for i in 0..half {
@@ -2144,11 +2144,11 @@ mod test {
             current[0]
         };
 
-        let proof = open_basefold_late_binding(prover_data, eval_point.clone(), &mut p_chal);
+        let proof = open_jagged_pcs(prover_data, eval_point.clone(), &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.commitment.clone());
-        verify_basefold_late_binding(
+        verify_jagged_pcs(
             &commit.commitment,
             commit.area,
             commit.log_stacking_height,
@@ -2157,7 +2157,7 @@ mod test {
             &proof,
             &mut v_chal,
         )
-        .expect("basefold late-binding roundtrip");
+        .expect("basefold jagged-PCS roundtrip");
     }
 
     /// **Phase C3** — full jagged-sumcheck pipeline backed by BaseFold.
@@ -2165,15 +2165,15 @@ mod test {
     /// were moved out of the whir feature gate.
     #[test]
     fn test_jagged_basefold_roundtrip() {
-        use crate::basefold_late_binding::jagged::{
+        use crate::jagged_pcs::jagged::{
             prove_jagged_basefold, verify_jagged_basefold,
         };
 
         let mut rng = StdRng::seed_from_u64(0xC0DE_BA5E);
 
         let mk_trace =
-            |width: usize, height: usize, rng: &mut StdRng| -> RowMajorMatrix<LbVal> {
-                let v: Vec<LbVal> = (0..width * height).map(|_| rand_kb(rng)).collect();
+            |width: usize, height: usize, rng: &mut StdRng| -> RowMajorMatrix<JaggedVal> {
+                let v: Vec<JaggedVal> = (0..width * height).map(|_| rand_kb(rng)).collect();
                 RowMajorMatrix::new(v, width)
             };
 
@@ -2185,7 +2185,7 @@ mod test {
         ];
 
         // Per-chip r_row sampled fresh; length = log2(padded height).
-        let r_row_per_chip: Vec<Vec<LbChallenge>> = traces
+        let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
             .iter()
             .map(|(_, t)| {
                 let h = t.values.len() / t.width.max(1);
@@ -2195,7 +2195,7 @@ mod test {
             .collect();
 
         let mut p_chal = build_challenger();
-        let z_row_test: Vec<LbChallenge> = r_row_per_chip
+        let z_row_test: Vec<JaggedChallenge> = r_row_per_chip
             .iter()
             .max_by_key(|v| v.len())
             .cloned()
@@ -2206,7 +2206,7 @@ mod test {
         // Verifier reconstructs chip_infos from the same traces it
         // already has access to via the protocol's outer loop.
         let chip_infos =
-            crate::jagged::compute_jagged_metadata::<LbVal>(&traces).chip_infos;
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
         let mut v_chal = build_challenger();
         let ok = verify_jagged_basefold(&chip_infos, &r_row_per_chip, &bundle, &mut v_chal);
         assert!(ok, "jagged-basefold pipeline should accept honest proof");
@@ -2220,18 +2220,18 @@ mod test {
     #[test]
     fn test_jagged_basefold_rejects_tampered_proof() {
         use p3_field::PrimeCharacteristicRing;
-        use crate::basefold_late_binding::jagged::{
+        use crate::jagged_pcs::jagged::{
             prove_jagged_basefold, verify_jagged_basefold,
         };
 
         let mut rng = StdRng::seed_from_u64(0xDEAD_BEEF);
         let mk_trace =
-            |width: usize, height: usize, rng: &mut StdRng| -> RowMajorMatrix<LbVal> {
-                let v: Vec<LbVal> = (0..width * height).map(|_| rand_kb(rng)).collect();
+            |width: usize, height: usize, rng: &mut StdRng| -> RowMajorMatrix<JaggedVal> {
+                let v: Vec<JaggedVal> = (0..width * height).map(|_| rand_kb(rng)).collect();
                 RowMajorMatrix::new(v, width)
             };
         let traces = vec![("Cpu".into(), mk_trace(4, 16, &mut rng))];
-        let r_row_per_chip: Vec<Vec<LbChallenge>> = traces
+        let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
             .iter()
             .map(|(_, t)| {
                 let h = t.values.len() / t.width.max(1);
@@ -2241,7 +2241,7 @@ mod test {
             .collect();
 
         let mut p_chal = build_challenger();
-        let z_row_test: Vec<LbChallenge> = r_row_per_chip
+        let z_row_test: Vec<JaggedChallenge> = r_row_per_chip
             .iter()
             .max_by_key(|v| v.len())
             .cloned()
@@ -2249,11 +2249,11 @@ mod test {
         let bundle =
             prove_jagged_basefold(&traces, &r_row_per_chip, &z_row_test, &mut p_chal);
         let chip_infos =
-            crate::jagged::compute_jagged_metadata::<LbVal>(&traces).chip_infos;
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
 
         // Tamper #1: corrupt the sumcheck final claim `q_at_z`.
         let mut tampered = bundle.clone();
-        tampered.reduction.q_at_z = tampered.reduction.q_at_z + LbChallenge::ONE;
+        tampered.reduction.q_at_z = tampered.reduction.q_at_z + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
             !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
@@ -2262,7 +2262,7 @@ mod test {
 
         // Tamper #2: corrupt one of the per-chip y_{c,j} commitments.
         let mut tampered = bundle.clone();
-        tampered.y_per_chip[0][0] = tampered.y_per_chip[0][0] + LbChallenge::ONE;
+        tampered.y_per_chip[0][0] = tampered.y_per_chip[0][0] + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
             !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
@@ -2272,7 +2272,7 @@ mod test {
         // Tamper #3: corrupt the BaseFold final_poly in the proof.
         let mut tampered = bundle.clone();
         tampered.basefold_proof.basefold_proof.final_poly =
-            tampered.basefold_proof.basefold_proof.final_poly + LbChallenge::ONE;
+            tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
             !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
@@ -2353,13 +2353,13 @@ mod test {
     }
 
     fn test_v2_hook_noop(
-        _dense_q_host: Vec<LbVal>,
+        _dense_q_host: Vec<JaggedVal>,
         _dense_q_device_handle: Option<u64>,
-        _packing: &crate::jagged::JaggedPacking<LbVal>,
-        _r_row_per_chip: &[Vec<LbChallenge>],
-        _y_per_chip: &[Vec<LbChallenge>],
-        _challenger: &mut LbChallenger,
-    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<LbChallenge>> {
+        _packing: &crate::jagged::JaggedPacking<JaggedVal>,
+        _r_row_per_chip: &[Vec<JaggedChallenge>],
+        _y_per_chip: &[Vec<JaggedChallenge>],
+        _challenger: &mut JaggedChallenger,
+    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>> {
         // Hook returns None — dispatcher would fall through to the
         // host body.  We're testing the signature, not the dispatch.
         None

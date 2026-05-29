@@ -249,7 +249,7 @@ impl BasefoldShardVerifier {
         // ── Phase 4: Jagged-PCS opening verification ────────────
         //
         // Delegate to the existing host-side verifier at
-        // crate::basefold_late_binding::jagged::verify_jagged_basefold
+        // crate::jagged_pcs::jagged::verify_jagged_basefold
         // after deserialising the bundle bytes.  See detailed rationale
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
@@ -268,7 +268,7 @@ impl BasefoldShardVerifier {
 ///
 /// Deserialises the bundle bytes and delegates to the long-standing
 /// host-side verifier at
-/// [`crate::basefold_late_binding::jagged::verify_jagged_basefold`].
+/// [`crate::jagged_pcs::jagged::verify_jagged_basefold`].
 /// This is much shorter than the recursion-circuit port because the
 /// host verifier already exists; we just need to wire up the
 /// KoalaBearPoseidon2-specialised call.
@@ -290,7 +290,7 @@ where
     SC::Challenger: 'static,
 {
     use core::any::{Any, TypeId};
-    use crate::basefold_late_binding::jagged::{
+    use crate::jagged_pcs::jagged::{
         verify_jagged_basefold_no_observe, JaggedBasefoldBundle,
     };
     use crate::jagged::JaggedChipInfo;
@@ -301,7 +301,7 @@ where
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
         || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::basefold_late_binding::LbChallenger>()
+            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         // Non-KoalaBear — skip (prover emitted Empty too).
         return Ok(());
@@ -411,11 +411,11 @@ where
         })
         .collect();
 
-    // Downcast SC::Challenger to &mut LbChallenger.
+    // Downcast SC::Challenger to &mut JaggedChallenger.
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
-        .downcast_mut::<crate::basefold_late_binding::LbChallenger>()
-        .expect("TypeId gate guarantees SC::Challenger == LbChallenger");
+        .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
+        .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
     // Delegate to the existing host-side verifier.
     //

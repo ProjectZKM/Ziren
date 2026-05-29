@@ -191,9 +191,9 @@ where
 {
     use core::any::TypeId;
 
-    use crate::basefold_late_binding::{
+    use crate::jagged_pcs::{
         allocate_gpu_layer_circuit_id, get_gpu_layer_init_hook, get_gpu_layer_pull_hook,
-        get_gpu_layer_transition_hook, HostLayerView, LbChallenge, LbVal,
+        get_gpu_layer_transition_hook, HostLayerView, JaggedChallenge, JaggedVal,
     };
 
     // Need 'static bound on F/EF to use TypeId; the build_gkr_circuit
@@ -208,8 +208,8 @@ where
 
     // Gate 4: TypeId match (recursion-circuit instantiates over a
     // different field stack — those calls fall through to host).
-    if TypeId::of::<F>() != TypeId::of::<LbVal>()
-        || TypeId::of::<EF>() != TypeId::of::<LbChallenge>()
+    if TypeId::of::<F>() != TypeId::of::<JaggedVal>()
+        || TypeId::of::<EF>() != TypeId::of::<JaggedChallenge>()
     {
         return None;
     }
@@ -220,20 +220,20 @@ where
     // `terminal_owned` short-circuit takes over; no device dispatch.
     let first_ef_layer = last_ef_layer.take()?;
 
-    // SAFETY: TypeId gates 4 confirm `EF == LbChallenge` and
-    // `F == LbVal` at runtime; the layer type
+    // SAFETY: TypeId gates 4 confirm `EF == JaggedChallenge` and
+    // `F == JaggedVal` at runtime; the layer type
     // `LogUpGkrCpuLayer<EF, EF>` therefore has identical layout to
-    // `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` and `RowMajorTable<EF>`
-    // to `RowMajorTable<LbChallenge>`.  We reinterpret-borrow via a
+    // `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` and `RowMajorTable<EF>`
+    // to `RowMajorTable<JaggedChallenge>`.  We reinterpret-borrow via a
     // pointer cast so the upload stays zero-copy on the host side.
     //
     // The borrow in `view` cannot outlive `first_ef_layer`; we pass
     // `view` by value to the init hook which returns immediately with
     // a `u64` handle.
-    let layer_as_lb: &super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> = unsafe {
+    let layer_as_lb: &super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> = unsafe {
         &*(&first_ef_layer
             as *const super::layer::LogUpGkrCpuLayer<EF, EF>
-            as *const super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge>)
+            as *const super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>)
     };
 
     let view = HostLayerView {
@@ -318,11 +318,11 @@ where
     // the captured terminal_handle (NOT the post-loop `handle` which
     // points at the null terminal at num=0) mirrors the host path's
     // `layers[layers.len() - 2]` indexing.
-    let terminal_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
+    let terminal_lb: super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> =
         pull_hook(circuit_id, terminal_handle);
 
-    // SAFETY: TypeId gate 4 confirms `LbChallenge == EF` at runtime;
-    // the `LogUpGkrCpuLayer<LbChallenge, LbChallenge>` struct has
+    // SAFETY: TypeId gate 4 confirms `JaggedChallenge == EF` at runtime;
+    // the `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` struct has
     // identical layout to `LogUpGkrCpuLayer<EF, EF>`.  Reinterpret via
     // `transmute_copy` and `forget` to move ownership safely.
     let terminal_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {

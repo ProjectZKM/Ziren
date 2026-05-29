@@ -292,8 +292,8 @@ where
 
 use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 use zkm_stark::basefold::stacked::StackedBasefoldProof;
-use zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle;
-use zkm_stark::basefold_late_binding::LbMmcs;
+use zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle;
+use zkm_stark::jagged_pcs::JaggedMmcs;
 use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
 use crate::basefold_verifier::{
@@ -360,7 +360,7 @@ pub struct MerkleOpeningVar<F> {
     pub leaves: Vec<LeafOpeningVar<F>>,
 }
 
-impl<C> Witnessable<C> for LeafOpening<InnerVal, LbMmcs>
+impl<C> Witnessable<C> for LeafOpening<InnerVal, JaggedMmcs>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -381,7 +381,7 @@ where
     }
 }
 
-impl<C> Witnessable<C> for MerkleOpening<InnerVal, LbMmcs>
+impl<C> Witnessable<C> for MerkleOpening<InnerVal, JaggedMmcs>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -451,7 +451,7 @@ where
 /// legacy carrier the existing recursion-circuit retains for
 /// witness-stream layout compatibility but no longer consumes.
 fn host_component_opening_to_recursive(
-    opening: &MerkleOpening<InnerVal, LbMmcs>,
+    opening: &MerkleOpening<InnerVal, JaggedMmcs>,
 ) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, 8>> {
     opening
         .leaves
@@ -483,7 +483,7 @@ fn host_component_opening_to_recursive(
 /// No fix needed at this site; binding-soundness happens through the
 /// `merkle_path_digests` field, not through `position`.
 fn host_query_opening_to_recursive(
-    opening: &MerkleOpening<InnerVal, LbMmcs>,
+    opening: &MerkleOpening<InnerVal, JaggedMmcs>,
 ) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, 8>> {
     use p3_field::BasedVectorSpace;
     const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
@@ -542,7 +542,7 @@ fn host_query_opening_to_recursive(
 /// [`RecursiveBasefoldProof`] Witnessable in
 /// [`crate::basefold_witness`] for a one-line `.read(builder)` flow.
 pub fn host_basefold_proof_to_recursive(
-    proof: &BasefoldProof<InnerVal, InnerChallenge, LbMmcs>,
+    proof: &BasefoldProof<InnerVal, InnerChallenge, JaggedMmcs>,
     batch_evaluations: Vec<Vec<InnerChallenge>>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
     assert_eq!(
@@ -595,7 +595,7 @@ pub fn host_basefold_proof_to_recursive(
 /// `batch_evaluations` through.  Companion to
 /// [`host_basefold_proof_to_recursive`] for the stacked-PCS layer.
 pub fn host_stacked_basefold_to_recursive(
-    proof: &StackedBasefoldProof<InnerVal, InnerChallenge, LbMmcs>,
+    proof: &StackedBasefoldProof<InnerVal, InnerChallenge, JaggedMmcs>,
 ) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
@@ -822,7 +822,7 @@ where
 
     // ── REAL: original_commitments[0] from bundle.commit ──
     // The committed cap is height-0 (1 root) for the BaseFold
-    // late-binding adapter — see basefold_late_binding.rs.
+    // jagged-PCS adapter — see jagged_pcs.rs.
     let cap_roots = bundle.commit.commitment.roots();
     assert_eq!(
         cap_roots.len(),
@@ -846,7 +846,7 @@ where
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
     // The host prover now emits SP1's branching-program jagged-eval
-    // sub-protocol (basefold_late_binding.rs, between the reduction and
+    // sub-protocol (jagged_pcs.rs, between the reduction and
     // the BaseFold open).  Lift its `PartialSumcheckProof` to circuit
     // variables via the same const-promotion path as the outer
     // reduction so the in-circuit `real_jagged_evaluator_fn`
@@ -1130,7 +1130,7 @@ mod tests {
     #[test]
     fn leaf_opening_witnessable_reads() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let host = LeafOpening::<InnerVal, LbMmcs> {
+        let host = LeafOpening::<InnerVal, JaggedMmcs> {
             values: vec![vec![InnerVal::ZERO; 4], vec![InnerVal::ZERO; 4]],
             proof: vec![[InnerVal::ZERO; 8]; 3],
         };
@@ -1145,11 +1145,11 @@ mod tests {
     #[test]
     fn merkle_opening_witnessable_reads() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let leaf = LeafOpening::<InnerVal, LbMmcs> {
+        let leaf = LeafOpening::<InnerVal, JaggedMmcs> {
             values: vec![vec![InnerVal::ZERO; 2]],
             proof: vec![[InnerVal::ZERO; 8]; 2],
         };
-        let host = MerkleOpening::<InnerVal, LbMmcs> {
+        let host = MerkleOpening::<InnerVal, JaggedMmcs> {
             leaves: vec![leaf.clone(), leaf],
         };
         let var = <_ as Witnessable<C>>::read(&host, &mut builder);
@@ -1231,7 +1231,7 @@ mod tests {
     /// zero rounds and the components/query_phase pass-through.
     #[test]
     fn host_basefold_proof_converter_empty() {
-        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
             univariate_messages: vec![],
             fri_commitments: vec![],
             component_polynomials_query_openings_and_proofs: vec![],
@@ -1258,7 +1258,7 @@ mod tests {
             [InnerChallenge::from_u8(7), InnerChallenge::from_u8(11)];
         let digest: [InnerVal; 8] = core::array::from_fn(|i| InnerVal::from_u16(i as u16));
         let cap = MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![digest]);
-        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
             univariate_messages: vec![uni_poly],
             fri_commitments: vec![cap],
             component_polynomials_query_openings_and_proofs: vec![],
@@ -1296,11 +1296,11 @@ mod tests {
         ];
         let mut row = lo_basis.to_vec();
         row.extend_from_slice(&hi_basis);
-        let leaf = LeafOpening::<InnerVal, LbMmcs> {
+        let leaf = LeafOpening::<InnerVal, JaggedMmcs> {
             values: vec![row],
             proof: vec![[InnerVal::ZERO; 8]; 5],
         };
-        let opening = MerkleOpening::<InnerVal, LbMmcs> { leaves: vec![leaf] };
+        let opening = MerkleOpening::<InnerVal, JaggedMmcs> { leaves: vec![leaf] };
         let recur = host_query_opening_to_recursive(&opening);
         assert_eq!(recur.len(), 1);
         let expected_lo =
@@ -1324,7 +1324,7 @@ mod tests {
     #[test]
     fn host_stacked_basefold_threads_batch_evaluations() {
         use p3_field::PrimeCharacteristicRing;
-        let bf_proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+        let bf_proof = BasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
             univariate_messages: vec![],
             fri_commitments: vec![],
             component_polynomials_query_openings_and_proofs: vec![],
@@ -1333,7 +1333,7 @@ mod tests {
             pow_witness: InnerVal::ZERO,
             batch_grinding_witness: InnerVal::ZERO,
         };
-        let stacked = StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+        let stacked = StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
             basefold_proof: bf_proof,
             batch_evaluations: vec![
                 vec![InnerChallenge::from_u8(1), InnerChallenge::from_u8(2)],
@@ -1355,7 +1355,7 @@ mod tests {
     fn host_basefold_converter_witnessable_composition() {
         use p3_field::PrimeCharacteristicRing;
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = BasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+        let proof = BasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
             univariate_messages: vec![],
             fri_commitments: vec![],
             component_polynomials_query_openings_and_proofs: vec![],
@@ -1432,8 +1432,8 @@ mod tests {
     fn lift_evaluation_proof_via_bundle_real_bundle_bytes() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
-        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+        use zkm_stark::jagged_pcs::jagged::PackingMeta;
+        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -1445,7 +1445,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
-            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
                     fri_commitments: vec![],
@@ -1486,8 +1486,8 @@ mod tests {
     fn lift_jagged_basefold_bundle_with_row_counts() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
-        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+        use zkm_stark::jagged_pcs::jagged::PackingMeta;
+        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -1499,7 +1499,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
-            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
                     fri_commitments: vec![],
@@ -1544,8 +1544,8 @@ mod tests {
     fn lift_jagged_basefold_bundle_smoke() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::basefold_late_binding::jagged::PackingMeta;
-        use zkm_stark::basefold_late_binding::BasefoldLateBindingCommit;
+        use zkm_stark::jagged_pcs::jagged::PackingMeta;
+        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         // Minimal-but-valid bundle: one reduction round, empty
@@ -1559,7 +1559,7 @@ mod tests {
                 eval_point: vec![InnerChallenge::ZERO],
                 q_at_z: InnerChallenge::ZERO,
             },
-            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, LbMmcs> {
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
                 basefold_proof: BasefoldProof {
                     univariate_messages: vec![],
                     fri_commitments: vec![],

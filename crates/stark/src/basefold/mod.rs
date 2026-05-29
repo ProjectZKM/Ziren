@@ -13,7 +13,7 @@
 //! Layered above this module:
 //!   * `stacked` — interleaves heterogeneous batches into stripes of
 //!     fixed `log_stacking_height`, then commits via this protocol.
-//!   * `basefold_late_binding` — jagged late-binding adapter
+//!   * `jagged_pcs` — jagged jagged-PCS adapter
 //!     (replaces `whir_late_binding.rs`).
 //!
 //! Per-round protocol shape (much simpler than WHIR):
@@ -32,7 +32,7 @@ pub mod proof;
 // jagged_per_chip module removed (Ziren #97, May 2 2026): per-chip
 // jagged-PCS path was an E3 perf experiment that diverged from SP1's
 // single-dense design and never landed.  Removed in favor of the
-// SP1-aligned dense path in `basefold_late_binding::jagged`.
+// SP1-aligned dense path in `jagged_pcs::jagged`.
 pub mod prover;
 pub mod stacked;
 pub mod verifier;

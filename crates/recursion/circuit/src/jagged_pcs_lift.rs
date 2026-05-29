@@ -9,7 +9,7 @@
 //!
 //!   1. Deserialize bytes → host-side `JaggedBasefoldBundle`
 //!      (existing rmp-serde format from
-//!      `crate::stark::basefold_late_binding::JaggedBasefoldBundle`).
+//!      `crate::stark::jagged_pcs::JaggedBasefoldBundle`).
 //!   2. Map each nested piece through `Witnessable::read`.
 //!   3. Assemble into `JaggedPcsProofVariable`.
 //!
@@ -17,7 +17,7 @@
 //!
 //! Step 1 wired (rmp-serde deserialize is one call).  Step 2/3
 //! deferred — the mapping requires Witnessable impls for
-//! [`zkm_stark::basefold_late_binding::jagged::JaggedReductionProof`]
+//! [`zkm_stark::jagged_pcs::jagged::JaggedReductionProof`]
 //! and `StackedBasefoldProof`, which are stark-side internal
 //! types not currently exposed to the recursion-circuit
 //! Witnessable surface.  Until those are added, this adapter
@@ -96,7 +96,7 @@ where
     // byte-for-byte.
     if !bytes.is_empty() {
         if let Some(bundle) =
-            zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle::from_bytes(bytes)
+            zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
         {
             return crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
                 builder,

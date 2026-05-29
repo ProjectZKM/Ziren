@@ -48,7 +48,7 @@ where
     // because the ziren-gpu populator drains the layer-transition
     // registry filled DURING `build_gkr_circuit`.
     let mut logup_task_scope = super::device_circuit::LogupTaskScope::<F, EF>::new(
-        crate::basefold_late_binding::allocate_gpu_layer_circuit_id(),
+        crate::jagged_pcs::allocate_gpu_layer_circuit_id(),
     );
 
     let _logup_task_scope_guard =
@@ -126,7 +126,7 @@ where
             && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
         {
             if let Some(hook) =
-                crate::basefold_late_binding::get_gpu_logup_scope_populate_hook()
+                crate::jagged_pcs::get_gpu_logup_scope_populate_hook()
             {
                 let cid = logup_task_scope.circuit_id();
                 if let Some(payloads) = hook(cid) {
@@ -278,7 +278,7 @@ where
     // or when ziren-gpu hasn't registered the drain hook.
     if let Some(circuit_id) = device_circuit_id_to_drain {
         if let Some(drain_hook) =
-            crate::basefold_late_binding::get_gpu_layer_drain_circuit_hook()
+            crate::jagged_pcs::get_gpu_layer_drain_circuit_hook()
         {
             drain_hook(circuit_id);
         }
@@ -412,7 +412,7 @@ where
 }
 
 /// Pull a device-resident GKR layer back to host. Panics if the
-/// `EF != LbChallenge` TypeId gate fires or if no pull hook is
+/// `EF != JaggedChallenge` TypeId gate fires or if no pull hook is
 /// registered — both indicate a programmer error: `build_gkr_circuit`
 /// requires the EF match and all three hooks before producing any
 /// `Device` entries.
@@ -426,12 +426,12 @@ where
 {
     use core::any::TypeId;
 
-    use crate::basefold_late_binding::{get_gpu_layer_pull_hook, LbChallenge};
+    use crate::jagged_pcs::{get_gpu_layer_pull_hook, JaggedChallenge};
 
     assert_eq!(
         TypeId::of::<EF>(),
-        TypeId::of::<LbChallenge>(),
-        "LayerState::Device under EF != LbChallenge"
+        TypeId::of::<JaggedChallenge>(),
+        "LayerState::Device under EF != JaggedChallenge"
     );
 
     let pull_hook = get_gpu_layer_pull_hook().expect(
@@ -441,10 +441,10 @@ where
     // Pass circuit_id so the GPU registry scopes per build call —
     // concurrent shards on the same GPU would otherwise collide on
     // the per-GPU `next_handle` counter.
-    let pulled_lb: super::layer::LogUpGkrCpuLayer<LbChallenge, LbChallenge> =
+    let pulled_lb: super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> =
         pull_hook(circuit_id, handle);
 
-    // SAFETY: assert above confirms `EF == LbChallenge` at runtime.
+    // SAFETY: assert above confirms `EF == JaggedChallenge` at runtime.
     let pulled_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {
         let out: super::layer::LogUpGkrCpuLayer<EF, EF> =
             core::mem::transmute_copy(&pulled_lb);

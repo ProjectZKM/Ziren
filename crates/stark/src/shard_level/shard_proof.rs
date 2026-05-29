@@ -52,7 +52,7 @@ pub struct ChipCumulativeSums<F, EF> {
 pub enum EvaluationProof {
     Empty,
     Bytes(Vec<u8>),
-    Bundle(crate::basefold_late_binding::jagged::JaggedBasefoldBundle),
+    Bundle(crate::jagged_pcs::jagged::JaggedBasefoldBundle),
 }
 
 impl Default for EvaluationProof {

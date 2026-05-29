@@ -112,7 +112,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// 5. Wrap the PartialSumcheckProof in JaggedSumcheckEvalProof.
 ///
 /// The prover is callable from
-/// [`crate::basefold_late_binding::jagged::prove_jagged_basefold`]
+/// [`crate::jagged_pcs::jagged::prove_jagged_basefold`]
 /// alongside the outer jagged-reduction sumcheck.
 /// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
 /// hypercube indexing (used by partial_lagrange) with the MSB-first

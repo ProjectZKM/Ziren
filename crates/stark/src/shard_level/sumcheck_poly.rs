@@ -447,7 +447,7 @@ gpu_hook_accessors!(GPU_INTERACTION_EVAL_HOOK: GpuInteractionEvalFn
 
 // Whole-pipeline GPU jagged-PCS driver: commit, y-evals, sumcheck
 // reduction, BaseFold open. Concrete-typed on `(KoalaBear, Ef4,
-// LbChallenger)`; generic-EF callers take the host orchestrator.
+// JaggedChallenger)`; generic-EF callers take the host orchestrator.
 mod jagged_orchestration_hook {
     use super::Ef4;
     use alloc::string::String;
@@ -467,7 +467,7 @@ mod jagged_orchestration_hook {
         chip_traces: &[(String, RowMajorMatrix<KoalaBear>)],
         r_row_per_chip: &[Vec<Ef4>],
         z_row: &[Ef4],
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> Vec<u8>;
 
     static GPU_JAGGED_ORCHESTRATION_HOOK: std::sync::OnceLock<GpuJaggedOrchestrationFn> =
@@ -513,7 +513,7 @@ mod jagged_pcs_device_hook {
         chip_names: &[String],
         r_row_per_chip: &[Vec<Ef4>],
         z_row: &[Ef4],
-        challenger: &mut crate::basefold_late_binding::LbChallenger,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         host_chip_traces: Option<&[(String, RowMajorMatrix<KoalaBear>)]>,
     ) -> Vec<u8>;

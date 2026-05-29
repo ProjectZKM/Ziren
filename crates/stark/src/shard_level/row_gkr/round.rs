@@ -3023,7 +3023,7 @@ where
                 // On success the V3 hook adopts the device buffers directly —
                 // no device→host→device round-trip.
                 let published =
-                    crate::basefold_late_binding::get_gpu_v3_fetch_publish_hook()
+                    crate::jagged_pcs::get_gpu_v3_fetch_publish_hook()
                         .map(|h| h(*circuit_id, total_vars_state))
                         .unwrap_or(false);
                 if published {
