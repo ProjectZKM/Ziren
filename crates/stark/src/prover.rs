@@ -260,6 +260,28 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
+        // #527 PoC: smallest-cluster snap (env-gated; OFF by default).
+        if std::env::var("ZIREN_SMALLEST_CLUSTER_SNAP").as_deref() == Ok("1") {
+            let actual: std::collections::BTreeSet<String> =
+                named_traces.iter().map(|(n, _)| n.clone()).collect();
+            let ms = crate::stacked_shapes::build_mips_machine_shape();
+            if let Some(cluster) = ms.smallest_cluster(&actual) {
+                let extras: Vec<String> = cluster.iter()
+                    .filter(|n| !actual.contains(*n)).cloned().collect();
+                println!(">>> #527 SNAP actual={} cluster={} extras={:?}",
+                    actual.len(), cluster.len(), extras);
+                for name in extras {
+                    let w = self.machine().chips().iter()
+                        .find(|c| c.name() == name)
+                        .map(|c| p3_air::BaseAir::<Val<SC>>::width(c))
+                        .unwrap_or(1);
+                    named_traces.push((name,
+                        RowMajorMatrix::new(vec![Val::<SC>::ZERO; w], w)));
+                }
+            } else {
+                println!(">>> #527 SNAP no cluster (actual={})", actual.len());
+            }
+        }
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
@@ -967,34 +989,12 @@ where
                 .into_par_iter()
                 .map(|record| {
                     let t0 = std::time::Instant::now();
-                    let mut named_traces = self.generate_traces(&record).map_err(|e| {
+                    let named_traces = self.generate_traces(&record).map_err(|e| {
                         tracing::error!("generate traces error: {:?}", e);
                         Self::Error {}
                     })?;
                     let trace_gen_ms = t0.elapsed().as_millis();
 
-                    // #527 PoC: smallest-cluster snap (env-gated; OFF by default).
-                    if std::env::var("ZIREN_SMALLEST_CLUSTER_SNAP").as_deref() == Ok("1") {
-                        let actual: std::collections::BTreeSet<String> =
-                            named_traces.iter().map(|(n, _)| n.clone()).collect();
-                        let ms = crate::stacked_shapes::build_mips_machine_shape();
-                        if let Some(cluster) = ms.smallest_cluster(&actual) {
-                            let extras: Vec<String> = cluster.iter()
-                                .filter(|n| !actual.contains(*n)).cloned().collect();
-                            println!(">>> #527 SNAP actual={} cluster={} extras={:?}",
-                                actual.len(), cluster.len(), extras);
-                            for name in extras {
-                                let w = self.machine().chips().iter()
-                                    .find(|c| c.name() == name)
-                                    .map(|c| p3_air::BaseAir::<Val<SC>>::width(c))
-                                    .unwrap_or(1);
-                                named_traces.push((name,
-                                    RowMajorMatrix::new(vec![Val::<SC>::ZERO; w], w)));
-                            }
-                        } else {
-                            println!(">>> #527 SNAP no cluster (actual={})", actual.len());
-                        }
-                    }
 
                     let t1 = std::time::Instant::now();
                     let shard_data = self.commit(&record, named_traces);
