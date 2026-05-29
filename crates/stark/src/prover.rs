@@ -560,7 +560,6 @@ where
                 &pk.traces,
                 &pk.chip_ordering,
                 &traces,
-                &data.main_commit,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
                 precomputed_basefold_taken,
@@ -1062,7 +1061,6 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
     pk_traces: &[RowMajorMatrix<Val<SC>>],
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
     main_traces: &[std::sync::Arc<RowMajorMatrix<Val<SC>>>],
-    main_commit: &Com<SC>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     precomputed_basefold: Option<Box<dyn std::any::Any + Send + Sync>>,
@@ -1089,7 +1087,6 @@ where
     SC::Challenger: Clone + 'static,
     Val<SC>: 'static,
     <SC as StarkGenericConfig>::Challenge: 'static,
-    Com<SC>: 'static,
 {
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
@@ -1116,56 +1113,35 @@ where
         })
         .collect();
 
-    // Convert `Com<SC>` to `[Val<SC>; 8]`.  For KoalaBearPoseidon2
-    // (the gated config) `Com<SC>` is `Hash<Val, Val, 8>`, a
-    // transparent wrapper around `[Val; 8]`.  Use Any-downcast on a
-    // cloned value to avoid any layout assumptions.
-    // Extract the 8-felt digest from the commitment.
-    //
-    // BUG FIX: previously this used `core::ptr::read(ptr as *const [Val; 8])`
-    // assuming Com<SC> was `Hash<Val, Val, 8>` (a #[repr(transparent)]
-    // wrapper around [Val; 8]).  But for `KoalaBearPoseidon2`'s
-    // `TwoAdicFriPcs` setup, `Com<SC>` is actually
-    // `MerkleCap<Val, [Val; 8]>` — a Vec header (24 bytes) whose first
-    // element holds the real digest on the heap.  Reading 32 bytes
-    // from a 24-byte struct read past the end into adjacent stack
-    // slots, producing a garbage digest that didn't match the OUTER
-    // stark prover's challenger observation (which uses the proper
-    // `IntoIterator` impl).  The mismatch propagated into
-    // `BasefoldShardProof.main_commitment` and caused the verifier's
-    // Phase 1 challenger state to diverge after the 6th commit felt
-    // observation, breaking the GKR round-0 claimed_sum check.
-    //
-    // Fix: downcast via Any to the concrete `MerkleCap` type, then
-    // pull the first root (which is the [Val; 8] digest).  The
-    // upstream TypeId gate guarantees Val<SC> = InnerVal = KoalaBear,
-    // so the downcast is sound.
-    #[allow(unused_assignments)]
-    let mut digest = [Val::<SC>::ZERO; 8];
-    {
-        use core::any::Any;
-        use p3_symmetric::MerkleCap;
-        let main_commit_cloned: Com<SC> = main_commit.clone();
-        let any_commit: &dyn Any = &main_commit_cloned;
-        if let Some(cap) = any_commit
-            .downcast_ref::<MerkleCap<crate::InnerVal, [crate::InnerVal; 8]>>()
-        {
-            let roots = cap.roots();
-            assert!(!roots.is_empty(), "MerkleCap must have at least one root");
-            let inner_digest: [crate::InnerVal; 8] = roots[0];
-            // Transmute back to [Val<SC>; 8] — sound under the TypeId
-            // gate above (Val<SC> == InnerVal).
-            digest = unsafe {
-                core::ptr::read(&inner_digest as *const _ as *const [Val<SC>; 8])
-            };
-        } else {
+    // Option B: the precomputed BaseFold jagged-PCS commit produced
+    // up-front by `commit_basefold_path`.  Always present on this path:
+    // the helper's sole caller (`open()`) reaches it only inside the
+    // `use_basefold_path` branch, whose gate is byte-identical to the
+    // `commit()` gate that routes through `commit_basefold_path`, which
+    // unconditionally sets `Some(..)`.  Absence is unreachable → expect.
+    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = *precomputed_basefold
+        .expect(
+            "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
+             basefold path (commit_basefold_path always sets it under the same TypeId gate)",
+        )
+        .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>()
+        .unwrap_or_else(|_| {
             panic!(
-                "basefold path expected Com<SC> = MerkleCap<InnerVal, [InnerVal; 8]>, \
-                 got something else (size_of = {})",
-                std::mem::size_of::<Com<SC>>(),
-            );
-        }
-    }
+                "try_prove_shard_to_basefold_boxed: precomputed_basefold present but downcast \
+                 to PrecomputedJaggedCommit failed (expected Option B flow)",
+            )
+        });
+
+    // The 8-felt main-trace digest comes straight from the precomputed
+    // jagged commit — the same value `commit_basefold_path` already
+    // packaged into `main_commit` and the prologue observed (SP1's
+    // `commit_multilinears` returns the digest directly; no MerkleCap
+    // round-trip).  Transmute the concrete `[InnerVal; 8]` to the
+    // generic `[Val<SC>; 8]`: sound under the TypeId gate (Val<SC> ==
+    // InnerVal) — the only reinterpretation left.
+    let digest_inner = crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+    let digest: [Val<SC>; 8] =
+        unsafe { core::ptr::read(&digest_inner as *const _ as *const [Val<SC>; 8]) };
 
     // Clone the outer challenger so our shard-level run doesn't
     // perturb the legacy transcript state.
@@ -1195,25 +1171,6 @@ where
     let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
         main_traces.iter().map(|arc| (**arc).clone()).collect();
 
-    // Option B: downcast the precomputed BaseFold commit (if any) to
-    // the concrete `PrecomputedJaggedCommit` type so the shard-level
-    // prover can skip the Phase 4 in-band commit.  The TypeId gate
-    // above guarantees Val<SC> == InnerVal, so when the orchestrator
-    // (commit_basefold_path) populated this slot the downcast MUST
-    // succeed — panic on type mismatch instead of silently degrading
-    // to the in-band commit (which would double-observe vs the
-    // verifier's Phase 1 prologue that already saw the digest).
-    let precomputed_concrete = precomputed_basefold.map(|boxed| {
-        *boxed
-            .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>()
-            .unwrap_or_else(|_| {
-                panic!(
-                    "try_prove_shard_to_basefold_boxed: precomputed_basefold present but \
-                     downcast to PrecomputedJaggedCommit failed (expected Option B flow)",
-                )
-            })
-    });
-
     let proof = crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
         &chips_reborrow,
         &preprocessed_traces,
@@ -1227,7 +1184,7 @@ where
         // Gap #10: CpuProver path always emits MSB-folded proofs
         // (the GPU LSB packed-pool path is unreachable here).
         crate::shard_level::shard_proof::FoldOrientation::Msb,
-        precomputed_concrete,
+        Some(precomputed),
     );
 
     Some(Box::new(proof))
