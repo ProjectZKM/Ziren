@@ -37,8 +37,15 @@
 
 use alloc::vec::Vec;
 
-use p3_challenger::FieldChallenger;
+use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
+
+/// Proof-of-work grinding difficulty (in bits) applied at the start of the
+/// LogUp-GKR argument, matching SP1's `GKR_GRINDING_BITS`. The prover grinds
+/// for a witness that, once absorbed, makes the challenger emit
+/// `GKR_GRINDING_BITS` leading zero bits; the verifier re-checks the witness
+/// before sampling any GKR challenge.
+pub const GKR_GRINDING_BITS: usize = 12;
 
 use crate::lookup::Lookup;
 use crate::zerocheck_prover::{eq_mle_table, fold_table_first};
@@ -123,8 +130,11 @@ pub struct LogUpGkrLayerProof<EF> {
 
 /// Proof of the fraction-sum claim `Σ num_i / denom_i` at the leaves.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(bound(serialize = "EF: serde::Serialize", deserialize = "EF: serde::Deserialize<'de>"))]
-pub struct LogUpGkrProof<EF> {
+#[serde(bound(
+    serialize = "EF: serde::Serialize, Witness: serde::Serialize",
+    deserialize = "EF: serde::Deserialize<'de>, Witness: serde::Deserialize<'de>"
+))]
+pub struct LogUpGkrProof<EF, Witness> {
     /// Root fraction, sent in the clear so the verifier can test `num == 0`.
     pub root: (EF, EF),
     /// One reduction per layer, in descent order (root side first).
@@ -134,6 +144,11 @@ pub struct LogUpGkrProof<EF> {
     pub eval_point: Vec<EF>,
     /// Final leaf-layer fraction claim at `eval_point`.
     pub leaf_claim: (EF, EF),
+    /// Proof-of-work grinding witness, produced before any GKR challenge is
+    /// drawn. The verifier re-checks it via
+    /// [`GrindingChallenger::check_witness`] against [`GKR_GRINDING_BITS`].
+    /// Mirrors SP1's `LogupGkrProof::witness`.
+    pub witness: Witness,
 }
 
 /// Compute the initial sum-of-fractions value from the leaves.
@@ -272,15 +287,20 @@ where
 pub fn prove_logup_gkr<F, EF, Challenger>(
     leaves: &[Fraction<EF>],
     challenger: &mut Challenger,
-) -> LogUpGkrProof<EF>
+) -> LogUpGkrProof<EF, <Challenger as GrindingChallenger>::Witness>
 where
     F: Field,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
-    Challenger: FieldChallenger<F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger,
 {
     let m = leaves.len().trailing_zeros() as usize;
     let tree = build_fraction_tree(leaves);
     let root = tree.last().unwrap()[0];
+
+    // Proof-of-work grinding, before any GKR challenge is drawn (matches
+    // SP1's `prove_logup_gkr`). `grind` absorbs the witness into the
+    // transcript, so every subsequent Fiat–Shamir challenge depends on it.
+    let witness = challenger.grind(GKR_GRINDING_BITS);
 
     observe_ext::<F, EF, _>(challenger, root.num);
     observe_ext::<F, EF, _>(challenger, root.denom);
@@ -383,6 +403,7 @@ where
         layers,
         eval_point: cur_point,
         leaf_claim: (cur_num, cur_denom),
+        witness,
     }
 }
 
@@ -491,14 +512,21 @@ pub fn eval_mle_first_var<EF: Field>(table: &[EF], r: &[EF]) -> EF {
 /// against the actual lookup events (numerator = multiplicity, denominator
 /// = α − fingerprint).
 pub fn verify_logup_gkr<F, EF, Challenger>(
-    proof: &LogUpGkrProof<EF>,
+    proof: &LogUpGkrProof<EF, <Challenger as GrindingChallenger>::Witness>,
     challenger: &mut Challenger,
 ) -> Option<(Vec<EF>, Fraction<EF>)>
 where
     F: Field,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
-    Challenger: FieldChallenger<F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger,
 {
+    // Re-check the proof-of-work grinding witness before sampling any GKR
+    // challenge, mirroring SP1's `verify_logup_gkr`. `check_witness` absorbs
+    // the witness so the transcript matches the prover's.
+    if !challenger.check_witness(GKR_GRINDING_BITS, proof.witness) {
+        return None;
+    }
+
     observe_ext::<F, EF, _>(challenger, proof.root.0);
     observe_ext::<F, EF, _>(challenger, proof.root.1);
 
