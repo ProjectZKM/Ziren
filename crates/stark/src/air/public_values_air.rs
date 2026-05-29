@@ -40,9 +40,36 @@ pub fn eval_public_values<AB: ZKMAirBuilder>(builder: &mut AB) {
     let pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar> = pv_slice.as_slice().borrow();
 
     eval_global_sum::<AB>(builder, pv);
-    // TODO(Option 2): eval_state (State bus: initial/final (shard,clk,pc,next_pc))
-    // and eval_global_memory_init/finalize follow, once the corresponding
-    // chips are converted to receive/send chaining.
+    eval_state::<AB>(builder, pv);
+    // TODO(Option 2): eval_global_memory_init / eval_global_memory_finalize
+    // follow, once memory/global.rs is converted to receive/send chaining.
+}
+
+/// `State` boundary: anchor the CPU `(shard, clk, pc, next_pc)` chain.
+///
+/// The Cpu rows form a chain `receive(state_i) -> send(state_{i+1})` (see
+/// `cpu/air/mod.rs::eval`).  This SENDS the initial endpoint `(shard,
+/// initial_timestamp, start_pc, start_next_pc)` (received by the first
+/// real row) and RECEIVES the final endpoint `(shard, last_timestamp,
+/// next_pc, next_next_pc)` (sent by the halting row).  The multiset
+/// balances iff the prover laid a consistent CPU sequence whose endpoints
+/// equal these public values — the local-only replacement for the legacy
+/// `when_first_row`/`when_last_row` pc/clk boundary constraints.
+///
+/// MIPS note: the state is the 2-pc pair `(pc, next_pc)` (delay-slot
+/// lookahead).  At halt the executor sets `next_pc = 0`, so the final
+/// endpoint's `pc = next_pc (public) = 0`-region and its `next_pc =
+/// next_next_pc (public)` come straight from the public values.  Review:
+/// the executor must populate `start_next_pc`/`next_next_pc` to exactly
+/// the first row's `next_pc` and the last row's `next_next_pc`.
+fn eval_state<AB: ZKMAirBuilder>(
+    builder: &mut AB,
+    pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
+) {
+    // Initial endpoint — sent here, received by the first real Cpu row.
+    builder.send_state(pv.shard, pv.initial_timestamp, pv.start_pc, pv.start_next_pc, AB::Expr::ONE);
+    // Final endpoint — received here, sent by the last (halting) Cpu row.
+    builder.receive_state(pv.shard, pv.last_timestamp, pv.next_pc, pv.next_next_pc, AB::Expr::ONE);
 }
 
 /// `GlobalAccumulation` boundary: anchor the running-digest chain.

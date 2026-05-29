@@ -69,6 +69,17 @@ pub struct PublicValues<W, T> {
     /// Final CPU timestamp (clk) for this shard — the `State`-bus final
     /// endpoint (`receive_state`).
     pub last_timestamp: T,
+    /// The `next_pc` of this shard's first instruction — the 4th element
+    /// of the `State`-bus initial endpoint `(shard, clk, start_pc,
+    /// start_next_pc)`.  MIPS carries a delay-slot `next_pc` lookahead,
+    /// so the shard-boundary CPU state is the 2-pc pair `(pc, next_pc)`,
+    /// not just `pc` (unlike SP1's RISC-V).  For the first shard with no
+    /// branch in the delay slot this equals `start_pc + 4`.
+    pub start_next_pc: T,
+    /// The `next_pc` that the *next* shard starts with (i.e. this shard's
+    /// last row's `next_next_pc`) — the 4th element of the `State`-bus
+    /// final endpoint `(shard, last_timestamp, next_pc, next_next_pc)`.
+    pub next_next_pc: T,
     /// Number of global-memory-init rows — `MemoryGlobalInitControl`
     /// chain length endpoint.
     pub global_init_count: T,
@@ -84,7 +95,7 @@ pub struct PublicValues<W, T> {
     pub global_cumulative_sum: SepticDigest<T>,
 
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
-    pub empty: [T; 8],
+    pub empty: [T; 6],
 }
 
 impl PublicValues<u32, u32> {
@@ -156,6 +167,8 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_finalize_addr_bits,
             initial_timestamp,
             last_timestamp,
+            start_next_pc,
+            next_next_pc,
             global_init_count,
             global_finalize_count,
             global_count,
@@ -181,6 +194,8 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
 
         let initial_timestamp = F::from_u32(initial_timestamp);
         let last_timestamp = F::from_u32(last_timestamp);
+        let start_next_pc = F::from_u32(start_next_pc);
+        let next_next_pc = F::from_u32(next_next_pc);
         let global_init_count = F::from_u32(global_init_count);
         let global_finalize_count = F::from_u32(global_finalize_count);
         let global_count = F::from_u32(global_count);
@@ -201,11 +216,13 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_finalize_addr_bits,
             initial_timestamp,
             last_timestamp,
+            start_next_pc,
+            next_next_pc,
             global_init_count,
             global_finalize_count,
             global_count,
             global_cumulative_sum,
-            empty: [F::ZERO; 8],
+            empty: [F::ZERO; 6],
         }
     }
 }
