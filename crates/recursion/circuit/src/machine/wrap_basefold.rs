@@ -81,6 +81,9 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             >,
         >,
     >,
+    /// per-input per-chip log heights (mirrors
+    /// `chip_cumulative_sums_per_input`).
+    pub chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
     /// vk-merkle witness — in-circuit cousin of
     /// [`ZKMWrapBasefoldWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -115,6 +118,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let ZKMWrapBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
         vk_merkle_data,
     } = input;
 
@@ -202,9 +206,17 @@ pub fn verify_wrap_basefold<C, SC, A>(
             &column_counts_by_round,
         ),
     };
-    let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
+    // Real chip_height_bits derivation from per-input
+    // chip_log_heights (mirrors compress_basefold flow).  Wrap takes
+    // a single input so we read slot 0.
+    let empty_log_heights_wrap = std::collections::BTreeMap::<String, u8>::new();
+    let chip_log_heights_for_input = chip_log_heights_per_input
+        .first()
+        .unwrap_or(&empty_log_heights_wrap);
+    let chip_height_bits = crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
         builder,
         &chip_names,
+        chip_log_heights_for_input,
         max_log_row_count,
     );
     let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<

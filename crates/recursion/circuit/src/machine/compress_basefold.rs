@@ -131,6 +131,13 @@ pub struct ZKMCompressBasefoldWitnessVariable<
             >,
         >,
     >,
+    /// per-input per-chip log heights (sourced from each input's
+    /// `BasefoldShardProof.chip_log_heights`).  Same length and order
+    /// as `vks_and_proofs`.  Threaded into
+    /// `chip_height_bits_from_log_heights` at the lift site so the
+    /// recursion verifier observes the real Horner-recomposed felt
+    /// rather than the zero placeholder.
+    pub chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
     /// vk-merkle witness — the in-circuit cousin of
     /// [`ZKMCompressBasefoldWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -196,6 +203,7 @@ pub fn verify_compress_basefold<C, SC, A>(
     let ZKMCompressBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
         vk_merkle_data,
         is_complete,
     } = input;
@@ -346,11 +354,24 @@ pub fn verify_compress_basefold<C, SC, A>(
             ),
         };
 
-        let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-            builder,
-            &chip_names,
-            max_log_row_count,
-        );
+        // Real chip_height_bits derivation from per-input
+        // chip_log_heights (witnessed from
+        // `BasefoldShardProof.chip_log_heights`).  Falls back to a
+        // zero-filled map when the input is missing (legacy proof
+        // bytes / dummy proofs), which produces the same
+        // Horner-recomposed felt sequence as the previous
+        // `empty_chip_height_bits` placeholder.
+        let empty_log_heights_compress = std::collections::BTreeMap::<String, u8>::new();
+        let chip_log_heights_for_input = chip_log_heights_per_input
+            .get(_i)
+            .unwrap_or(&empty_log_heights_compress);
+        let chip_height_bits =
+            crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+                builder,
+                &chip_names,
+                chip_log_heights_for_input,
+                max_log_row_count,
+            );
 
         // Step 5a: derive per-shard chip set from the machine —
         // filter machine.chips() to the chips actually present

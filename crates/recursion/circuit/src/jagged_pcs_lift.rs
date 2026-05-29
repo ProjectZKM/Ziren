@@ -73,7 +73,7 @@ use zkm_stark::{InnerChallenge, InnerVal};
 ///   metadata).
 pub fn lift_evaluation_proof_bytes<C>(
     builder: &mut Builder<C>,
-    _bytes: &[u8],
+    bytes: &[u8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
@@ -86,6 +86,27 @@ where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
+
+    // Part B: when bytes is non-empty, deserialize into a
+    // `JaggedBasefoldBundle` and delegate to
+    // `lift_jagged_basefold_bundle` (real wire-format pieces, no
+    // zero placeholders).  Empty / malformed bytes fall through to
+    // the structural-only zero placeholder below — preserves the
+    // scaffolding-test and `EvaluationProof::Empty` paths
+    // byte-for-byte.
+    if !bytes.is_empty() {
+        if let Some(bundle) =
+            zkm_stark::basefold_late_binding::jagged::JaggedBasefoldBundle::from_bytes(bytes)
+        {
+            return crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                builder,
+                &bundle,
+                max_log_row_count,
+                column_counts_by_round,
+                None,
+            );
+        }
+    }
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };

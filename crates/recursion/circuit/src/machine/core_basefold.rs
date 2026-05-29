@@ -295,11 +295,23 @@ pub fn verify_core_basefold<C, SC, A>(
                     &column_counts_by_round_pre,
                 ),
             };
-            let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-                builder,
-                &chip_names,
-                max_log_row_count,
-            );
+            // Real chip_height_bits derivation: pulls per-chip log
+            // heights from `chip_log_heights_per_shard` (witnessed from
+            // each shard's `BasefoldShardProof.chip_log_heights`) and
+            // sorts by (Reverse(log_h), name) to match the prover
+            // prologue.  Falls back to a zero-filled map when the
+            // input is missing (empty-slice scaffolding callers).
+            let empty_log_heights_core = std::collections::BTreeMap::<String, u8>::new();
+            let chip_log_heights_for_shard = chip_log_heights_per_shard
+                .get(i)
+                .unwrap_or(&empty_log_heights_core);
+            let chip_height_bits =
+                crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+                    builder,
+                    &chip_names,
+                    chip_log_heights_for_shard,
+                    max_log_row_count,
+                );
             let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
                 .chips()
                 .iter()
@@ -334,7 +346,9 @@ pub fn verify_core_basefold<C, SC, A>(
                     evaluation_proof_var,
                     chip_height_bits,
                 );
-            let _ = chip_log_heights_per_shard.get(i);
+            // chip_log_heights_per_shard now consumed above by
+            // chip_height_bits_from_log_heights — the previous discard
+            // was a placeholder while the helper was being wired.
             let empty_cumsums = std::collections::BTreeMap::new();
             let cumsums_for_shard = cumsums_per_shard_ref
                 .get(i)
