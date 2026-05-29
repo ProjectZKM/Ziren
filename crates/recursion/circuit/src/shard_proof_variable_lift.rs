@@ -408,6 +408,83 @@ where
         .collect()
 }
 
+/// Real `chip_height_bits` derivation from a per-chip log-height map.
+///
+/// For each chip in `chip_names`, looks up its log-height in
+/// `chip_log_heights` (defaults to `0` when missing — matches the
+/// legacy proof-bytes path).  Sorts entries by `(Reverse(log_h),
+/// name)` to match the host prover prologue ordering (chips iterated
+/// by preprocessed trace height descending, ties broken by name).
+///
+/// Returns a `Vec<(name, bits)>` where `bits` is the big-endian
+/// bit-decomposition of `log_h` into `max_log_row_count + 1` slots —
+/// exactly the shape the recursion verifier's Horner accumulation
+/// at `shard_basefold.rs:418-422` expects (`acc = bit + acc * 2`).
+///
+/// # Soundness
+///
+/// `bits` are emitted as field constants `0` or `1`.  Each slot
+/// must satisfy the same bit-discipline the verifier already
+/// enforces via Horner re-composition; no explicit boolean
+/// assertion is needed because the resulting Horner felt is then
+/// observed into the challenger transcript and the prover-side
+/// log_h observe binds the same value.
+pub fn chip_height_bits_from_log_heights<C>(
+    builder: &mut Builder<C>,
+    chip_names: &[String],
+    chip_log_heights: &BTreeMap<String, u8>,
+    max_log_row_count: usize,
+) -> Vec<(String, Vec<Felt<C::F>>)>
+where
+    C: CircuitConfig,
+{
+    use p3_field::PrimeCharacteristicRing;
+    use std::cmp::Reverse;
+
+    // Pair each chip name with its log_h (default 0 when missing).
+    let mut entries: Vec<(String, u8)> = chip_names
+        .iter()
+        .map(|name| {
+            let log_h = chip_log_heights.get(name).copied().unwrap_or(0);
+            (name.clone(), log_h)
+        })
+        .collect();
+    // Sort by (Reverse(log_h), name) to match the host prover
+    // prologue ordering documented at
+    // `crates/stark/src/machine.rs:454` (StarkProvingKey's
+    // `chip_ordering` is the index into a Reverse(height)+name
+    // sort).
+    entries.sort_by(|a, b| (Reverse(a.1), &a.0).cmp(&(Reverse(b.1), &b.0)));
+
+    let bit_len = max_log_row_count + 1;
+    entries
+        .into_iter()
+        .map(|(name, log_h)| {
+            // Big-endian: MSB at index 0, matches the Horner
+            // recomposition `acc = bit + acc * 2` which produces
+            // the value bit_0 * 2^(n-1) + bit_1 * 2^(n-2) + ...
+            let log_h_u = log_h as usize;
+            let bits: Vec<Felt<C::F>> = (0..bit_len)
+                .map(|i| {
+                    // i=0 is the MSB (slot 0 of Horner accumulation).
+                    let shift = bit_len - 1 - i;
+                    let bit_val = if shift < usize::BITS as usize {
+                        (log_h_u >> shift) & 1
+                    } else {
+                        0
+                    };
+                    if bit_val == 1 {
+                        builder.constant(C::F::ONE)
+                    } else {
+                        builder.constant(C::F::ZERO)
+                    }
+                })
+                .collect();
+            (name, bits)
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -702,5 +779,53 @@ mod tests {
         assert_eq!(bits[0].0, "Z");
         assert_eq!(bits[1].0, "A");
         assert_eq!(bits[2].0, "M");
+    }
+
+    /// chip_height_bits_from_log_heights: sort by (Reverse(log_h), name)
+    /// and emit big-endian bit decomposition.
+    #[test]
+    fn chip_height_bits_from_log_heights_sort_and_decompose() {
+        use std::collections::BTreeMap;
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let names = vec!["A".to_string(), "B".to_string(), "C".to_string()];
+        let mut map: BTreeMap<String, u8> = BTreeMap::new();
+        map.insert("A".to_string(), 3);
+        map.insert("B".to_string(), 5);
+        map.insert("C".to_string(), 5); // tie with B → broken by name
+        let max_log_row_count = 5; // bit_len = 6
+        let result = chip_height_bits_from_log_heights::<C>(
+            &mut builder,
+            &names,
+            &map,
+            max_log_row_count,
+        );
+        // Sort order: B(5) < C(5) by name, then A(3).
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].0, "B");
+        assert_eq!(result[1].0, "C");
+        assert_eq!(result[2].0, "A");
+        // Each bit vec has max_log_row_count + 1 = 6 slots.
+        assert_eq!(result[0].1.len(), 6);
+        assert_eq!(result[1].1.len(), 6);
+        assert_eq!(result[2].1.len(), 6);
+    }
+
+    /// chip_height_bits_from_log_heights: missing chip defaults to log_h=0.
+    #[test]
+    fn chip_height_bits_from_log_heights_missing_chip_defaults_zero() {
+        use std::collections::BTreeMap;
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let names = vec!["X".to_string()];
+        let map: BTreeMap<String, u8> = BTreeMap::new();
+        let result = chip_height_bits_from_log_heights::<C>(
+            &mut builder,
+            &names,
+            &map,
+            4,
+        );
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, "X");
+        // 5 slots, all zero (log_h=0 default).
+        assert_eq!(result[0].1.len(), 5);
     }
 }

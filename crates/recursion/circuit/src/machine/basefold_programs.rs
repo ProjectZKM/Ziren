@@ -50,13 +50,25 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
-    // The host input now carries `chip_log_heights` per shard, but
-    // wiring it through verify_core_basefold breaks the existing
-    // padded-row mask constraint (passing real degree bits where the
-    // verifier was tuned for zero placeholders desyncs the
-    // zerocheck residual). Pass empty for now — the field is staged
-    // for future use once the constraint side aligns.
-    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> = Vec::new();
+    // Populate per-shard chip_log_heights from each shard's
+    // `BasefoldShardProof.chip_log_heights`.  Fed into
+    // `verify_core_basefold` which now drives
+    // `chip_height_bits_from_log_heights` at the lift site (real
+    // Horner-recomposed heights — same value the prover prologue
+    // observes via host transcript at
+    // `crates/stark/src/shard_level/prover.rs:260-269`).
+    //
+    // NOTE the warning in the previous comment about breaking the
+    // padded-row mask constraint applies to
+    // `opened_values.chips[*].degree` (the per-chip zerocheck
+    // degree bits) — a DIFFERENT consumer.  `chip_height_bits` is
+    // the recursion-verifier's transcript prologue input, not the
+    // constraint-side degree mask.
+    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> = input
+        .shard_proofs
+        .iter()
+        .map(|sp| sp.chip_log_heights.clone())
+        .collect();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,

@@ -97,6 +97,9 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
             >,
         >,
     >,
+    /// per-input per-chip log heights (mirrors
+    /// `chip_cumulative_sums_per_input`).
+    pub chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
@@ -149,6 +152,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
         zkm_vk_digest,
@@ -259,11 +263,19 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &column_counts_by_round,
             ),
         };
-        let chip_height_bits = crate::shard_proof_variable_lift::empty_chip_height_bits(
-            builder,
-            &chip_names,
-            max_log_row_count,
-        );
+        // Real chip_height_bits derivation from per-input
+        // chip_log_heights (mirrors compress_basefold flow).
+        let empty_log_heights_deferred = std::collections::BTreeMap::<String, u8>::new();
+        let chip_log_heights_for_input = chip_log_heights_per_input
+            .get(_deferred_i)
+            .unwrap_or(&empty_log_heights_deferred);
+        let chip_height_bits =
+            crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+                builder,
+                &chip_names,
+                chip_log_heights_for_input,
+                max_log_row_count,
+            );
         let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&shard_chips);
