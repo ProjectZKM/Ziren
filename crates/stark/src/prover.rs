@@ -1063,7 +1063,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
     main_traces: &[std::sync::Arc<RowMajorMatrix<Val<SC>>>],
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
-    precomputed_basefold: Option<Box<dyn std::any::Any + Send + Sync>>,
+    precomputed_basefold: Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
 ) -> Option<
     Box<
         crate::shard_level::shard_proof::BasefoldShardProof<
@@ -1119,18 +1119,11 @@ where
     // `use_basefold_path` branch, whose gate is byte-identical to the
     // `commit()` gate that routes through `commit_basefold_path`, which
     // unconditionally sets `Some(..)`.  Absence is unreachable → expect.
-    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = *precomputed_basefold
+    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = precomputed_basefold
         .expect(
             "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
              basefold path (commit_basefold_path always sets it under the same TypeId gate)",
-        )
-        .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>()
-        .unwrap_or_else(|_| {
-            panic!(
-                "try_prove_shard_to_basefold_boxed: precomputed_basefold present but downcast \
-                 to PrecomputedJaggedCommit failed (expected Option B flow)",
-            )
-        });
+        );
 
     // The 8-felt main-trace digest comes straight from the precomputed
     // jagged commit — the same value `commit_basefold_path` already
@@ -1332,6 +1325,6 @@ where
         main_data,
         chip_ordering,
         public_values,
-        precomputed_basefold: Some(Box::new(precomputed)),
+        precomputed_basefold: Some(precomputed),
     }
 }

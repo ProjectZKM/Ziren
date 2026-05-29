@@ -39,23 +39,21 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
-    /// Option B single-main-commit side channel: when `Some`, the
-    /// BaseFold jagged-PCS commit was produced up-front by `commit()`
-    /// (KoalaBear/JaggedChallenger config), `main_commit` carries its
-    /// 8-felt digest (so the existing `Com<SC>` shape is preserved
-    /// for the legacy fields), and `main_data` carries a placeholder.
-    /// `open()` retrieves this in the basefold branch and passes it
-    /// as the `precomputed_commit` argument to
-    /// `prove_shard_to_basefold`, which threads it into the Phase 4
-    /// jagged-PCS body (skipping the double-commit + in-band
-    /// observe).  `None` in the legacy FRI path (BN254 wrap /
-    /// OuterSC).
+    /// Option B single-main-commit: the BaseFold jagged-PCS commit
+    /// produced up-front by `commit()` (KoalaBear/JaggedChallenger
+    /// config).  `main_commit` carries its 8-felt digest (preserving
+    /// the `Com<SC>` shape for the legacy fields) and `main_data`
+    /// carries a placeholder.  `open()` passes this to
+    /// `prove_shard_to_basefold` as `precomputed_commit`, which threads
+    /// it into the Phase 4 jagged-PCS body (skipping the double-commit
+    /// + in-band observe).  `None` in the legacy FRI path (BN254 wrap /
+    /// OuterSC), which has no jagged commit.
     ///
-    /// `Box<dyn Any>` to avoid plumbing `PrecomputedJaggedCommit`
-    /// through the generic SC/M/P type parameters — only the `open()`
-    /// body (which already type-gates on KoalaBear) downcasts and
-    /// consumes the value.
-    pub precomputed_basefold: Option<Box<dyn std::any::Any + Send + Sync>>,
+    /// First-class typed jagged commit (no `Box<dyn Any>` erasure) —
+    /// `PrecomputedJaggedCommit` is the concrete KoalaBear jagged-PCS
+    /// state; the type is independent of the `SC`/`M`/`P` generics so
+    /// it sits cleanly in the struct (the wrap simply holds `None`).
+    pub precomputed_basefold: Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
 }
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
