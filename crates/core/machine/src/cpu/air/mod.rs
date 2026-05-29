@@ -25,9 +25,10 @@ where
     #[inline(never)]
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.current_slice(), main.next_slice());
+        // Option 2 local-only: the CPU AIR no longer reads the next row
+        // (cross-row pc/clk/shard chaining moved to the `State` bus).
+        let local = main.current_slice();
         let local: &CpuCols<AB::Var> = (*local).borrow();
-        let next: &CpuCols<AB::Var> = (*next).borrow();
 
         let public_values_slice: [AB::PublicVar; ZKM_PROOF_NUM_PV_ELTS] =
             core::array::from_fn(|i| builder.public_values()[i]);
@@ -75,14 +76,40 @@ where
             local.is_real,
         );
 
-        // Check that the shard and clk is updated correctly.
-        self.eval_shard_clk(builder, local, next, clk.clone());
+        // ── Option 2 local-only CPU state chaining ────────────────────
+        // Replaces the legacy `when_transition` shard/clk/pc/next_pc
+        // constraints (eval_shard_clk:110/131, eval_pc:163/168).  Each
+        // real row RECEIVES its current state `(shard, clk, pc, next_pc)`
+        // and SENDS the next `(shard, clk+5+extra, next_pc, next_next_pc)`
+        // on the `State` bus; the LogUp multiset balance forces row i+1's
+        // `(pc, next_pc)` to equal row i's `(next_pc, next_next_pc)` and
+        // `clk_{i+1} = clk_i + 5 + extra`, exactly reproducing the old
+        // transition chain.  The initial endpoint `(shard, clk=0,
+        // start_pc, start_pc+4)` and final endpoint `(shard,
+        // last_timestamp, next_pc, <final next_next_pc>)` are emitted by
+        // the public-values AIR (`eval_state`).  NOTE for review: the MIPS
+        // delay-slot lookahead means the final endpoint needs the last
+        // row's `next_next_pc`; at halt the executor sets `next_pc = 0`
+        // (halt.rs:14), so the PV `eval_state` boundary must match the
+        // halt convention — flagged for the PV-AIR State emitter.
+        builder.receive_state(local.shard, clk.clone(), local.pc, local.next_pc, local.is_real);
+        builder.send_state(
+            local.shard,
+            clk.clone() + AB::Expr::from_u32(5) + local.num_extra_cycles,
+            local.next_pc,
+            local.next_next_pc,
+            local.is_real,
+        );
 
-        // Check public values constraints.
-        self.eval_pc(builder, local, next, public_values);
+        // Range checks for shard / clk (chaining now via the State bus).
+        self.eval_shard_clk(builder, local, clk.clone());
 
-        // Check that the is_real flag is correct.
-        self.eval_is_real(builder, local, next);
+        // Local pc + public-value constraints (cross-row pc chaining now
+        // via the State bus; first/last-row boundaries via the PV-AIR).
+        self.eval_pc(builder, local, public_values);
+
+        // Check that the is_real flag is boolean.
+        self.eval_is_real(builder, local);
 
         let not_real = AB::Expr::ONE - local.is_real;
         builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - local.instruction.imm_b);
@@ -103,12 +130,8 @@ impl CpuChip {
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
-        next: &CpuCols<AB::Var>,
         clk: AB::Expr,
     ) {
-        // Verify that all shard values are the same.
-        builder.when_transition().when(next.is_real).assert_eq(local.shard, next.shard);
-
         // Verify that the shard value is within 16 bits.
         builder.send_byte(
             AB::Expr::from_u8(ByteOpcode::U16Range as u8),
@@ -118,19 +141,13 @@ impl CpuChip {
             local.is_real,
         );
 
-        // Verify that the first row has a clk value of 0.
-        builder.when_first_row().assert_zero(clk.clone());
+        // Option 2: shard equality across rows and the clk chain
+        // (`clk_{i+1} = clk_i + 5 + num_extra_cycles`) are now enforced by
+        // the local-only `State` bus (see `eval`), not by
+        // `when_transition`.  The first-row `clk == 0` initial condition
+        // is emitted by the public-values AIR (`eval_state`).
 
-        // We already assert that `local.clk < 2^24`. `num_extra_cycles` is an entry of a word and
-        // therefore less than `2^8`, this means that the sum cannot overflow in a 31 bit field.
-        let expected_next_clk =
-            clk.clone() + AB::Expr::from_u32(5) + local.num_extra_cycles;
-
-        let next_clk =
-            AB::Expr::from_u32(1u32 << 16) * next.clk_8bit_limb + next.clk_16bit_limb;
-        builder.when_transition().when(next.is_real).assert_eq(expected_next_clk, next_clk);
-
-        // Range check that the clk is within 24 bits using it's limb values.
+        // Range check that the clk is within 24 bits using its limb values.
         builder.eval_range_check_24bits(
             clk,
             local.clk_16bit_limb,
@@ -144,47 +161,25 @@ impl CpuChip {
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
-        next: &CpuCols<AB::Var>,
         public_values: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
     ) {
-        // Verify the public value's shard.
+        // Verify the public value's shard (purely local).
         builder.when(local.is_real).assert_eq(public_values.execution_shard, local.shard);
 
-        // Verify the public value's start pc.
-        builder.when_first_row().assert_eq(public_values.start_pc, local.pc);
+        // Option 2: the cross-row pc chain (`next.pc == local.next_pc` and
+        // `next.next_pc == local.next_next_pc`) is now enforced by the
+        // local-only `State` bus (see `eval`).  The first-row boundary
+        // (`start_pc == pc`, `pc + 4 == next_pc`) and the last-row /
+        // last-transition boundary (`public_values.next_pc ==
+        // local.next_pc`) are emitted by the public-values AIR
+        // (`eval_state`), not by `when_first_row` / `when_last_row`.
 
-        // Verify the relationship between initial start pc and initial next pc.
+        // Purely-local delay-slot relation: for a sequential instruction
+        // the lookahead is `next_next_pc == next_pc + 4` (same row).
         builder
-            .when_first_row()
-            .when_not(local.is_halt)
-            .assert_eq(local.pc + AB::Expr::from_u32(4), local.next_pc);
-
-        // Verify the pc, next_pc, and next_next_pc
-        builder.when_transition().when(next.is_real).assert_eq(local.next_pc, next.pc);
-        builder
-            .when_transition()
-            .when(next.is_real)
-            .when_not(next.is_halt)
-            .assert_eq(local.next_next_pc, next.next_pc);
-
-        builder
-            .when_transition()
             .when(local.is_real)
             .when(local.is_sequential)
             .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_u32(4));
-
-        // Verify the public value's next pc.  We need to handle two cases:
-        // 1. The last real row is a transition row.
-        // 2. The last real row is the last row.
-
-        // If the last real row is a transition row, verify the public value's next pc.
-        builder
-            .when_transition()
-            .when(local.is_real - next.is_real)
-            .assert_eq(public_values.next_pc, local.next_pc);
-
-        // If the last real row is the last row, verify the public value's next pc.
-        builder.when_last_row().when(local.is_real).assert_eq(public_values.next_pc, local.next_pc);
     }
 
     /// Constraints related to the is_real column.
@@ -195,15 +190,17 @@ impl CpuChip {
         &self,
         builder: &mut AB,
         local: &CpuCols<AB::Var>,
-        next: &CpuCols<AB::Var>,
     ) {
-        // Check the is_real flag.  It should be 1 for the first row.  Once its 0, it should never
-        // change value.
+        // The is_real flag must be boolean.
         builder.assert_bool(local.is_real);
-        builder.when_first_row().assert_one(local.is_real);
-        builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
-        // If we're halting and it's a transition, then the next.is_real should be 0.
-        builder.when_transition().when(local.is_halt).assert_zero(next.is_real);
+        // Option 2: the first-row `is_real == 1` and the padding/halt
+        // monotonicity (`!is_real => !next.is_real`, `is_halt =>
+        // !next.is_real`) are dropped — the local-only `State` bus does
+        // not require a contiguous real-row prefix.  The boundary (the
+        // initial state is consumed by the first real row, the final
+        // state is produced by the halting row) is enforced by the
+        // public-values AIR (`eval_state`) together with the multiset
+        // balance.
     }
 }
 
