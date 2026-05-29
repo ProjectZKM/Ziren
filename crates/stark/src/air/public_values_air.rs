@@ -41,8 +41,80 @@ pub fn eval_public_values<AB: ZKMAirBuilder>(builder: &mut AB) {
 
     eval_global_sum::<AB>(builder, pv);
     eval_state::<AB>(builder, pv);
-    // TODO(Option 2): eval_global_memory_init / eval_global_memory_finalize
-    // follow, once memory/global.rs is converted to receive/send chaining.
+    eval_global_memory_init::<AB>(builder, pv);
+    eval_global_memory_finalize::<AB>(builder, pv);
+}
+
+/// Recompose a 32-bit little-endian bit array into a single field element
+/// (mod the field), matching `memory/global.rs`'s `prev_addr` recompose
+/// (`Σ bit_i · 2^i`).  Addresses are carried as one field element + a
+/// 32-bit decomposition; the `< 2^32` ordering is enforced by the bit
+/// comparison, while this recompose is the field-element form used on the
+/// `MemoryGlobal*Control` bus tuple.
+fn addr_from_bits<AB: ZKMAirBuilder>(bits: &[AB::PublicVar; 32]) -> AB::Expr {
+    let mut acc = AB::Expr::ZERO;
+    for (i, bit) in bits.iter().enumerate() {
+        acc += (*bit).into() * AB::Expr::from_u32(1u32 << i);
+    }
+    acc
+}
+
+/// `MemoryGlobalInitControl` boundary: anchor the global-memory-init
+/// address-ordering chain.  The `MemoryGlobalChip` (Initialize) rows form
+/// `receive(index, prev_addr, prev_valid) -> send(index+1, addr, is_comp)`
+/// (sorted, strictly-increasing addresses).  This SENDs the chain head
+/// `(0, previous_init_addr, 1)` [received by row 0 as its prev_addr] and
+/// RECEIVEs the chain tail `(global_init_count, last_init_addr, 1)` [sent
+/// by the last real row].  Tuple = [index, addr, valid] (3 values).
+fn eval_global_memory_init<AB: ZKMAirBuilder>(
+    builder: &mut AB,
+    pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
+) {
+    let prev_addr = addr_from_bits::<AB>(&pv.previous_init_addr_bits);
+    let last_addr = addr_from_bits::<AB>(&pv.last_init_addr_bits);
+    builder.send(
+        AirLookup::new(
+            vec![AB::Expr::ZERO, prev_addr, AB::Expr::ONE],
+            AB::Expr::ONE,
+            LookupKind::MemoryGlobalInitControl,
+        ),
+        LookupScope::Local,
+    );
+    builder.receive(
+        AirLookup::new(
+            vec![pv.global_init_count.into(), last_addr, AB::Expr::ONE],
+            AB::Expr::ONE,
+            LookupKind::MemoryGlobalInitControl,
+        ),
+        LookupScope::Local,
+    );
+}
+
+/// `MemoryGlobalFinalizeControl` boundary: the finalize analogue of
+/// [`eval_global_memory_init`] (`previous_finalize_addr` / `last_finalize_addr`
+/// / `global_finalize_count`).
+fn eval_global_memory_finalize<AB: ZKMAirBuilder>(
+    builder: &mut AB,
+    pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
+) {
+    let prev_addr = addr_from_bits::<AB>(&pv.previous_finalize_addr_bits);
+    let last_addr = addr_from_bits::<AB>(&pv.last_finalize_addr_bits);
+    builder.send(
+        AirLookup::new(
+            vec![AB::Expr::ZERO, prev_addr, AB::Expr::ONE],
+            AB::Expr::ONE,
+            LookupKind::MemoryGlobalFinalizeControl,
+        ),
+        LookupScope::Local,
+    );
+    builder.receive(
+        AirLookup::new(
+            vec![pv.global_finalize_count.into(), last_addr, AB::Expr::ONE],
+            AB::Expr::ONE,
+            LookupKind::MemoryGlobalFinalizeControl,
+        ),
+        LookupScope::Local,
+    );
 }
 
 /// `State` boundary: anchor the CPU `(shard, clk, pc, next_pc)` chain.
