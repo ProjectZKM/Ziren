@@ -8,6 +8,7 @@ mod picus_info;
 mod polynomial;
 mod public_values;
 mod public_values_air;
+mod public_values_folder;
 mod sub_builder;
 
 pub use builder::*;
@@ -18,4 +19,5 @@ pub use picus_info::*;
 pub use polynomial::*;
 pub use public_values::*;
 pub use public_values_air::*;
+pub use public_values_folder::*;
 pub use sub_builder::*;
