@@ -332,13 +332,22 @@ pub fn prove_shard_zerocheck<SC, A>(
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     public_values: &[Val<SC>],
+    logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> PartialSumcheckProof<Challenge<SC>>
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        >,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
@@ -365,9 +374,158 @@ where
     // one EF squeeze and downstream sumcheck/jagged-PCS round 0
     // checks will desync (audit D1, May 1 2026).
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let _gkr_batch_open: Challenge<SC> =
+    let gkr_batch_open: Challenge<SC> =
         challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+
+    // ── SP1-aligned per-chip ZeroCheckPoly path ──────────────────────
+    //
+    // Replaces the legacy dense pad+RLC+combined sumcheck below (now
+    // dead code, removed in a follow-up).  Builds one lazy
+    // `ZeroCheckPoly` per chip — summing only over the chip's real rows
+    // with the padded tail handled analytically by `VirtualGeq` — and a
+    // per-chip claim `Σ (main ++ prep GKR-openings) · β^(1..)`.  The
+    // batched sumcheck's `claimed_sum = λ-RLC(claims)` chains the
+    // zerocheck to the LogUp-GKR openings exactly as the recursion
+    // verifier asserts (`recursion_circuit::zerocheck::verify_zerocheck`,
+    // steps 5-7) and the host identity
+    // (`verify_zerocheck_cryptographic_identity_host`).
+    //
+    // Conventions are pinned to the verifier: β powers `[β¹, β², …]`,
+    // columns main-then-preprocessed, chips folded in chip-NAME order
+    // (matching the recursion verifier + SP1), eq anchored at the
+    // GKR-emitted point.
+    {
+        use crate::shard_level::zerocheck_poly::{
+            compute_padded_row_adjustment, VirtualGeq, ZeroCheckPoly,
+        };
+
+        let zeta: Vec<Challenge<SC>> = logup_evaluations.point.clone();
+        let num_variables = max_log_row_count as u32;
+        debug_assert_eq!(
+            zeta.len(),
+            num_variables as usize,
+            "GKR eval point dim {} must equal max_log_row_count {}",
+            zeta.len(),
+            max_log_row_count,
+        );
+
+        let mut zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, Challenge<SC>, A>> =
+            Vec::with_capacity(n_chips);
+        let mut chip_sumcheck_claims: Vec<Challenge<SC>> = Vec::with_capacity(n_chips);
+
+        // The cross-chip lambda-RLC (both claimed_sum and point_and_eval.1)
+        // must be folded in chip-NAME order to match the recursion verifier
+        // (recursion/circuit/src/zerocheck.rs:480 over name-sorted shard_chips
+        // and :577 over the chip_openings BTreeMap) and SP1 (BTreeSet<Chip>,
+        // Chip::cmp == name.cmp).  The incoming `chips` / `main_traces` /
+        // `preprocessed_traces` slices are HEIGHT-descending (the orchestrator
+        // sorts by (Reverse(height), name)), so iterate a name-sorted index
+        // permutation and index the parallel arrays by the original index —
+        // preserving trace alignment while emitting per-chip claims/polys in
+        // name order.
+        let mut name_order: Vec<usize> = (0..chips.len()).collect();
+        name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
+
+        for &chip_idx in name_order.iter() {
+            let chip = chips[chip_idx];
+            let name = chip.name().to_string();
+            let opening =
+                logup_evaluations.chip_openings.get(&name).unwrap_or_else(|| {
+                    panic!("chip {name} missing from logup_evaluations.chip_openings")
+                });
+
+            let main_trace = &main_traces[chip_idx];
+            let prep_trace = &preprocessed_traces[chip_idx];
+            let main_width = main_trace.width;
+            let prep_width = prep_trace.width;
+            let main_height =
+                if main_width == 0 { 0 } else { main_trace.values.len() / main_width };
+
+            // GKR-opening batch powers [β¹ .. β^(main+prep)].
+            let combined_width = main_width + prep_width;
+            let mut gkr_powers: Vec<Challenge<SC>> = Vec::with_capacity(combined_width);
+            {
+                let mut acc = Challenge::<SC>::ONE;
+                for _ in 0..combined_width {
+                    acc *= gkr_batch_open;
+                    gkr_powers.push(acc);
+                }
+            }
+
+            // chip claim = Σ (main_evals ++ prep_evals) · β^(1..).
+            let prep_evals: &[Challenge<SC>] =
+                opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]);
+            let claim = opening
+                .main_trace_evaluations
+                .iter()
+                .chain(prep_evals.iter())
+                .zip(gkr_powers.iter())
+                .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p);
+            chip_sumcheck_claims.push(claim);
+
+            // Lift real trace rows to the challenge field.
+            let main_cells: Vec<Challenge<SC>> =
+                main_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect();
+            let prep_cells: Option<Vec<Challenge<SC>>> = if prep_width > 0 {
+                Some(prep_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect())
+            } else {
+                None
+            };
+
+            let padded_row_adjustment = compute_padded_row_adjustment::<
+                Val<SC>,
+                Challenge<SC>,
+                A,
+            >(chip, alpha, public_values, main_width, prep_width);
+            let initial_geq_value =
+                if main_height > 0 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
+            let virtual_geq = VirtualGeq::new(
+                main_height as u32,
+                Challenge::<SC>::ONE,
+                Challenge::<SC>::ZERO,
+                num_variables,
+            );
+
+            let poly = ZeroCheckPoly::<Val<SC>, Challenge<SC>, A>::new(
+                chip,
+                public_values,
+                alpha,
+                gkr_powers,
+                zeta.clone(),
+                main_cells,
+                main_width,
+                prep_cells,
+                prep_width,
+                main_height,
+                num_variables,
+                Challenge::<SC>::ONE, // eq_adjustment
+                initial_geq_value,
+                padded_row_adjustment,
+                virtual_geq,
+            );
+            zerocheck_polys.push(poly);
+        }
+
+        // `_component_poly_evals` are the per-chip trace openings at the
+        // reduced point z (padded-MLE@z, prep-then-main, name order) — the
+        // values the jagged PCS must open at z for the full SP1 chain
+        // (review item 12).  Ignored for now: the host jagged-PCS still
+        // opens at the GKR point per its own per-chip (jagged) dimension,
+        // so re-pointing it to z requires reconciling padded-MLE@z vs
+        // Ziren's per-chip jagged opening — a transcript-changing,
+        // recursion/vk-coupled follow-up (see plan + memory).
+        let (sp1_proof, _component_poly_evals) =
+            crate::shard_level::zerocheck_poly::reduce_sumcheck_serial::<
+                Val<SC>,
+                Challenge<SC>,
+                _,
+                SC::Challenger,
+            >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda);
+        return sp1_proof;
+    }
+    #[allow(unreachable_code)]
+    {
 
     // Step 2: compute per-chip C-tables.  Skip chips that
     // participate in lookup arguments — their constraints pull
@@ -661,6 +819,7 @@ where
         "zerocheck sub-phase done"
     );
     proof
+    }
 }
 
 /// Derive a chip's global cumulative sum from the last 14 elements of

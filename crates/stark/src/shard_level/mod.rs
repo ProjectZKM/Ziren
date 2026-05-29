@@ -12,6 +12,7 @@ pub mod row_gkr;
 pub mod sumcheck_poly;
 pub mod types;
 pub mod verifier;
+pub mod zerocheck_poly;
 pub mod zerocheck_prover;
 
 pub use device_trace_provider::DeviceTraceProvider;

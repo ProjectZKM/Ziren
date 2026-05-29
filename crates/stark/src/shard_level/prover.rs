@@ -142,7 +142,15 @@ pub fn prove_shard_to_basefold<SC, A>(
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
@@ -182,7 +190,15 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>> + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     L: MainTraceLoader<Val<SC>>,
@@ -304,9 +320,10 @@ where
         "shard phase done"
     );
 
-    // Phase 3: zerocheck over the lambda-RLC'd per-chip constraint
-    // tables. Lookup soundness is handled by Phase 2 (LogUp-GKR), so
-    // the zerocheck doesn't take any LogUp evaluations as input.
+    // Phase 3: SP1-aligned per-chip zerocheck.  Takes the LogUp-GKR
+    // evaluations so each chip's sumcheck claim chains to its GKR
+    // openings (`claimed_sum = λ-RLC(Σ openings·β^k)`), eq-anchored at
+    // the shared GKR point.
     let _t_phase3 = std::time::Instant::now();
     let zerocheck_proof = {
         let _span = tracing::info_span!("phase_zerocheck").entered();
@@ -315,6 +332,7 @@ where
             preprocessed_traces,
             main_traces,
             &public_values,
+            &logup_gkr_proof.logup_evaluations,
             max_log_row_count,
             challenger,
             _device_traces,
@@ -327,23 +345,21 @@ where
         "shard phase done"
     );
 
-    // Phase 3 → 4 bridge: observe per-chip openings to keep
-    // challenger state in sync with the verifier. Order matters:
-    // num_chips felt, then per-chip preprocessed then main basis
-    // coefficients in `chips` order.
+    // Phase 3 → 4 bridge: observe per-chip openings to keep challenger
+    // state in sync with the verifier. Order matters: num_chips felt,
+    // then per-chip preprocessed then main basis coefficients in
+    // chip-NAME order — matching the recursion verifier's step (9)
+    // (recursion/circuit/src/zerocheck.rs:628 iterates the name-ordered
+    // opened_values.chips) and SP1 (shard.rs:617-626 over the
+    // BTreeSet/BTreeMap chip set). `chip_openings` is a BTreeMap<String,_>,
+    // so iterating it directly yields name order.
     let _t_phase35 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_bridge_3_4").entered();
         use p3_field::BasedVectorSpace;
         let num_chips_felt = Val::<SC>::from_u64(chips.len() as u64);
         challenger.observe(num_chips_felt);
-        for chip in chips.iter() {
-            let name = chip.name().to_string();
-            let opening = logup_gkr_proof
-                .logup_evaluations
-                .chip_openings
-                .get(&name)
-                .expect("chip missing from logup_evaluations.chip_openings");
+        for (_name, opening) in logup_gkr_proof.logup_evaluations.chip_openings.iter() {
             if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
                 for c in prep.iter() {
                     for basis in c.as_basis_coefficients_slice() {

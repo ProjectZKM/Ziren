@@ -214,7 +214,13 @@ where
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<SymbolicAirBuilder<Val<SC>>>,
+        + for<'a> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'a,
+                Val<SC>,
+                SC::Challenge,
+            >,
+        > + for<'a> Air<SymbolicAirBuilder<Val<SC>>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC::Val: PrimeField32,
     Com<SC>: Send + Sync,
@@ -1075,7 +1081,14 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>,
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                <SC as StarkGenericConfig>::Challenge,
+            >,
+        >,
     Val<SC>: PrimeField32,
     SC::Challenger: Clone + 'static,
     Val<SC>: 'static,
