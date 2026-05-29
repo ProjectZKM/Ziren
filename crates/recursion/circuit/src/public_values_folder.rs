@@ -30,8 +30,9 @@
 use std::marker::PhantomData;
 
 use p3_air::{AirBuilder, ExtensionBuilder};
-use p3_field::{Algebra, Field, ExtensionField};
+use p3_field::{Algebra, Field, ExtensionField, PrimeCharacteristicRing};
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
+use zkm_stark::air::{AirLookup, LookupScope, MessageBuilder};
 use zkm_stark::folder::PairWindow;
 
 /// In-circuit folder for record-level public-values constraints.
@@ -118,6 +119,50 @@ where
         I: Into<Self::ExprEF>,
     {
         self.assert_zero(x);
+    }
+}
+
+impl<C: Config> RecursivePublicValuesConstraintFolder<'_, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    /// In-circuit LogUp fraction `multiplicity / (alpha + beta_0*kind +
+    /// sum beta_i*value_i)` — mirrors the host
+    /// [`zkm_stark::air::PublicValuesConstraintFolder`] and
+    /// `permutation.rs:50-57`.
+    fn interaction_fraction(
+        &self,
+        message: AirLookup<SymbolicExt<C::F, C::EF>>,
+    ) -> SymbolicExt<C::F, C::EF> {
+        let mut denominator: SymbolicExt<C::F, C::EF> = (*self.perm_challenges.0).into();
+        let mut betas = self.perm_challenges.1.iter();
+        denominator = denominator
+            + betas.next().expect("beta_0 (kind term)").clone()
+                * C::F::from_usize(message.kind as usize);
+        for value in message.values {
+            denominator = denominator + value * betas.next().expect("beta_i (value term)").clone();
+        }
+        message.multiplicity / denominator
+    }
+}
+
+impl<C: Config> MessageBuilder<AirLookup<SymbolicExt<C::F, C::EF>>>
+    for RecursivePublicValuesConstraintFolder<'_, C>
+where
+    C::F: Field,
+    C::EF: ExtensionField<C::F>,
+    SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+{
+    fn send(&mut self, message: AirLookup<SymbolicExt<C::F, C::EF>>, _scope: LookupScope) {
+        let digest = self.interaction_fraction(message);
+        self.local_interaction_digest = self.local_interaction_digest.clone() + digest;
+    }
+
+    fn receive(&mut self, message: AirLookup<SymbolicExt<C::F, C::EF>>, _scope: LookupScope) {
+        let digest = self.interaction_fraction(message);
+        self.local_interaction_digest = self.local_interaction_digest.clone() - digest;
     }
 }
 

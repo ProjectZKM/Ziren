@@ -360,7 +360,17 @@ pub fn verify_core_basefold<C, SC, A>(
                     cumsums_for_shard,
                     max_log_row_count,
                 );
-            let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
+            // Option 2: the MIPS core machine now closes its local-only
+            // control buses (State / GlobalAccumulation / MemoryGlobal*)
+            // through the public-values AIR.  Fold those boundary
+            // interactions into the LogUp-GKR balance by emitting
+            // `eval_public_values` through the record folder (was a no-op;
+            // `verify_logup_gkr` negates the resulting digest into the
+            // cumulative sum the GKR root is checked against).
+            let eval_public_values_fn =
+                |folder: &mut crate::public_values_folder::RecursivePublicValuesConstraintFolder<C>| {
+                    zkm_stark::air::eval_public_values(folder);
+                };
             let jagged_evaluator_fn =
                 super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                     builder,
