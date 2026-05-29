@@ -113,9 +113,7 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         builder: &mut AB,
         global_lookup_cols: [GlobalLookupOperation<AB::Var>; N],
         local_is_real: [AB::Var; N],
-        next_is_real: [AB::Var; N],
         local_accumulation: GlobalAccumulationOperation<AB::Var, N>,
-        next_accumulation: GlobalAccumulationOperation<AB::Var, N>,
     ) {
         // First, constrain the control flow regarding `is_real`.
         // Constrain that all `is_real` values are boolean.
@@ -123,14 +121,16 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             builder.assert_bool(local_is_real[i]);
         }
 
-        // Constrain that `is_real = 0` implies the next `is_real` values are all zero.
+        // Constrain that `is_real = 0` implies the next `is_real` values are all zero
+        // (within-row, for N > 1).
         for i in 0..N - 1 {
             // `is_real[i] == 0` implies `is_real[i + 1] == 0`.
             builder.when_not(local_is_real[i]).assert_zero(local_is_real[i + 1]);
         }
 
-        // Constrain that `is_real[N - 1] == 0` implies `next.is_real[0] == 0`
-        builder.when_transition().when_not(local_is_real[N - 1]).assert_zero(next_is_real[0]);
+        // Option 2: the cross-row `is_real` monotonicity is dropped — the
+        // GlobalAccumulation bus does not require a contiguous real-row
+        // prefix (the index chain + multiset balance handle it).
 
         // Next, constrain the accumulation.
         let initial_digest = SepticCurve::<AB::Expr> {
@@ -160,10 +160,10 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             }),
         };
 
-        // Constrain that the first `initial_digest` is the zero digest.
-        let zero_digest = SepticDigest::<AB::Expr>::zero().0;
-        builder.when_first_row().assert_septic_ext_eq(initial_digest.x.clone(), zero_digest.x);
-        builder.when_first_row().assert_septic_ext_eq(initial_digest.y.clone(), zero_digest.y);
+        // Option 2: the first-row `initial_digest == ZERO` anchor is
+        // dropped — the GlobalAccumulation bus's initial endpoint
+        // `(0, ZERO_DIGEST)`, emitted by the public-values AIR
+        // (`eval_global_sum`) and received by row 0, enforces it.
 
         // Constrain that when `is_real = 1`, addition is being carried out, and when `is_real = 0`, the sum remains the same.
         for i in 0..N {
@@ -203,21 +203,12 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             builder.when_not(local_is_real[i]).assert_septic_ext_eq(current_sum.y, next_sum.y);
         }
 
-        // Constrain that the final digest is the next row's initial_digest.
-        let final_digest = ith_cumulative_sum(N - 1);
-
-        let next_initial_digest = SepticCurve::<AB::Expr> {
-            x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                next_accumulation.initial_digest[0][i].into()
-            }),
-            y: SepticExtension::<AB::Expr>::from_base_fn(|i| {
-                next_accumulation.initial_digest[1][i].into()
-            }),
-        };
-
-        builder
-            .when_transition()
-            .assert_septic_ext_eq(final_digest.x.clone(), next_initial_digest.x.clone());
-        builder.when_transition().assert_septic_ext_eq(final_digest.y, next_initial_digest.y);
+        // Option 2: the cross-row `final_digest == next.initial_digest`
+        // chain is dropped — the GlobalAccumulation bus (emitted in
+        // GlobalChip::eval as receive(index, initial_digest) +
+        // send(index+1, cumulative_sum[N-1])) chains consecutive rows via
+        // the multiset balance, and the public-values AIR closes the chain
+        // at both ends (initial (0, ZERO), final (global_count,
+        // global_cumulative_sum)).
     }
 }

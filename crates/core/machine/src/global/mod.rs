@@ -1,6 +1,7 @@
 use std::{borrow::Borrow, mem::transmute};
 
 use p3_air::{WindowAccess, Air, BaseAir};
+use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{
@@ -59,6 +60,11 @@ pub struct GlobalCols<T: Copy> {
     pub is_receive: T,
     pub is_send: T,
     pub is_real: T,
+    /// Option 2: running real-row index for the GlobalAccumulation bus
+    /// chain.  Set to the row's position by trace-gen.  Placed before
+    /// `accumulation` so the latter (and its trailing cumulative_sum)
+    /// stays at the end of the row (perm-constraint requirement).
+    pub index: T,
     pub accumulation: GlobalAccumulationOperation<T, 1>,
 }
 
@@ -148,6 +154,10 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
                         event.kind,
                     );
                     cols.is_real = F::ONE;
+                    // Option 2: running index for the GlobalAccumulation
+                    // bus chain (real rows are placed contiguously at
+                    // rows 0..nb_rows, so `idx` is the chain position).
+                    cols.index = F::from_u32(idx as u32);
                     if event.is_receive {
                         cols.is_receive = F::ONE;
                     } else {
@@ -222,8 +232,6 @@ where
         let main = builder.main();
         let local = main.current_slice();
         let local: &GlobalCols<AB::Var> = (*local).borrow();
-        let next = main.next_slice();
-        let next: &GlobalCols<AB::Var> = (*next).borrow();
 
         // Receive the arguments, which consists of 7 message columns, `is_send`, `is_receive`, and `kind`.
         // In MemoryGlobal, MemoryLocal, Syscall chips, `is_send`, `is_receive`, `kind` are sent with correct constant values.
@@ -264,14 +272,48 @@ where
             local.kind,
         );
 
-        // Evaluate the accumulation.
+        // Evaluate the local (is_real-gated) curve accumulation.
         GlobalAccumulationOperation::<AB::F, 1>::eval_accumulation(
             builder,
             [local.lookup],
             [local.is_real],
-            [next.is_real],
             local.accumulation,
-            next.accumulation,
+        );
+
+        // Option 2 GlobalAccumulation bus: chain the running digest via a
+        // multiset-balanced control interaction instead of the legacy
+        // when_transition `final_digest == next.initial_digest`.  Each
+        // real row RECEIVEs (index, initial_digest) and SENDs (index+1,
+        // cumulative_sum); the public-values AIR (`eval_global_sum`)
+        // closes the chain at both ends — initial `(0, ZERO_DIGEST)`
+        // (matched to row 0's initial_digest) and final `(global_count,
+        // global_cumulative_sum)` (matched to the last real row's
+        // cumulative_sum).  Multiplicity is `is_real`, so the chain spans
+        // exactly the real rows and `global_count` equals the real count.
+        let mut recv_vals: Vec<AB::Expr> = Vec::with_capacity(15);
+        recv_vals.push(local.index.into());
+        for i in 0..7 {
+            recv_vals.push(local.accumulation.initial_digest[0].0[i].into());
+        }
+        for i in 0..7 {
+            recv_vals.push(local.accumulation.initial_digest[1].0[i].into());
+        }
+        builder.receive(
+            AirLookup::new(recv_vals, local.is_real.into(), LookupKind::GlobalAccumulation),
+            LookupScope::Local,
+        );
+
+        let mut send_vals: Vec<AB::Expr> = Vec::with_capacity(15);
+        send_vals.push(local.index.into() + AB::Expr::ONE);
+        for i in 0..7 {
+            send_vals.push(local.accumulation.cumulative_sum[0][0].0[i].into());
+        }
+        for i in 0..7 {
+            send_vals.push(local.accumulation.cumulative_sum[0][1].0[i].into());
+        }
+        builder.send(
+            AirLookup::new(send_vals, local.is_real.into(), LookupKind::GlobalAccumulation),
+            LookupScope::Local,
         );
     }
 }
