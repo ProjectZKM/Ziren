@@ -50,6 +50,7 @@ use super::types::{
 };
 use crate::air::MachineAir;
 use crate::logup_gkr::{build_lookup_leaves, prove_logup_gkr as prove_logup_gkr_inner, Fraction};
+use p3_challenger::GrindingChallenger;
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
 
@@ -299,10 +300,10 @@ where
 ///
 /// # Soundness note
 ///
-/// The grinding-witness step (PoW gating) is currently emitted as
-/// `F::ZERO` — Ziren's challenger does not yet expose
-/// `GrindingChallenger::grind` in a stable API.  Add that when
-/// the challenger surface is unified across crates.
+/// The grinding-witness step (PoW gating) is produced by the inner
+/// [`crate::logup_gkr::prove_logup_gkr`] via
+/// `GrindingChallenger::grind(GKR_GRINDING_BITS)` (C4, matching SP1) and
+/// threaded into the SP1-shape `LogupGkrProof::witness` below.
 pub fn prove_shard_logup_gkr<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
@@ -313,7 +314,7 @@ where
     F: PrimeField,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     A: MachineAir<F>,
-    Challenger: FieldChallenger<F>,
+    Challenger: FieldChallenger<F> + GrindingChallenger<Witness = F>,
 {
     // Step 1: sample [alpha, beta] for the lookup mixing.
     let alpha: EF = challenger.sample_algebra_element::<EF>();
@@ -407,7 +408,7 @@ where
         },
         round_proofs,
         logup_evaluations: LogUpEvaluations { point: inner_proof.eval_point, chip_openings },
-        witness: F::ZERO,
+        witness: inner_proof.witness,
     }
 }
 
