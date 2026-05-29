@@ -4,6 +4,8 @@ use std::borrow::{Borrow, BorrowMut};
 use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 
+use crate::septic_curve::SepticCurve;
+use crate::septic_digest::SepticDigest;
 use crate::{Word, PROOF_MAX_NUM_PVS};
 
 /// The number of non padded elements in the Ziren proofs public values vec.
@@ -54,8 +56,35 @@ pub struct PublicValues<W, T> {
     /// The bits of the largest address that is witnessed for finalization in the current shard.
     pub last_finalize_addr_bits: [T; 32],
 
+    // ── Option 2 (local-only / SP1-hypercube) boundary-anchor fields ──
+    // These are emitted by the public-values AIR (`eval_public_values`)
+    // as the closing endpoints of the new control-bus interactions
+    // (State / GlobalAccumulation / MemoryGlobalInit/Finalize) that
+    // replace the legacy `when_transition` chaining + the per-chip
+    // last-row cumulative-sum closure.  Mirrors SP1
+    // `hypercube/src/air/public_values.rs`.
+    /// Initial CPU timestamp (clk) for this shard — the `State`-bus
+    /// initial endpoint (`send_state`).
+    pub initial_timestamp: T,
+    /// Final CPU timestamp (clk) for this shard — the `State`-bus final
+    /// endpoint (`receive_state`).
+    pub last_timestamp: T,
+    /// Number of global-memory-init rows — `MemoryGlobalInitControl`
+    /// chain length endpoint.
+    pub global_init_count: T,
+    /// Number of global-memory-finalize rows —
+    /// `MemoryGlobalFinalizeControl` chain length endpoint.
+    pub global_finalize_count: T,
+    /// Number of global interactions — `GlobalAccumulation` chain
+    /// length endpoint.
+    pub global_count: T,
+    /// The shard's global cumulative sum — the `GlobalAccumulation`
+    /// final digest endpoint.  Replaces the verifier's per-chip
+    /// last-row digest sum (machine.rs).
+    pub global_cumulative_sum: SepticDigest<T>,
+
     /// This field is here to ensure that the size of the public values struct is a multiple of 8.
-    pub empty: [T; 3],
+    pub empty: [T; 8],
 }
 
 impl PublicValues<u32, u32> {
@@ -125,6 +154,12 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_init_addr_bits,
             previous_finalize_addr_bits,
             last_finalize_addr_bits,
+            initial_timestamp,
+            last_timestamp,
+            global_init_count,
+            global_finalize_count,
+            global_count,
+            global_cumulative_sum,
             ..
         } = value;
 
@@ -144,6 +179,14 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
         let previous_finalize_addr_bits = previous_finalize_addr_bits.map(F::from_u32);
         let last_finalize_addr_bits = last_finalize_addr_bits.map(F::from_u32);
 
+        let initial_timestamp = F::from_u32(initial_timestamp);
+        let last_timestamp = F::from_u32(last_timestamp);
+        let global_init_count = F::from_u32(global_init_count);
+        let global_finalize_count = F::from_u32(global_finalize_count);
+        let global_count = F::from_u32(global_count);
+        let global_cumulative_sum =
+            SepticDigest(SepticCurve::convert(global_cumulative_sum.0, F::from_u32));
+
         Self {
             committed_value_digest,
             deferred_proofs_digest,
@@ -156,7 +199,13 @@ impl<F: PrimeCharacteristicRing> From<PublicValues<u32, u32>> for PublicValues<W
             last_init_addr_bits,
             previous_finalize_addr_bits,
             last_finalize_addr_bits,
-            empty: [F::ZERO, F::ZERO, F::ZERO],
+            initial_timestamp,
+            last_timestamp,
+            global_init_count,
+            global_finalize_count,
+            global_count,
+            global_cumulative_sum,
+            empty: [F::ZERO; 8],
         }
     }
 }
