@@ -231,6 +231,47 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         );
     }
 
+    /// Sends the next CPU state `(shard, clk, pc, next_pc)` on the
+    /// [`LookupKind::State`] bus.  Local-only replacement for the legacy
+    /// `when_transition` pc/clk/shard chaining: each instruction row
+    /// `receive_state`s its current state and `send_state`s the next
+    /// (`clk + 5 + extra`, `pc := next_pc`, `next_pc := next_next_pc`);
+    /// the LogUp multiset balance forces consecutive rows to chain.  The
+    /// initial / final endpoints are emitted by the public-values AIR.
+    fn send_state(
+        &mut self,
+        shard: impl Into<Self::Expr>,
+        clk: impl Into<Self::Expr>,
+        pc: impl Into<Self::Expr>,
+        next_pc: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values =
+            once(shard.into()).chain(once(clk.into())).chain(once(pc.into())).chain(once(next_pc.into())).collect();
+        self.send(
+            AirLookup::new(values, multiplicity.into(), LookupKind::State),
+            LookupScope::Local,
+        );
+    }
+
+    /// Receives the current CPU state `(shard, clk, pc, next_pc)` on the
+    /// [`LookupKind::State`] bus.  See [`Self::send_state`].
+    fn receive_state(
+        &mut self,
+        shard: impl Into<Self::Expr>,
+        clk: impl Into<Self::Expr>,
+        pc: impl Into<Self::Expr>,
+        next_pc: impl Into<Self::Expr>,
+        multiplicity: impl Into<Self::Expr>,
+    ) {
+        let values =
+            once(shard.into()).chain(once(clk.into())).chain(once(pc.into())).chain(once(next_pc.into())).collect();
+        self.receive(
+            AirLookup::new(values, multiplicity.into(), LookupKind::State),
+            LookupScope::Local,
+        );
+    }
+
     /// Receives an ALU operation to be processed.
     #[allow(clippy::too_many_arguments)]
     fn receive_instruction(

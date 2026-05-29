@@ -45,6 +45,29 @@ pub enum LookupKind {
     /// Lookup connecting syscall result and argument bytes between SyscallInstrsChip,
     /// SyscallChip, and SysLinuxChip.
     SyscallResult = 8,
+
+    /// CPU-state chaining bus (clk, pc).  Each instruction-bearing row
+    /// `receive_state`s its current (clk, pc) and `send_state`s the next
+    /// (clk', next_pc); the LogUp multiset balance forces consecutive
+    /// rows to chain — the local-only replacement for the legacy
+    /// `when_transition(local.next_pc == next.pc)` constraints.
+    /// Boundary endpoints (initial / final pc, clk) are emitted by the
+    /// public-values AIR.  Mirrors SP1 `InteractionKind::State`.
+    State = 9,
+
+    /// Running global-digest accumulation chain.  Each `GlobalChip` row
+    /// receives `(index, running_digest)` and sends
+    /// `(index+1, running_digest + this_point)`; anchored at both ends by
+    /// the public-values AIR.  Mirrors SP1 `InteractionKind::GlobalAccumulation`.
+    GlobalAccumulation = 10,
+
+    /// Global-memory-init ordering control bus (index, prev_addr, valid).
+    /// Mirrors SP1 `InteractionKind::MemoryGlobalInitControl`.
+    MemoryGlobalInitControl = 11,
+
+    /// Global-memory-finalize ordering control bus.
+    /// Mirrors SP1 `InteractionKind::MemoryGlobalFinalizeControl`.
+    MemoryGlobalFinalizeControl = 12,
 }
 
 impl LookupKind {
@@ -60,7 +83,26 @@ impl LookupKind {
             LookupKind::Syscall,
             LookupKind::Global,
             LookupKind::SyscallResult,
+            LookupKind::State,
+            LookupKind::GlobalAccumulation,
+            LookupKind::MemoryGlobalInitControl,
+            LookupKind::MemoryGlobalFinalizeControl,
         ]
+    }
+
+    /// Whether this kind's multiset is closed by endpoints emitted from
+    /// the public-values AIR (rather than balancing entirely within the
+    /// trace).  Mirrors SP1 `InteractionKind::appears_in_eval_public_values`.
+    #[must_use]
+    pub fn appears_in_eval_public_values(&self) -> bool {
+        matches!(
+            self,
+            LookupKind::Byte
+                | LookupKind::State
+                | LookupKind::GlobalAccumulation
+                | LookupKind::MemoryGlobalInitControl
+                | LookupKind::MemoryGlobalFinalizeControl
+        )
     }
 }
 
@@ -101,6 +143,10 @@ impl Display for LookupKind {
             LookupKind::Syscall => write!(f, "Syscall"),
             LookupKind::Global => write!(f, "Global"),
             LookupKind::SyscallResult => write!(f, "SyscallResult"),
+            LookupKind::State => write!(f, "State"),
+            LookupKind::GlobalAccumulation => write!(f, "GlobalAccumulation"),
+            LookupKind::MemoryGlobalInitControl => write!(f, "MemoryGlobalInitControl"),
+            LookupKind::MemoryGlobalFinalizeControl => write!(f, "MemoryGlobalFinalizeControl"),
         }
     }
 }
