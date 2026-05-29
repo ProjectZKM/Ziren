@@ -778,3 +778,130 @@ where
         self.sum_as_poly(claim, true)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{InnerChallenge, InnerVal};
+    use p3_field::PrimeCharacteristicRing;
+
+    type EF = InnerChallenge;
+
+    /// Standard multilinear evaluation of a dense table at `point`, with
+    /// `point[k]` bound to bit `k` (LSB-first) of the table index — the
+    /// convention the LSB-adjacent `fold_cells` realizes.
+    fn padded_mle_eval(table: &[EF], point: &[EF]) -> EF {
+        assert_eq!(table.len(), 1 << point.len());
+        let mut acc = EF::ZERO;
+        for (i, &v) in table.iter().enumerate() {
+            let mut w = EF::ONE;
+            for (k, &p) in point.iter().enumerate() {
+                let bit = (i >> k) & 1;
+                w *= if bit == 1 { p } else { EF::ONE - p };
+            }
+            acc += v * w;
+        }
+        acc
+    }
+
+    /// `fold_cells` applied round-by-round (fixing the LSB each round, as
+    /// `reduce_sumcheck_serial` does) over a real-cell buffer must equal
+    /// the multilinear extension of the ZERO-padded table at the reduced
+    /// point — i.e. `component_poly_evals` = padded-MLE@z (the zerocheck
+    /// "dense claim").  Uses a non-power-of-two `num_real` (3) so the
+    /// odd-tail / virtual-padding path is exercised.
+    #[test]
+    fn fold_cells_equals_padded_mle_at_z() {
+        let num_vars = 3usize;
+        // Single column, 3 real rows; padded hypercube is 2^3 = 8.
+        let c = [EF::from_u64(7), EF::from_u64(11), EF::from_u64(19)];
+        let mut padded = vec![EF::ZERO; 1 << num_vars];
+        padded[..c.len()].copy_from_slice(&c);
+
+        // Round challenges a_0..a_{num_vars-1}; round k fixes bit k.
+        let alphas = [EF::from_u64(5), EF::from_u64(13), EF::from_u64(23)];
+
+        // Fold round-by-round: num_real halves via div_ceil; odd tail
+        // folds against the ZERO padding constant.
+        let mut cells = c.to_vec();
+        let mut num_real = c.len();
+        for &alpha in alphas.iter() {
+            cells = fold_cells(&cells, 1, num_real, alpha);
+            num_real = num_real.div_ceil(2);
+        }
+        assert_eq!(cells.len(), 1);
+        let folded = cells[0];
+
+        let brute = padded_mle_eval(&padded, &alphas);
+        assert_eq!(folded, brute, "fold_cells must equal padded-MLE@z (dense claim)");
+    }
+
+    /// Multi-column variant: each column folds independently and must
+    /// equal that column's padded-MLE@z.
+    #[test]
+    fn fold_cells_multicol_equals_padded_mle() {
+        let num_vars = 2usize;
+        let ncols = 2usize;
+        // 3 real rows x 2 cols, row-major.
+        let cells0 = vec![
+            EF::from_u64(2), EF::from_u64(3), // row 0
+            EF::from_u64(5), EF::from_u64(7), // row 1
+            EF::from_u64(11), EF::from_u64(13), // row 2
+        ];
+        let alphas = [EF::from_u64(4), EF::from_u64(9)];
+
+        let mut cells = cells0.clone();
+        let mut num_real = 3usize;
+        for &alpha in alphas.iter() {
+            cells = fold_cells(&cells, ncols, num_real, alpha);
+            num_real = num_real.div_ceil(2);
+        }
+        assert_eq!(cells.len(), ncols);
+
+        for col in 0..ncols {
+            let mut padded = vec![EF::ZERO; 1 << num_vars];
+            for row in 0..3 {
+                padded[row] = cells0[row * ncols + col];
+            }
+            assert_eq!(cells[col], padded_mle_eval(&padded, &alphas), "col {col} padded-MLE mismatch");
+        }
+    }
+
+    /// `VirtualGeq::fix_last_variable` then `eval_at_usize` must agree
+    /// with directly evaluating the geq/eq combination — guards the
+    /// padded-row correction used in `sum_as_poly`.
+    #[test]
+    fn virtual_geq_fold_matches_threshold_indicator() {
+        // threshold = 2 real rows, 3 variables, geq=1 eq=0 (as the prover sets).
+        let vg = VirtualGeq::<EF>::new(2, EF::ONE, EF::ZERO, 3);
+        // After fixing the last variable to alpha, eval_at_usize at the
+        // halved threshold index must equal the analytic recurrence.
+        let alpha = EF::from_u64(6);
+        let folded = vg.fix_last_variable(alpha);
+        // threshold 2 is even -> new_threshold=1, new_eq=(1-alpha)*0=0, new_geq=1.
+        assert_eq!(folded.threshold, 1);
+        assert_eq!(folded.eq_coefficient, EF::ZERO);
+        assert_eq!(folded.geq_coefficient, EF::ONE);
+        // index 1 == threshold -> eq+geq = 0 + 1 = 1; index 0 (< threshold) -> 0.
+        assert_eq!(folded.eval_at_usize(1), EF::ONE);
+        assert_eq!(folded.eval_at_usize(0), EF::ZERO);
+    }
+
+    /// Lagrange interpolation round-trips: the interpolant evaluated at
+    /// each node returns the node value, including the eq-root sample.
+    #[test]
+    fn interpolate_round_trips_through_nodes() {
+        let xs = [EF::from_u64(0), EF::from_u64(1), EF::from_u64(2), EF::from_u64(4), EF::from_u64(9)];
+        let ys = [EF::from_u64(3), EF::from_u64(8), EF::from_u64(21), EF::from_u64(40), EF::from_u64(0)];
+        let poly = interpolate_univariate_polynomial(&xs, &ys);
+        for (x, y) in xs.iter().zip(ys.iter()) {
+            // Horner eval.
+            let mut acc = EF::ZERO;
+            for c in poly.coefficients.iter().rev() {
+                acc = acc * *x + *c;
+            }
+            assert_eq!(acc, *y, "interpolant must pass through node x={x:?}");
+        }
+        let _ = InnerVal::ONE; // keep InnerVal import used
+    }
+}
