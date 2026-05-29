@@ -289,11 +289,7 @@ where
                     == TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
         };
 
-        if use_basefold_path
-            && !std::env::var("ZIREN_TEST_SKIP_BASEFOLD")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false)
-        {
+        if use_basefold_path {
             return commit_basefold_path::<SC, Self::DeviceMatrix, Self::DeviceProverData>(
                 pcs,
                 record.public_values(),
@@ -1097,22 +1093,6 @@ where
 {
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
-
-    // Test-only escape hatch: ZIREN_TEST_SKIP_BASEFOLD=1 forces this
-    // helper to return None, skipping the ~30s LogUp-GKR + jagged-PCS
-    // proof generation entirely.  The verifier then dispatches to the
-    // legacy STARK path (because `basefold_shard_proof.is_none()`).
-    // Intended for dev/test workloads that exercise recursion plumbing
-    // without basefold soundness — e.g. `mips::tests::test_*_prove_simple`
-    // micro-benchmarks.  Production deployments MUST leave this unset
-    // (or set to `0`) so the basefold proof is generated and the
-    // BasefoldShardVerifier dispatches.
-    if std::env::var("ZIREN_TEST_SKIP_BASEFOLD")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
-        return None;
-    }
 
     // Gate on SC == KoalaBearPoseidon2 (monomorphic dispatch).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
