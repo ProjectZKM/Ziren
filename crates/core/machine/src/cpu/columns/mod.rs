@@ -40,6 +40,16 @@ pub struct CpuCols<T: Copy> {
     /// The expected next_next program counter value.
     pub next_next_pc: T,
 
+    /// The `next_pc` value RECEIVED on the `State` bus (Option 2 local-only).
+    /// Equals `next_pc` for normal rows, but `pc + 4` on the halt row: the
+    /// ecall-exit forces `next_pc = 0` for the halt SEND (the recursion
+    /// shard-chaining signal), yet the predecessor row SENT `next_next_pc =
+    /// pc + 4` (the `is_sequential` lookahead), so the halt must RECEIVE
+    /// `pc + 4` for the State-bus chain to telescope.  Replaces the legacy
+    /// `when_not(next.is_halt)` exemption on the cross-row `next_next_pc`
+    /// constraint.
+    pub state_recv_next_pc: T,
+
     /// Columns related to the instruction.
     pub instruction: InstructionCols<T>,
 

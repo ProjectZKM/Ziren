@@ -195,6 +195,17 @@ impl CpuChip {
             !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction(),
         );
 
+        // Option 2 State bus: the value RECEIVED on the bus is the
+        // predecessor's `next_next_pc`.  For a normal row that is `next_pc`;
+        // on the halt row the executor overrode `next_pc = 0` (the exit
+        // signal SENT to the PV), so RECEIVE the predicted continuation
+        // `pc + 4` instead, matching the predecessor's SEND.
+        cols.state_recv_next_pc = if is_halt {
+            F::from_u32(event.pc.wrapping_add(4))
+        } else {
+            F::from_u32(event.next_pc)
+        };
+
         // Populate range checks for a.
         let a_bytes = cols
             .op_a_access

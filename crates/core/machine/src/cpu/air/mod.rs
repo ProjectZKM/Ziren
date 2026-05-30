@@ -92,7 +92,19 @@ where
         // row's `next_next_pc`; at halt the executor sets `next_pc = 0`
         // (halt.rs:14), so the PV `eval_state` boundary must match the
         // halt convention — flagged for the PV-AIR State emitter.
-        builder.receive_state(local.shard, clk.clone(), local.pc, local.next_pc, local.is_real);
+        // Halt boundary: RECEIVE the predicted continuation (`state_recv_next_pc`,
+        // which is `pc + 4` on the halt row and `next_pc` elsewhere) so the chain
+        // telescopes into the halt — the legacy `when_not(next.is_halt)` exemption.
+        // The halt's real `next_pc = 0` still flows out via SEND below to the PV
+        // `eval_state` final endpoint.  `state_recv_next_pc` is pinned by the
+        // degree-2 constraint in `eval_pc`.
+        builder.receive_state(
+            local.shard,
+            clk.clone(),
+            local.pc,
+            local.state_recv_next_pc,
+            local.is_real,
+        );
         builder.send_state(
             local.shard,
             clk.clone() + AB::Expr::from_u32(5) + local.num_extra_cycles,
@@ -180,6 +192,17 @@ impl CpuChip {
             .when(local.is_real)
             .when(local.is_sequential)
             .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_u32(4));
+
+        // Option 2 State bus: define the RECEIVED next_pc.  Normal rows
+        // receive `next_pc`; the halt row receives the predicted continuation
+        // `pc + 4` (its own `next_pc` was forced to 0 as the exit signal).
+        //   state_recv_next_pc == (1 - is_halt)*next_pc + is_halt*(pc + 4)
+        let is_halt: AB::Expr = local.is_halt.into();
+        builder.when(local.is_real).assert_eq(
+            local.state_recv_next_pc,
+            (AB::Expr::ONE - is_halt.clone()) * local.next_pc
+                + is_halt * (local.pc + AB::Expr::from_u32(4)),
+        );
     }
 
     /// Constraints related to the is_real column.

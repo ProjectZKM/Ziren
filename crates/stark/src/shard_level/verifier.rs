@@ -220,6 +220,7 @@ impl BasefoldShardVerifier {
             self.max_log_row_count,
             beta_seed_dim,
             proof.fold_orientation,
+            &proof.public_values,
             challenger,
         )?;
 
@@ -1058,6 +1059,7 @@ fn verify_logup_gkr_host<SC>(
     max_log_row_count: usize,
     beta_seed_dim: usize,
     fold_orientation: FoldOrientation,
+    public_values: &[Val<SC>],
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
@@ -1088,13 +1090,47 @@ where
     // initial_num_variables = log_num_interactions + 1 = log2(output.len)
     let initial_num_variables = numerator.len().trailing_zeros() as usize;
 
-    // (1) Sample challenges.  We don't use alpha / beta_seed /
-    // pv_challenge here because the public-values closure isn't
-    // ported (see caller comment); we still sample them so the
-    // transcript stays in sync with the prover's ordering.
-    let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    for _ in 0..beta_seed_dim {
-        let _: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    // (1) Sample the LogUp permutation challenges (alpha + beta_seed),
+    // matching the prover (row_gkr/top_level.rs:62-78).
+    let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let beta_seed: Vec<Challenge<SC>> = (0..beta_seed_dim)
+        .map(|_| challenger.sample_algebra_element::<Challenge<SC>>())
+        .collect();
+    // betas[0] = argument_index (kind) weight, betas[1..] = per-value weights —
+    // the partial-lagrange table over {0,1}^beta_seed_dim (eq_mle_table),
+    // identical to the prover's leaf-denominator construction.
+    let beta_powers: Vec<Challenge<SC>> = if beta_seed.is_empty() {
+        vec![Challenge::<SC>::ONE]
+    } else {
+        crate::zerocheck_prover::eq_mle_table::<Challenge<SC>>(&beta_seed)
+    };
+
+    // (G1) Public-values balance — THE Option-2 local-only invariant.  The
+    // LogUp-GKR cumulative sum over the chip interactions must equal -PV_digest,
+    // where PV_digest folds the record-level public-values AIR interactions
+    // (the State / GlobalAccumulation / MemoryGlobalInit+Finalize bus
+    // boundaries) under the SAME (alpha, beta_powers).  The local-only buses
+    // are closed ONLY by this balance; without it a prover could forge bus
+    // fractions and the host would accept.  Host port of recursion
+    // logup_gkr.rs:357-381.  `eval_public_values` emits no assert_zero
+    // constraints, so the constraint-fold alpha is unused (pass `alpha`).  Pure
+    // arithmetic over already-sampled challenges — transcript-neutral.
+    {
+        let gkr_sum: Challenge<SC> = numerator
+            .iter()
+            .zip(denominator.iter())
+            .fold(Challenge::<SC>::ZERO, |acc, (n, d)| acc + *n / *d);
+        let pv_digest = crate::air::eval_public_values_digest_host::<Val<SC>, Challenge<SC>>(
+            &alpha,
+            &beta_powers,
+            alpha,
+            public_values,
+        );
+        if gkr_sum != -pv_digest {
+            return Err(BasefoldVerifyError::LogupGkr(
+                "public-values balance failed (sum circuit_output num/den != -PV_digest)".into(),
+            ));
+        }
     }
 
     // (2) Observe circuit_output into the transcript.  Each EF

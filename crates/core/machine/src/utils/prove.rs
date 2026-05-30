@@ -334,6 +334,15 @@ where
                                 state.execution_shard = record.public_values.execution_shard;
                                 state.start_pc = record.public_values.start_pc;
                                 state.next_pc = record.public_values.next_pc;
+                                // Option 2 State bus: the per-shard 2-pc endpoints and
+                                // timestamps are populated by the executor's finalization,
+                                // not the running `state`, so carry them here — otherwise the
+                                // `record.public_values = *state` write below zeroes them and
+                                // the `State`-bus multiset no longer balances.
+                                state.start_next_pc = record.public_values.start_next_pc;
+                                state.next_next_pc = record.public_values.next_next_pc;
+                                state.initial_timestamp = record.public_values.initial_timestamp;
+                                state.last_timestamp = record.public_values.last_timestamp;
                                 state.committed_value_digest =
                                     record.public_values.committed_value_digest;
                                 state.deferred_proofs_digest =
@@ -380,6 +389,11 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
+                                    // Option 2 State bus: a no-CPU shard has no Cpu row chain,
+                                    // so its PV-AIR send_state/receive_state must self-cancel —
+                                    // force both endpoints equal (start==next 2-pc, equal ts).
+                                    state.start_next_pc = state.next_next_pc;
+                                    state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records_clone.append(&mut deferred);
@@ -459,6 +473,11 @@ where
                                     state.last_finalize_addr_bits =
                                         record.public_values.last_finalize_addr_bits;
                                     state.start_pc = state.next_pc;
+                                    // Option 2 State bus: a no-CPU shard has no Cpu row chain,
+                                    // so its PV-AIR send_state/receive_state must self-cancel —
+                                    // force both endpoints equal (start==next 2-pc, equal ts).
+                                    state.start_next_pc = state.next_next_pc;
+                                    state.last_timestamp = state.initial_timestamp;
                                     record.public_values = *state;
                                 }
                                 records.append(&mut deferred);
