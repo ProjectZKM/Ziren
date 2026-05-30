@@ -555,14 +555,13 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    // (1) Sample the per-phase challenges to keep the transcript in
-    // sync with the prover.  They would drive the cryptographic
-    // identity check if wired — see the doc comment for the current
-    // split between structural and cryptographic verification.
+    // (1) Sample the per-phase challenges (transcript-sync with the prover).
+    // `gkr_batch_open` + `lambda` drive the claimed_sum binding (G2-b) below;
+    // `alpha` drives the constraint-RLC half (G2-a), deferred to the re-point.
     let _alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
-    let _gkr_batch_open: Challenge<SC> =
+    let gkr_batch_open: Challenge<SC> =
         challenger.sample_algebra_element::<Challenge<SC>>();
-    let _lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+    let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
     // (2) Point dimension == max_log_row_count.
     let point_dim = zerocheck_proof.point_and_eval.0.len();
@@ -581,11 +580,64 @@ where
         )));
     }
 
-    // `public_values` and `chips` with BasefoldConstraintFolder bound
-    // are threaded so callers can reach
-    // [`verify_zerocheck_cryptographic_identity_host`] without
-    // duplicating plumbing.
-    let _ = (chips, public_values);
+    // (G2-b) Bind the zerocheck `claimed_sum` to the lambda-RLC of the
+    // (commitment-bound) GKR openings — host port of recursion
+    // zerocheck.rs:577-612 part (b).  Closes the "arbitrary claimed_sum"
+    // forgery: the structural sumcheck only checks p_0(0)+p_0(1)==claimed_sum,
+    // never that claimed_sum equals the GKR-derived modification.  Pure
+    // arithmetic over already-sampled challenges → transcript-neutral,
+    // verifier-only (no vk regen).
+    //
+    // The cross-chip constraint-RLC half (recursion part (a),
+    // == point_and_eval.1) additionally needs the trace opened at the
+    // zerocheck REDUCED point z_zc; the host opens the jagged PCS at the GKR
+    // point z_gkr today, so that half lands with the open-point re-point
+    // (the full `verify_zerocheck_cryptographic_identity_host` is kept for it).
+    let _ = public_values;
+    {
+        use p3_air::BaseAir;
+        let max_elements = chips
+            .iter()
+            .map(|chip| {
+                <_ as BaseAir<Val<SC>>>::width(*chip)
+                    + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
+            })
+            .max()
+            .unwrap_or(0);
+        let mut gkr_batch_open_powers: Vec<Challenge<SC>> = Vec::with_capacity(max_elements);
+        let mut acc_pow: Challenge<SC> = Challenge::<SC>::ONE;
+        for _ in 0..max_elements {
+            acc_pow = acc_pow * gkr_batch_open;
+            gkr_batch_open_powers.push(acc_pow);
+        }
+        let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
+            .chip_openings
+            .values()
+            .map(|chip_evaluation| {
+                chip_evaluation
+                    .main_trace_evaluations
+                    .iter()
+                    .copied()
+                    .chain(
+                        chip_evaluation
+                            .preprocessed_trace_evaluations
+                            .as_ref()
+                            .map(|v| v.as_slice())
+                            .unwrap_or(&[])
+                            .iter()
+                            .copied(),
+                    )
+                    .zip(gkr_batch_open_powers.iter().copied())
+                    .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
+            })
+            .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
+        if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
+            return Err(BasefoldVerifyError::Zerocheck(
+                "GKR sum-modification identity failed (claimed_sum != lambda-RLC(GKR openings))"
+                    .into(),
+            ));
+        }
+    }
 
     // (4) Inner sumcheck: degree 4, max_log_row_count rounds.  The round
     // poly is `elf(X)·[eq-weighted constraint sum]` — the eq term's last
