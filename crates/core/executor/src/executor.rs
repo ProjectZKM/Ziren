@@ -2822,6 +2822,12 @@ impl<'a> Executor<'a> {
             }
         }
 
+        // Option 2 State bus: stamp the final shard's last_timestamp.  No
+        // per-shard reset occurs for the last shard, so state.clk still holds
+        // its post-last-instruction value (= clk_last + 5 + extra_last, the
+        // value the last real CPU row sends on the State bus).
+        self.record.public_values.last_timestamp = self.state.clk;
+
         // Get the final public values.
         let public_values = self.record.public_values;
 
@@ -2842,21 +2848,38 @@ impl<'a> Executor<'a> {
         let mut last_next_pc = 0;
         let mut last_exit_code = 0;
         for (i, record) in self.records.iter_mut().enumerate() {
+            // Option 2 State bus: preserve the per-shard last_timestamp stamped
+            // during execution across the public_values template clobber, and
+            // anchor initial_timestamp at 0 (per-shard clk resets to 0, the old
+            // `when_first_row().assert_zero(clk)` anchor).
+            let shard_last_timestamp = record.public_values.last_timestamp;
             record.program = program.clone();
             record.public_values = public_values;
             record.public_values.committed_value_digest = public_values.committed_value_digest;
             record.public_values.deferred_proofs_digest = public_values.deferred_proofs_digest;
             record.public_values.execution_shard = start_shard + i as u32;
+            record.public_values.initial_timestamp = 0;
+            record.public_values.last_timestamp = shard_last_timestamp;
             if record.cpu_events.is_empty() {
                 record.public_values.start_pc = last_next_pc;
                 record.public_values.next_pc = last_next_pc;
                 record.public_values.exit_code = last_exit_code;
+                // Option 2 State-bus boundary: empty shard has no CPU
+                // chain, so the 2-pc state degenerates to the carried pc.
+                record.public_values.start_next_pc = last_next_pc;
+                record.public_values.next_next_pc = last_next_pc;
             } else {
                 record.public_values.start_pc = record.cpu_events[0].pc;
                 record.public_values.next_pc = record.cpu_events.last().unwrap().next_pc;
                 record.public_values.exit_code = record.cpu_events.last().unwrap().exit_code;
                 last_next_pc = record.public_values.next_pc;
                 last_exit_code = record.public_values.exit_code;
+                // Option 2 State-bus boundary (MIPS delay-slot 2-pc state):
+                // the initial endpoint's next_pc is row 0's next_pc, and the
+                // final endpoint's next_pc is the last row's next_next_pc.
+                record.public_values.start_next_pc = record.cpu_events[0].next_pc;
+                record.public_values.next_next_pc =
+                    record.cpu_events.last().unwrap().next_next_pc;
             }
         }
 
@@ -2870,6 +2893,11 @@ impl<'a> Executor<'a> {
             if records_clk_index < self.state.records_clk.len()
                 && self.state.clk >= self.state.records_clk[self.state.records_clk_index as usize]
             {
+                // Option 2 State bus: stamp the just-finished shard's final
+                // timestamp (post-last-instruction clk, before the per-shard
+                // reset) — the 2nd element of the State-bus final endpoint
+                // `(shard, last_timestamp, next_pc, next_next_pc)`.
+                self.record.public_values.last_timestamp = self.state.clk;
                 self.state.current_shard += 1;
                 self.state.clk = 0;
                 self.state.records_clk_index += 1;
@@ -2971,6 +2999,10 @@ impl<'a> Executor<'a> {
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
+            // Option 2 State bus: stamp the just-finished shard's final
+            // timestamp before the per-shard clk reset (cf. the records_clk
+            // path above).
+            self.record.public_values.last_timestamp = self.state.clk;
             self.state.current_shard += 1;
             self.state.clk = 0;
             return true;
