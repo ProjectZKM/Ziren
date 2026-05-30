@@ -942,11 +942,11 @@ where
         col_prefix_sums,
     };
 
-    // ── REAL (when caller-plumbed): row_counts from row_counts_by_round ──
-    // Bundle alone lacks per-chip row counts; caller passes them via
-    // row_counts_by_round (parallel to column_counts_by_round).  When
-    // None, falls back to the zero placeholder for backward compat
-    // with scaffolding tests + early adopters.
+    // ── row_counts: caller-plumbed if provided, else derived from the bundle ──
+    // A caller MAY pass per-chip row counts via row_counts_by_round (parallel
+    // to column_counts_by_round).  When None, they are derived from the
+    // packer's `bundle.commit.chip_dims` (see the else-branch) — NOT zeroed,
+    // which was the bug that broke the prefix-sum binding on real proofs.
     // The verifier reads row_counts[round][chip] as a SINGLE Felt
     // representing the chip's row count (recursive_jagged_pcs.rs:248-260
     // dereferences row as a Felt and repeats it `col` times).  Since
@@ -963,10 +963,23 @@ where
             })
             .collect()
     } else {
-        column_counts_by_round
+        // row_counts NOT caller-plumbed: derive the padded per-chip heights
+        // (2^log_height_padded) from the packer's own `bundle.commit.chip_dims`
+        // — exactly the dimensions that produced `bundle.packing.offsets`, so
+        // the verifier's prefix-sum consistency check
+        // (recursive_jagged_pcs.rs:248-272) reconciles.  The previous all-zero
+        // fallback made that check assert the real (non-zero) offsets equal 0,
+        // i.e. it FAILED on every non-degenerate proof and only "passed" for
+        // empty bundles.  A chip's preprocessed + main traces share one height,
+        // so the same per-chip heights are reused for every round; chip_dims is
+        // in the same (name-sorted) chip order as `column_counts_by_round`.
+        let heights: Vec<Felt<C::F>> = bundle
+            .commit
+            .chip_dims
             .iter()
-            .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
-            .collect()
+            .map(|&(_w, log_h)| builder.constant(C::F::from_u64(1u64 << log_h)))
+            .collect();
+        column_counts_by_round.iter().map(|_| heights.clone()).collect()
     };
 
     // ── REAL: expected_eval from bundle.reduction.q_at_z ──
@@ -1087,11 +1100,16 @@ mod tests {
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
-        let (main_commit, pvs, _logup, _zerocheck, evbytes, _bundle_opt) =
+        let (main_commit, pvs, _logup, _zerocheck, evaluation_proof) =
             <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);
-        assert!(evbytes.is_empty());
+        // The `EvaluationProof` (formerly a separate `(evbytes, bundle_opt)`
+        // pair) is `Empty` for an empty proof.
+        assert!(matches!(
+            evaluation_proof,
+            zkm_stark::shard_level::shard_proof::EvaluationProof::Empty
+        ));
     }
 
     /// #241 Phase 1: JaggedReductionRound Witnessable round-trips a
@@ -1535,6 +1553,113 @@ mod tests {
         // total_real=3, added=cc[len-2]+1=1+1=2, so per round 3+2=5
         // total before pad → next_power_of_two = 8 → col_prefix_sums.len = 9.
         assert_eq!(var.params.col_prefix_sums.len(), 9);
+    }
+
+    /// row_counts=None path: lifting a NON-degenerate bundle with populated
+    /// `commit.chip_dims` must succeed and produce the right-shaped
+    /// `row_counts` (one Felt per chip per round) derived from chip_dims —
+    /// the wiring that replaced the all-zero fallback.  (Felt *values* are IR
+    /// handles, so the numeric binding is asserted by the host-level test
+    /// below and exercised in-circuit by the e2e compress gate.)
+    #[test]
+    fn lift_jagged_basefold_bundle_none_path_derives_from_chip_dims() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_symmetric::MerkleCap;
+        use zkm_stark::jagged_pcs::jagged::PackingMeta;
+        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
+
+        let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
+        let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
+        let bundle = JaggedBasefoldBundle {
+            reduction: JaggedReductionProof::<InnerChallenge> {
+                rounds: vec![JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] }],
+                eval_point: vec![InnerChallenge::ZERO],
+                q_at_z: InnerChallenge::ZERO,
+            },
+            basefold_proof: StackedBasefoldProof::<InnerVal, InnerChallenge, JaggedMmcs> {
+                basefold_proof: BasefoldProof {
+                    univariate_messages: vec![],
+                    fri_commitments: vec![],
+                    component_polynomials_query_openings_and_proofs: vec![],
+                    query_phase_openings_and_proofs: vec![],
+                    final_poly: InnerChallenge::ZERO,
+                    pow_witness: InnerVal::ZERO,
+                    batch_grinding_witness: InnerVal::ZERO,
+                },
+                batch_evaluations: vec![],
+            },
+            y_per_chip: vec![],
+            commit: BasefoldLateBindingCommit {
+                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+                // 3 single-column chips, each padded height 16 = 2^4.
+                chip_dims: vec![(1, 4), (1, 4), (1, 4)],
+                area: 0,
+                log_stacking_height: 0,
+            },
+            packing: PackingMeta {
+                offsets: vec![0, 16, 32],
+                total_values: 48,
+                log_dense_size: 6,
+                column_counts: vec![1, 1, 1],
+            },
+            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+        };
+        let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
+        // None -> derive row_counts from bundle.commit.chip_dims.
+        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 8, &cols, None);
+        assert_eq!(var.row_counts.len(), 1);
+        assert_eq!(var.row_counts[0].len(), 3);
+        assert_eq!(var.params.col_prefix_sums.len(), 9);
+    }
+
+    /// NEGATIVE binding guard for the row_counts=None fix: the per-chip
+    /// heights derived from `bundle.commit.chip_dims` (2^log_height_padded)
+    /// must reconcile the packer's `packing.offsets` via the verifier's
+    /// prefix-sum accumulation (recursive_jagged_pcs.rs:248-272), and the
+    /// OLD all-zero fallback must NOT (it asserted the real, non-zero offsets
+    /// equal 0 — failing every non-degenerate proof).  Pure-usize mirror of
+    /// the in-circuit check; the e2e compress gate exercises the same logic
+    /// in-circuit.
+    #[test]
+    fn row_counts_from_chip_dims_reconcile_prefix_sums() {
+        // Consistent bundle: 3 single-column chips, padded height 16 = 2^4,
+        // so offsets are the cumulative per-column heights and total = 3*16.
+        let chip_dims: Vec<(usize, u32)> = vec![(1, 4), (1, 4), (1, 4)];
+        let column_counts: Vec<usize> = vec![1, 1, 1];
+        let offsets: Vec<usize> = vec![0, 16, 32];
+        let total_values: usize = 48;
+
+        // The fix: heights from chip_dims (NOT zeros).
+        let heights: Vec<usize> =
+            chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
+        assert_eq!(heights, vec![16, 16, 16]);
+
+        // Verifier reconciliation (recursive_jagged_pcs.rs:248-272) in usize:
+        // repeat each chip's height `column_count` times, accumulate, and
+        // assert the running sum equals each offset, ending at total_values.
+        let reconciles = |rows: &[usize]| -> bool {
+            let repeated: Vec<usize> = rows
+                .iter()
+                .zip(column_counts.iter())
+                .flat_map(|(&h, &c)| std::iter::repeat(h).take(c))
+                .collect();
+            let mut acc = 0usize;
+            for (i, &h) in repeated.iter().enumerate() {
+                if acc != offsets[i] {
+                    return false;
+                }
+                acc += h;
+            }
+            acc == total_values
+        };
+
+        // chip_dims-derived heights reconcile the real offsets.
+        assert!(reconciles(&heights), "chip_dims heights must reconcile the offsets");
+        // The old all-zero fallback does NOT — this is the bug it caused.
+        assert!(
+            !reconciles(&[0usize, 0, 0]),
+            "all-zero row_counts must FAIL to reconcile non-zero offsets"
+        );
     }
 
     /// #241 Phase 4a: bundle lift produces a structurally valid

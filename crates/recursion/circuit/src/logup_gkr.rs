@@ -635,7 +635,9 @@ mod tests {
         for _ in 0..initial_num_variables {
             let coeffs: Vec<Ext<F, EF>> =
                 (0..4).map(|_| builder.constant(EF::ZERO)).collect();
-            univariate_polys.push(UnivariatePolynomial::new(coeffs));
+            // `Ext` (a circuit handle) does not impl `PrimeCharacteristicRing`,
+            // so the bounded `::new` is unavailable — construct directly.
+            univariate_polys.push(UnivariatePolynomial { coefficients: coeffs });
         }
         let sumcheck_point: Vec<Ext<F, EF>> = (0..initial_num_variables)
             .map(|_| builder.constant(EF::ZERO))
