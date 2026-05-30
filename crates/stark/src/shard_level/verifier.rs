@@ -523,7 +523,7 @@ where
 ///      cryptographic identity check is skipped.
 ///   2. Point dimension == `max_log_row_count`.
 ///   3. Point dimension == `gkr_evaluations.point` dimension.
-///   4. Inner sumcheck proof via [`verify_sumcheck_host`] (degree 3,
+///   4. Inner sumcheck proof via [`verify_sumcheck_host`] (degree 4,
 ///      `max_log_row_count` rounds).
 ///   5. Per-chip opening transcript observations matching the prover's
 ///      ordering.
@@ -587,12 +587,18 @@ where
     // duplicating plumbing.
     let _ = (chips, public_values);
 
-    // (4) Inner sumcheck: degree 3, max_log_row_count rounds.
+    // (4) Inner sumcheck: degree 4, max_log_row_count rounds.  The round
+    // poly is `elf(X)·[eq-weighted constraint sum]` — the eq term's last
+    // factor `elf` is degree 1 and the max AIR constraint degree is 3, so the
+    // honest round poly is degree 4 (5 coefficients), matching the prover's
+    // `UnivariatePolynomial::zero(4)` dummy and the recursion dummy
+    // `dummy_partial_sumcheck_proof(.., 4)`.  (The recursion `verify_sumcheck`
+    // fixes the degree via the witness shape rather than an explicit check.)
     verify_sumcheck_host::<Val<SC>, Challenge<SC>, SC::Challenger>(
         zerocheck_proof,
         challenger,
         max_log_row_count,
-        3,
+        4,
     )
     .map_err(|e| match e {
         BasefoldVerifyError::LogupGkr(msg) => BasefoldVerifyError::Zerocheck(msg),

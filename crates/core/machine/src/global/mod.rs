@@ -41,7 +41,11 @@ const GLOBAL_COL_MAP: GlobalCols<usize> = make_col_map();
 
 pub const GLOBAL_INITIAL_DIGEST_POS: usize = GLOBAL_COL_MAP.accumulation.initial_digest[0].0[0];
 
-pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 64;
+// Option 2: bumped 64 -> 65 — the `index` column added to `GlobalCols`
+// (for the GlobalAccumulation bus chain) shifts `accumulation.initial_digest`
+// one position right.  Kept in sync with the struct-derived
+// `GLOBAL_INITIAL_DIGEST_POS` by the assert in `name()` below.
+pub const GLOBAL_INITIAL_DIGEST_POS_COPY: usize = 65;
 
 #[repr(C)]
 pub struct Ghost {

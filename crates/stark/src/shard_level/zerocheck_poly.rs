@@ -466,15 +466,21 @@ where
         let np = self.num_prep_cols;
         let num_pairs = num_real.div_ceil(2);
 
-        let (mut y_0, mut y_2, mut y_4) = (EF::ZERO, EF::ZERO, EF::ZERO);
+        let (mut y_0, mut y_2, mut y_3, mut y_4) =
+            (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
 
         // Scratch buffers reused across pairs.
         let mut m0 = vec![EF::ZERO; nm];
         let mut m2 = vec![EF::ZERO; nm];
+        let mut m3 = vec![EF::ZERO; nm];
         let mut m4 = vec![EF::ZERO; nm];
         let mut p0 = vec![EF::ZERO; np];
         let mut p2 = vec![EF::ZERO; np];
+        let mut p3 = vec![EF::ZERO; np];
         let mut p4 = vec![EF::ZERO; np];
+        // Sample point 3 lies on the row-pair line midway between 2 and 4
+        // (interp_pair is affine in the sample point): m3 = (m2 + m4)/2.
+        let half = EF::from_u64(2).inverse();
 
         for pair in 0..num_pairs {
             let eq = partial[pair];
@@ -486,17 +492,26 @@ where
                 let prep = self.prep_cells.as_ref().expect("prep_cells present when np > 0");
                 interp_pair(prep, np, num_real, row0, row1, &mut p0, &mut p2, &mut p4);
             }
+            for c in 0..nm {
+                m3[c] = (m2[c] + m4[c]) * half;
+            }
+            for c in 0..np {
+                p3[c] = (p2[c] + p4[c]) * half;
+            }
 
             let g0 = self.gkr_batch(&m0, &p0);
             let g2 = self.gkr_batch(&m2, &p2);
             let g4 = g2 + g2 - g0; // gkr is linear in the row values
+            let g3 = (g2 + g4) * half; // linear interpolant at 3
 
             let c0 = if is_first_round { EF::ZERO } else { self.eval_air_at_row(&p0, &m0) };
             let c2 = self.eval_air_at_row(&p2, &m2);
+            let c3 = self.eval_air_at_row(&p3, &m3);
             let c4 = self.eval_air_at_row(&p4, &m4);
 
             y_0 += (c0 + g0) * eq;
             y_2 += (c2 + g2) * eq;
+            y_3 += (c3 + g3) * eq;
             y_4 += (c4 + g4) * eq;
         }
 
@@ -511,12 +526,20 @@ where
         let virtual_0 = self.virtual_geq.fix_last_variable(EF::ZERO).eval_at_usize(threshold_half);
         let virtual_2 =
             self.virtual_geq.fix_last_variable(EF::from_u64(2)).eval_at_usize(threshold_half);
+        let virtual_3 =
+            self.virtual_geq.fix_last_variable(EF::from_u64(3)).eval_at_usize(threshold_half);
         let virtual_4 =
             self.virtual_geq.fix_last_variable(EF::from_u64(4)).eval_at_usize(threshold_half);
 
-        // Interpolation samples: points {0, 1, 2, 4, eq-root}; the
-        // degree-3 round poly has a known root where the eq term's last
-        // factor vanishes, plus y_1 = claim − y_0 ties p(0)+p(1)=claim.
+        // Interpolation samples: the degree-4 round poly over the always-
+        // distinct points {0, 1, 2, 3, 4}.  Point 1 is fixed by the sumcheck
+        // relation p(0)+p(1)=claim.  The eq term's known root (where its last
+        // factor vanishes) is *implied* by these samples, so it need not be
+        // sampled explicitly — which avoids the original {0,1,2,4,eq-root}
+        // scheme's `(1 − 2·last)` inverse (panics at last = 1/2) and its
+        // `eq-root ∈ {0,1,2,4}` duplicate-point collision.  The poly is
+        // unchanged (same coefficients), so the proof/transcript is identical.
+        // `elf_X = (2X − 1)·last − (X − 1)` is the eq term's last factor at X.
         let mut xs: Vec<EF> = Vec::with_capacity(5);
         let mut ys: Vec<EF> = Vec::with_capacity(5);
 
@@ -535,16 +558,17 @@ where
             - self.padded_row_adjustment * virtual_2 * msb_lagrange_eval * elf_2;
         ys.push(y_2);
 
+        xs.push(EF::from_u64(3));
+        let elf_3 = last * EF::from_u64(5) - EF::from_u64(2);
+        y_3 = y_3 * (elf_3 * self.eq_adjustment)
+            - self.padded_row_adjustment * virtual_3 * msb_lagrange_eval * elf_3;
+        ys.push(y_3);
+
         xs.push(EF::from_u64(4));
         let elf_4 = last * EF::from_u64(7) - EF::from_u64(3);
         y_4 = y_4 * (elf_4 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_4 * msb_lagrange_eval * elf_4;
         ys.push(y_4);
-
-        // eq-first-term root: b = (1 − last) / (1 − 2·last).
-        let b_const = (EF::ONE - last) * (EF::ONE - last.double()).inverse();
-        xs.push(b_const);
-        ys.push(EF::ZERO);
 
         interpolate_univariate_polynomial(&xs, &ys)
     }
