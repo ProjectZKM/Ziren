@@ -193,16 +193,20 @@ impl CpuChip {
             .when(local.is_sequential)
             .assert_eq(local.next_next_pc, local.next_pc + AB::Expr::from_u32(4));
 
-        // Option 2 State bus: define the RECEIVED next_pc.  Normal rows
-        // receive `next_pc`; the halt row receives the predicted continuation
-        // `pc + 4` (its own `next_pc` was forced to 0 as the exit signal).
-        //   state_recv_next_pc == (1 - is_halt)*next_pc + is_halt*(pc + 4)
-        let is_halt: AB::Expr = local.is_halt.into();
-        builder.when(local.is_real).assert_eq(
-            local.state_recv_next_pc,
-            (AB::Expr::ONE - is_halt.clone()) * local.next_pc
-                + is_halt * (local.pc + AB::Expr::from_u32(4)),
-        );
+        // Option 2 State bus: for every NON-halt row the RECEIVED value equals
+        // the local `next_pc` (= the predecessor's `next_next_pc`), pinned here.
+        // On the halt row `next_pc` was overridden to 0 (the exit signal SENT to
+        // the PV endpoint), so `state_recv_next_pc` is intentionally left
+        // unpinned LOCALLY: the State-bus multiset forces it to equal the
+        // predecessor's SENT `next_next_pc`, which the predecessor's own AIR
+        // already pins (`is_sequential => next_pc+4`, or the verified
+        // branch/jump target).  This telescopes for ANY predecessor — including
+        // a halt sitting in a taken branch/jump delay slot — and stays sound:
+        // a forged value would require the (pinned) predecessor to SEND it.
+        builder
+            .when(local.is_real)
+            .when_not(local.is_halt)
+            .assert_eq(local.state_recv_next_pc, local.next_pc);
     }
 
     /// Constraints related to the is_real column.

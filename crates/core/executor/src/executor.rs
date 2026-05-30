@@ -1232,6 +1232,9 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         // this is added for branch instruction
         next_next_pc: u32,
+        // Option-2 State bus: the entry next_pc (predecessor's next_next_pc),
+        // received on the State bus; equals next_pc except on the halt row.
+        recv_next_pc: u32,
         instruction: &Instruction,
         a: u32,
         b: u32,
@@ -1241,7 +1244,9 @@ impl<'a> Executor<'a> {
         exit_code: u32,
         syscall_code: u32,
     ) {
-        self.emit_cpu(clk, pc, next_pc, next_next_pc, a, b, c, hi_or_prev_a, record, exit_code);
+        self.emit_cpu(
+            clk, pc, next_pc, next_next_pc, recv_next_pc, a, b, c, hi_or_prev_a, record, exit_code,
+        );
 
         if instruction.is_alu_instruction() {
             self.emit_alu_event(clk, instruction.opcode, hi_or_prev_a, a, b, c, record.hi);
@@ -1281,6 +1286,8 @@ impl<'a> Executor<'a> {
         next_pc: u32,
         // this is added for branch instruction
         next_next_pc: u32,
+        // Option-2 State bus: entry next_pc (predecessor's next_next_pc).
+        recv_next_pc: u32,
         a: u32,
         b: u32,
         c: u32,
@@ -1293,6 +1300,7 @@ impl<'a> Executor<'a> {
             pc,
             next_pc,
             next_next_pc,
+            recv_next_pc,
             a,
             a_record: record.a,
             b,
@@ -1597,6 +1605,11 @@ impl<'a> Executor<'a> {
 
         let mut next_pc = self.state.next_pc;
         let mut next_next_pc = self.state.next_pc + 4;
+        // Option-2 State bus: the value RECEIVED is the entry `next_pc` =
+        // the predecessor's `next_next_pc`, captured BEFORE any syscall (the
+        // halt) overrides `next_pc` to 0.  Equals `next_pc` for every
+        // instruction except the halt.
+        let recv_next_pc = self.state.next_pc;
 
         let mut a = 0;
         let mut b = 0;
@@ -1801,6 +1814,7 @@ impl<'a> Executor<'a> {
                 pc,
                 next_pc,
                 next_next_pc,
+                recv_next_pc,
                 instruction,
                 a,
                 b,

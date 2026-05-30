@@ -108,15 +108,12 @@ __ZKM_HOSTDEV__ void event_to_row(
             && !is_jump_instruction(instruction)
     );
 
-    // Option 2 State bus: the value RECEIVED on the bus is the predecessor's
-    // next_next_pc — `next_pc` for a normal row, but `pc + 4` on the halt row
-    // (whose own next_pc was overridden to 0 as the exit signal SENT to the
-    // PV endpoint).  Mirrors the Rust cpu/trace.rs population; FFI parity is
-    // required or the GPU trace diverges from the host and the degree-2
-    // `state_recv_next_pc` constraint fails.
-    cols.state_recv_next_pc = is_halt
-        ? F::from_canonical_u32(event.pc + 4u)
-        : F::from_canonical_u32(event.next_pc);
+    // Option 2 State bus: RECEIVE the predecessor's next_next_pc, captured by
+    // the executor as `recv_next_pc` (the entry next_pc, before the halt
+    // overrode its own next_pc to 0).  Mirrors the Rust cpu/trace.rs
+    // population; FFI parity is required or the GPU trace diverges from the
+    // host and the `state_recv_next_pc` constraint fails.
+    cols.state_recv_next_pc = F::from_canonical_u32(event.recv_next_pc);
 
     // Assert that the instruction is not a no-op.
     cols.is_real = F::one();

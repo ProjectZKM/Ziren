@@ -21,6 +21,13 @@ pub struct CpuEvent {
     pub next_pc: u32,
     /// The next after the next program counter.
     pub next_next_pc: u32,
+    /// The program counter RECEIVED on the Option-2 State bus = the value
+    /// `state.next_pc` held at instruction entry = the predecessor's
+    /// `next_next_pc`.  Equals `next_pc` for every instruction EXCEPT the
+    /// halt (ecall-exit), whose `next_pc` is overridden to 0 as the exit
+    /// signal SENT to the PV endpoint while it still RECEIVES the real
+    /// predecessor continuation here.
+    pub recv_next_pc: u32,
     /// The first operand.
     pub a: u32,
     /// The first operand memory record.
@@ -54,6 +61,9 @@ pub struct CpuEventFfi {
     pub next_pc: u32,
     /// The next after the next program counter.
     pub next_next_pc: u32,
+    /// The program counter RECEIVED on the Option-2 State bus (predecessor's
+    /// `next_next_pc`; equals `next_pc` except on the halt row).
+    pub recv_next_pc: u32,
     /// The first operand.
     pub a: u32,
     /// The first operand memory record.
@@ -83,6 +93,7 @@ impl From<&CpuEvent> for CpuEventFfi {
             pc: event.pc,
             next_pc: event.next_pc,
             next_next_pc: event.next_next_pc,
+            recv_next_pc: event.recv_next_pc,
             a: event.a,
             a_record: event.a_record.into(),
             b: event.b,

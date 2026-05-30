@@ -195,16 +195,13 @@ impl CpuChip {
             !is_halt && !instruction.is_branch_instruction() && !instruction.is_jump_instruction(),
         );
 
-        // Option 2 State bus: the value RECEIVED on the bus is the
-        // predecessor's `next_next_pc`.  For a normal row that is `next_pc`;
-        // on the halt row the executor overrode `next_pc = 0` (the exit
-        // signal SENT to the PV), so RECEIVE the predicted continuation
-        // `pc + 4` instead, matching the predecessor's SEND.
-        cols.state_recv_next_pc = if is_halt {
-            F::from_u32(event.pc.wrapping_add(4))
-        } else {
-            F::from_u32(event.next_pc)
-        };
+        // Option 2 State bus: RECEIVE the predecessor's `next_next_pc`, which
+        // the executor captured as `recv_next_pc` (the entry `next_pc`, before
+        // the halt overrode its own `next_pc` to 0).  Equals `next_pc` for
+        // every row except the halt; for a halt in a branch/jump delay slot it
+        // is the real branch target, so the State-bus chain telescopes for any
+        // predecessor (not just sequential ones).
+        cols.state_recv_next_pc = F::from_u32(event.recv_next_pc);
 
         // Populate range checks for a.
         let a_bytes = cols
@@ -296,6 +293,7 @@ mod tests {
                 pc: 0,
                 next_pc: 1,
                 next_next_pc: 2,
+                recv_next_pc: 1,
                 a: 5,
                 a_record: Some(MemoryRecordEnum::Write(MemoryWriteRecord::new(5, 1, 2, 1, 1, 1))),
                 b: 10,
