@@ -235,9 +235,11 @@ where
     folder.local_interaction_digest
 }
 
-/// Number of grinding bits for the LogUp-GKR challenge — matches
-/// the reference's `GKR_GRINDING_BITS` constant.
-pub const GKR_GRINDING_BITS: usize = 16;
+/// Number of grinding bits for the LogUp-GKR challenge — must stay in
+/// lockstep with the host prover's `zkm_stark::logup_gkr::GKR_GRINDING_BITS`
+/// (= 12); the in-circuit verifier re-checks the same witness the host
+/// ground, so a mismatch would reject honest proofs.
+pub const GKR_GRINDING_BITS: usize = 12;
 
 /// Per-shard chip introspection input to [`verify_logup_gkr`].
 ///
