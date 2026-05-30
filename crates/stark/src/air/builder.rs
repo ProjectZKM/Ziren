@@ -638,3 +638,11 @@ impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder for crate::D
 // can be used with the upstream prove/verify functions.
 impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::ProverConstraintFolder<'_, SC> {}
 impl<SC: p3_uni_stark::StarkGenericConfig> EmptyMessageBuilder for p3_uni_stark::VerifierConstraintFolder<'_, SC> {}
+// `p3_uni_stark::prove`/`verify` run `debug_constraints` (under `debug_assertions`)
+// with the upstream `p3_air::DebugConstraintBuilder`, so the per-chip unit tests
+// (`uni_stark_prove`, prove.rs:929) need it to satisfy `ZKMAirBuilder` too.  The
+// debug pass only checks the algebraic constraints, so interactions are ignored.
+impl<F: Field, EF: p3_field::ExtensionField<F>> EmptyMessageBuilder
+    for p3_air::DebugConstraintBuilder<'_, F, EF>
+{
+}
