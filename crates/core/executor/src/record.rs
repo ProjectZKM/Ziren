@@ -1,9 +1,12 @@
 use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
-use p3_field::{PrimeCharacteristicRing, PrimeField};
+use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use zkm_stark::{
     air::{MachineAir, PublicValues},
+    septic_curve::{SepticCurve, SepticCurveComplete},
+    septic_digest::SepticDigest,
+    septic_extension::SepticExtension,
     shape::Shape,
     MachineRecord, SplitOpts, ZKMCoreOpts,
 };
@@ -452,8 +455,48 @@ impl MachineRecord for ExecutionRecord {
 
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
     fn public_values<F: PrimeCharacteristicRing>(&self) -> Vec<F> {
-        self.public_values.to_vec()
+        let mut pv = self.public_values;
+        // Option 2 (local-only): the global public values are derived from
+        // the cross-chip events, which exist only after
+        // `generate_dependencies` — so they are finalised lazily here (the
+        // analogue of SP1 `record.rs:836`), at the point the shard prover
+        // reads the public values to feed the commitment.  The public-values
+        // AIR's GlobalAccumulation / MemoryGlobalInit / MemoryGlobalFinalize
+        // buses consume these endpoints.
+        pv.global_count = self.global_lookup_events.len() as u32;
+        pv.global_init_count = self.global_memory_initialize_events.len() as u32;
+        pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
+        pv.global_cumulative_sum = compute_global_cumulative_sum(&self.global_lookup_events);
+        pv.to_vec()
     }
+}
+
+/// Compute the global cumulative-sum digest from the populated global lookup
+/// events.  Mirrors `GlobalChip::generate_trace`
+/// (`crates/core/machine/src/global/mod.rs:136-185`) and
+/// `GlobalLookupOperation::get_digest`
+/// (`crates/core/machine/src/operations/global_lookup.rs:31-37`): each event
+/// lifts to a septic-curve point (negated for a send), and the digest is the
+/// running sum seeded by the `SepticDigest::zero()` offset — exactly the value
+/// the last real `GlobalChip` row sends on the GlobalAccumulation bus.  The
+/// septic curve is over the base field, so this is computed over `KoalaBear`
+/// and stored as canonical `u32` coordinates (lifted to `F` by `to_vec`).
+fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u32> {
+    use p3_field::BasedVectorSpace;
+    use p3_koala_bear::KoalaBear;
+    type F = KoalaBear;
+
+    let mut acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0);
+    for event in events {
+        let x_start =
+            SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(event.message[i]))
+                + SepticExtension::from(F::from_u32((event.kind as u32) << 16));
+        let (point, _offset) = SepticCurve::<F>::lift_x(x_start);
+        let point = if event.is_receive { point } else { point.neg() };
+        acc = acc + SepticCurveComplete::Affine(point);
+    }
+    let final_digest = acc.point();
+    SepticDigest(SepticCurve::convert(final_digest, |x: F| x.as_canonical_u32()))
 }
 
 impl ByteRecord for ExecutionRecord {
