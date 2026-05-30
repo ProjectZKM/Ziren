@@ -663,6 +663,11 @@ pub fn verify_jagged_reduction(
         || r_row_per_chip.len() != packing.chip_infos.len()
         || y_per_chip.len() != packing.chip_infos.len()
     {
+        tracing::debug!(
+            "jagged reduction dim mismatch: rounds={} eval_point={} log_dense_size={} r_row={} y_per_chip={} chip_infos={}",
+            proof.rounds.len(), proof.eval_point.len(), packing.log_dense_size,
+            r_row_per_chip.len(), y_per_chip.len(), packing.chip_infos.len(),
+        );
         return None;
     }
 

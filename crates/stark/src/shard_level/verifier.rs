@@ -605,18 +605,18 @@ where
         other => other,
     })?;
 
-    // (5) Observe per-chip opening count + openings.
+    // (5) Observe per-chip opening count + openings, in chip-NAME order.
+    //
+    // The prover's phase_bridge_3_4 (prover.rs) iterates
+    // `logup_evaluations.chip_openings` — a `BTreeMap<String, _>`, i.e.
+    // NAME order — to feed these observations.  The `chips` slice here is
+    // height/definition-ordered, NOT name-ordered, so iterating it would
+    // observe the same opening values in a different sequence and desync
+    // the challenger vs the prover (surfacing only later as a jagged
+    // sumcheck round-0 identity failure once z_col is sampled).  Iterate
+    // the same BTreeMap the prover does so the transcript stays in lock-step.
     challenger.observe(Val::<SC>::from_u64(chips.len() as u64));
-    for chip in chips.iter() {
-        let name = chip.name().to_string();
-        let opening = match gkr_evaluations.chip_openings.get(&name) {
-            Some(o) => o,
-            None => {
-                return Err(BasefoldVerifyError::Zerocheck(format!(
-                    "chip {name} missing from gkr_evaluations.chip_openings"
-                )));
-            }
-        };
+    for (_name, opening) in gkr_evaluations.chip_openings.iter() {
         if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
             for c in prep.iter() {
                 for basis in c.as_basis_coefficients_slice() {
