@@ -111,10 +111,18 @@ where
             //   → real iff k + next_rows < src_real_rows.
             // The src real-row count is the same across all four
             // quadrants (they share an underlying logical row count).
-            let src_real = n0.num_real_rows;
-            debug_assert_eq!(src_real, d0.num_real_rows);
-            debug_assert_eq!(src_real, n1.num_real_rows);
-            debug_assert_eq!(src_real, d1.num_real_rows);
+            // An output row k (upper half) reads index k from ALL FOUR source
+            // quadrants (see the combine loop below), so it is real iff k is
+            // below the MAX of the four real-row counts — not just n0's.  The
+            // quadrants can legitimately differ: for a contiguous real-row
+            // prefix the upper half (n0/d0) fills before the lower (n1/d1), so
+            // e.g. n0=d0=8192, n1=d1=0.  `n0` is therefore always the max, but
+            // take it explicitly so the sizing is correct regardless of order.
+            let src_real = n0
+                .num_real_rows
+                .max(d0.num_real_rows)
+                .max(n1.num_real_rows)
+                .max(d1.num_real_rows);
 
             let next_n0_real = src_real.min(next_rows);
             let next_d0_real = next_n0_real;
