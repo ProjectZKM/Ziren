@@ -28,7 +28,8 @@ use crate::{
     challenger::CanObserveVariable,
     hash::{FieldHasher, FieldHasherVariable},
     machine::{
-        assert_root_public_values_valid, RootPublicValues, ZKMMerkleProofVerifier,
+        assert_root_public_values_valid, compress::PublicValuesOutputDigest,
+        root_public_values_digest, RootPublicValues, ZKMMerkleProofVerifier,
         ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
     },
     CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
@@ -104,6 +105,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     machine: &zkm_stark::StarkMachine<SC, A>,
     value_assertions: bool,
     max_log_row_count: usize,
+    output_digest_kind: PublicValuesOutputDigest,
 ) where
     SC: KoalaBearFriParametersVariable<
             C,
@@ -290,19 +292,39 @@ pub fn verify_wrap_basefold<C, SC, A>(
         jagged_evaluator_fn,
     );
 
-    // Interpret public values as RootPublicValues, validate, reflect.
+    // Interpret public values as RootPublicValues.
     let public_values: &RootPublicValues<Felt<C::F>> = public_values_raw.as_slice().borrow();
-    assert_root_public_values_valid::<C, SC>(builder, public_values);
+    // `RecursionPublicValues<Felt>` is `Copy`; take a local so the committed
+    // output digest can be set by kind (mirrors `verify_compress_basefold`'s
+    // `PublicValuesOutputDigest` switch at compress_basefold.rs:879-889).
+    let mut inner = public_values.inner;
+    match output_digest_kind {
+        PublicValuesOutputDigest::Root => {
+            // The BN254 wrap is the recursion-tree ROOT: its committed
+            // public-values digest must be the ROOT digest
+            // (`hash(zkm_vk_digest || committed_value_digest)`), not the
+            // intermediate recursion digest reflected from the input proof.
+            // Recompute and set it so the committed digest matches both the
+            // in-circuit `root_public_values_digest` and the host
+            // `is_root_public_values_valid` check. (Previously the recursion
+            // digest was reflected unchanged, so the host root check failed.)
+            inner.digest = root_public_values_digest::<C, SC>(builder, &inner);
+        }
+        PublicValuesOutputDigest::Reduce => {
+            // Intermediate (shrink) layer: keep the reflected recursion digest.
+            assert_root_public_values_valid::<C, SC>(builder, public_values);
+        }
+    }
 
     if zkm_imm_wrap_vk_mode() {
         SC::commit_recursion_public_values_imm_wrap_vk(
             builder,
-            public_values.inner,
+            inner,
             vk_legacy.commitment,
             vk_legacy.pc_start,
         );
     } else {
-        SC::commit_recursion_public_values(builder, public_values.inner);
+        SC::commit_recursion_public_values(builder, inner);
     }
 
     // Silence unused-zero-felt lint (kept for transcript-ordering parity).

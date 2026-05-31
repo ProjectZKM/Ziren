@@ -188,6 +188,8 @@ where
         machine,
         value_assertions,
         max_log_row_count,
+        // Shrink is an intermediate layer: keep the recursion digest.
+        crate::machine::compress::PublicValuesOutputDigest::Reduce,
     );
     let operations = builder.into_operations();
     builder_span.exit();

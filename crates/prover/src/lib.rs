@@ -807,6 +807,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.shrink_prover.machine(),
             self.vk_verification,
             max_log_row_count,
+            // The BN254 wrap is the recursion-tree root: emit the ROOT digest
+            // so the committed PV digest matches `verify_wrap_bn254`'s
+            // `is_root_public_values_valid` (host) and the in-circuit root check.
+            PublicValuesOutputDigest::Root,
         );
         let operations = builder.into_operations();
         builder_span.exit();
