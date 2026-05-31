@@ -650,6 +650,135 @@ pub fn prove_jagged_reduction_owned(
     JaggedReductionProof { rounds, eval_point, q_at_z }
 }
 
+/// SP1-faithful reorganization of the jagged outer reduction (C6 Phase 1).
+///
+/// A from-the-SP1-source re-implementation of SP1's single branching-program-
+/// driven outer reducer
+/// (`slop/crates/jagged/src/prover.rs::prove_trusted_evaluations` ->
+/// `jagged_sumcheck_poly` (`HadamardProduct`) + `slop_sumcheck::
+/// reduce_sumcheck_to_evaluation`).  It exists ONLY for parallel parity
+/// validation against the in-production gamma-reducer
+/// [`prove_jagged_reduction_owned`]; it does NOT drive the proof and does NOT
+/// change the transcript (it is run on a CLONED challenger when the
+/// `ZIREN_JAGGED_SP1_REDUCER_ASSERT` gate is on -- see `jagged_pcs.rs`).
+///
+/// ## Where SP1 and Ziren agree, and where they DIFFER (the point of Phase 1)
+/// Agree:
+/// - Weight table: SP1's `partial_jagged_multilinear` (`populate.rs`) yields
+///   `weights[off_k + r] = eq(z_col, k) * eq(z_row, r)`, identical to Ziren's
+///   [`build_weight_table`] (`z_col_lagrange[k] * eq(r_row_c)[row]`).
+/// - Claim: SP1's `column_claims.eval_at(z_col)[0] = sum_k eq(z_col,k)*y_k`.
+/// - Round message: SP1 observes the round poly's monomial COEFFICIENTS (via
+///   `UnivariatePolynomial`), same as [`observe_round_poly_coeffs`].
+/// - Point: SP1 does `point.insert(0, alpha)`, same reverse order as Ziren.
+///
+/// DIFFER (this is what the parity assert exposes):
+/// - FOLD ORDER.  SP1's `HadamardProduct::sum_as_poly_in_last_variable`
+///   (`hadamard.rs`) and `fix_last_variable` bind the LAST variable using the
+///   LSB stride `step_by(2)` -- pairing adjacent cells `(2i, 2i+1)`.  Ziren's
+///   gamma-reducer binds the HIGH variable -- pairing `(i, i+half)` (the `_msb`
+///   helpers).  This function faithfully uses the LSB helpers
+///   ([`jagged_round_evals`] + [`par_fold_table_first`]) so it is a TRUE SP1
+///   port, not a clone of the gamma path.
+///
+/// The gated `debug_assert` in `jagged_pcs.rs` therefore checks whether the
+/// MSB and LSB conventions yield the same reduced point / eval on real jagged
+/// packings.  Either outcome is informative: HELD => the SP1 reducer is a
+/// verified drop-in; FIRED => the fold-order convention is the exact thing the
+/// Phase-2 flip must reconcile (transcript-changing, recursion lockstep).
+///
+/// Inputs are exactly those of [`prove_jagged_reduction_owned`] (taking
+/// `dense_q` by ref so the caller can run both reducers on the same data).
+pub fn prove_jagged_reduction_sp1(
+    dense_q: &[InnerVal],
+    packing: &JaggedPacking<InnerVal>,
+    r_row_per_chip: &[Vec<InnerChallenge>],
+    y_per_chip: &[Vec<InnerChallenge>],
+    z_col: &[InnerChallenge],
+    challenger: &mut InnerChallenger,
+) -> JaggedReductionProof<InnerChallenge> {
+    assert_eq!(packing.chip_infos.len(), r_row_per_chip.len());
+    assert_eq!(packing.chip_infos.len(), y_per_chip.len());
+
+    // === SP1 `jagged_sumcheck_poly` analogue ===
+    // ext multilinear = partial_jagged_multilinear(z_row, z_col):
+    //   weights[off_k + r] = eq(z_col, k) * eq(z_row_restricted, r).
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
+    let w = build_weight_table(packing, r_row_per_chip, &z_col_lagrange);
+
+    let n = packing.log_dense_size;
+    assert_eq!(dense_q.len(), 1usize << n);
+    assert_eq!(w.len(), 1usize << n);
+
+    // base multilinear lifted to EF once (SP1's `HadamardProduct.base` is a
+    // LongMle<F>; lifting to EF makes the generic reduce loop field-uniform --
+    // the round math is identical since q values are base-field constants).
+    let mut q_table: Vec<InnerChallenge> =
+        dense_q.par_iter().map(|&x| InnerChallenge::from(x)).collect();
+    let mut w_table: Vec<InnerChallenge> = w;
+
+    // === SP1 `reduce_sumcheck_to_evaluation(vec![poly], chal, vec![claim], t=1, lambda=1)` ===
+    // claim = column_claims.eval_at(z_col)[0] = sum_k eq(z_col,k)*y_k.
+    let mut current_claim = InnerChallenge::ZERO;
+    {
+        let mut k = 0usize;
+        for y_c in y_per_chip {
+            for &val in y_c {
+                current_claim += z_col_lagrange[k] * val;
+                k += 1;
+            }
+        }
+    }
+
+    let mut rounds: Vec<JaggedReductionRound<InnerChallenge>> = Vec::with_capacity(n);
+    // SP1 builds `point` via `point.insert(0, alpha)` (reverse sample order).
+    let mut eval_point: Vec<InnerChallenge> = Vec::with_capacity(n);
+
+    for _round in 0..n {
+        let half = q_table.len() / 2;
+        // SP1 `HadamardProduct::sum_as_poly_in_last_variable` (hadamard.rs):
+        // LSB stride -- degree-2 evals at {0,1,2} pairing adjacent (2i, 2i+1).
+        let evals = jagged_round_evals(&q_table, &w_table, half);
+
+        // SP1 carries `claim` into the round poly: p(0)+p(1) == current_claim.
+        // Debug-only parity guard; no transcript effect.
+        debug_assert_eq!(
+            evals[0] + evals[1],
+            current_claim,
+            "SP1 reducer round {_round}: p(0)+p(1) != claim",
+        );
+
+        // SP1 observes the round poly's monomial coefficients (low-degree
+        // first).  `observe_round_poly_coeffs` emits the identical [c0,c1,c2].
+        observe_round_poly_coeffs(challenger, evals);
+        rounds.push(JaggedReductionRound { evals });
+
+        let alpha: InnerChallenge = challenger.sample_algebra_element();
+        eval_point.insert(0, alpha);
+
+        // SP1 `fix_last_variable(alpha)`: LSB fold (adjacent pairs).
+        q_table = par_fold_table_first(&q_table, alpha);
+        w_table = par_fold_table_first(&w_table, alpha);
+
+        // SP1 carries the next round's claim as the previous round poly
+        // evaluated at alpha.
+        current_claim = jagged_eval_round_poly(evals, alpha);
+    }
+
+    debug_assert_eq!(q_table.len(), 1);
+    debug_assert_eq!(w_table.len(), 1);
+    let q_at_z = q_table[0];
+
+    // SP1 final identity: reduced claim == q(z*) * w(z*).  w_table[0] = w(z*).
+    debug_assert_eq!(
+        current_claim,
+        q_at_z * w_table[0],
+        "SP1 reducer final identity q_at_z*w(z*) != reduced claim",
+    );
+
+    JaggedReductionProof { rounds, eval_point, q_at_z }
+}
+
 pub fn verify_jagged_reduction(
     proof: &JaggedReductionProof<InnerChallenge>,
     packing: &JaggedPacking<InnerVal>,

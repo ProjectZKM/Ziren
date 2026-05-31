@@ -1619,6 +1619,28 @@ pub mod jagged {
 
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
+
+        // C6 Phase 1 (parity, gated by ZIREN_JAGGED_SP1_REDUCER_ASSERT=1,
+        // default OFF, NO transcript change): snapshot the challenger + dense_q
+        // + r_row_per_chip BEFORE the reduction so the SP1-faithful reducer can
+        // be replayed on an identical transcript state and its (eval_point,
+        // q_at_z, rounds) compared against the production gamma-reducer's.  The
+        // clones are only taken when the gate is on.  `r_row_per_chip` is moved
+        // by-value into the GPU-hook closures inside the reduction block, so we
+        // snapshot an owned copy here.
+        let _c6_parity_on = std::env::var("ZIREN_JAGGED_SP1_REDUCER_ASSERT")
+            .map(|v| v == "1")
+            .unwrap_or(false);
+        let _c6_pre_challenger: Option<InnerChallenger> =
+            if _c6_parity_on { Some((*challenger).clone()) } else { None };
+        let _c6_dense_q: Option<Vec<InnerVal>> = if _c6_parity_on {
+            Some(materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size))
+        } else {
+            None
+        };
+        let _c6_r_row: Option<Vec<Vec<InnerChallenge>>> =
+            if _c6_parity_on { Some(r_row_per_chip.to_vec()) } else { None };
+
         let reduction = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
@@ -1858,6 +1880,49 @@ pub mod jagged {
             sub_phase = "sumcheck_reduce",
             "jagged sub-phase done"
         );
+
+        // C6 Phase 1 PARITY CHECK (gated, default OFF).  Replays SP1's single
+        // BP-driven outer reducer on the pre-reduction challenger snapshot and
+        // asserts it produces the SAME (eval_point, q_at_z, rounds) as the
+        // production gamma-reducer.  NO transcript change: the SP1 reducer runs
+        // on a CLONED challenger; the real proof is driven entirely by
+        // `reduction` above.
+        if let (Some(mut pre_chal), Some(dq), Some(rrow)) =
+            (_c6_pre_challenger, _c6_dense_q, _c6_r_row)
+        {
+            let sp1_reduction = crate::jagged_sumcheck::prove_jagged_reduction_sp1(
+                &dq,
+                &packing,
+                &rrow,
+                &y_per_chip,
+                &z_col,
+                &mut pre_chal,
+            );
+            debug_assert_eq!(
+                sp1_reduction.eval_point, reduction.eval_point,
+                "C6 parity: SP1 reducer eval_point (z*) != gamma-reducer eval_point"
+            );
+            debug_assert_eq!(
+                sp1_reduction.q_at_z, reduction.q_at_z,
+                "C6 parity: SP1 reducer q_at_z != gamma-reducer q_at_z"
+            );
+            debug_assert_eq!(
+                sp1_reduction.rounds.len(), reduction.rounds.len(),
+                "C6 parity: SP1 reducer round count != gamma-reducer round count"
+            );
+            for (_i, (_a, _b)) in
+                sp1_reduction.rounds.iter().zip(reduction.rounds.iter()).enumerate()
+            {
+                debug_assert_eq!(
+                    _a.evals, _b.evals,
+                    "C6 parity: SP1 reducer round {_i} evals != gamma-reducer round evals"
+                );
+            }
+            tracing::info!(
+                rounds = sp1_reduction.rounds.len(),
+                "C6 parity: SP1 reducer matched gamma-reducer (z*, q_at_z, rounds)"
+            );
+        }
 
         // (4b) Jagged-eval sub-protocol — SP1's branching-program proof
         // that the per-column geometry (prefix sums) is consistent with
