@@ -50,6 +50,10 @@ pub fn root_public_values_digest(
     public_values: &RootPublicValues<KoalaBear>,
 ) -> [KoalaBear; 8] {
     let hash = InnerHash::new(config.perm.clone());
+    // Must match the in-circuit `root_public_values_digest`
+    // (recursion/circuit/.../public_values.rs): bind zkm_vk_digest,
+    // committed_value_digest, exit_code, vk_root — the same fields SP1 binds
+    // (minus the `proof_nonce` Ziren's schema lacks).
     let input = (*public_values.zkm_vk_digest())
         .into_iter()
         .chain(
@@ -57,6 +61,8 @@ pub fn root_public_values_digest(
                 .into_iter()
                 .flat_map(|word| word.0.into_iter()),
         )
+        .chain(std::iter::once(*public_values.exit_code()))
+        .chain(*public_values.vk_root())
         .collect::<Vec<_>>();
     hash.hash_slice(&input)
 }

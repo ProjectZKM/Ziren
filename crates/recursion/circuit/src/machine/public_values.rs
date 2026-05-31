@@ -65,10 +65,17 @@ where
     C: CircuitConfig,
     H: Poseidon2KoalaBearHasherVariable<C>,
 {
+    // Bind the same fields SP1's root digest binds (Ziren's
+    // `RecursionPublicValues` has no `proof_nonce`): zkm_vk_digest,
+    // committed_value_digest, exit_code, vk_root. Previously only the first
+    // two were bound, leaving `vk_root` / `exit_code` neither bound by the
+    // root commitment nor checked by `verify_wrap_bn254` / the BN254 commit.
     let input = public_values
         .zkm_vk_digest
         .into_iter()
         .chain(public_values.committed_value_digest.into_iter().flat_map(|word| word.0.into_iter()))
+        .chain(core::iter::once(public_values.exit_code))
+        .chain(public_values.vk_root)
         .collect::<Vec<_>>();
     H::poseidon2_hash(builder, &input)
 }
@@ -91,5 +98,15 @@ impl<T> RootPublicValues<T> {
     #[inline]
     pub const fn digest(&self) -> &[T; DIGEST_SIZE] {
         &self.inner.digest
+    }
+
+    #[inline]
+    pub const fn exit_code(&self) -> &T {
+        &self.inner.exit_code
+    }
+
+    #[inline]
+    pub const fn vk_root(&self) -> &[T; DIGEST_SIZE] {
+        &self.inner.vk_root
     }
 }
