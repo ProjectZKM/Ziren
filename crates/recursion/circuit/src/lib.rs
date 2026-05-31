@@ -244,7 +244,31 @@ impl CircuitConfig for InnerConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        builder.exp_reverse_bits_v2(input, power_bits)
+        // SP1-aligned inline repeated-squaring lowering (identical to
+        // WrapConfig below and to SP1's `InnerConfig::exp_reverse_bits`).
+        // Emitting the dedicated `ExpReverseBitsLen` instruction is
+        // incompatible with the BaseFold zerocheck: that chip's AIR uses
+        // `when_transition` row selectors (the accum-squaring chain at
+        // exp_reverse_bits.rs:421 and x-stability at :380), which
+        // `BasefoldConstraintFolder` cannot evaluate (it has no row
+        // selectors — `unimplemented!`). Lowering to primitive
+        // ALU/Select ops keeps the work in row-selector-free chips, so
+        // `ExpReverseBitsLen` can be retired from the compress/shrink
+        // machine (see `machine.rs::compress_machine`). The chip remains
+        // in the legacy-FRI `wrap_machine`, which uses the row-selector
+        // STARK prover, not the BaseFold folder.
+        let mut result = builder.constant(Self::F::ONE);
+        let mut power_f = input;
+        let bit_len = power_bits.len();
+
+        for i in 1..=bit_len {
+            let index = bit_len - i;
+            let bit = power_bits[index];
+            let prod: Felt<_> = builder.eval(result * power_f);
+            result = builder.eval(bit * prod + (SymbolicFelt::ONE - bit) * result);
+            power_f = builder.eval(power_f * power_f);
+        }
+        result
     }
 
     fn batch_fri(

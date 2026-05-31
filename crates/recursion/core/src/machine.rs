@@ -120,9 +120,19 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
             RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
+            // BatchFRI and ExpReverseBitsLen are retired from the BaseFold
+            // compress/shrink machine. Both carry `when_transition` /
+            // padded-row AIR constraints that `BasefoldConstraintFolder`
+            // cannot evaluate (it has no row selectors — `unimplemented!`).
+            // BatchFRI emits zero events on this path: its only emitter
+            // `C::batch_fri` is the legacy `TwoAdicFriPcs` FRI verifier
+            // (fri.rs:227), which BaseFold never exercises. ExpReverseBitsLen
+            // is now lowered inline to ALU/Select ops in
+            // `InnerConfig::exp_reverse_bits` (circuit/lib.rs), so it too
+            // emits zero events here. Both chips remain in the legacy-FRI
+            // `wrap_machine` / `machine_*_with_all_chips`, which use the
+            // row-selector STARK prover. SP1's compress machine has neither.
             RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
         .map(Chip::new)
@@ -161,6 +171,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             (Self::MemoryVar(MemoryVarChip::default()), 18),
             (Self::Select(SelectChip), 18),
             (Self::MemoryConst(MemoryConstChip::default()), 17),
+            // BatchFRI / ExpReverseBitsLen are no longer in the BaseFold
+            // compress/shrink *machine* (see `compress_machine`), but their
+            // keys are retained here: `heights()` still enumerates every
+            // RecursionAir variant (these chips live on in `wrap_machine` /
+            // `machine_*_with_all_chips`), and `fix_shape` does
+            // `shape.get(name).unwrap()` over all of `heights()`. The prover
+            // is machine-driven, so the extra keys are ignored for the
+            // reduced compress machine but keep any `fix_shape` consumer
+            // (e.g. the offline `find_recursion_shapes` script) panic-free.
             (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
             (Self::BaseAlu(BaseAluChip), 17),
             (Self::ExtAlu(ExtAluChip), 15),

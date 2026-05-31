@@ -16,6 +16,7 @@ use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
 use crate::types::{AirOpenedValues, ChipOpenedValues};
+use crate::lookup::LookupKind;
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
 /// Errors emitted by the host-side shard-level BaseFold verifier.
@@ -215,12 +216,34 @@ impl BasefoldShardVerifier {
             .unwrap_or(1);
         let beta_seed_dim = max_arity.next_power_of_two().trailing_zeros() as usize;
 
+        // The core Option-2 public-values closure (`eval_public_values`:
+        // State / GlobalAccumulation / MemoryGlobalInit+Finalize boundary
+        // buses) only applies to machines that actually carry those buses —
+        // i.e. the MIPS core machine.  The recursion machine uses only
+        // self-cancelling `Local` buses (Memory / Program / Range / Syscall),
+        // so its local-only closure is `gkr_sum == 0` and the core State-bus
+        // PV-AIR (which reads a different PV schema and emits arity-16
+        // GlobalAccumulation messages) must not run for it.  Detect the
+        // machine kind structurally from its interaction set.
+        let machine_has_pv_buses = chips.iter().any(|chip| {
+            chip.sends().iter().chain(chip.receives().iter()).any(|lk| {
+                matches!(
+                    lk.kind,
+                    LookupKind::State
+                        | LookupKind::GlobalAccumulation
+                        | LookupKind::MemoryGlobalInitControl
+                        | LookupKind::MemoryGlobalFinalizeControl
+                )
+            })
+        });
+
         verify_logup_gkr_host::<SC>(
             &proof.logup_gkr_proof,
             self.max_log_row_count,
             beta_seed_dim,
             proof.fold_orientation,
             &proof.public_values,
+            machine_has_pv_buses,
             challenger,
         )?;
 
@@ -1060,6 +1083,7 @@ fn verify_logup_gkr_host<SC>(
     beta_seed_dim: usize,
     fold_orientation: FoldOrientation,
     public_values: &[Val<SC>],
+    machine_has_pv_buses: bool,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
@@ -1120,12 +1144,26 @@ where
             .iter()
             .zip(denominator.iter())
             .fold(Challenge::<SC>::ZERO, |acc, (n, d)| acc + *n / *d);
-        let pv_digest = crate::air::eval_public_values_digest_host::<Val<SC>, Challenge<SC>>(
-            &alpha,
-            &beta_powers,
-            alpha,
-            public_values,
-        );
+        // Machine-aware local-only closure.  The core MIPS machine carries
+        // the State/GlobalAccumulation/MemoryGlobal boundary buses, closed by
+        // the public-values AIR (`gkr_sum == -PV_digest`).  The recursion
+        // machine carries only self-cancelling `Local` buses, so its closure
+        // is `gkr_sum == 0`; the core State-bus PV-AIR does not apply (it
+        // reads a different PV schema and its arity-16 GlobalAccumulation
+        // message would overflow the recursion `beta_powers`).
+        let pv_digest = if machine_has_pv_buses {
+            crate::air::eval_public_values_digest_host::<Val<SC>, Challenge<SC>>(
+                &alpha,
+                &beta_powers,
+                alpha,
+                public_values,
+            )
+        } else {
+            // Recursion machine: all buses are self-cancelling `Local`
+            // (Memory/Program/Range/Syscall), so the local-only closure is
+            // `gkr_sum == 0` (empirically confirmed for the compress shard).
+            Challenge::<SC>::ZERO
+        };
         if gkr_sum != -pv_digest {
             return Err(BasefoldVerifyError::LogupGkr(
                 "public-values balance failed (sum circuit_output num/den != -PV_digest)".into(),
