@@ -47,6 +47,65 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 /// before sampling any GKR challenge.
 pub const GKR_GRINDING_BITS: usize = 12;
 
+/// Config-aware GKR proof-of-work grinding.
+///
+/// The production Inner challenger ([`crate::InnerChallenger`], a
+/// `DuplexChallenger` over KoalaBear) actually grinds. Every other
+/// challenger — notably the Outer/BN254 `MultiField32Challenger` used by
+/// the gnark-verified wrap (which is never recursion-verified, so its GKR
+/// grinding witness is never checked in-circuit) — returns a no-op
+/// `F::ZERO`.
+///
+/// A blanket impl over `FieldChallenger` means callers need NO extra trait
+/// bound, avoiding a `GrindingChallenger` bound cascade through the entire
+/// prove stack (the Outer challenger is not a `GrindingChallenger`, so a
+/// hard bound would break the wrap path).
+pub trait GkrGrind<F> {
+    /// Prover side: grind a witness (real for the Inner challenger, `F::ZERO`
+    /// no-op otherwise). Observes the witness into the challenger (Inner).
+    fn gkr_grind(&mut self, bits: usize) -> F;
+    /// Verifier side (host): re-observe + check the witness, EXACTLY matching
+    /// `gkr_grind`'s challenger consumption so alpha/beta stay consistent.
+    /// Real check for the Inner challenger; no-op (accept) otherwise — because
+    /// the Outer/wrap `gkr_grind` observed nothing, the verifier must too.
+    fn gkr_check_witness(&mut self, bits: usize, witness: F) -> bool;
+}
+
+impl<F, C> GkrGrind<F> for C
+where
+    F: Field + 'static,
+    C: FieldChallenger<F> + 'static,
+{
+    fn gkr_grind(&mut self, bits: usize) -> F {
+        use core::any::{Any, TypeId};
+        if TypeId::of::<F>() == TypeId::of::<crate::InnerVal>() {
+            if let Some(c) = (self as &mut dyn Any).downcast_mut::<crate::InnerChallenger>() {
+                // `InnerChallenger: GrindingChallenger<Witness = InnerVal>`;
+                // `grind` finds the witness AND observes it into the challenger.
+                let w: crate::InnerVal = c.grind(bits);
+                // SAFETY: the TypeId guard proves `F == InnerVal` on this path.
+                return unsafe { core::mem::transmute_copy::<crate::InnerVal, F>(&w) };
+            }
+        }
+        F::ZERO
+    }
+
+    fn gkr_check_witness(&mut self, bits: usize, witness: F) -> bool {
+        use core::any::{Any, TypeId};
+        if TypeId::of::<F>() == TypeId::of::<crate::InnerVal>() {
+            if let Some(c) = (self as &mut dyn Any).downcast_mut::<crate::InnerChallenger>() {
+                // SAFETY: the TypeId guard proves `F == InnerVal` on this path.
+                let w: crate::InnerVal =
+                    unsafe { core::mem::transmute_copy::<F, crate::InnerVal>(&witness) };
+                // Observes `w` + samples + checks the leading `bits` are zero —
+                // same challenger consumption as the prover's `grind`.
+                return c.check_witness(bits, w);
+            }
+        }
+        true
+    }
+}
+
 use crate::lookup::Lookup;
 use crate::zerocheck_prover::{eq_mle_table, fold_table_first};
 

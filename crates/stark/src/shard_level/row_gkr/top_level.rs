@@ -16,6 +16,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
+use crate::logup_gkr::{GkrGrind, GKR_GRINDING_BITS};
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
 use crate::zerocheck_prover::eq_mle_table;
@@ -33,7 +34,7 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
 ) -> LogupGkrProof<F, EF>
 where
-    F: PrimeField,
+    F: PrimeField + 'static,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
@@ -55,6 +56,19 @@ where
         super::device_circuit::LogupTaskScopeGuard::enter_with_scope::<F, EF>(
             &mut logup_task_scope,
         );
+
+    // Step 0: proof-of-work grinding. MUST run BEFORE sampling alpha/beta to
+    // match the in-circuit verifier's `check_witness`, which is the FIRST
+    // challenger op in `verify_logup_gkr` (recursion logup_gkr.rs:347). p3's
+    // `grind` finds the witness AND observes it into the challenger, so the
+    // post-grind state — alpha/beta and the whole GKR transcript — is
+    // identical between prover and verifier. Config-aware (see `GkrGrind`):
+    // real grind for the Inner challenger, `F::ZERO` no-op for the
+    // Outer/wrap challenger (never recursion-verified). Previously a hard
+    // `F::ZERO` placeholder, so the in-circuit `assert(bit==0)` grinding
+    // check was never satisfiable (and only passed because that assert was
+    // itself unenforced; see compiler.rs base_assert_eq / DivFAssert).
+    let witness: F = challenger.gkr_grind(GKR_GRINDING_BITS);
 
     // Step 1: sample [alpha, beta].  `beta_seed_dim` = log2(max_arity
     // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for
@@ -392,7 +406,7 @@ where
             point: trace_dim_point,
             chip_openings,
         },
-        witness: F::ZERO,
+        witness,
     };
 
 

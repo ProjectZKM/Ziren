@@ -1114,6 +1114,22 @@ where
     // initial_num_variables = log_num_interactions + 1 = log2(output.len)
     let initial_num_variables = numerator.len().trailing_zeros() as usize;
 
+    // (0) Re-observe + check the GKR proof-of-work grinding witness BEFORE
+    // sampling alpha/beta — EXACTLY matching the prover's grind
+    // (row_gkr/top_level.rs::gkr_grind), which observes the witness into the
+    // challenger. Without this the verifier's alpha/beta diverge from the
+    // prover's and the G1 PV-balance below fails. Config-aware: a real check
+    // for the Inner core proof, a no-op for the Outer/wrap (whose prover
+    // grind is itself a no-op). Replaces the previous "omits the
+    // grinding-witness check" gap — now both soundness AND consistency.
+    if !crate::logup_gkr::GkrGrind::gkr_check_witness(
+        challenger,
+        crate::logup_gkr::GKR_GRINDING_BITS,
+        proof.witness,
+    ) {
+        return Err(BasefoldVerifyError::LogupGkr("GKR grinding witness check failed".into()));
+    }
+
     // (1) Sample the LogUp permutation challenges (alpha + beta_seed),
     // matching the prover (row_gkr/top_level.rs:62-78).
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
