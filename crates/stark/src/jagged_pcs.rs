@@ -1631,14 +1631,14 @@ pub mod jagged {
         let _c6_parity_on = std::env::var("ZIREN_JAGGED_SP1_REDUCER_ASSERT")
             .map(|v| v == "1")
             .unwrap_or(false);
-        let _c6_pre_challenger: Option<InnerChallenger> =
+        let _c6_pre_challenger =
             if _c6_parity_on { Some((*challenger).clone()) } else { None };
-        let _c6_dense_q: Option<Vec<InnerVal>> = if _c6_parity_on {
+        let _c6_dense_q = if _c6_parity_on {
             Some(materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size))
         } else {
             None
         };
-        let _c6_r_row: Option<Vec<Vec<InnerChallenge>>> =
+        let _c6_r_row =
             if _c6_parity_on { Some(r_row_per_chip.to_vec()) } else { None };
 
         let reduction = {
