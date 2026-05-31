@@ -27,10 +27,12 @@ struct Args {
 /// is the canonical-form `[u32; 8]` printed by
 /// `eprintln!("{:?}", vk.hash_koalabear())`.
 const HASHES: &[[u32; DIGEST_SIZE]] = &[
-    // FIBONACCI_ELF (test_artifacts): hash reflects verifier + prover
-    // using real per-chip global_cumulative_sum (from main trace's last
-    // 14 elements when commit_scope == Global).
-    [159607536, 165679321, 977659457, 1222294833, 1612132582, 1230109602, 1281748934, 861713239],
+    // FIBONACCI_ELF (test_artifacts): captured 2026-05-31 after the
+    // recursion-core Option-2 port (commit 52484a5d: retire BatchFRI /
+    // ExpReverseBitsLen from compress_machine + inline exp_reverse_bits),
+    // which changed the compress recursion program and thus the compress_vk.
+    // Re-capture via the `[VKCAP]` eprintln in verify_compressed.
+    [1742144917, 866629002, 1133061815, 1454295332, 1629503932, 1506472388, 209162025, 467815626],
     // ziren-shape-bin/{fibonacci-1k, chess, json} cluster. Re-collect with:
     //   cargo run -r --bin collect_basefold_vks -- --workload-dir <shape-bin-dir> --workload fibonacci-1k
     [1699581369, 570857037, 1349217405, 1928854405, 35860423, 1342774164, 89742593, 1891520740],
