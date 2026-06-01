@@ -377,6 +377,33 @@ pub fn verify_core_basefold<C, SC, A>(
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 
+            // Pre-prologue challenger seeding. The host machine verifier
+            // (crates/stark/src/machine.rs:693-706) does, BEFORE dispatching
+            // to the BaseFold shard verifier:
+            //   (1) `vk.observe_into(challenger)` — commit(8), pc_start(1),
+            //       initial_global_cumulative_sum.x(7)+.y(7), ZERO(1)
+            //       (machine.rs:164-171; in-circuit mirror types.rs:88-103),
+            //   (2) per shard: clone + `observe_slice(public_values[0..num_pv_elts])`.
+            // The host prover bakes both into `basefold_challenger_snapshot`
+            // (prover.rs: pk.observe_into in `prove`, then per-shard `open`
+            // observes PV at :363 and snapshots at :378), and the shard
+            // prologue then re-observes the public values (PV twice total).
+            // The in-circuit lift created a FRESH challenger and did NEITHER
+            // seeding step — so its sponge entering verify_shard was missing
+            // the vk seed + one PV absorb, and every post-prologue squeeze
+            // (LogUp-GKR alpha/beta/eval_point + the whole sumcheck) diverged
+            // from the prover. This was the first real failure of the
+            // dead-assert cascade, masked only by the vacuous in-circuit
+            // asserts. Replicate the host seed so the transcript is aligned.
+            {
+                use crate::challenger::CanObserveVariable;
+                let num_pv = machine.num_pv_elts();
+                vk_legacy.observe_into(builder, &mut challenger);
+                for &pv in public_values_raw[0..num_pv].iter() {
+                    CanObserveVariable::observe(&mut challenger, builder, pv);
+                }
+            }
+
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
                 EvaluationProof::Bundle(bundle) if !legacy_lift => {

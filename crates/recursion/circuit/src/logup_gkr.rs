@@ -346,19 +346,33 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
     // (1) Check the proof-of-work grinding witness.
     challenger.check_witness(builder, GKR_GRINDING_BITS, *witness);
 
-    // (2) Sample the permutation challenges and public-values
-    // challenge.  beta_seed dim is decided by chip metadata.
+    // (2) Sample the permutation challenges (alpha + beta_seed).
+    // beta_seed dim is decided by chip metadata.  NOTE: the host
+    // prover (row_gkr/top_level.rs:71-86) and host verifier
+    // (shard_level/verifier.rs:1135-1138) sample ONLY [alpha, beta_seed]
+    // here — there is NO separate public-values challenge draw.  The
+    // public-values digest folds the record-level PV interactions under
+    // the SAME `alpha` (used as both the permutation challenge and the
+    // constraint-fold alpha; see `eval_public_values_digest_host`,
+    // public_values_folder.rs:132, which passes `alpha` for both the
+    // `perm_challenges.0` and `alpha` slots).  A prior version sampled an
+    // EXTRA `pv_challenge` here, which had no host counterpart: it
+    // desynced every post-alpha squeeze (eval_point, per-round lambda,
+    // the whole GKR sumcheck) from the prover's transcript.  Drop it and
+    // reuse `alpha` so the in-circuit transcript is byte-identical to the
+    // host from alpha onward.
     let alpha = challenger.sample_ext(builder);
     let beta_seed: Vec<Ext<C::F, C::EF>> = (0..chip_metadata.beta_seed_dim)
         .map(|_| challenger.sample_ext(builder))
         .collect();
-    let pv_challenge = challenger.sample_ext(builder);
 
     // (3) Evaluate public-values constraints.  Negated digest =
-    // cumulative_sum (matches the sign convention upstream).
+    // cumulative_sum (matches the sign convention upstream).  The
+    // constraint-fold alpha is `alpha` itself (host parity), not a
+    // separate challenge.
     let local_interaction_digest = verify_public_values::<C, _>(
         builder,
-        pv_challenge,
+        alpha,
         &alpha,
         &beta_seed,
         public_values,
