@@ -493,9 +493,15 @@ where
             );
 
             // (4c) Build the extended sumcheck point (one extra
-            // zero coordinate) for the geq comparison.
+            // zero coordinate) for the geq comparison.  FRONT-insert
+            // (SP1 `Point::add_dimension` = `values.insert(0, ..)`),
+            // NOT back-append: `full_geq` iterates MSB-first and
+            // `degree` is big-endian (MSB at index 0), so the extra
+            // high coordinate must pair with `degree`'s extra high bit.
+            // A back-append shifted every degree bit one slot vs `z`,
+            // giving the wrong padded-row mask on every padded chip.
             let mut proof_point_extended = point_symbolic.clone();
-            proof_point_extended.push(SymbolicExt::ZERO);
+            proof_point_extended.insert(0, SymbolicExt::ZERO);
 
             // (4d) Assert each degree coordinate is boolean and
             // that all-but-the-first coordinates are zero unless
