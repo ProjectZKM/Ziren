@@ -386,6 +386,78 @@ where
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
+/// Review item 12: finalize the per-chip opened values carried from
+/// the host proof.
+///
+/// The host `BasefoldShardProof.opened_values` carries each chip's
+/// trace evaluations at the *zerocheck-reduced* point `z` (prep + main
+/// `local`), in chip-NAME order — the values the in-circuit zerocheck
+/// verifier batches/constrains and asserts equal `point_and_eval.1`
+/// (`zerocheck.rs:573`).  Those are exactly the SP1 `shard_open_values`
+/// (`shard.rs:618-643`).  But the host carries placeholder `degree`
+/// bits and zero cumulative sums, so this helper rebuilds, per chip
+/// (still name-aligned with `chip_names`):
+///
+///   - `degree` ← REAL big-endian boolean coordinates of the chip's
+///     `log_height` (length `max_log_row_count + 1`), so the zerocheck
+///     verifier's `full_geq` padded-row mask (`zerocheck.rs:517`) is
+///     correct rather than the all-zero stub.
+///   - `local_cumulative_sum` / `global_cumulative_sum` ← the real
+///     per-chip sums witnessed in `chip_cumulative_sums` (falling back
+///     to the carried value when a chip is missing).
+///
+/// `preprocessed.local` / `main.local` (trace@z) are kept verbatim.
+pub fn finalize_carried_opened_values<C>(
+    _builder: &mut Builder<C>,
+    carried: crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+    >,
+    chip_names: &[String],
+    chip_log_heights: &BTreeMap<String, u8>,
+    chip_cumulative_sums: &BTreeMap<
+        String,
+        zkm_stark::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
+    >,
+    max_log_row_count: usize,
+) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    let bit_len = max_log_row_count + 1;
+    let chips = carried
+        .chips
+        .into_iter()
+        .enumerate()
+        .map(|(idx, mut chip_opening)| {
+            let name = chip_names.get(idx);
+
+            // Review item 12: KEEP the carried degree — the REAL big-endian
+            // height bits, carried host-side via the proof's `quotient[0]`
+            // (prover.rs E1d) and lifted in
+            // `basefold_opened_values_from_host`.  This is the VirtualGeq
+            // threshold (zerocheck_prover.rs:487 `VirtualGeq::new(main_height)`)
+            // the recursion `full_geq` (zerocheck.rs:517) compares against.
+            // Recomputing from `log_h` here was the off-by-encoding bug
+            // (bits of the log-height value 17 instead of the real height).
+            let _ = (&chip_log_heights, bit_len);
+
+            // Real per-chip cumulative sums when present.
+            if let Some(n) = name {
+                if let Some(sums) = chip_cumulative_sums.get(n) {
+                    chip_opening.local_cumulative_sum = sums.local;
+                    chip_opening.global_cumulative_sum = sums.global.clone();
+                }
+            }
+
+            chip_opening
+        })
+        .collect();
+    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
+}
+
 /// Build empty `chip_height_bits` placeholder of the given size.
 /// Used while the opened_values-based derivation is being wired.
 pub fn empty_chip_height_bits<C>(

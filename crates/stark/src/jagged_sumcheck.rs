@@ -49,6 +49,12 @@ fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     z_col_lagrange: &[InnerChallenge],
+    // ITEM-12: the FULL zerocheck-reduced z* (max_log_row_count dims). Each
+    // chip's row-eq weight is scaled by the embedding factor Π_high(1-z*[k])
+    // over the (max-log_h) high/MSB coords the per-chip r_row trailing-slice
+    // drops, so the reduction opens the padded-MLE@z* (matching the zerocheck
+    // opened_values) instead of the bare eq_mle@trailing.
+    z_row: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
     let n = 1usize << packing.log_dense_size;
     let mut w = vec![InnerChallenge::ZERO; n];
@@ -63,7 +69,15 @@ fn build_weight_table(
                 r_row_c.len(),
                 "r_row_c must have log2(row_count) entries (rounded up)",
             );
-            crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c)
+            let n_high = z_row.len().saturating_sub(r_row_c.len());
+            let factor_c: InnerChallenge = z_row[..n_high]
+                .iter()
+                .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
+            let mut eq = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+            for e in eq.iter_mut() {
+                *e *= factor_c;
+            }
+            eq
         })
         .collect();
 
@@ -589,6 +603,7 @@ pub fn prove_jagged_reduction_owned(
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
+    z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor in the weights
     challenger: &mut InnerChallenger,
 ) -> JaggedReductionProof<InnerChallenge> {
     assert_eq!(packing.chip_infos.len(), r_row_per_chip.len());
@@ -600,7 +615,7 @@ pub fn prove_jagged_reduction_owned(
     // Lagrange table over it.  Column claims (`y_per_chip`) are already
     // bound into the transcript by earlier phases, so not re-observed.
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
-    let w = build_weight_table(packing, r_row_per_chip, &z_col_lagrange);
+    let w = build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row);
 
     let n = packing.log_dense_size;
     assert_eq!(dense_q.len(), 1usize << n);
@@ -656,6 +671,7 @@ pub fn verify_jagged_reduction(
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
+    z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor
     challenger: &mut InnerChallenger,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
     if proof.rounds.len() != packing.log_dense_size
@@ -712,7 +728,7 @@ pub fn verify_jagged_reduction(
     }
     let z_star = proof.eval_point.clone();
 
-    let w_table = build_weight_table(packing, r_row_per_chip, &z_col_lagrange);
+    let w_table = build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row);
     let w_mle = crate::zerocheck_prover::MultilinearExt::new(w_table);
     let w_at_z = w_mle.evaluate(&z_star);
 

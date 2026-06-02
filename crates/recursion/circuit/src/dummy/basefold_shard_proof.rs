@@ -27,7 +27,7 @@ use zkm_stark::{
             PartialSumcheckProof, UnivariatePolynomial,
         },
     },
-    Chip, ShardOpenedValues, PROOF_MAX_NUM_PVS,
+    AirOpenedValues, Chip, ChipOpenedValues, ShardOpenedValues, PROOF_MAX_NUM_PVS,
 };
 
 /// Allocator for [`PartialSumcheckProof`] — zero-filled.
@@ -222,12 +222,46 @@ where
     let zerocheck_proof =
         dummy_partial_sumcheck_proof::<EF>(max_log_row_count, 4);
 
-    // ShardOpenedValues::chips empty — matches real
-    // prove_shard_to_basefold at `shard_level/prover.rs:365`
-    // (basefold pipeline carries per-chip openings via
-    // LogUp-GKR's `chip_openings` map, not via the legacy
-    // `ShardOpenedValues.chips` Vec).
-    let opened_values = ShardOpenedValues { chips: Vec::new() };
+    // Review item 12: the real prover (`shard_level/prover.rs:438-498`)
+    // now populates one `ChipOpenedValues` per chip (name-sorted) with
+    // the per-chip trace@z openings — `main.local` of `width` Exts,
+    // `preprocessed.local` of `preprocessed_width` Exts, and `quotient`
+    // = the `max_log_row_count + 1` big-endian height-bit `degree`.  The
+    // VK-regen shape-compiled program (`program_from_shape_basefold`)
+    // allocates witness slots from THIS dummy, so its `opened_values`
+    // shape MUST match the real proof's per-chip column counts — an
+    // empty `chips` Vec here would allocate zero opened_values slots
+    // against N written felts and desync the witness stream during
+    // vk_map regeneration.  The values are zero (shape-only fixture).
+    let opened_values = {
+        let bit_len = max_log_row_count + 1;
+        let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
+        name_sorted
+            .sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
+        let chips_ov: Vec<ChipOpenedValues<F, EF>> = name_sorted
+            .iter()
+            .map(|chip| {
+                let prep_w = MachineAir::<F>::preprocessed_width(**chip);
+                let main_w = <_ as BaseAir<F>>::width(&chip.air);
+                ChipOpenedValues {
+                    preprocessed: AirOpenedValues {
+                        local: vec![EF::ZERO; prep_w],
+                        next: Vec::new(),
+                    },
+                    main: AirOpenedValues {
+                        local: vec![EF::ZERO; main_w],
+                        next: Vec::new(),
+                    },
+                    permutation: AirOpenedValues { local: Vec::new(), next: Vec::new() },
+                    quotient: vec![vec![EF::ZERO; bit_len]],
+                    global_cumulative_sum: SepticDigest::<F>::zero(),
+                    local_cumulative_sum: EF::ZERO,
+                    log_degree: 0,
+                }
+            })
+            .collect();
+        ShardOpenedValues { chips: chips_ov }
+    };
 
     let chip_log_heights: BTreeMap<String, u8> = chip_log_heights_pairs
         .iter()

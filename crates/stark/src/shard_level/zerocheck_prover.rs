@@ -336,7 +336,10 @@ pub fn prove_shard_zerocheck<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-) -> PartialSumcheckProof<Challenge<SC>>
+) -> (
+    PartialSumcheckProof<Challenge<SC>>,
+    std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+)
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
@@ -456,12 +459,35 @@ where
             // chip claim = Σ (main_evals ++ prep_evals) · β^(1..).
             let prep_evals: &[Challenge<SC>] =
                 opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]);
-            let claim = opening
+            let claim_gkr = opening
                 .main_trace_evaluations
                 .iter()
                 .chain(prep_evals.iter())
                 .zip(gkr_powers.iter())
                 .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p);
+
+            // MIXED-HEIGHT EMBEDDING CORRECTION (SP1 PaddedMle::eval_at_eq).
+            // SP1 opens each chip at the FULL max-dim point, so its opening
+            // carries Π_high(1 − zeta[k]) over every zeta coord ABOVE this
+            // chip's own trailing log_h (the chip's trace is zero on the
+            // x_high≠0 sub-cube).  Ziren's GKR opens at the trailing log_h
+            // only (top_level.rs), dropping that factor — so for any chip
+            // SHORTER than the tallest chip in the shard the claim is too
+            // small and the zerocheck reduction is corrupted.  Re-apply the
+            // factor over the leading (num_variables − log_h) zeta coords;
+            // the left-pad ZERO coords contribute (1−0)=1, so this reduces to
+            // the nonzero "extra-real" coords.  For the tallest chip the range
+            // is empty (factor = 1).  Validated by the orientation_sweep_mixed
+            // _height unit test.
+            let log_h = if main_height == 0 {
+                0usize
+            } else {
+                (main_height as u64).trailing_zeros() as usize
+            };
+            let embed_factor: Challenge<SC> = zeta[..(num_variables as usize - log_h)]
+                .iter()
+                .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
+            let claim = claim_gkr * embed_factor;
             chip_sumcheck_claims.push(claim);
 
             // Lift real trace rows to the challenge field.
@@ -472,6 +498,18 @@ where
             } else {
                 None
             };
+
+            // ORIENTATION FIX: the GKR per-chip opening (eq_mle_table) is
+            // LSB-first while this poly's eq-anchor (partial_lagrange / fold_cells
+            // peel of zeta[dim-1]) is big-endian (SP1-matching).  Bit-reversing
+            // the trace rows makes the poly's big-endian boolean-cube sum equal
+            // the LSB-first GKR-batch claim (MLE_MSB(bitrev(T))@zeta ==
+            // MLE_LSB(T)@zeta), restoring claim == cube-sum without changing
+            // zeta, the GKR openings, or the claim.
+            let main_cells =
+                crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height);
+            let prep_cells = prep_cells
+                .map(|c| crate::shard_level::zerocheck_poly::bitrev_rows(&c, prep_width, main_height));
 
             let padded_row_adjustment = compute_padded_row_adjustment::<
                 Val<SC>,
@@ -515,14 +553,25 @@ where
         // so re-pointing it to z requires reconciling padded-MLE@z vs
         // Ziren's per-chip jagged opening — a transcript-changing,
         // recursion/vk-coupled follow-up (see plan + memory).
-        let (sp1_proof, _component_poly_evals) =
+        let (sp1_proof, component_poly_evals) =
             crate::shard_level::zerocheck_poly::reduce_sumcheck_serial::<
                 Val<SC>,
                 Challenge<SC>,
                 _,
                 SC::Challenger,
             >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda);
-        return sp1_proof;
+        // Per-chip trace@z openings keyed by chip NAME (name order), feeding
+        // the item-12 opened_values (prover.rs E1d) the recursion verifier's
+        // recon consumes.  With the bitrev-rows orientation fix these are
+        // bitrev_trace@z, matching the poly's reduced value.
+        let mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>> =
+            std::collections::BTreeMap::new();
+        for (k, &chip_idx) in name_order.iter().enumerate() {
+            let name = chips[chip_idx].name().to_string();
+            trace_at_z.insert(name, component_poly_evals[k].clone());
+        }
+
+        return (sp1_proof, trace_at_z);
     }
     #[allow(unreachable_code)]
     {
@@ -818,7 +867,7 @@ where
         sub_phase = "sumcheck",
         "zerocheck sub-phase done"
     );
-    proof
+    (proof, std::collections::BTreeMap::new())
     }
 }
 

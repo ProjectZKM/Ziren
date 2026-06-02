@@ -325,7 +325,7 @@ where
     // openings (`claimed_sum = λ-RLC(Σ openings·β^k)`), eq-anchored at
     // the shared GKR point.
     let _t_phase3 = std::time::Instant::now();
-    let zerocheck_proof = {
+    let (zerocheck_proof, trace_at_z) = {
         let _span = tracing::info_span!("phase_zerocheck").entered();
         prove_shard_zerocheck::<SC, A>(
             chips,
@@ -389,7 +389,8 @@ where
         emit_jagged_pcs_bytes::<SC, A>(
             chips,
             main_traces,
-            &logup_gkr_proof.logup_evaluations.point,
+            // ITEM-12: open jagged at the zerocheck-reduced z*.
+            &zerocheck_proof.point_and_eval.0,
             challenger,
             _device_traces,
             precomputed_commit,
@@ -405,9 +406,14 @@ where
     // Phase 5: assembly.
     let _t_phase5 = std::time::Instant::now();
     let _phase5_span = tracing::info_span!("phase_assembly").entered();
-    let opened_values = ShardOpenedValues { chips: Vec::new() };
 
     let mut chip_log_heights = std::collections::BTreeMap::new();
+    // Review item 12: the REAL per-chip height (row count, possibly
+    // non-power-of-2) is the VirtualGeq threshold the prover uses
+    // (zerocheck_prover.rs:487 `VirtualGeq::new(main_height,..)`), so the
+    // recursion's `full_geq` (zerocheck.rs:517) degree must be its bit
+    // decomposition — NOT bits of log_h.  Carry it per chip by name.
+    let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, trace) in chips.iter().zip(main_traces.iter()) {
         let h = trace.height().max(1);
         let log_h = if h.is_power_of_two() {
@@ -416,8 +422,86 @@ where
             (usize::BITS - h.leading_zeros()) as u8
         };
         let name = MachineAir::<Val<SC>>::name(*chip);
-        chip_log_heights.insert(name, log_h);
+        chip_log_heights.insert(name.clone(), log_h);
+        chip_heights.insert(name, h);
     }
+
+    // Review item 12: populate `opened_values` with the per-chip
+    // trace@z openings from the zerocheck reduction (the values the
+    // recursion zerocheck verifier batches/constrains at the reduced
+    // point z and asserts equal `point_and_eval.1`, recursion
+    // zerocheck.rs:573).  `trace_at_z` is keyed by chip name and is
+    // prep-then-main per chip (SP1 ordering, shard.rs:622); split at the
+    // chip's `preprocessed_width` to recover `preprocessed.local` /
+    // `main.local`.  Chips are emitted in NAME order to match the
+    // recursion `opened_values.chips` BTreeMap key-order iteration and
+    // SP1's `shard_open_values` BTreeMap.
+    let opened_values = {
+        let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
+        name_sorted.sort_by(|a, b| {
+            MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b))
+        });
+        let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> =
+            name_sorted
+                .iter()
+                .map(|chip| {
+                    let name = MachineAir::<Val<SC>>::name(**chip);
+                    let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+                    let evals: Vec<Challenge<SC>> =
+                        trace_at_z.get(&name).cloned().unwrap_or_default();
+                    let split = prep_width.min(evals.len());
+                    let (prep_local, main_local) = evals.split_at(split);
+                    let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
+                    // Review item 12: big-endian bit decomposition of the
+                    // REAL height (the VirtualGeq threshold) carried via the
+                    // unused `quotient` slot for the recursion `full_geq`
+                    // degree.  bit_len = max_log_row_count + 1 (matches the
+                    // verifier's `proof_point_extended`, zerocheck.rs:497).
+                    let height = *chip_heights.get(&name).unwrap_or(&1);
+                    let bit_len = max_log_row_count + 1;
+                    let degree_bits: Vec<Challenge<SC>> = (0..bit_len)
+                        .map(|i| {
+                            // BIG-ENDIAN (MSB at index 0): SP1
+                            // Point::from_usize is big-endian (point.rs:93)
+                            // and the verifier shape asserts (zerocheck.rs:512)
+                            // require degree[0]=MSB.  z_extended front-inserts
+                            // the extra high coord (zerocheck.rs:504).
+                            let shift = bit_len - 1 - i;
+                            let bit = if shift < usize::BITS as usize {
+                                (height >> shift) & 1
+                            } else {
+                                0
+                            };
+                            if bit == 1 {
+                                Challenge::<SC>::ONE
+                            } else {
+                                Challenge::<SC>::ZERO
+                            }
+                        })
+                        .collect();
+                    crate::types::ChipOpenedValues {
+                        preprocessed: crate::types::AirOpenedValues {
+                            local: prep_local.to_vec(),
+                            next: Vec::new(),
+                        },
+                        main: crate::types::AirOpenedValues {
+                            local: main_local.to_vec(),
+                            next: Vec::new(),
+                        },
+                        permutation: crate::types::AirOpenedValues {
+                            local: Vec::new(),
+                            next: Vec::new(),
+                        },
+                        quotient: vec![degree_bits],
+                        global_cumulative_sum:
+                            crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
+                        local_cumulative_sum: Challenge::<SC>::ZERO,
+                        log_degree,
+                    }
+                })
+                .collect();
+        ShardOpenedValues { chips: chip_opened }
+    };
 
     // local sum is ZERO (the basefold path doesn't materialize the
     // permutation trace — future: thread from LogUp-GKR layer 0).

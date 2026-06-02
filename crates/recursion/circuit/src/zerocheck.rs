@@ -241,18 +241,47 @@ where
             local: &opening.main.local,
             next: &opening.main.local,
         };
+        // SP1's `VerifierConstraintFolder` (verifier/shard.rs:243) carries NO
+        // cumulative sums, and the Ziren host zeroes them in the zerocheck
+        // constraint eval (`eval_air_constraints_at_row`, zerocheck_poly.rs:661
+        // — "lookup soundness rides on LogUp-GKR, not this zerocheck"). Feed
+        // the same zeros here instead of the witnessed per-chip sums: any AIR
+        // term that references the cumulative sum must contribute exactly what
+        // the host reduced into `evals[i]`, else the per-chip zerocheck term
+        // diverges (the all-zero-row padded-row adjustment otherwise picks up
+        // `-local_cumulative_sum`, so the in-circuit `pra` came out 0 while
+        // the host's was non-zero — dropping the `-pra*geq` correction).
+        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed,
             main,
             alpha,
             accumulator: SymbolicExt::ZERO,
             public_values,
-            local_cumulative_sum: &opening.local_cumulative_sum,
-            global_cumulative_sum: &opening.global_cumulative_sum,
+            local_cumulative_sum: &zero_lcs,
+            global_cumulative_sum: &zero_gcs,
             _marker: PhantomData,
         };
         chip.eval(&mut folder);
         builder.eval(folder.accumulator)
+    }
+
+    /// Zero `(local_cumulative_sum, global_cumulative_sum)` for the
+    /// zerocheck constraint folder, matching the host
+    /// (`eval_air_constraints_at_row`) and SP1's
+    /// `VerifierConstraintFolder` (which omits the sums entirely).
+    fn zero_cumulative_sums(
+        builder: &mut Builder<C>,
+    ) -> (Ext<C::F, C::EF>, SepticDigest<Felt<C::F>>) {
+        use zkm_stark::septic_curve::SepticCurve;
+        use zkm_stark::septic_extension::SepticExtension;
+        let zero_lcs: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+        let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
+        let zero_gcs: SepticDigest<Felt<C::F>> = SepticDigest(SepticCurve {
+            x: SepticExtension(core::array::from_fn(|_| zero_felt)),
+            y: SepticExtension(core::array::from_fn(|_| zero_felt)),
+        });
+        (zero_lcs, zero_gcs)
     }
 
     /// Variant of [`Self::compute_padded_row_adjustment`]
@@ -272,14 +301,17 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
         let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
+        // Zero cumulative sums — match the host pra (`compute_padded_row_
+        // adjustment` → `eval_air_constraints_at_row`, zero sums) and SP1.
+        let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
             main: PairWindow { local: &main_row, next: &main_row },
             alpha,
             accumulator: SymbolicExt::ZERO,
             public_values,
-            local_cumulative_sum: &opening.local_cumulative_sum,
-            global_cumulative_sum: &opening.global_cumulative_sum,
+            local_cumulative_sum: &zero_lcs,
+            global_cumulative_sum: &zero_gcs,
             _marker: PhantomData,
         };
         chip.eval(&mut folder);
@@ -441,8 +473,8 @@ where
 
         // (1) Sample per-phase challenges from the transcript.
         let alpha = challenger.sample_ext(builder);
-        let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> =
-            challenger.sample_ext(builder).into();
+        let gkr_batch_open_ext = challenger.sample_ext(builder);
+        let gkr_batch_open_challenge: SymbolicExt<C::F, C::EF> = gkr_batch_open_ext.into();
         let lambda = challenger.sample_ext(builder);
 
         // (2) eq(zerocheck reduced point, GKR-emitted point).
@@ -477,7 +509,9 @@ where
         // claimed evaluation at the sumcheck-reduced point).
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
-        for (chip, opening) in shard_chips.iter().zip(opened_values.chips.iter()) {
+        for (idx, (chip, opening)) in
+            shard_chips.iter().zip(opened_values.chips.iter()).enumerate()
+        {
             let degree = &opening.degree;
 
             // (4a) Shape sanity check on the chip's openings.
@@ -540,7 +574,7 @@ where
             );
             let pra_sym: SymbolicExt<C::F, C::EF> = padded_row_adjustment.into();
             let ce_sym: SymbolicExt<C::F, C::EF> = constraint_eval_ext.into();
-            let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val;
+            let constraint_eval: SymbolicExt<C::F, C::EF> = ce_sym - pra_sym * geq_val.clone();
 
             // (4g) Batch the chip's openings (main first, then
             // preprocessed) by the pre-computed challenge powers.
@@ -579,12 +613,22 @@ where
         builder.assert_ext_eq(rlc_eval, zerocheck_proof.point_and_eval.1);
 
         // (6) Reduce the GKR-side openings into the zerocheck
-        // claimed_sum modifier (lambda-RLC across chips).
+        // claimed_sum modifier (lambda-RLC across chips).  Each chip's
+        // batch is scaled by the MIXED-HEIGHT EMBEDDING FACTOR
+        // Π_high(1 − zeta[k]) over the zeta coords ABOVE the chip's own
+        // height — the prover's claim carries it (zerocheck_prover.rs) but
+        // the trailing-log_h GKR opening does not.  zeta = gkr_evaluations
+        // .point; the "high" coords are those before the chip's degree
+        // one-hot, selected via the running prefix of `opening.degree`
+        // (big-endian one-hot at index `dim − log_h`): is_high[k] =
+        // 1 − Σ_{j≤k} degree[j], so factor = Π_k (1 − is_high[k]·zeta[k]).
+        // (Mirrors the host verifier verifier.rs step (G2-b).)
         let zerocheck_sum_modifications_from_gkr: Vec<SymbolicExt<C::F, C::EF>> = gkr_evaluations
             .chip_openings
             .values()
-            .map(|chip_evaluation| {
-                chip_evaluation
+            .zip(opened_values.chips.iter())
+            .map(|(chip_evaluation, opening)| {
+                let raw: SymbolicExt<C::F, C::EF> = chip_evaluation
                     .main_trace_evaluations
                     .iter()
                     .copied()
@@ -602,7 +646,23 @@ where
                         let o_sym: SymbolicExt<C::F, C::EF> = opening.into();
                         o_sym * power
                     })
-                    .sum::<SymbolicExt<C::F, C::EF>>()
+                    .sum::<SymbolicExt<C::F, C::EF>>();
+
+                // Embedding factor from the degree one-hot prefix.
+                let mut prefix: Ext<C::F, C::EF> = zero_ext;
+                let mut factor: Ext<C::F, C::EF> = one_ext;
+                for (k, zk) in gkr_evaluations.point.iter().enumerate() {
+                    let dk: SymbolicExt<C::F, C::EF> = opening.degree[k].into();
+                    let prefix_sym: SymbolicExt<C::F, C::EF> = prefix.into();
+                    prefix = builder.eval(prefix_sym + dk);
+                    let prefix_now: SymbolicExt<C::F, C::EF> = prefix.into();
+                    let is_high: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE - prefix_now;
+                    let zk_sym: SymbolicExt<C::F, C::EF> = (*zk).into();
+                    let factor_sym: SymbolicExt<C::F, C::EF> = factor.into();
+                    factor = builder.eval(factor_sym * (SymbolicExt::ONE - is_high * zk_sym));
+                }
+                let factor_sym: SymbolicExt<C::F, C::EF> = factor.into();
+                raw * factor_sym
             })
             .collect();
 

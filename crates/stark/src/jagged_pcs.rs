@@ -1547,6 +1547,15 @@ pub mod jagged {
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
+                    // ITEM-12: open at the FULL z* (padded-MLE), not bare
+                    // eq_mle@trailing -- multiply by Pi_high(1-z*[k]) so y_per_chip
+                    // == opened_values (component_poly_evals@z*) and matches the
+                    // embedding factor build_weight_table now bakes into w.
+                    let n_high = z_row.len().saturating_sub(r_row_c.len());
+                    let embed_factor: InnerChallenge = z_row[..n_high]
+                        .iter()
+                        .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
+
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
                     (0..w)
                         .into_par_iter()
@@ -1555,7 +1564,7 @@ pub mod jagged {
                             for row in 0..h {
                                 acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                             }
-                            acc
+                            acc * embed_factor
                         })
                         .collect::<Vec<_>>()
                 })
@@ -1773,6 +1782,7 @@ pub mod jagged {
                                 r_row_per_chip,
                                 &y_per_chip,
                                 &z_col,
+                                z_row,
                                 challenger,
                             )
                         }
@@ -1836,6 +1846,7 @@ pub mod jagged {
                                 r_row_per_chip,
                                 &y_per_chip,
                                 &z_col,
+                                z_row,
                                 challenger,
                             )
                         }
@@ -1847,6 +1858,7 @@ pub mod jagged {
                     r_row_per_chip,
                     &y_per_chip,
                     &z_col,
+                    z_row,
                     challenger,
                 ),
             }
@@ -1938,12 +1950,14 @@ pub mod jagged {
     pub fn verify_jagged_basefold(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
             chip_infos,
             r_row_per_chip,
+            z_row,
             bundle,
             challenger,
             /* skip_commit_observe = */ false,
@@ -1958,12 +1972,14 @@ pub mod jagged {
     pub fn verify_jagged_basefold_no_observe(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
             chip_infos,
             r_row_per_chip,
+            z_row,
             bundle,
             challenger,
             /* skip_commit_observe = */ true,
@@ -1973,6 +1989,7 @@ pub mod jagged {
     fn verify_jagged_basefold_inner(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
@@ -2012,6 +2029,7 @@ pub mod jagged {
             r_row_per_chip,
             &bundle.y_per_chip,
             &z_col,
+            z_row,
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
@@ -2208,7 +2226,7 @@ mod test {
         let chip_infos =
             crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
         let mut v_chal = build_challenger();
-        let ok = verify_jagged_basefold(&chip_infos, &r_row_per_chip, &bundle, &mut v_chal);
+        let ok = verify_jagged_basefold(&chip_infos, &r_row_per_chip, &z_row_test, &bundle, &mut v_chal);
         assert!(ok, "jagged-basefold pipeline should accept honest proof");
     }
 
@@ -2256,7 +2274,7 @@ mod test {
         tampered.reduction.q_at_z = tampered.reduction.q_at_z + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
-            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
+            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &z_row_test, &tampered, &mut v_chal),
             "verifier must reject q_at_z tampering"
         );
 
@@ -2265,7 +2283,7 @@ mod test {
         tampered.y_per_chip[0][0] = tampered.y_per_chip[0][0] + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
-            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
+            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &z_row_test, &tampered, &mut v_chal),
             "verifier must reject y_per_chip tampering"
         );
 
@@ -2275,7 +2293,7 @@ mod test {
             tampered.basefold_proof.basefold_proof.final_poly + JaggedChallenge::ONE;
         let mut v_chal = build_challenger();
         assert!(
-            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &tampered, &mut v_chal),
+            !verify_jagged_basefold(&chip_infos, &r_row_per_chip, &z_row_test, &tampered, &mut v_chal),
             "verifier must reject final_poly tampering"
         );
     }

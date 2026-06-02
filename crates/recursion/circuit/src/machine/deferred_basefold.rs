@@ -85,6 +85,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             zkm_stark::shard_level::shard_proof::EvaluationProof,
+            crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
         ),
     )>,
     /// per-input per-chip cumulative sums.
@@ -191,8 +192,14 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 builder,
                 &vk_legacy,
             );
-        let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof) =
-            proof_tuple;
+        let (
+            main_commit,
+            public_values_raw,
+            logup_gkr_proof,
+            zerocheck_proof,
+            evaluation_proof,
+            _proof_opened_values,
+        ) = proof_tuple;
 
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();

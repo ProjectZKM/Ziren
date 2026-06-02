@@ -278,7 +278,8 @@ impl BasefoldShardVerifier {
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
             chips,
-            &proof.logup_gkr_proof.logup_evaluations.point,
+            // ITEM-12: jagged verified at the zerocheck-reduced z*.
+            &proof.zerocheck_proof.point_and_eval.0,
             &proof.evaluation_proof,
             &proof.logup_gkr_proof.logup_evaluations,
             challenger,
@@ -435,6 +436,17 @@ where
         })
         .collect();
 
+    // ITEM-12: the full z* point as InnerChallenge for the jagged embedding factor.
+    // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
+    let z_row_inner: Vec<InnerChallenge> = {
+        let cloned: Vec<Challenge<SC>> = shared_eval_point.to_vec();
+        let (ptr, len, cap) = {
+            let mut vv = core::mem::ManuallyDrop::new(cloned);
+            (vv.as_mut_ptr(), vv.len(), vv.capacity())
+        };
+        unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+    };
+
     // Downcast SC::Challenger to &mut JaggedChallenger.
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
@@ -449,7 +461,7 @@ where
     // Use the `_no_observe` variant so the verifier doesn't observe
     // the same digest a second time (which would desync the
     // transcript vs the prover).
-    if !verify_jagged_basefold_no_observe(&chip_infos, &r_row_per_chip, &bundle, lb_challenger) {
+    if !verify_jagged_basefold_no_observe(&chip_infos, &r_row_per_chip, &z_row_inner, &bundle, lb_challenger) {
         return Err(BasefoldVerifyError::JaggedPcs(
             "verify_jagged_basefold_no_observe rejected the bundle".into(),
         ));
@@ -469,6 +481,7 @@ where
 ///
 /// via the same recurrence as the in-circuit [`crate::zerocheck::full_geq`]
 /// but on concrete extension-field values.
+#[allow(dead_code)] // host mirrors of the retired crypto-identity check; kept for unit tests
 fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
     debug_assert_eq!(
         threshold.len(),
@@ -494,6 +507,7 @@ fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
 /// (no-op) so this preserves the current recursion-circuit behaviour;
 /// a later iteration can thread real per-chip height bits through once
 /// the prover populates them.
+#[allow(dead_code)] // host mirrors of the retired crypto-identity check; kept for unit tests
 fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
     vec![EF::ZERO; max_log_row_count + 1]
 }
@@ -507,6 +521,7 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 /// [`ChipOpenedValues`] fields (permutation, quotient, cumulative sums,
 /// log_degree) aren't consumed by [`BasefoldConstraintFolder`] beyond
 /// what's directly plumbed, so placeholder zeros are adequate.
+#[allow(dead_code)] // host mirrors of the retired crypto-identity check; kept for unit tests
 fn chip_opening_from_gkr_evaluation<F, EF>(
     evaluation: &super::types::ChipEvaluation<EF>,
     log_degree: usize,
@@ -638,7 +653,7 @@ where
             .chip_openings
             .values()
             .map(|chip_evaluation| {
-                chip_evaluation
+                let raw = chip_evaluation
                     .main_trace_evaluations
                     .iter()
                     .copied()
@@ -652,7 +667,18 @@ where
                             .copied(),
                     )
                     .zip(gkr_batch_open_powers.iter().copied())
-                    .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
+                    .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p);
+                // MIXED-HEIGHT EMBEDDING FACTOR (matches the prover's claim
+                // correction in zerocheck_prover.rs): the GKR opens each chip
+                // at its trailing log_h, dropping Π_high(1 − zeta[k]) over the
+                // zeta coords above this chip's height; re-apply it so the
+                // reconstruction equals the prover's embedded claimed_sum.
+                let log_h = chip_evaluation.log_degree as usize;
+                let high = gkr_evaluations.point.len().saturating_sub(log_h);
+                let embed_factor = gkr_evaluations.point[..high]
+                    .iter()
+                    .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
+                raw * embed_factor
             })
             .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
         if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
@@ -710,168 +736,6 @@ where
     Ok(())
 }
 
-/// Full cryptographic identity check for the BaseFold zerocheck phase
-/// — host port of the in-circuit
-/// [`crate::recursion_circuit::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`]'s
-/// steps (4)-(5):
-///
-///   (a) Cross-chip constraint RLC:
-///       ```text
-///       Σ_chip λ^k · eq(gkr_point, zerocheck_point) ·
-///           ( constraint_eval(chip, α)
-///             - full_geq(degree, zerocheck_point ++ 0) · padded_row_adjustment(chip, α)
-///             + batch_openings(chip.openings, gkr_batch_open) )
-///           == zerocheck_proof.point_and_eval.1
-///       ```
-///
-///   (b) GKR sum-modification:
-///       ```text
-///       Σ_chip λ^k · batch_openings(chip's GKR evals, gkr_batch_open)
-///           == zerocheck_proof.claimed_sum
-///       ```
-///
-/// # Protocol compatibility
-///
-/// Callers must supply an SP1-shape zerocheck proof where
-/// `claimed_sum` and `point_and_eval.1` are the reduction of chip
-/// constraint tables under `α, λ, gkr_batch_open` — Ziren's current
-/// direct `Σ_b C(b) == 0` zerocheck does NOT satisfy these identities.
-///
-/// The `alpha`, `gkr_batch_open`, `lambda` parameters are the exact
-/// values the caller already sampled from the transcript in
-/// [`verify_zerocheck_host`] — pass them through rather than
-/// re-sampling to avoid transcript desync.
-#[allow(clippy::too_many_arguments)]
-pub fn verify_zerocheck_cryptographic_identity_host<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
-    gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
-    public_values: &[Val<SC>],
-    max_log_row_count: usize,
-    alpha: Challenge<SC>,
-    gkr_batch_open: Challenge<SC>,
-    lambda: Challenge<SC>,
-) -> Result<(), BasefoldVerifyError>
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
-    Val<SC>: PrimeField,
-    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
-{
-    use p3_air::BaseAir;
-
-    // Shared factors computed once outside the per-chip loop.
-    let zerocheck_eq_val = eq_eval_host(&gkr_evaluations.point, &zerocheck_proof.point_and_eval.0);
-
-    let max_elements = chips
-        .iter()
-        .map(|chip| {
-            <_ as BaseAir<Val<SC>>>::width(*chip)
-                + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
-        })
-        .max()
-        .unwrap_or(0);
-    let gkr_batch_open_powers: Vec<Challenge<SC>> = {
-        let mut v = Vec::with_capacity(max_elements);
-        let mut acc: Challenge<SC> = Challenge::<SC>::ONE;
-        for _ in 0..max_elements {
-            acc = acc * gkr_batch_open;
-            v.push(acc);
-        }
-        v
-    };
-
-    // Per-chip degree point (zero-filled stub — matches the in-circuit
-    // witness stub at `shard_proof_variable_lift::empty_chip_height_bits`).
-    let degree_stub: Vec<Challenge<SC>> = degree_stub_host::<Challenge<SC>>(max_log_row_count);
-
-    // Extended sumcheck point (one extra zero coord) for full_geq.
-    let mut proof_point_extended: Vec<Challenge<SC>> =
-        zerocheck_proof.point_and_eval.0.clone();
-    proof_point_extended.push(Challenge::<SC>::ZERO);
-
-    // (a) Cross-chip constraint-RLC identity.
-    let mut rlc_eval: Challenge<SC> = Challenge::<SC>::ZERO;
-    for chip in chips.iter() {
-        let name = chip.name().to_string();
-        let opening_ref = gkr_evaluations.chip_openings.get(&name).ok_or_else(|| {
-            BasefoldVerifyError::Zerocheck(format!(
-                "chip {name} missing from gkr_evaluations.chip_openings"
-            ))
-        })?;
-        let chip_opening: ChipOpenedValues<Val<SC>, Challenge<SC>> =
-            chip_opening_from_gkr_evaluation::<Val<SC>, Challenge<SC>>(opening_ref, 0);
-
-        let geq_val = full_geq_host(&degree_stub, &proof_point_extended);
-        let constraint_acc = eval_constraints_basefold_host::<Val<SC>, Challenge<SC>, A>(
-            chip,
-            &chip_opening,
-            alpha,
-            public_values,
-        );
-        let padded_row_adj = compute_padded_row_adjustment_basefold_host::<
-            Val<SC>,
-            Challenge<SC>,
-            A,
-        >(chip, &chip_opening, alpha, public_values);
-        let constraint_eval = constraint_acc - padded_row_adj * geq_val;
-
-        let combined_len = chip_opening.main.local.len() + chip_opening.preprocessed.local.len();
-        let openings_batch: Challenge<SC> = chip_opening
-            .main
-            .local
-            .iter()
-            .copied()
-            .chain(chip_opening.preprocessed.local.iter().copied())
-            .zip(gkr_batch_open_powers.iter().take(combined_len).copied())
-            .fold(Challenge::<SC>::ZERO, |acc, (opening, power)| acc + opening * power);
-
-        rlc_eval = rlc_eval * lambda
-            + zerocheck_eq_val * (constraint_eval + openings_batch);
-    }
-
-    if rlc_eval != zerocheck_proof.point_and_eval.1 {
-        return Err(BasefoldVerifyError::Zerocheck(
-            "cross-chip constraint-RLC identity failed".into(),
-        ));
-    }
-
-    // (b) GKR sum-modification identity.
-    let gkr_batches: Vec<Challenge<SC>> = gkr_evaluations
-        .chip_openings
-        .values()
-        .map(|chip_evaluation| {
-            chip_evaluation
-                .main_trace_evaluations
-                .iter()
-                .copied()
-                .chain(
-                    chip_evaluation
-                        .preprocessed_trace_evaluations
-                        .as_ref()
-                        .map(|v| v.as_slice())
-                        .unwrap_or(&[])
-                        .iter()
-                        .copied(),
-                )
-                .zip(gkr_batch_open_powers.iter().copied())
-                .fold(Challenge::<SC>::ZERO, |acc, (opening, power)| acc + opening * power)
-        })
-        .collect();
-
-    let zerocheck_sum_mod: Challenge<SC> = gkr_batches
-        .iter()
-        .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + *m);
-
-    if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
-        return Err(BasefoldVerifyError::Zerocheck(
-            "GKR sum-modification identity failed".into(),
-        ));
-    }
-
-    Ok(())
-}
 
 // ─────────────────────────────────────────────────────────────
 // Phase 2: host-side LogUp-GKR verification helpers

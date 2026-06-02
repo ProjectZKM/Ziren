@@ -117,6 +117,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             zkm_stark::shard_level::shard_proof::EvaluationProof,
+            crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
         ),
     )>,
     /// per-input per-chip cumulative sums (witnessed
@@ -280,6 +281,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
+            _proof_opened_values,
         ) = proof_tuple;
         // Clone public_values for the aggregate pass — it's moved into
         // `assemble_basefold_shard_proof_variable` below.

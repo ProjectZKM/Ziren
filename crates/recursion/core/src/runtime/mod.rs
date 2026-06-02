@@ -871,15 +871,20 @@ where
                     FieldEltType::Base => {
                         state.nb_print_f += 1;
                         let f = self.mr_us(addr).val[0];
-                        writeln!(debug_stdout.as_mut().expect("debug_stdout must be Some at root walker"), "PRINTF={f}")
+                        match debug_stdout.as_mut() {
+                            Some(w) => writeln!(w, "PRINTF={f}").map_err(RuntimeError::DebugPrint)?,
+                            None => eprintln!("PRINTF={f}"),
+                        }
                     }
                     FieldEltType::Extension => {
                         state.nb_print_e += 1;
                         let ef = self.mr_us(addr).val;
-                        writeln!(debug_stdout.as_mut().expect("debug_stdout must be Some at root walker"), "PRINTEF={ef:?}")
+                        match debug_stdout.as_mut() {
+                            Some(w) => writeln!(w, "PRINTEF={ef:?}").map_err(RuntimeError::DebugPrint)?,
+                            None => eprintln!("PRINTEF={ef:?}"),
+                        }
                     }
-                }
-                .map_err(RuntimeError::DebugPrint)?,
+                },
                 Instruction::HintExt2Felts(HintExt2FeltsInstr {
                     output_addrs_mults,
                     input_addr,

@@ -237,8 +237,23 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         // SepticDigest<F> → SepticDigest<Felt<F>> — field-by-field
         // read of the 7-element septic extension coordinates.
+        //
+        // CRITICAL: the felt-stream consumption order here MUST match
+        // `write` below (the `Vec<_>` Witnessable carries no length
+        // prefix — witness/mod.rs:119 — so read/write order, not just
+        // length, must agree).  `write` emits in struct-declaration
+        // order: preprocessed, main, degree, local_cumulative_sum,
+        // THEN the 7+7 septic global-cumsum felts.  A previous version
+        // read x/y FIRST, shifting every chip's openings by 14 felts:
+        // `main.local[0]` then read what `write` placed at
+        // `main.local[14]`, breaking `rlc_eval == point_and_eval.1`
+        // (zerocheck.rs:585).
         use zkm_stark::septic_curve::SepticCurve;
         use zkm_stark::septic_extension::SepticExtension;
+        let preprocessed = self.preprocessed.read(builder);
+        let main = self.main.read(builder);
+        let degree = self.degree.read(builder);
+        let local_cumulative_sum = self.local_cumulative_sum.read(builder);
         let x_felts: [Felt<C::F>; 7] = core::array::from_fn(|i| {
             self.global_cumulative_sum.0.x.0[i].read(builder)
         });
@@ -246,10 +261,10 @@ where
             self.global_cumulative_sum.0.y.0[i].read(builder)
         });
         BasefoldChipOpenedValues {
-            preprocessed: self.preprocessed.read(builder),
-            main: self.main.read(builder),
-            degree: self.degree.read(builder),
-            local_cumulative_sum: self.local_cumulative_sum.read(builder),
+            preprocessed,
+            main,
+            degree,
+            local_cumulative_sum,
             global_cumulative_sum: SepticDigest(SepticCurve {
                 x: SepticExtension(x_felts),
                 y: SepticExtension(y_felts),

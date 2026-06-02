@@ -87,6 +87,11 @@ pub struct ZKMCoreBasefoldWitnessVariable<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         zkm_stark::shard_level::shard_proof::EvaluationProof,
+        // Review item 12: per-chip trace@z openings carried from the
+        // host proof so the in-circuit zerocheck verifier batches and
+        // constrains the SAME values the prover reduced to the
+        // zerocheck point (not the trace@z_gkr LogUp-GKR openings).
+        crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
     )>,
     /// swap 1+2: per-shard per-chip cumulative sums.
     pub chip_cumulative_sums_per_shard: Vec<
@@ -233,8 +238,14 @@ pub fn verify_core_basefold<C, SC, A>(
         .into_iter()
         .enumerate()
         .ir_par_map_collect::<Vec<_>, _, _>(builder, |builder, (i, proof_tuple)| {
-            let (main_commit, public_values_raw, logup_gkr_proof, zerocheck_proof, evaluation_proof) =
-                proof_tuple;
+            let (
+                main_commit,
+                public_values_raw,
+                logup_gkr_proof,
+                zerocheck_proof,
+                evaluation_proof,
+                proof_opened_values,
+            ) = proof_tuple;
             let chip_names: Vec<String> =
                 logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
@@ -353,10 +364,23 @@ pub fn verify_core_basefold<C, SC, A>(
             let cumsums_for_shard = cumsums_per_shard_ref
                 .get(i)
                 .unwrap_or(&empty_cumsums);
+            // Review item 12: use the per-chip trace@z openings carried
+            // from the host proof (`proof_opened_values`) instead of the
+            // LogUp-GKR openings (trace@z_gkr).  The host reduced the
+            // trace to the zerocheck point z; the in-circuit zerocheck
+            // verifier batches/constrains these and asserts they equal
+            // `point_and_eval.1` (zerocheck.rs:573).  `finalize_…`
+            // overwrites the placeholder `degree` with REAL big-endian
+            // height bits (so `full_geq` masks padded rows correctly,
+            // zerocheck.rs:517) and the real per-chip cumulative sums.
+            // `chip_names` is the name-ordered BTreeMap key list, aligned
+            // index-for-index with the host name-sorted opened_values.
             let opened_values =
-                crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
+                crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
                     builder,
-                    &logup_gkr_proof.logup_evaluations.chip_openings,
+                    proof_opened_values,
+                    &chip_names,
+                    chip_log_heights_for_shard,
                     cumsums_for_shard,
                     max_log_row_count,
                 );

@@ -168,12 +168,22 @@ where
     type WitnessVariable = st::LogUpEvaluations<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        // CRITICAL: read must consume the felt stream in the SAME order
+        // `write` emits it — `point` FIRST, then `chip_openings`.  The
+        // `Vec`/`BTreeMap` Witnessable impls carry no length prefix
+        // (witness/mod.rs:119), so reading `chip_openings` before `point`
+        // swapped the two regions in-circuit: `point` ended up holding
+        // the GKR trace@z_gkr opening felts and `chip_openings` held the
+        // point felts.  `verify_zerocheck` (zerocheck.rs:456) then
+        // computed `zerocheck_eq_val` from the opening felts, breaking
+        // the `rlc_eval == point_and_eval.1` identity (zerocheck.rs:579).
+        let point = self.point.read(builder);
         let chip_openings: BTreeMap<String, st::ChipEvaluation<Ext<C::F, C::EF>>> = self
             .chip_openings
             .iter()
             .map(|(name, eval)| (name.clone(), eval.read(builder)))
             .collect();
-        st::LogUpEvaluations { point: self.point.read(builder), chip_openings }
+        st::LogUpEvaluations { point, chip_openings }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
@@ -239,6 +249,11 @@ where
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
         zkm_stark::shard_level::shard_proof::EvaluationProof,
+        // Review item 12: per-chip trace@z openings (name order).
+        crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+        >,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -251,12 +266,18 @@ where
         // jagged-PCS-variable reconstruction step consumes it directly
         // (no felt-level witness reads here).
         let evaluation_proof = self.evaluation_proof.clone();
+        // Review item 12: lift the host `ShardOpenedValues` (trace@z)
+        // into the BaseFold-shape per-chip opening bundle.  `degree`
+        // and the cumulative sums are placeholders here and are
+        // finalized in the verifier from the real height / cumsum maps.
+        let opened_values = basefold_opened_values_from_host(&self.opened_values).read(builder);
         (
             main_commitment_arr,
             public_values,
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
+            opened_values,
         )
     }
 
@@ -270,7 +291,50 @@ where
         // evaluation_proof bytes are not written through the
         // felt-witness stream — they're transported out-of-band
         // and consumed by the jagged-PCS layer directly.
+        // Review item 12: write opened_values in the same shape `read`
+        // consumes them.
+        basefold_opened_values_from_host(&self.opened_values).write(witness);
     }
+}
+
+/// Review item 12: convert the host `ShardOpenedValues` (legacy 4-batch
+/// FRI shape) into the BaseFold-pipeline per-chip opening bundle.
+///
+/// Only `preprocessed.local`, `main.local`, and the cumulative sums are
+/// carried; `next`/`permutation`/`quotient` have no analog in the
+/// BaseFold reduction.  `degree` is set to a zero placeholder of length
+/// `log_degree + 1` and is replaced with the REAL big-endian height
+/// bits in the verifier (`finalize_carried_opened_values`); its length
+/// is irrelevant to the felt-witness stream since `Ext` reads are
+/// length-prefixed by the `Vec<_>` Witnessable.
+fn basefold_opened_values_from_host(
+    opened: &zkm_stark::ShardOpenedValues<InnerVal, InnerChallenge>,
+) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<InnerVal, InnerChallenge> {
+    use p3_field::PrimeCharacteristicRing;
+    let chips = opened
+        .chips
+        .iter()
+        .map(|c| crate::basefold_chip_opened_values::BasefoldChipOpenedValues {
+            preprocessed: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                local: c.preprocessed.local.clone(),
+            },
+            main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
+                local: c.main.local.clone(),
+            },
+            // Review item 12: the REAL big-endian height bits were carried
+            // host-side in `quotient[0]` (prover.rs E1d) — the VirtualGeq
+            // threshold for `full_geq`.  Fall back to a 1-elt zero stub if
+            // absent (legacy/empty proofs).
+            degree: c
+                .quotient
+                .first()
+                .cloned()
+                .unwrap_or_else(|| vec![InnerChallenge::ZERO]),
+            local_cumulative_sum: c.local_cumulative_sum,
+            global_cumulative_sum: c.global_cumulative_sum,
+        })
+        .collect();
+    crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
 // ── Jagged-PCS bundle Witnessable surface (#241 Phase 1) ─────────
@@ -1100,7 +1164,7 @@ mod tests {
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
-        let (main_commit, pvs, _logup, _zerocheck, evaluation_proof) =
+        let (main_commit, pvs, _logup, _zerocheck, evaluation_proof, _opened_values) =
             <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);

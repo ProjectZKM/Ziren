@@ -287,6 +287,14 @@ mod tests {
     }
 
     #[test]
+    fn measure_addsub_degree() {
+        let chip = zkm_stark::Chip::<KoalaBear, _>::new(AddSubChip::default());
+        // log_quotient_degree = log2_ceil(max_constraint_degree - 1):
+        //   1 => degree 3 ; 2 => degree 4 or 5.
+        println!("ADDSUB_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());
+    }
+
+    #[test]
     fn prove_koala_bear() {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();

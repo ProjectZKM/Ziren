@@ -728,6 +728,31 @@ fn fold_cells<EF: Field>(cells: &[EF], ncols: usize, num_real: usize, alpha: EF)
     out
 }
 
+/// Bit-reverse the rows of a row-major cell buffer over `log2(height)` bits
+/// (row `r` -> row `bitrev(r)`).  `height` must be a power of two.
+///
+/// ORIENTATION FIX: the GKR per-chip opening (`evaluate_trace_columns_at_point`
+/// -> `eq_mle_table`) is LSB-first (`point[0]` <-> row-LSB), while this module's
+/// zerocheck poly is big-endian (`partial_lagrange` / `fold_cells` peel
+/// `zeta[dim-1]` <-> row-LSB, matching SP1).  Feeding the bit-reversed trace to
+/// the poly makes its big-endian boolean-cube sum equal the LSB-first GKR-batch
+/// claim, restoring `claim == cube-sum` without touching `zeta`, the GKR
+/// openings, or the claim.
+pub(crate) fn bitrev_rows<EF: Field>(cells: &[EF], ncols: usize, height: usize) -> Vec<EF> {
+    if height <= 1 || ncols == 0 {
+        return cells.to_vec();
+    }
+    let log_h = (height as u32).trailing_zeros();
+    debug_assert_eq!(1usize << log_h, height, "bitrev_rows: height must be 2^k");
+    let mut out = vec![EF::ZERO; height * ncols];
+    for r in 0..height {
+        let rr = ((r as u32).reverse_bits() >> (32 - log_h)) as usize;
+        out[rr * ncols..rr * ncols + ncols]
+            .copy_from_slice(&cells[r * ncols..r * ncols + ncols]);
+    }
+    out
+}
+
 // ───────────────────────────── trait impls ───────────────────────────────
 
 impl<F, EF, A> SumcheckPolyBase for ZeroCheckPoly<'_, F, EF, A>
@@ -927,5 +952,713 @@ mod tests {
             assert_eq!(acc, *y, "interpolant must pass through node x={x:?}");
         }
         let _ = InnerVal::ONE; // keep InnerVal import used
+    }
+
+    // ───── reduce_sumcheck_serial end-to-end identity (host sum_as_poly) ─────
+    use crate::air::{MachineAir, MachineProgram};
+    use crate::chip::Chip;
+    use crate::record::MachineRecord;
+    use crate::septic_digest::SepticDigest;
+    use crate::air::{AirLookup, BaseAirBuilder, LookupScope};
+    use crate::lookup::LookupKind;
+    use p3_air::{Air, BaseAir, WindowAccess};
+    use p3_matrix::dense::RowMajorMatrix;
+
+    #[derive(Clone, Default)]
+    struct MockRecord;
+    impl MachineRecord for MockRecord {
+        type Config = ();
+        fn stats(&self) -> hashbrown::HashMap<String, usize> {
+            hashbrown::HashMap::new()
+        }
+        fn append(&mut self, _other: &mut Self) {}
+        fn public_values<FF: p3_field::PrimeCharacteristicRing>(&self) -> Vec<FF> {
+            Vec::new()
+        }
+    }
+    #[derive(Clone, Default)]
+    struct MockProgram;
+    impl MachineProgram<InnerVal> for MockProgram {
+        fn pc_start(&self) -> InnerVal {
+            InnerVal::ZERO
+        }
+        fn initial_global_cumulative_sum(&self) -> SepticDigest<InnerVal> {
+            SepticDigest::<InnerVal>::zero()
+        }
+    }
+    #[derive(Clone)]
+    struct MockAir {
+        ncols: usize,
+    }
+    impl<F> BaseAir<F> for MockAir {
+        fn width(&self) -> usize {
+            self.ncols
+        }
+    }
+    impl<AB: BaseAirBuilder> Air<AB> for MockAir {
+        fn eval(&self, builder: &mut AB) {
+            let main = builder.main();
+            let row = main.current_slice();
+            // Degree-3 algebraic constraint on column 0 (matches AddSub's degree).
+            let x: AB::Expr = row[0].into();
+            // Degree-3 constraint x·(x-1)·(x-2), satisfied by rows in {0,1,2}.
+            let one = AB::Expr::ONE;
+            let two = AB::Expr::ONE + AB::Expr::ONE;
+            builder.assert_zero(x.clone() * (x.clone() - one) * (x.clone() - two));
+            // One (no-op for the BaseFold folder) interaction so the chip has a
+            // permutation trace (permutation_trace_width > 0) — makes Chip::eval's
+            // eval_permutation_constraints early-return instead of panicking on
+            // empty permutation_randomness.
+            builder.send(
+                AirLookup::new(vec![x.clone()], AB::Expr::ONE, LookupKind::Byte),
+                LookupScope::Local,
+            );
+        }
+    }
+    impl MachineAir<InnerVal> for MockAir {
+        type Record = MockRecord;
+        type Program = MockProgram;
+        type Error = std::convert::Infallible;
+        fn name(&self) -> String {
+            "Mock".to_string()
+        }
+        fn generate_trace(
+            &self,
+            _input: &MockRecord,
+            _output: &mut MockRecord,
+        ) -> Result<RowMajorMatrix<InnerVal>, Self::Error> {
+            unreachable!("generate_trace not exercised by this test")
+        }
+        fn included(&self, _shard: &MockRecord) -> bool {
+            true
+        }
+    }
+
+    fn eq_pt(a: &[EF], b: &[EF]) -> EF {
+        a.iter()
+            .zip(b.iter())
+            .map(|(&ai, &bi)| (EF::ONE - ai) * (EF::ONE - bi) + ai * bi)
+            .product()
+    }
+
+    fn poly_horner(coeffs: &[EF], x: EF) -> EF {
+        let mut acc = EF::ZERO;
+        for c in coeffs.iter().rev() {
+            acc = acc * x + *c;
+        }
+        acc
+    }
+
+    /// The zerocheck sumcheck must reduce its claim to
+    /// `eq(zeta,z) * (C(trace@z) + batch(trace@z))` at the reduced point z —
+    /// the exact identity the recursion verifier asserts.  Fully-packed
+    /// (no padding) so the VirtualGeq/padded term is inert: this isolates
+    /// the core `sum_as_poly` reduction.
+    #[test]
+    fn reduce_sumcheck_reduces_to_eq_times_constraint_plus_batch() {
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        let num_vars = 4u32;
+        let ncols = 1usize;
+        let num_real = 2usize; // HEAVY padding: 2 real rows in a 2^4 = 16 hypercube
+                               // (high variables fully padded; fold sits at num_real=1)
+
+        // Honest trace: every real row value in {0,1} → C=0 on real rows.
+        let main_cells: Vec<EF> =
+            (0..num_real * ncols).map(|i| EF::from_u64((i % 2) as u64)).collect();
+        // zeta MATCHES the real system: the GKR point is left-padded with ZERO
+        // for the high (MSB) row variables down to log2(num_real); only the
+        // trailing log2(num_real) coords are "real" sampled challenges.
+        let real_vars = (num_real as u32).trailing_zeros() as usize; // num_real is 2^k
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if k < (num_vars as usize - real_vars) {
+                    EF::ZERO // leading-zero padding for fully-padded high variables
+                } else {
+                    EF::from_u64((k * 5 + 2) as u64 + 100)
+                }
+            })
+            .collect();
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let lambda = EF::from_u64(31);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let combined = main_width + prep_width;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..combined {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+
+        let batch = |row: &[EF]| -> EF {
+            row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum()
+        };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+        };
+        let zero_row = vec![EF::ZERO; ncols];
+        let h = |x: usize| -> EF {
+            // Padded rows (x >= num_real) are the ZERO row.
+            let row: &[EF] = if x < num_real {
+                &main_cells[x * ncols..x * ncols + ncols]
+            } else {
+                &zero_row
+            };
+            cval(row) + batch(row)
+        };
+
+        // claim = Σ_x eq(zeta, x) · h(x).  boolean_point(x)[k] = bit_{n-1-k}(x)
+        // matches the z = point_and_eval.0 = [a_{n-1},…,a_0] orientation.
+        let n = num_vars as usize;
+        let mut claim = EF::ZERO;
+        for x in 0..(1usize << n) {
+            let pt: Vec<EF> = (0..n)
+                .map(|k| if (x >> (n - 1 - k)) & 1 == 1 { EF::ONE } else { EF::ZERO })
+                .collect();
+            claim += eq_pt(&zeta, &pt) * h(x);
+        }
+
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let main_height = num_real;
+        let vg = VirtualGeq::new(main_height as u32, EF::ONE, EF::ZERO, num_vars);
+        let init_geq = if main_height > 0 { EF::ZERO } else { EF::ONE };
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip,
+            &pv,
+            alpha,
+            gkr_powers.clone(),
+            zeta.clone(),
+            main_cells.clone(),
+            main_width,
+            None,
+            prep_width,
+            num_real,
+            num_vars,
+            EF::ONE,
+            init_geq,
+            pra,
+            vg,
+        );
+
+        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+            vec![poly],
+            &mut challenger,
+            vec![claim],
+            1,
+            lambda,
+        );
+
+        // SANITY: a correct claim must satisfy p_0(0)+p_0(1)=claim.  If this
+        // fails, the bug is in this test's claim convention, not sum_as_poly.
+        let p0 = &proof.univariate_polys[0].coefficients;
+        assert_eq!(
+            claim,
+            poly_horner(p0, EF::ZERO) + poly_horner(p0, EF::ONE),
+            "test claim convention wrong (round-0 sumcheck relation broken)"
+        );
+
+        // THE IDENTITY: evals[0] (== point_and_eval.1) must equal
+        // eq(zeta,z)·(C(trace@z)+batch(trace@z)).
+        let z = &proof.point_and_eval.0;
+        let trace_at_z = &cpe[0]; // prep-then-main; prep_width=0 → all main
+        let main_at_z = &trace_at_z[prep_width..];
+        let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
+        assert_eq!(
+            proof.point_and_eval.1, expected,
+            "sum_as_poly reduction != eq*(C(trace@z)+batch) — host zerocheck bug reproduced"
+        );
+    }
+
+    // The orientation fix under test is the module-scope `super::bitrev_rows`
+    // (the same helper `zerocheck_prover` feeds the poly), exercised below.
+    use super::bitrev_rows;
+
+    /// REPRODUCTION of the zeta-orientation bug + REGRESSION for its fix.
+    ///
+    /// Feeds the poly the *real* prover's GKR-forward claim — built from
+    /// `main_trace_evaluations = evaluate_trace_columns_at_point` over the
+    /// trailing `log2(height)` coords of `zeta` (forward: row-bit k ←
+    /// zeta[start+k]; `zerocheck_prover.rs:474-479`, `row_gkr/top_level.rs:
+    /// 330-347`) — NOT the poly-convention brute force used by the sibling
+    /// test.  The poly's own fold is LSB-first → it binds row-bit k ←
+    /// zeta[dim-1-k] (REVERSED).  So on a row-distinct trace the poly's
+    /// true boolean-cube sum (reversed batch) != the forward claim, and the
+    /// sumcheck reduces to a wrong value (`point_and_eval.1` !=
+    /// `eq(zeta,z)·(C+batch(trace@z))`) — the recursion verifier rejects.
+    ///
+    /// THE FIX (`fix = true`): bit-reverse the chip's real trace rows over
+    /// `log2(height)` bits before building the poly.  This re-aligns the
+    /// LSB fold to the GKR-forward orientation WITHOUT touching `zeta`, the
+    /// GKR openings, the jagged `r_row`, or any transcript-observe — so the
+    /// poly's cube-sum becomes the forward claim (invariant 1 restored) and
+    /// `point_and_eval.1 == eq_eval(zeta_ORIGINAL, z)·(C+batch)` still holds
+    /// (invariant 2 preserved, because zeta is untouched).
+    fn run_orientation_case(fix: bool) -> bool {
+        use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        let num_vars = 4u32;
+        let ncols = 2usize;
+        // 4 real rows in a 2^4 hypercube → 2 trailing real coords, 2 leading
+        // ZERO-pad coords (exercises the leading-zero padding offset).
+        let height = 4usize;
+        let real_vars = (height as u32).trailing_zeros() as usize; // 2
+
+        // Row-DISTINCT honest trace (so the trace MLE is orientation-
+        // sensitive).  Column 0 in {0,1,2} → MockAir x(x-1)(x-2) = 0 on real
+        // rows; column 1 arbitrary.
+        let col0 = [0u64, 1, 2, 1];
+        let col1 = [9u64, 4, 7, 13];
+        let trace_base: Vec<InnerVal> = (0..height)
+            .flat_map(|r| [InnerVal::from_u64(col0[r]), InnerVal::from_u64(col1[r])])
+            .collect();
+        let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
+
+        // zeta: leading-ZERO padded, trailing `real_vars` sampled.
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if k < (num_vars as usize - real_vars) {
+                    EF::ZERO
+                } else {
+                    EF::from_u64((k * 7 + 3) as u64 + 200)
+                }
+            })
+            .collect();
+
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let lambda = EF::from_u64(31);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let combined = main_width + prep_width;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..combined {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let batch = |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+        };
+
+        // *** THE REAL PROVER'S CLAIM ***  GKR-forward main_trace_evaluations
+        // at the trailing `real_vars` coords of zeta, then `Σ evals · β^(1..)`.
+        let start = num_vars as usize - real_vars;
+        let main_evals =
+            evaluate_trace_columns_at_point::<InnerVal, EF>(&trace_base, main_width, &zeta[start..]);
+        let claim: EF =
+            main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |acc, (o, p)| acc + *o * *p);
+
+        // The poly input: bit-reverse the trace rows iff `fix` (keeps zeta,
+        // GKR openings, jagged r_row, transcript-observe byte-identical).
+        let poly_cells =
+            if fix { bitrev_rows(&main_cells, ncols, height) } else { main_cells.clone() };
+
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), poly_cells, main_width, None,
+            prep_width, height, num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+
+        let (proof, cpe) =
+            reduce_sumcheck_serial::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
+
+        // INVARIANT (2) — the exact identity the recursion verifier asserts
+        // (zerocheck.rs:628/648): reduced value == eq_eval(zeta_ORIGINAL, z)
+        // · (C(trace@z) + batch(trace@z)).  Returns whether it holds.  zeta is
+        // UNTOUCHED by the fix, so the verifier needs no change.
+        let z = &proof.point_and_eval.0;
+        let main_at_z = &cpe[0][prep_width..];
+        let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
+        proof.point_and_eval.1 == expected
+    }
+
+    /// Same harness over a NON-power-of-two height (3 real rows in 2^4) to
+    /// prove the bit-reverse-rows fix is COMPATIBLE with the VirtualGeq
+    /// contiguous-real-rows optimization.  The trace is padded to the next
+    /// power of two (height_pow2) with ZERO rows BEFORE bit-reversal — so
+    /// real rows land at their bit-reversed positions in the pow2 hypercube,
+    /// exactly mirroring GKR's pow2-padded forward eval; the remaining slots
+    /// stay ZERO and are summed analytically by VirtualGeq.
+    fn run_orientation_nonpow2(fix: bool) -> bool {
+        use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        let num_vars = 4u32;
+        let ncols = 2usize;
+        let real_rows = 3usize; // NON power of two
+        let height_pow2 = real_rows.next_power_of_two(); // 4
+        let log_h = (height_pow2 as u32).trailing_zeros() as usize; // 2
+
+        let col0 = [0u64, 1, 2];
+        let col1 = [9u64, 4, 7];
+        // pow2-padded base trace (GKR evaluates this).
+        let trace_base: Vec<InnerVal> = (0..height_pow2)
+            .flat_map(|r| {
+                if r < real_rows {
+                    [InnerVal::from_u64(col0[r]), InnerVal::from_u64(col1[r])]
+                } else {
+                    [InnerVal::ZERO, InnerVal::ZERO]
+                }
+            })
+            .collect();
+
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if k < (num_vars as usize - log_h) {
+                    EF::ZERO
+                } else {
+                    EF::from_u64((k * 11 + 5) as u64 + 300)
+                }
+            })
+            .collect();
+
+        let alpha = EF::from_u64(19);
+        let beta = EF::from_u64(23);
+        let lambda = EF::from_u64(37);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..main_width {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let batch = |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+        };
+
+        // GKR-forward claim over the pow2-padded trace at trailing log_h coords.
+        let start = num_vars as usize - log_h;
+        let main_evals =
+            evaluate_trace_columns_at_point::<InnerVal, EF>(&trace_base, main_width, &zeta[start..]);
+        let claim: EF =
+            main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |acc, (o, p)| acc + *o * *p);
+
+        // The poly cells.  Unfixed: contiguous real rows (VirtualGeq path),
+        // num_real = real_rows (NON-pow2).  Fixed: bit-reverse the FULL pow2
+        // trace (real rows scatter to bit-reversed slots, gaps stay ZERO),
+        // num_real = height_pow2 so the now-non-contiguous reals are all
+        // summed (VirtualGeq threshold = full height → inert padded term).
+        let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
+        let (poly_cells, num_real, vg_threshold) = if fix {
+            (bitrev_rows(&main_cells, ncols, height_pow2), height_pow2, height_pow2 as u32)
+        } else {
+            // contiguous real-rows slice (length real_rows * ncols).
+            (main_cells[..real_rows * ncols].to_vec(), real_rows, real_rows as u32)
+        };
+
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(vg_threshold, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), poly_cells, main_width, None,
+            prep_width, num_real, num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+
+        let (proof, cpe) =
+            reduce_sumcheck_serial::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
+
+        let z = &proof.point_and_eval.0;
+        let main_at_z = &cpe[0][prep_width..];
+        let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
+        proof.point_and_eval.1 == expected
+    }
+
+    /// Without the fix, the GKR-forward claim is inconsistent with the
+    /// poly's reversed cube-sum → the reduced value != verifier recon.
+    #[test]
+    fn orientation_bug_reproduced_without_fix() {
+        assert!(
+            !run_orientation_case(false),
+            "expected the zeta-orientation bug to make point_and_eval.1 != eq*(C+batch)"
+        );
+    }
+
+    /// With the bit-reverse-rows fix, invariant (2) is restored while zeta /
+    /// GKR openings / jagged r_row stay byte-identical.
+    #[test]
+    fn orientation_fix_restores_verifier_identity() {
+        assert!(
+            run_orientation_case(true),
+            "bit-reverse-rows fix must restore point_and_eval.1 == eq*(C+batch)"
+        );
+    }
+
+    /// Non-power-of-two height: bug present without fix, restored with the
+    /// pow2-padded bit-reverse-rows fix (VirtualGeq-compatible).
+    #[test]
+    fn orientation_nonpow2_bug_then_fix() {
+        assert!(!run_orientation_nonpow2(false), "non-pow2 bug should reproduce");
+        assert!(
+            run_orientation_nonpow2(true),
+            "non-pow2 pow2-padded bit-reverse fix must restore the identity"
+        );
+    }
+
+    /// Parametrized harness: returns (inv1_holds, inv2_holds) for a given
+    /// (num_vars, real_vars, ncols) shape.  inv1 = `claim == boolean-cube
+    /// sum` (brute force, poly's LSB↔zeta[dim-1] orientation); inv2 =
+    /// `reduced == eq(zeta,z)·(C+batch(trace@z))` (the verifier's assert).
+    /// Sweeps the unit-test shape up to the e2e shape to localize any
+    /// shape-dependent break in the bit-reverse-rows fix.
+    fn run_sweep_case(num_vars: u32, real_vars: u32, ncols: usize, fix: bool) -> (bool, bool) {
+        // Existing behaviour: nonzero-zeta width == real_vars (chip is the
+        // tallest in the shard, no nonzero-zeta padding rounds).
+        run_sweep_case_z(num_vars, real_vars, real_vars, ncols, fix)
+    }
+
+    /// Generalized sweep: `real_vars` = log2(num_real rows); `zeta_real_vars`
+    /// = number of NONZERO trailing zeta coords (= the shard's max chip
+    /// log-height, `num_row_variables`).  When `zeta_real_vars > real_vars`
+    /// (this chip is SHORTER than the tallest chip in the shard) the poly
+    /// folds `zeta_real_vars - real_vars` padding rounds over NONZERO zeta —
+    /// the case the original sweep never exercised, and the exact AddSub-in-a-
+    /// mixed-height-shard situation.  The GKR claim still opens at the trailing
+    /// `real_vars` coords (top_level.rs uses the chip's own log_main_height).
+    fn run_sweep_case_z(
+        num_vars: u32,
+        real_vars: u32,
+        zeta_real_vars: u32,
+        ncols: usize,
+        fix: bool,
+    ) -> (bool, bool) {
+        use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        assert!(real_vars <= zeta_real_vars && zeta_real_vars <= num_vars);
+        let height = 1usize << real_vars; // pow2 real rows
+
+        // Row-distinct honest trace: col0 cycles {0,1,2} (MockAir C=0 on real
+        // rows); other cols arbitrary-distinct (affect batch / trace-MLE only).
+        let trace_base: Vec<InnerVal> = (0..height)
+            .flat_map(|r| {
+                (0..ncols)
+                    .map(move |c| {
+                        if c == 0 {
+                            InnerVal::from_u64((r % 3) as u64)
+                        } else {
+                            InnerVal::from_u64((r * 13 + c * 7 + 1) as u64)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
+
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if (k as u32) < (num_vars - zeta_real_vars) {
+                    EF::ZERO
+                } else {
+                    EF::from_u64((k * 7 + 3) as u64 + 200)
+                }
+            })
+            .collect();
+
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let lambda = EF::from_u64(31);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..main_width {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let batch =
+            |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+        };
+
+        let start = (num_vars - real_vars) as usize;
+        let main_evals =
+            evaluate_trace_columns_at_point::<InnerVal, EF>(&trace_base, main_width, &zeta[start..]);
+        let claim_gkr: EF =
+            main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
+
+        // SP1-FAITHFUL CLAIM CORRECTION (PaddedMle::eval_at_eq embedding):
+        // SP1 opens each chip at the FULL max-dim point, so its opening already
+        // carries Π_{extra}(1 − zeta[k]) over the nonzero zeta coords BETWEEN
+        // this chip's trailing log_h and the shard max (`num_row_variables`).
+        // Ziren's GKR opens at the trailing log_h only, dropping that factor.
+        // Re-apply it so the zerocheck claim equals the embedded boolean-cube
+        // sum.  The extra coords are zeta[num_vars - zeta_real_vars ..
+        // num_vars - real_vars]; for an equal-height chip this range is empty
+        // (factor = 1, no-op).
+        let embed_factor: EF = zeta
+            [(num_vars - zeta_real_vars) as usize..(num_vars - real_vars) as usize]
+            .iter()
+            .fold(EF::ONE, |acc, &zk| acc * (EF::ONE - zk));
+        let claim: EF = claim_gkr * embed_factor;
+
+        let poly_cells =
+            if fix { bitrev_rows(&main_cells, ncols, height) } else { main_cells.clone() };
+
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip,
+            &pv,
+            alpha,
+            gkr_powers.clone(),
+            zeta.clone(),
+            poly_cells.clone(),
+            main_width,
+            None,
+            prep_width,
+            height,
+            num_vars,
+            EF::ONE,
+            EF::ZERO,
+            pra,
+            vg,
+        );
+
+        // INVARIANT (1): brute-force boolean-cube sum == claim.  The poly folds
+        // the LSB first and peels zeta[dim-1] first, so row-bit b ↔ zeta[dim-1-b];
+        // padding rows (x ≥ height) contribute eq·pra, which VirtualGeq cancels.
+        let dim = num_vars as usize;
+        let mut cube_sum = EF::ZERO;
+        for x in 0..height {
+            let mut pt = vec![EF::ZERO; dim];
+            for b in 0..(real_vars as usize) {
+                if (x >> b) & 1 == 1 {
+                    pt[dim - 1 - b] = EF::ONE;
+                }
+            }
+            let row = &poly_cells[x * ncols..x * ncols + ncols];
+            cube_sum += eq_pt(&zeta, &pt) * (cval(row) + batch(row));
+        }
+        let inv1 = cube_sum == claim;
+
+        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+            vec![poly],
+            &mut challenger,
+            vec![claim],
+            1,
+            lambda,
+        );
+        let z = &proof.point_and_eval.0;
+        let main_at_z = &cpe[0][prep_width..];
+        let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
+        let inv2 = proof.point_and_eval.1 == expected;
+        (inv1, inv2)
+    }
+
+    /// Bisect the unit-test shape (4,2,2 — passes) toward the e2e shape
+    /// (22,16,2 — AddSub chip0) to localize any shape-dependent break in
+    /// the bit-reverse-rows orientation fix.  Prints per-config results; the
+    /// final assert flags any config whose FIX path fails invariant (2).
+    #[test]
+    fn orientation_sweep() {
+        let configs = [
+            (4u32, 2u32, 2usize), // baseline == run_orientation_case
+            (4, 2, 5),            // wider
+            (5, 2, 2),            // +1 padding round
+            (6, 2, 2),            // +2 padding rounds (gap 4)
+            (8, 2, 2),            // gap 6 (== e2e gap), few real rounds
+            (6, 4, 2),            // 4 real rounds
+            (8, 4, 2),            // 4 real + gap 4
+            (10, 8, 2),           // 8 real rounds
+            (12, 6, 8),           // wide + medium
+            (16, 10, 4),          // large
+            (22, 16, 2),          // *** e2e shape (chip0 AddSub) ***
+        ];
+        let mut any_fix_inv2_fail = false;
+        for &(nv, rv, nc) in configs.iter() {
+            let (i1f, i2f) = run_sweep_case(nv, rv, nc, true);
+            let (i1n, i2n) = run_sweep_case(nv, rv, nc, false);
+            eprintln!(
+                "SWEEP nv={:>2} rv={:>2} nc={} | FIX inv1={} inv2={} | NOFIX inv1={} inv2={}",
+                nv, rv, nc, i1f, i2f, i1n, i2n
+            );
+            if !i2f {
+                any_fix_inv2_fail = true;
+            }
+        }
+        assert!(
+            !any_fix_inv2_fail,
+            "some FIX config failed invariant (2) — bit-reverse fix is shape-dependent (see SWEEP lines)"
+        );
+    }
+
+    /// MIXED-HEIGHT sweep: the chip is SHORTER than the tallest chip in the
+    /// shard, so `zeta` has nonzero coords BEYOND this chip's log-height
+    /// (`zeta_real_vars > real_vars`).  This is the exact e2e situation for
+    /// AddSub (and any sub-max-height chip) that the equal-height sweep never
+    /// exercised.  Prints results; does NOT assert (diagnostic) so we see the
+    /// full pattern.
+    #[test]
+    fn orientation_sweep_mixed_height() {
+        // (num_vars, real_vars = log2(rows), zeta_real_vars = nonzero zeta coords, ncols)
+        let configs = [
+            (8u32, 2u32, 2u32, 2usize),  // equal-height control (should pass)
+            (8, 2, 3, 2),                // +1 nonzero-zeta padding round
+            (8, 2, 4, 2),                // +2 nonzero-zeta padding rounds
+            (8, 2, 6, 2),                // +4
+            (22, 10, 16, 2),             // e2e-like: 2^10 rows, 16 nonzero zeta coords
+            (22, 10, 20, 2),             // taller shard
+            (12, 6, 6, 4),               // equal-height control wide
+            (12, 4, 8, 4),               // shorter chip, wide
+        ];
+        for &(nv, rv, zrv, nc) in configs.iter() {
+            let (i1f, i2f) = run_sweep_case_z(nv, rv, zrv, nc, true);
+            let (i1n, i2n) = run_sweep_case_z(nv, rv, zrv, nc, false);
+            eprintln!(
+                "MIXED nv={:>2} rv={:>2} zrv={:>2} nc={} | FIX inv1={} inv2={} | NOFIX inv1={} inv2={}",
+                nv, rv, zrv, nc, i1f, i2f, i1n, i2n
+            );
+        }
     }
 }
