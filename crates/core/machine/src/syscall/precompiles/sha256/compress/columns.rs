@@ -29,7 +29,10 @@ pub struct ShaCompressCols<T> {
     pub w_ptr: T,
     pub h_ptr: T,
 
-    pub start: T,
+    /// Per-row position in `0..80` (`index = 8*octet_num + octet`), carried on the
+    /// `PrecompileChain` bus.  Replaces the legacy `start` syscall-anchor column —
+    /// the syscall is now received by `ShaCompressControlChip`.
+    pub index: T,
 
     /// Which cycle within the octet we are currently processing.
     pub octet: [T; 8],
@@ -104,7 +107,5 @@ pub struct ShaCompressCols<T> {
     pub is_initialize: T,
     pub is_compression: T,
     pub is_finalize: T,
-    pub is_last_row: T,
-
     pub is_real: T,
 }

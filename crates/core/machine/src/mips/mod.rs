@@ -1,4 +1,6 @@
-use crate::syscall::precompiles::boolean_circuit_garble::BooleanCircuitGarbleChip;
+use crate::syscall::precompiles::boolean_circuit_garble::{
+    BooleanCircuitGarbleChip, BooleanCircuitGarbleControlChip,
+};
 use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
@@ -41,8 +43,10 @@ pub(crate) mod mips_chips {
             instructions::SyscallInstrsChip,
             precompiles::{
                 edwards::{EdAddAssignChip, EdDecompressChip},
-                keccak_sponge::KeccakSpongeChip,
-                sha256::{ShaCompressChip, ShaExtendChip},
+                keccak_sponge::{KeccakSpongeChip, KeccakSpongeControlChip},
+                sha256::{
+                    ShaCompressChip, ShaCompressControlChip, ShaExtendChip, ShaExtendControlChip,
+                },
                 sys_linux::SysLinuxChip,
                 u256x2048_mul::U256x2048MulChip,
                 uint256::Uint256MulChip,
@@ -124,8 +128,12 @@ pub enum MipsAir<F: PrimeField32> {
     Global(GlobalChip),
     /// A precompile for sha256 extend.
     Sha256Extend(ShaExtendChip),
+    /// The control chip bookending the sha256-extend `PrecompileChain` state bus.
+    Sha256ExtendControl(ShaExtendControlChip),
     /// A precompile for sha256 compress.
     Sha256Compress(ShaCompressChip),
+    /// The control chip bookending the sha256-compress `PrecompileChain` state bus.
+    Sha256CompressControl(ShaCompressControlChip),
     /// A precompile for addition on the Elliptic curve ed25519.
     Ed25519Add(EdAddAssignChip<EdwardsCurve<Ed25519Parameters>>),
     /// A precompile for decompressing a point on the Edwards curve ed25519.
@@ -146,8 +154,12 @@ pub enum MipsAir<F: PrimeField32> {
     Poseidon2Permute(Poseidon2PermuteChip),
     /// A precompile for the Boolean Circuit Garble
     BooleanCircuitGarble(BooleanCircuitGarbleChip),
+    /// The control chip bookending the boolean-circuit-garble `PrecompileChain` state bus.
+    BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
+    /// The control chip bookending the keccak-sponge `PrecompileChain` state buses.
+    KeccakSpongeControl(KeccakSpongeControlChip),
     /// A precompile for addition on the Elliptic curve bn254.
     Bn254Add(WeierstrassAddAssignChip<SwCurve<Bn254Parameters>>),
     /// A precompile for doubling a point on the Elliptic curve bn254.
@@ -220,9 +232,19 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(sha_extend.name(), 48 * sha_extend.cost());
         chips.push(sha_extend);
 
+        let sha_extend_control =
+            Chip::new(MipsAir::Sha256ExtendControl(ShaExtendControlChip::default()));
+        costs.insert(sha_extend_control.name(), sha_extend_control.cost());
+        chips.push(sha_extend_control);
+
         let sha_compress = Chip::new(MipsAir::Sha256Compress(ShaCompressChip::default()));
         costs.insert(sha_compress.name(), 80 * sha_compress.cost());
         chips.push(sha_compress);
+
+        let sha_compress_control =
+            Chip::new(MipsAir::Sha256CompressControl(ShaCompressControlChip::default()));
+        costs.insert(sha_compress_control.name(), sha_compress_control.cost());
+        chips.push(sha_compress_control);
 
         let ed_add_assign = Chip::new(MipsAir::Ed25519Add(EdAddAssignChip::<
             EdwardsCurve<Ed25519Parameters>,
@@ -280,6 +302,11 @@ impl<F: PrimeField32> MipsAir<F> {
         let keccak_sponge = Chip::new(MipsAir::KeccakSponge(KeccakSpongeChip::new()));
         costs.insert(keccak_sponge.name(), 24 * keccak_sponge.cost());
         chips.push(keccak_sponge);
+
+        let keccak_sponge_control =
+            Chip::new(MipsAir::KeccakSpongeControl(KeccakSpongeControlChip::new()));
+        costs.insert(keccak_sponge_control.name(), keccak_sponge_control.cost());
+        chips.push(keccak_sponge_control);
 
         let bn254_add_assign = Chip::new(MipsAir::Bn254Add(WeierstrassAddAssignChip::<
             SwCurve<Bn254Parameters>,
@@ -444,6 +471,12 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(boolean_circuit_garble.name(), boolean_circuit_garble.cost());
         chips.push(boolean_circuit_garble);
 
+        let boolean_circuit_garble_control = Chip::new(MipsAir::<F>::BooleanCircuitGarbleControl(
+            BooleanCircuitGarbleControlChip::default(),
+        ));
+        costs.insert(boolean_circuit_garble_control.name(), boolean_circuit_garble_control.cost());
+        chips.push(boolean_circuit_garble_control);
+
         (chips, costs)
     }
 
@@ -501,11 +534,15 @@ impl<F: PrimeField32> MipsAir<F> {
                     _ => events.len(),
                 };
                 let num_rows = events_len * self.rows_per_event();
-                (
-                    num_rows,
-                    events.get_local_mem_events().into_iter().count(),
-                    record.global_lookup_events.len(),
-                )
+                let num_local_mem_events = match self {
+                    // The control chips have no memory access of their own — the
+                    // syscall's local memory events belong to the worker chip
+                    // (`ShaCompressChip` / `ShaExtendChip`), so they must report 0
+                    // here (their `memory_events_per_row` is 0).
+                    Self::Sha256CompressControl(_) | Self::Sha256ExtendControl(_) => 0,
+                    _ => events.get_local_mem_events().into_iter().count(),
+                };
+                (num_rows, num_local_mem_events, record.global_lookup_events.len())
             })
     }
 
@@ -569,10 +606,31 @@ impl<F: PrimeField32> MipsAir<F> {
         airs.remove(&Self::Program(ProgramChip::default()));
         airs.remove(&Self::ByteLookup(ByteChip::default()));
 
+        // Remove the `PrecompileChain` bus-control chips: they are never matched
+        // independently — instead `get_precompile_shapes` appends each control to
+        // its worker's shape so the worker+control pair is sized together (else a
+        // control matched alone under-sizes `MemoryLocal` for the worker's memory
+        // events).
+        airs.remove(&Self::Sha256CompressControl(ShaCompressControlChip::default()));
+        airs.remove(&Self::Sha256ExtendControl(ShaExtendControlChip::default()));
+        airs.remove(&Self::BooleanCircuitGarbleControl(BooleanCircuitGarbleControlChip::default()));
+        airs.remove(&Self::KeccakSpongeControl(KeccakSpongeControlChip::default()));
+
         airs.into_iter()
             .map(|air| {
+                // A bus-ported worker's paired control chip carries memory the
+                // worker no longer does itself (e.g. keccak's input/output
+                // reads+writes all live in `KeccakSpongeControl`).  Fold the
+                // control's per-row memory into the worker's
+                // `memory_events_per_row`, normalized by the worker's
+                // `rows_per_event` (the control emits 1 row per `rows_per_event`
+                // worker rows), so `get_precompile_shapes` sizes `MemoryLocal`
+                // for the worker+control pair.  Workers whose control has no
+                // memory (sha256) are unaffected.
+                let control_air = air.precompile_control_air();
+                let rows_per_event = air.rows_per_event();
                 let chip = Chip::new(air);
-                let local_mem_events: usize = chip
+                let mut local_mem_events: usize = chip
                     .sends()
                     .iter()
                     .chain(chip.receives())
@@ -580,10 +638,45 @@ impl<F: PrimeField32> MipsAir<F> {
                         lookup.kind == LookupKind::Memory && lookup.scope == LookupScope::Local
                     })
                     .count();
+                if let Some(control) = control_air {
+                    let control_chip = Chip::new(control);
+                    let control_mem: usize = control_chip
+                        .sends()
+                        .iter()
+                        .chain(control_chip.receives())
+                        .filter(|lookup| {
+                            lookup.kind == LookupKind::Memory && lookup.scope == LookupScope::Local
+                        })
+                        .count();
+                    local_mem_events += control_mem.div_ceil(rows_per_event);
+                }
 
                 (chip.into_inner(), local_mem_events)
             })
             .collect()
+    }
+
+    /// For a bus-ported precompile **worker** air, returns its paired
+    /// `PrecompileChain` **control** air (the chip that seeds/drains the state
+    /// bus, 1 row per syscall).  Returns `None` for precompiles that have no
+    /// control chip.  Used by `get_precompile_shapes` to size the worker+control
+    /// pair together in a single shard shape.
+    pub(crate) fn precompile_control_air(&self) -> Option<Self> {
+        match self {
+            Self::Sha256Compress(_) => {
+                Some(Self::Sha256CompressControl(ShaCompressControlChip::default()))
+            }
+            Self::Sha256Extend(_) => {
+                Some(Self::Sha256ExtendControl(ShaExtendControlChip::default()))
+            }
+            Self::BooleanCircuitGarble(_) => Some(Self::BooleanCircuitGarbleControl(
+                BooleanCircuitGarbleControlChip::default(),
+            )),
+            Self::KeccakSponge(_) => {
+                Some(Self::KeccakSpongeControl(KeccakSpongeControlChip::default()))
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn rows_per_event(&self) -> usize {
@@ -623,7 +716,10 @@ impl<F: PrimeField32> MipsAir<F> {
                     .iter()
                     .map(|(_, pre_e)| {
                         if let PrecompileEvent::BooleanCircuitGarble(event) = pre_e {
-                            event.num_gates() + 1
+                            // The worker now emits exactly one row per gate; the
+                            // former header row moved to the control chip, so no
+                            // `+ 1` here.
+                            event.num_gates()
                         } else {
                             unreachable!()
                         }
@@ -648,7 +744,9 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Secp256r1Add(_) => SyscallCode::SECP256R1_ADD,
             Self::Secp256r1Double(_) => SyscallCode::SECP256R1_DOUBLE,
             Self::Sha256Compress(_) => SyscallCode::SHA_COMPRESS,
+            Self::Sha256CompressControl(_) => SyscallCode::SHA_COMPRESS,
             Self::Sha256Extend(_) => SyscallCode::SHA_EXTEND,
+            Self::Sha256ExtendControl(_) => SyscallCode::SHA_EXTEND,
             Self::Uint256Mul(_) => SyscallCode::UINT256_MUL,
             Self::U256x2048Mul(_) => SyscallCode::U256XU2048_MUL,
             Self::Bls12381Decompress(_) => SyscallCode::BLS12381_DECOMPRESS,
@@ -660,7 +758,9 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
             Self::BooleanCircuitGarble(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
+            Self::BooleanCircuitGarbleControl(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
+            Self::KeccakSpongeControl(_) => SyscallCode::KECCAK_SPONGE,
             Self::SysLinux(_) => SyscallCode::SYS_LINUX,
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),

@@ -248,22 +248,30 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         air: &MipsAir<F>,
         memory_events_per_row: usize,
         allowed_log2_height: usize,
-    ) -> Vec<[(String, usize); 4]> {
+    ) -> Vec<Vec<(String, usize)>> {
         // TODO: This is a temporary fix to the shape, concretely fix this
         (1..=4 * air.rows_per_event())
             .rev()
             .map(|rows_per_event| {
                 let num_local_mem_events =
                     ((1 << allowed_log2_height) * memory_events_per_row).div_ceil(rows_per_event);
-                [
+                // The `SyscallPrecompile` chip — and any `PrecompileChain`
+                // control chip — emit exactly 1 row per syscall, so they share
+                // this height.
+                let syscall_height = ((1 << allowed_log2_height)
+                    .div_ceil(&air.rows_per_event())
+                    .next_power_of_two()
+                    .ilog2() as usize)
+                    .max(4);
+                // NOTE: the worker / SyscallPrecompile / MemoryLocal / Global
+                // entries stay at indices 0 / 1 / 2 / 3 so the caller's
+                // `shape[2]` (mem) and `shape[3]` (global) indexing is preserved;
+                // the optional control chip is appended at index 4.
+                let mut shape = vec![
                     (air.name(), allowed_log2_height),
                     (
                         MipsAir::<F>::SyscallPrecompile(SyscallChip::precompile()).name(),
-                        ((1 << allowed_log2_height)
-                            .div_ceil(&air.rows_per_event())
-                            .next_power_of_two()
-                            .ilog2() as usize)
-                            .max(4),
+                        syscall_height,
                     ),
                     (
                         MipsAir::<F>::MemoryLocal(MemoryLocalChip::new()).name(),
@@ -281,7 +289,16 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                         .ilog2() as usize)
                             .max(4),
                     ),
-                ]
+                ];
+                // Bus-ported precompiles (sha256-compress/extend, garble) pair the
+                // worker with a control chip that bookends the PrecompileChain
+                // state bus.  It emits 1 row per syscall and MUST be present in the
+                // shard's shape, otherwise `Shape::included` drops it and the
+                // worker's bus sends have no matching receives (unbalanced LogUp).
+                if let Some(control) = air.precompile_control_air() {
+                    shape.push((control.name(), syscall_height));
+                }
+                shape
             })
             .filter(|shape| shape[3].1 <= 22)
             .collect::<Vec<_>>()

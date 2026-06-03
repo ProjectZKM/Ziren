@@ -25,6 +25,10 @@ pub enum MipsAirId {
     ShaExtend = 2,
     /// The SHA-256 compress chip.
     ShaCompress = 3,
+    /// The SHA-256 compress control chip (bookends the `PrecompileChain` state bus).
+    ShaCompressControl = 12,
+    /// The SHA-256 extend control chip (bookends the `PrecompileChain` state bus).
+    ShaExtendControl = 51,
     /// The Edwards add assign chip.
     EdAddAssign = 4,
     /// The Edwards decompress chip.
@@ -45,6 +49,8 @@ pub enum MipsAirId {
     Poseidon2Permute = 46,
     /// The Keccak sponge chip.
     KeccakSponge = 48,
+    /// The Keccak sponge control chip (bookends the `PrecompileChain` state buses).
+    KeccakSpongeControl = 53,
     /// The bn254 add assign chip.
     Bn254AddAssign = 13,
     /// The bn254 double assign chip.
@@ -117,6 +123,8 @@ pub enum MipsAirId {
     MovCond = 49,
     // The BooleanCircuitGarble chip.
     BooleanCircuitGarble = 50,
+    /// The BooleanCircuitGarble control chip (bookends the `PrecompileChain` state bus).
+    BooleanCircuitGarbleControl = 52,
 }
 
 impl MipsAirId {
@@ -152,6 +160,8 @@ impl MipsAirId {
             Self::Program => "Program",
             Self::ShaExtend => "ShaExtend",
             Self::ShaCompress => "ShaCompress",
+            Self::ShaCompressControl => "ShaCompressControl",
+            Self::ShaExtendControl => "ShaExtendControl",
             Self::EdAddAssign => "EdAddAssign",
             Self::EdDecompress => "EdDecompress",
             Self::Secp256k1Decompress => "Secp256k1Decompress",
@@ -162,6 +172,7 @@ impl MipsAirId {
             Self::Secp256r1DoubleAssign => "Secp256r1DoubleAssign",
             Self::Poseidon2Permute => "Poseidon2Permute",
             Self::KeccakSponge => "KeccakSponge",
+            Self::KeccakSpongeControl => "KeccakSpongeControl",
             Self::Bn254AddAssign => "Bn254AddAssign",
             Self::Bn254DoubleAssign => "Bn254DoubleAssign",
             Self::Bls12381AddAssign => "Bls12381AddAssign",
@@ -198,6 +209,7 @@ impl MipsAirId {
             Self::SysLinux => "SysLinux",
             Self::MovCond => "MovCond",
             Self::BooleanCircuitGarble => "BooleanCircuitGarble",
+            Self::BooleanCircuitGarbleControl => "BooleanCircuitGarbleControl",
         }
     }
 }

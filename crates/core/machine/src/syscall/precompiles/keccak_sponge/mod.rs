@@ -1,21 +1,29 @@
-use p3_keccak_air::KeccakAir;
-
 mod air;
 mod columns;
+mod constants;
+mod control;
 mod trace;
 mod utils;
+
+pub use control::{
+    KeccakSpongeControlChip, KeccakSpongeControlCols, NUM_KECCAK_SPONGE_CONTROL_COLS,
+};
 
 pub const KECCAK_GENERAL_RATE_U32S: usize = 36;
 pub const KECCAK_STATE_U32S: usize = 50;
 pub const KECCAK_GENERAL_OUTPUT_U32S: usize = 16;
+/// Bits per `p3_keccak` u64 limb (16-bit limbs → 4 limbs/u64, 100 limbs/state).
+pub const BITS_PER_LIMB: usize = 16;
 
-pub struct KeccakSpongeChip {
-    p3_keccak: KeccakAir,
-}
+/// The keccak-sponge **worker** chip: one row per keccak-f round, with the
+/// round-to-round and block-to-block hand-off carried on the `PrecompileChain`
+/// buses (see `air` and the `control` chip).
+#[derive(Default)]
+pub struct KeccakSpongeChip;
 
 impl KeccakSpongeChip {
     pub const fn new() -> Self {
-        Self { p3_keccak: KeccakAir {} }
+        Self {}
     }
 }
 #[cfg(test)]

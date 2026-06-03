@@ -63,6 +63,9 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             let cols: &mut ShaCompressCols<F> = row.as_mut_slice().borrow_mut();
             cols.octet_num[octet_num] = F::ONE;
             cols.octet[octet] = F::ONE;
+            // Pin index = 8*octet_num + octet on padding rows too (the per-row
+            // `index` constraint is not gated by is_real).
+            cols.index = F::from_u32((8 * octet_num + octet) as u32);
 
             // If in the compression phase, set the k value.
             if octet_num != 0 && octet_num != 9 {
@@ -75,8 +78,6 @@ impl<F: PrimeField32> MachineAir<F> for ShaCompressChip {
             if octet == 0 {
                 octet_num = (octet_num + 1) % 10;
             }
-
-            cols.is_last_row = cols.octet[7] * cols.octet_num[9];
         }
 
         // Convert the trace to a row major matrix.
@@ -161,7 +162,8 @@ impl ShaCompressChip {
             cols.h = Word::from(event.h_read_records[7].value);
 
             cols.is_real = F::ONE;
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = j (octet_num 0, octet j) for the 8 init rows.
+            cols.index = F::from_u32(j as u32);
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
             }
@@ -245,7 +247,8 @@ impl ShaCompressChip {
             h_array[0] = temp1_add_temp2;
 
             cols.is_real = F::ONE;
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = 8*octet_num_idx + (j % 8) for the 64 compression rows.
+            cols.index = F::from_u32((8 * octet_num_idx + j % 8) as u32);
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);
@@ -296,8 +299,8 @@ impl ShaCompressChip {
             };
 
             cols.is_real = F::ONE;
-            cols.is_last_row = cols.octet[7] * cols.octet_num[9];
-            cols.start = cols.is_real * cols.octet_num[0] * cols.octet[0];
+            // index = 72 + j (octet_num 9) for the 8 finalize rows.
+            cols.index = F::from_u32((8 * octet_num_idx + j) as u32);
 
             if rows.as_ref().is_some() {
                 rows.as_mut().unwrap().push(row);

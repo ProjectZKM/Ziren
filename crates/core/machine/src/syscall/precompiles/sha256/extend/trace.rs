@@ -47,11 +47,10 @@ impl<F: PrimeField32> MachineAir<F> for ShaExtendChip {
         if padded_nb_rows == 2 || padded_nb_rows == 1 {
             padded_nb_rows = 4;
         }
-        for i in nb_rows..padded_nb_rows {
-            let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
-            let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
-            cols.populate_flags(i);
-            rows.push(row);
+        // Padding rows are all-zero: `is_real = 0` makes them contribute nothing
+        // to the `PrecompileChain` bus, so no flag population is needed.
+        for _ in nb_rows..padded_nb_rows {
+            rows.push([F::ZERO; NUM_SHA_EXTEND_COLS]);
         }
 
         // Convert the trace to a row major matrix.
@@ -106,7 +105,9 @@ impl ShaExtendChip {
             let mut row = [F::ZERO; NUM_SHA_EXTEND_COLS];
             let cols: &mut ShaExtendCols<F> = row.as_mut_slice().borrow_mut();
             cols.is_real = F::ONE;
-            cols.populate_flags(j);
+            // Loop index `i` for this row: 16, 17, …, 63.  Its sequencing is
+            // pinned by the `PrecompileChain` bus (see `eval_state_bus`).
+            cols.i = F::from_u32((16 + j) as u32);
             cols.shard = F::from_u32(event.shard);
             cols.clk = F::from_u32(event.clk);
             cols.w_ptr = F::from_u32(event.w_ptr);

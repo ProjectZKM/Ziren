@@ -68,6 +68,20 @@ pub enum LookupKind {
     /// Global-memory-finalize ordering control bus.
     /// Mirrors SP1 `InteractionKind::MemoryGlobalFinalizeControl`.
     MemoryGlobalFinalizeControl = 12,
+
+    /// Generic per-row state-chaining bus for MULTI-ROW precompiles
+    /// (sha256 compress/extend, keccak sponge, …).  A control chip seeds
+    /// the initial state at `index = 0` and drains the final state at the
+    /// terminal index; each worker row receives `state @ index` and sends
+    /// `state @ index + 1`, so the per-row ordering is pinned by lookup
+    /// multiplicity instead of the legacy `when_first_row`/`when_transition`
+    /// machinery (which the single-row BaseFold zerocheck folder cannot
+    /// evaluate).  A leading precompile-ID field in the tuple isolates each
+    /// precompile's chain (e.g. SHA_COMPRESS sends only balance SHA_COMPRESS
+    /// receives), so a single kind serves all multi-row precompiles.  This
+    /// is the generic analog of SP1's per-precompile `InteractionKind`s
+    /// (`ShaCompress`, `ShaExtend`, …).
+    PrecompileChain = 13,
 }
 
 impl LookupKind {
@@ -147,6 +161,7 @@ impl Display for LookupKind {
             LookupKind::GlobalAccumulation => write!(f, "GlobalAccumulation"),
             LookupKind::MemoryGlobalInitControl => write!(f, "MemoryGlobalInitControl"),
             LookupKind::MemoryGlobalFinalizeControl => write!(f, "MemoryGlobalFinalizeControl"),
+            LookupKind::PrecompileChain => write!(f, "PrecompileChain"),
         }
     }
 }

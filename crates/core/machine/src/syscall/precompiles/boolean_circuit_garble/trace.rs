@@ -103,53 +103,17 @@ impl BooleanCircuitGarbleChip {
         let gates_num = event.num_gates();
         let mut rows = Vec::new();
 
-        let mut input_address = event.input_addr;
-        let mut pre_check = true;
-
-        // first row to read gates_num and delta
-        // gates_num: gate_input_mem[0]
-        // delta: gate_input_mem[1..5]
-        {
-            let mut row = [F::ZERO; NUM_BOOLEAN_CIRCUIT_GARBLE_COLS];
-            let cols: &mut BooleanCircuitGarbleCols<F> = row.as_mut_slice().borrow_mut();
-            cols.shard = F::from_u32(event.shard);
-            cols.clk = F::from_u32(event.clk);
-            cols.is_real = F::ONE;
-            cols.is_gate = F::ZERO;
-            cols.is_first_row = F::ONE;
-            cols.input_address = F::from_u32(input_address);
-            cols.output_address = F::from_u32(event.output_addr);
-            cols.gates_num = F::from_u32(gates_num as u32);
-            for i in 0..4 {
-                let delta_i_bytes = event.delta[i].to_le_bytes();
-                cols.delta[i]
-                    .0
-                    .iter_mut()
-                    .enumerate()
-                    .for_each(|(id, x)| *x = F::from_u8(delta_i_bytes[id]));
-            }
-            // read number of gates
-            cols.gates_input_mem[0].populate(event.num_gates_read_record, blu);
-            // read delta
-            for i in 0..4 {
-                cols.gates_input_mem[1 + i].populate(event.delta_read_records[i], blu);
-            }
-            rows.push(row);
-        }
-
-        input_address += 20;
+        // The header read (`gates_num` + `delta`) and the result write live in
+        // the control chip; the worker emits one row per gate, starting at
+        // `input_addr + 20` (past the 5-word header).
+        let mut input_address = event.input_addr + 20;
         for gate_id in 0..gates_num {
             let mut row = [F::ZERO; NUM_BOOLEAN_CIRCUIT_GARBLE_COLS];
             let cols: &mut BooleanCircuitGarbleCols<F> = row.as_mut_slice().borrow_mut();
             cols.shard = F::from_u32(event.shard);
             cols.clk = F::from_u32(event.clk);
             cols.is_real = F::ONE;
-            cols.is_gate = F::ONE;
             cols.input_address = F::from_u32(input_address);
-            cols.output_address = F::from_u32(event.output_addr);
-            cols.is_first_gate = F::from_bool(gate_id == 0);
-            cols.is_last_gate = F::from_bool(gate_id == gates_num - 1);
-            cols.not_last_gate = F::from_bool(gate_id != gates_num - 1);
             cols.gate_id = F::from_u32(gate_id as u32);
             cols.gates_num = F::from_u32(gates_num as u32);
 
@@ -208,13 +172,6 @@ impl BooleanCircuitGarbleChip {
             cols.checks[0] = F::from_u32(check_u32s[1]);
             cols.checks[1] = F::from_u32(check_u32s[2]);
             cols.checks[2] = F::from_u32(check_u32s[3]);
-            cols.checks[3] = F::from_u32(check_u32s[3] * (pre_check as u32));
-            pre_check = pre_check && (check_u32s[3] == 1);
-
-            // if this is the last gate, write result
-            if gate_id == gates_num - 1 {
-                cols.result_mem.populate(event.output_write_record, blu);
-            }
 
             rows.push(row);
             input_address += 68;

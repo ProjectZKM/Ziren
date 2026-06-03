@@ -1,6 +1,12 @@
 mod air;
 mod columns;
+mod control;
 mod trace;
+
+pub use control::{
+    BooleanCircuitGarbleControlChip, BooleanCircuitGarbleControlCols,
+    NUM_BOOLEAN_CIRCUIT_GARBLE_CONTROL_COLS,
+};
 
 // number of bytes for each gate input info.
 pub const GATE_INFO_BYTES: usize = 17;

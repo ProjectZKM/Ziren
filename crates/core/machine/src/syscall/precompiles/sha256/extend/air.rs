@@ -1,7 +1,10 @@
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
+use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::air::{LookupScope, ZKMAirBuilder};
+use zkm_stark::{
+    air::{AirLookup, LookupScope, ZKMAirBuilder},
+    LookupKind,
+};
 
 use super::{ShaExtendChip, ShaExtendCols, NUM_SHA_EXTEND_COLS};
 use crate::{
@@ -13,7 +16,6 @@ use crate::{
 };
 
 use core::borrow::Borrow;
-use zkm_stark::air::BaseAirBuilder;
 
 impl<F> BaseAir<F> for ShaExtendChip {
     fn width(&self) -> usize {
@@ -28,29 +30,21 @@ where
     fn eval(&self, builder: &mut AB) {
         // Initialize columns.
         let main = builder.main();
-        let (local, next) = (main.current_slice(), main.next_slice());
+        let local = main.current_slice();
         let local: &ShaExtendCols<AB::Var> = (*local).borrow();
-        let next: &ShaExtendCols<AB::Var> = (*next).borrow();
 
         let i_start = AB::F::from_u32(16);
         let nb_bytes_in_word = AB::F::from_u32(4);
 
-        // Evaluate the control flags.
-        self.eval_flags(builder);
+        // Assert that `is_real` is a bool.
+        builder.assert_bool(local.is_real);
 
-        // Copy over the inputs until the result has been computed (every 48 rows).
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.shard, next.shard);
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.clk, next.clk);
-        builder
-            .when_transition()
-            .when_not(local.cycle_16_end.result * local.cycle_48[2])
-            .assert_eq(local.w_ptr, next.w_ptr);
+        // PrecompileChain state bus: receive `i`, send `i + 1`.  This pins the
+        // per-row `i` sequencing (and the `shard`/`clk`/`w_ptr` constancy via the
+        // matched tuple) that the legacy `cycle_16`/`cycle_48` flag machinery used
+        // to enforce, without the row selectors the single-row BaseFold zerocheck
+        // folder cannot evaluate.
+        self.eval_state_bus(builder, local);
 
         // Read w[i-15].
         builder.eval_memory_access(
@@ -193,29 +187,44 @@ where
         );
 
         builder.assert_word_eq(*local.w_i.value(), local.s2.value);
+    }
+}
 
-        // Receive syscall event in first row of 48-cycle.
-        builder.receive_syscall(
-            local.shard,
-            local.clk,
-            AB::F::from_u32(SyscallCode::SHA_EXTEND.syscall_id()),
-            local.w_ptr,
-            AB::Expr::ZERO,
-            local.cycle_48_start,
+impl ShaExtendChip {
+    /// `PrecompileChain` state bus.  Each real worker row RECEIVEs the current
+    /// loop index `i` and SENDs `i + 1`.  The `ShaExtendControlChip` seeds
+    /// `@ i = 16` and drains `@ i = 64`, so the multiset only balances when the
+    /// per-syscall chain telescopes `16 → 64` across exactly 48 worker rows,
+    /// pinning each row's `i` (and the constancy of `shard`/`clk`/`w_ptr`).  A
+    /// leading `pid = SHA_EXTEND.syscall_id()` isolates this chain from other
+    /// precompiles on the shared `PrecompileChain` kind.
+    fn eval_state_bus<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &ShaExtendCols<AB::Var>) {
+        let pid = AB::Expr::from_u32(SyscallCode::SHA_EXTEND.syscall_id());
+
+        let tuple = |index: AB::Expr| -> Vec<AB::Expr> {
+            vec![
+                pid.clone(),
+                local.shard.into(),
+                local.clk.into(),
+                local.w_ptr.into(),
+                index,
+            ]
+        };
+
+        // Receive the current index `i`.
+        builder.receive(
+            AirLookup::new(tuple(local.i.into()), local.is_real.into(), LookupKind::PrecompileChain),
             LookupScope::Local,
         );
 
-        // Assert that is_real is a bool.
-        builder.assert_bool(local.is_real);
-
-        // Ensure that all rows in a 48 row cycle has the same `is_real` values.
-        builder
-            .when_transition()
-            .when_not(local.cycle_48_end)
-            .assert_eq(local.is_real, next.is_real);
-
-        // Assert that the table ends in nonreal columns. Since each extend syscall is 48 cycles and
-        // the table is padded to a power of 2, the last row of the table should always be padding.
-        builder.when_last_row().assert_zero(local.is_real);
+        // Send the next index `i + 1`.
+        builder.send(
+            AirLookup::new(
+                tuple(local.i.into() + AB::Expr::ONE),
+                local.is_real.into(),
+                LookupKind::PrecompileChain,
+            ),
+            LookupScope::Local,
+        );
     }
 }

@@ -4,8 +4,8 @@ use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_stark::{
-    air::{LookupScope, ZKMAirBuilder},
-    Word,
+    air::{AirLookup, LookupScope, ZKMAirBuilder},
+    LookupKind, Word,
 };
 
 use super::{
@@ -34,28 +34,25 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.current_slice(), main.next_slice());
+        let local = main.current_slice();
         let local: &ShaCompressCols<AB::Var> = (*local).borrow();
-        let next: &ShaCompressCols<AB::Var> = (*next).borrow();
 
-        self.eval_control_flow_flags(builder, local, next);
+        self.eval_control_flow_flags(builder, local);
 
         self.eval_memory(builder, local);
 
-        self.eval_compression_ops(builder, local, next);
+        self.eval_compression_ops(builder, local);
 
         self.eval_finalize_ops(builder, local);
 
-        builder.assert_eq(local.start, local.is_real * local.octet[0] * local.octet_num[0]);
-        builder.receive_syscall(
-            local.shard,
-            local.clk,
-            AB::F::from_u32(SyscallCode::SHA_COMPRESS.syscall_id()),
-            local.w_ptr,
-            local.h_ptr,
-            local.start,
-            LookupScope::Local,
-        );
+        // PrecompileChain state bus: receive `a..h @ index`, send `@ index+1`
+        // (carry unchanged for init/finalize, rotated for compression).  The
+        // `ShaCompressControlChip` seeds `@ index=0` and drains `@ index=80`,
+        // so the LogUp multiset only balances when the chain telescopes 0..80
+        // — the local-only replacement for the legacy
+        // `when_first_row`/`when_transition` octet+state machinery and the
+        // worker's `receive_syscall` (now the control chip's job).
+        self.eval_state_bus(builder, local);
     }
 }
 
@@ -64,7 +61,6 @@ impl ShaCompressChip {
         &self,
         builder: &mut AB,
         local: &ShaCompressCols<AB::Var>,
-        next: &ShaCompressCols<AB::Var>,
     ) {
         // Verify that all of the octet columns are bool.
         for i in 0..8 {
@@ -78,14 +74,6 @@ impl ShaCompressChip {
         }
         builder.assert_one(octet_sum);
 
-        // Verify that the first row's octet value is correct.
-        builder.when_first_row().assert_one(local.octet[0]);
-
-        // Verify correct transition for octet column.
-        for i in 0..8 {
-            builder.when_transition().when(local.octet[i]).assert_one(next.octet[(i + 1) % 8])
-        }
-
         // Verify that all of the octet_num columns are bool.
         for i in 0..10 {
             builder.assert_bool(local.octet_num[i]);
@@ -98,43 +86,20 @@ impl ShaCompressChip {
         }
         builder.assert_one(octet_num_sum);
 
-        // The first row should have octet_num[0] = 1 if it's real.
-        builder.when_first_row().assert_one(local.octet_num[0]);
-
-        // If current row is not last of an octet and next row is real, octet_num should be the
-        // same.
-        for i in 0..10 {
-            builder
-                .when_transition()
-                .when_not(local.octet[7])
-                .assert_eq(local.octet_num[i], next.octet_num[i]);
+        // Pin `index = 8*octet_num + octet` per row.  The octet/octet_num
+        // SEQUENCING across rows (legacy when_first_row/when_transition) and
+        // the A-H carry/rotation are now enforced by the PrecompileChain bus
+        // telescoping index 0..80; here we only tie the one-hot flags to the
+        // scalar `index` that the bus carries.
+        let mut computed_index = AB::Expr::ZERO;
+        for i in 0..8 {
+            computed_index = computed_index.clone() + local.octet[i] * AB::Expr::from_usize(i);
         }
-
-        // If current row is last of an octet and next row is real, octet_num should rotate by 1.
-        for i in 0..10 {
-            builder
-                .when_transition()
-                .when(local.octet[7])
-                .assert_eq(local.octet_num[i], next.octet_num[(i + 1) % 10]);
+        for j in 0..10 {
+            computed_index =
+                computed_index.clone() + local.octet_num[j] * AB::Expr::from_usize(8 * j);
         }
-
-        // Constrain A-H columns
-        let vars = [local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h];
-        let next_vars = [next.a, next.b, next.c, next.d, next.e, next.f, next.g, next.h];
-        for (i, var) in vars.iter().enumerate() {
-            // For all initialize and finalize cycles, A-H should be the same in the next row. The
-            // last cycle is an exception since the next row must be a new 80-cycle loop or nonreal.
-            builder
-                .when_transition()
-                .when(local.octet_num[0] + local.octet_num[9] * (AB::Expr::ONE - local.octet[7]))
-                .assert_word_eq(*var, next_vars[i]);
-
-            // When column is read from memory during init, is should be equal to the memory value.
-            builder
-                .when_transition()
-                .when(local.octet_num[0] * local.octet[i])
-                .assert_word_eq(*var, *local.mem.value());
-        }
+        builder.assert_eq(local.index, computed_index);
 
         // Assert that the is_initialize flag is correct.
         builder.assert_eq(local.is_initialize, local.octet_num[0] * local.is_real);
@@ -156,46 +121,11 @@ impl ShaCompressChip {
         // Assert that the is_finalize flag is correct.
         builder.assert_eq(local.is_finalize, local.octet_num[9] * local.is_real);
 
-        builder.assert_eq(local.is_last_row.into(), local.octet[7] * local.octet_num[9]);
-
-        // If this row is real and not the last cycle, then next row should have same inputs
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when_not(local.is_last_row)
-            .assert_eq(local.shard, next.shard);
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when_not(local.is_last_row)
-            .assert_eq(local.clk, next.clk);
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when_not(local.is_last_row)
-            .assert_eq(local.w_ptr, next.w_ptr);
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when_not(local.is_last_row)
-            .assert_eq(local.h_ptr, next.h_ptr);
-
-        // Assert that is_real is a bool.
+        // is_real is boolean.  Cross-row constancy of shard/clk/w_ptr/h_ptr,
+        // is_real contiguity, and the table-end padding are all enforced by
+        // the PrecompileChain bus instead of `when_transition`/`when_last_row`
+        // (extra or missing real rows leave the LogUp multiset unbalanced).
         builder.assert_bool(local.is_real);
-
-        // If this row is real and not the last cycle, then next row should also be real.
-        builder
-            .when_transition()
-            .when(local.is_real)
-            .when_not(local.is_last_row)
-            .assert_one(next.is_real);
-
-        // Once the is_real flag is changed to false, it should not be changed back.
-        builder.when_transition().when_not(local.is_real).assert_zero(next.is_real);
-
-        // Assert that the table ends in nonreal columns. Since each compress syscall is 80 cycles and
-        // the table is padded to a power of 2, the last row of the table should always be padding.
-        builder.when_last_row().assert_zero(local.is_real);
     }
 
     /// Constrains that memory address is correct and that memory is correctly written/read.
@@ -270,7 +200,6 @@ impl ShaCompressChip {
         &self,
         builder: &mut AB,
         local: &ShaCompressCols<AB::Var>,
-        next: &ShaCompressCols<AB::Var>,
     ) {
         // Constrain k column which loops over 64 constant values.
         for i in 0..64 {
@@ -446,28 +375,11 @@ impl ShaCompressChip {
             local.is_compression.into(),
         );
 
-        // h := g
-        // g := f
-        // f := e
-        // e := d + temp1
-        // d := c
-        // c := b
-        // b := a
-        // a := temp1 + temp2
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.h, local.g);
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.g, local.f);
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.f, local.e);
-        builder
-            .when_transition()
-            .when(local.is_compression)
-            .assert_word_eq(next.e, local.d_add_temp1.value);
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.d, local.c);
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.c, local.b);
-        builder.when_transition().when(local.is_compression).assert_word_eq(next.b, local.a);
-        builder
-            .when_transition()
-            .when(local.is_compression)
-            .assert_word_eq(next.a, local.temp1_add_temp2.value);
+        // The next-row rotation
+        //   h:=g, g:=f, f:=e, e:=d+temp1, d:=c, c:=b, b:=a, a:=temp1+temp2
+        // is carried on the PrecompileChain bus (see `eval_state_bus`): the
+        // compression `send @ index+1` ships the rotated `a..h` directly,
+        // replacing these `next.*` row constraints.
     }
 
     fn eval_finalize_ops<AB: ZKMAirBuilder>(
@@ -502,5 +414,86 @@ impl ShaCompressChip {
         );
 
         // Memory write is constrained in constrain_memory.
+    }
+
+    /// `PrecompileChain` state bus.  Each real worker row RECEIVEs the current
+    /// digest `a..h @ index` and SENDs the next digest `@ index + 1`: unchanged
+    /// for initialize/finalize rows, and rotated for compression rows.  The
+    /// `ShaCompressControlChip` seeds `@ index = 0` and drains `@ index = 80`,
+    /// so the multiset only balances when the per-syscall chain telescopes
+    /// `0 → 80`.  A leading `pid = SHA_COMPRESS.syscall_id()` isolates this
+    /// chain from other precompiles on the shared `PrecompileChain` kind.
+    fn eval_state_bus<AB: ZKMAirBuilder>(
+        &self,
+        builder: &mut AB,
+        local: &ShaCompressCols<AB::Var>,
+    ) {
+        let pid = AB::Expr::from_u32(SyscallCode::SHA_COMPRESS.syscall_id());
+
+        let header = |index: AB::Expr| -> Vec<AB::Expr> {
+            vec![
+                pid.clone(),
+                local.shard.into(),
+                local.clk.into(),
+                local.w_ptr.into(),
+                local.h_ptr.into(),
+                index,
+            ]
+        };
+        let push_state = |vals: &mut Vec<AB::Expr>, state: [Word<AB::Var>; 8]| {
+            for word in state.iter() {
+                for b in word.0.iter() {
+                    vals.push((*b).into());
+                }
+            }
+        };
+
+        // Receive the current digest `a..h @ index`.
+        let mut recv = header(local.index.into());
+        push_state(
+            &mut recv,
+            [local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h],
+        );
+        builder.receive(
+            AirLookup::new(recv, local.is_real.into(), LookupKind::PrecompileChain),
+            LookupScope::Local,
+        );
+
+        // Send `a..h @ index + 1`, unchanged, for initialize and finalize rows.
+        let mut send_carry = header(local.index.into() + AB::Expr::ONE);
+        push_state(
+            &mut send_carry,
+            [local.a, local.b, local.c, local.d, local.e, local.f, local.g, local.h],
+        );
+        builder.send(
+            AirLookup::new(
+                send_carry,
+                (local.is_initialize + local.is_finalize).into(),
+                LookupKind::PrecompileChain,
+            ),
+            LookupScope::Local,
+        );
+
+        // Send `a..h @ index + 1`, rotated, for compression rows:
+        //   a' = temp1+temp2, b' = a, c' = b, d' = c,
+        //   e' = d+temp1,     f' = e, g' = f, h' = g.
+        let mut send_comp = header(local.index.into() + AB::Expr::ONE);
+        push_state(
+            &mut send_comp,
+            [
+                local.temp1_add_temp2.value,
+                local.a,
+                local.b,
+                local.c,
+                local.d_add_temp1.value,
+                local.e,
+                local.f,
+                local.g,
+            ],
+        );
+        builder.send(
+            AirLookup::new(send_comp, local.is_compression.into(), LookupKind::PrecompileChain),
+            LookupScope::Local,
+        );
     }
 }

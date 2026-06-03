@@ -1,19 +1,34 @@
-use crate::air::{MemoryAirBuilder, WordAirBuilder};
-use crate::memory::MemoryCols;
-use crate::operations::XorOperation;
-use crate::syscall::precompiles::keccak_sponge::columns::{
-    KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,
-};
-use crate::syscall::precompiles::keccak_sponge::{
-    KeccakSpongeChip, KECCAK_GENERAL_OUTPUT_U32S, KECCAK_GENERAL_RATE_U32S, KECCAK_STATE_U32S,
+//! Keccak-sponge **worker** AIR — one keccak-f round per row.
+//!
+//! This is a direct port of SP1's single-row `keccak256` round AIR: all of the
+//! keccak-f permutation constraints (θ/ρ/π via `c`/`c'`/`a'`, χ via `a''`, ι via
+//! `a'''[0][0]`) are evaluated **within one row** over the `p3_keccak`
+//! `KeccakCols`, and the round-to-round state hand-off — which `p3_keccak`'s
+//! multi-row SubAir does with a `when_transition` window the single-row BaseFold
+//! folder cannot evaluate — is carried on the `PrecompileChain` bus instead:
+//! each row RECEIVEs the round input `a` and SENDs the round output `a'''`.  The
+//! [`super::control`] chip seeds round 0 (the absorbed block state) and drains
+//! round 24 (the permuted state).
+
+use core::borrow::Borrow;
+
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::PrimeCharacteristicRing;
+use p3_keccak_air::{NUM_ROUNDS, U64_LIMBS};
+use zkm_core_executor::syscalls::SyscallCode;
+use zkm_stark::{air::AirLookup, LookupKind, LookupScope, ZKMAirBuilder};
+
+use super::{
+    columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS},
+    constants::rc_value_bit,
+    KeccakSpongeChip, BITS_PER_LIMB,
 };
 
-use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
-use p3_field::PrimeCharacteristicRing;
-use p3_keccak_air::{KeccakAir, NUM_KECCAK_COLS, NUM_ROUNDS, U64_LIMBS};
-use std::borrow::Borrow;
-use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{LookupScope, SubAirBuilder, ZKMAirBuilder};
+/// Bus tag for the keccak round-chain bus (distinguishes it from the block-chain
+/// bus, which shares `LookupKind::PrecompileChain`).
+pub(crate) const KECCAK_BUS_ROUND: u32 = 0;
+/// Bus tag for the keccak block-chain (sponge) bus.
+pub(crate) const KECCAK_BUS_BLOCK: u32 = 1;
 
 impl<F> BaseAir<F> for KeccakSpongeChip {
     fn width(&self) -> usize {
@@ -27,258 +42,180 @@ where
 {
     fn eval(&self, builder: &mut AB) {
         let main = builder.main();
-        let (local, next) = (main.current_slice(), main.next_slice());
+        let local = main.current_slice();
         let local: &KeccakSpongeCols<AB::Var> = (*local).borrow();
-        let next: &KeccakSpongeCols<AB::Var> = (*next).borrow();
 
-        let first_block = local.is_first_input_block;
-        let final_block = local.is_final_input_block;
-        let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
-        let not_final_step = AB::Expr::ONE - final_step;
-        let not_final_sponge = AB::Expr::ONE - local.write_output;
+        builder.assert_bool(local.is_real);
 
-        // Constrain flags
-        self.eval_flags(builder, local);
-        // Constrain memory
-        self.eval_memory_access(builder, local);
-        // Constrain the state
-        self.eval_state_keccakf(builder, local, next);
+        let andn = |a: AB::Expr, b: AB::Expr| b.clone() - a * b;
+        let xor = |a: AB::Expr, b: AB::Expr| a.clone() + b.clone() - a * b.double();
+        let xor3 = |a: AB::Expr, b: AB::Expr, c: AB::Expr| xor(a, xor(b, c));
 
-        // Receive syscall
-        builder.receive_syscall(
-            local.shard,
-            local.clk,
-            AB::F::from_u32(SyscallCode::KECCAK_SPONGE.syscall_id()),
-            local.input_address,
-            local.output_address,
-            local.receive_syscall,
-            LookupScope::Local,
-        );
+        // Flag constraints: each `step_flags` bit is boolean, exactly one is set,
+        // and `index = Σ i·step_flags[i]` is the round number.
+        let mut sum_flags = AB::Expr::ZERO;
+        let mut computed_index = AB::Expr::ZERO;
+        for i in 0..NUM_ROUNDS {
+            builder.assert_bool(local.keccak.step_flags[i]);
+            sum_flags = sum_flags.clone() + local.keccak.step_flags[i].into();
+            computed_index = computed_index.clone()
+                + AB::Expr::from_u32(i as u32) * local.keccak.step_flags[i].into();
+        }
+        builder.assert_one(sum_flags);
+        builder.when(local.is_real).assert_eq(computed_index, local.index);
 
-        // Constrain that the inputs stay the same throughout the rows of each cycle
-        let mut transition_builder = builder.when_transition();
-        let mut transition_not_final_builder = transition_builder.when(not_final_sponge.clone());
-        transition_not_final_builder.assert_eq(local.shard, next.shard);
-        transition_not_final_builder.assert_eq(local.clk, next.clk);
-        transition_not_final_builder.assert_eq(local.is_real, next.is_real);
-        transition_not_final_builder.assert_eq(local.input_len, next.input_len);
-        transition_not_final_builder.assert_eq(local.output_address, next.output_address);
-        // The final row must be nonreal because NUM_ROUNDS is not a power of 2. This constraint
-        // ensures that the table does not end abruptly.
-        builder.when_last_row().assert_zero(local.is_real);
+        // C'[x, z] = xor(C[x, z], C[x - 1, z], C[x + 1, z - 1]).
+        for x in 0..5 {
+            for z in 0..64 {
+                builder.assert_bool(local.keccak.c[x][z]);
+                let xor_val = xor3(
+                    local.keccak.c[x][z].into(),
+                    local.keccak.c[(x + 4) % 5][z].into(),
+                    local.keccak.c[(x + 1) % 5][(z + 63) % 64].into(),
+                );
+                let c_prime = local.keccak.c_prime[x][z];
+                builder.assert_eq(c_prime, xor_val);
+            }
+        }
 
-        // Xor
-        for i in 0..KECCAK_GENERAL_RATE_U32S {
-            XorOperation::<AB::F>::eval(
-                builder,
-                local.original_state[i],
-                local.block_mem[i].access.value,
-                local.xored_general_rate[i],
-                local.read_block,
+        // A[x, y, z] = xor(A'[x, y, z], C[x, z], C'[x, z]).
+        for y in 0..5 {
+            for x in 0..5 {
+                let get_bit = |z: usize| {
+                    let a_prime: AB::Var = local.keccak.a_prime[y][x][z];
+                    let c: AB::Var = local.keccak.c[x][z];
+                    let c_prime: AB::Var = local.keccak.c_prime[x][z];
+                    xor3(a_prime.into(), c.into(), c_prime.into())
+                };
+
+                for limb in 0..U64_LIMBS {
+                    let a_limb = local.keccak.a[y][x][limb];
+                    let computed_limb = (limb * BITS_PER_LIMB..(limb + 1) * BITS_PER_LIMB)
+                        .rev()
+                        .fold(AB::Expr::ZERO, |acc, z| {
+                            builder.assert_bool(local.keccak.a_prime[y][x][z]);
+                            acc.double() + get_bit(z)
+                        });
+                    builder.assert_eq(computed_limb, a_limb);
+                }
+            }
+        }
+
+        // sum_{i=0}^4 A'[x, i, z] = C'[x, z], so diff*(diff-2)*(diff-4) = 0.
+        for x in 0..5 {
+            for z in 0..64 {
+                let sum: AB::Expr = (0..5).map(|y| local.keccak.a_prime[y][x][z].into()).sum();
+                let diff = sum - local.keccak.c_prime[x][z];
+                let four = AB::Expr::from_u32(4);
+                builder.assert_zero(
+                    diff.clone() * (diff.clone() - AB::Expr::from_u32(2)) * (diff - four),
+                );
+            }
+        }
+
+        // A''[x, y] = xor(B[x, y], andn(B[x + 1, y], B[x + 2, y])).
+        for y in 0..5 {
+            for x in 0..5 {
+                let get_bit = |z: usize| {
+                    let andn_val = andn(
+                        local.keccak.b((x + 1) % 5, y, z).into(),
+                        local.keccak.b((x + 2) % 5, y, z).into(),
+                    );
+                    xor(local.keccak.b(x, y, z).into(), andn_val)
+                };
+
+                for limb in 0..U64_LIMBS {
+                    let computed_limb = (limb * BITS_PER_LIMB..(limb + 1) * BITS_PER_LIMB)
+                        .rev()
+                        .fold(AB::Expr::ZERO, |acc, z| acc.double() + get_bit(z));
+                    builder.assert_eq(computed_limb, local.keccak.a_prime_prime[y][x][limb]);
+                }
+            }
+        }
+
+        // A'''[0, 0] = A''[0, 0] XOR RC.
+        for limb in 0..U64_LIMBS {
+            let computed_a_prime_prime_0_0_limb = (limb * BITS_PER_LIMB..(limb + 1) * BITS_PER_LIMB)
+                .rev()
+                .fold(AB::Expr::ZERO, |acc, z| {
+                    builder.assert_bool(local.keccak.a_prime_prime_0_0_bits[z]);
+                    acc.double() + local.keccak.a_prime_prime_0_0_bits[z].into()
+                });
+            let a_prime_prime_0_0_limb = local.keccak.a_prime_prime[0][0][limb];
+            builder.assert_eq(computed_a_prime_prime_0_0_limb, a_prime_prime_0_0_limb);
+        }
+
+        let get_xored_bit = |i: usize| {
+            let mut rc_bit_i = AB::Expr::ZERO;
+            for r in 0..NUM_ROUNDS {
+                let this_round = local.keccak.step_flags[r];
+                let this_round_constant = AB::Expr::from_u8(rc_value_bit(r, i));
+                rc_bit_i = rc_bit_i.clone() + this_round.into() * this_round_constant;
+            }
+
+            xor(local.keccak.a_prime_prime_0_0_bits[i].into(), rc_bit_i)
+        };
+
+        for limb in 0..U64_LIMBS {
+            let a_prime_prime_prime_0_0_limb = local.keccak.a_prime_prime_prime_0_0_limbs[limb];
+            let computed_a_prime_prime_prime_0_0_limb = (limb * BITS_PER_LIMB
+                ..(limb + 1) * BITS_PER_LIMB)
+                .rev()
+                .fold(AB::Expr::ZERO, |acc, z| acc.double() + get_xored_bit(z));
+            builder.assert_eq(
+                computed_a_prime_prime_prime_0_0_limb,
+                a_prime_prime_prime_0_0_limb,
             );
         }
 
-        // Constrain the absorbed bytes
-        builder
-            .when_transition()
-            .when(not_final_step)
-            .assert_eq(local.already_absorbed_u32s, next.already_absorbed_u32s);
-        // If this is the first block, absorbed bytes should be 0
-        builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::ZERO);
-        // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
-        builder.when(final_block).assert_eq(
-            local.already_absorbed_u32s,
-            local.input_len - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32),
-        );
-        // If local is real and not the final block, absorbed bytes in next block should be
-        // equal to the previous absorbed bytes + KECCAK_GENERAL_RATE_U32S
-        builder.when(local.is_absorbed).assert_eq(
-            local.already_absorbed_u32s,
-            next.already_absorbed_u32s
-                - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32),
-        );
-        // check the input address
-        builder.when(local.is_absorbed).assert_eq(
-            local.input_address,
-            next.input_address - AB::Expr::from_u32(KECCAK_GENERAL_RATE_U32S as u32 * 4),
-        );
-
-        // Eval the plonky3 keccak air
-        let mut sub_builder =
-            SubAirBuilder::<AB, KeccakAir, AB::Var>::new(builder, 0..NUM_KECCAK_COLS);
-        self.p3_keccak.eval(&mut sub_builder);
+        // Round-chain bus: receive `a` @ (block, index), send `a'''` @ (block, index+1).
+        self.eval_state_bus(builder, local);
     }
 }
 
 impl KeccakSpongeChip {
-    fn eval_flags<AB: ZKMAirBuilder>(&self, builder: &mut AB, local: &KeccakSpongeCols<AB::Var>) {
-        let first_block = local.is_first_input_block;
-        let final_block = local.is_final_input_block;
-        let not_final_block = AB::Expr::ONE - final_block;
-
-        let first_step = local.keccak.step_flags[0];
-        let final_step = local.keccak.step_flags[NUM_ROUNDS - 1];
-
-        // receive syscall
-        builder.assert_eq(first_block * first_step * local.is_real, local.receive_syscall);
-
-        // write output flag
-        builder.assert_eq(final_block * final_step * local.is_real, local.write_output);
-
-        // check the absorbed bytes
-        builder.assert_eq(local.is_absorbed, final_step * not_final_block * local.is_real);
-    }
-
-    fn eval_memory_access<AB: ZKMAirBuilder>(
+    fn eval_state_bus<AB: ZKMAirBuilder>(
         &self,
         builder: &mut AB,
         local: &KeccakSpongeCols<AB::Var>,
     ) {
-        // if this is the first row, populate reading input length
-        builder.eval_memory_access(
-            local.shard,
-            local.clk,
-            local.output_address + AB::Expr::from_u32(64),
-            &local.input_length_mem,
-            local.receive_syscall,
+        let pid = AB::Expr::from_u32(SyscallCode::KECCAK_SPONGE.syscall_id());
+        let header = |index: AB::Expr| -> Vec<AB::Expr> {
+            vec![
+                pid.clone(),
+                AB::Expr::from_u32(KECCAK_BUS_ROUND),
+                local.clk.into(),
+                local.block.into(),
+                index,
+            ]
+        };
+
+        // Receive the round input `a` @ index (state in (y, x, limb) order).
+        let mut recv = header(local.index.into());
+        for y in 0..5 {
+            for x in 0..5 {
+                for limb in 0..U64_LIMBS {
+                    recv.push(local.keccak.a[y][x][limb].into());
+                }
+            }
+        }
+        builder.receive(
+            AirLookup::new(recv, local.is_real.into(), LookupKind::PrecompileChain),
+            LookupScope::Local,
         );
-        // Verify the input length has not changed
-        builder
-            .when(local.is_real)
-            .assert_word_eq(*local.input_length_mem.value(), *local.input_length_mem.prev_value());
 
-        // Read the input block
-        for i in 0..KECCAK_GENERAL_RATE_U32S as u32 {
-            builder.eval_memory_access(
-                local.shard,
-                local.clk,
-                local.input_address + AB::Expr::from_u32(i * 4),
-                &local.block_mem[i as usize],
-                local.read_block,
-            );
-        }
-        // Verify the input has not changed
-        for i in 0..KECCAK_GENERAL_RATE_U32S {
-            builder
-                .when(local.is_real)
-                .assert_word_eq(*local.block_mem[i].value(), *local.block_mem[i].prev_value());
-        }
-
-        // If this is the final round of the final block, write the output
-        for i in 0..KECCAK_GENERAL_OUTPUT_U32S as u32 {
-            builder.eval_memory_access(
-                local.shard,
-                local.clk + AB::Expr::ONE,
-                local.output_address + AB::Expr::from_u32(i * 4),
-                &local.output_mem[i as usize],
-                local.write_output,
-            );
-        }
-    }
-    fn eval_state_keccakf<AB: ZKMAirBuilder>(
-        &self,
-        builder: &mut AB,
-        local: &KeccakSpongeCols<AB::Var>,
-        next: &KeccakSpongeCols<AB::Var>,
-    ) {
-        let first_step = local.keccak.step_flags[0];
-        // constrain the state
-        let expr_2_pow_8 = AB::Expr::from_u32(2u32.pow(8));
-
-        for i in 0..(KECCAK_GENERAL_RATE_U32S / 2) as u32 {
-            let y_idx = i / 5;
-            let x_idx = i % 5;
-
-            // Interpret u32 memory words as u16 limbs
-            let least_sig_word = local.xored_general_rate[(i * 2) as usize].value;
-            let most_sig_word = local.xored_general_rate[(i * 2 + 1) as usize].value;
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
-            // On a first round, verify memory matches with local.p3_keccak_cols.a
-            let a_value_limbs = local.keccak.a[y_idx as usize][x_idx as usize];
-            for j in 0..U64_LIMBS {
-                builder
-                    .when(first_step * local.is_real)
-                    .assert_eq(memory_limbs[j].clone(), a_value_limbs[j]);
-            }
-
-            // On a final round, verify memory matches with
-            // local.p3_keccak_cols.a_prime_prime_prime (except for the final block)
-            let least_sig_word = next.original_state[(i * 2) as usize];
-            let most_sig_word = next.original_state[(i * 2 + 1) as usize];
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
-            for j in 0..U64_LIMBS {
-                builder.when(local.is_absorbed).assert_eq(
-                    memory_limbs[j].clone(),
-                    local.keccak.a_prime_prime_prime(y_idx as usize, x_idx as usize, j),
-                )
+        // Send the round output `a'''` @ index + 1.
+        let mut send = header(local.index.into() + AB::Expr::ONE);
+        for y in 0..5 {
+            for x in 0..5 {
+                for limb in 0..U64_LIMBS {
+                    send.push(local.keccak.a_prime_prime_prime(y, x, limb).into());
+                }
             }
         }
-
-        for i in (KECCAK_GENERAL_RATE_U32S / 2)..(KECCAK_STATE_U32S / 2) {
-            let y_idx = i / 5;
-            let x_idx = i % 5;
-
-            let least_sig_word = local.original_state[(i * 2) as usize];
-            let most_sig_word = local.original_state[(i * 2 + 1) as usize];
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
-            let a_value_limbs = local.keccak.a[y_idx as usize][x_idx as usize];
-            for j in 0..U64_LIMBS {
-                builder
-                    .when(first_step * local.is_real)
-                    .assert_eq(memory_limbs[j].clone(), a_value_limbs[j]);
-            }
-
-            let least_sig_word = next.original_state[(i * 2) as usize];
-            let most_sig_word = next.original_state[(i * 2 + 1) as usize];
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
-            for j in 0..U64_LIMBS {
-                builder.when(local.is_absorbed).assert_eq(
-                    memory_limbs[j].clone(),
-                    local.keccak.a_prime_prime_prime(y_idx as usize, x_idx as usize, j),
-                )
-            }
-        }
-
-        // if this is the final round of the final block, verify output memory with
-        // local.p3_keccak_cols.a_prime_prime_prime
-        for i in 0..(KECCAK_GENERAL_OUTPUT_U32S / 2) as u32 {
-            let y_idx = i / 5;
-            let x_idx = i % 5;
-
-            let least_sig_word = local.output_mem[(i * 2) as usize].value();
-            let most_sig_word = local.output_mem[(i * 2 + 1) as usize].value();
-            let memory_limbs = [
-                least_sig_word[0] + least_sig_word[1] * expr_2_pow_8.clone(),
-                least_sig_word[2] + least_sig_word[3] * expr_2_pow_8.clone(),
-                most_sig_word[0] + most_sig_word[1] * expr_2_pow_8.clone(),
-                most_sig_word[2] + most_sig_word[3] * expr_2_pow_8.clone(),
-            ];
-            for j in 0..U64_LIMBS {
-                builder.when(local.write_output).assert_eq(
-                    memory_limbs[j].clone(),
-                    local.keccak.a_prime_prime_prime(y_idx as usize, x_idx as usize, j),
-                )
-            }
-        }
+        builder.send(
+            AirLookup::new(send, local.is_real.into(), LookupKind::PrecompileChain),
+            LookupScope::Local,
+        );
     }
 }
