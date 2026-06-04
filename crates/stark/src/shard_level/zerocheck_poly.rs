@@ -468,8 +468,98 @@ where
         // accumulator.  This is a pure extraction — byte-identical to the
         // original fused loop (validated by `orientation_sweep` inv1/inv2 and
         // `sum_as_poly_matches_spec_reference`).
-        let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple_host(&partial, is_first_round);
+        let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round);
         self.finalize_round_poly(claim, last, &partial, y_0, y_2, y_3, y_4)
+    }
+
+    /// Device-or-host dispatch for the per-pair y-tuple accumulator.
+    /// Under `ZIREN_GPU_ZEROCHECK_YTUPLE=1` with a registered
+    /// `GpuZerocheckYTupleFn` and `EF == Ef4`, computes the tuple on the
+    /// device; otherwise (and on any hook `None`) runs the byte-identical
+    /// host loop.  With `ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY=1` it runs BOTH
+    /// and asserts the device result equals the host loop (the P0 parity
+    /// gate; mirrors the prover's device-resident-verify pattern).  The
+    /// transcript is unaffected either way — `finalize_round_poly` and the
+    /// challenger stay host.
+    fn accumulate_y_tuple(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
+        let device_on = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        if device_on {
+            if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
+                let verify = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if verify {
+                    let h = self.accumulate_y_tuple_host(partial, is_first_round);
+                    assert!(
+                        dev.0 == h.0 && dev.1 == h.1 && dev.2 == h.2 && dev.3 == h.3,
+                        "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: device y-tuple != host for chip {} \
+                         (is_first_round={is_first_round})",
+                        self.air.name(),
+                    );
+                }
+                return dev;
+            }
+        }
+        self.accumulate_y_tuple_host(partial, is_first_round)
+    }
+
+    /// TypeId-guarded bridge to the registered device y-tuple hook.
+    /// Returns `None` (host fallback) unless `EF == Ef4`, `F == KoalaBear`,
+    /// and a hook is registered.  All reinterpretations are sound under the
+    /// `TypeId` equalities (identical layout).
+    fn gpu_y_tuple(&self, partial: &[EF], is_first_round: bool) -> Option<(EF, EF, EF, EF)> {
+        use core::any::TypeId;
+        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+        type Kb = p3_koala_bear::KoalaBear;
+        if TypeId::of::<EF>() != TypeId::of::<Ef4>() || TypeId::of::<F>() != TypeId::of::<Kb>() {
+            return None;
+        }
+        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_ytuple_hook()?;
+
+        // SAFETY: the TypeId equalities above guarantee `EF == Ef4` and
+        // `F == Kb`, so these slice / scalar reinterpretations are
+        // layout-safe for the duration of the call (shared borrows only).
+        let main_ef4: &[Ef4] = unsafe {
+            core::slice::from_raw_parts(self.main_cells.as_ptr().cast::<Ef4>(), self.main_cells.len())
+        };
+        let empty: Vec<Ef4> = Vec::new();
+        let prep_ef4: &[Ef4] = match self.prep_cells.as_ref() {
+            Some(p) => unsafe { core::slice::from_raw_parts(p.as_ptr().cast::<Ef4>(), p.len()) },
+            None => &empty,
+        };
+        let gkr_ef4: &[Ef4] = unsafe {
+            core::slice::from_raw_parts(self.gkr_powers.as_ptr().cast::<Ef4>(), self.gkr_powers.len())
+        };
+        let eq_ef4: &[Ef4] =
+            unsafe { core::slice::from_raw_parts(partial.as_ptr().cast::<Ef4>(), partial.len()) };
+        let pv_kb: &[Kb] = unsafe {
+            core::slice::from_raw_parts(
+                self.public_values.as_ptr().cast::<Kb>(),
+                self.public_values.len(),
+            )
+        };
+        let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&self.alpha) };
+
+        let name = self.air.name();
+        let out = hook(
+            &name,
+            main_ef4,
+            self.num_main_cols,
+            prep_ef4,
+            self.num_prep_cols,
+            gkr_ef4,
+            alpha_ef4,
+            eq_ef4,
+            pv_kb,
+            self.num_real_entries,
+            is_first_round,
+        )?;
+
+        // SAFETY: `Ef4 == EF` under the TypeId guard.
+        let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
+        Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
     }
 
     /// The per-pair degree-4 eq-weighted accumulator: returns

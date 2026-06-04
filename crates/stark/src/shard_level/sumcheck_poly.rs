@@ -374,6 +374,43 @@ pub type GpuConstraintEvalFn = fn(
 gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_HOOK: GpuConstraintEvalFn
     => register_gpu_constraint_eval_hook, get_gpu_constraint_eval_hook);
 
+/// Per-chip per-round zerocheck y-tuple device hook.
+///
+/// Returns `(y_0, y_2, y_3, y_4)` — the per-pair eq-weighted
+/// accumulators the device computes for one chip in one sumcheck
+/// round, EXACTLY mirroring `ZeroCheckPoly::accumulate_y_tuple_host`
+/// (Ziren `zerocheck_poly.rs`).  These are the raw accumulators BEFORE
+/// `finalize_round_poly`'s `elf_X · eq_adjustment` scaling and the
+/// VirtualGeq padded-row correction — the host keeps that analytic,
+/// transcript-critical finalize, so the Fiat-Shamir transcript is
+/// byte-identical regardless of this hook.
+///
+/// `main_cells` / `prep_cells` are the CURRENT folded `Ef4` trace rows
+/// (row-major `num_real × width`), already bit-reversed on round 0
+/// (`prep_cells` is empty when `num_prep_cols == 0`).  `gkr_powers` is
+/// the main-then-prep batch-power vector `[β¹ .. β^(main+prep)]`.
+/// `alpha` is the constraint-batching Horner challenge.  `eq` is
+/// `partial_lagrange(zeta[..dim-1])` (length ≥ `num_real.div_ceil(2)`).
+/// `is_first_round` skips the AIR eval at sample 0 (it is summed only
+/// as the gkr term there).  Returns `None` on chip-reject (cache miss /
+/// shape unsupported); callers MUST fall back to host on `None`.
+pub type GpuZerocheckYTupleFn = fn(
+    chip_name: &str,
+    main_cells: &[Ef4],
+    num_main_cols: usize,
+    prep_cells: &[Ef4],
+    num_prep_cols: usize,
+    gkr_powers: &[Ef4],
+    alpha: Ef4,
+    eq: &[Ef4],
+    public_values: &[p3_koala_bear::KoalaBear],
+    num_real: usize,
+    is_first_round: bool,
+) -> Option<[Ef4; 4]>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_HOOK: GpuZerocheckYTupleFn
+    => register_gpu_zerocheck_ytuple_hook, get_gpu_zerocheck_ytuple_hook);
+
 /// Multi-chip batched variant of `GpuConstraintEvalFn`. Returns
 /// `Vec<Option<Vec<Ef4>>>` of length `chip_names.len()`; `None`
 /// slots must be filled in via per-chip GPU or host fallback.
