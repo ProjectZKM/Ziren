@@ -439,7 +439,16 @@ class kb31_septic_curve_t {
                 if (y == b.y) {
                     kb31_septic_extension_t y2 = y + y; 
                     kb31_septic_extension_t x2 = x * x;
-                    kb31_septic_extension_t slope = (x2 + x2 + x2 + kb31_t::two()) / y2;
+                    // FIX (septic-doubling): slope numerator must be 3x^2 + 3z
+                    // (curve linear coeff a=3z at coeff index 1), matching host
+                    // SepticCurve::double() (septic_curve.rs:69-84) + this header's
+                    // own curve_formula (t[1]=kb31_t(int(3))).  The old
+                    // `+ kb31_t::two()` wrongly added scalar 2 at coeff index 0.
+                    // Latent-only (doubling branch unreachable for honest traces),
+                    // device-only -> NO vk regen.
+                    kb31_septic_extension_t num = x2 + x2 + x2;
+                    num.value[1] = num.value[1] + kb31_t(int(3));
+                    kb31_septic_extension_t slope = num / y2;
                     kb31_septic_extension_t result_x = slope * slope - x - x;
                     kb31_septic_extension_t result_y = slope * (x - result_x) - y;
                     x = result_x;
