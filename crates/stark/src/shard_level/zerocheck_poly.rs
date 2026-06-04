@@ -462,12 +462,30 @@ where
         let rest_point = &self.zeta[..dim - 1];
         let partial = partial_lagrange(rest_point);
 
+        // The per-pair degree-4 eq-weighted accumulation (the device zerocheck
+        // kernel's job) and the analytic finalize (host-only, transcript-
+        // critical) are split so a device path can replace ONLY the
+        // accumulator.  This is a pure extraction — byte-identical to the
+        // original fused loop (validated by `orientation_sweep` inv1/inv2 and
+        // `sum_as_poly_matches_spec_reference`).
+        let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple_host(&partial, is_first_round);
+        self.finalize_round_poly(claim, last, &partial, y_0, y_2, y_3, y_4)
+    }
+
+    /// The per-pair degree-4 eq-weighted accumulator: returns
+    /// `(y_0, y_2, y_3, y_4)` BEFORE the elf/eq_adjustment scaling and
+    /// VirtualGeq padded-row correction.  This is exactly the per-chip
+    /// per-round quantity the device zerocheck kernel computes (consuming the
+    /// bit-reversed trace at interpolation samples `X ∈ {0,2,3,4}`); the host
+    /// retains `finalize_round_poly`.  `partial = partial_lagrange(zeta[..dim-1])`.
+    /// Caller guarantees `num_real_entries > 0`.
+    fn accumulate_y_tuple_host(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
+        let num_real = self.num_real_entries;
         let nm = self.num_main_cols;
         let np = self.num_prep_cols;
         let num_pairs = num_real.div_ceil(2);
 
-        let (mut y_0, mut y_2, mut y_3, mut y_4) =
-            (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
+        let (mut y_0, mut y_2, mut y_3, mut y_4) = (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
 
         // Scratch buffers reused across pairs.
         let mut m0 = vec![EF::ZERO; nm];
@@ -514,6 +532,36 @@ where
             y_3 += (c3 + g3) * eq;
             y_4 += (c4 + g4) * eq;
         }
+        (y_0, y_2, y_3, y_4)
+    }
+
+    /// Analytic finalize (host-only, transcript-critical): scale the per-pair
+    /// accumulators by `elf_X · eq_adjustment`, subtract the VirtualGeq
+    /// padded-row correction, fix `y_1 = claim − y_0`, and Lagrange-interpolate
+    /// the degree-4 round poly over `{0,1,2,3,4}`.  `last` / `partial` are the
+    /// same values `accumulate_y_tuple_host` consumed.  Pure extraction of the
+    /// original fused tail.
+    ///
+    /// Interpolation samples: the degree-4 round poly over the always-distinct
+    /// points {0,1,2,3,4}.  Point 1 is fixed by the sumcheck relation
+    /// p(0)+p(1)=claim.  The eq term's known root is *implied* by these samples,
+    /// so it need not be sampled explicitly — avoiding the original
+    /// {0,1,2,4,eq-root} scheme's `(1 − 2·last)` inverse (panics at last = 1/2)
+    /// and its `eq-root ∈ {0,1,2,4}` duplicate-point collision.  Same
+    /// coefficients → identical proof/transcript.  `elf_X = (2X − 1)·last −
+    /// (X − 1)` is the eq term's last factor at X.
+    fn finalize_round_poly(
+        &self,
+        claim: EF,
+        last: EF,
+        partial: &[EF],
+        y_0: EF,
+        y_2: EF,
+        y_3: EF,
+        y_4: EF,
+    ) -> UnivariatePolynomial<EF> {
+        let (mut y_0, mut y_2, mut y_3, mut y_4) = (y_0, y_2, y_3, y_4);
+        let num_pairs = self.num_real_entries.div_ceil(2);
 
         // Padded-row correction at the boundary index.
         let threshold_half = num_pairs - 1;
@@ -531,15 +579,6 @@ where
         let virtual_4 =
             self.virtual_geq.fix_last_variable(EF::from_u64(4)).eval_at_usize(threshold_half);
 
-        // Interpolation samples: the degree-4 round poly over the always-
-        // distinct points {0, 1, 2, 3, 4}.  Point 1 is fixed by the sumcheck
-        // relation p(0)+p(1)=claim.  The eq term's known root (where its last
-        // factor vanishes) is *implied* by these samples, so it need not be
-        // sampled explicitly — which avoids the original {0,1,2,4,eq-root}
-        // scheme's `(1 − 2·last)` inverse (panics at last = 1/2) and its
-        // `eq-root ∈ {0,1,2,4}` duplicate-point collision.  The poly is
-        // unchanged (same coefficients), so the proof/transcript is identical.
-        // `elf_X = (2X − 1)·last − (X − 1)` is the eq term's last factor at X.
         let mut xs: Vec<EF> = Vec::with_capacity(5);
         let mut ys: Vec<EF> = Vec::with_capacity(5);
 
@@ -1660,5 +1699,294 @@ mod tests {
                 nv, rv, zrv, nc, i1f, i2f, i1n, i2n
             );
         }
+    }
+
+    // ─────────────────── sum_as_poly spec-reference parity ───────────────────
+    //
+    // An INDEPENDENT re-implementation of one chip's one-round degree-4 round
+    // poly, derived from the byte-exact spec of `sum_as_poly` (the exact thing
+    // the device zerocheck kernel must reproduce).  It is structured DIFFERENTLY
+    // from the host on purpose, so a shared transcription bug is unlikely:
+    //   * sample rows via field-mult LDE `a + X·(b−a)` (host uses doubling);
+    //   * g_X computed by DIRECT `gkr_batch` at all four samples (host uses the
+    //     `g4 = 2·g2 − g0`, `g3 = (g2+g4)/2` linear extrapolation) — this also
+    //     cross-checks that `gkr_batch` is affine in the sample point;
+    //   * the eq weight `partial[pair]` reimplemented big-endian from scratch
+    //     (host uses `partial_lagrange`).
+    // The finalize (elf_X pre-scale + VirtualGeq padded subtraction + degree-4
+    // interpolation) is mirrored from the spec — the end-to-end correctness of
+    // that stage is independently pinned by `orientation_sweep`'s inv1/inv2.
+    fn cpu_ref_round_poly(
+        poly: &ZeroCheckPoly<InnerVal, EF, MockAir>,
+        claim: EF,
+        is_first_round: bool,
+    ) -> UnivariatePolynomial<EF> {
+        let num_real = poly.num_real_entries;
+        if num_real == 0 {
+            return UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] };
+        }
+        let nm = poly.num_main_cols;
+        let np = poly.num_prep_cols;
+        let dim = poly.zeta.len();
+        let last = poly.zeta[dim - 1];
+        let rest = &poly.zeta[..dim - 1];
+        let num_pairs = num_real.div_ceil(2);
+        let gkr = &poly.gkr_powers;
+
+        // big-endian eq weight: bit k (LSB) of `pair` binds rest[rest.len()-1-k];
+        // bit set -> z, bit clear -> (1 - z).  (Reimplements partial_lagrange.)
+        let eqw = |pair: usize| -> EF {
+            let rl = rest.len();
+            let mut acc = EF::ONE;
+            for k in 0..rl {
+                let z = rest[rl - 1 - k];
+                acc *= if (pair >> k) & 1 == 1 { z } else { EF::ONE - z };
+            }
+            acc
+        };
+        // field-mult LDE of one row-pair at sample X (odd tail -> partner ZERO).
+        let lerp = |cells: &[EF], ncols: usize, r0: usize, r1: usize, x: u64| -> Vec<EF> {
+            let xx = EF::from_u64(x);
+            (0..ncols)
+                .map(|c| {
+                    let a = cells[r0 * ncols + c];
+                    let b = if r1 < num_real { cells[r1 * ncols + c] } else { EF::ZERO };
+                    a + xx * (b - a)
+                })
+                .collect()
+        };
+        let gkr_batch = |m: &[EF], p: &[EF]| -> EF {
+            m.iter().chain(p.iter()).zip(gkr.iter()).fold(EF::ZERO, |a, (v, pw)| a + *v * *pw)
+        };
+        let cval = |p: &[EF], m: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(
+                poly.air,
+                poly.alpha,
+                poly.public_values,
+                p,
+                m,
+            )
+        };
+
+        let prep = poly.prep_cells.as_ref();
+        let empty: Vec<EF> = Vec::new();
+        let (mut y0, mut y2, mut y3, mut y4) = (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
+        for pair in 0..num_pairs {
+            let eq = eqw(pair);
+            let (r0, r1) = (2 * pair, 2 * pair + 1);
+            let m0 = lerp(&poly.main_cells, nm, r0, r1, 0);
+            let m2 = lerp(&poly.main_cells, nm, r0, r1, 2);
+            let m3 = lerp(&poly.main_cells, nm, r0, r1, 3);
+            let m4 = lerp(&poly.main_cells, nm, r0, r1, 4);
+            let (p0, p2, p3, p4) = if np > 0 {
+                let pc = prep.expect("prep_cells present when np > 0");
+                (
+                    lerp(pc, np, r0, r1, 0),
+                    lerp(pc, np, r0, r1, 2),
+                    lerp(pc, np, r0, r1, 3),
+                    lerp(pc, np, r0, r1, 4),
+                )
+            } else {
+                (empty.clone(), empty.clone(), empty.clone(), empty.clone())
+            };
+            // direct gkr at every sample (no g4=2g2-g0 extrapolation).
+            let g0 = gkr_batch(&m0, &p0);
+            let g2 = gkr_batch(&m2, &p2);
+            let g3 = gkr_batch(&m3, &p3);
+            let g4 = gkr_batch(&m4, &p4);
+            let c0 = if is_first_round { EF::ZERO } else { cval(&p0, &m0) };
+            let c2 = cval(&p2, &m2);
+            let c3 = cval(&p3, &m3);
+            let c4 = cval(&p4, &m4);
+            y0 += (c0 + g0) * eq;
+            y2 += (c2 + g2) * eq;
+            y3 += (c3 + g3) * eq;
+            y4 += (c4 + g4) * eq;
+        }
+
+        // finalize: SCALE accumulated y_X by (elf_X · eq_adjustment), then
+        // SUBTRACT padded_row_adjustment · virtual_X · msb_lagrange_eval · elf_X.
+        let threshold_half = num_pairs - 1;
+        let eq_adj = poly.eq_adjustment;
+        let msb = eq_adj
+            * if threshold_half < (1usize << (poly.num_variables - 1)) {
+                eqw(threshold_half)
+            } else {
+                EF::ZERO
+            };
+        let pra = poly.padded_row_adjustment;
+        let virt = |x: u64| -> EF {
+            poly.virtual_geq.fix_last_variable(EF::from_u64(x)).eval_at_usize(threshold_half)
+        };
+        let elf0 = EF::ONE - last;
+        let elf2 = last * EF::from_u64(3) - EF::ONE;
+        let elf3 = last * EF::from_u64(5) - EF::from_u64(2);
+        let elf4 = last * EF::from_u64(7) - EF::from_u64(3);
+        let yy0 = y0 * (elf0 * eq_adj) - pra * virt(0) * msb * elf0;
+        let yy2 = y2 * (elf2 * eq_adj) - pra * virt(2) * msb * elf2;
+        let yy3 = y3 * (elf3 * eq_adj) - pra * virt(3) * msb * elf3;
+        let yy4 = y4 * (elf4 * eq_adj) - pra * virt(4) * msb * elf4;
+
+        let xs = vec![EF::ZERO, EF::ONE, EF::from_u64(2), EF::from_u64(3), EF::from_u64(4)];
+        let ys = vec![yy0, claim - yy0, yy2, yy3, yy4];
+        interpolate_univariate_polynomial(&xs, &ys)
+    }
+
+    /// Honest pow2-height fixture (mirrors `run_sweep_case_z`); asserts the
+    /// independent reference equals the live `sum_as_poly` for round 0 and
+    /// round 1, plus the sumcheck relation `p(0)+p(1)==claim`.
+    fn check_sum_as_poly_ref(num_vars: u32, real_vars: u32, zeta_real_vars: u32, ncols: usize) {
+        use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+        assert!(real_vars <= zeta_real_vars && zeta_real_vars <= num_vars);
+        let height = 1usize << real_vars;
+        let trace_base: Vec<InnerVal> = (0..height)
+            .flat_map(|r| {
+                (0..ncols)
+                    .map(move |c| {
+                        if c == 0 {
+                            InnerVal::from_u64((r % 3) as u64)
+                        } else {
+                            InnerVal::from_u64((r * 13 + c * 7 + 1) as u64)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if (k as u32) < (num_vars - zeta_real_vars) {
+                    EF::ZERO
+                } else {
+                    EF::from_u64((k * 7 + 3) as u64 + 200)
+                }
+            })
+            .collect();
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let pv: Vec<InnerVal> = Vec::new();
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..main_width {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let start = (num_vars - real_vars) as usize;
+        let main_evals =
+            evaluate_trace_columns_at_point::<InnerVal, EF>(&trace_base, main_width, &zeta[start..]);
+        let claim_gkr: EF =
+            main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
+        let embed_factor: EF = zeta
+            [(num_vars - zeta_real_vars) as usize..(num_vars - real_vars) as usize]
+            .iter()
+            .fold(EF::ONE, |acc, &zk| acc * (EF::ONE - zk));
+        let claim: EF = claim_gkr * embed_factor;
+        let poly_cells = bitrev_rows(&main_cells, ncols, height);
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers, zeta, poly_cells, main_width, None, prep_width, height,
+            num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+
+        // Round 0 (is_first_round = true -> c0 skipped).
+        let host0 = poly.sum_as_poly(Some(claim), true);
+        let ref0 = cpu_ref_round_poly(&poly, claim, true);
+        assert_eq!(
+            ref0.coefficients, host0.coefficients,
+            "round0 mismatch nv={num_vars} rv={real_vars} zrv={zeta_real_vars} nc={ncols}"
+        );
+        assert_eq!(
+            poly_horner(&host0.coefficients, EF::ZERO) + poly_horner(&host0.coefficients, EF::ONE),
+            claim,
+            "sumcheck relation p(0)+p(1)==claim nv={num_vars}"
+        );
+
+        // Round 1 (fold by an arbitrary challenge; is_first_round = false).
+        let alpha_fold = EF::from_u64(101);
+        let claim1 = poly_horner(&host0.coefficients, alpha_fold);
+        let poly1 = poly.fix_last(alpha_fold);
+        let host1 = poly1.sum_as_poly(Some(claim1), false);
+        let ref1 = cpu_ref_round_poly(&poly1, claim1, false);
+        assert_eq!(
+            ref1.coefficients, host1.coefficients,
+            "round1 mismatch nv={num_vars} rv={real_vars} zrv={zeta_real_vars} nc={ncols}"
+        );
+    }
+
+    /// Pure-padding (num_real=0) and odd-real (odd-tail + non-trivial
+    /// VirtualGeq) cases.  The claim need not be valid: the reference and the
+    /// host must agree on the COMPUTATION for the same arbitrary inputs.
+    fn check_pad_and_odd_tail() {
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let pv: Vec<InnerVal> = Vec::new();
+        let ncols = 3usize;
+        let chip = Chip::new(MockAir { ncols });
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..ncols {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let pra =
+            compute_padded_row_adjustment::<InnerVal, EF, MockAir>(&chip, alpha, &pv, ncols, 0);
+        let num_vars = 4u32;
+        let zeta: Vec<EF> =
+            (0..num_vars as usize).map(|k| EF::from_u64((k * 7 + 3) as u64 + 200)).collect();
+
+        // pure padding.
+        let vg0 = VirtualGeq::new(0, EF::ONE, EF::ZERO, num_vars);
+        let poly0 = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), Vec::new(), ncols, None, 0, 0,
+            num_vars, EF::ONE, EF::ZERO, pra, vg0,
+        );
+        let arb = EF::from_u64(999983);
+        let h0 = poly0.sum_as_poly(Some(arb), false);
+        let r0 = cpu_ref_round_poly(&poly0, arb, false);
+        assert_eq!(r0.coefficients, h0.coefficients, "pure-padding mismatch");
+        assert_eq!(h0.coefficients, vec![EF::ZERO; 5], "pure-padding must be [0;5]");
+
+        // odd real (num_real=3): exercises interp odd-tail + non-zero virtual_X.
+        let num_real = 3usize;
+        let main_cells: Vec<EF> = (0..num_real)
+            .flat_map(|r| {
+                (0..ncols).map(move |c| EF::from_u64((r * 13 + c * 7 + 1) as u64)).collect::<Vec<_>>()
+            })
+            .collect();
+        let vg = VirtualGeq::new(num_real as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers, zeta, main_cells, ncols, None, 0, num_real, num_vars,
+            EF::ONE, EF::ZERO, pra, vg,
+        );
+        let arb2 = EF::from_u64(424242);
+        let h = poly.sum_as_poly(Some(arb2), true);
+        let r = cpu_ref_round_poly(&poly, arb2, true);
+        assert_eq!(r.coefficients, h.coefficients, "odd-tail mismatch");
+    }
+
+    /// The byte-exact device-kernel target: independent reference == live
+    /// `sum_as_poly` for the full degree-4 round poly across mixed-height,
+    /// wide, e2e-like, pure-padding, and odd-tail fixtures.
+    #[test]
+    fn sum_as_poly_matches_spec_reference() {
+        check_sum_as_poly_ref(4, 2, 2, 2); // equal-height, padded
+        check_sum_as_poly_ref(4, 2, 3, 2); // mixed-height (embed_factor != 1)
+        check_sum_as_poly_ref(8, 2, 4, 2); // more padding rounds
+        check_sum_as_poly_ref(8, 3, 6, 3); // wider + taller, shorter chip
+        check_sum_as_poly_ref(6, 4, 4, 4); // wide, equal-height
+        check_sum_as_poly_ref(22, 10, 16, 2); // e2e-like (AddSub chip0 shape)
+        check_pad_and_odd_tail();
     }
 }
