@@ -214,7 +214,7 @@ pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = get_gpu_basefold_commit_hook() {
             // The hook signature returns `Result` so the device side
             // can tunnel its host-input back to us on shape-unsupported
@@ -289,7 +289,7 @@ pub fn commit_jagged_pcs_host(
 pub fn commit_jagged_pcs_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = get_gpu_basefold_commit_hook() {
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
@@ -1056,7 +1056,7 @@ pub fn open_jagged_pcs(
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = get_gpu_basefold_open_hook() {
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
