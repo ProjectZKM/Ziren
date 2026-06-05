@@ -957,6 +957,13 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
 {
+    // A width-0 main trace (absent / placeholder chip in this shard) => main_height==0
+    // => num_real==0 => sum_as_poly emits the degree-4 dummy and never uses this
+    // padded-row adjustment. Skip the eval, which would borrow the chip cols from an
+    // empty row and panic (index out of bounds len 0). Transcript-neutral (value unused).
+    if main_width == 0 {
+        return EF::ZERO;
+    }
     let main_row = vec![EF::ZERO; main_width];
     let prep_row = vec![EF::ZERO; prep_width];
     eval_air_constraints_at_row(chip, alpha, public_values, &prep_row, &main_row)
