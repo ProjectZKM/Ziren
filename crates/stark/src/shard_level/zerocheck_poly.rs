@@ -169,11 +169,9 @@ where
         Vec::with_capacity(num_variables as usize);
 
     // Round 0.
-    let mut uni_polys: Vec<UnivariatePolynomial<EF>> = polys
-        .iter()
-        .zip(claims.iter())
-        .map(|(poly, claim)| poly.sum_as_poly_in_last_t_variables(Some(*claim), t))
-        .collect();
+    let round0_claims: Vec<Option<EF>> = claims.iter().map(|c| Some(*c)).collect();
+    let mut uni_polys: Vec<UnivariatePolynomial<EF>> =
+        P::batched_sum_as_poly_in_last_t_variables(&polys, &round0_claims, t);
     let mut rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
     for c in &rlc_uni_poly.coefficients {
         observe_ext::<F, EF, _>(challenger, *c);
@@ -191,11 +189,12 @@ where
         let round_claims: Vec<EF> =
             uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_prev)).collect();
 
-        uni_polys = polys_cursor
-            .iter()
-            .zip(round_claims.iter())
-            .map(|(poly, &round_claim)| poly.sum_as_poly_in_last_variable(Some(round_claim)))
-            .collect();
+        let round_claims_opt: Vec<Option<EF>> =
+            round_claims.iter().map(|c| Some(*c)).collect();
+        uni_polys = P::NextRoundPoly::batched_sum_as_poly_in_last_variable(
+            &polys_cursor,
+            &round_claims_opt,
+        );
         rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
         for c in &rlc_uni_poly.coefficients {
             observe_ext::<F, EF, _>(challenger, *c);
@@ -472,6 +471,162 @@ where
         self.finalize_round_poly(claim, last, &partial, y_0, y_2, y_3, y_4)
     }
 
+    /// B2.2 chip fusion: compute ALL chips' (y_0,y_2,y_3,y_4) in ONE fused
+    /// device call (TypeId-guarded), then per-chip host finalize.  Returns the
+    /// same per-chip round polynomials as the per-chip `sum_as_poly` loop, or
+    /// `None` to signal whole-round host fallback (no hook / wrong field /
+    /// shape mismatch).
+    fn batched_device_round(
+        polys: &[Self],
+        claims: &[Option<EF>],
+        is_first_round: bool,
+    ) -> Option<Vec<UnivariatePolynomial<EF>>> {
+        use core::any::TypeId;
+        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+        type Kb = p3_koala_bear::KoalaBear;
+        if TypeId::of::<EF>() != TypeId::of::<Ef4>() || TypeId::of::<F>() != TypeId::of::<Kb>() {
+            return None;
+        }
+        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_batched_ytuple_hook()?;
+        if polys.is_empty() {
+            return Some(Vec::new());
+        }
+
+        // Per REAL chip (num_real > 0): partial-lagrange + last coord + owned
+        // name must outlive the borrowed inputs.  `real_poly_idx` maps the
+        // real-chip order back to the full poly order.
+        let mut partials: Vec<Vec<EF>> = Vec::new();
+        let mut names: Vec<String> = Vec::new();
+        let mut lasts: Vec<EF> = Vec::new();
+        let mut real_poly_idx: Vec<usize> = Vec::new();
+        for (i, poly) in polys.iter().enumerate() {
+            // Device set = REAL chips with NO preprocessed trace. np>0 chips
+            // and pure-padding chips are handled on host below (the device
+            // kernel has no prep-cell path, matching the per-chip np==0 gate).
+            if poly.num_real_entries == 0 || poly.num_prep_cols != 0 {
+                continue;
+            }
+            let dim = poly.zeta.len();
+            lasts.push(poly.zeta[dim - 1]);
+            partials.push(partial_lagrange(&poly.zeta[..dim - 1]));
+            names.push(poly.air.name());
+            real_poly_idx.push(i);
+        }
+
+        // No device-eligible (real, np==0) chip this round -> host fallback.
+        if real_poly_idx.is_empty() {
+            return None;
+        }
+
+        // SAFETY: TypeId guard above => EF == Ef4 and F == Kb, so these slice /
+        // scalar reinterpretations are layout-safe (shared borrows only).
+        let empty: Vec<Ef4> = Vec::new();
+        let inputs: Vec<crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput<'_>> =
+            real_poly_idx
+                .iter()
+                .enumerate()
+                .map(|(r, &i)| {
+                    let poly = &polys[i];
+                    let main_ef4: &[Ef4] = unsafe {
+                        core::slice::from_raw_parts(
+                            poly.main_cells.as_ptr().cast::<Ef4>(),
+                            poly.main_cells.len(),
+                        )
+                    };
+                    let prep_ef4: &[Ef4] = match poly.prep_cells.as_ref() {
+                        Some(p) => unsafe {
+                            core::slice::from_raw_parts(p.as_ptr().cast::<Ef4>(), p.len())
+                        },
+                        None => &empty,
+                    };
+                    let gkr_ef4: &[Ef4] = unsafe {
+                        core::slice::from_raw_parts(
+                            poly.gkr_powers.as_ptr().cast::<Ef4>(),
+                            poly.gkr_powers.len(),
+                        )
+                    };
+                    let eq_ef4: &[Ef4] = unsafe {
+                        core::slice::from_raw_parts(
+                            partials[r].as_ptr().cast::<Ef4>(),
+                            partials[r].len(),
+                        )
+                    };
+                    let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&poly.alpha) };
+                    crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput {
+                        chip_name: names[r].as_str(),
+                        main_cells: main_ef4,
+                        num_main_cols: poly.num_main_cols,
+                        prep_cells: prep_ef4,
+                        num_prep_cols: poly.num_prep_cols,
+                        gkr_powers: gkr_ef4,
+                        alpha: alpha_ef4,
+                        eq: eq_ef4,
+                        num_real: poly.num_real_entries,
+                    }
+                })
+                .collect();
+
+        let pv_kb: &[Kb] = unsafe {
+            core::slice::from_raw_parts(
+                polys[0].public_values.as_ptr().cast::<Kb>(),
+                polys[0].public_values.len(),
+            )
+        };
+        let tuples = hook(&inputs, pv_kb, is_first_round)?;
+        if tuples.len() != real_poly_idx.len() {
+            return None; // shape mismatch -> host fallback
+        }
+        drop(inputs); // release the shared borrows before finalize
+
+        let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
+        let mut out: Vec<UnivariatePolynomial<EF>> = Vec::with_capacity(polys.len());
+        let mut r = 0usize;
+        for (i, poly) in polys.iter().enumerate() {
+            if poly.num_real_entries == 0 {
+                out.push(UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] });
+                continue;
+            }
+            if poly.num_prep_cols != 0 {
+                // np>0 chip: host path (device kernel has no prep-cell support).
+                out.push(poly.sum_as_poly(claims[i], is_first_round));
+                continue;
+            }
+            let yt = &tuples[r];
+            let claim = claims[i].expect("batched_device_round: claim required");
+            out.push(poly.finalize_round_poly(
+                claim,
+                lasts[r],
+                &partials[r],
+                to_ef(&yt[0]),
+                to_ef(&yt[1]),
+                to_ef(&yt[2]),
+                to_ef(&yt[3]),
+            ));
+            r += 1;
+        }
+
+        // VERIFY: the batched path bypasses accumulate_y_tuple's own dual-run,
+        // so cross-check each device-eligible chip's finalized round poly against
+        // the per-chip sum_as_poly path (itself device-vs-host validated).
+        if std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
+            for (i, poly) in polys.iter().enumerate() {
+                if poly.num_real_entries == 0 || poly.num_prep_cols != 0 {
+                    continue;
+                }
+                let reference = poly.sum_as_poly(claims[i], is_first_round);
+                assert_eq!(
+                    out[i].coefficients, reference.coefficients,
+                    "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: batched round poly != per-chip for chip {} (is_first_round={})",
+                    poly.air.name(), is_first_round,
+                );
+            }
+        }
+        Some(out)
+    }
+
     /// Device-or-host dispatch for the per-pair y-tuple accumulator.
     /// Under `ZIREN_GPU_ZEROCHECK_YTUPLE=1` with a registered
     /// `GpuZerocheckYTupleFn` and `EF == Ef4`, computes the tuple on the
@@ -482,25 +637,22 @@ where
     /// transcript is unaffected either way — `finalize_round_poly` and the
     /// challenger stay host.
     fn accumulate_y_tuple(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
-        let device_on = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false);
-        if device_on {
-            if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
-                let verify = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
-                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                    .unwrap_or(false);
-                if verify {
-                    let h = self.accumulate_y_tuple_host(partial, is_first_round);
-                    assert!(
-                        dev.0 == h.0 && dev.1 == h.1 && dev.2 == h.2 && dev.3 == h.3,
-                        "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: device y-tuple != host for chip {} \
-                         (is_first_round={is_first_round})",
-                        self.air.name(),
-                    );
-                }
-                return dev;
+        // Device-on by default; gpu_y_tuple returns None (-> host) unless EF==Ef4,
+        // F==KoalaBear and a hook is registered (the TypeId guard is the safety net).
+        if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
+            let verify = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            if verify {
+                let h = self.accumulate_y_tuple_host(partial, is_first_round);
+                assert!(
+                    dev.0 == h.0 && dev.1 == h.1 && dev.2 == h.2 && dev.3 == h.3,
+                    "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: device y-tuple != host for chip {} \
+                     (is_first_round={is_first_round})",
+                    self.air.name(),
+                );
             }
+            return dev;
         }
         self.accumulate_y_tuple_host(partial, is_first_round)
     }
@@ -932,6 +1084,20 @@ where
     fn sum_as_poly_in_last_variable(&self, claim: Option<EF>) -> UnivariatePolynomial<EF> {
         self.sum_as_poly(claim, false)
     }
+
+    fn batched_sum_as_poly_in_last_variable(
+        polys: &[Self],
+        claims: &[Option<EF>],
+    ) -> Vec<UnivariatePolynomial<EF>> {
+        if let Some(r) = Self::batched_device_round(polys, claims, false) {
+            return r;
+        }
+        polys
+            .iter()
+            .zip(claims.iter())
+            .map(|(p, c)| p.sum_as_poly_in_last_variable(*c))
+            .collect()
+    }
 }
 
 impl<'a, F, EF, A> SumcheckPolyFirstRound<EF> for ZeroCheckPoly<'a, F, EF, A>
@@ -954,6 +1120,22 @@ where
     ) -> UnivariatePolynomial<EF> {
         assert_eq!(t, 1, "ZeroCheckPoly only supports t = 1");
         self.sum_as_poly(claim, true)
+    }
+
+    fn batched_sum_as_poly_in_last_t_variables(
+        polys: &[Self],
+        claims: &[Option<EF>],
+        t: usize,
+    ) -> Vec<UnivariatePolynomial<EF>> {
+        assert_eq!(t, 1, "ZeroCheckPoly only supports t = 1");
+        if let Some(r) = Self::batched_device_round(polys, claims, true) {
+            return r;
+        }
+        polys
+            .iter()
+            .zip(claims.iter())
+            .map(|(p, c)| p.sum_as_poly_in_last_t_variables(*c, t))
+            .collect()
     }
 }
 

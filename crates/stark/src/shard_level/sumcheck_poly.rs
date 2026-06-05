@@ -49,6 +49,23 @@ pub trait SumcheckPoly<K: Field>: SumcheckPolyBase + ComponentPoly<K> + Sized {
     /// `claim = prev_poly(alpha_prev)` enables the 3-eval trick
     /// `p(0) = claim - p(1)`. When `None`, compute `p(0)` directly.
     fn sum_as_poly_in_last_variable(&self, claim: Option<K>) -> UnivariatePolynomial<K>;
+
+    /// Batched form over ALL polys (chips) at once, enabling a single fused
+    /// device call across chips.  Default = per-poly loop (GKR / tests keep
+    /// the host path); the zerocheck poly overrides this to fuse on-device.
+    fn batched_sum_as_poly_in_last_variable(
+        polys: &[Self],
+        claims: &[Option<K>],
+    ) -> Vec<UnivariatePolynomial<K>>
+    where
+        Self: Sized,
+    {
+        polys
+            .iter()
+            .zip(claims.iter())
+            .map(|(p, c)| p.sum_as_poly_in_last_variable(*c))
+            .collect()
+    }
 }
 
 /// Sumcheckable polynomial whose first round binds `t` variables at
@@ -63,6 +80,23 @@ pub trait SumcheckPolyFirstRound<K: Field>: SumcheckPolyBase {
         claim: Option<K>,
         t: usize,
     ) -> UnivariatePolynomial<K>;
+
+    /// Batched first-round form over ALL polys (chips).  Default = per-poly
+    /// loop; the zerocheck poly overrides this to fuse on-device.
+    fn batched_sum_as_poly_in_last_t_variables(
+        polys: &[Self],
+        claims: &[Option<K>],
+        t: usize,
+    ) -> Vec<UnivariatePolynomial<K>>
+    where
+        Self: Sized,
+    {
+        polys
+            .iter()
+            .zip(claims.iter())
+            .map(|(p, c)| p.sum_as_poly_in_last_t_variables(*c, t))
+            .collect()
+    }
 }
 
 /// Observe an EF element into a base-field challenger by decomposing
@@ -410,6 +444,34 @@ pub type GpuZerocheckYTupleFn = fn(
 
 gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_HOOK: GpuZerocheckYTupleFn
     => register_gpu_zerocheck_ytuple_hook, get_gpu_zerocheck_ytuple_hook);
+
+/// Per-chip input for the BATCHED device y-tuple hook (B2.2 chip fusion):
+/// one fused device launch over ALL chips in a round.  Slices borrow the
+/// per-chip ZeroCheckPoly data; the hook must not retain them past the call.
+pub struct ZerocheckChipYTupleInput<'a> {
+    pub chip_name: &'a str,
+    pub main_cells: &'a [Ef4],
+    pub num_main_cols: usize,
+    pub prep_cells: &'a [Ef4],
+    pub num_prep_cols: usize,
+    pub gkr_powers: &'a [Ef4],
+    pub alpha: Ef4,
+    pub eq: &'a [Ef4],
+    pub num_real: usize,
+}
+
+/// Batched per-round y-tuple hook: computes (y_0,y_2,y_3,y_4) for ALL
+/// input chips in one fused device call, returning one tuple per chip in
+/// the SAME order.  None => whole-round host fallback.  Only the REAL
+/// chips (num_real > 0) are passed; the caller emits dummies for the rest.
+pub type GpuZerocheckBatchedYTupleFn = fn(
+    chips: &[ZerocheckChipYTupleInput<'_>],
+    public_values: &[p3_koala_bear::KoalaBear],
+    is_first_round: bool,
+) -> Option<Vec<[Ef4; 4]>>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_BATCHED_YTUPLE_HOOK: GpuZerocheckBatchedYTupleFn
+    => register_gpu_zerocheck_batched_ytuple_hook, get_gpu_zerocheck_batched_ytuple_hook);
 
 /// Multi-chip batched variant of `GpuConstraintEvalFn`. Returns
 /// `Vec<Option<Vec<Ef4>>>` of length `chip_names.len()`; `None`
