@@ -269,7 +269,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 .map(|c| p3_air::BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
                 .collect();
             let column_counts_by_round_pre: Vec<Vec<usize>> =
-                vec![preprocessed_widths_pre, main_widths_pre];
+                vec![main_widths_pre];
 
             // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
             // (set to any value) falls back to the bytes lift; preserved
@@ -341,7 +341,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 .iter()
                 .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+            let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
             let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::chip_metadata_from_chips::<SC, A>(&shard_chips);

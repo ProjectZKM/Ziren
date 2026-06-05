@@ -317,7 +317,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             .map(|c| _Base1::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let column_counts_by_round_pre: Vec<Vec<usize>> =
-            vec![preprocessed_widths_pre, main_widths_pre];
+            vec![main_widths_pre];
 
         // Bundle lift is the production path post multi-GPU determinism
         // cascade closure.  ZIREN_LEGACY_NONBUNDLE_LIFT (set to any
@@ -408,7 +408,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let _column_counts_by_round: Vec<Vec<usize>> =
-            vec![preprocessed_widths, main_widths];
+            vec![main_widths];
         let _insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::insertion_points_from_column_counts(&_column_counts_by_round);

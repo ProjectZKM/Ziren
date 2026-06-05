@@ -233,7 +233,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .iter()
             .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+        let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
         // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
         // (set to any value) falls back to the bytes lift; preserved

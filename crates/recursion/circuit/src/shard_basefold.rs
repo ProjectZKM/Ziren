@@ -495,17 +495,15 @@ impl<P> BasefoldShardVerifier<P> {
         // from phase 3 as its `point` argument.  Evaluation claims
         // are flattened from the GKR emission: one row per chip,
         // consisting of (main_trace_evaluations ++ preprocessed_trace_evaluations).
-        let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = logup_gkr_proof
-            .logup_evaluations
-            .chip_openings
-            .values()
-            .map(|chip_eval| {
-                let mut row = chip_eval.main_trace_evaluations.clone();
-                if let Some(prep) = chip_eval.preprocessed_trace_evaluations.as_ref() {
-                    row.extend(prep.iter().copied());
-                }
-                row
-            })
+        // Item-12 @z*: source the jagged evaluation claims from the trace@z
+        // openings (opened_values, name-order, MAIN-ONLY) that Phase-3
+        // zerocheck consumed and reduced to point z -- NOT the GKR openings
+        // @z_gkr.  The host commits main-only, so the jagged opening now binds
+        // the COMMITTED main trace at the zerocheck-reduced point z.
+        let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = opened_values
+            .chips
+            .iter()
+            .map(|chip| chip.main.local.clone())
             .collect();
 
         // Assemble the commitments vector — the main-trace

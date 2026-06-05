@@ -176,7 +176,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         .iter()
         .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
         .collect();
-    let column_counts_by_round: Vec<Vec<usize>> = vec![preprocessed_widths, main_widths];
+    let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
     // Bundle lift is the production path since the witness-stream
     // symmetry fix that closed the multi-GPU determinism cascade.

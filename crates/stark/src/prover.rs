@@ -290,6 +290,12 @@ where
         };
 
         if use_basefold_path {
+            // Item-12: name-order the basefold jagged commit (SP1 BTreeMap chip
+            // order) so the recursion verifier's compile-time name-order
+            // column_counts / opened_values match the committed column order.
+            // Open/verify follow this via the chip_ordering map; the legacy FRI
+            // path below keeps the original height-desc (biggest-first) order.
+            named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
             return commit_basefold_path::<SC, Self::DeviceMatrix, Self::DeviceProverData>(
                 pcs,
                 record.public_values(),
