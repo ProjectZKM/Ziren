@@ -1508,14 +1508,175 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let (shrink_pk, shrink_vk) = tracing::debug_span!("setup shrink basefold")
             .in_scope(|| self.shrink_prover.setup(&program));
         let mut challenger = self.shrink_prover.config().challenger();
+
+        // Capture the execution record before it is moved into `prove`
+        // so the BaseFold side-channel attach below (GPU host-fallback
+        // path) can re-run generate_traces + commit on a fresh clone.
+        let rec = runtime.record;
         let mut compress_proof = self
             .shrink_prover
-            .prove(&shrink_pk, vec![runtime.record], &mut challenger, opts.recursion_opts)
+            .prove(&shrink_pk, vec![rec.clone()], &mut challenger, opts.recursion_opts)
             .unwrap();
-        Ok(ZKMReduceProof {
-            vk: shrink_vk,
-            proof: compress_proof.shard_proofs.pop().unwrap(),
-        })
+        let mut proof = compress_proof.shard_proofs.pop().unwrap();
+
+        // ── BaseFold side-channel attach (GPU shrink) ──────────────────
+        //
+        // The CPU `StarkMachine::open` populates `basefold_shard_proof`
+        // inline via `try_prove_shard_to_basefold_boxed`
+        // (crates/stark/src/prover.rs:564), so on CPU this guard is a
+        // no-op.  Under `StarkGpuProver<InnerSC, ShrinkAir>` with
+        // `ZIREN_GPU_DROP_FRI` (default), the GPU `open()` returns
+        // `basefold_shard_proof: None`, and `wrap_bn254` `.expect()`s
+        // that side channel.  Mirror the GPU compress orchestrator
+        // (ziren-gpu/prover/src/compress_multi_gpu.rs:1496-1865) by
+        // re-running the pipeline pieces on the shrink machine and
+        // driving `prove_shard_to_basefold` here, extracting the 8-felt
+        // `main_commitment` from the `MerkleCap` (precomputed_commit =
+        // None, since the GPU lacks the precomputed jagged commit the
+        // CPU helper expects).  Host `prove_shard_to_basefold` with
+        // `device_traces = None` needs no device snapshot.
+        if proof.basefold_shard_proof.is_none() {
+            use core::any::Any;
+            use p3_challenger::CanObserve;
+            use p3_symmetric::MerkleCap;
+            use zkm_stark::air::MachineAir;
+
+            // Re-run generate_dependencies + generate_traces on a fresh
+            // clone of the record (mirrors the GPU orchestrator + host
+            // `prove` preamble), then commit to obtain the MerkleCap
+            // main commitment, chip_ordering, and public_values.
+            let mut dep_records = vec![rec.clone()];
+            self.shrink_prover
+                .machine()
+                .generate_dependencies(&mut dep_records, &opts.recursion_opts, None)
+                .expect("shrink basefold attach: generate_dependencies failed");
+            let bf_record = dep_records.into_iter().next().unwrap();
+            let traces = self
+                .shrink_prover
+                .generate_traces(&bf_record)
+                .expect("shrink basefold attach: generate_traces failed");
+            let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
+            let data = self.shrink_prover.commit(&bf_record, traces.clone());
+
+            // Snapshot the challenger at the state the BaseFold verifier
+            // sees at entry to `BasefoldShardVerifier::verify_shard`:
+            // fresh challenger -> pk.observe_into -> observe pv. Matches
+            // the compress orchestrator's snapshot ordering exactly
+            // (compress_multi_gpu.rs:1295 pk.observe_into + :1478
+            // snap.observe_slice(pv[0..num_pv_elts])) and the CPU
+            // helper's snapshot point (prover.rs:369/383).
+            let num_pv_elts = self.shrink_prover.machine().num_pv_elts();
+            let mut bf_challenger = self.shrink_prover.config().challenger();
+            shrink_pk.observe_into(&mut bf_challenger);
+            bf_challenger.observe_slice(&data.public_values[0..num_pv_elts]);
+
+            // Rehydrate device-only RecursionAir chips on host: the GPU
+            // `generate_traces` (StarkGpuProver) filters out chips whose
+            // `generate_trace_host` returns None, so they are absent from
+            // `traces`.  Regenerate them via `chip.air.generate_trace`
+            // (host-or-device generic).  No-op on CPU (all present).
+            // Mirrors compress_multi_gpu.rs:1341-1383.
+            let mut trace_by_name: std::collections::BTreeMap<
+                String,
+                RowMajorMatrix<Val<InnerSC>>,
+            > = traces.into_iter().collect();
+            {
+                let machine = self.shrink_prover.machine();
+                for chip in machine.chips() {
+                    let name = chip.name();
+                    if trace_by_name.contains_key(&name) {
+                        continue;
+                    }
+                    if !chip.included(&bf_record) {
+                        continue;
+                    }
+                    let mut output =
+                        <ShrinkAir<KoalaBear> as MachineAir<KoalaBear>>::Record::default();
+                    let trace = chip
+                        .air
+                        .generate_trace(&bf_record, &mut output)
+                        .expect("shrink basefold attach: rehydrate generate_trace failed");
+                    trace_by_name.insert(name, trace);
+                }
+            }
+
+            // Build per-chip preprocessed + main traces aligned with the
+            // chips iteration order (shard_chips_ordered). Empty matrix
+            // when a chip has no preprocessed / main columns.
+            let machine = self.shrink_prover.machine();
+            let chips: Vec<&zkm_stark::Chip<Val<InnerSC>, _>> =
+                machine.shard_chips_ordered(&data.chip_ordering).collect();
+
+            let preprocessed_traces: Vec<RowMajorMatrix<Val<InnerSC>>> = chips
+                .iter()
+                .map(|chip| {
+                    host_pk
+                        .chip_ordering
+                        .get(&chip.name())
+                        .map(|&idx| host_pk.traces[idx].clone())
+                        .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0))
+                })
+                .collect();
+
+            let main_traces: Vec<RowMajorMatrix<Val<InnerSC>>> = chips
+                .iter()
+                .map(|chip| {
+                    trace_by_name
+                        .remove(&chip.name())
+                        .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0))
+                })
+                .collect();
+            drop(trace_by_name);
+
+            // Extract the 8-felt digest from the main commitment. For
+            // KoalaBearPoseidon2 the PCS commitment is
+            // `MerkleCap<KoalaBear, [KoalaBear; 8]>`; pull the first
+            // root. Mirrors compress_multi_gpu.rs:1585-1611.
+            let digest: [Val<InnerSC>; 8] = {
+                let any_commit: &dyn Any = &data.main_commit;
+                let cap = any_commit
+                    .downcast_ref::<MerkleCap<KoalaBear, [KoalaBear; 8]>>()
+                    .expect(
+                        "shrink basefold attach: Com<InnerSC> downcast to \
+                         MerkleCap<KoalaBear,[KoalaBear;8]> failed",
+                    );
+                let roots = cap.roots();
+                assert!(!roots.is_empty(), "MerkleCap must have at least one root");
+                roots[0]
+            };
+
+            // Pin to the BasefoldShardVerifier production default
+            // (max_log_row_count = 22), matching the CPU helper
+            // (prover.rs:1165) and the compress orchestrator
+            // (compress_multi_gpu.rs:1613).
+            let max_log_row_count =
+                zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                    .max_log_row_count;
+
+            let bf_proof = zkm_stark::shard_level::prover::prove_shard_to_basefold::<
+                InnerSC,
+                ShrinkAir<Val<InnerSC>>,
+            >(
+                &chips,
+                &preprocessed_traces,
+                &main_traces,
+                digest,
+                data.public_values.clone(),
+                max_log_row_count,
+                &mut bf_challenger,
+                // Host path: no device traces.
+                None,
+                // CPU/host emits MSB-folded proofs.
+                zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
+                // GPU lacks the precomputed jagged commit; the digest
+                // above is extracted straight from the MerkleCap.
+                None,
+            );
+
+            proof.basefold_shard_proof = Some(Box::new(bf_proof));
+        }
+
+        Ok(ZKMReduceProof { vk: shrink_vk, proof })
     }
 
     /// Wrap a reduce proof into a STARK proven over a SNARK-friendly field.
