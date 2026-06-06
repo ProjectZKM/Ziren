@@ -2195,6 +2195,117 @@ pub mod jagged {
             jagged_eval,
         }
     }
+
+    /// #H (BaseFold-over-BN254) generic host open orchestration: the
+    /// challenger + Mmcs-generic mirror of the HOST path of
+    /// `prove_jagged_basefold_inner` (no GPU jagged-reduction hooks -- those are
+    /// inner-typed). The wrap (OuterChallenger + OuterValMmcs) calls this to
+    /// emit a BaseFold-BN254 bundle. Requires a precomputed commit (Option B).
+    #[allow(clippy::type_complexity)]
+    pub fn prove_jagged_basefold_inner_generic<Challenger, MT>(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        precomputed: PrecomputedJaggedCommitGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+    ) -> JaggedBasefoldBundleGeneric<MT>
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+    {
+        use p3_maybe_rayon::prelude::*;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data } = precomputed;
+
+        // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
+        // the host path including the ITEM-12 embedding factor + empty-chip skip).
+        let y_per_chip: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip {
+            assert_eq!(pre.len(), chip_traces.len(),
+                "pre_y_per_chip length must match chip_traces length");
+            pre
+        } else {
+            chip_traces
+                .par_iter()
+                .zip(r_row_per_chip.par_iter())
+                .map(|((_name, trace), r_row_c)| {
+                    let h = trace.values.len() / trace.width.max(1);
+                    let w = trace.width;
+                    if h == 0 || w == 0 {
+                        return Vec::new();
+                    }
+                    let h_padded = h.next_power_of_two();
+                    assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
+                    let n_high = z_row.len().saturating_sub(r_row_c.len());
+                    let embed_factor: InnerChallenge = z_row[..n_high]
+                        .iter()
+                        .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
+                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                    (0..w)
+                        .into_par_iter()
+                        .map(|col| {
+                            let mut acc = InnerChallenge::ZERO;
+                            for row in 0..h {
+                                acc += eq_c[row]
+                                    * InnerChallenge::from(trace.values[row * w + col]);
+                            }
+                            acc * embed_factor
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+
+        // (4) sample z_col, then run the HOST jagged-sumcheck reduction.
+        let num_cols = packing.offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
+            .map(|_| challenger.sample_algebra_element())
+            .collect();
+        let reduction = {
+            let dense_q =
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+            crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                dense_q, &packing, r_row_per_chip, &y_per_chip, &z_col, z_row, challenger,
+            )
+        };
+
+        // jagged-eval sub-proof at (z_row, z_col, z*).
+        let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+            &packing.offsets, z_row, &z_col, &reduction.eval_point, challenger,
+        );
+
+        // (5) extend the eval point to log2(area) + BaseFold open at z*.
+        let target_dim = prover_data.area.trailing_zeros() as usize;
+        let mut extended_eval_point = reduction.eval_point.clone();
+        while extended_eval_point.len() < target_dim {
+            let r: InnerChallenge = challenger.sample_algebra_element();
+            extended_eval_point.push(r);
+        }
+        let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+        let proof = crate::jagged_pcs::open_jagged_pcs_host_generic::<
+            Challenger,
+            MT,
+            crate::jagged_pcs::JaggedDft,
+        >(prover_data, extended_eval_point, challenger, mmcs, dft);
+
+        let packing_meta = PackingMeta {
+            offsets: packing.offsets.clone(),
+            total_values: packing.total_values,
+            log_dense_size: packing.log_dense_size,
+            column_counts: packing.chip_infos.iter().map(|ci| ci.column_count).collect(),
+        };
+        JaggedBasefoldBundleGeneric {
+            reduction,
+            basefold_proof: proof,
+            y_per_chip,
+            commit,
+            packing: packing_meta,
+            jagged_eval,
+        }
+    }
     /// Verifier mirror.
     pub fn verify_jagged_basefold(
         chip_infos: &[JaggedChipInfo],
