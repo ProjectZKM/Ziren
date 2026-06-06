@@ -1568,6 +1568,36 @@ pub mod jagged {
         PrecomputedJaggedCommit { packing, commit, prover_data }
     }
 
+    /// #H (BaseFold-over-BN254) generic precompute: build the BaseFold commit
+    /// over an arbitrary Mmcs (the ring's `BasefoldRing::BfMmcs`). Inner uses
+    /// Poseidon2-KoalaBear; the wrap (OuterSC) passes the Poseidon2-BN254
+    /// `OuterValMmcs` so the commitment is the BN254 root. The DFT is over
+    /// KoalaBear for BOTH rings (Val == KoalaBear everywhere), so `JaggedDft`
+    /// is reused. No challenger observe (caller surfaces the commitment).
+    pub fn precompute_jagged_basefold_commit_generic<MT>(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        mmcs: MT,
+    ) -> PrecomputedJaggedCommitGeneric<MT>
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+    {
+        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        let (commit, prover_data) = {
+            let dense_q =
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
+            let dense_traces = vec![(
+                alloc::string::String::from("<jagged-dense>"),
+                RowMajorMatrix::new(dense_q, 1),
+            )];
+            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+            crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
+                dense_traces, mmcs, dft,
+            )
+        };
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data }
+    }
+
     /// **Prover-side one-call entry point** — full pipeline:
     /// commit chip traces (via BaseFold-stacked), run jagged sumcheck
     /// reduction, open dense at the reduction's `z*` via BaseFold,
