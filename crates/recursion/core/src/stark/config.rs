@@ -230,7 +230,13 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn use_basefold() -> bool {
-        true
+        // BaseFold-over-BN254 wrap port: kept FALSE until the runtime
+        // digest/bundle tunnel is complete (commit_basefold_path builds a
+        // KoalaBear [F;8] MerkleCap + downcasts to Com<SC>=Hash<KoalaBear,Bn254,1>,
+        // which panics for OuterSC). Wrap stays on the FRI device STARK
+        // (DROP_FRI OuterSC exemption) = working + device-resident. Flip to
+        // true only after the digest tunnel + gnark BaseFold verifier + vk regen.
+        false
     }
 }
 
@@ -372,5 +378,114 @@ impl BasefoldRing for KoalaBearPoseidon2OuterD5 {
 
     fn use_basefold() -> bool {
         false
+    }
+}
+
+// #H (BaseFold-over-BN254 wrap port) — compile-time proof that the genericized
+// BaseFold jagged-PCS digest path (`zkm_stark::jagged_pcs::*_generic`) is
+// instantiable over the OUTER ring's BN254 commitment family, i.e. that the
+// BN254 commitment (`OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`)
+// "flows" through commit/open/verify exactly where the inner ring uses the
+// 8-felt Poseidon2-KoalaBear digest. `Val`/`Challenge` stay KoalaBear /
+// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear, KoalaBear⁴>`); only the
+// Merkle-commitment hash + challenger vary.
+//
+// No runtime body: these functions are never *called* here (the OuterSC wrap
+// orchestration that drives them lives in `zkm-stark`'s `prover.rs`
+// `commit()/open()` + gnark `build_outer_circuit`, which are the remaining
+// wrap-port work). The point is purely to monomorphize the generic cores at
+// `MT = OuterValMmcs` + `Challenger = OuterChallenger` so the trait bounds
+// (`OuterChallenger: CanObserve<OuterValMmcs::Commitment>`,
+// `OuterDft: TwoAdicSubgroupDft<KoalaBear>`) are checked by the compiler. If
+// the BN254 commit family ever drifts out of the generic-core bounds, this
+// stops compiling — a guardrail for the wrap port.
+#[cfg(test)]
+#[allow(dead_code, clippy::type_complexity)]
+mod basefold_over_bn254_generic_typecheck {
+    use super::{OuterChallenger, OuterDft, OuterValMmcs};
+    use std::sync::Arc;
+    use zkm_stark::jagged_pcs::{
+        commit_jagged_pcs_host_generic, commit_jagged_pcs_no_observe_generic,
+        open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+        BasefoldLateBindingCommitGeneric, BasefoldLateBindingProverDataGeneric,
+        JaggedChallenge, JaggedMmcs, JaggedVal,
+    };
+    use p3_matrix::dense::RowMajorMatrix;
+    use zkm_stark::basefold::{StackedBasefoldProof, StackedVerifierError};
+
+    // Sanity: `JaggedVal == OuterVal == KoalaBear`, so the OUTER MMCS is an
+    // `Mmcs<JaggedVal>` exactly as the generic cores require. (Inner alias is
+    // a `MerkleTreeMmcs` over the same `JaggedVal`.)
+    type _AssertOuterIsJaggedValMmcs = OuterValMmcs;
+    type _AssertInner = JaggedMmcs;
+
+    // commit (no observe) over the BN254 MMCS.
+    fn _commit_no_observe(
+        traces: std::vec::Vec<(std::string::String, RowMajorMatrix<JaggedVal>)>,
+        mmcs: OuterValMmcs,
+        dft: Arc<OuterDft>,
+    ) -> (
+        BasefoldLateBindingCommitGeneric<OuterValMmcs>,
+        BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+    ) {
+        commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft)
+    }
+
+    // commit (with observe) — exercises `OuterChallenger:
+    // CanObserve<OuterValMmcs::Commitment>` (the BN254 commit observe the
+    // prologue would perform on the outer path).
+    fn _commit_observe(
+        traces: std::vec::Vec<(std::string::String, RowMajorMatrix<JaggedVal>)>,
+        ch: &mut OuterChallenger,
+        mmcs: OuterValMmcs,
+        dft: Arc<OuterDft>,
+    ) -> (
+        BasefoldLateBindingCommitGeneric<OuterValMmcs>,
+        BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+    ) {
+        commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            traces, ch, mmcs, dft,
+        )
+    }
+
+    // open over the BN254 MMCS.
+    fn _open(
+        pd: BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+        eval_point: std::vec::Vec<JaggedChallenge>,
+        ch: &mut OuterChallenger,
+        mmcs: OuterValMmcs,
+        dft: Arc<OuterDft>,
+    ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
+        open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            pd, eval_point, ch, mmcs, dft,
+        )
+    }
+
+    // verify over the BN254 MMCS — exercises the verifier-side
+    // `CanObserve<OuterValMmcs::Commitment>` (the BN254 commit observe the
+    // outer-path verifier prologue would perform).
+    #[allow(clippy::too_many_arguments)]
+    fn _verify(
+        commitment: &<OuterValMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+        area: usize,
+        log_stacking_height: u32,
+        eval_point: &[JaggedChallenge],
+        evaluation_claim: JaggedChallenge,
+        proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs>,
+        ch: &mut OuterChallenger,
+        mmcs: OuterValMmcs,
+        dft: Arc<OuterDft>,
+    ) -> Result<(), StackedVerifierError> {
+        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            commitment,
+            area,
+            log_stacking_height,
+            eval_point,
+            evaluation_claim,
+            proof,
+            ch,
+            mmcs,
+            dft,
+        )
     }
 }
