@@ -57,7 +57,7 @@ use serde::{Deserialize, Serialize};
 use crate::jagged_branching_program::{
     bits_big_endian, full_jagged_evaluation, BranchingProgram,
 };
-use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger};
+use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
 /// Jagged-eval sub-protocol proof — wraps a [`PartialSumcheckProof`]
@@ -457,13 +457,13 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
 /// log_m up to ~30.
-fn structural_jagged_eval_sumcheck(
+fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_row: &[InnerChallenge],
     z_trace: &[InnerChallenge],
     merged_prefix_sums: &[Vec<InnerChallenge>],
     z_col_eq_vals: &[InnerChallenge],
     claimed_sum: InnerChallenge,
-    challenger: &mut InnerChallenger,
+    challenger: &mut C,
 ) -> PartialSumcheckProof<InnerChallenge> {
     let n = if merged_prefix_sums.is_empty() {
         0
@@ -512,12 +512,13 @@ fn structural_jagged_eval_sumcheck(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn prove_jagged_evaluation(
+// #H (BaseFold-over-BN254): generic over the challenger (FieldChallenger only).
+pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     prefix_sums: &[usize],
     z_row: &[InnerChallenge],
     z_col: &[InnerChallenge],
     z_trace: &[InnerChallenge],
-    challenger: &mut InnerChallenger,
+    challenger: &mut C,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
     // day-2 complete (test fixtures): claimed_sum + naive
     // sumcheck via materialization for small workloads.

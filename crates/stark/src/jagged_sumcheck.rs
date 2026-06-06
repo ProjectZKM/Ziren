@@ -122,7 +122,7 @@ fn build_weight_table(
 /// `interpolate_3point_evals_at_012` (recursion `univariate.rs`) so the
 /// host prover's Fiat-Shamir challenges align with the in-circuit
 /// `verify_sumcheck`, which observes *coefficients* (not evals).
-fn observe_round_poly_coeffs(challenger: &mut InnerChallenger, evals: [InnerChallenge; 3]) {
+fn observe_round_poly_coeffs<C: p3_challenger::FieldChallenger<InnerVal>>(challenger: &mut C, evals: [InnerChallenge; 3]) {
     let [p0, p1, p2] = evals;
     let two_inv = InnerChallenge::from_u8(2).inverse();
     let c0 = p0;
@@ -597,14 +597,17 @@ where
 /// drops `dense_q` as soon as the round-0 fold completes, trimming
 /// `4N` bytes off the peak for the duration of rounds 1 through
 /// `n-1`.  Meaningful for wide workloads (tendermint, large-sum).
-pub fn prove_jagged_reduction_owned(
+// #H (BaseFold-over-BN254): generic over the challenger (only FieldChallenger
+// methods used) so the wrap (OuterChallenger) reuses the same reduction. Inner
+// callers infer C = InnerChallenger (non-breaking).
+pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>(
     dense_q: Vec<InnerVal>,
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
     z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor in the weights
-    challenger: &mut InnerChallenger,
+    challenger: &mut C,
 ) -> JaggedReductionProof<InnerChallenge> {
     assert_eq!(packing.chip_infos.len(), r_row_per_chip.len());
     assert_eq!(packing.chip_infos.len(), y_per_chip.len());
