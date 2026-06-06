@@ -483,6 +483,19 @@ pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal;
     roots[0]
 }
 
+/// #H (BaseFold-over-BN254): ring-native commitment digest. Inner (KoalaBear)
+/// callers use `basefold_commit_digest` (8-felt MerkleCap root); the wrap
+/// (OuterSC) carries the BN254 `MT::Commitment` directly via this generic
+/// accessor -- the seam the digest tunnel observes / serializes.
+pub fn basefold_commit_digest_generic<MT: p3_commit::Mmcs<JaggedVal>>(
+    commit: &BasefoldLateBindingCommitGeneric<MT>,
+) -> <MT as p3_commit::Mmcs<JaggedVal>>::Commitment
+where
+    <MT as p3_commit::Mmcs<JaggedVal>>::Commitment: Clone,
+{
+    commit.commitment.clone()
+}
+
 /// Production-grade FRI config used by the jagged-PCS pipeline.
 /// Public so the GPU dispatch hook can construct a matching
 /// device-side encoder (same `log_blowup`, same coset shift) without
@@ -1432,16 +1445,24 @@ pub mod jagged {
         pub column_counts: Vec<usize>,
     }
 
+    // #H (BaseFold-over-BN254): generic over the Mmcs so the wrap (OuterSC)
+    // bundle holds the BN254 commitment + proof; inner alias below keeps every
+    // caller + the rmp wire-format unchanged. serde(bound) mirrors the
+    // BasefoldLateBindingCommitGeneric pattern (commitment + proof must serde).
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
-    pub struct JaggedBasefoldBundle {
+    #[serde(bound(
+        serialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Serialize, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Serialize",
+        deserialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Deserialize<'de>, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Deserialize<'de>"
+    ))]
+    pub struct JaggedBasefoldBundleGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
         pub reduction: JaggedReductionProof<InnerChallenge>,
         pub basefold_proof: StackedBasefoldProof<
             InnerVal,
             InnerChallenge,
-            crate::jagged_pcs::JaggedMmcs,
+            MT,
         >,
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
-        pub commit: BasefoldLateBindingCommit,
+        pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
         pub packing: PackingMeta,
         /// Jagged-eval sub-protocol proof (#243 — SP1 port scaffold).
         ///
@@ -1455,7 +1476,17 @@ pub mod jagged {
         pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
     }
 
-    impl JaggedBasefoldBundle {
+    /// Concrete inner (Poseidon2-KoalaBear) bundle alias -- the type every
+    /// current caller + wire-format uses.
+    pub type JaggedBasefoldBundle = JaggedBasefoldBundleGeneric<crate::jagged_pcs::JaggedMmcs>;
+
+    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedBasefoldBundleGeneric<MT>
+    where
+        <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment:
+            serde::Serialize + for<'d> serde::Deserialize<'d>,
+        <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof:
+            serde::Serialize + for<'d> serde::Deserialize<'d>,
+    {
         /// Wire-format bytes (rmp-serde — matches the existing WHIR
         /// jagged-PCS bundle's serializer choice).
         pub fn to_bytes(&self) -> Vec<u8> {
@@ -1476,11 +1507,13 @@ pub mod jagged {
     /// The 8-felt digest of `commit.commitment` (via
     /// [`crate::jagged_pcs::basefold_commit_digest`]) is the
     /// `main_commitment` that the prologue + verifier observe.
-    pub struct PrecomputedJaggedCommit {
+    pub struct PrecomputedJaggedCommitGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
-        pub commit: crate::jagged_pcs::BasefoldLateBindingCommit,
-        pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverData,
+        pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
+        pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
     }
+    /// Concrete inner alias (MT = JaggedMmcs).
+    pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
 
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
