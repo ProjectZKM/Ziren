@@ -516,6 +516,21 @@ where
         if polys.is_empty() {
             return Some(Vec::new());
         }
+        // #108-core residency: the batched (fused) hook reads HOST main_cells.
+        // When any device-eligible chip has its host cells emptied (the core
+        // device-fold residency path leaves main_cells empty + device_cells set),
+        // the fused hook cannot serve it -> decline the whole round so the driver
+        // falls to the per-chip sum_as_poly path, where gpu_y_tuple_device reads
+        // the device cells. (This is the per-chip device-fold the operator opted
+        // into via ZIREN_GPU_CORE_DEVICE_FOLD; it forfeits fusion for residency.)
+        if polys.iter().any(|p| {
+            p.num_real_entries > 0
+                && p.num_prep_cols == 0
+                && p.main_cells.is_empty()
+                && p.device_cells.is_some()
+        }) {
+            return None;
+        }
 
         // Per REAL chip (num_real > 0): partial-lagrange + last coord + owned
         // name must outlive the borrowed inputs.  `real_poly_idx` maps the
@@ -668,6 +683,20 @@ where
         if self.device_cells.is_some() {
             if let Some(dev) = self.gpu_y_tuple_device(partial, is_first_round) {
                 return dev;
+            }
+            // #108-core residency: device cells were set (host trace emptied)
+            // but the device y-tuple hook declined for this chip. main_cells is
+            // empty, so the host-cell paths below would OOB. Fail loudly +
+            // actionably rather than corrupt -- this chip type is not yet
+            // supported under the per-chip device-fold residency path.
+            if self.main_cells.is_empty() && self.num_real_entries > 0 {
+                panic!(
+                    "core device-fold: gpu_y_tuple_device declined for chip {} \
+                     under device residency (host trace emptied, no device \
+                     y-tuple support) -- disable ZIREN_GPU_CORE_DEVICE_FOLD or \
+                     extend the device y-tuple hook for this chip type",
+                    self.air.name(),
+                );
             }
         }
         // Device-on by default; gpu_y_tuple returns None (-> host) unless EF==Ef4,
