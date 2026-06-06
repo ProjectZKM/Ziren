@@ -227,6 +227,11 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: Clone,
+    <SC as BasefoldRing>::BfMmcs:
+        p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
+    <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
+        p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+    >: Send + Sync + 'static,
 {
     type DeviceMatrix = RowMajorMatrix<Val<SC>>;
     type DeviceProverData = PcsProverData<SC>;
@@ -1222,7 +1227,10 @@ where
     M: 'static,
     P: 'static,
     <SC as BasefoldRing>::BfMmcs:
-        p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + 'static>,
+        p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
+    <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
+        p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+    >: Send + Sync + 'static,
 {
     use core::any::Any;
     use p3_symmetric::MerkleCap;
