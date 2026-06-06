@@ -38,9 +38,21 @@ pub type JaggedChallenger = InnerChallenger;
 
 /// One committed batch of chip traces, plus the per-chip metadata
 /// needed to recompute evaluation points on the verifier side.
+///
+/// **#H (BaseFold-over-BN254 port)** — generic over the MMCS `MT` so
+/// the inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254)
+/// commit paths share one struct.  `Val`/`Challenge` stay KoalaBear /
+/// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear,KoalaBear⁴>`); only
+/// the commitment hash varies.  The concrete [`BasefoldLateBindingCommit`]
+/// alias below pins `MT = JaggedMmcs` so every existing caller (incl.
+/// serde wire-format + the ziren-gpu hooks) compiles unchanged.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct BasefoldLateBindingCommit {
-    pub commitment: <JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+#[serde(bound(
+    serialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Serialize",
+    deserialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Deserialize<'de>"
+))]
+pub struct BasefoldLateBindingCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+    pub commitment: <MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
     /// Per-chip `(width, log_height_padded)` so the verifier can
     /// reconstruct the same Mle shapes when checking openings.
     pub chip_dims: Vec<(usize, u32)>,
@@ -52,12 +64,20 @@ pub struct BasefoldLateBindingCommit {
     pub log_stacking_height: u32,
 }
 
-pub struct BasefoldLateBindingProverData {
-    pub stacked_data: StackedBasefoldProverData<JaggedVal, JaggedMmcs>,
+/// Concrete inner (Poseidon2-KoalaBear) commit — the type every current
+/// caller uses.  Transparent alias to the generic struct so struct
+/// literals / field access compile unchanged.
+pub type BasefoldLateBindingCommit = BasefoldLateBindingCommitGeneric<JaggedMmcs>;
+
+pub struct BasefoldLateBindingProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+    pub stacked_data: StackedBasefoldProverData<JaggedVal, MT>,
     pub chip_dims: Vec<(usize, u32)>,
     pub area: usize,
     pub log_stacking_height: u32,
 }
+
+/// Concrete inner prover-data alias (`MT = JaggedMmcs`).
+pub type BasefoldLateBindingProverData = BasefoldLateBindingProverDataGeneric<JaggedMmcs>;
 
 /// Defaults chosen to match the perf-results sweet spot:
 /// `log_stacking_height=14` → 16K rows per stripe, well below the
@@ -99,6 +119,47 @@ pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
     DEFAULT_LOG_STACKING_HEIGHT.min(max_for_data)
 }
 
+// #H (BaseFold-over-BN254 port): GC-generic PCS core. Val/Challenge stay
+// KoalaBear (SP1's BNGC<KoalaBear,KoalaBear^4> keeps the same field for outer);
+// only the Mmcs (hash) + Dft vary by context. Inner uses Poseidon2-KoalaBear
+// Merkle; the wrap (OuterSC) will pass Poseidon2-BN254 Merkle (OuterValMmcs).
+// Non-breaking: `build_pcs` below stays a concrete wrapper so every existing
+// caller compiles unchanged.
+#[allow(clippy::type_complexity)]
+fn build_pcs_generic<MT, D>(
+    log_stacking_height: u32,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> (
+    StackedPcsProver<JaggedVal, JaggedChallenge, MT, D>,
+    StackedPcsVerifier<JaggedVal, JaggedChallenge, MT>,
+)
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal>,
+{
+    // Route through `from_env_or_default` so `ZIREN_BASEFOLD_LOG_BLOWUP`
+    // can override the rate for memory-measurement runs.
+    let fri = FriConfig::<JaggedVal>::from_env_or_default();
+    let basefold_prover = BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(
+        fri.clone(),
+        dft,
+        mmcs.clone(),
+        1, // num_expected_commitments — one round per shard
+    );
+    let basefold_verifier =
+        BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(fri, mmcs.clone(), 1);
+    let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, DEFAULT_BATCH_SIZE);
+    let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
+    (prover, verifier)
+}
+
+// Kept as the concrete inner wrapper (the established pattern); its former
+// callers (commit/open/verify host fns) now build the KoalaBear mmcs/dft
+// inline and delegate to `build_pcs_generic` directly, so this is currently
+// uncalled. Retained for future inner-only callers / symmetry with the
+// generic core.
+#[allow(dead_code)]
 fn build_pcs(
     log_stacking_height: u32,
 ) -> (
@@ -111,29 +172,10 @@ fn build_pcs(
     let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
     let mmcs = JaggedMmcs::new(hash, compress, 0);
-
-    // Route through `from_env_or_default` so `ZIREN_BASEFOLD_LOG_BLOWUP`
-    // can override the rate for memory-measurement runs (see
-    // `FriConfig::from_env_or_default`).
-    let fri = FriConfig::<JaggedVal>::from_env_or_default();
     let dft = Arc::new(JaggedDft::default());
-
-    let basefold_prover = BasefoldProver::<JaggedVal, JaggedChallenge, _, _>::new(
-        fri.clone(),
-        dft,
-        mmcs.clone(),
-        1, // num_expected_commitments — one round per shard
-    );
-    let basefold_verifier =
-        BasefoldVerifier::<JaggedVal, JaggedChallenge, _>::new(fri, mmcs.clone(), 1);
-
-    let prover = StackedPcsProver::new(
-        basefold_prover,
-        log_stacking_height,
-        DEFAULT_BATCH_SIZE,
-    );
-    let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
-
+    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
+    let (prover, verifier) =
+        build_pcs_generic::<JaggedMmcs, JaggedDft>(log_stacking_height, mmcs.clone(), dft);
     (prover, verifier, mmcs)
 }
 
@@ -272,8 +314,43 @@ pub fn commit_jagged_pcs_host(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+    let mmcs = JaggedMmcs::new(hash, compress, 0);
+    let dft = Arc::new(JaggedDft::default());
+    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
+    commit_jagged_pcs_host_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+        chip_traces,
+        challenger,
+        mmcs,
+        dft,
+    )
+}
+
+/// #H (BaseFold-over-BN254 port): GC-generic host commit core (observes
+/// the commitment into `challenger`).  Parameterized over the challenger
+/// `Challenger` + MMCS `MT` + DFT `D`; the caller supplies the concrete
+/// `mmcs`/`dft`.  The inner path uses `JaggedChallenger` + Poseidon2-KoalaBear
+/// Mmcs; the wrap (OuterSC) will pass the BN254 challenger + Poseidon2-BN254
+/// Mmcs.  `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both.
+#[allow(clippy::type_complexity)]
+pub fn commit_jagged_pcs_host_generic<Challenger, MT, D>(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    challenger: &mut Challenger,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> (
+    BasefoldLateBindingCommitGeneric<MT>,
+    BasefoldLateBindingProverDataGeneric<MT>,
+)
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+    Challenger: CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+{
     let (commit, prover_data) =
-        commit_jagged_pcs_host_no_observe(chip_traces);
+        commit_jagged_pcs_no_observe_generic::<MT, D>(chip_traces, mmcs, dft);
     challenger.observe(commit.commitment.clone());
     (commit, prover_data)
 }
@@ -338,21 +415,48 @@ pub fn commit_jagged_pcs_no_observe(
 pub fn commit_jagged_pcs_host_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+    let mmcs = JaggedMmcs::new(hash, compress, 0);
+    let dft = Arc::new(JaggedDft::default());
+    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
+    commit_jagged_pcs_no_observe_generic::<JaggedMmcs, JaggedDft>(chip_traces, mmcs, dft)
+}
+
+/// #H (BaseFold-over-BN254 port): GC-generic commit core (no challenger
+/// observe).  Parameterized over the MMCS `MT` + DFT `D`; the caller
+/// supplies the concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear)
+/// and the wrap (OuterSC, Poseidon2-BN254) paths share one body.
+/// `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both.
+#[allow(clippy::type_complexity)]
+pub fn commit_jagged_pcs_no_observe_generic<MT, D>(
+    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> (
+    BasefoldLateBindingCommitGeneric<MT>,
+    BasefoldLateBindingProverDataGeneric<MT>,
+)
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+{
     let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
     let total_entries: usize = mles.iter().map(|m| m.guts.values.len()).sum();
     let log_stacking_height = pick_log_stacking_height(total_entries);
     let area = total_entries.next_multiple_of(1usize << log_stacking_height);
 
-    let (prover, _verifier, _mmcs) = build_pcs(log_stacking_height);
+    let (prover, _verifier) = build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft);
     let (commitment, stacked_data) = prover.commit_multilinears(mles);
 
-    let commit = BasefoldLateBindingCommit {
+    let commit = BasefoldLateBindingCommitGeneric::<MT> {
         commitment: commitment.clone(),
         chip_dims: chip_dims.clone(),
         area,
         log_stacking_height,
     };
-    let prover_data = BasefoldLateBindingProverData {
+    let prover_data = BasefoldLateBindingProverDataGeneric::<MT> {
         stacked_data,
         chip_dims,
         area,
@@ -1105,7 +1209,44 @@ pub fn open_jagged_pcs_host(
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    let (prover, _verifier, _mmcs) = build_pcs(prover_data.log_stacking_height);
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+    let mmcs = JaggedMmcs::new(hash, compress, 0);
+    let dft = Arc::new(JaggedDft::default());
+    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
+    open_jagged_pcs_host_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+        prover_data,
+        eval_point,
+        challenger,
+        mmcs,
+        dft,
+    )
+}
+
+/// #H (BaseFold-over-BN254 port): GC-generic host open core.  Parameterized
+/// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
+/// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
+/// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
+/// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
+/// KoalaBear⁴ for both (the eval-point is over `JaggedChallenge`).
+#[allow(clippy::type_complexity)]
+pub fn open_jagged_pcs_host_generic<Challenger, MT, D>(
+    prover_data: BasefoldLateBindingProverDataGeneric<MT>,
+    eval_point: Vec<JaggedChallenge>,
+    challenger: &mut Challenger,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+    Challenger: p3_challenger::FieldChallenger<JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+{
+    let (prover, _verifier) =
+        build_pcs_generic::<MT, D>(prover_data.log_stacking_height, mmcs, dft);
     prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
 }
 
@@ -1178,7 +1319,52 @@ pub fn verify_jagged_pcs(
     proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
     challenger: &mut JaggedChallenger,
 ) -> Result<(), crate::basefold::StackedVerifierError> {
-    let (_prover, verifier, _mmcs) = build_pcs(log_stacking_height);
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+    let mmcs = JaggedMmcs::new(hash, compress, 0);
+    let dft = Arc::new(JaggedDft::default());
+    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
+    verify_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+        commitment,
+        area,
+        log_stacking_height,
+        eval_point,
+        evaluation_claim,
+        proof,
+        challenger,
+        mmcs,
+        dft,
+    )
+}
+
+/// #H (BaseFold-over-BN254 port): GC-generic verify core.  Parameterized
+/// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
+/// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
+/// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
+/// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
+/// KoalaBear⁴ for both.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn verify_jagged_pcs_generic<Challenger, MT, D>(
+    commitment: &<MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
+    area: usize,
+    log_stacking_height: u32,
+    eval_point: &[JaggedChallenge],
+    evaluation_claim: JaggedChallenge,
+    proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>,
+    challenger: &mut Challenger,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> Result<(), crate::basefold::StackedVerifierError>
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+    Challenger: p3_challenger::FieldChallenger<JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+{
+    let (_prover, verifier) =
+        build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft);
     verifier.verify_trusted_evaluation(
         core::slice::from_ref(commitment),
         &[area],

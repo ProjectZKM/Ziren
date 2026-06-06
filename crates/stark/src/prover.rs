@@ -21,8 +21,8 @@ use super::{
     VerifierConstraintFolder,
 };
 use crate::{
-    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, Challenger,
-    DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
+    air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
+    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
@@ -209,7 +209,7 @@ pub struct CpuProverError;
 
 impl<SC, A> MachineProver<SC, A> for CpuProver<SC, A>
 where
-    SC: 'static + StarkGenericConfig + Send + Sync,
+    SC: 'static + StarkGenericConfig + BasefoldRing + Send + Sync,
     A: MachineAir<SC::Val>
         + for<'a> Air<ProverConstraintFolder<'a, SC>>
         + Air<LookupBuilder<Val<SC>>>
@@ -280,14 +280,14 @@ where
         // double-commit (FRI + BaseFold) on the same trace data.
         // Non-KoalaBear configs (BN254 wrap / OuterSC) fall through to
         // the legacy FRI commit body below.
-        let use_basefold_path = {
-            use core::any::TypeId;
-            TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>()
-                && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
-                    == TypeId::of::<crate::InnerChallenge>()
-                && TypeId::of::<SC::Challenger>()
-                    == TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-        };
+        // #H (BaseFold-over-BN254 wrap port): dispatch via the `BasefoldRing`
+        // trait instead of the open-coded TypeId gate. `use_basefold()` returns
+        // the SAME boolean the legacy gate computed (inner = true, OuterSC wrap
+        // = false), so this is non-breaking. The trait is now the single source
+        // of truth for BaseFold-vs-FRI dispatch; flipping OuterSC's
+        // `use_basefold()` to `true` (after the bundle/digest genericization)
+        // routes the wrap through BaseFold-over-BN254 here.
+        let use_basefold_path = <SC as BasefoldRing>::use_basefold();
 
         if use_basefold_path {
             // Item-12: name-order the basefold jagged commit (SP1 BTreeMap chip
@@ -432,14 +432,14 @@ where
         // Smoke validation (test_e2e_compress_fibonacci, 38.12s VERIFY_VK=false)
         // confirmed the recursion-AIR basefold variant prior to this flip.
         // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
-        let use_basefold_path = {
-            use core::any::TypeId;
-            TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>()
-                && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
-                    == TypeId::of::<crate::InnerChallenge>()
-                && TypeId::of::<SC::Challenger>()
-                    == TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-        };
+        // #H (BaseFold-over-BN254 wrap port): dispatch via the `BasefoldRing`
+        // trait instead of the open-coded TypeId gate. `use_basefold()` returns
+        // the SAME boolean the legacy gate computed (inner = true, OuterSC wrap
+        // = false), so this is non-breaking. The trait is now the single source
+        // of truth for BaseFold-vs-FRI dispatch; flipping OuterSC's
+        // `use_basefold()` to `true` (after the bundle/digest genericization)
+        // routes the wrap through BaseFold-over-BN254 here.
+        let use_basefold_path = <SC as BasefoldRing>::use_basefold();
 
         if use_basefold_path {
             let t_basefold_path = std::time::Instant::now();
@@ -1079,7 +1079,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
     >,
 >
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + BasefoldRing,
     A: MachineAir<Val<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>
         + for<'b> Air<
@@ -1097,15 +1097,22 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // Gate on SC == KoalaBearPoseidon2 (monomorphic dispatch).
-    if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
-        || TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
-            != TypeId::of::<InnerChallenge>()
-        || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-    {
+    // #H (BaseFold-over-BN254 wrap port): gate via `BasefoldRing::use_basefold()`
+    // (the trait dispatch authority) instead of the open-coded TypeId check.
+    // For every config returning `true` today (the inner KoalaBear stack) the
+    // Val/Challenge/Challenger identities below hold, which keeps the
+    // subsequent KoalaBear-typed transmutes sound — asserted in debug builds.
+    if !<SC as BasefoldRing>::use_basefold() {
         return None;
     }
+    debug_assert!(
+        TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
+            && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
+                == TypeId::of::<InnerChallenge>()
+            && TypeId::of::<SC::Challenger>()
+                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
+        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires the          inner KoalaBear/JaggedChallenger stack (BaseFold-over-BN254 wrap path          needs the genericized bundle/digest before this transmute is valid)",
+    );
 
     // Build per-chip preprocessed traces aligned with `chips` (empty
     // when a chip has no preprocessed column).

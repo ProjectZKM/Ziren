@@ -153,6 +153,66 @@ where
     evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
 }
 
+/// #108 phase-3: materialize a device-only chip's full main trace from the
+/// per-shard provider (host row-major). Returns `None` when the hook is
+/// unregistered, the chip is absent, or F != KoalaBear.
+pub fn materialize_chip_main_trace_via_provider<F>(
+    chip_name: &str,
+    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+) -> Option<(Vec<F>, usize)>
+where
+    F: PrimeField,
+{
+    let hook = crate::shard_level::sumcheck_poly::get_gpu_materialize_trace_hook()?;
+    use core::any::TypeId;
+    type Kb = p3_koala_bear::KoalaBear;
+    if TypeId::of::<F>() != TypeId::of::<Kb>() {
+        return None;
+    }
+    let (vals_kb, width) = hook(chip_name, device_traces)?;
+    // SAFETY: TypeId equality guarantees F == Kb; Vec layout identical.
+    let vals: Vec<F> = unsafe {
+        let len = vals_kb.len();
+        let cap = vals_kb.capacity();
+        let ptr = core::mem::ManuallyDrop::new(vals_kb).as_mut_ptr() as *mut F;
+        Vec::from_raw_parts(ptr, len, cap)
+    };
+    Some((vals, width))
+}
+
+/// #108: per-chip eval_at via the per-shard device-trace provider, for
+/// device-only chips with NO host main trace. `eval_point` is the trailing
+/// log(chip_height) coords. Returns `None` (caller emits the legacy zero
+/// vector) when the provider hook is unregistered, the chip is absent, or
+/// (F,EF) != (KoalaBear, Ef4).
+pub fn eval_chip_columns_at_point_via_provider<F, EF>(
+    chip_name: &str,
+    eval_point: &[EF],
+    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+) -> Option<Vec<EF>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    let hook = crate::shard_level::sumcheck_poly::get_gpu_eval_at_provider_hook()?;
+    use core::any::TypeId;
+    type Kb = p3_koala_bear::KoalaBear;
+    type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
+    if TypeId::of::<F>() != TypeId::of::<Kb>() || TypeId::of::<EF>() != TypeId::of::<Ef4>() {
+        return None;
+    }
+    // SAFETY: TypeId equality guarantees EF == Ef4; slice/Vec layout identical.
+    unsafe {
+        let ep: &[Ef4] =
+            core::slice::from_raw_parts(eval_point.as_ptr().cast::<Ef4>(), eval_point.len());
+        let res_ef4: Vec<Ef4> = hook(chip_name, ep, device_traces)?;
+        let len = res_ef4.len();
+        let cap = res_ef4.capacity();
+        let ptr = core::mem::ManuallyDrop::new(res_ef4).as_mut_ptr() as *mut EF;
+        Some(Vec::from_raw_parts(ptr, len, cap))
+    }
+}
+
 /// Compute per-column MLE evaluations of a row-major trace at a
 /// multilinear point.
 ///

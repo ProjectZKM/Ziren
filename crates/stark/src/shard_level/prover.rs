@@ -55,25 +55,31 @@ fn maybe_auto_precompute_basefold<SC, A>(
     Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
 )
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
 {
     use core::any::TypeId;
-    use crate::{InnerChallenge, InnerVal};
+    use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // Host path already supplied a precompute, or non-KoalaBear config
-    // (no jagged-PCS): pass through untouched.
-    if precomputed_commit.is_some()
-        || TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
-        || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
-        || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-    {
+    // Host path already supplied a precompute, or this config does not prove
+    // via BaseFold (`use_basefold() == false`, e.g. the OuterSC wrap on FRI):
+    // pass through untouched. #H (BaseFold-over-BN254 wrap port): the dispatch
+    // boolean is the `BasefoldRing` trait; the Val/Challenge/Challenger
+    // identities (which keep the KoalaBear transmutes below sound) are then
+    // asserted in debug builds.
+    if precomputed_commit.is_some() || !<SC as BasefoldRing>::use_basefold() {
         return (main_traces, main_commitment, precomputed_commit);
     }
+    debug_assert!(
+        TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
+            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
+            && TypeId::of::<SC::Challenger>()
+                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
+        "maybe_auto_precompute_basefold: use_basefold()=true must imply the          inner KoalaBear/JaggedChallenger stack for the transmutes below",
+    );
 
     // Build named tuples, MOVING each matrix in (the `values` Vec is
     // reinterpreted Val<SC> -> InnerVal under the TypeId gate; identical
@@ -141,7 +147,7 @@ pub fn prove_shard_to_basefold<SC, A>(
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>
         + for<'b> Air<
@@ -189,7 +195,7 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>
         + for<'b> Air<
@@ -570,7 +576,7 @@ fn emit_jagged_pcs_bytes<SC, A>(
     >,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
@@ -581,15 +587,23 @@ where
         prove_jagged_basefold, prove_jagged_basefold_with_precomputed,
     };
     use crate::shard_level::shard_proof::EvaluationProof;
-    use crate::{InnerChallenge, InnerVal};
+    use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
-        || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
-        || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-    {
+    // #H (BaseFold-over-BN254 wrap port): dispatch via `BasefoldRing`. Configs
+    // that don't prove via BaseFold (OuterSC wrap on FRI) emit `Empty`. The
+    // KoalaBear identities that make the transmute + challenger downcast below
+    // sound are asserted in debug builds (they hold for every config that
+    // returns `use_basefold() == true` today).
+    if !<SC as BasefoldRing>::use_basefold() {
         return EvaluationProof::Empty;
     }
+    debug_assert!(
+        TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
+            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
+            && TypeId::of::<SC::Challenger>()
+                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
+        "emit_jagged_pcs_bytes: use_basefold()=true must imply the inner          KoalaBear/JaggedChallenger stack for the transmute + downcast below",
+    );
 
     // Send `trace.width` directly; the verifier reads each chip's
     // `column_count` from `PackingMeta` so padding to `chip.width()`

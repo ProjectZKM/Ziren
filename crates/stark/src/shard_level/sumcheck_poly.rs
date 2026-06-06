@@ -332,6 +332,87 @@ pub type GpuEvalAtFn = fn(
 gpu_hook_accessors!(GPU_EVAL_AT_HOOK: GpuEvalAtFn
     => register_gpu_eval_at_hook, get_gpu_eval_at_hook);
 
+// #108 device trace residency: per-chip eval_at that reads the chip's
+// device trace from the per-shard provider (for device-only chips that
+// have NO host main trace). `eval_point` is the trailing log(chip_height)
+// coords. The hook downcasts the provider handle to its device-matrix type,
+// evaluates each main-trace column at the point on device, and returns one
+// Ef4 per column, or `None` to fall back to the host (zero) path.
+pub type GpuEvalAtProviderFn = fn(
+    chip_name: &str,
+    eval_point: &[Ef4],
+    device_traces: &dyn super::DeviceTraceProvider,
+) -> Option<Vec<Ef4>>;
+
+gpu_hook_accessors!(GPU_EVAL_AT_PROVIDER_HOOK: GpuEvalAtProviderFn
+    => register_gpu_eval_at_provider_hook, get_gpu_eval_at_provider_hook);
+
+// #108 phase-3: materialize a device-only chip's FULL main trace to host
+// (row-major Felt) from the per-shard provider, for the zerocheck constraint
+// eval (ZeroCheckPoly needs the full trace cells, not just a point-eval).
+// Read at zerocheck time (after commit/open) so the D2H does not stall on the
+// commit stream. Returns (row-major values, width). `None` -> caller keeps the
+// empty host trace (legacy / no provider entry).
+pub type GpuMaterializeTraceFn = fn(
+    chip_name: &str,
+    device_traces: &dyn super::DeviceTraceProvider,
+) -> Option<(Vec<p3_koala_bear::KoalaBear>, usize)>;
+
+gpu_hook_accessors!(GPU_MATERIALIZE_TRACE_HOOK: GpuMaterializeTraceFn
+    => register_gpu_materialize_trace_hook, get_gpu_materialize_trace_hook);
+
+// #108 device-fold: per-round per-pair y-tuple computed from DEVICE-resident
+// cells (no host upload). `dev_cells` is the erased device handle held by the
+// ZeroCheckPoly (ColMajorMatrixDevice<Felt> round 0, DeviceBuffer<Ef4> later).
+// Returns (y0,y2,y3,y4) or None to fall back. The hook downcasts the handle.
+pub type GpuZerocheckYTupleDeviceFn = fn(
+    chip_name: &str,
+    dev_cells: &(dyn core::any::Any + Send + Sync),
+    num_main_cols: usize,
+    dev_prep: Option<&(dyn core::any::Any + Send + Sync)>,
+    num_prep_cols: usize,
+    gkr_powers: &[Ef4],
+    alpha: Ef4,
+    eq: &[Ef4],
+    public_values: &[p3_koala_bear::KoalaBear],
+    num_real: usize,
+    is_first_round: bool,
+) -> Option<[Ef4; 4]>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_DEVICE_HOOK: GpuZerocheckYTupleDeviceFn
+    => register_gpu_zerocheck_ytuple_device_hook, get_gpu_zerocheck_ytuple_device_hook);
+
+// #108 device-fold: fold the device-resident cells on the last variable to
+// `alpha`, on device. Returns the new erased device handle (DeviceBuffer<Ef4>).
+// `is_first_round` => current cells are Felt (round 0); fold lifts Felt->Ef4.
+pub type GpuZerocheckFoldDeviceFn = fn(
+    dev_cells: &(dyn core::any::Any + Send + Sync),
+    num_cols: usize,
+    num_real: usize,
+    alpha: Ef4,
+    is_first_round: bool,
+) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
+    => register_gpu_zerocheck_fold_device_hook, get_gpu_zerocheck_fold_device_hook);
+
+// #108 device-fold: bit-reverse + prepare the provider trace once into the
+// device-cell handle the ZeroCheckPoly carries (round-0 cells). Erased handle.
+pub type GpuZerocheckPrepareCellsFn =
+    fn(&(dyn core::any::Any + Send + Sync)) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_PREPARE_CELLS_HOOK: GpuZerocheckPrepareCellsFn
+    => register_gpu_zerocheck_prepare_cells_hook, get_gpu_zerocheck_prepare_cells_hook);
+
+// #108 device-fold: extract the fully-folded per-chip openings (1 row) from the
+// device cells so the host get_component_poly_evals (item-12 trace_at_z) reads
+// the device result. A single-row D2H -- cheap (not the full-trace materialize).
+pub type GpuZerocheckExtractFinalFn =
+    fn(dev_cells: &(dyn core::any::Any + Send + Sync), num_main_cols: usize) -> Option<Vec<Ef4>>;
+
+gpu_hook_accessors!(GPU_ZEROCHECK_EXTRACT_FINAL_HOOK: GpuZerocheckExtractFinalFn
+    => register_gpu_zerocheck_extract_final_hook, get_gpu_zerocheck_extract_final_hook);
+
 // Registration slot for round-0 alpha binding hook. No in-tree
 // caller today; provided so ziren-gpu's startup registration compiles.
 pub type GpuFixRoundZeroFn = fn(

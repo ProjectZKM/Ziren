@@ -323,6 +323,15 @@ where
     use crate::{InnerChallenge, InnerVal};
 
     // Type gate (same as prover-side emit_jagged_pcs_bytes).
+    // #H (BaseFold-over-BN254 wrap port): this verifier-side gate is kept as a
+    // TypeId transmute-safety guard (rather than `BasefoldRing::use_basefold()`)
+    // so the `BasefoldRing` bound does not have to thread through the entire
+    // host-verify generic API (`Verifier::verify_shard` -> `StarkMachine::verify`
+    // -> all generic test/util callers). It is functionally equivalent: it is
+    // reached only when the prover emitted a BaseFold bundle (i.e. the config
+    // proved via BaseFold), and the TypeId check is exactly the identity that
+    // makes the transmute + challenger downcast below sound. Convert to the
+    // trait gate together with the wrap-verify genericization (downstream).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
         || TypeId::of::<SC::Challenger>()

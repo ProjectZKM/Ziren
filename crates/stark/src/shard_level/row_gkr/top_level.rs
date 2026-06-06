@@ -321,7 +321,12 @@ where
         .zip(preprocessed_traces.par_iter())
         .map(|((chip, main_trace), prep_trace)| {
             let main_height = if main_trace.width == 0 {
-                1
+                // #108: device-only chip — its real height lives in the
+                // per-shard provider (host trace empty). Falls back to 1
+                // (legacy unexercised-chip) when no provider entry.
+                _device_traces
+                    .and_then(|p| p.chip_height(&chip.name()))
+                    .unwrap_or(1)
             } else {
                 main_trace.values.len() / main_trace.width
             };
@@ -337,7 +342,20 @@ where
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
             let main_evals = if main_trace.width == 0 && chip_main_width > 0 {
-                vec![EF::ZERO; chip_main_width]
+                // #108: device-only chip — eval its device-resident trace
+                // (from the provider) at the GKR point on device, instead of
+                // emitting a zero vector (which breaks the zerocheck GKR
+                // sum-modification identity). Fall back to zeros only when no
+                // provider / hook (legacy unexercised-chip behaviour).
+                _device_traces
+                    .and_then(|p| {
+                        crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
+                            &chip.name(),
+                            main_eval_point,
+                            p,
+                        )
+                    })
+                    .unwrap_or_else(|| vec![EF::ZERO; chip_main_width])
             } else {
                 evaluate_trace_columns_at_point::<F, EF>(
                     &main_trace.values,

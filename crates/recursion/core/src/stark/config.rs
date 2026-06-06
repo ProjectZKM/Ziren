@@ -10,7 +10,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm_stark::{Com, StarkGenericConfig, ZeroCommitment};
+use zkm_stark::{BasefoldRing, Com, StarkGenericConfig, ZeroCommitment};
 
 use super::{poseidon2::bn254_poseidon2_rc3, zkm_dev_mode};
 
@@ -199,6 +199,41 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
     }
 }
 
+// #H (BaseFold-over-BN254 wrap port): the OUTER (wrap) impl of `BasefoldRing`.
+// Lives here — not in zkm-stark — because zkm-stark cannot import OuterSC
+// (recursion-core depends on stark, not vice versa). `Val<OuterSC> = KoalaBear`
+// and `Challenge<OuterSC> = KoalaBear⁴` (same as inner; mirrors SP1's
+// `BNGC<KoalaBear, KoalaBear⁴>`), so the BaseFold jagged-PCS over the
+// Poseidon2-BN254 Merkle MMCS (`OuterValMmcs`, whose
+// `Commitment = Hash<KoalaBear, Bn254, 1>`) applies directly. `bf_mmcs()`
+// builds that MMCS so the generic BaseFold cores
+// (`commit/open/verify_jagged_pcs_generic`) can run over it once the
+// higher-level jagged bundle + 8-felt-digest stack is genericized over
+// `BfMmcs::Commitment`.
+//
+// `use_basefold()` returns `false` for now — exactly mirroring the legacy
+// `TypeId::of::<SC::Challenger>() == TypeId::of::<JaggedChallenger>()` gate,
+// which was false for OuterSC (`Challenger = MultiField32Challenger`). This
+// keeps the swap to `BasefoldRing` dispatch non-breaking: the wrap stays on
+// the two-adic FRI path. Flip to `true` once `JaggedBasefoldBundle` /
+// `prove_shard_to_basefold`'s `main_commitment: [Val; 8]` are genericized over
+// `Self::BfMmcs::Commitment` (the remaining wrap-port work + vk regen); the
+// `bf_mmcs()` infrastructure here is then consumed directly.
+impl BasefoldRing for KoalaBearPoseidon2Outer {
+    type BfMmcs = OuterValMmcs;
+
+    fn bf_mmcs() -> Self::BfMmcs {
+        let perm = outer_perm();
+        let hash = OuterHash::new(perm.clone()).unwrap();
+        let compress = OuterCompress::new(perm);
+        OuterValMmcs::new(hash, compress, 0)
+    }
+
+    fn use_basefold() -> bool {
+        true
+    }
+}
+
 /// The FRI config for testing recursion.
 pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
     let perm = outer_perm();
@@ -319,5 +354,23 @@ impl StarkGenericConfig for KoalaBearPoseidon2OuterD5 {
 impl ZeroCommitment<KoalaBearPoseidon2OuterD5> for Outer128Pcs {
     fn zero_commitment(&self) -> Com<KoalaBearPoseidon2OuterD5> {
         Com::<KoalaBearPoseidon2OuterD5>::default()
+    }
+}
+
+// #H (BaseFold-over-BN254 wrap port): D=5 quintic outer config. Shares the
+// Poseidon2-BN254 `OuterValMmcs`. `use_basefold() = false` (stays on FRI,
+// mirroring the legacy TypeId gate), supplied for bound-completeness.
+impl BasefoldRing for KoalaBearPoseidon2OuterD5 {
+    type BfMmcs = OuterValMmcs;
+
+    fn bf_mmcs() -> Self::BfMmcs {
+        let perm = outer_perm();
+        let hash = OuterHash::new(perm.clone()).unwrap();
+        let compress = OuterCompress::new(perm);
+        OuterValMmcs::new(hash, compress, 0)
+    }
+
+    fn use_basefold() -> bool {
+        false
     }
 }

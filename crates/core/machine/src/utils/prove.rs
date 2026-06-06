@@ -805,7 +805,7 @@ where
         >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + zkm_stark::BasefoldRing,
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,
@@ -852,7 +852,7 @@ where
         >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + zkm_stark::BasefoldRing,
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,

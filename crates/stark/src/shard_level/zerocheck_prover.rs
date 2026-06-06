@@ -178,12 +178,61 @@ where
                     panic!("chip {name} missing from logup_evaluations.chip_openings")
                 });
 
-            let main_trace = &main_traces[chip_idx];
+            // #108 device-fold: for device-only chips (empty host main trace),
+            // run the zerocheck FULLY on device — build the round-0 device cells
+            // from the per-shard provider (bit-reversed by the prepare hook to
+            // match the host bitrev_rows below). No materialize D2H. Falls back
+            // to the materialize path (host cells) when the device-fold prepare
+            // hook isn't registered.
+            // #108 device-fold: DEFAULT ON (kill-switch ZIREN_GPU_DEVICE_FOLD=0)
+            // for ALL device-only chips. Mixed-height is handled in fold_device_hook
+            // (odd num_real folds host-side, div_ceil + ZERO tail, matching host
+            // fold_cells); the virtual_geq/padded_row_adjustment pad correction stays
+            // host-side in finalize (same as the materialize path).
+            let device_fold_on = std::env::var("ZIREN_GPU_DEVICE_FOLD")
+                .map(|v| v != "0")
+                .unwrap_or(true);
+            let device_cells_opt: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
+                if main_traces[chip_idx].width == 0 && device_fold_on {
+                    _device_traces.and_then(|p| {
+                        let prep_hook =
+                            crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;
+                        let raw = p.lookup_by_name(&name)?;
+                        prep_hook(raw.as_ref())
+                    })
+                } else {
+                    None
+                };
+            // Device-fold chips source dims from the AIR width + provider height
+            // (the host trace is empty); host fold cells stay empty.
+            let df_dims: Option<(usize, usize)> = if device_cells_opt.is_some() {
+                let w = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
+                let h = _device_traces.and_then(|p| p.chip_height(&name)).unwrap_or(0);
+                Some((w, h))
+            } else {
+                None
+            };
+            // Materialize fallback (host cells via D2H) only when device-fold is
+            // unavailable for this empty-host chip.
+            let materialized_dev: Option<RowMajorMatrix<Val<SC>>> =
+                if device_cells_opt.is_none() && main_traces[chip_idx].width == 0 {
+                    _device_traces.and_then(|p| {
+                        crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
+                            &name, p,
+                        )
+                        .map(|(vals, w)| RowMajorMatrix::new(vals, w))
+                    })
+                } else {
+                    None
+                };
+            let main_trace: &RowMajorMatrix<Val<SC>> =
+                materialized_dev.as_ref().unwrap_or(&main_traces[chip_idx]);
             let prep_trace = &preprocessed_traces[chip_idx];
-            let main_width = main_trace.width;
+            let main_width = df_dims.map(|(w, _)| w).unwrap_or(main_trace.width);
             let prep_width = prep_trace.width;
-            let main_height =
-                if main_width == 0 { 0 } else { main_trace.values.len() / main_width };
+            let main_height = df_dims.map(|(_, h)| h).unwrap_or(
+                if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width },
+            );
 
             // GKR-opening batch powers [β¹ .. β^(main+prep)].
             let combined_width = main_width + prep_width;
@@ -230,10 +279,14 @@ where
             let claim = claim_gkr * embed_factor;
             chip_sumcheck_claims.push(claim);
 
-            // Lift real trace rows to the challenge field.
-            let main_cells: Vec<Challenge<SC>> =
-                main_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect();
-            let prep_cells: Option<Vec<Challenge<SC>>> = if prep_width > 0 {
+            // Lift real trace rows to the challenge field. Device-fold chips keep
+            // host cells EMPTY (the device cells carry the trace).
+            let main_cells: Vec<Challenge<SC>> = if df_dims.is_some() {
+                Vec::new()
+            } else {
+                main_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect()
+            };
+            let prep_cells: Option<Vec<Challenge<SC>>> = if df_dims.is_none() && prep_width > 0 {
                 Some(prep_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect())
             } else {
                 None
@@ -246,8 +299,13 @@ where
             // the LSB-first GKR-batch claim (MLE_MSB(bitrev(T))@zeta ==
             // MLE_LSB(T)@zeta), restoring claim == cube-sum without changing
             // zeta, the GKR openings, or the claim.
-            let main_cells =
-                crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height);
+            // Device-fold cells are bit-reversed by the prepare hook on device;
+            // only host cells need bitrev here.
+            let main_cells = if df_dims.is_some() {
+                main_cells
+            } else {
+                crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height)
+            };
             let prep_cells = prep_cells
                 .map(|c| crate::shard_level::zerocheck_poly::bitrev_rows(&c, prep_width, main_height));
 
@@ -282,6 +340,13 @@ where
                 padded_row_adjustment,
                 virtual_geq,
             );
+            // #108 device-fold: attach device cells so the per-round y-tuple +
+            // fold run on device (no host cells).
+            let poly = if let Some(dc) = device_cells_opt {
+                poly.with_device_cells(dc, None)
+            } else {
+                poly
+            };
             zerocheck_polys.push(poly);
         }
 

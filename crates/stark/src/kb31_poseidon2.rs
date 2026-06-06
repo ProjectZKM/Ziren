@@ -207,6 +207,25 @@ impl ZeroCommitment<KoalaBearPoseidon2Inner> for InnerPcs {
     }
 }
 
+// #H (BaseFold-over-BN254 wrap port): `KoalaBearPoseidon2Inner` shares the
+// inner Val=KoalaBear / Challenge=KoalaBear⁴ / JaggedChallenger stack, so it
+// proves via BaseFold (legacy TypeId gate == true). Provided so the
+// `SC: BasefoldRing` bound is satisfiable wherever this config is used.
+impl crate::config::BasefoldRing for KoalaBearPoseidon2Inner {
+    type BfMmcs = crate::jagged_pcs::JaggedMmcs;
+
+    fn bf_mmcs() -> Self::BfMmcs {
+        let perm: InnerPerm = zkm_primitives::poseidon2_init();
+        let hash = InnerHash::new(perm.clone());
+        let compress = InnerCompress::new(perm);
+        crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0)
+    }
+
+    fn use_basefold() -> bool {
+        true
+    }
+}
+
 // ── 128-bit StarkGenericConfig ────────────────────────────────────────────
 
 /// STARK configuration with quintic extension (D=5) for higher security levels.
@@ -295,6 +314,27 @@ impl StarkGenericConfig for KoalaBearPoseidon2D5 {
 impl ZeroCommitment<KoalaBearPoseidon2D5> for Inner128Pcs {
     fn zero_commitment(&self) -> Com<KoalaBearPoseidon2D5> {
         InnerDigestHash::from([InnerVal::ZERO; DIGEST_SIZE]).into()
+    }
+}
+
+// #H (BaseFold-over-BN254 wrap port): the D=5 (quintic) config uses
+// Challenge = Inner128Challenge != KoalaBear⁴, so the legacy TypeId gate is
+// FALSE and it stays on the FRI path → `use_basefold() = false`. `BfMmcs` is
+// supplied (never actually exercised) only to satisfy the bound; the generic
+// BaseFold cores fix JaggedChallenge = KoalaBear⁴ and would not type-check for
+// D5, but the BaseFold branch is dead for this config.
+impl crate::config::BasefoldRing for KoalaBearPoseidon2D5 {
+    type BfMmcs = crate::jagged_pcs::JaggedMmcs;
+
+    fn bf_mmcs() -> Self::BfMmcs {
+        let perm: InnerPerm = zkm_primitives::poseidon2_init();
+        let hash = InnerHash::new(perm.clone());
+        let compress = InnerCompress::new(perm);
+        crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0)
+    }
+
+    fn use_basefold() -> bool {
+        false
     }
 }
 
@@ -498,6 +538,28 @@ pub mod koala_bear_poseidon2 {
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
         fn zero_commitment(&self) -> Com<KoalaBearPoseidon2> {
             DigestHash::from([Val::ZERO; DIGEST_SIZE]).into()
+        }
+    }
+
+    // #H (BaseFold-over-BN254 wrap port): the inner (default core / compress /
+    // shrink) config proves via the BaseFold jagged-PCS over the
+    // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `bf_mmcs()` reproduces
+    // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
+    // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
+    // generic BaseFold cores can be driven through this trait.  `use_basefold`
+    // returns `true`, matching the legacy TypeId gate's inner-config result.
+    impl crate::config::BasefoldRing for KoalaBearPoseidon2 {
+        type BfMmcs = crate::jagged_pcs::JaggedMmcs;
+
+        fn bf_mmcs() -> Self::BfMmcs {
+            let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+            let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+            let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+            crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0)
+        }
+
+        fn use_basefold() -> bool {
+            true
         }
     }
 
