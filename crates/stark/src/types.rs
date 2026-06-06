@@ -53,7 +53,11 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     /// `PrecomputedJaggedCommit` is the concrete KoalaBear jagged-PCS
     /// state; the type is independent of the `SC`/`M`/`P` generics so
     /// it sits cleanly in the struct (the wrap simply holds `None`).
-    pub precomputed_basefold: Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
+    // #H (BaseFold-over-BN254 wrap port): type-erased so it can carry either
+    // the inner PrecomputedJaggedCommit (=Generic<JaggedMmcs>) OR the wrap
+    // PrecomputedJaggedCommitGeneric<OuterValMmcs>. open() downcasts to
+    // PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
+    pub precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
 }
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {

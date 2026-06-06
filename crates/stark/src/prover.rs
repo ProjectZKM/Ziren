@@ -1215,12 +1215,14 @@ fn commit_basefold_path<SC, M, P>(
     named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
 ) -> ShardMainData<SC, M, P>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + BasefoldRing,
     Val<SC>: 'static,
     Com<SC>: 'static,
     PcsProverData<SC>: 'static,
     M: 'static,
     P: 'static,
+    <SC as BasefoldRing>::BfMmcs:
+        p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + 'static>,
 {
     use core::any::Any;
     use p3_symmetric::MerkleCap;
@@ -1246,23 +1248,25 @@ where
         )
     };
 
-    let precomputed =
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
-            &named_traces_inner,
-        );
-    let digest_inner: [crate::InnerVal; 8] =
-        crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+    // #H (BaseFold-over-BN254): build the commit over the ring's BfMmcs
+    // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
+    let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
+        <SC as BasefoldRing>::BfMmcs,
+    >(&named_traces_inner, <SC as BasefoldRing>::bf_mmcs());
 
-    // Build the placeholder `Com<SC>` carrying the BaseFold digest.
-    // For KoalaBearPoseidon2, Com<SC> == MerkleCap<InnerVal, [InnerVal; 8]>.
-    let cap = MerkleCap::<crate::InnerVal, [crate::InnerVal; 8]>::new(vec![digest_inner]);
-    let cap_any: Box<dyn Any> = Box::new(cap);
-    let main_commit: Com<SC> = *cap_any
+    // Com<SC> == BfMmcs::Commitment for both rings (FRI commits via the
+    // val-mmcs root), so the BaseFold commitment IS Com<SC>. Carry it directly.
+    let commitment_any: Box<dyn Any> = Box::new(
+        crate::jagged_pcs::basefold_commit_digest_generic::<<SC as BasefoldRing>::BfMmcs>(
+            &precomputed.commit,
+        ),
+    );
+    let main_commit: Com<SC> = *commitment_any
         .downcast::<Com<SC>>()
         .unwrap_or_else(|_| {
             panic!(
-                "commit_basefold_path: failed to downcast MerkleCap<InnerVal,[InnerVal;8]> \
-                 to Com<SC> (size_of Com<SC> = {})",
+                "commit_basefold_path: failed to downcast BfMmcs::Commitment to Com<SC> \
+                 (size_of Com<SC> = {})",
                 core::mem::size_of::<Com<SC>>(),
             )
         });
@@ -1338,6 +1342,6 @@ where
         main_data,
         chip_ordering,
         public_values,
-        precomputed_basefold: Some(precomputed),
+        precomputed_basefold: Some(Box::new(precomputed)),
     }
 }
