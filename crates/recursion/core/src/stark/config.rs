@@ -238,6 +238,28 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // true only after the digest tunnel + gnark BaseFold verifier + vk regen.
         false
     }
+
+    fn digest_felts(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_stark::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [zkm_stark::jagged_pcs::JaggedVal; 8] {
+        // #H (BaseFold-over-BN254 wrap port): `commit: Hash<KoalaBear, Bn254, 1>`
+        // is the BN254 wrap commitment. Project it to 8 KoalaBear felts via
+        // `split_32` (the same BN254->base primitive the MultiField32 challenger
+        // uses) for the host `[F;8]` FS observe. The gnark step observes the BN254
+        // commit natively; this host projection only needs prover/verifier
+        // agreement, which split_32 gives deterministically.
+        let roots = commit.roots();
+        assert!(
+            !roots.is_empty(),
+            "BN254 wrap commitment MerkleCap must have at least one root",
+        );
+        let felts = p3_field::split_32::<Bn254, KoalaBear>(roots[0][0], 8);
+        let mut out = [KoalaBear::default(); 8];
+        for i in 0..8 {
+            out[i] = felts.get(i).copied().unwrap_or_default();
+        }
+        out
+    }
 }
 
 /// The FRI config for testing recursion.
@@ -378,6 +400,28 @@ impl BasefoldRing for KoalaBearPoseidon2OuterD5 {
 
     fn use_basefold() -> bool {
         false
+    }
+
+    fn digest_felts(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_stark::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [zkm_stark::jagged_pcs::JaggedVal; 8] {
+        // #H (BaseFold-over-BN254 wrap port): `commit: Hash<KoalaBear, Bn254, 1>`
+        // is the BN254 wrap commitment. Project it to 8 KoalaBear felts via
+        // `split_32` (the same BN254->base primitive the MultiField32 challenger
+        // uses) for the host `[F;8]` FS observe. The gnark step observes the BN254
+        // commit natively; this host projection only needs prover/verifier
+        // agreement, which split_32 gives deterministically.
+        let roots = commit.roots();
+        assert!(
+            !roots.is_empty(),
+            "BN254 wrap commitment MerkleCap must have at least one root",
+        );
+        let felts = p3_field::split_32::<Bn254, KoalaBear>(roots[0][0], 8);
+        let mut out = [KoalaBear::default(); 8];
+        for i in 0..8 {
+            out[i] = felts.get(i).copied().unwrap_or_default();
+        }
+        out
     }
 }
 

@@ -224,6 +224,12 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2Inner {
     fn use_basefold() -> bool {
         true
     }
+
+    fn digest_felts(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [crate::jagged_pcs::JaggedVal; 8] {
+        crate::jagged_pcs::basefold_commit_digest_felts(commit)
+    }
 }
 
 // ── 128-bit StarkGenericConfig ────────────────────────────────────────────
@@ -335,6 +341,12 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2D5 {
 
     fn use_basefold() -> bool {
         false
+    }
+
+    fn digest_felts(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [crate::jagged_pcs::JaggedVal; 8] {
+        crate::jagged_pcs::basefold_commit_digest_felts(commit)
     }
 }
 
@@ -560,6 +572,12 @@ pub mod koala_bear_poseidon2 {
 
         fn use_basefold() -> bool {
             true
+        }
+
+        fn digest_felts(
+            commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+        ) -> [crate::jagged_pcs::JaggedVal; 8] {
+            crate::jagged_pcs::basefold_commit_digest_felts(commit)
         }
     }
 

@@ -108,7 +108,14 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
     /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
     /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
-    type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone> + Clone;
+    type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
+        + p3_commit::Mmcs<
+            crate::jagged_pcs::JaggedVal,
+            Commitment: Clone + Send + Sync + 'static,
+            ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>:
+                Send + Sync + 'static,
+        >
+        + Clone;
 
     /// Construct the BaseFold MMCS for this config (perm + hash + compress).
     fn bf_mmcs() -> Self::BfMmcs;
@@ -117,6 +124,13 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// (vs. the legacy two-adic FRI path).  Replaces the open-coded
     /// `use_basefold_path` TypeId gate.
     fn use_basefold() -> bool;
+
+    /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
+    /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap
+    /// root[0]; outer = deterministic projection of the BN254 commit.
+    fn digest_felts(
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [crate::jagged_pcs::JaggedVal; 8];
 }
 
 #[derive(Clone)]

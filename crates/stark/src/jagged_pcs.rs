@@ -474,6 +474,16 @@ where
 /// helper pulls out the first cap root — the same byte sequence
 /// `DuplexChallenger::observe(MerkleCap)` consumes.
 #[must_use]
+/// #H: extract the 8-felt MerkleCap root from a JaggedMmcs commitment (the
+/// inner BasefoldRing::digest_felts body).
+pub fn basefold_commit_digest_felts(
+    commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
+) -> [JaggedVal; 8] {
+    let roots = commitment.roots();
+    assert!(!roots.is_empty(), "BasefoldLateBindingCommit MerkleCap must have at least one root");
+    roots[0]
+}
+
 pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal; 8] {
     let roots = commit.commitment.roots();
     assert!(
