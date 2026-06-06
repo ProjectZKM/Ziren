@@ -198,7 +198,43 @@ where
                         let prep_hook =
                             crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;
                         let raw = p.lookup_by_name(&name)?;
-                        prep_hook(raw.as_ref())
+                        // #108-core np>0: build the chip's preprocessed cells in
+                        // column-major at the PROVIDER main height so the device
+                        // prepare hook can append them to the main device cells and
+                        // fold [main ++ prep] as one buffer. KoalaBear-only (the
+                        // device y-tuple path is Kb); otherwise pass empty (np==0).
+                        let prov_h = p.chip_height(&name).unwrap_or(0);
+                        let pt = &preprocessed_traces[chip_idx];
+                        let np = pt.width;
+                        let is_kb = core::any::TypeId::of::<Val<SC>>()
+                            == core::any::TypeId::of::<p3_koala_bear::KoalaBear>();
+                        let prep_storage: Vec<Val<SC>> = if np > 0 && prov_h > 0 && is_kb {
+                            let mut cm =
+                                vec![<Val<SC> as p3_field::PrimeCharacteristicRing>::ZERO; prov_h * np];
+                            let ph = pt.values.len() / np;
+                            for r in 0..ph.min(prov_h) {
+                                for c in 0..np {
+                                    cm[c * prov_h + r] = pt.values[r * np + c];
+                                }
+                            }
+                            cm
+                        } else {
+                            Vec::new()
+                        };
+                        let (prep_kb, np_hook): (&[p3_koala_bear::KoalaBear], usize) =
+                            if !prep_storage.is_empty() {
+                                // SAFETY: is_kb guard => Val<SC> == KoalaBear (same layout).
+                                let s = unsafe {
+                                    core::slice::from_raw_parts(
+                                        prep_storage.as_ptr() as *const p3_koala_bear::KoalaBear,
+                                        prep_storage.len(),
+                                    )
+                                };
+                                (s, np)
+                            } else {
+                                (&[], 0)
+                            };
+                        prep_hook(raw.as_ref(), prep_kb, np_hook)
                     })
                 } else {
                     None

@@ -398,8 +398,15 @@ gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
 
 // #108 device-fold: bit-reverse + prepare the provider trace once into the
 // device-cell handle the ZeroCheckPoly carries (round-0 cells). Erased handle.
-pub type GpuZerocheckPrepareCellsFn =
-    fn(&(dyn core::any::Any + Send + Sync)) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
+// #108-core np>0: the prepare hook also receives the chip's preprocessed
+// cells (column-major, KoalaBear, height = provider main height) + prep width,
+// so it can build a combined [main ++ prep] device buffer that folds as one.
+// Empty slice / np==0 => main-only (the np==0 device-fold path, unchanged).
+pub type GpuZerocheckPrepareCellsFn = fn(
+    &(dyn core::any::Any + Send + Sync),
+    &[p3_koala_bear::KoalaBear],
+    usize,
+) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
 
 gpu_hook_accessors!(GPU_ZEROCHECK_PREPARE_CELLS_HOOK: GpuZerocheckPrepareCellsFn
     => register_gpu_zerocheck_prepare_cells_hook, get_gpu_zerocheck_prepare_cells_hook);
