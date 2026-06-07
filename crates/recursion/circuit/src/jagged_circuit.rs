@@ -116,7 +116,7 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
 /// Type alias bringing together the standard Ziren BaseFold
 /// recursion-circuit configuration (KoalaBear, 8-element digests).
 pub type DefaultJaggedPcsProof<F, EF> = JaggedPcsProofVariable<
-    RecursiveBasefoldProof<F, EF, 8>,
+    RecursiveBasefoldProof<F, EF>,
     [Felt<F>; 8],
     F,
     EF,

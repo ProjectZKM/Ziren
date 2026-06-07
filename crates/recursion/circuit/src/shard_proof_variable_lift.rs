@@ -126,21 +126,22 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 ///   future iteration derives this from per-chip
 ///   `ShardOpenedValues.chips[i].log_degree` once the
 ///   opened_values flow is wired.
-pub fn assemble_basefold_shard_proof_variable<C>(
+pub fn assemble_basefold_shard_proof_variable<C, HV>(
     main_commitment: [Felt<C::F>; 8],
     public_values: Vec<Felt<C::F>>,
     logup_gkr_proof: &st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     zerocheck_proof: &st::PartialSumcheckProof<Ext<C::F, C::EF>>,
     evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<C::F, C::EF, 8>,
-        [Felt<C::F>; 8],
+        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        HV::DigestVariable,
         C::F,
         C::EF,
     >,
     chip_height_bits: Vec<(String, Vec<Felt<C::F>>)>,
-) -> BasefoldShardProofVariable<C>
+) -> BasefoldShardProofVariable<C, HV>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C>,
 {
     BasefoldShardProofVariable {
         main_commitment,
@@ -201,12 +202,13 @@ where
 /// - `log_stacking_height`: stacking factor for the stacked-PCS
 ///   wrapper.  Production default: equal to `max_log_row_count`
 ///   (one stripe per power-of-two chip-rows count).
-pub fn build_basefold_shard_verifier(
+pub fn build_basefold_shard_verifier<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
-) -> crate::shard_basefold::BasefoldShardVerifier<crate::basefold_verifier::RecursiveBasefoldVerifier>
-{
-    build_basefold_shard_verifier_with_num_vars(
+) -> crate::shard_basefold::BasefoldShardVerifier<
+    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
+> {
+    build_basefold_shard_verifier_with_num_vars::<HV>(
         max_log_row_count,
         log_stacking_height,
         max_log_row_count,
@@ -221,13 +223,14 @@ pub fn build_basefold_shard_verifier(
 /// round count) rather than `max_log_row_count`.  See #244 for the
 /// chain of pre-existing prover/verifier param mismatches this
 /// closes.
-pub fn build_basefold_shard_verifier_with_num_vars(
+pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
     num_variables: usize,
-) -> crate::shard_basefold::BasefoldShardVerifier<crate::basefold_verifier::RecursiveBasefoldVerifier>
-{
-    let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::new(
+) -> crate::shard_basefold::BasefoldShardVerifier<
+    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
+> {
+    let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(
         crate::basefold_verifier::BasefoldVerifierParams::production_default(num_variables),
     );
     let stacked_pcs_verifier = crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
@@ -772,7 +775,7 @@ mod tests {
         };
         let empty_cols: Vec<Vec<usize>> = Vec::new();
         let evaluation_proof =
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig>(
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(
                 &mut builder,
                 &[],
                 21,
@@ -780,7 +783,7 @@ mod tests {
             );
         let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
 
-        let assembled = assemble_basefold_shard_proof_variable::<InnerConfig>(
+        let assembled = assemble_basefold_shard_proof_variable::<InnerConfig, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(
             main_commit,
             public_values,
             &logup_gkr_proof,
@@ -799,7 +802,7 @@ mod tests {
     /// production defaults yields a correctly-shaped verifier.
     #[test]
     fn build_basefold_shard_verifier_production_default() {
-        let v = build_basefold_shard_verifier(21, 21);
+        let v = build_basefold_shard_verifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(21, 21);
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
@@ -812,7 +815,7 @@ mod tests {
     /// configuration — verifier still constructs).
     #[test]
     fn build_basefold_shard_verifier_with_mismatched_heights() {
-        let v = build_basefold_shard_verifier(15, 12);
+        let v = build_basefold_shard_verifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(15, 12);
         assert_eq!(v.max_log_row_count, 15);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 12);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 15);

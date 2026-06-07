@@ -67,6 +67,32 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     ) -> [Self::DigestVariable; 2];
 
     fn print_digest(builder: &mut Builder<C>, digest: Self::DigestVariable);
+
+    /// Promote a *constant* raw digest (host-side [`FieldHasher::Digest`])
+    /// into the in-circuit [`Self::DigestVariable`] via builder constants.
+    /// Inner (KoalaBear): `[KoalaBear;8]` -> `[Felt<KoalaBear>;8]`.
+    /// Outer (BN254): `[Bn254;1]` -> `[Var<Bn254>;1]`.
+    ///
+    /// #H (BaseFold-over-BN254 wrap port): the lift paths carry the
+    /// host BaseFold bundle's digests as raw field constants (not
+    /// witness-stream reads), so this bridges raw -> variable in a
+    /// digest-type-generic way (mirrors SP1's `GC::Digest: Witnessable`
+    /// read but for the const-lift path).
+    fn const_digest(
+        builder: &mut Builder<C>,
+        digest: <Self as FieldHasher<C::F>>::Digest,
+    ) -> Self::DigestVariable;
+
+    /// Build a *raw* host digest ([`FieldHasher::Digest`]) from a
+    /// host-side inner KoalaBear root ([`KoalaBear; 8`]).  Used by the
+    /// inner BaseFold bundle lift (which reads KoalaBear MMCS roots).
+    /// Inner: identity.  Outer (BN254): unreachable from the inner
+    /// bundle path — returns the default digest (the OUTER ring lifts
+    /// its BN254 bundle through a dedicated path; the inner-root
+    /// conversion is never the soundness-binding digest there).
+    fn digest_from_koalabear_root(
+        root: [p3_koala_bear::KoalaBear; 8],
+    ) -> <Self as FieldHasher<C::F>>::Digest;
 }
 
 impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
@@ -150,6 +176,20 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             builder.print_f(*d);
         }
     }
+
+    fn const_digest(
+        builder: &mut Builder<C>,
+        digest: <Self as FieldHasher<KoalaBear>>::Digest,
+    ) -> Self::DigestVariable {
+        core::array::from_fn(|i| builder.constant(digest[i]))
+    }
+
+    fn digest_from_koalabear_root(
+        root: [KoalaBear; 8],
+    ) -> <Self as FieldHasher<KoalaBear>>::Digest {
+        // Inner digest IS [KoalaBear; 8] — identity.
+        root
+    }
 }
 
 pub const BN254_DIGEST_SIZE: usize = 1;
@@ -227,5 +267,21 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         for d in digest.iter() {
             builder.print_v(*d);
         }
+    }
+
+    fn const_digest(
+        builder: &mut Builder<C>,
+        digest: <Self as FieldHasher<KoalaBear>>::Digest,
+    ) -> Self::DigestVariable {
+        core::array::from_fn(|i| builder.constant(digest[i]))
+    }
+
+    fn digest_from_koalabear_root(
+        _root: [KoalaBear; 8],
+    ) -> <Self as FieldHasher<KoalaBear>>::Digest {
+        // OUTER ring digests are BN254 and come from the dedicated
+        // outer bundle lift; the inner-KoalaBear-root conversion is
+        // never the binding digest here.
+        <Self as FieldHasher<KoalaBear>>::Digest::default()
     }
 }

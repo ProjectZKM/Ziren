@@ -136,8 +136,15 @@ pub struct BasefoldShardProof<F, EF> {
 ///   - `evaluation_proof` — input to phase 4
 ///
 /// Mirrors `ShardProofVariable` (crates/recursion/circuit/src/shard.rs).
-pub struct BasefoldShardProofVariable<C: CircuitConfig> {
-    /// Commitment digest to the main trace.
+pub struct BasefoldShardProofVariable<
+    C: CircuitConfig,
+    HV: crate::hash::FieldHasherVariable<C> = zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+> {
+    /// Commitment digest to the main trace.  The main trace is
+    /// committed with the INNER KoalaBear MMCS on EVERY ring (only the
+    /// jagged BaseFold round commitments go BN254 on the OUTER ring),
+    /// so this stays `[Felt;8]` and is observed felt-by-felt to match
+    /// the host transcript (verifier.rs:168).
     pub main_commitment: [Felt<C::F>; 8],
     /// Per-chip log-degree bits (variable-width, max bound by
     /// `pcs_verifier.max_log_row_count + 1`).
@@ -148,9 +155,14 @@ pub struct BasefoldShardProofVariable<C: CircuitConfig> {
     pub logup_gkr_proof: LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     /// Zerocheck sumcheck reduction proof.
     pub zerocheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>>,
-    /// Jagged-PCS opening proof.
-    pub evaluation_proof:
-        JaggedPcsProofVariable<RecursiveBasefoldProof<C::F, C::EF, 8>, [Felt<C::F>; 8], C::F, C::EF>,
+    /// Jagged-PCS opening proof.  The inner BaseFold proof's raw
+    /// digests + the per-round original commitments are `HV`-typed.
+    pub evaluation_proof: JaggedPcsProofVariable<
+        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        HV::DigestVariable,
+        C::F,
+        C::EF,
+    >,
 }
 
 /// In-circuit verifying-key variable for the BaseFold pipeline.
@@ -336,11 +348,11 @@ impl<P> BasefoldShardVerifier<P> {
     ///     orchestrator doesn't depend on the jagged-eval module.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
-    pub fn verify_shard<'a, C, SC, A, FC, EVPV, JE>(
+    pub fn verify_shard<'a, C, SC, A, FC, HV, EVPV, JE>(
         &self,
         builder: &mut Builder<C>,
         vk: &BasefoldVerifyingKeyVariable<C>,
-        proof: &'a BasefoldShardProofVariable<C>,
+        proof: &'a BasefoldShardProofVariable<C, HV>,
         shard_chips: &[&MachineChip<SC, A>],
         chip_metadata: &LogupGkrShardChipMetadata,
         opened_values: &'a BasefoldShardOpenedValuesVariable<C>,
@@ -354,13 +366,25 @@ impl<P> BasefoldShardVerifier<P> {
         C::F: TwoAdicField,
         SC: KoalaBearFriParametersVariable<C>,
         A: MachineAir<C::F> + for<'b> Air<BasefoldConstraintFolder<'b, C>>,
-        FC: FieldChallengerVariable<C, C::Bit>,
+        FC: FieldChallengerVariable<C, C::Bit>
+            + crate::challenger::CanObserveVariable<C, HV::DigestVariable>,
         SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
+        // #H (BaseFold-over-BN254 wrap port): the digest hasher (inner
+        // KoalaBearPoseidon2 / outer KoalaBearPoseidon2Outer). The PCS
+        // verifier P opens commitments of type HV::DigestVariable and a
+        // BaseFold proof whose raw digests are HV::Digest.
+        HV: crate::hash::FieldHasherVariable<C>
+            + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+        HV::DigestVariable: Copy,
         P: RecursiveMultilinearPcsVerifier<
                 C,
                 FC,
-                Commitment = [Felt<C::F>; 8],
-                Proof = RecursiveBasefoldProof<C::F, C::EF, 8>,
+                Commitment = HV::DigestVariable,
+                Proof = RecursiveBasefoldProof<
+                    C::F,
+                    C::EF,
+                    <HV as crate::hash::FieldHasher<p3_koala_bear::KoalaBear>>::Digest,
+                >,
             > + Clone,
         EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
         JE: FnOnce(
@@ -391,7 +415,10 @@ impl<P> BasefoldShardVerifier<P> {
             challenger.observe(builder, *value);
         }
 
-        // Observe the main trace commitment.
+        // Observe the main trace commitment felt-by-felt — the main
+        // trace is committed with the inner KoalaBear MMCS on every
+        // ring, so this matches the host transcript (verifier.rs:168)
+        // which absorbs 8 KoalaBear felts.
         for limb in main_commitment.iter() {
             challenger.observe(builder, *limb);
         }
@@ -506,11 +533,16 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|chip| chip.main.local.clone())
             .collect();
 
-        // Assemble the commitments vector — the main-trace
-        // commitment is the only one in the BaseFold pipeline's
-        // wire; additional commit rounds (if any) would extend
-        // this slice.
-        let commitments = [*main_commitment];
+        // The jagged-PCS commitments are the per-round digests the
+        // BaseFold opener binds; on the OUTER ring these are BN254
+        // (`HV::DigestVariable`).  The jagged verifier's
+        // `verify_trusted_evaluations` currently only uses them for a
+        // deferred digest-mix check (recursive_jagged_pcs.rs:163
+        // `let _ = commitments`), and the binding ones are
+        // `proof.original_commitments`; pass those so the slice type is
+        // `HV::DigestVariable` (the main-trace KoalaBear commit is
+        // observed separately in phase 1).
+        let commitments = evaluation_proof.original_commitments.clone();
 
         let _prefix_sum_felts = jagged_verifier.verify_trusted_evaluations::<C, FC, JE>(
             builder,
@@ -609,7 +641,10 @@ pub fn dummy_basefold_shard_proof_variable<C>(
     shape: &BasefoldProofShape,
 ) -> BasefoldShardProofVariable<C>
 where
-    C: CircuitConfig,
+    // The dummy uses the default inner digest hasher
+    // (KoalaBearPoseidon2 / `[Felt;8]`); it's only constructed in
+    // inner recursion shape-fixture contexts (Bit = Felt<KoalaBear>).
+    C: CircuitConfig<F = p3_koala_bear::KoalaBear, Bit = Felt<p3_koala_bear::KoalaBear>>,
 {
     use p3_field::PrimeCharacteristicRing;
 
@@ -709,24 +744,25 @@ where
     // Jagged PCS proof — has the most nested structure.
     let evaluation_proof = {
         // Inner BaseFold proof.
-        let basefold_proof = RecursiveBasefoldProof::<C::F, C::EF, 8> {
+        let basefold_proof = RecursiveBasefoldProof::<C::F, C::EF> {
             rounds: (0..shape.basefold_num_variables)
-                .map(|_| RecursiveBasefoldRound::<C::F, C::EF, 8> {
+                .map(|_| RecursiveBasefoldRound::<C::F, C::EF> {
                     uni_poly: [C::EF::ZERO; 2],
                     commitment: [C::F::ZERO; 8],
+                    _phantom_f: core::marker::PhantomData,
                 })
                 .collect(),
             final_poly: C::EF::ZERO,
             pow_witness: C::F::ZERO,
             batch_grinding_witness: C::F::ZERO,
-            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<C::F, C::EF, 8> {
+            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<C::F, C::EF> {
                 leaf_values: vec![vec![C::F::ZERO; 1]],
                 merkle_path_bytes: vec![],
                 _phantom: core::marker::PhantomData,
             }]],
             query_phase_openings: (0..shape.basefold_num_variables)
                 .map(|_| {
-                    vec![RecursiveBasefoldOpening::<C::F, C::EF, 8> {
+                    vec![RecursiveBasefoldOpening::<C::F, C::EF> {
                         position: 0,
                         sibling_pair: [C::EF::ZERO; 2],
                         merkle_path_bytes: vec![],
@@ -761,7 +797,7 @@ where
             },
         };
         let stacked_pcs_proof = RecursiveStackedPcsProof::<
-            RecursiveBasefoldProof<C::F, C::EF, 8>,
+            RecursiveBasefoldProof<C::F, C::EF>,
             C::F,
             C::EF,
         > {

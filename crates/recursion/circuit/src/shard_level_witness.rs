@@ -516,7 +516,7 @@ where
 /// witness-stream layout compatibility but no longer consumes.
 fn host_component_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, JaggedMmcs>,
-) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, 8>> {
+) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge>> {
     opening
         .leaves
         .iter()
@@ -548,7 +548,7 @@ fn host_component_opening_to_recursive(
 /// `merkle_path_digests` field, not through `position`.
 fn host_query_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, JaggedMmcs>,
-) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, 8>> {
+) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge>> {
     use p3_field::BasedVectorSpace;
     const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
     opening
@@ -608,14 +608,14 @@ fn host_query_opening_to_recursive(
 pub fn host_basefold_proof_to_recursive(
     proof: &BasefoldProof<InnerVal, InnerChallenge, JaggedMmcs>,
     batch_evaluations: Vec<Vec<InnerChallenge>>,
-) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge> {
     assert_eq!(
         proof.univariate_messages.len(),
         proof.fri_commitments.len(),
         "BasefoldProof: univariate_messages.len() != fri_commitments.len()",
     );
 
-    let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, 8>> = proof
+    let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge>> = proof
         .univariate_messages
         .iter()
         .zip(proof.fri_commitments.iter())
@@ -627,17 +627,17 @@ pub fn host_basefold_proof_to_recursive(
                 "FRI commitment cap must have exactly 1 root (height-0 cap), got {}",
                 cap_roots.len(),
             );
-            RecursiveBasefoldRound { uni_poly: *uni, commitment: cap_roots[0] }
+            RecursiveBasefoldRound { uni_poly: *uni, commitment: cap_roots[0], _phantom_f: core::marker::PhantomData }
         })
         .collect();
 
-    let component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<_, _, 8>>> = proof
+    let component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<_, _>>> = proof
         .component_polynomials_query_openings_and_proofs
         .iter()
         .map(host_component_opening_to_recursive)
         .collect();
 
-    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _, 8>>> = proof
+    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _>>> = proof
         .query_phase_openings_and_proofs
         .iter()
         .map(host_query_opening_to_recursive)
@@ -660,7 +660,7 @@ pub fn host_basefold_proof_to_recursive(
 /// [`host_basefold_proof_to_recursive`] for the stacked-PCS layer.
 pub fn host_stacked_basefold_to_recursive(
     proof: &StackedBasefoldProof<InnerVal, InnerChallenge, JaggedMmcs>,
-) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, 8> {
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge> {
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
@@ -684,28 +684,31 @@ pub fn host_stacked_basefold_to_recursive(
 /// `JaggedBasefoldBundle`, eliminating this adapter and the
 /// rmp-serde round trip — which is the actual fix for the #240
 /// determinism cascade.
-pub fn lift_evaluation_proof_via_bundle<C>(
+pub fn lift_evaluation_proof_via_bundle<C, HV>(
     builder: &mut Builder<C>,
     bytes: &[u8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<C::F, C::EF, 8>,
-    [Felt<C::F>; 8],
+    RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    HV::DigestVariable,
     C::F,
     C::EF,
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
-        lift_jagged_basefold_bundle(builder, &bundle, max_log_row_count, column_counts_by_round, None)
+        lift_jagged_basefold_bundle::<C, HV>(
+            builder, &bundle, max_log_row_count, column_counts_by_round, None,
+        )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
         // placeholder (preserves shape compatibility with scaffolding
         // tests and the BasefoldShardProof::empty() construction
         // path).
-        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, HV>(
             builder,
             bytes,
             max_log_row_count,
@@ -807,20 +810,98 @@ where
 ///
 /// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// so downstream callers can swap with no shape change.
-pub fn lift_jagged_basefold_bundle<C>(
+/// #H (BaseFold-over-BN254 wrap port): re-key a host BaseFold proof's
+/// raw digests (read as inner KoalaBear `[InnerVal; 8]` roots) onto the
+/// generic `HV::Digest` digest type.  Inner (`HV = KoalaBearPoseidon2`):
+/// identity (`Digest = [KoalaBear; 8]`).  Outer (`HV =
+/// KoalaBearPoseidon2Outer`): maps to the default BN254 digest — the
+/// OUTER ring's real BN254 commitments are bound by a dedicated outer
+/// bundle path, so the inner-root lift is never the binding digest there.
+fn rekey_basefold_digests_to_hv<C, HV>(
+    src: RecursiveBasefoldProof<InnerVal, InnerChallenge>,
+) -> RecursiveBasefoldProof<
+    InnerVal,
+    InnerChallenge,
+    <HV as crate::hash::FieldHasher<C::F>>::Digest,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+{
+    use crate::basefold_verifier::{
+        RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldRound,
+    };
+    let conv_digest =
+        |root: [InnerVal; 8]| -> <HV as crate::hash::FieldHasher<C::F>>::Digest {
+            let kb: [p3_koala_bear::KoalaBear; 8] = core::array::from_fn(|i| root[i]);
+            HV::digest_from_koalabear_root(kb)
+        };
+    RecursiveBasefoldProof {
+        rounds: src
+            .rounds
+            .into_iter()
+            .map(|r| RecursiveBasefoldRound {
+                uni_poly: r.uni_poly,
+                commitment: conv_digest(r.commitment),
+                _phantom_f: core::marker::PhantomData,
+            })
+            .collect(),
+        final_poly: src.final_poly,
+        pow_witness: src.pow_witness,
+        batch_grinding_witness: src.batch_grinding_witness,
+        component_openings: src
+            .component_openings
+            .into_iter()
+            .map(|round| {
+                round
+                    .into_iter()
+                    .map(|c| RecursiveBasefoldComponentOpening {
+                        leaf_values: c.leaf_values,
+                        merkle_path_bytes: c.merkle_path_bytes,
+                        _phantom: core::marker::PhantomData,
+                    })
+                    .collect()
+            })
+            .collect(),
+        query_phase_openings: src
+            .query_phase_openings
+            .into_iter()
+            .map(|round| {
+                round
+                    .into_iter()
+                    .map(|o| RecursiveBasefoldOpening {
+                        position: o.position,
+                        sibling_pair: o.sibling_pair,
+                        merkle_path_bytes: o.merkle_path_bytes,
+                        merkle_path_digests: o
+                            .merkle_path_digests
+                            .into_iter()
+                            .map(conv_digest)
+                            .collect(),
+                        _phantom: core::marker::PhantomData,
+                    })
+                    .collect()
+            })
+            .collect(),
+        batch_evaluations: src.batch_evaluations,
+    }
+}
+
+pub fn lift_jagged_basefold_bundle<C, HV>(
     builder: &mut Builder<C>,
     bundle: &JaggedBasefoldBundle,
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<C::F, C::EF, 8>,
-    [Felt<C::F>; 8],
+    RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    HV::DigestVariable,
     C::F,
     C::EF,
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     use p3_field::PrimeCharacteristicRing;
 
@@ -858,7 +939,11 @@ where
     // — the call routes through the existing impl that emits no
     // runtime stream consumption.
     let host_basefold = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
-    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold, builder);
+    // Re-key the host basefold proof's KoalaBear digests onto HV::Digest
+    // (inner: identity; outer: dedicated path supplies BN254 separately).
+    let host_basefold_hv =
+        rekey_basefold_digests_to_hv::<C, HV>(host_basefold);
+    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold_hv, builder);
 
     // ── REAL: batch_evaluations as Ext (constants for stacked layer) ──
     // #245 fix: builder.constant() per element (was witness-stream
@@ -876,7 +961,7 @@ where
         .collect();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<C::F, C::EF, 8>,
+        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
         C::F,
         C::EF,
     > {
@@ -894,18 +979,22 @@ where
         "BasefoldLateBindingCommit cap must have exactly 1 root, got {}",
         cap_roots.len(),
     );
-    // #245 fix: builder.constant() instead of witness-stream read.
-    let first_commit_digest: [Felt<C::F>; 8] =
-        core::array::from_fn(|i| builder.constant(cap_roots[0][i]));
-    // For multi-round (jagged with rotating commits) the bundle
-    // would have one cap per round.  Currently Ziren commits the
-    // jagged-PCS to one batched cap, so subsequent round slots get
-    // zero-felt placeholders to match the verifier's
-    // num_rounds-shape expectation.
-    let mut original_commitments: Vec<[Felt<C::F>; 8]> = Vec::with_capacity(num_rounds);
+    // #H: re-key the inner KoalaBear cap root onto HV::DigestVariable
+    // (inner: const_digest of the 8 KoalaBear limbs; outer: default
+    // BN254 digest — the BN254 commitment is bound by the dedicated
+    // outer bundle path, not this inner-root lift).
+    let first_root_raw: [p3_koala_bear::KoalaBear; 8] =
+        core::array::from_fn(|i| cap_roots[0][i]);
+    let first_commit_digest: HV::DigestVariable =
+        HV::const_digest(builder, HV::digest_from_koalabear_root(first_root_raw));
+    let zero_digest_var: HV::DigestVariable = HV::const_digest(
+        builder,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+    );
+    let mut original_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
     original_commitments.push(first_commit_digest);
     for _ in 1..num_rounds {
-        original_commitments.push(core::array::from_fn(|_| zero_felt(builder)));
+        original_commitments.push(zero_digest_var);
     }
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
@@ -1502,7 +1591,7 @@ mod tests {
     fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_via_bundle::<C>(&mut builder, &[], 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 21, &cols);
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
     }
@@ -1556,7 +1645,7 @@ mod tests {
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
-        let var = lift_evaluation_proof_via_bundle::<C>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
         assert_eq!(var.column_counts, cols);
         // sumcheck_proof has the real reduction round (1 univariate poly).
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
@@ -1610,7 +1699,7 @@ mod tests {
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
-        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 8, &cols, Some(&rows));
+        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, Some(&rows));
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         // col_prefix_sums has padded_cols+1 entries.  With cc=[1,1,1]
@@ -1670,7 +1759,7 @@ mod tests {
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         // None -> derive row_counts from bundle.commit.chip_dims.
-        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 8, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, None);
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         assert_eq!(var.params.col_prefix_sums.len(), 9);
@@ -1776,7 +1865,7 @@ mod tests {
             jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_jagged_basefold_bundle::<C>(&mut builder, &bundle, 21, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 21, &cols, None);
         // column_counts pass through verbatim.
         assert_eq!(var.column_counts, cols);
         // num_rounds == 2 → 2 commitment slots, first from bundle,

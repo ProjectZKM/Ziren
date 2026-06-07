@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn jagged_pcs_verifier_constructs() {
         let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::new(basefold_params);
+        let basefold_verifier = RecursiveBasefoldVerifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>::new(basefold_params);
         let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
         let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
         assert_eq!(jagged.max_log_row_count, 21);
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn machine_jagged_pcs_verifier_constructs() {
         let basefold_params = BasefoldVerifierParams::production_default(21);
-        let basefold_verifier = RecursiveBasefoldVerifier::new(basefold_params);
+        let basefold_verifier = RecursiveBasefoldVerifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>::new(basefold_params);
         let stacked = RecursiveStackedPcsVerifier::new(basefold_verifier, 21);
         let jagged = RecursiveJaggedPcsVerifier::new(stacked, 21);
         let machine_jagged =

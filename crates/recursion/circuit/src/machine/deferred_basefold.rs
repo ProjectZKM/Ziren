@@ -181,7 +181,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
     let mut reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         start_reconstruct_deferred_digest;
 
-    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier(
+    let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
         max_log_row_count,
         max_log_row_count as u32,
     );
@@ -243,7 +243,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
         let evaluation_proof_var = match &evaluation_proof {
             EvaluationProof::Bundle(bundle) if !legacy_lift => {
-                crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+                crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                     builder,
                     bundle,
                     max_log_row_count,
@@ -251,19 +251,19 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     None,
                 )
             }
-            EvaluationProof::Bundle(bundle) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            EvaluationProof::Bundle(bundle) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 &bundle.to_bytes(),
                 max_log_row_count,
                 &column_counts_by_round,
             ),
-            EvaluationProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            EvaluationProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 bytes,
                 max_log_row_count,
                 &column_counts_by_round,
             ),
-            EvaluationProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C>(
+            EvaluationProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 &[],
                 max_log_row_count,
@@ -290,7 +290,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::insertion_points_from_column_counts(&column_counts_by_round);
         let basefold_shard_proof_variable =
-            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C>(
+            crate::shard_proof_variable_lift::assemble_basefold_shard_proof_variable::<C, SC>(
                 main_commit,
                 public_values_raw.clone(),
                 &logup_gkr_proof,
@@ -325,7 +325,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 let bundle_num_vars =
                     bundle.basefold_proof.basefold_proof.fri_commitments.len();
                 per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars(
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                         max_log_row_count,
                         bundle.commit.log_stacking_height,
                         bundle_num_vars,
@@ -335,7 +335,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             _ => &basefold_shard_verifier,
         };
 
-        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, _, _>(
+        active_verifier.verify_shard::<C, SC, A, SC::FriChallengerVariable, SC, _, _>(
             builder,
             &basefold_vk,
             &basefold_shard_proof_variable,

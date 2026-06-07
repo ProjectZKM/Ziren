@@ -351,24 +351,22 @@ where
 
 // ── Recursive BaseFold proof types ───────────────────────────────
 
-impl<C, const DIGEST_ELEMS: usize> Witnessable<C>
-    for RecursiveBasefoldRound<InnerVal, InnerChallenge, DIGEST_ELEMS>
+impl<C, Dig: Clone> Witnessable<C>
+    for RecursiveBasefoldRound<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldRound<C::F, C::EF, DIGEST_ELEMS>;
+    type WitnessVariable = RecursiveBasefoldRound<C::F, C::EF, Dig>;
 
     fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
         // The `uni_poly` / `commitment` fields carry raw base/
         // extension values (not witness cells) — the in-circuit
         // verifier body promotes them to `Felt::constant` /
-        // `Ext::constant` inside its body.  We return the same
-        // values unchanged; readers treating the proof as
-        // witness-stream input would need an Ext/Felt-typed
-        // variant of this struct, tracked as follow-up.
+        // `Ext::constant` (or `HV::const_digest`) inside its body.
         RecursiveBasefoldRound {
             uni_poly: self.uni_poly,
-            commitment: self.commitment,
+            commitment: self.commitment.clone(),
+            _phantom_f: core::marker::PhantomData,
         }
     }
 
@@ -377,12 +375,12 @@ where
     }
 }
 
-impl<C, const DIGEST_ELEMS: usize> Witnessable<C>
-    for RecursiveBasefoldOpening<InnerVal, InnerChallenge, DIGEST_ELEMS>
+impl<C, Dig: Clone> Witnessable<C>
+    for RecursiveBasefoldOpening<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldOpening<C::F, C::EF, DIGEST_ELEMS>;
+    type WitnessVariable = RecursiveBasefoldOpening<C::F, C::EF, Dig>;
 
     fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldOpening {
@@ -397,12 +395,12 @@ where
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {}
 }
 
-impl<C, const DIGEST_ELEMS: usize> Witnessable<C>
-    for RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, DIGEST_ELEMS>
+impl<C, Dig: Clone> Witnessable<C>
+    for RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldComponentOpening<C::F, C::EF, DIGEST_ELEMS>;
+    type WitnessVariable = RecursiveBasefoldComponentOpening<C::F, C::EF, Dig>;
 
     fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldComponentOpening {
@@ -456,12 +454,12 @@ where
     }
 }
 
-impl<C, const DIGEST_ELEMS: usize> Witnessable<C>
-    for RecursiveBasefoldProof<InnerVal, InnerChallenge, DIGEST_ELEMS>
+impl<C, Dig: Clone> Witnessable<C>
+    for RecursiveBasefoldProof<InnerVal, InnerChallenge, Dig>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldProof<C::F, C::EF, DIGEST_ELEMS>;
+    type WitnessVariable = RecursiveBasefoldProof<C::F, C::EF, Dig>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldProof {

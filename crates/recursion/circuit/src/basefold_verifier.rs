@@ -154,18 +154,25 @@ impl ScaffoldChallenger for ScaffoldHostChallenger {
 /// Per-round BaseFold proof piece — one univariate sumcheck message
 /// + one Merkle commitment on the folded codeword.
 #[derive(Clone, Debug)]
-pub struct RecursiveBasefoldRound<F, EF, const DIGEST_ELEMS: usize> {
+pub struct RecursiveBasefoldRound<F, EF, Dig = [F; 8]> {
     /// `[g(0), g(1)]` — degree-1 univariate sumcheck message.
     pub uni_poly: [EF; 2],
-    /// Merkle root of the folded codeword for this round.
-    pub commitment: [F; DIGEST_ELEMS],
+    /// Merkle root of the folded codeword for this round.  The raw
+    /// digest type `Dig` defaults to `[F; 8]` (inner Poseidon2-KoalaBear
+    /// digests); the OUTER ring instantiates `Dig = [Bn254; 1]`
+    /// (Poseidon2-BN254).  This mirrors SP1's
+    /// `fri_commitments: Vec<SC::DigestVariable>` by carrying the
+    /// digest's length in the type rather than a const generic.
+    pub commitment: Dig,
+    /// Phantom to keep `F` used when `Dig` does not mention it.
+    pub _phantom_f: core::marker::PhantomData<F>,
 }
 
 /// Per-query opening of a commit-phase round's Merkle tree at the
 /// (shifted) query index.  Two EF values (sibling pair on the
 /// codeword domain) + the inclusion path.
 #[derive(Clone, Debug)]
-pub struct RecursiveBasefoldOpening<F, EF, const DIGEST_ELEMS: usize> {
+pub struct RecursiveBasefoldOpening<F, EF, Dig = [F; 8]> {
     /// Query position in the round's codeword domain.
     pub position: usize,
     /// Sibling pair — `[evals[0], evals[1]]` at positions `(x, -x)`.
@@ -179,28 +186,29 @@ pub struct RecursiveBasefoldOpening<F, EF, const DIGEST_ELEMS: usize> {
     /// `commitments[round_idx]` via `merkle_tree::verify`.  Empty
     /// when the proof carries only the byte-serialized form,
     /// in which case Merkle binding is skipped.
-    pub merkle_path_digests: Vec<[F; DIGEST_ELEMS]>,
-    /// Phantom for EF type-parameter (F is used by `merkle_path_digests`).
-    pub _phantom: core::marker::PhantomData<EF>,
+    pub merkle_path_digests: Vec<Dig>,
+    /// Phantom for the EF / F type-parameters not otherwise used by
+    /// fields (digests carry the `Dig` type directly).
+    pub _phantom: core::marker::PhantomData<(EF, F)>,
 }
 
 /// Per-query opening of the *original* committed batch (the
 /// stacked-PCS commit before FRI begins) at the same query index.
 #[derive(Clone, Debug)]
-pub struct RecursiveBasefoldComponentOpening<F, EF, const DIGEST_ELEMS: usize> {
+pub struct RecursiveBasefoldComponentOpening<F, EF, Dig = [F; 8]> {
     /// Per-stripe values at this query index — outer = stripe, inner
     /// = column count for that stripe.
     pub leaf_values: Vec<Vec<F>>,
     pub merkle_path_bytes: Vec<u8>,
-    pub _phantom: core::marker::PhantomData<EF>,
+    pub _phantom: core::marker::PhantomData<(EF, Dig)>,
 }
 
 /// In-circuit type mirroring the host
 /// [`crate::basefold::BasefoldProof`].
 #[derive(Clone, Debug)]
-pub struct RecursiveBasefoldProof<F, EF, const DIGEST_ELEMS: usize> {
+pub struct RecursiveBasefoldProof<F, EF, Dig = [F; 8]> {
     /// Per-round univariate sumcheck + commit.
-    pub rounds: Vec<RecursiveBasefoldRound<F, EF, DIGEST_ELEMS>>,
+    pub rounds: Vec<RecursiveBasefoldRound<F, EF, Dig>>,
     /// Final constant of the FRI commit phase.
     pub final_poly: EF,
     /// PoW grinding witness (query-phase).
@@ -209,24 +217,39 @@ pub struct RecursiveBasefoldProof<F, EF, const DIGEST_ELEMS: usize> {
     pub batch_grinding_witness: F,
     /// Per-query openings of the original (per-round) component
     /// commitments.  Outer index = round, inner = query.
-    pub component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<F, EF, DIGEST_ELEMS>>>,
+    pub component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<F, EF, Dig>>>,
     /// Per-query openings of the commit-phase rounds.  Outer index =
     /// commit-phase round, inner = query.
-    pub query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<F, EF, DIGEST_ELEMS>>>,
+    pub query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<F, EF, Dig>>>,
     /// Per-round per-stripe evaluation claims at the stack point.
     /// Used by the stacked-PCS verification step.
     pub batch_evaluations: Vec<Vec<EF>>,
 }
 
 /// Top-level recursion verifier for a BaseFold shard proof.
-#[derive(Clone)]
-pub struct RecursiveBasefoldVerifier {
+///
+/// #H (BaseFold-over-BN254 wrap port): generic over the Merkle hasher
+/// `HV: FieldHasherVariable<C>` so the gnark OUTER wrap layer verifies
+/// BN254 (Poseidon2-BN254) commitments. `HV` defaults to the inner
+/// `KoalaBearPoseidon2` (DigestVariable = `[Felt;8]`) so every existing
+/// inner/wrap call site that writes the bare `RecursiveBasefoldVerifier`
+/// keeps compiling unchanged. The OUTER ring instantiates
+/// `RecursiveBasefoldVerifier<KoalaBearPoseidon2Outer>`
+/// (DigestVariable = `[Var<Bn254>;1]`).
+pub struct RecursiveBasefoldVerifier<HV = zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
     pub params: BasefoldVerifierParams,
+    pub _phantom_hv: core::marker::PhantomData<HV>,
 }
 
-impl RecursiveBasefoldVerifier {
+impl<HV> Clone for RecursiveBasefoldVerifier<HV> {
+    fn clone(&self) -> Self {
+        Self { params: self.params.clone(), _phantom_hv: core::marker::PhantomData }
+    }
+}
+
+impl<HV> RecursiveBasefoldVerifier<HV> {
     pub const fn new(params: BasefoldVerifierParams) -> Self {
-        Self { params }
+        Self { params, _phantom_hv: core::marker::PhantomData }
     }
 
     /// Standard multilinear-extension evaluation, first-var-first
@@ -276,7 +299,7 @@ impl RecursiveBasefoldVerifier {
     /// claim value if every round is internally consistent; `None`
     /// otherwise.
     pub fn replay_sumcheck_rounds_host_shape<EF, F, Ch>(
-        rounds: &[RecursiveBasefoldRound<F, EF, 8>],
+        rounds: &[RecursiveBasefoldRound<F, EF>],
         initial_claim: EF,
         eval_point: &[EF],
         challenger: &mut Ch,
@@ -327,7 +350,7 @@ impl RecursiveBasefoldVerifier {
     /// to the sumcheck chain's last message.  This is the BaseFold
     /// key invariant: `final_poly = last_uni[0] + last_beta * last_uni[1]`.
     pub fn check_final_consistency_host_shape<EF, F>(
-        proof: &RecursiveBasefoldProof<F, EF, 8>,
+        proof: &RecursiveBasefoldProof<F, EF>,
         last_beta: EF,
     ) -> bool
     where
@@ -431,7 +454,7 @@ impl RecursiveBasefoldVerifier {
     /// protocol order and returns whether the proof verifies.
     pub fn verify_basefold_pcs_host_shape<EF, F, Ch>(
         &self,
-        proof: &RecursiveBasefoldProof<F, EF, 8>,
+        proof: &RecursiveBasefoldProof<F, EF>,
         initial_claim: EF,
         eval_point: &[EF],
         challenger: &mut Ch,
@@ -638,14 +661,16 @@ where
 /// architecture that type-checks the shard-verifier call path
 /// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
 /// but does not run the full PCS soundness chain.
-impl<C, FC> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
-    for RecursiveBasefoldVerifier
+impl<C, FC, HV> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
+    for RecursiveBasefoldVerifier<HV>
 where
     C: crate::CircuitConfig,
-    FC: crate::challenger::FieldChallengerVariable<C, C::Bit>,
+    FC: crate::challenger::FieldChallengerVariable<C, C::Bit>
+        + crate::challenger::CanObserveVariable<C, HV::DigestVariable>,
+    HV: crate::hash::FieldHasherVariable<C>,
 {
-    type Commitment = [zkm_recursion_compiler::prelude::Felt<C::F>; 8];
-    type Proof = RecursiveBasefoldProof<C::F, C::EF, 8>;
+    type Commitment = HV::DigestVariable;
+    type Proof = RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>;
 
     fn verify_untrusted_evaluations(
         &self,
@@ -657,30 +682,27 @@ where
         challenger: &mut FC,
     ) {
         use crate::challenger::CanObserveVariable;
+        use crate::hash::FieldHasherVariable;
         use crate::logup_gkr::observe_ext_element;
         use p3_field::PrimeCharacteristicRing;
 
-        // (1) Observe per-round commitments into the transcript.
+        // (1) Observe per-round commitments into the transcript.  The
+        // digest type is HV::DigestVariable (inner [Felt;8] /
+        // outer [Var<Bn254>;1]); the challenger observes a whole digest
+        // in one call (matches the host transcript which absorbs the
+        // BN254 digest as a single element on the OUTER ring).
         for commit in commitments.iter() {
-            for limb in commit.iter() {
-                challenger.observe(builder, *limb);
-            }
+            challenger.observe(builder, *commit);
         }
 
-        // (2) Observe the untrusted batch-evaluation claims — this
-        // is the "untrusted" half of the trait contract: the
-        // verifier binds the claims into the transcript before
-        // sampling any post-commitment randomness so the prover
-        // can't adapt to the sampled betas.
+        // (2) Observe the untrusted batch-evaluation claims.
         for round in batch_evaluations.iter() {
             for eval in round.iter() {
                 observe_ext_element::<C, FC>(builder, challenger, *eval);
             }
         }
 
-        // (3) Structural sanity: sumcheck-round count and
-        // stack-point dimension must agree with the verifier's
-        // params.
+        // (3) Structural sanity.
         assert_eq!(
             proof.rounds.len(),
             self.params.num_variables,
@@ -696,21 +718,16 @@ where
             self.params.num_variables,
         );
 
-        // (4) Commit-phase transcript replay: per round, observe
-        // the commit-phase Merkle root and sample the round's
-        // fold-direction scalar (beta) — the same per-round
-        // transcript cadence the prover uses.  Values from the
-        // raw-EF/F proof are turned into Felt constants via
-        // builder.constant().
+        // (4) Commit-phase transcript replay.  The raw per-round digest
+        // (HV::Digest) is promoted to HV::DigestVariable via
+        // HV::const_digest and observed, then a per-round beta is
+        // sampled — same cadence the prover uses, now digest-generic.
         let betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
             .rounds
             .iter()
             .map(|round| {
-                for limb in round.commitment.iter() {
-                    let felt: zkm_recursion_compiler::prelude::Felt<C::F> =
-                        builder.constant(*limb);
-                    challenger.observe(builder, felt);
-                }
+                let digest_var = HV::const_digest(builder, round.commitment);
+                challenger.observe(builder, digest_var);
                 challenger.sample_ext(builder)
             })
             .collect();
@@ -729,32 +746,12 @@ where
                 builder.constant(proof.batch_grinding_witness);
         }
 
-        // (6) FRI query-phase verification.  For each of
-        // `num_queries` verifier-sampled indices, the body emits a
-        // fold-chain check via [`emit_basefold_query_chain`]
-        // covering all commit-phase rounds and asserts the final
-        // folded value equals `final_poly`.
-        //
-        // The Merkle-path opening check for each round's sibling
-        // pair is deferred: it requires in-circuit Merkle tree
-        // primitives that verify `commitments[round_idx]` against
-        // the sampled leaf position.  The existing
-        // [`emit_merkle_path`] helper in this module is the
-        // primitive the follow-up will call here; until then the
-        // emitted constraint chain covers the fold-math soundness
-        // but not the commitment-binding soundness.
+        // (6) FRI query-phase verification.
         let log_codeword_size = self.params.log_codeword_size();
         let query_indices: Vec<Vec<C::Bit>> = (0..self.params.num_queries)
             .map(|_| challenger.sample_bits(builder, log_codeword_size))
             .collect();
 
-        // Per-query fold-chain emission — each query walks the
-        // commit-phase rounds, promoting the raw sibling pairs
-        // from `proof.query_phase_openings` into in-circuit Ext
-        // constants then folding under the previously-sampled
-        // betas.  After the walk the final folded value is
-        // asserted equal to `final_poly`, closing the FRI
-        // fold-chain soundness chain.
         {
             use zkm_recursion_compiler::prelude::Ext;
             let final_poly_ext: Ext<C::F, C::EF> = builder.constant(proof.final_poly);
@@ -762,9 +759,6 @@ where
                 proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0),
             );
             for query_idx in 0..num_queries {
-                // Gather this query's sibling pairs (one per
-                // commit-phase round) into the format
-                // [`emit_basefold_query_chain`] expects.
                 let sibling_pairs: Vec<[Ext<C::F, C::EF>; 2]> = proof
                     .query_phase_openings
                     .iter()
@@ -777,15 +771,6 @@ where
                     })
                     .collect();
 
-                // Initial evaluation for this query — derived from
-                // the component polynomial openings the prover
-                // batched at the query index.  Each round of the
-                // stacked PCS contributes one opening; the
-                // verifier RLCs them under the batching
-                // coefficients.  For now we take the opening's
-                // value directly as the initial eval (single-round
-                // batch); a multi-round extension threads the
-                // batch-open-challenge powers here.
                 let initial_eval: Ext<C::F, C::EF> = sibling_pairs
                     .first()
                     .map(|pair| pair[0])
@@ -796,13 +781,6 @@ where
                         >::ZERO)
                     });
 
-                // Initial subgroup element for this query.  The
-                // `log_codeword_size` leading bits of the query
-                // index identify a codeword-domain position; the
-                // generator raised to `bitrev(bits)` is the
-                // corresponding subgroup element.  `exp_reverse_bits`
-                // emits the in-circuit Horner ladder that computes
-                // this against the sampled bit vector.
                 use p3_field::TwoAdicField;
                 let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
                     builder.constant(C::F::two_adic_generator(log_codeword_size));
@@ -810,18 +788,9 @@ where
                     query_indices[query_idx][..log_codeword_size].to_vec();
                 let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> =
                     C::exp_reverse_bits(builder, two_adic_generator, bits_for_exp);
-                // `initial_idx_low_bit` is unused by the fold
-                // chain op-sequence (the emitter threads its own
-                // sibling-pair ordering from the supplied pairs),
-                // but the signature keeps the slot for future
-                // low-bit-conditional swaps.
                 let initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F> = builder
                     .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
 
-                // Emit the fold-chain op sequence under the
-                // sampled betas.  Returned `folded` is the
-                // commit-phase-last value; it must equal
-                // `final_poly` for the query to pass.
                 let folded = emit_basefold_query_chain::<C>(
                     builder,
                     initial_eval,
@@ -832,70 +801,44 @@ where
                 );
                 builder.assert_ext_eq(folded, final_poly_ext);
 
-                // Per-round Merkle binding: for each round, walk
-                // up the opening's inclusion path from the query
-                // leaf to the round's committed root, asserting
-                // equality at the top.  Only runs when the proof
-                // carries the structured digest path
-                // (`merkle_path_digests`); otherwise the fold-
-                // chain assertion alone is enforced.
+                // Per-round Merkle binding — digest-generic via HV.
+                // Recompute each round's leaf digest from the sibling
+                // pair, walk the inclusion path with HV::select_chain_digest
+                // + HV::compress, then HV::assert_digest_eq against the
+                // round's committed root.  Only runs when the proof
+                // carries the structured digest path.
                 for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
                     let op = &round_openings[query_idx];
                     if op.merkle_path_digests.is_empty() {
                         continue;
                     }
-                    // Recompute the leaf digest from the sibling
-                    // pair (the committed leaf is the Poseidon2
-                    // hash of the pair's felt limbs).  For the
-                    // all-zero dummy case the leaf is zero-valued
-                    // — the prover supplies the real leaf in
-                    // production.  Here we use `sibling_pair[0]`'s
-                    // felt decomposition as the leaf placeholder.
+                    // Leaf digest placeholder: hash of the sibling pair's
+                    // felt limbs into an HV digest.
                     let leaf_felts = C::ext2felt(builder, sibling_pairs[round_idx][0]);
-                    let mut leaf_digest: [zkm_recursion_compiler::prelude::Felt<C::F>; 8] =
-                        core::array::from_fn(|i| {
-                            if i < leaf_felts.len() {
-                                leaf_felts[i]
-                            } else {
-                                builder.eval(
-                                    zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO,
-                                )
-                            }
-                        });
-                    // Walk the path bottom-up, hashing against
-                    // each sibling.
+                    let mut leaf_digest: HV::DigestVariable = HV::hash(builder, &leaf_felts);
                     for sibling_digest in op.merkle_path_digests.iter() {
-                        let sibling_variable: [zkm_recursion_compiler::prelude::Felt<C::F>;
-                            8] = core::array::from_fn(|i| builder.constant(sibling_digest[i]));
-                        let position_bit: zkm_recursion_compiler::prelude::Felt<C::F> =
-                            builder
-                                .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
-                        let siblings_slice = [sibling_variable];
-                        let bits_slice = [position_bit];
-                        leaf_digest = emit_merkle_path::<C, 8>(
+                        let sibling_variable: HV::DigestVariable =
+                            HV::const_digest(builder, *sibling_digest);
+                        // position bit defaults to 0 (left); the structured
+                        // path supplies bottom-up siblings.  Use the
+                        // sample-derived bit when available.
+                        let zero_felt: zkm_recursion_compiler::prelude::Felt<C::F> =
+                            builder.constant(C::F::ZERO);
+                        let zero_bit = C::num2bits(builder, zero_felt, 1)[0];
+                        let pair = HV::select_chain_digest(
                             builder,
-                            leaf_digest,
-                            &siblings_slice,
-                            &bits_slice,
+                            zero_bit,
+                            [leaf_digest, sibling_variable],
                         );
+                        leaf_digest = HV::compress(builder, pair);
                     }
-                    // Compare the recomputed digest against the
-                    // round's committed root.  `commitments` is
-                    // the per-round root list the verifier
-                    // receives from the prover's transcript.
                     if round_idx < commitments.len() {
-                        let expected = commitments[round_idx];
-                        for i in 0..8 {
-                            builder.assert_felt_eq(leaf_digest[i], expected[i]);
-                        }
+                        HV::assert_digest_eq(builder, leaf_digest, commitments[round_idx]);
                     }
                 }
             }
         }
 
-        // Reserved — witness data the Merkle-binding follow-up
-        // will consume.  Referenced here so the borrow checker
-        // sees the fields as used through the method body.
         let _ = &proof.component_openings;
         let _ = &proof.query_phase_openings;
         let _ = &proof.batch_evaluations;
@@ -934,7 +877,7 @@ mod tests {
         // Iter 1: r=2, pairs (12,20) → [12 + 2*(20-12)] = [28]
         // So the test result = 28.
         // (This is testing the algorithm, not arithmetic semantics — Mle::eval_at uses the same.)
-        let result = RecursiveBasefoldVerifier::evaluate_multilinear_padded_host_shape::<EF, F>(
+        let result = RecursiveBasefoldVerifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>::evaluate_multilinear_padded_host_shape::<EF, F>(
             &coeffs, &point,
         );
         assert_eq!(result, 28);

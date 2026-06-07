@@ -71,19 +71,24 @@ use zkm_stark::{InnerChallenge, InnerVal};
 /// - `max_log_row_count`: shard-level PCS max log row count
 ///   (gates the height-bit representation length in the
 ///   metadata).
-pub fn lift_evaluation_proof_bytes<C>(
+pub fn lift_evaluation_proof_bytes<C, HV>(
     builder: &mut Builder<C>,
     bytes: &[u8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
-    crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
-    [Felt<C::F>; 8],
+    crate::basefold_verifier::RecursiveBasefoldProof<
+        C::F,
+        C::EF,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest,
+    >,
+    HV::DigestVariable,
     C::F,
     C::EF,
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     use p3_field::PrimeCharacteristicRing;
 
@@ -98,7 +103,7 @@ where
         if let Some(bundle) =
             zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
         {
-            return crate::shard_level_witness::lift_jagged_basefold_bundle::<C>(
+            return crate::shard_level_witness::lift_jagged_basefold_bundle::<C, HV>(
                 builder,
                 &bundle,
                 max_log_row_count,
@@ -151,18 +156,27 @@ where
     // Inner BaseFold proof.  rounds.len() must equal the
     // BasefoldVerifierParams::num_variables which build_basefold_shard_verifier
     // sets to max_log_row_count (see shard_proof_variable_lift.rs:206-212).
-    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<C::F, C::EF, 8> {
+    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest> {
         rounds: (0..max_log_row_count)
-            .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<C::F, C::EF, 8> {
+            .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<
+                C::F,
+                C::EF,
+                <HV as crate::hash::FieldHasher<C::F>>::Digest,
+            > {
                 uni_poly: [C::EF::ZERO; 2],
-                commitment: [C::F::ZERO; 8],
+                commitment: <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+                _phantom_f: core::marker::PhantomData,
             })
             .collect(),
         final_poly: C::EF::ZERO,
         pow_witness: C::F::ZERO,
         batch_grinding_witness: C::F::ZERO,
         component_openings: vec![vec![
-            crate::basefold_verifier::RecursiveBasefoldComponentOpening::<C::F, C::EF, 8> {
+            crate::basefold_verifier::RecursiveBasefoldComponentOpening::<
+                C::F,
+                C::EF,
+                <HV as crate::hash::FieldHasher<C::F>>::Digest,
+            > {
                 leaf_values: vec![vec![C::F::ZERO; 1]],
                 merkle_path_bytes: vec![],
                 _phantom: core::marker::PhantomData,
@@ -175,7 +189,11 @@ where
         // must equal num_variables (== max_log_row_count here).
         query_phase_openings: (0..max_log_row_count)
             .map(|_| vec![
-                crate::basefold_verifier::RecursiveBasefoldOpening::<C::F, C::EF, 8> {
+                crate::basefold_verifier::RecursiveBasefoldOpening::<
+                    C::F,
+                    C::EF,
+                    <HV as crate::hash::FieldHasher<C::F>>::Digest,
+                > {
                     position: 0,
                     sibling_pair: [C::EF::ZERO; 2],
                     merkle_path_bytes: vec![],
@@ -255,7 +273,11 @@ where
     }
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        crate::basefold_verifier::RecursiveBasefoldProof<C::F, C::EF, 8>,
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            C::F,
+            C::EF,
+            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+        >,
         C::F,
         C::EF,
     > {
@@ -272,9 +294,14 @@ where
         .iter()
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
         .collect();
-    let original_commitments: Vec<[Felt<C::F>; 8]> = (0..num_rounds)
-        .map(|_| std::array::from_fn(|_| zero_felt(builder)))
-        .collect();
+    // #H: zero-placeholder original commitments as HV::DigestVariable
+    // (inner [Felt;8] / outer [Var<Bn254>;1]).
+    let zero_digest_var: HV::DigestVariable = HV::const_digest(
+        builder,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+    );
+    let original_commitments: Vec<HV::DigestVariable> =
+        (0..num_rounds).map(|_| zero_digest_var).collect();
 
     // stacked_point_dim used for silencing dead_code warning.
     let _ = stacked_point_dim;
@@ -305,7 +332,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = Vec::new();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
         // column_counts lifted through verbatim.
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
@@ -319,7 +346,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let cols: Vec<Vec<usize>> = vec![vec![1, 2]];
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &bytes, 16, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 16, &cols);
         assert_eq!(var.column_counts, cols);
     }
 
@@ -333,7 +360,7 @@ mod tests {
         // added = cc[len-2]+1 = 3+1 = 4, total per round = 10.
         // 2 rounds = 20 → padded to 32 → col_prefix_sums.len() = 33.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
-        let var = lift_evaluation_proof_bytes::<C>(&mut builder, &[], 8, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 8, &cols);
         assert_eq!(var.params.col_prefix_sums.len(), 33);
         assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }
