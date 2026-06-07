@@ -58,6 +58,19 @@ where
         proof: &Self::Proof,
         challenger: &mut FC,
     );
+
+    /// #H (BaseFold-over-BN254 wrap port): observe a single commitment
+    /// digest into the transcript.  The jagged layer calls this to absorb
+    /// the main PCS commitment BEFORE sampling z_col (mirror of host
+    /// verify_jagged_basefold_inner_generic's leading
+    /// `challenger.observe(commit)`).  Implemented where the digest's
+    /// CanObserveVariable bound is available (the basefold verifier).
+    fn observe_commitment(
+        &self,
+        builder: &mut Builder<C>,
+        challenger: &mut FC,
+        commitment: &Self::Commitment,
+    );
 }
 
 /// In-circuit verifier for the stacked-PCS wrapper.
@@ -107,11 +120,16 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         FC: FieldChallengerVariable<C, C::Bit>,
         P: RecursiveMultilinearPcsVerifier<C, FC>,
     {
-        // Observe the evaluation claim — binds the transcript to
-        // the value being opened before the verifier samples any
-        // post-commitment randomness.
+        // #H (BaseFold-over-BN254 wrap port): the HOST stacked verifier
+        // (crates/stark/src/basefold/stacked.rs verify_trusted_evaluation)
+        // does NOT observe the evaluation claim into the transcript — it
+        // only checks `evaluation_claim == eval_multilinear_padded(...)`.
+        // The previous in-circuit observe of claim_ext was a spurious
+        // transcript injection that desync'd every downstream challenge
+        // (masked by vacuous recursion-VM asserts, ENFORCED in gnark).
+        // We still bind the claim via the non-transcript MLE equality
+        // below (assert_ext_eq claim_ext == expected_evaluation).
         let claim_ext: Ext<_, _> = builder.eval(evaluation_claim);
-        observe_ext_element::<C, FC>(builder, challenger, claim_ext);
 
         // Split point into (batch_point, stack_point).  Convention:
         // first `batch_dim` coords are batch (which stripe), last
@@ -267,6 +285,15 @@ mod tests {
             _batch_evaluations: &[Vec<Ext<F, EF>>],
             _proof: &Self::Proof,
             _challenger: &mut DuplexChallengerVariable<C>,
+        ) {
+            // intentionally empty — stub for type-checking only
+        }
+
+        fn observe_commitment(
+            &self,
+            _builder: &mut Builder<C>,
+            _challenger: &mut DuplexChallengerVariable<C>,
+            _commitment: &Self::Commitment,
         ) {
             // intentionally empty — stub for type-checking only
         }

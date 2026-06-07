@@ -672,6 +672,16 @@ where
     type Commitment = HV::DigestVariable;
     type Proof = RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>;
 
+    fn observe_commitment(
+        &self,
+        builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
+        challenger: &mut FC,
+        commitment: &Self::Commitment,
+    ) {
+        use crate::challenger::CanObserveVariable;
+        challenger.observe(builder, *commitment);
+    }
+
     fn verify_untrusted_evaluations(
         &self,
         builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
@@ -686,19 +696,42 @@ where
         use crate::logup_gkr::observe_ext_element;
         use p3_field::PrimeCharacteristicRing;
 
-        // (1) Observe per-round commitments into the transcript.  The
-        // digest type is HV::DigestVariable (inner [Felt;8] /
-        // outer [Var<Bn254>;1]); the challenger observes a whole digest
-        // in one call (matches the host transcript which absorbs the
-        // BN254 digest as a single element on the OUTER ring).
-        for commit in commitments.iter() {
-            challenger.observe(builder, *commit);
+        // #H (BaseFold-over-BN254 wrap port): the in-circuit transcript
+        // is now a byte-for-byte mirror of the HOST basefold open
+        // verifier `verify_mle_evaluations` (crates/stark/src/basefold/
+        // verifier.rs:91+).  The original per-round commitments are
+        // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
+        // host verify_jagged_basefold_inner_generic's leading
+        // `challenger.observe(commit)`), so they are NOT re-observed here,
+        // and the prover never observes the untrusted batch_evaluations
+        // into the transcript.  The previous spurious observes desync'd
+        // every downstream challenge; masked by vacuous recursion-VM
+        // asserts, ENFORCED (and thus failing) in the gnark OUTER wrap.
+        let _ = commitments;
+        let _ = batch_evaluations;
+
+        // (1) Verify batch grinding (host step 1):
+        //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
+        {
+            let batch_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
+                builder.constant(proof.batch_grinding_witness);
+            challenger.check_witness(builder, self.params.batch_grinding_bits, batch_witness);
         }
 
-        // (2) Observe the untrusted batch-evaluation claims.
-        for round in batch_evaluations.iter() {
-            for eval in round.iter() {
-                observe_ext_element::<C, FC>(builder, challenger, *eval);
+        // (2) Sample the batching point (host step 2):
+        //   num_batching_vars = log2_ceil(total_polys), one EF challenge
+        //   per var.  total_polys = Σ_round batch_evaluations[round].len().
+        //   The batched claim itself is a deterministic recombination the
+        //   host does NOT bind into the transcript (host step 3), so we
+        //   only need to consume the same number of challenges here to
+        //   keep the FS state aligned.
+        {
+            let total_polys: usize =
+                batch_evaluations.iter().map(|r| r.len()).sum();
+            let num_batching_vars =
+                total_polys.max(1).next_power_of_two().trailing_zeros() as usize;
+            for _ in 0..num_batching_vars {
+                let _b = challenger.sample_ext(builder);
             }
         }
 
@@ -718,14 +751,35 @@ where
             self.params.num_variables,
         );
 
-        // (4) Commit-phase transcript replay.  The raw per-round digest
-        // (HV::Digest) is promoted to HV::DigestVariable via
-        // HV::const_digest and observed, then a per-round beta is
-        // sampled — same cadence the prover uses, now digest-generic.
+        // (4) Commit-phase transcript replay — byte-for-byte the
+        // BaseFold PROVER cadence (crates/stark/src/basefold/prover.rs
+        // open_jagged_pcs step 4/5):
+        //   observe(num_variables);
+        //   per round: observe(uni_poly[0]); observe(uni_poly[1]);
+        //              observe(commitment); sample beta.
+        // The previous replay observed ONLY the commitment, diverging
+        // the sampled betas from the prover's.  In the recursion VM the
+        // downstream FRI-fold asserts are vacuous so this was masked; the
+        // gnark OUTER wrap ENFORCES them, surfacing the divergence as an
+        // AssertEqE failure on the fold-chain.  This aligns both rings.
+        {
+            let nvar_felt: zkm_recursion_compiler::prelude::Felt<C::F> =
+                builder.constant(C::F::from_usize(self.params.num_variables));
+            challenger.observe(builder, nvar_felt);
+        }
         let betas: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = proof
             .rounds
             .iter()
             .map(|round| {
+                // observe the round's univariate message (2 EF coeffs)
+                // BEFORE the Merkle commitment, mirroring the prover's
+                // observe_algebra_element(uni_poly) + observe(commitment).
+                let p0: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                    builder.constant(round.uni_poly[0]);
+                let p1: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                    builder.constant(round.uni_poly[1]);
+                observe_ext_element::<C, FC>(builder, challenger, p0);
+                observe_ext_element::<C, FC>(builder, challenger, p1);
                 let digest_var = HV::const_digest(builder, round.commitment);
                 challenger.observe(builder, digest_var);
                 challenger.sample_ext(builder)
@@ -740,10 +794,14 @@ where
             for felt in final_felts.iter() {
                 challenger.observe(builder, *felt);
             }
-            let _pow_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
+            // (host step 7) PoW check on the query-phase grind witness:
+            //   check_witness(pow_bits, pow_witness) — observes the
+            //   witness and samples `pow_bits` zero-bits, advancing the
+            //   transcript exactly as the host does BEFORE query-index
+            //   sampling. Omitting it desync'd the query indices.
+            let pow_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(proof.pow_witness);
-            let _batch_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
-                builder.constant(proof.batch_grinding_witness);
+            challenger.check_witness(builder, self.params.pow_bits, pow_witness);
         }
 
         // (6) FRI query-phase verification.

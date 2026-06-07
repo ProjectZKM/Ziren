@@ -160,7 +160,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             &mut FC,
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
-        let _ = commitments; // digest mix-in check deferred to follow-up
+        let _ = commitments; // commitments observed via proof.original_commitments below
         let JaggedPcsProofVariable {
             pcs_proof,
             sumcheck_proof,
@@ -171,6 +171,24 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             original_commitments,
             expected_eval,
         } = proof;
+
+        // #H (BaseFold-over-BN254 wrap port): observe the jagged-PCS
+        // main commitment into the transcript BEFORE sampling z_col, a
+        // byte-for-byte mirror of the HOST verify_jagged_basefold_inner_generic
+        // (crates/stark/src/jagged_pcs.rs) which does
+        // `challenger.observe(bundle.commit.commitment)` as its first act.
+        // The host observes the single jagged commit once; original_commitments[0]
+        // is that commit (the remaining entries are zero round-padding the
+        // host never observes).  Previously this observe was deferred
+        // (`let _ = commitments`) and the commitment was (incorrectly)
+        // observed inside the basefold open AFTER z_col — desyncing z_col
+        // and every downstream challenge.  Masked by vacuous recursion-VM
+        // asserts; ENFORCED in the gnark OUTER wrap.
+        if let Some(first_commit) = original_commitments.first() {
+            self.stacked_pcs_verifier
+                .recursive_pcs_verifier
+                .observe_commitment(builder, challenger, first_commit);
+        }
 
         // (1) Sample column-index challenges `z_col` of dimension
         // `log2_ceil(num_columns)`.  `col_prefix_sums.len() - 1`
