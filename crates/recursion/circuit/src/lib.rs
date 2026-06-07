@@ -736,9 +736,14 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         builder: &mut Builder<C>,
         commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
     ) -> [Felt<<C as Config>::F>; 8] {
-        // outer: project the [Var<Bn254>;1] commit to 8 KoalaBear felts
-        // (in-circuit twin of host digest_felts split_32).
-        let felts = crate::challenger::split_32(builder, commitment[0], 8);
-        felts.try_into().expect("split_32 returns 8 felts")
+        // outer: project the [Var<Bn254>;1] commit to 8 KoalaBear felts —
+        // in-circuit twin of host digest_felts (p3_field::split_32::<Bn254,
+        // KoalaBear>(., 8)). The host uses 64-bit limbs; BN254 < 2^256 = 4 limbs,
+        // and host zero-pads limbs 4..8. The in-circuit split_32 reads 256 bits
+        // (4 limbs), so split to 4 and zero-pad to 8 to match exactly. (Each limb
+        // = (64-bit chunk) mod KoalaBear prime, identical to from_wrapped_u64.)
+        let limbs = crate::challenger::split_32(builder, commitment[0], 4);
+        let zero: Felt<<C as Config>::F> = builder.eval(<C as Config>::F::ZERO);
+        [limbs[0], limbs[1], limbs[2], limbs[3], zero, zero, zero, zero]
     }
 }
