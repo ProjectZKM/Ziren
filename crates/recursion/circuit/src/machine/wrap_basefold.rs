@@ -140,6 +140,60 @@ pub fn verify_wrap_basefold<C, SC, A>(
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
     let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
+    verify_wrap_basefold_core::<C, SC, A>(
+        builder,
+        vk_legacy,
+        proof_tuple,
+        chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
+        machine,
+        max_log_row_count,
+        output_digest_kind,
+    );
+}
+
+/// #H (BaseFold-over-BN254 wrap port): the merkle-free shard-verify core, generic
+/// over the challenger + Bit + vk-digest type. The recursion layer reaches it via
+/// `verify_wrap_basefold` (which prepends the vk-merkle bind); the gnark OUTER
+/// layer (`build_outer_circuit`, OuterConfig/OuterSC) calls it directly — no
+/// merkle (mirrors SP1WrapVerifier; binding is commit/pc_start + public vkey_hash).
+#[allow(clippy::too_many_arguments)]
+pub fn verify_wrap_basefold_core<C, SC, A>(
+    builder: &mut Builder<C>,
+    vk_legacy: VerifyingKeyVariable<C, SC>,
+    proof_tuple: (
+        [Felt<C::F>; 8],
+        Vec<Felt<C::F>>,
+        zkm_stark::shard_level::types::LogupGkrProof<
+            Felt<C::F>,
+            zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+        >,
+        zkm_stark::shard_level::types::PartialSumcheckProof<
+            zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+        >,
+        zkm_stark::shard_level::shard_proof::EvaluationProof,
+        crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+    ),
+    chip_cumulative_sums_per_input: Vec<
+        std::collections::BTreeMap<
+            String,
+            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+                Felt<C::F>,
+                zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
+            >,
+        >,
+    >,
+    chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
+    machine: &zkm_stark::StarkMachine<SC, A>,
+    max_log_row_count: usize,
+    output_digest_kind: PublicValuesOutputDigest,
+) where
+    SC: KoalaBearFriParametersVariable<C, Val = InnerVal> + FieldHasherVariable<C>,
+    SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    A: MachineAir<SC::Val>
+        + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
+{
 
     let basefold_vk = crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
         builder,

@@ -133,6 +133,16 @@ pub trait KoalaBearFriParametersVariable<C: CircuitConfig<F = KoalaBear>>:
         vk_commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
         pc_start: Felt<<C as Config>::F>,
     );
+
+    /// #H (BaseFold-over-BN254 wrap port): project this ring's vk preprocessed
+    /// commitment digest to 8 KoalaBear felts — the in-circuit twin of host
+    /// `BasefoldRing::digest_felts`. Inner = identity ([Felt;8]); outer = split_32
+    /// of the BN254 commit. Lets the BaseFold shard verifier's preprocessed_commit
+    /// be uniformly [Felt;8] across rings.
+    fn vk_preprocessed_commit_felts(
+        builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8];
 }
 
 pub trait CircuitConfig: Config {
@@ -668,6 +678,14 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> KoalaBearFriParamet
     ) {
         unreachable!("commit_recursion_public_values_imm_wrap_vk not implemented");
     }
+
+    fn vk_preprocessed_commit_felts(
+        _builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8] {
+        // inner: DigestVariable is already [Felt;8].
+        commitment
+    }
 }
 
 impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriParametersVariable<C>
@@ -712,5 +730,15 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> KoalaBearFriP
         builder.push_op(DslIr::CircuitPoseidon2Permute(state));
         let vkey_hash = state[0];
         builder.commit_vkey_hash_circuit(vkey_hash);
+    }
+
+    fn vk_preprocessed_commit_felts(
+        builder: &mut Builder<C>,
+        commitment: <Self as FieldHasherVariable<C>>::DigestVariable,
+    ) -> [Felt<<C as Config>::F>; 8] {
+        // outer: project the [Var<Bn254>;1] commit to 8 KoalaBear felts
+        // (in-circuit twin of host digest_felts split_32).
+        let felts = crate::challenger::split_32(builder, commitment[0], 8);
+        felts.try_into().expect("split_32 returns 8 felts")
     }
 }

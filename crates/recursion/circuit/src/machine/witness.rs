@@ -531,4 +531,56 @@ mod basefold_witness {
             self.vk_merkle_data.write(witness);
         }
     }
+
+    // #H (BaseFold-over-BN254 wrap port): Witnessable for the OUTER wrap witness
+    // (gnark layer). Mirrors the inner impl above but for KoalaBearPoseidon2Outer
+    // over an outer-config builder (Bit = Var<N>). vk_merkle_data is read for
+    // witness-shape symmetry; the gnark wrap verifier skips verifying it
+    // (skip_vk_merkle=true) — binding is the build_outer_circuit commit/pc_start
+    // constraint + the public vkey_hash, mirroring SP1WrapVerifier (no merkle).
+    type OuterCfg = zkm_recursion_compiler::config::OuterConfig;
+    impl Witnessable<OuterCfg>
+        for ZKMWrapBasefoldWitnessValues<zkm_recursion_core::stark::KoalaBearPoseidon2Outer>
+    {
+        type WitnessVariable = ZKMWrapBasefoldWitnessVariable<
+            OuterCfg,
+            zkm_recursion_core::stark::KoalaBearPoseidon2Outer,
+        >;
+
+        fn read(&self, builder: &mut Builder<OuterCfg>) -> Self::WitnessVariable {
+            let vks_and_proofs = self.vks_and_proofs.read(builder);
+            let chip_cumulative_sums_per_input: Vec<_> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| {
+                    sp.chip_cumulative_sums
+                        .iter()
+                        .map(|(name, sums)| (name.clone(), sums.read(builder)))
+                        .collect::<std::collections::BTreeMap<_, _>>()
+                })
+                .collect();
+            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> = self
+                .vks_and_proofs
+                .iter()
+                .map(|(_, sp)| sp.chip_log_heights.clone())
+                .collect();
+            let vk_merkle_data = self.vk_merkle_data.read(builder);
+            ZKMWrapBasefoldWitnessVariable {
+                vks_and_proofs,
+                chip_cumulative_sums_per_input,
+                chip_log_heights_per_input,
+                vk_merkle_data,
+            }
+        }
+
+        fn write(&self, witness: &mut impl WitnessWriter<OuterCfg>) {
+            self.vks_and_proofs.write(witness);
+            for (_, sp) in self.vks_and_proofs.iter() {
+                for (_name, sums) in sp.chip_cumulative_sums.iter() {
+                    sums.write(witness);
+                }
+            }
+            self.vk_merkle_data.write(witness);
+        }
+    }
 }

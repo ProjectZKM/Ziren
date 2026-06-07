@@ -131,11 +131,19 @@ impl<SC: KoalaBearFriParameters + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWit
     }
 }
 
-impl ZKMMerkleProofWitnessValues<KoalaBearPoseidon2> {
+impl<SC: FieldHasher<KoalaBear>> ZKMMerkleProofWitnessValues<SC>
+where
+    SC::Digest: Copy + Default,
+{
+    // #H (BaseFold-over-BN254 wrap port): generic over SC so the gnark wrap
+    // layer (OuterSC, Digest = [Bn254;1]) can build a dummy merkle witness
+    // (the gnark verifier skips merkle, so only the shape must read/write).
+    // `map` (not vec![;]) avoids requiring MerkleProof: Clone.
     pub fn dummy(num_proofs: usize, height: usize) -> Self {
-        let dummy_digest = [KoalaBear::ZERO; DIGEST_SIZE];
-        let vk_merkle_proofs =
-            vec![MerkleProof { index: 0, path: vec![dummy_digest; height] }; num_proofs];
+        let dummy_digest = SC::Digest::default();
+        let vk_merkle_proofs = (0..num_proofs)
+            .map(|_| MerkleProof { index: 0, path: vec![dummy_digest; height] })
+            .collect();
         let values = vec![dummy_digest; num_proofs];
 
         Self { vk_merkle_proofs, values, root: dummy_digest }

@@ -9,7 +9,10 @@ use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_recursion_circuit::{
     hash::FieldHasherVariable,
-    machine::{ZKMCompressWitnessValues, ZKMWrapVerifier},
+    machine::{
+        wrap_basefold::{verify_wrap_basefold_core, ZKMWrapBasefoldWitnessValues},
+        ZKMMerkleProofWitnessValues, ZKMWrapBasefoldWitnessVariable, PublicValuesOutputDigest,
+    },
 };
 use zkm_recursion_compiler::{
     config::OuterConfig,
@@ -177,9 +180,19 @@ pub fn build_constraints_and_witness(
     template_proof: &ShardProof<OuterSC>,
 ) -> (Vec<Constraint>, OuterWitness<OuterConfig>) {
     tracing::info!("building verifier constraints");
-    let template_input = ZKMCompressWitnessValues {
-        vks_and_proofs: vec![(template_vk.clone(), template_proof.clone())],
-        is_complete: true,
+    // #H (BaseFold-over-BN254 wrap port): the wrap STARK is proved over
+    // BaseFold-BN254; the gnark outer circuit verifies its basefold shard proof.
+    let basefold_proof = *template_proof
+        .basefold_shard_proof
+        .clone()
+        .expect(
+            "build_constraints_and_witness: wrap proof missing basefold_shard_proof \
+             (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+        );
+    let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
+    let template_input = ZKMWrapBasefoldWitnessValues {
+        vks_and_proofs: vec![(template_vk.clone(), basefold_proof)],
+        vk_merkle_data,
     };
     let constraints =
         tracing::info_span!("wrap circuit").in_scope(|| build_outer_circuit(&template_input));
@@ -234,33 +247,50 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
     (wrapped_proof.vk, wrapped_proof.proof)
 }
 
-fn build_outer_circuit(template_input: &ZKMCompressWitnessValues<OuterSC>) -> Vec<Constraint> {
+fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
+    let max_log_row_count =
+        zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
     let mut builder = Builder::<OuterConfig>::default();
 
-    // Get the value of the vk.
+    // Template vk for the commit/pc_start binding.
     let template_vk = template_input.vks_and_proofs.first().unwrap().0.clone();
-    // Get an input variable.
+    // Read the BaseFold wrap witness.
     let input = template_input.read(&mut builder);
-    // Fix the `wrap_vk` value to be the same as the template `vk`. Since the chip information and
-    // the ordering is already a constant, we just need to constrain the commitment and pc_start.
+    let ZKMWrapBasefoldWitnessVariable {
+        vks_and_proofs,
+        chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
+        vk_merkle_data: _,
+    } = input;
 
     if !zkm_imm_wrap_vk_mode() {
-        // Get the vk variable from the input.
-        let vk = input.vks_and_proofs.first().unwrap().0.clone();
-        // Get the expected commitment.
+        // Constrain the witnessed vk to the template (commit + pc_start). This +
+        // the public vkey_hash bind the wrap vk (gnark layer skips the vk-merkle,
+        // mirroring SP1WrapVerifier).
+        let vk = &vks_and_proofs.first().unwrap().0;
         let cap: &[_] = template_vk.commit.as_ref();
         let expected_commitment = [builder.eval(cap[0][0])];
-        // Constrain `commit` to be the same as the template `vk`.
         OuterSC::assert_digest_eq(&mut builder, expected_commitment, vk.commitment);
-        // Constrain `pc_start` to be the same as the template `vk`.
         builder.assert_felt_eq(vk.pc_start, template_vk.pc_start);
     }
 
-    // Verify the proof.
-    ZKMWrapVerifier::verify(&mut builder, &wrap_machine, input);
+    // #H (BaseFold-over-BN254 wrap port): verify the wrap STARK proof over the
+    // BaseFold jagged-PCS on BN254 via the merkle-free core (plain shard verify).
+    let [(vk_legacy, proof_tuple)] = vks_and_proofs.try_into().ok().unwrap();
+    verify_wrap_basefold_core::<OuterConfig, OuterSC, WrapAir<KoalaBear>>(
+        &mut builder,
+        vk_legacy,
+        proof_tuple,
+        chip_cumulative_sums_per_input,
+        chip_log_heights_per_input,
+        &wrap_machine,
+        max_log_row_count,
+        PublicValuesOutputDigest::Root,
+    );
 
     let mut backend = ConstraintCompiler::<OuterConfig>::default();
     let operations = backend.emit(builder.into_operations());

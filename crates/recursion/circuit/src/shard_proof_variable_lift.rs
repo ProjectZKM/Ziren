@@ -169,16 +169,13 @@ pub fn build_basefold_verifying_key_variable<C, SC>(
 ) -> crate::shard_basefold::BasefoldVerifyingKeyVariable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    SC: crate::KoalaBearFriParametersVariable<
-        C,
-        Val = InnerVal,
-        DigestVariable = [Felt<InnerVal>; 8],
-    >,
+    SC: crate::KoalaBearFriParametersVariable<C, Val = InnerVal>,
 {
     use p3_field::PrimeCharacteristicRing;
     let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
     let pc_start: [Felt<C::F>; 3] = [vk.pc_start, zero_felt, zero_felt];
-    let preprocessed_commit: [Felt<C::F>; 8] = vk.commitment;
+    let preprocessed_commit: [Felt<C::F>; 8] =
+        SC::vk_preprocessed_commit_felts(builder, vk.commitment);
     let enable_untrusted = builder.constant(C::F::ZERO);
     crate::shard_basefold::BasefoldVerifyingKeyVariable::<C>::new(
         pc_start,
