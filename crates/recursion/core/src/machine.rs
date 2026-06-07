@@ -150,13 +150,22 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     /// This machine assumes that the `shrink` stage has a fixed shape, so there is no need to
     /// fix the trace sizes.
     pub fn wrap_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
+        // #H (BaseFold-over-BN254 wrap port): the wrap STARK now proves via
+        // BaseFold (`KoalaBearPoseidon2Outer::use_basefold() == true`), so its
+        // machine must be selector-free, exactly like the compress/shrink
+        // BaseFold machine. The legacy wrap chip set used `Poseidon2Skinny`
+        // (poseidon2_skinny/air.rs has when_first_row/when_transition AIR
+        // constraints) and `BatchFRI` (FRI verifier chip, also row-selector +
+        // padded-row constrained) — both `unimplemented!` in
+        // `BasefoldConstraintFolder`. On the BaseFold path the wrap program
+        // (`verify_wrap_basefold`) emits zero BatchFRI events and uses the wide
+        // Poseidon2, so the FRI-free compress/shrink chip set is correct here.
         let chips = [
             RecursionAir::MemoryConst(MemoryConstChip::default()),
             RecursionAir::MemoryVar(MemoryVarChip::default()),
             RecursionAir::BaseAlu(BaseAluChip),
             RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
+            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]

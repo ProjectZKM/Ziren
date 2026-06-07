@@ -230,13 +230,15 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn use_basefold() -> bool {
-        // BaseFold-over-BN254 wrap port: kept FALSE until the runtime
-        // digest/bundle tunnel is complete (commit_basefold_path builds a
-        // KoalaBear [F;8] MerkleCap + downcasts to Com<SC>=Hash<KoalaBear,Bn254,1>,
-        // which panics for OuterSC). Wrap stays on the FRI device STARK
-        // (DROP_FRI OuterSC exemption) = working + device-resident. Flip to
-        // true only after the digest tunnel + gnark BaseFold verifier + vk regen.
-        false
+        // #H (BaseFold-over-BN254 wrap port): the digest tunnel + the outer
+        // jagged open/verify dispatch (hooks) are now wired, so the wrap STARK
+        // proves + host-verifies over the BN254 BaseFold jagged-PCS
+        // (OuterValMmcs + OuterChallenger). commit_basefold_path builds the BN254
+        // commit via precompute_jagged_basefold_commit_generic::<OuterValMmcs>;
+        // emit_jagged_pcs_bytes / verify_jagged_pcs_host route to the
+        // recursion-core hooks. (gnark verify_wrap_basefold + wrap vk regen +
+        // FRI deletion remain.)
+        true
     }
 
     fn digest_felts(
