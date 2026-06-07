@@ -351,6 +351,33 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 );
             &per_proof_verifier
         }
+        // #H (BaseFold-over-BN254 wrap port): the OUTER wrap proof carries
+        // its bundle as Bytes (JaggedBasefoldBundleGeneric<OuterValMmcs>).
+        // The verifier's num_variables must match the OUTER bundle's FRI
+        // round count (== fri_commitments.len()), not max_log_row_count,
+        // and its log_stacking_height must match the OUTER commit — same
+        // per-proof override the Bundle arm applies (mirrors #244). Deser
+        // is Option, so a non-outer Bytes payload (placeholder/empty)
+        // cleanly falls through to the default verifier.
+        EvaluationProof::Bytes(bytes) => {
+            if let Some(outer_bundle) =
+                zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                    zkm_recursion_core::stark::OuterValMmcs,
+                >::from_bytes(bytes)
+            {
+                let bundle_num_vars =
+                    outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                per_proof_verifier =
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
+                        max_log_row_count,
+                        outer_bundle.commit.log_stacking_height,
+                        bundle_num_vars,
+                    );
+                &per_proof_verifier
+            } else {
+                &basefold_shard_verifier
+            }
+        }
         _ => &basefold_shard_verifier,
     };
 
