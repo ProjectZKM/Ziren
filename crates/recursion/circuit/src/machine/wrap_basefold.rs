@@ -108,13 +108,19 @@ pub fn verify_wrap_basefold<C, SC, A>(
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
 ) where
+    // #H (BaseFold-over-BN254 wrap port): genericized over the config's
+    // challenger + Bit type so the gnark OUTER layer (OuterConfig, Bit=Var<BN254>,
+    // MultiField32ChallengerVariable) can reuse this verifier, not just the inner
+    // recursion layer (InnerConfig/WrapConfig, Bit=Felt<KoalaBear>,
+    // DuplexChallengerVariable). The recursion call infers DuplexChallenger as
+    // before (non-breaking).
     SC: KoalaBearFriParametersVariable<
             C,
-            FriChallengerVariable = crate::challenger::DuplexChallengerVariable<C>,
             DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
             Val = InnerVal,
         > + FieldHasherVariable<C>,
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<p3_koala_bear::KoalaBear>>,
+    SC::FriChallengerVariable: crate::challenger::FieldChallengerVariable<C, C::Bit>,
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
