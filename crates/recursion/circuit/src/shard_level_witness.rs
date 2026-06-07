@@ -1376,7 +1376,25 @@ where
     //
     // For empty bundles all decompositions reduce to zero-felts,
     // preserving byte-for-byte compat with the prior placeholder.
-    let bits_per_entry = max_log_row_count + 1;
+    //
+    // #H (BaseFold-over-BN254 wrap port) — CRITICAL: the per-entry bit
+    // width must equal the branching program's `half = proof_point.len()/2`
+    // (jagged_eval.rs:223 + compress_basefold.rs:998), which the HOST
+    // jagged-eval prover sets to `log_m + 1` = z_trace.len()
+    // (jagged_eval_sumcheck.rs:534).  Using `max_log_row_count + 1` is too
+    // narrow when the total column area exceeds 2^max_log_row_count (true
+    // for the wide WrapAir trace): col_prefix_sums.last() (= total_values)
+    // then CLAMPS to 2^(max_log_row_count+1)-1 and the step-7 prefix-sum
+    // felt-assert (acc == final_area) fails (e.g. 201326592 vs 8388607).
+    // Derive the width from the jagged-eval sumcheck point length, falling
+    // back to max_log_row_count+1 only for the dummy/empty jagged_eval.
+    let jagged_eval_point_len =
+        bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+    let bits_per_entry = if jagged_eval_point_len >= 2 {
+        jagged_eval_point_len / 2
+    } else {
+        max_log_row_count + 1
+    };
     let total_values = bundle.packing.total_values;
     let cap_to_bits = |v: usize| -> usize {
         if bits_per_entry < usize::BITS as usize {

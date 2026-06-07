@@ -160,7 +160,18 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             &mut FC,
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
-        let _ = commitments; // commitments observed via proof.original_commitments below
+        // #H (BaseFold-over-BN254 wrap port): the main jagged-PCS
+        // commitment is bound in the SHARD-LEVEL Phase-1 prologue
+        // (shard_basefold.rs observes the 8-felt main_commitment digest),
+        // matching the host shard verifier (shard_level/verifier.rs:168).
+        // The host therefore drives the jagged BaseFold open with
+        // skip_commit_observe=true (outer_verify, recursion-core
+        // config.rs:619), i.e. it does NOT re-observe the commitment
+        // here.  So neither does the circuit — `commitments` /
+        // `original_commitments` carry the digest only for the per-round
+        // Merkle-binding checks inside the basefold open, not the FS
+        // transcript.
+        let _ = commitments;
         let JaggedPcsProofVariable {
             pcs_proof,
             sumcheck_proof,
@@ -171,24 +182,6 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             original_commitments,
             expected_eval,
         } = proof;
-
-        // #H (BaseFold-over-BN254 wrap port): observe the jagged-PCS
-        // main commitment into the transcript BEFORE sampling z_col, a
-        // byte-for-byte mirror of the HOST verify_jagged_basefold_inner_generic
-        // (crates/stark/src/jagged_pcs.rs) which does
-        // `challenger.observe(bundle.commit.commitment)` as its first act.
-        // The host observes the single jagged commit once; original_commitments[0]
-        // is that commit (the remaining entries are zero round-padding the
-        // host never observes).  Previously this observe was deferred
-        // (`let _ = commitments`) and the commitment was (incorrectly)
-        // observed inside the basefold open AFTER z_col — desyncing z_col
-        // and every downstream challenge.  Masked by vacuous recursion-VM
-        // asserts; ENFORCED in the gnark OUTER wrap.
-        if let Some(first_commit) = original_commitments.first() {
-            self.stacked_pcs_verifier
-                .recursive_pcs_verifier
-                .observe_commitment(builder, challenger, first_commit);
-        }
 
         // (1) Sample column-index challenges `z_col` of dimension
         // `log2_ceil(num_columns)`.  `col_prefix_sums.len() - 1`
@@ -245,6 +238,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let sumcheck_claim = evaluate_mle_ext::<C>(builder, &column_claims, &z_col);
         builder.assert_ext_eq(sumcheck_claim, sumcheck_proof.claimed_sum);
 
+
         // (5) Verify the jagged sumcheck.
         verify_sumcheck::<C, FC>(builder, challenger, sumcheck_proof);
 
@@ -295,6 +289,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let expected_eval_sym_for_lhs: SymbolicExt<C::F, C::EF> = (*expected_eval).into();
         let lhs: Ext<C::F, C::EF> = builder.eval(jagged_eval_sym * expected_eval_sym_for_lhs);
         builder.assert_ext_eq(lhs, sumcheck_proof.point_and_eval.1);
+
 
         // (9) Verify the dense-trace opening via the stacked PCS.
         let evaluation_point = sumcheck_proof.point_and_eval.0.clone();
