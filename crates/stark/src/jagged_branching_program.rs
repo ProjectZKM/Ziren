@@ -329,8 +329,14 @@ pub fn full_jagged_evaluation<EF: Field>(
     z_col: &[EF],
     z_index: &[EF],
 ) -> EF {
-    let log_m = z_index.len().saturating_sub(1).max(0);
-    // log_m+1 bits needed to represent the largest prefix_sum
+    // SP1-faithful prefix-sum bit width: the largest prefix sum is
+    // `prefix_sums.last()` (= total area), which needs `log2_ceil(total)+1`
+    // bits (matching SP1 into_verifier_params: Point::from_usize(x, log_m+1)
+    // with log_m = log2_ceil(last_prefix_sum)).  Deriving `num_bits` from the
+    // prefix sums (not `z_index.len()`) avoids the off-by-one that truncated
+    // the top prefix-sum bit for single/equal-height packings.
+    let last = prefix_sums.last().copied().unwrap_or(0);
+    let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
     let num_bits = log_m + 1;
 
     // z_col_lagrange[k] = EQ(k_bits, z_col)

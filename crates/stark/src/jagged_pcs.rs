@@ -1892,16 +1892,15 @@ pub mod jagged {
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-                    // ITEM-12: open at the FULL z* (padded-MLE), not bare
-                    // eq_mle@trailing -- multiply by Pi_high(1-z*[k]) so y_per_chip
-                    // == opened_values (component_poly_evals@z*) and matches the
-                    // embedding factor build_weight_table now bakes into w.
-                    let n_high = z_row.len().saturating_sub(r_row_c.len());
-                    let embed_factor: InnerChallenge = z_row[..n_high]
-                        .iter()
-                        .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
-
-                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                    // SP1-faithful column claim: full row_eq over z_row indexed
+                    // by the NATURAL row (eq(z_row, r)), no Pi_high embedding.
+                    // The full row_eq subsumes the height factor for any row <
+                    // 2^log_h_c (high bits of such a row are 0).  Build over
+                    // reversed z_row so eq_c[r] = eq(z_row, r) (undo eq_mle_table
+                    // LSB-first bitrev), matching build_weight_table.
+                    let _ = r_row_c;
+                    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
                     (0..w)
                         .into_par_iter()
                         .map(|col| {
@@ -1909,7 +1908,7 @@ pub mod jagged {
                             for row in 0..h {
                                 acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                             }
-                            acc * embed_factor
+                            acc
                         })
                         .collect::<Vec<_>>()
                 })
@@ -2334,11 +2333,13 @@ pub mod jagged {
                     }
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
-                    let n_high = z_row.len().saturating_sub(r_row_c.len());
-                    let embed_factor: InnerChallenge = z_row[..n_high]
-                        .iter()
-                        .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
-                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                    let _ = r_row_c; // SP1 convention uses the full z_row row_eq
+                    // SP1-faithful column claim: full row_eq over z_row indexed
+                    // by the NATURAL row (eq(z_row, r)), no Pi_high embedding.
+                    // Build over reversed z_row so eq_c[r] = eq(z_row, r) (undo
+                    // eq_mle_table's LSB-first bitrev), matching build_weight_table.
+                    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+                    let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
                     (0..w)
                         .into_par_iter()
                         .map(|col| {
@@ -2347,7 +2348,7 @@ pub mod jagged {
                                 acc += eq_c[row]
                                     * InnerChallenge::from(trace.values[row * w + col]);
                             }
-                            acc * embed_factor
+                            acc
                         })
                         .collect::<Vec<_>>()
                 })

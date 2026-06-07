@@ -49,36 +49,30 @@ fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     z_col_lagrange: &[InnerChallenge],
-    // ITEM-12: the FULL zerocheck-reduced z* (max_log_row_count dims). Each
-    // chip's row-eq weight is scaled by the embedding factor Π_high(1-z*[k])
-    // over the (max-log_h) high/MSB coords the per-chip r_row trailing-slice
-    // drops, so the reduction opens the padded-MLE@z* (matching the zerocheck
-    // opened_values) instead of the bare eq_mle@trailing.
+    // SP1 re-align (PHASE 1): the FULL zerocheck-reduced z* (max_log_row_count
+    // dims).  The per-chip row weight is the full row_eq over z_row indexed by
+    // the natural row (0..h_c) — NO trailing slice, NO Pi_high embedding (the
+    // full row_eq subsumes the height factor since high bits of any row <
+    // 2^log_h_c are 0).  Mirrors SP1 partial_jagged_little_polynomial_evaluation.
     z_row: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
     let n = 1usize << packing.log_dense_size;
     let mut w = vec![InnerChallenge::ZERO; n];
 
-    let eq_per_chip: Vec<Vec<InnerChallenge>> = packing
+    // SP1-faithful row weight: the full max-log-row eq table
+    // over z_row, indexed by the LITERAL row index (0..h_c).  No trailing
+    // slice, no stride, no explicit Pi_high embedding — the full row_eq
+    // bakes the height factor in for any row < 2^log_h_c because the high
+    // bits of such a row are 0.  Mirrors SP1
+    // partial_jagged_little_polynomial_evaluation's `row_eq[current_row]`.
+    let _ = r_row_per_chip; // no longer used under the SP1 convention
+    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+    let row_eq_full: Vec<InnerChallenge> =
+        crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+    let eq_per_chip: Vec<&[InnerChallenge]> = packing
         .chip_infos
         .iter()
-        .zip(r_row_per_chip.iter())
-        .map(|(info, r_row_c)| {
-            assert_eq!(
-                info.row_count.next_power_of_two().trailing_zeros() as usize,
-                r_row_c.len(),
-                "r_row_c must have log2(row_count) entries (rounded up)",
-            );
-            let n_high = z_row.len().saturating_sub(r_row_c.len());
-            let factor_c: InnerChallenge = z_row[..n_high]
-                .iter()
-                .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
-            let mut eq = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
-            for e in eq.iter_mut() {
-                *e *= factor_c;
-            }
-            eq
-        })
+        .map(|_info| row_eq_full.as_slice())
         .collect();
 
     let mut k: usize = 0;
@@ -837,21 +831,18 @@ mod phase1_acceptance_gate {
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())
-            .map(|((_n, trace), r_row_c)| {
+            .map(|((_n, trace), _r_row_c)| {
                 let w = trace.width;
                 let h = trace.values.len() / w.max(1);
-                let n_high = z_row.len().saturating_sub(r_row_c.len());
-                let embed: InnerChallenge = z_row[..n_high]
-                    .iter()
-                    .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
-                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
                         for row in 0..h {
                             acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
                         }
-                        acc * embed
+                        acc
                     })
                     .collect()
             })
@@ -894,7 +885,8 @@ mod phase1_acceptance_gate {
 
         // SP1 closing identity: w_at_z must equal the BP jagged polynomial
         // evaluated at the same (z_row, z_col, z_star).
-        let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star);
+        let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
+        let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
         (w_at_z, bp)
     }
 
