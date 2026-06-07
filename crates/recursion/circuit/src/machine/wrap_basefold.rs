@@ -262,12 +262,21 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             max_log_row_count,
             &column_counts_by_round,
         ),
-        EvaluationProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-            builder,
-            bytes,
-            max_log_row_count,
-            &column_counts_by_round,
-        ),
+        EvaluationProof::Bytes(bytes) => {
+            // #H (BaseFold-over-BN254 wrap port): ring-aware dispatch.
+            // SC is the field hasher (HV); its impl deserializes the OUTER
+            // bundle (JaggedBasefoldBundleGeneric<OuterValMmcs>, BN254
+            // commitments) for the gnark wrap and the INNER bundle for the
+            // recursion wrap. The OUTER path lifts the real BN254 round
+            // commitments (was an all-zero placeholder -> constraint
+            // #488163 failure in the Groth16 setup).
+            <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
+                builder,
+                bytes,
+                max_log_row_count,
+                &column_counts_by_round,
+            )
+        }
         EvaluationProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
             builder,
             &[],

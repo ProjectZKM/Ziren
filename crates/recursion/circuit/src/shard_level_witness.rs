@@ -664,6 +664,357 @@ pub fn host_stacked_basefold_to_recursive(
     host_basefold_proof_to_recursive(&proof.basefold_proof, proof.batch_evaluations.clone())
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// #H (BaseFold-over-BN254 wrap port): OUTER-ring bundle lift.
+//
+// The OUTER wrap proof's `EvaluationProof::Bytes` carries a
+// `JaggedBasefoldBundleGeneric<OuterValMmcs>` whose commitments are
+// REAL BN254 MerkleCaps (`MerkleCap<KoalaBear, [Bn254; 1]>`).  The inner
+// lift (`lift_jagged_basefold_bundle`) reads KoalaBear MMCS roots and is
+// wrong for this ring.  These helpers read the BN254 roots and lift them
+// to the outer digest type (`KoalaBearPoseidon2Outer::Digest = [Bn254; 1]`,
+// `DigestVariable = [Var<Bn254>; 1]`), so the in-circuit challenger
+// observes the same BN254 digests the host `verify_jagged_basefold_inner_generic`
+// absorbs (via `split_32` per BN254 element) — matching the Fiat-Shamir
+// transcript exactly.
+// ─────────────────────────────────────────────────────────────────────
+
+use p3_bn254_fr::Bn254;
+use zkm_recursion_core::stark::OuterValMmcs;
+
+type OuterDigestRaw = [Bn254; crate::hash::BN254_DIGEST_SIZE];
+
+/// Extract the single BN254 1-cap root from an `OuterValMmcs` commitment.
+fn outer_cap_root(
+    commitment: &<OuterValMmcs as p3_commit::Mmcs<InnerVal>>::Commitment,
+) -> OuterDigestRaw {
+    use p3_commit::Mmcs as _;
+    let roots = commitment.roots();
+    assert_eq!(
+        roots.len(),
+        1,
+        "OuterValMmcs MerkleCap must have exactly 1 root (height-0 cap), got {}",
+        roots.len(),
+    );
+    roots[0]
+}
+
+/// Outer analog of [`host_component_opening_to_recursive`] over `OuterValMmcs`.
+fn host_component_opening_to_recursive_outer(
+    opening: &MerkleOpening<InnerVal, OuterValMmcs>,
+) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge, OuterDigestRaw>> {
+    opening
+        .leaves
+        .iter()
+        .map(|leaf| RecursiveBasefoldComponentOpening {
+            leaf_values: leaf.values.clone(),
+            merkle_path_bytes: Vec::new(),
+            _phantom: core::marker::PhantomData,
+        })
+        .collect()
+}
+
+/// Outer analog of [`host_query_opening_to_recursive`] over `OuterValMmcs`.
+/// `leaf.proof` is `OuterValMmcs::Proof = Vec<[Bn254; 1]>` — the real BN254
+/// Merkle siblings, threaded into `merkle_path_digests` for binding.
+fn host_query_opening_to_recursive_outer(
+    opening: &MerkleOpening<InnerVal, OuterValMmcs>,
+) -> Vec<RecursiveBasefoldOpening<InnerVal, InnerChallenge, OuterDigestRaw>> {
+    use p3_field::BasedVectorSpace;
+    const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
+    opening
+        .leaves
+        .iter()
+        .map(|leaf| {
+            assert_eq!(
+                leaf.values.len(),
+                1,
+                "commit-phase leaf must have exactly one inner matrix",
+            );
+            let row = &leaf.values[0];
+            assert_eq!(
+                row.len(),
+                2 * D,
+                "commit-phase leaf row must have 2*EF::DIMENSION = {} base elements, got {}",
+                2 * D,
+                row.len(),
+            );
+            let lo = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                row[..D].iter().copied(),
+            )
+            .expect("EF parse from D base elements");
+            let hi = <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                row[D..2 * D].iter().copied(),
+            )
+            .expect("EF parse from D base elements");
+            RecursiveBasefoldOpening {
+                position: 0,
+                sibling_pair: [lo, hi],
+                merkle_path_bytes: Vec::new(),
+                merkle_path_digests: leaf.proof.clone(),
+                _phantom: core::marker::PhantomData,
+            }
+        })
+        .collect()
+}
+
+/// Outer analog of [`host_basefold_proof_to_recursive`] — reads the BN254
+/// 1-cap roots from `fri_commitments` and the BN254 Merkle siblings from the
+/// per-query openings, producing a `RecursiveBasefoldProof` whose `Dig` is
+/// the outer BN254 digest type `[Bn254; 1]`.
+fn host_basefold_proof_to_recursive_outer(
+    proof: &BasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
+    batch_evaluations: Vec<Vec<InnerChallenge>>,
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
+    assert_eq!(
+        proof.univariate_messages.len(),
+        proof.fri_commitments.len(),
+        "BasefoldProof: univariate_messages.len() != fri_commitments.len()",
+    );
+
+    let rounds: Vec<RecursiveBasefoldRound<InnerVal, InnerChallenge, OuterDigestRaw>> = proof
+        .univariate_messages
+        .iter()
+        .zip(proof.fri_commitments.iter())
+        .map(|(uni, commit)| RecursiveBasefoldRound {
+            uni_poly: *uni,
+            commitment: outer_cap_root(commit),
+            _phantom_f: core::marker::PhantomData,
+        })
+        .collect();
+
+    let component_openings: Vec<Vec<RecursiveBasefoldComponentOpening<_, _, OuterDigestRaw>>> =
+        proof
+            .component_polynomials_query_openings_and_proofs
+            .iter()
+            .map(host_component_opening_to_recursive_outer)
+            .collect();
+
+    let query_phase_openings: Vec<Vec<RecursiveBasefoldOpening<_, _, OuterDigestRaw>>> = proof
+        .query_phase_openings_and_proofs
+        .iter()
+        .map(host_query_opening_to_recursive_outer)
+        .collect();
+
+    RecursiveBasefoldProof {
+        rounds,
+        final_poly: proof.final_poly,
+        pow_witness: proof.pow_witness,
+        batch_grinding_witness: proof.batch_grinding_witness,
+        component_openings,
+        query_phase_openings,
+        batch_evaluations,
+    }
+}
+
+/// Outer analog of [`host_stacked_basefold_to_recursive`] over `OuterValMmcs`.
+fn host_stacked_basefold_to_recursive_outer(
+    proof: &StackedBasefoldProof<InnerVal, InnerChallenge, OuterValMmcs>,
+) -> RecursiveBasefoldProof<InnerVal, InnerChallenge, OuterDigestRaw> {
+    host_basefold_proof_to_recursive_outer(
+        &proof.basefold_proof,
+        proof.batch_evaluations.clone(),
+    )
+}
+
+/// #H (BaseFold-over-BN254 wrap port): lift the OUTER-ring jagged BaseFold
+/// bundle into the in-circuit `JaggedPcsProofVariable`.
+///
+/// Structural mirror of [`lift_jagged_basefold_bundle`] but:
+///   * `original_commitments[0]` ← the REAL BN254 `bundle.commit.commitment`
+///     1-cap root, lifted to `[Var<Bn254>; 1]` via
+///     `KoalaBearPoseidon2Outer::const_digest`.  This is the digest the
+///     in-circuit `RecursiveBasefoldVerifier::verify_untrusted_evaluations`
+///     step (1) observes, matching the host's
+///     `challenger.observe(bundle.commit.commitment)`.
+///   * the inner BaseFold proof's per-round `commitment` + per-query
+///     `merkle_path_digests` carry the real BN254 digests (read via
+///     `host_stacked_basefold_to_recursive_outer`), so the commit-phase
+///     transcript replay (step (4)) observes the same BN254 digests the
+///     host basefold verifier absorbs.
+///
+/// `HV` is pinned to `KoalaBearPoseidon2Outer` (the only outer hasher); the
+/// generic param keeps the output type aligned with the dispatch call site.
+pub fn lift_jagged_basefold_bundle_outer<C>(
+    builder: &mut Builder<C>,
+    bundle: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+    row_counts_by_round: Option<&[Vec<usize>]>,
+) -> JaggedPcsProofVariable<
+    RecursiveBasefoldProof<
+        C::F,
+        C::EF,
+        <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasher<C::F>>::Digest,
+    >,
+    <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254, Bit = zkm_recursion_compiler::ir::Var<Bn254>>,
+{
+    use crate::hash::FieldHasherVariable;
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_recursion_core::stark::KoalaBearPoseidon2Outer as HV;
+
+    // ── Padding shape (mirror of lift_jagged_basefold_bundle) ──
+    let total_cols_before_pad: usize = column_counts_by_round
+        .iter()
+        .map(|cc| {
+            let flattened = cc.iter().sum::<usize>();
+            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+            flattened + added
+        })
+        .sum();
+    let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
+    let col_prefix_sums_len = padded_cols + 1;
+    let num_rounds = column_counts_by_round.len().max(1);
+
+    // ── REAL: sumcheck_proof from bundle.reduction ──
+    let host_sumcheck = jagged_reduction_to_partial_sumcheck(&bundle.reduction);
+    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
+        host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
+
+    // ── REAL: basefold proof from bundle.basefold_proof (BN254 digests) ──
+    let host_basefold_outer =
+        host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
+    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold_outer, builder);
+
+    // ── REAL: batch_evaluations as Ext constants ──
+    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
+        .basefold_proof
+        .batch_evaluations
+        .iter()
+        .map(|round| round.iter().map(|ef| builder.constant(*ef)).collect())
+        .collect();
+
+    let stacked_pcs_proof = RecursiveStackedPcsProof::<
+        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        C::F,
+        C::EF,
+    > {
+        batch_evaluations: batch_evaluations_ext,
+        pcs_proof: basefold_proof_var,
+    };
+
+    // ── REAL: original_commitments[0] = BN254 commit cap root ──
+    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    let first_commit_digest: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
+        HV::const_digest(builder, first_root);
+    let zero_digest_var: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
+        HV::const_digest(builder, <HV as crate::hash::FieldHasher<C::F>>::Digest::default());
+    let mut original_commitments: Vec<
+        <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
+    > = Vec::with_capacity(num_rounds);
+    original_commitments.push(first_commit_digest);
+    for _ in 1..num_rounds {
+        original_commitments.push(zero_digest_var);
+    }
+
+    // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
+    let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
+        partial_sumcheck_proof: host_sumcheck_to_const_var::<C>(
+            builder,
+            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+        ),
+    };
+
+    // ── REAL: col_prefix_sums with artificial-zero insertion (mirror) ──
+    let bits_per_entry = max_log_row_count + 1;
+    let total_values = bundle.packing.total_values;
+    let cap_to_bits = |v: usize| -> usize {
+        if bits_per_entry < usize::BITS as usize {
+            v.min((1usize << bits_per_entry) - 1)
+        } else {
+            v
+        }
+    };
+    let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
+    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+    let mut offset_idx: usize = 0;
+    let mut current_offset: usize = 0;
+    for cc in column_counts_by_round.iter() {
+        let real_in_round = cc.iter().sum::<usize>();
+        for _ in 0..real_in_round {
+            if offset_idx < bundle.packing.offsets.len() {
+                current_offset = bundle.packing.offsets[offset_idx];
+                offset_idx += 1;
+            }
+            if col_prefix_sums.len() >= col_prefix_sums_len {
+                break;
+            }
+            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                builder,
+                cap_to_bits(current_offset),
+                bits_per_entry,
+            ));
+        }
+        let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+        for _ in 0..added {
+            if col_prefix_sums.len() >= col_prefix_sums_len {
+                break;
+            }
+            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                builder,
+                cap_to_bits(current_offset),
+                bits_per_entry,
+            ));
+        }
+    }
+    while col_prefix_sums.len() < col_prefix_sums_len - 1 {
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+            builder,
+            cap_to_bits(current_offset),
+            bits_per_entry,
+        ));
+    }
+    if col_prefix_sums.len() < col_prefix_sums_len {
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+            builder,
+            cap_to_bits(total_values),
+            bits_per_entry,
+        ));
+    }
+    let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums };
+
+    // ── row_counts: caller-plumbed if provided, else from chip_dims ──
+    let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(row_counts_src) = row_counts_by_round {
+        row_counts_src
+            .iter()
+            .map(|round| {
+                round
+                    .iter()
+                    .map(|&rc| builder.constant(C::F::from_u64(rc as u64)))
+                    .collect()
+            })
+            .collect()
+    } else {
+        let heights: Vec<Felt<C::F>> = bundle
+            .commit
+            .chip_dims
+            .iter()
+            .map(|&(_w, log_h)| builder.constant(C::F::from_u64(1u64 << log_h)))
+            .collect();
+        column_counts_by_round.iter().map(|_| heights.clone()).collect()
+    };
+
+    // ── REAL: expected_eval from bundle.reduction.q_at_z ──
+    let expected_eval: Ext<C::F, C::EF> = builder.constant(bundle.reduction.q_at_z);
+
+    JaggedPcsProofVariable {
+        params: jagged_dim_metadata,
+        sumcheck_proof,
+        jagged_eval_proof,
+        pcs_proof: stacked_pcs_proof,
+        column_counts: column_counts_by_round.to_vec(),
+        row_counts,
+        original_commitments,
+        expected_eval,
+    }
+}
+
+
 /// Bytes-input adapter for [`lift_jagged_basefold_bundle`].
 ///
 /// Deserializes `evaluation_proof_bytes` (rmp-serde wire format) into

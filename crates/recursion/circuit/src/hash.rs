@@ -93,6 +93,49 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     fn digest_from_koalabear_root(
         root: [p3_koala_bear::KoalaBear; 8],
     ) -> <Self as FieldHasher<C::F>>::Digest;
+
+    /// #H (BaseFold-over-BN254 wrap port): ring-aware lift of a host
+    /// `EvaluationProof::Bytes` payload into the in-circuit
+    /// `JaggedPcsProofVariable`.
+    ///
+    /// The INNER ring (`KoalaBearPoseidon2`) payload is a
+    /// `JaggedBasefoldBundle` (KoalaBear MMCS) — the default impl routes to
+    /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
+    ///
+    /// The OUTER ring (`KoalaBearPoseidon2Outer`) payload is a
+    /// `JaggedBasefoldBundleGeneric<OuterValMmcs>` carrying REAL BN254
+    /// commitments — the override deserializes the outer bundle and lifts its
+    /// BN254 round commitments via
+    /// [`crate::shard_level_witness::lift_jagged_basefold_bundle_outer`], so
+    /// the in-circuit challenger observes the same BN254 digests the host
+    /// outer verifier absorbs (the all-zero placeholder for those
+    /// commitments was the residual gnark constraint-#488163 failure).
+    fn lift_evaluation_proof_bytes_dispatch(
+        builder: &mut Builder<C>,
+        bytes: &[u8],
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            C::F,
+            C::EF,
+            <Self as FieldHasher<C::F>>::Digest,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized,
+    {
+        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, Self>(
+            builder,
+            bytes,
+            max_log_row_count,
+            column_counts_by_round,
+        )
+    }
 }
 
 impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
@@ -283,5 +326,49 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         // outer bundle lift; the inner-KoalaBear-root conversion is
         // never the binding digest here.
         <Self as FieldHasher<KoalaBear>>::Digest::default()
+    }
+
+    fn lift_evaluation_proof_bytes_dispatch(
+        builder: &mut Builder<C>,
+        bytes: &[u8],
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            C::F,
+            C::EF,
+            <Self as FieldHasher<C::F>>::Digest,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized,
+    {
+        // OUTER ring: deserialize the BN254 bundle and lift its real
+        // commitments.  Falls back to the inner-style zero placeholder only
+        // if deserialization fails (empty/placeholder paths).
+        if let Some(bundle) =
+            zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                zkm_recursion_core::stark::OuterValMmcs,
+            >::from_bytes(bytes)
+        {
+            crate::shard_level_witness::lift_jagged_basefold_bundle_outer::<C>(
+                builder,
+                &bundle,
+                max_log_row_count,
+                column_counts_by_round,
+                None,
+            )
+        } else {
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, Self>(
+                builder,
+                bytes,
+                max_log_row_count,
+                column_counts_by_round,
+            )
+        }
     }
 }
