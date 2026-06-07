@@ -994,12 +994,17 @@ where
 
         // (3) Split the reduced point in half — first half flows into
         //     the BP as `prefix_sum`, second half as `next_prefix_sum`.
+        //     PHASE 2 (jagged SP1 re-align): the host BranchingProgram reads
+        //     its streams BIG-endian (get_ith_lsb_ef = p[dim-1-i]) while this
+        //     emitter reads LITTLE-endian, so the BP inputs (z_row + the two
+        //     reduced-point halves) are fed REVERSED to bridge the conventions.
+        //     The lagrange/prefix_sum_check below keeps proof_point un-reversed.
         let proof_point: &[Ext<C::F, C::EF>] = &partial_sumcheck_proof.point_and_eval.0;
         let half = proof_point.len() / 2;
         let first_half_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
-            proof_point[..half].iter().map(|e| (*e).into()).collect();
+            proof_point[..half].iter().rev().map(|e| (*e).into()).collect();
         let second_half_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
-            proof_point[half..].iter().map(|e| (*e).into()).collect();
+            proof_point[half..].iter().rev().map(|e| (*e).into()).collect();
 
         // (4) Full partial-Lagrange over z_col.
         let z_col_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
@@ -1035,8 +1040,11 @@ where
         // (6) Multiply by the branching-program evaluation.
         //     BP parameterized by (z_row, z_eval) ≈ SP1's (z_row, z_trace);
         //     evaluated with first/second halves of the sub-sumcheck point.
+        // z_row reversed (BIG-endian host BP vs LITTLE-endian emitter); z_eval
+        // stays un-reversed (the host structural prover already uses rev(z_star)
+        // as its z_index, and the emitter's internal reversal lands it correctly).
         let z_row_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
-            z_row.iter().map(|e| (*e).into()).collect();
+            z_row.iter().rev().map(|e| (*e).into()).collect();
         let z_eval_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
             z_eval.iter().map(|e| (*e).into()).collect();
 

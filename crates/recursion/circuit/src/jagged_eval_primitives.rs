@@ -66,31 +66,27 @@ const fn build_transition_table() -> [[Option<u8>; 16]; 4] {
             let curr_bit = (bs_idx & 4) != 0;
             let next_bit = (bs_idx & 8) != 0;
 
-            // Transition: the branching program succeeds when the
-            // row-index pair lies inside the `[curr, next)` range.
+            // EXACT mirror of the host `transition_function`
+            // (zkm_stark::jagged_branching_program): the prior hand-rolled
+            // logic computed a DIFFERENT DP (added next_bit into the carry,
+            // compared against row) → the in-circuit BP disagreed with the
+            // host BP, which only surfaced in gnark (AsmCompiler asserts are
+            // vacuous).  Mirror the host precisely.
             //
-            // Carry out: `curr_bit XOR next_bit XOR carry_in` with
-            // the comparison flag flipping on inequality.
-            let b = curr_bit as u8;
-            let c = next_bit as u8;
-            let sum = b + c + carry_in as u8;
-            let carry_out = sum >= 2;
-            let curr_bit_low = sum & 1 == 1;
-
-            let matches_row = row_bit == curr_bit_low;
-            let comp_out = if matches_row {
+            // comparison: i < t_{c+1} — defer to running comparison when
+            // index_bit == next_bit, else the next-prefix bit decides.
+            let new_comparison = if index_bit == next_bit {
                 comparison_in
-            } else if index_bit {
-                true
             } else {
-                false
+                next_bit
             };
-
-            let valid = matches_row || !index_bit || comparison_in;
-
-            if valid {
-                let out_idx =
-                    (carry_out as u8) | ((comp_out as u8) << 1);
+            // carry: grade-school addition row + carry_in + curr_prefix must
+            // produce index_bit at this layer, else the path FAILs (None).
+            let sum = (row_bit as u8) + (carry_in as u8) + (curr_bit as u8);
+            if ((sum & 1) == 1) == index_bit {
+                let new_carry = (sum >> 1) != 0;
+                // output index = MemoryState::get_index = carry | comparison<<1.
+                let out_idx = (new_carry as u8) | ((new_comparison as u8) << 1);
                 let mut t = table;
                 t[ms_idx][bs_idx] = Some(out_idx);
                 table = t;
@@ -271,5 +267,38 @@ mod tests {
         let bits: Vec<Felt<F>> = (0..3).map(|_| builder.constant(F::ZERO)).collect();
         let point: Vec<Ext<F, EF>> = (0..3).map(|_| builder.constant(EF::ZERO)).collect();
         let (_lag, _felt) = emit_prefix_sum_check::<C>(&mut builder, bits, point);
+    }
+
+    /// PHASE-2: the compile-time TRANSITIONS table MUST be byte-identical to
+    /// the host BranchingProgram DP (zkm_stark `transition_function`).  A
+    /// divergence makes the in-circuit BP compute a different function than
+    /// the host, surfacing only in gnark (where asserts are real).
+    #[test]
+    fn transition_table_matches_host_dp() {
+        use zkm_stark::jagged_branching_program::{
+            transition_function, BitState, MemoryState, StateOrFail,
+        };
+        for ms_idx in 0..4usize {
+            let ms = MemoryState {
+                carry: (ms_idx & 1) != 0,
+                comparison_so_far: (ms_idx & 2) != 0,
+            };
+            for bs_idx in 0..16usize {
+                let bs = BitState {
+                    row_bit: (bs_idx & 1) != 0,
+                    index_bit: (bs_idx & 2) != 0,
+                    curr_col_prefix_sum_bit: (bs_idx & 4) != 0,
+                    next_col_prefix_sum_bit: (bs_idx & 8) != 0,
+                };
+                let expected = match transition_function(bs, ms) {
+                    StateOrFail::State(out) => Some(out.get_index() as u8),
+                    StateOrFail::Fail => None,
+                };
+                assert_eq!(
+                    super::TRANSITIONS[ms_idx][bs_idx], expected,
+                    "TRANSITIONS[{ms_idx}][{bs_idx}] mismatch vs host transition_function",
+                );
+            }
+        }
     }
 }

@@ -447,7 +447,12 @@ impl<'a> StructuralJaggedEvalProver<'a> {
             let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
             self.intermediate_eq_full_evals[k] *= factor;
         }
-        self.rhos.push(alpha);
+        // SP1 parity: rhos accumulate via add_dimension = insert at FRONT
+        // (slop Point::add_dimension = values.insert(0, .)), newest-first.
+        // Ziren previously push()'d (append, oldest-first) → the per-round
+        // full_point + final point_and_eval.0 ordering diverged from SP1's
+        // in-circuit half-split verifier.  Mirror SP1 exactly.
+        self.rhos.insert(0, alpha);
         self.round_num += 1;
     }
 }
@@ -531,8 +536,20 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
         return JaggedSumcheckEvalProof::dummy();
     }
 
-    // half = log_m + 1 = number of bits per prefix sum.
-    let half = z_trace.len();
+    // half = log_m + 1 = number of bits per prefix sum.  PHASE 2: derive this
+    // from the prefix sums (matching full_jagged_evaluation's num_bits), NOT
+    // from z_trace.len() (= log_dense_size = log_m), which is one bit SHORT and
+    // truncates the top prefix-sum bit — the SAME off-by-one PHASE 1 fixed in
+    // full_jagged_evaluation but left here.  z_trace.len()=log_m desynced the
+    // structural sumcheck (2*log_m vars) from the closed form (log_m+1 bits) and
+    // broke the in-circuit jagged closing on real data (z_star.len = log_m).
+    let last = prefix_sums.last().copied().unwrap_or(0);
+    let log_m = if last <= 1 {
+        0
+    } else {
+        (last - 1).next_power_of_two().trailing_zeros() as usize
+    };
+    let half = log_m + 1;
     let n = 2 * half;
 
     let claimed_sum = full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
@@ -604,6 +621,28 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
         // cover correctness independently.
     }
 
+    // [TEMP PHASE-2 DIAG] Host replica of the in-circuit real_jagged_evaluator_fn
+    // eval closing on REAL data: (Σ_k z_col_eq * Π eq(merged_k, pp)) *
+    // BP(z_row, z_trace).eval(pp[..h], pp[h..]) must equal point_and_eval.1.
+    // (BP here == the in-circuit combo-25 emit, since z_trace = rev(z_star).)
+    {
+        let pp = &partial_sumcheck_proof.point_and_eval.0;
+        let h = pp.len() / 2;
+        let bp = BranchingProgram::new(z_row.to_vec(), z_trace.to_vec()).eval(&pp[..h], &pp[h..]);
+        let mut lag = InnerChallenge::ZERO;
+        for (k, merged) in merged_prefix_sums.iter().enumerate() {
+            let mut e = InnerChallenge::ONE;
+            for (mb, p) in merged.iter().zip(pp.iter()) {
+                e *= *mb * *p + (InnerChallenge::ONE - *mb) * (InnerChallenge::ONE - *p);
+            }
+            lag += z_col_eq_vals[k] * e;
+        }
+        eprintln!(
+            "[EVAL-CLOSE] match={} chips={} half={} n={}",
+            lag * bp == partial_sumcheck_proof.point_and_eval.1, num_chips, half, pp.len()
+        );
+    }
+
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 
@@ -657,7 +696,9 @@ mod tests {
     fn prove_jagged_evaluation_naive_path_emits_round_polys() {
         let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
         let mut challenger = InnerChallenger::new(perm);
-        // 4 chips, log_m=4 → half=5, n=10. Within naive threshold (n=24).
+        // prefix_sums=[0,16,32,48] → total area 48, log_m = log2_ceil(48) = 6,
+        // so half = log_m+1 = 7 and n = 2*half = 14.  (PHASE 2: half is derived
+        // from the prefix sums, not z_trace.len(); see prove_jagged_evaluation.)
         let proof = prove_jagged_evaluation(
             &[0, 16, 32, 48],
             &[InnerChallenge::ZERO; 5],
@@ -665,10 +706,8 @@ mod tests {
             &[InnerChallenge::ZERO; 5],
             &mut challenger,
         );
-        // Naive path produces n round polys.  half = z_trace.len() = 5,
-        // so n = 10.
-        assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 10);
-        assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 10);
+        assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 14);
+        assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 14);
     }
 
     /// naive sumcheck: round-by-round identity holds.  Each
@@ -724,7 +763,9 @@ mod tests {
                 "round {round_idx}: g(0) + g(1) should equal claim {claim:?}",
             );
             // Next round's claim = poly evaluated at the round's challenge.
-            claim = poly.eval_at_point(psp.point_and_eval.0[round_idx]);
+            // SP1 parity: point_and_eval.0 is prepend-order (newest-first), so
+            // round r's challenge is at index n-1-r.
+            claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }
 
         // Final identity: last round's poly at last challenge equals
@@ -761,13 +802,13 @@ mod tests {
         assert_eq!(psp.univariate_polys.len(), n);
         // Round identity: g_round(0) + g_round(1) == claim_so_far.
         let mut claim = psp.claimed_sum;
-        for poly in psp.univariate_polys.iter() {
+        for (round_idx, poly) in psp.univariate_polys.iter().enumerate() {
             let g0 = poly.eval_at_point(InnerChallenge::ZERO);
             let g1 = poly.eval_at_point(InnerChallenge::ONE);
             assert_eq!(g0 + g1, claim);
-            claim = poly.eval_at_point(*psp.point_and_eval.0.iter().nth(
-                psp.univariate_polys.iter().position(|p| std::ptr::eq(p, poly)).unwrap()
-            ).unwrap());
+            // SP1 parity: point_and_eval.0 is prepend-order; round r's
+            // challenge is at index n-1-r.
+            claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }
         // Final identity: last claim == point_and_eval.1.
         assert_eq!(claim, psp.point_and_eval.1);
@@ -797,5 +838,194 @@ mod tests {
             &prefix_sums, &z_row, &z_col, &z_trace,
         );
         assert_eq!(proof.partial_sumcheck_proof.claimed_sum, expected);
+    }
+
+    // PHASE-2 circuit-orientation ORACLE.  The recursion verifier
+    // (real_jagged_evaluator_fn) reconstructs `expected_eval` and asserts
+    // it equals the eval-sumcheck closing claim `point_and_eval.1`.  The
+    // host BranchingProgram reads BIG-endian; the in-circuit
+    // emit_branching_program_eval reads LITTLE-endian.  This test runs the
+    // PRODUCTION prove_jagged_evaluation (z_trace = rev(z_star)) and
+    // brute-forces which orientation of the circuit's BP inputs + lagrange
+    // pairing reproduces point_and_eval.1, telling us the exact circuit edit.
+    #[test]
+    #[ignore] // PHASE-2 investigation tool: structural prover's full_point layout
+              // is not reproduced by any simple input reversal of the circuit;
+              // run with --ignored to iterate the circuit-side fix.
+    fn phase2_circuit_orientation_oracle() {
+        use crate::jagged_branching_program::{
+            bits_big_endian, full_jagged_evaluation, partial_lagrange, BranchingProgram,
+        };
+        use p3_field::PrimeCharacteristicRing;
+        use rand::{rngs::StdRng, Rng, SeedableRng};
+
+        type EF = InnerChallenge;
+        let rev = |v: &[EF]| -> Vec<EF> { v.iter().rev().copied().collect() };
+        let eq = |a: EF, b: EF| -> EF { a * b + (EF::ONE - a) * (EF::ONE - b) };
+        // circuit_emit(a,b,c,d) [little-endian] == BP_host(rev a, rev b).eval(rev c, rev d).
+        let circuit_bp = |a: &[EF], b: &[EF], c: &[EF], d: &[EF]| -> EF {
+            BranchingProgram::new(rev(a), rev(b)).eval(&rev(c), &rev(d))
+        };
+
+        // (chips as (log_h, ncol)) -> column-wise offsets (jagged packing).
+        let shapes: &[&[(usize, usize)]] = &[
+            &[(4, 1), (3, 1), (2, 1)],
+            &[(5, 2), (4, 3), (2, 1)],
+            &[(6, 1), (4, 2), (3, 1)],
+            &[(2, 1)],                  // single chip, single column (wrap-like)
+            &[(3, 1)],                  // single chip
+            &[(3, 1), (2, 1)],          // two chips
+            &[(4, 2)],                  // single chip, 2 columns
+        ];
+
+        // Knob combo -> set of shape-indices where it matched.
+        let mut survivors: Vec<[bool; 7]> = Vec::new();
+        let mut first = true;
+
+        for (si, chips) in shapes.iter().enumerate() {
+            let mut rng = StdRng::seed_from_u64(9000 + si as u64);
+            let mut offsets = vec![0usize];
+            for &(lh, nc) in chips.iter() {
+                for _ in 0..nc {
+                    let last = *offsets.last().unwrap();
+                    offsets.push(last + (1usize << lh));
+                }
+            }
+            let num_cols = offsets.len() - 1;
+            let last = *offsets.last().unwrap();
+            let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
+            let half = log_m + 1;
+            let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
+            let z_col_len = if num_cols <= 1 { 0 } else { (num_cols as usize).next_power_of_two().trailing_zeros() as usize };
+            // PRODUCTION-FAITHFUL: z_star (= reduction.eval_point = BP z_index)
+            // has length log_dense_size = log2_ceil(total area) = log_m, which is
+            // ONE LESS than half (= log_m+1, the prefix-sum bit width).  The
+            // earlier oracle used z_star.len = half, accidentally masking the
+            // prove_jagged_evaluation `half = z_trace.len()` off-by-one.
+            let log_dense_size =
+                if last <= 1 { 1 } else { last.next_power_of_two().trailing_zeros() as usize };
+
+            let rk = |rng: &mut StdRng| EF::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF);
+            let z_row: Vec<EF> = (0..max_log_row).map(|_| rk(&mut rng)).collect();
+            let z_col: Vec<EF> = (0..z_col_len).map(|_| rk(&mut rng)).collect();
+            let z_star: Vec<EF> = (0..log_dense_size).map(|_| rk(&mut rng)).collect();
+            let z_trace = rev(&z_star); // BP z_index (len log_dense_size).
+
+            let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
+            let mut ch = InnerChallenger::new(perm);
+            let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch);
+            let psp = &proof.partial_sumcheck_proof;
+            // sanity: claimed_sum == closed form at rev(z_star).
+            assert_eq!(
+                psp.claimed_sum,
+                full_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace)
+            );
+            let target = psp.point_and_eval.1;
+            let pp = &psp.point_and_eval.0; // len n = 2*half
+            let n = pp.len();
+            let h = n / 2;
+            let z_col_lag = partial_lagrange(&z_col);
+
+            // DEFINITIVE materialized oracle: the canonical polynomial is
+            // P = F .* BP over the boolean hypercube (see materialize_f_evals /
+            // materialize_bp_evals).  point_and_eval.1 of a standard sumcheck =
+            // MLE_F(pp) * MLE_BP(pp) where pp is read LSB-first (hypercube bit j
+            // <-> pp[j]).  This pins target with zero hand-tracing.
+            {
+                let f_arr = super::materialize_f_evals(&z_col_lag, &offsets, half);
+                let bp_obj = BranchingProgram::new(z_row.clone(), z_trace.clone());
+                let bp_arr = super::materialize_bp_evals(&bp_obj, half);
+                let mle = |arr: &[EF], pt: &[EF]| -> EF {
+                    let mut s = EF::ZERO;
+                    for (i, &a) in arr.iter().enumerate() {
+                        if a == EF::ZERO {
+                            continue;
+                        }
+                        let mut w = EF::ONE;
+                        for (j, &p) in pt.iter().enumerate() {
+                            w *= if (i >> j) & 1 == 1 { p } else { EF::ONE - p };
+                        }
+                        s += a * w;
+                    }
+                    s
+                };
+                let mle_f = mle(&f_arr, pp);
+                let mle_bp = mle(&bp_arr, pp);
+                eprintln!("   [mat] target == mle_f*mle_bp : {}", target == mle_f * mle_bp);
+                eprintln!(
+                    "   [mat] bp.eval(pp[..h],pp[h..]) == mle_bp : {}",
+                    bp_obj.eval(&pp[..h], &pp[h..]) == mle_bp
+                );
+                // combo-25 BP via the circuit_bp identity (zrow_rev, zeval=z*, fh_rev, sh_rev):
+                let c25 = circuit_bp(&rev(&z_row), &z_star, &rev(&pp[..h]), &rev(&pp[h..]));
+                eprintln!("   [mat] circuit_bp(combo25) == mle_bp : {}", c25 == mle_bp);
+                // lag with NO reversal == mle_f ?
+                let mut lag_nr = EF::ZERO;
+                for k in 0..num_cols {
+                    let mut merged = bits_big_endian::<EF>(offsets[k], half);
+                    merged.extend(bits_big_endian::<EF>(offsets[k + 1], half));
+                    let mut e = EF::ONE;
+                    for (mb, p) in merged.iter().zip(pp.iter()) {
+                        e *= eq(*mb, *p);
+                    }
+                    lag_nr += z_col_lag[k] * e;
+                }
+                eprintln!("   [mat] lag(no-rev) == mle_f : {}", lag_nr == mle_f);
+            }
+
+            let mut matched_here: Vec<[bool; 7]> = Vec::new();
+            for combo in 0u32..(1 << 7) {
+                let b = |i: u32| (combo >> i) & 1 == 1;
+                let (zrow_rev, zeval_rev, swap, fh_rev, sh_rev, lag_m_rev, lag_pp_rev) =
+                    (b(0), b(1), b(2), b(3), b(4), b(5), b(6));
+
+                let z_row_bp = if zrow_rev { rev(&z_row) } else { z_row.clone() };
+                let z_eval_bp = if zeval_rev { rev(&z_star) } else { z_star.clone() };
+                let fh: Vec<EF> = pp[..h].to_vec();
+                let sh: Vec<EF> = pp[h..].to_vec();
+                let fh2 = if fh_rev { rev(&fh) } else { fh.clone() };
+                let sh2 = if sh_rev { rev(&sh) } else { sh.clone() };
+                let (prefix, next) = if swap { (&sh2, &fh2) } else { (&fh2, &sh2) };
+                let bp = circuit_bp(&z_row_bp, &z_eval_bp, prefix, next);
+
+                let pp_lag: Vec<EF> = if lag_pp_rev { rev(pp) } else { pp.clone() };
+                let mut lag_sum = EF::ZERO;
+                for k in 0..num_cols {
+                    let mut merged = bits_big_endian::<EF>(offsets[k], half);
+                    merged.extend(bits_big_endian::<EF>(offsets[k + 1], half));
+                    let merged2 = if lag_m_rev { rev(&merged) } else { merged };
+                    let mut fl = EF::ONE;
+                    for (mb, p) in merged2.iter().zip(pp_lag.iter()) {
+                        fl *= eq(*mb, *p);
+                    }
+                    lag_sum += z_col_lag[k] * fl;
+                }
+                if lag_sum * bp == target {
+                    matched_here.push([zrow_rev, zeval_rev, swap, fh_rev, sh_rev, lag_m_rev, lag_pp_rev]);
+                }
+            }
+            eprintln!("shape {si} {chips:?}: half={half} n={n} matches={}", matched_here.len());
+            for m in &matched_here {
+                eprintln!("   combo zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
+                    m[0], m[1], m[2], m[3], m[4], m[5], m[6]);
+            }
+            if first {
+                survivors = matched_here;
+                first = false;
+            } else {
+                survivors.retain(|s| matched_here.contains(s));
+            }
+        }
+
+        eprintln!("=== survivors across ALL shapes: {} ===", survivors.len());
+        for s in &survivors {
+            eprintln!("   FINAL zrow_rev={} zeval_rev={} swap={} fh_rev={} sh_rev={} lag_m_rev={} lag_pp_rev={}",
+                s[0], s[1], s[2], s[3], s[4], s[5], s[6]);
+        }
+        // Informational only (no panic): empty survivors means the structural
+        // prover's full_point layout is not a simple input-reversal of pp.
+        if survivors.is_empty() {
+            eprintln!("   (no simple reversal matches — structural full_point layout is non-trivial)");
+        }
     }
 }

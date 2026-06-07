@@ -2224,11 +2224,20 @@ pub mod jagged {
         // verifier): col_prefix_sums = packing.offsets (per-column,
         // incl. total); z_row = shared zerocheck point; z_col as sampled;
         // z_trace/z_index = the outer reduction's eval_point (z*).
+        // PHASE 2 (jagged SP1 re-align): the BranchingProgram reads its
+        // z_index BIG-endian (get_ith_lsb_ef = point[dim-1-i]) while the
+        // reduction emits z_star LITTLE-endian (z_star[0]=LSB).  Feed the
+        // BP / structural eval-sumcheck rev(z_star) so claimed_sum equals
+        // the reduction's closing weight w_at_z (the SP1 closing identity
+        // validated by phase1_acceptance_gate).  reduction.eval_point is
+        // kept UN-reversed for the BaseFold open below (the PCS point).
+        let z_trace_be: Vec<InnerChallenge> =
+            reduction.eval_point.iter().rev().copied().collect();
         let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
             &packing.offsets,
             z_row,
             &z_col,
-            &reduction.eval_point,
+            &z_trace_be,
             challenger,
         );
 
@@ -2369,9 +2378,13 @@ pub mod jagged {
             )
         };
 
-        // jagged-eval sub-proof at (z_row, z_col, z*).
+        // jagged-eval sub-proof at (z_row, z_col, z*).  PHASE 2 (jagged SP1
+        // re-align): feed rev(z_star) — BP reads z_index big-endian while the
+        // reduction emits z_star little-endian (see prove_jagged_basefold_inner).
+        let z_trace_be: Vec<InnerChallenge> =
+            reduction.eval_point.iter().rev().copied().collect();
         let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
-            &packing.offsets, z_row, &z_col, &reduction.eval_point, challenger,
+            &packing.offsets, z_row, &z_col, &z_trace_be, challenger,
         );
 
         // (5) extend the eval point to log2(area) + BaseFold open at z*.
