@@ -742,3 +742,193 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 
     Some((z_star, proof.q_at_z, w_at_z))
 }
+
+
+// ZIREN_PHASE1_ACCEPTANCE_GATE
+//
+// PHASE-1 (jagged/zerocheck SP1 re-alignment) acceptance gate.
+//
+// For a MIXED-HEIGHT packing, the host jagged reduction's closing weight
+// value `w_at_z` (= the dense weight-MLE evaluated at the reduction's
+// eval point z*) MUST equal the closed-form branching-program jagged
+// polynomial `full_jagged_evaluation(offsets, z_row, z_col, z*)` — this
+// is SP1's closing identity
+// (`*expected_eval * jagged_eval == sumcheck_proof.point_and_eval.1`,
+// slop/crates/jagged/src/verifier.rs:360) and exactly what the recursion
+// circuit checks in-circuit (`real_jagged_evaluator_fn` /
+// `emit_branching_program_eval`).
+//
+// Under Ziren's CURRENT (non-SP1) convention — strided eq_mle@trailing +
+// explicit Π_high embedding + log_m-bit prefix sums — this identity FAILS
+// for mixed heights, while the host chain remains internally consistent
+// (so `test_e2e_wrap_fibonacci` passes but gnark wrap step-8 fails).
+//
+// PHASE 1 is COMPLETE when `gate_weight_table_matches_branching_program`
+// passes for all mixed-height shapes AND `test_e2e_wrap_fibonacci` is
+// still green under the re-aligned convention.
+#[cfg(test)]
+mod phase1_acceptance_gate {
+    use super::*;
+    use crate::jagged::{JaggedChipInfo, JaggedPacking};
+    use crate::jagged_branching_program::full_jagged_evaluation;
+    use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
+    use p3_challenger::FieldChallenger;
+    use p3_field::PrimeCharacteristicRing;
+    use p3_matrix::dense::RowMajorMatrix;
+    use rand::{Rng, SeedableRng};
+    use rand::rngs::StdRng;
+
+    fn challenger() -> InnerChallenger {
+        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+        InnerChallenger::new(perm)
+    }
+
+    fn rand_kb(rng: &mut StdRng) -> InnerVal {
+        InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
+    }
+
+    // Build chip traces (random base-field values) for the given
+    // per-chip (log_height, column_count).
+    fn build_traces(
+        chips: &[(usize, usize)],
+        rng: &mut StdRng,
+    ) -> Vec<(String, RowMajorMatrix<InnerVal>)> {
+        chips
+            .iter()
+            .enumerate()
+            .map(|(li, &(log_h, ncol))| {
+                let h = 1usize << log_h;
+                let vals: Vec<InnerVal> = (0..h * ncol).map(|_| rand_kb(rng)).collect();
+                (format!("chip{li}"), RowMajorMatrix::new(vals, ncol))
+            })
+            .collect()
+    }
+
+    // Run the REAL production reduction round-trip and return the closing
+    // (z_star, w_at_z) plus the BP oracle value at the same point.
+    fn run_case(chips: &[(usize, usize)], seed: u64) -> (InnerChallenge, InnerChallenge) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let traces = build_traces(chips, &mut rng);
+
+        // Metadata packing (column-by-column, SP1 col_prefix_sums layout).
+        let packing = crate::jagged::compute_jagged_metadata(&traces);
+
+        // Dense q (column-by-column, natural row order) padded to 2^n.
+        let dense_q = crate::jagged::materialize_dense_jagged(&traces, packing.log_dense_size);
+
+        // z_row: full max_log_row_count point (the shared zerocheck point).
+        let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
+        let z_row: Vec<InnerChallenge> = {
+            let mut c = challenger();
+            (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
+        };
+
+        // r_row_per_chip = trailing log_h slice of z_row (prover convention).
+        let r_row_per_chip: Vec<Vec<InnerChallenge>> = packing
+            .chip_infos
+            .iter()
+            .map(|info| {
+                let log_h = info.row_count.max(1).next_power_of_two().trailing_zeros() as usize;
+                z_row[z_row.len() - log_h..].to_vec()
+            })
+            .collect();
+
+        // y_per_chip = current host column claims (eq_c@trailing * embed).
+        let y_per_chip: Vec<Vec<InnerChallenge>> = traces
+            .iter()
+            .zip(r_row_per_chip.iter())
+            .map(|((_n, trace), r_row_c)| {
+                let w = trace.width;
+                let h = trace.values.len() / w.max(1);
+                let n_high = z_row.len().saturating_sub(r_row_c.len());
+                let embed: InnerChallenge = z_row[..n_high]
+                    .iter()
+                    .fold(InnerChallenge::ONE, |a, &zk| a * (InnerChallenge::ONE - zk));
+                let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(r_row_c);
+                (0..w)
+                    .map(|col| {
+                        let mut acc = InnerChallenge::ZERO;
+                        for row in 0..h {
+                            acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
+                        }
+                        acc * embed
+                    })
+                    .collect()
+            })
+            .collect();
+
+        // z_col: sampled after the (skipped) commit observe — here just
+        // a fresh deterministic challenger so prover/verifier agree.
+        let num_cols = packing.offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+
+        let mut prover_ch = challenger();
+        let z_col: Vec<InnerChallenge> =
+            (0..num_col_vars).map(|_| prover_ch.sample_algebra_element()).collect();
+
+        let proof = prove_jagged_reduction_owned(
+            dense_q,
+            &packing,
+            &r_row_per_chip,
+            &y_per_chip,
+            &z_col,
+            &z_row,
+            &mut prover_ch,
+        );
+
+        let mut verifier_ch = challenger();
+        let z_col_v: Vec<InnerChallenge> =
+            (0..num_col_vars).map(|_| verifier_ch.sample_algebra_element()).collect();
+        assert_eq!(z_col, z_col_v, "z_col prover/verifier mismatch");
+
+        let (z_star, _q_at_z, w_at_z) = verify_jagged_reduction(
+            &proof,
+            &packing,
+            &r_row_per_chip,
+            &y_per_chip,
+            &z_col_v,
+            &z_row,
+            &mut verifier_ch,
+        )
+        .expect("reduction must self-verify (internal identity)");
+
+        // SP1 closing identity: w_at_z must equal the BP jagged polynomial
+        // evaluated at the same (z_row, z_col, z_star).
+        let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star);
+        (w_at_z, bp)
+    }
+
+    // XFAIL until PHASE-1 re-alignment lands: under Ziren's current
+    // (non-SP1) jagged convention this identity does NOT hold for
+    // mixed (or even equal) heights.  Run explicitly with
+    // `cargo test -p zkm-stark gate_weight_table_matches_branching_program
+    //  -- --ignored --nocapture`.  Removing `#[ignore]` is the PHASE-1
+    // done-signal once build_weight_table / y_per_chip / the BP are
+    // re-aligned to SP1.
+    #[test]
+    #[ignore = "PHASE-1 xfail: host jagged convention not yet SP1-aligned"]
+    fn gate_weight_table_matches_branching_program() {
+        let cases: &[&[(usize, usize)]] = &[
+            &[(4, 2), (4, 2)],          // equal heights
+            &[(4, 1), (3, 1), (2, 1)],  // mixed
+            &[(5, 2), (4, 3), (2, 1)],  // mixed, multi-col
+            &[(6, 1), (5, 1), (4, 1)],  // mixed
+        ];
+        let mut all_ok = true;
+        for (ci, chips) in cases.iter().enumerate() {
+            let (w_at_z, bp) = run_case(chips, 7000 + ci as u64);
+            let ok = w_at_z == bp;
+            eprintln!("gate case {ci} {chips:?}: w_at_z==bp = {ok}");
+            if !ok {
+                eprintln!("  w_at_z = {w_at_z:?}");
+                eprintln!("  bp     = {bp:?}");
+            }
+            all_ok &= ok;
+        }
+        assert!(
+            all_ok,
+            "PHASE-1 gate: host reduction w_at_z must equal the branching-program \
+             jagged evaluation for all mixed-height shapes (SP1 closing identity)",
+        );
+    }
+}
