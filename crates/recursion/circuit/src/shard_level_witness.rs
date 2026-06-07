@@ -858,6 +858,50 @@ where
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_core::stark::KoalaBearPoseidon2Outer as HV;
 
+    // ── REAL per-chip shaping from the OUTER bundle's packing ──
+    // Mirror the host outer verify hook `build_jagged_verify_inputs`
+    // (crates/stark/src/jagged_pcs.rs): the per-chip column_count comes
+    // from `bundle.packing.column_counts`, and the per-chip row_count
+    // (column height) is the offsets sentinel-walk difference at each
+    // chip's first column.  The caller-supplied `column_counts_by_round`
+    // (= vec![main_widths]) and `bundle.commit.chip_dims` (a single
+    // cap-tree entry) do NOT reconcile the ~1300-column packing, so we
+    // recover the true per-column structure here.  The result is used
+    // for col_prefix_sums, the returned column_counts, AND row_counts so
+    // step-7's per-column accumulation (recursive_jagged_pcs.rs:271)
+    // reproduces `bundle.packing.offsets` exactly.
+    let packing_column_counts: Vec<usize> = bundle.packing.column_counts.clone();
+    let packing_row_counts: Vec<usize> = {
+        let offsets = &bundle.packing.offsets;
+        let total_values = bundle.packing.total_values;
+        let mut heights: Vec<usize> = Vec::with_capacity(packing_column_counts.len());
+        let mut col_idx = 0usize;
+        for &cc in packing_column_counts.iter() {
+            if cc == 0 {
+                heights.push(0);
+                continue;
+            }
+            let h = if col_idx + 1 < offsets.len() {
+                offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+            } else if col_idx < offsets.len() {
+                total_values.saturating_sub(offsets[col_idx])
+            } else {
+                0
+            };
+            heights.push(h);
+            col_idx += cc;
+        }
+        heights
+    };
+    // Single-round packing shape (the wrap STARK commits one main round).
+    // Fall back to the caller-supplied shape only if packing carries no
+    // per-chip column metadata (degenerate / scaffolding bundles).
+    let real_column_counts_by_round: Vec<Vec<usize>> = if packing_column_counts.is_empty() {
+        column_counts_by_round.to_vec()
+    } else {
+        vec![packing_column_counts.clone()]
+    };
+    let column_counts_by_round: &[Vec<usize>] = &real_column_counts_by_round;
     // ── Padding shape (mirror of lift_jagged_basefold_bundle) ──
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
@@ -921,7 +965,24 @@ where
     };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion (mirror) ──
-    let bits_per_entry = max_log_row_count + 1;
+    // CRITICAL (mirror of the INNER lift, shard_level_witness.rs:1457): the
+    // per-entry bit width must equal the branching program's
+    // `half = proof_point.len()/2` (jagged_eval.rs), which the host jagged-eval
+    // prover sets to `log_m + 1` = z_trace.len() (jagged_eval_sumcheck.rs).
+    // Using `max_log_row_count + 1` is too narrow when the total column area
+    // exceeds 2^max_log_row_count (true for the wide WrapAir trace):
+    // col_prefix_sums.last() (= total_values) then CLAMPS and the step-7
+    // prefix-sum felt-assert (acc == final_area) fails
+    // (e.g. 10813456 vs 8388607).  Derive the width from the jagged-eval
+    // sumcheck point length, falling back to max_log_row_count+1 only for the
+    // dummy/empty jagged_eval.
+    let jagged_eval_point_len =
+        bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+    let bits_per_entry = if jagged_eval_point_len >= 2 {
+        jagged_eval_point_len / 2
+    } else {
+        max_log_row_count + 1
+    };
     let total_values = bundle.packing.total_values;
     let cap_to_bits = |v: usize| -> usize {
         if bits_per_entry < usize::BITS as usize {
@@ -978,7 +1039,11 @@ where
     }
     let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums };
 
-    // ── row_counts: caller-plumbed if provided, else from chip_dims ──
+    // ── row_counts: caller-plumbed if provided, else from packing ──
+    // Per-chip heights derived from `bundle.packing.offsets` differences
+    // (see `packing_row_counts` above) so per-column accumulation in the
+    // step-7 prefix-sum check reproduces `bundle.packing.offsets`,
+    // mirroring the host `build_jagged_verify_inputs`.
     let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(row_counts_src) = row_counts_by_round {
         row_counts_src
             .iter()
@@ -990,11 +1055,9 @@ where
             })
             .collect()
     } else {
-        let heights: Vec<Felt<C::F>> = bundle
-            .commit
-            .chip_dims
+        let heights: Vec<Felt<C::F>> = packing_row_counts
             .iter()
-            .map(|&(_w, log_h)| builder.constant(C::F::from_u64(1u64 << log_h)))
+            .map(|&h| builder.constant(C::F::from_u64(h as u64)))
             .collect();
         column_counts_by_round.iter().map(|_| heights.clone()).collect()
     };
