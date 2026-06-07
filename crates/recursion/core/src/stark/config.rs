@@ -533,3 +533,49 @@ mod basefold_over_bn254_generic_typecheck {
         )
     }
 }
+
+
+// #H (BaseFold-over-BN254 wrap port) — RUNTIME validation that the stacked
+// BaseFold jagged-PCS actually commits / opens / verifies over the OUTER ring
+// (Poseidon2-BN254 `OuterValMmcs` + `MultiField32Challenger`). This is the
+// cryptographic heart the wrap shard reuses; an honest proof must verify.
+#[cfg(test)]
+mod basefold_over_bn254_roundtrip_test {
+    use super::{outer_perm, KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
+    use p3_field::PrimeCharacteristicRing;
+    use p3_matrix::dense::RowMajorMatrix;
+    use std::sync::Arc;
+    use zkm_stark::jagged_pcs::{roundtrip_jagged_pcs_generic, JaggedVal};
+    use zkm_stark::BasefoldRing;
+
+    fn make_challenger() -> OuterChallenger {
+        OuterChallenger::new(outer_perm()).unwrap()
+    }
+
+    #[test]
+    fn test_basefold_jagged_pcs_roundtrip_bn254() {
+        let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
+            let v: Vec<JaggedVal> = (0..(w * h))
+                .map(|i| {
+                    JaggedVal::from_u32(((i as u64 * 2_654_435_761 + seed) % 1_000_003) as u32)
+                })
+                .collect();
+            RowMajorMatrix::new(v, w)
+        };
+        let traces = vec![
+            ("Cpu".to_string(), mk(20, 100, 1)),
+            ("Add".to_string(), mk(8, 50, 7)),
+        ];
+
+        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let dft = Arc::new(OuterDft::default());
+
+        roundtrip_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            traces,
+            make_challenger,
+            mmcs,
+            dft,
+        )
+        .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
+    }
+}

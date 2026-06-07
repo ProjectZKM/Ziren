@@ -1398,6 +1398,92 @@ where
     )
 }
 
+/// #H (BaseFold-over-BN254 wrap port): generic commit -> open -> verify
+/// roundtrip of the stacked BaseFold jagged-PCS over an arbitrary MMCS +
+/// challenger.  Lets a downstream crate (recursion-core) validate the PCS over
+/// the OUTER ring (`OuterValMmcs` / `OuterChallenger`, BN254) using the same
+/// code path the inner ring uses, without re-exposing the prover-data
+/// internals (the honest evaluation_claim is computed here).  Deterministic:
+/// the eval point is sampled from a fresh unobserved challenger so prover and
+/// verifier agree without an RNG dependency.
+pub fn roundtrip_jagged_pcs_generic<Challenger, MT, D>(
+    traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    mut make_challenger: impl FnMut() -> Challenger,
+    mmcs: MT,
+    dft: Arc<D>,
+) -> Result<(), crate::basefold::StackedVerifierError>
+where
+    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
+    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
+    Challenger: p3_challenger::FieldChallenger<JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = JaggedVal>
+        + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
+{
+    let mut p_chal = make_challenger();
+    let (commit, prover_data) = commit_jagged_pcs_host_generic::<Challenger, MT, D>(
+        traces,
+        &mut p_chal,
+        mmcs.clone(),
+        dft.clone(),
+    );
+
+    let stack_dim = commit.log_stacking_height as usize;
+    let num_stripes = commit.area >> stack_dim;
+    let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
+    let total_vars = num_batch_vars + stack_dim;
+
+    // Deterministic eval point from a fresh (unobserved) challenger.
+    let mut pt_chal = make_challenger();
+    let eval_point: Vec<JaggedChallenge> =
+        (0..total_vars).map(|_| pt_chal.sample_algebra_element()).collect();
+
+    let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
+    let batch_evals_flat: Vec<JaggedChallenge> = prover_data
+        .stacked_data
+        .interleaved_mles
+        .iter()
+        .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
+        .collect();
+    let batch_point = &eval_point[stack_dim..];
+    let evaluation_claim = {
+        let target = 1usize << batch_point.len();
+        let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
+        current.resize(target, JaggedChallenge::ZERO);
+        for &r in batch_point.iter().rev() {
+            let half = current.len() / 2;
+            for i in 0..half {
+                let lo = current[2 * i];
+                let hi = current[2 * i + 1];
+                current[i] = lo + r * (hi - lo);
+            }
+            current.truncate(half);
+        }
+        current[0]
+    };
+
+    let proof = open_jagged_pcs_host_generic::<Challenger, MT, D>(
+        prover_data,
+        eval_point.clone(),
+        &mut p_chal,
+        mmcs.clone(),
+        dft.clone(),
+    );
+
+    let mut v_chal = make_challenger();
+    v_chal.observe(commit.commitment.clone());
+    verify_jagged_pcs_generic::<Challenger, MT, D>(
+        &commit.commitment,
+        commit.area,
+        commit.log_stacking_height,
+        &eval_point,
+        evaluation_claim,
+        &proof,
+        &mut v_chal,
+        mmcs,
+        dft,
+    )
+}
+
 // ─── Jagged-sumcheck integration ──────────
 //
 // Mirrors [`crate::jagged_late_binding::prove_jagged_late_binding`] but
