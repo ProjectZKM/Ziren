@@ -890,15 +890,12 @@ mod phase1_acceptance_gate {
         (w_at_z, bp)
     }
 
-    // XFAIL until PHASE-1 re-alignment lands: under Ziren's current
-    // (non-SP1) jagged convention this identity does NOT hold for
-    // mixed (or even equal) heights.  Run explicitly with
-    // `cargo test -p zkm-stark gate_weight_table_matches_branching_program
-    //  -- --ignored --nocapture`.  Removing `#[ignore]` is the PHASE-1
-    // done-signal once build_weight_table / y_per_chip / the BP are
-    // re-aligned to SP1.
+    // PHASE-1 acceptance gate (PASSING): under the SP1-aligned host jagged
+    // convention (full row_eq in build_weight_table + y_per_chip, dropping
+    // the strided eq_mle@trailing + Pi_high embedding; SP1-correct BP
+    // num_bits), the closing identity w_at_z == branching-program jagged eval
+    // holds for mixed AND equal heights.  test_e2e_wrap_fibonacci stays green.
     #[test]
-    #[ignore = "PHASE-1 xfail: host jagged convention not yet SP1-aligned"]
     fn gate_weight_table_matches_branching_program() {
         let cases: &[&[(usize, usize)]] = &[
             &[(4, 2), (4, 2)],          // equal heights
