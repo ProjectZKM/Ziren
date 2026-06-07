@@ -2531,6 +2531,84 @@ pub mod jagged {
         }
         res.is_ok()
     }
+
+    /// #H (BaseFold-over-BN254 wrap port): verifier mirror of
+    /// `prove_jagged_basefold_inner_generic`, generic over the challenger + MMCS.
+    /// The OUTER (wrap) ring drives this with OuterChallenger + OuterValMmcs via
+    /// the registered verify hook; the inner ring keeps the concrete
+    /// `verify_jagged_basefold_inner`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn verify_jagged_basefold_inner_generic<Challenger, MT, D>(
+        chip_infos: &[JaggedChipInfo],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        bundle: &JaggedBasefoldBundleGeneric<MT>,
+        challenger: &mut Challenger,
+        mmcs: MT,
+        dft: std::sync::Arc<D>,
+        skip_commit_observe: bool,
+    ) -> bool
+    where
+        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
+        Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
+    {
+        if !skip_commit_observe {
+            challenger.observe(bundle.commit.commitment.clone());
+        }
+        let packing = JaggedPacking {
+            dense_values: Vec::new(),
+            chip_infos: chip_infos.to_vec(),
+            offsets: bundle.packing.offsets.clone(),
+            total_values: bundle.packing.total_values,
+            log_dense_size: bundle.packing.log_dense_size,
+        };
+        let num_cols = packing.offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
+            .map(|_| challenger.sample_algebra_element())
+            .collect();
+        let red_result = crate::jagged_sumcheck::verify_jagged_reduction(
+            &bundle.reduction,
+            &packing,
+            r_row_per_chip,
+            &bundle.y_per_chip,
+            &z_col,
+            z_row,
+            challenger,
+        );
+        let Some((z_star, q_at_z, _w_at_z)) = red_result else {
+            eprintln!("[basefold verify outer] jagged sumcheck reduction REJECTED");
+            return false;
+        };
+        crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
+            &bundle.jagged_eval,
+            challenger,
+        );
+        let target_dim = bundle.commit.area.trailing_zeros() as usize;
+        let mut extended_z_star = z_star;
+        while extended_z_star.len() < target_dim {
+            let r: InnerChallenge = challenger.sample_algebra_element();
+            extended_z_star.push(r);
+        }
+        let res = crate::jagged_pcs::verify_jagged_pcs_generic::<Challenger, MT, D>(
+            &bundle.commit.commitment,
+            bundle.commit.area,
+            bundle.commit.log_stacking_height,
+            &extended_z_star,
+            q_at_z,
+            &bundle.basefold_proof,
+            challenger,
+            mmcs,
+            dft,
+        );
+        if let Err(e) = &res {
+            eprintln!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
+        }
+        res.is_ok()
+    }
 }
 
 #[cfg(test)]

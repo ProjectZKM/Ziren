@@ -578,4 +578,89 @@ mod basefold_over_bn254_roundtrip_test {
         )
         .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
     }
+
+    // Full jagged-basefold BUNDLE pipeline (jagged sumcheck reduction +
+    // jagged-eval + BaseFold open/verify) over the BN254 outer ring — one layer
+    // above the PCS roundtrip; this is what the wrap shard's open/verify hooks
+    // drive.
+    #[test]
+    fn test_jagged_basefold_bundle_roundtrip_bn254() {
+        use p3_challenger::{CanObserve, FieldChallenger};
+        use zkm_stark::jagged_pcs::jagged::{
+            precompute_jagged_basefold_commit_generic, prove_jagged_basefold_inner_generic,
+            verify_jagged_basefold_inner_generic,
+        };
+        use zkm_stark::jagged_pcs::JaggedChallenge;
+
+        let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
+            let v: Vec<JaggedVal> = (0..(w * h))
+                .map(|i| {
+                    JaggedVal::from_u32(
+                        (((i as u64).wrapping_mul(2_654_435_761).wrapping_add(seed)) % 1_000_003)
+                            as u32,
+                    )
+                })
+                .collect();
+            RowMajorMatrix::new(v, w)
+        };
+        let traces = vec![
+            ("Cpu".to_string(), mk(4, 16, 1)),
+            ("Add".to_string(), mk(2, 8, 7)),
+        ];
+
+        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let dft = Arc::new(OuterDft::default());
+
+        // r_row / z_row sampled deterministically from a fresh challenger;
+        // shared by prover and verifier.
+        let mut pt = make_challenger();
+        let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
+            .iter()
+            .map(|(_, t)| {
+                let h = t.values.len() / t.width.max(1);
+                let log_h = h.next_power_of_two().trailing_zeros() as usize;
+                (0..log_h).map(|_| pt.sample_algebra_element()).collect()
+            })
+            .collect();
+        let z_row: Vec<JaggedChallenge> = r_row_per_chip
+            .iter()
+            .max_by_key(|v| v.len())
+            .cloned()
+            .unwrap_or_default();
+
+        let precompute =
+            precompute_jagged_basefold_commit_generic::<OuterValMmcs>(&traces, mmcs.clone());
+        let commitment = precompute.commit.commitment.clone();
+
+        let mut p_chal = make_challenger();
+        p_chal.observe(commitment.clone());
+        let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+            &traces,
+            &r_row_per_chip,
+            &z_row,
+            None,
+            precompute,
+            &mut p_chal,
+            mmcs.clone(),
+        );
+
+        let chip_infos =
+            zkm_stark::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+        let mut v_chal = make_challenger();
+        v_chal.observe(commitment);
+        let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            &chip_infos,
+            &r_row_per_chip,
+            &z_row,
+            &bundle,
+            &mut v_chal,
+            mmcs,
+            dft,
+            /* skip_commit_observe = */ true,
+        );
+        assert!(
+            ok,
+            "jagged-basefold full bundle pipeline should accept the honest proof over BN254"
+        );
+    }
 }

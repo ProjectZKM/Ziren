@@ -944,6 +944,49 @@ pub type GpuFirstRoundHookFn = fn(
 gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
     => register_gpu_first_round_hook, get_gpu_first_round_hook);
 
+// ── #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify ──
+//
+// The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
+// `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
+// types live in recursion-core, which depends on zkm-stark, so zkm-stark cannot
+// name them. recursion-core registers these hooks; the generic shard
+// prover (`emit_jagged_pcs_bytes`) / verifier consult them when the config's
+// challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical
+// KoalaBear / KoalaBear^4 for both rings, so the trace/point payloads cross the
+// boundary unchanged; only the challenger + MMCS (type-erased here) differ.
+type OuterKb = p3_koala_bear::KoalaBear;
+type OuterEf4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
+
+/// Outer jagged BaseFold OPEN. Inputs mirror the inner host open
+/// (`prove_jagged_basefold_inner_generic`); `precomputed` is a type-erased
+/// `PrecomputedJaggedCommitGeneric<OuterValMmcs>` and `challenger` a
+/// `&mut OuterChallenger`. Returns the rmp-serialized
+/// `JaggedBasefoldBundleGeneric<OuterValMmcs>`.
+pub type OuterJaggedOpenFn = fn(
+    chip_traces: &[(std::string::String, p3_matrix::dense::RowMajorMatrix<OuterKb>)],
+    r_row_per_chip: &[Vec<OuterEf4>],
+    z_row: &[OuterEf4],
+    precomputed: Box<dyn core::any::Any + Send + Sync>,
+    challenger: &mut dyn core::any::Any,
+) -> Vec<u8>;
+
+gpu_hook_accessors!(OUTER_JAGGED_OPEN_HOOK: OuterJaggedOpenFn
+    => register_outer_jagged_open_hook, get_outer_jagged_open_hook);
+
+/// Outer jagged BaseFold VERIFY. Deserializes `bundle_bytes` as
+/// `JaggedBasefoldBundleGeneric<OuterValMmcs>` and verifies it with the
+/// `&mut OuterChallenger`. Returns accept/reject.
+pub type OuterJaggedVerifyFn = fn(
+    chip_infos: &[crate::jagged::JaggedChipInfo],
+    r_row_per_chip: &[Vec<OuterEf4>],
+    z_row: &[OuterEf4],
+    bundle_bytes: &[u8],
+    challenger: &mut dyn core::any::Any,
+) -> bool;
+
+gpu_hook_accessors!(OUTER_JAGGED_VERIFY_HOOK: OuterJaggedVerifyFn
+    => register_outer_jagged_verify_hook, get_outer_jagged_verify_hook);
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;

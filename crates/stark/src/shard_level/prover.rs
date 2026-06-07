@@ -47,12 +47,14 @@ fn maybe_auto_precompute_basefold<SC, A>(
     main_traces: Vec<RowMajorMatrix<Val<SC>>>,
     main_commitment: [Val<SC>; 8],
     precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
     >,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
-    Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
+    Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>>,
 )
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -128,7 +130,21 @@ where
     let main_commitment: [Val<SC>; 8] =
         unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
 
-    (main_traces, main_commitment, Some(precomputed))
+    // #H: this build path only runs for the inner ring (use_basefold + no
+    // host precompute); SC::BfMmcs == JaggedMmcs there, so the concrete
+    // precompute IS PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
+    let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::BasefoldRing>::BfMmcs,
+    > = {
+        let any: Box<dyn core::any::Any> = Box::new(precomputed);
+        *any.downcast().unwrap_or_else(|_| {
+            panic!(
+                "maybe_auto_precompute_basefold: inner build path produces a \
+                 JaggedMmcs precompute == SC::BfMmcs"
+            )
+        })
+    };
+    (main_traces, main_commitment, Some(precomputed_generic))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -143,7 +159,9 @@ pub fn prove_shard_to_basefold<SC, A>(
     device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
@@ -191,7 +209,9 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
     >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
@@ -572,7 +592,9 @@ fn emit_jagged_pcs_bytes<SC, A>(
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommit,
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
     >,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
@@ -599,10 +621,8 @@ where
     }
     debug_assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
-            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
-            && TypeId::of::<SC::Challenger>()
-                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
-        "emit_jagged_pcs_bytes: use_basefold()=true must imply the inner          KoalaBear/JaggedChallenger stack for the transmute + downcast below",
+            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
+        "emit_jagged_pcs_bytes: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
     );
 
     // Send `trace.width` directly; the verifier reads each chip's
@@ -668,6 +688,35 @@ where
         )
     };
 
+    // #H (BaseFold-over-BN254 wrap port): OUTER ring dispatch. When the
+    // config's challenger is NOT the inner JaggedChallenger (i.e.
+    // OuterChallenger), the jagged BaseFold open runs over the outer MMCS
+    // (OuterValMmcs) via a hook registered by recursion-core (zkm-stark
+    // cannot name those types). The hook rmp-serializes a
+    // JaggedBasefoldBundleGeneric<OuterValMmcs> -> EvaluationProof::Bytes.
+    if TypeId::of::<SC::Challenger>()
+        != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
+    {
+        let precomputed = precomputed_commit.expect(
+            "emit_jagged_pcs_bytes: outer BaseFold path requires a precomputed \
+             commit (commit_basefold_path sets it under the same use_basefold gate)",
+        );
+        let hook = crate::shard_level::sumcheck_poly::get_outer_jagged_open_hook()
+            .expect(
+                "emit_jagged_pcs_bytes: outer ring (non-JaggedChallenger) BaseFold \
+                 open requires the outer jagged-open hook \
+                 (recursion-core::register_outer_jagged_hooks)",
+            );
+        let precomputed_box: Box<dyn Any + Send + Sync> = Box::new(precomputed);
+        // SAFETY: chip_traces/r_row_per_chip/z_row are over InnerVal/InnerChallenge
+        // == OuterVal/OuterChallenge (KoalaBear / KoalaBear^4); the hook downcasts
+        // the challenger to &mut OuterChallenger under the TypeId guard above.
+        let challenger_any: &mut dyn Any = challenger;
+        let bytes =
+            hook(&chip_traces, &r_row_per_chip, z_row, precomputed_box, challenger_any);
+        return EvaluationProof::Bytes(bytes);
+    }
+
     let challenger_any: &mut dyn Any = challenger;
     let lb_challenger = challenger_any
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
@@ -688,11 +737,19 @@ where
                 chip_traces.len()
             );
         });
+        let precomputed_inner: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
+            let any: Box<dyn core::any::Any> = Box::new(precomputed);
+            *any.downcast().expect(
+                "emit_jagged_pcs_bytes inner path: PrecomputedJaggedCommitGeneric\
+                 <SC::BfMmcs> is PrecomputedJaggedCommit when SC::Challenger == \
+                 JaggedChallenger",
+            )
+        };
         let bundle = prove_jagged_basefold_with_precomputed(
             &chip_traces,
             &r_row_per_chip,
             z_row,
-            precomputed,
+            precomputed_inner,
             None,
             lb_challenger,
         );

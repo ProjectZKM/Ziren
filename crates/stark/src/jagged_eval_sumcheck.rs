@@ -614,9 +614,9 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
 /// branching-program soundness check is performed by the recursion
 /// verifier (`real_jagged_evaluator_fn`); the host self-check needs
 /// only transcript fidelity.
-pub fn replay_jagged_evaluation_transcript(
+pub fn replay_jagged_evaluation_transcript<C: p3_challenger::FieldChallenger<InnerVal>>(
     proof: &JaggedSumcheckEvalProof<InnerChallenge>,
-    challenger: &mut InnerChallenger,
+    challenger: &mut C,
 ) {
     let psp = &proof.partial_sumcheck_proof;
     // `prove_jagged_evaluation` observes the claimed sum first — it

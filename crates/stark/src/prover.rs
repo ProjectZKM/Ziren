@@ -1113,10 +1113,8 @@ where
     debug_assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
-                == TypeId::of::<InnerChallenge>()
-            && TypeId::of::<SC::Challenger>()
-                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
-        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires the          inner KoalaBear/JaggedChallenger stack (BaseFold-over-BN254 wrap path          needs the genericized bundle/digest before this transmute is valid)",
+                == TypeId::of::<InnerChallenge>(),
+        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in emit_jagged_pcs_bytes",
     );
 
     // Build per-chip preprocessed traces aligned with `chips` (empty
@@ -1142,31 +1140,33 @@ where
             "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
              basefold path (commit_basefold_path always sets it under the same TypeId gate)",
         );
-    // #H (BaseFold-over-BN254 wrap port): the live BaseFold path is inner
-    // (KoalaBear / JaggedMmcs).  Recover the concrete precomputed commit from
-    // the type-erased box.  The outer (BN254) BaseFold open is the remaining
-    // follow-up: when `use_basefold()` is flipped on for `OuterSC`, this
-    // downcast must branch on `SC::BfMmcs` and route the outer precompute to
-    // the OuterChallenger jagged open.
-    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = *precomputed_box
-        .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>()
+    // #H (BaseFold-over-BN254 wrap port): recover the precomputed commit from
+    // the type-erased box as PrecomputedJaggedCommitGeneric<SC::BfMmcs> — works
+    // for BOTH rings (inner BfMmcs=JaggedMmcs, outer BfMmcs=OuterValMmcs). The
+    // shard prover threads it generically; emit_jagged_pcs_bytes dispatches the
+    // open per ring.
+    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as BasefoldRing>::BfMmcs,
+    > = *precomputed_box
+        .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as BasefoldRing>::BfMmcs,
+        >>()
         .unwrap_or_else(|_| {
             panic!(
-                "try_prove_shard_to_basefold_boxed: precomputed downcast to inner \
-                 PrecomputedJaggedCommit failed (outer BaseFold open not yet wired)"
+                "try_prove_shard_to_basefold_boxed: precomputed downcast to \
+                 PrecomputedJaggedCommitGeneric<SC::BfMmcs> failed"
             )
         });
 
-    // The 8-felt main-trace digest comes straight from the precomputed
-    // jagged commit — the same value `commit_basefold_path` already
-    // packaged into `main_commit` and the prologue observed (SP1's
-    // `commit_multilinears` returns the digest directly; no MerkleCap
-    // round-trip).  Transmute the concrete `[InnerVal; 8]` to the
-    // generic `[Val<SC>; 8]`: sound under the TypeId gate (Val<SC> ==
-    // InnerVal) — the only reinterpretation left.
-    let digest_inner = crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+    // The 8-felt main-trace digest the prologue observed as `main_commit`.
+    // Per-ring projection of the BaseFold commitment (inner = MerkleCap root;
+    // outer = BN254 split_32) via BasefoldRing::digest_felts, then reinterpret
+    // [JaggedVal;8] as [Val<SC>;8] (JaggedVal == Val<SC> == KoalaBear for both
+    // rings — the only reinterpretation left).
+    let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
+        <SC as BasefoldRing>::digest_felts(&precomputed.commit.commitment);
     let digest: [Val<SC>; 8] =
-        unsafe { core::ptr::read(&digest_inner as *const _ as *const [Val<SC>; 8]) };
+        unsafe { core::ptr::read(&digest_jv as *const _ as *const [Val<SC>; 8]) };
 
     // Clone the outer challenger so our shard-level run doesn't
     // perturb the legacy transcript state.

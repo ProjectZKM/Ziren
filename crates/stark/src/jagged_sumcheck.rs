@@ -668,14 +668,14 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
     JaggedReductionProof { rounds, eval_point, q_at_z }
 }
 
-pub fn verify_jagged_reduction(
+pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     proof: &JaggedReductionProof<InnerChallenge>,
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     y_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
     z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor
-    challenger: &mut InnerChallenger,
+    challenger: &mut C,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
     if proof.rounds.len() != packing.log_dense_size
         || proof.eval_point.len() != packing.log_dense_size
