@@ -334,11 +334,56 @@ where
     // trait gate together with the wrap-verify genericization (downstream).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
-        || TypeId::of::<SC::Challenger>()
-            != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
-        // Non-KoalaBear — skip (prover emitted Empty too).
+        // Non-KoalaBear field — skip (prover emitted Empty too).
         return Ok(());
+    }
+
+    // #H (BaseFold-over-BN254 wrap port): OUTER ring dispatch. Val/Challenge are
+    // KoalaBear / KoalaBear^4 here, but the challenger is OuterChallenger (not
+    // JaggedChallenger). Verify via the recursion-core-registered hook over
+    // OuterValMmcs / OuterChallenger (zkm-stark cannot name those types); the
+    // prover emitted the bundle as EvaluationProof::Bytes.
+    if TypeId::of::<SC::Challenger>()
+        != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
+    {
+        use p3_air::BaseAir;
+        let bytes = match evaluation_proof {
+            EvaluationProof::Empty => return Ok(()),
+            EvaluationProof::Bytes(b) => b,
+            EvaluationProof::Bundle(_) => {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "outer ring expects a serialized (Bytes) BaseFold bundle, got Bundle"
+                        .into(),
+                ));
+            }
+        };
+        let hook = crate::shard_level::sumcheck_poly::get_outer_jagged_verify_hook()
+            .ok_or_else(|| {
+                BasefoldVerifyError::JaggedPcs(
+                    "outer jagged-verify hook not registered \
+                     (recursion-core::register_outer_jagged_hooks)"
+                        .into(),
+                )
+            })?;
+        let chip_widths: Vec<usize> =
+            chips.iter().map(|c| <_ as BaseAir<Val<SC>>>::width(*c)).collect();
+        // SAFETY: Challenge<SC> == InnerChallenge under the field gate above.
+        let eval_point_inner: &[InnerChallenge] = unsafe {
+            core::slice::from_raw_parts(
+                shared_eval_point.as_ptr() as *const InnerChallenge,
+                shared_eval_point.len(),
+            )
+        };
+        let challenger_any: &mut dyn Any = challenger;
+        let ok = hook(&chip_widths, eval_point_inner, bytes, challenger_any);
+        return if ok {
+            Ok(())
+        } else {
+            Err(BasefoldVerifyError::JaggedPcs(
+                "outer jagged-verify hook rejected the bundle".into(),
+            ))
+        };
     }
 
     // Resolve to a bundle. Empty means no jagged-PCS proof to verify;

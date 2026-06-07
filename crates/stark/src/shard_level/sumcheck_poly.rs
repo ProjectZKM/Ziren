@@ -977,9 +977,8 @@ gpu_hook_accessors!(OUTER_JAGGED_OPEN_HOOK: OuterJaggedOpenFn
 /// `JaggedBasefoldBundleGeneric<OuterValMmcs>` and verifies it with the
 /// `&mut OuterChallenger`. Returns accept/reject.
 pub type OuterJaggedVerifyFn = fn(
-    chip_infos: &[crate::jagged::JaggedChipInfo],
-    r_row_per_chip: &[Vec<OuterEf4>],
-    z_row: &[OuterEf4],
+    chip_widths: &[usize],
+    eval_point: &[OuterEf4],
     bundle_bytes: &[u8],
     challenger: &mut dyn core::any::Any,
 ) -> bool;

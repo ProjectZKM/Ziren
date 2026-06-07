@@ -2532,6 +2532,64 @@ pub mod jagged {
         res.is_ok()
     }
 
+    /// #H (BaseFold-over-BN254 wrap port): build the ring-agnostic verifier
+    /// inputs (chip_infos / r_row_per_chip / z_row) from the bundle's PackingMeta
+    /// + per-chip column widths + the shared zerocheck eval point. Mirrors the
+    /// host verifier's construction (shard_level/verifier.rs) so the outer-ring
+    /// verify hook reuses the exact same logic. Names are debug-only (unused in
+    /// the verify math), so placeholders suffice.
+    pub fn build_jagged_verify_inputs(
+        packing: &PackingMeta,
+        chip_widths: &[usize],
+        eval_point: &[InnerChallenge],
+    ) -> (
+        Vec<crate::jagged::JaggedChipInfo>,
+        Vec<Vec<InnerChallenge>>,
+        Vec<InnerChallenge>,
+    ) {
+        use crate::jagged::JaggedChipInfo;
+        let column_counts = &packing.column_counts;
+        let mut chip_infos: Vec<JaggedChipInfo> = (0..chip_widths.len())
+            .map(|i| JaggedChipInfo {
+                name: alloc::format!("chip{i}"),
+                row_count: 0,
+                column_count: column_counts.get(i).copied().unwrap_or(chip_widths[i]),
+            })
+            .collect();
+        // Patch row_count from the offsets sentinel walk (same as the host verifier).
+        {
+            let mut col_idx = 0usize;
+            for info in chip_infos.iter_mut() {
+                if info.column_count == 0 {
+                    continue;
+                }
+                let h = if col_idx + 1 < packing.offsets.len() {
+                    packing.offsets[col_idx + 1].saturating_sub(packing.offsets[col_idx])
+                } else if col_idx < packing.offsets.len() {
+                    packing.total_values.saturating_sub(packing.offsets[col_idx])
+                } else {
+                    0
+                };
+                info.row_count = h;
+                col_idx += info.column_count;
+            }
+        }
+        let r_row_per_chip: Vec<Vec<InnerChallenge>> = chip_infos
+            .iter()
+            .map(|info| {
+                let log_h =
+                    info.row_count.max(1).next_power_of_two().trailing_zeros() as usize;
+                if eval_point.len() >= log_h {
+                    eval_point[eval_point.len() - log_h..].to_vec()
+                } else {
+                    eval_point.to_vec()
+                }
+            })
+            .collect();
+        let z_row = eval_point.to_vec();
+        (chip_infos, r_row_per_chip, z_row)
+    }
+
     /// #H (BaseFold-over-BN254 wrap port): verifier mirror of
     /// `prove_jagged_basefold_inner_generic`, generic over the challenger + MMCS.
     /// The OUTER (wrap) ring drives this with OuterChallenger + OuterValMmcs via

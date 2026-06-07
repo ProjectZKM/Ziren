@@ -535,6 +535,101 @@ mod basefold_over_bn254_generic_typecheck {
 }
 
 
+// #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify hook
+// bodies. Registered into zkm-stark's process-global hook slots so the generic
+// shard prover (`emit_jagged_pcs_bytes`) / verifier (`verify_jagged_pcs_host`),
+// which cannot name `OuterValMmcs`/`OuterChallenger`, route the wrap-ring open /
+// verify here. `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so
+// only the MMCS + challenger differ.
+pub mod outer_jagged_hooks {
+    use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
+    use core::any::Any;
+    use p3_matrix::dense::RowMajorMatrix;
+    use std::sync::Arc;
+    use zkm_stark::jagged_pcs::jagged::{
+        build_jagged_verify_inputs, prove_jagged_basefold_inner_generic,
+        verify_jagged_basefold_inner_generic, JaggedBasefoldBundleGeneric,
+        PrecomputedJaggedCommitGeneric,
+    };
+    use zkm_stark::jagged_pcs::{JaggedChallenge, JaggedVal};
+    use zkm_stark::BasefoldRing;
+
+    fn outer_open(
+        chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+        r_row_per_chip: &[Vec<JaggedChallenge>],
+        z_row: &[JaggedChallenge],
+        precomputed: Box<dyn Any + Send + Sync>,
+        challenger: &mut dyn Any,
+    ) -> Vec<u8> {
+        let precomputed = *precomputed
+            .downcast::<PrecomputedJaggedCommitGeneric<OuterValMmcs>>()
+            .expect(
+                "outer_open: precompute downcast to \
+                 PrecomputedJaggedCommitGeneric<OuterValMmcs>",
+            );
+        let challenger = challenger
+            .downcast_mut::<OuterChallenger>()
+            .expect("outer_open: challenger downcast to OuterChallenger");
+        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            None,
+            precomputed,
+            challenger,
+            mmcs,
+        );
+        bundle.to_bytes()
+    }
+
+    fn outer_verify(
+        chip_widths: &[usize],
+        eval_point: &[JaggedChallenge],
+        bundle_bytes: &[u8],
+        challenger: &mut dyn Any,
+    ) -> bool {
+        let bundle = match JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(bundle_bytes) {
+            Some(b) => b,
+            None => {
+                eprintln!(
+                    "outer_verify: bundle deserialize failed ({} bytes)",
+                    bundle_bytes.len()
+                );
+                return false;
+            }
+        };
+        let challenger = challenger
+            .downcast_mut::<OuterChallenger>()
+            .expect("outer_verify: challenger downcast to OuterChallenger");
+        let (chip_infos, r_row_per_chip, z_row) =
+            build_jagged_verify_inputs(&bundle.packing, chip_widths, eval_point);
+        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let dft = Arc::new(OuterDft::default());
+        verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            &chip_infos,
+            &r_row_per_chip,
+            &z_row,
+            &bundle,
+            challenger,
+            mmcs,
+            dft,
+            /* skip_commit_observe = */ true,
+        )
+    }
+
+    /// Register the outer-ring jagged BaseFold open/verify hooks into zkm-stark.
+    /// Idempotent (OnceLock-backed); safe to call repeatedly. Must run before the
+    /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
+    /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
+    pub fn register_outer_jagged_hooks() {
+        let _ =
+            zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_open_hook(outer_open);
+        let _ =
+            zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
+    }
+}
+
 // #H (BaseFold-over-BN254 wrap port) — RUNTIME validation that the stacked
 // BaseFold jagged-PCS actually commits / opens / verifies over the OUTER ring
 // (Poseidon2-BN254 `OuterValMmcs` + `MultiField32Challenger`). This is the
