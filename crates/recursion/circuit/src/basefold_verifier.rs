@@ -873,33 +873,61 @@ where
                 // + HV::compress, then HV::assert_digest_eq against the
                 // round's committed root.  Only runs when the proof
                 // carries the structured digest path.
+                //
+                // Mirrors the HOST commit-phase Merkle verify (p3
+                // MerkleTreeMmcs::verify_batch, crates/stark/src/basefold/
+                // verifier.rs:389-404) and SP1's recursion `verify`
+                // (basefold/merkle_tree.rs):
+                //   * leaf = H(full row = [eval0(4 KB), eval1(4 KB)] = 8 felts)
+                //     — NOT just eval0; the codeword leaf is the whole
+                //     sibling pair.
+                //   * path direction at level `k` = bit `k` of the pair
+                //     index `index_pair = orig_query >> (round_idx+1)`,
+                //     i.e. `query_indices[query_idx][round_idx + 1 + k]`
+                //     (LSB-first).  The previous code hard-coded the bit to
+                //     0 (always-left), so every right-child step compressed
+                //     in the wrong order → wrong root.
+                //   * p3 MerkleTreeMmcs compares the reconstructed root
+                //     DIRECTLY to the commitment (no SP1-style dims-compress).
                 for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
                     let op = &round_openings[query_idx];
                     if op.merkle_path_digests.is_empty() {
                         continue;
                     }
-                    // Leaf digest placeholder: hash of the sibling pair's
-                    // felt limbs into an HV digest.
-                    let leaf_felts = C::ext2felt(builder, sibling_pairs[round_idx][0]);
+                    // Leaf = hash of the FULL sibling pair row: ext2felt(lo)
+                    // ++ ext2felt(hi) = 8 KoalaBear limbs, in committed order.
+                    let lo_felts = C::ext2felt(builder, sibling_pairs[round_idx][0]);
+                    let hi_felts = C::ext2felt(builder, sibling_pairs[round_idx][1]);
+                    let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
+                        lo_felts.into_iter().chain(hi_felts).collect();
                     let mut leaf_digest: HV::DigestVariable = HV::hash(builder, &leaf_felts);
-                    for sibling_digest in op.merkle_path_digests.iter() {
+                    // Path direction bits: bits of (orig_query >> (round_idx+1)),
+                    // LSB-first.  `query_indices[query_idx]` is LSB-first over
+                    // log_codeword_size bits, so slice from `round_idx + 1`.
+                    let path_bits = &query_indices[query_idx][round_idx + 1..];
+                    for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
                         let sibling_variable: HV::DigestVariable =
                             HV::const_digest(builder, *sibling_digest);
-                        // position bit defaults to 0 (left); the structured
-                        // path supplies bottom-up siblings.  Use the
-                        // sample-derived bit when available.
-                        let zero_felt: zkm_recursion_compiler::prelude::Felt<C::F> =
-                            builder.constant(C::F::ZERO);
-                        let zero_bit = C::num2bits(builder, zero_felt, 1)[0];
+                        let bit = path_bits[level].clone();
                         let pair = HV::select_chain_digest(
                             builder,
-                            zero_bit,
+                            bit,
                             [leaf_digest, sibling_variable],
                         );
                         leaf_digest = HV::compress(builder, pair);
                     }
-                    if round_idx < commitments.len() {
-                        HV::assert_digest_eq(builder, leaf_digest, commitments[round_idx]);
+                    // Bind the reconstructed root to the FRI COMMIT-PHASE round
+                    // commitment `proof.rounds[round_idx].commitment` (=
+                    // host `fri_commitments[round_idx]`), NOT the jagged
+                    // `original_commitments` passed in `commitments` (those bind
+                    // the *component* openings, a different opening set).  The
+                    // host `verify_queries` checks each commit-phase leaf against
+                    // `&proof.fri_commitments` (crates/stark/src/basefold/
+                    // verifier.rs:280, 394).
+                    if round_idx < proof.rounds.len() {
+                        let round_commit: HV::DigestVariable =
+                            HV::const_digest(builder, proof.rounds[round_idx].commitment);
+                        HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }
             }

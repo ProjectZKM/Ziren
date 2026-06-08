@@ -131,47 +131,36 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // below (assert_ext_eq claim_ext == expected_evaluation).
         let claim_ext: Ext<_, _> = builder.eval(evaluation_claim);
 
-        // Split point into (batch_point, stack_point).  Convention:
-        // first `batch_dim` coords are batch (which stripe), last
-        // `log_stacking_height` are stack (within a stripe).
+        // Split point into (stack_point, batch_point).  Convention:
+        // first `log_stacking_height` coords are stack (within a
+        // stripe), the remaining coords are batch (which stripe).
         //
-        // The basefold prover's sumcheck reduces
-        // all max_log_degree variables, where max_log_degree may be
-        // < log_stacking_height (e.g., shard didn't fill the
-        // stacking dimension). Zero-padding the point at the
-        // high-order coordinates is mathematically sound for this
-        // case: the polynomial being evaluated effectively doesn't
-        // depend on the unspoken coordinates (it's embedded in a
-        // larger variable space than its real support), so
-        // MLE(x_real, 0, ..., 0) is the canonical evaluation. Both
-        // prover and verifier agree on this convention. The earlier
-        // "unsound" comment mis-characterized this — confirmed by
-        // empirical observation (Test::All passes 7/8 with this
-        // padding active).
-        //
-        // If a future change makes the prover emit a longer point
-        // covering all stack_dim coords, this padding becomes
-        // a no-op (point.len() == stack_dim from the start).
+        // CRITICAL transcript fix (step9 desync): the reduction
+        // sumcheck emits a point of length `log_dense_size`, which is
+        // < the full commit-area dimension `log2(area)`.  The HOST
+        // verifier (`verify_jagged_basefold_inner_generic`,
+        // crates/stark/src/jagged_pcs.rs:2702-2707) extends z_star up
+        // to `target_dim = log2(area)` by *sampling* Fiat-Shamir coords
+        // from the challenger:
+        //     while extended_z_star.len() < target_dim {
+        //         extended_z_star.push(challenger.sample_algebra_element());
+        //     }
+        // The previous in-circuit code ZERO-PADDED the stack portion
+        // instead of sampling it.  That left the challenger un-advanced
+        // for `(stack_dim - point.len())` draws, so every downstream
+        // challenge in the basefold open (the per-round `beta`s and the
+        // query indices that derive `initial_x`) diverged from the host
+        // — producing a wrong final FRI fold value while the lifted
+        // proof data (sibling pairs, final_poly) matched.  Masked by the
+        // vacuous recursion-VM asserts; ENFORCED (and thus failing) in
+        // the gnark OUTER wrap.  Mirror the host exactly: SAMPLE every
+        // extension coord, never zero-pad.
         let stack_dim = self.log_stacking_height as usize;
-        let mut padded_point: Vec<Ext<C::F, C::EF>> = point.to_vec();
-        if padded_point.len() < stack_dim {
-            use p3_field::PrimeCharacteristicRing;
-            while padded_point.len() < stack_dim {
-                padded_point.push(builder.constant(C::EF::ZERO));
-            }
-        }
-        // SP1-port (verifier side): mirror the prover's eval_point
-        // extension in `crates/stark/src/jagged_pcs.rs`
-        // step (5) of `prove_jagged_basefold`.  The prover sampled
-        // additional Fiat-Shamir coords to extend the sumcheck output
-        // from log_dense_size to log2(commit_area).  Sample matching
-        // coords in the same transcript order so the in-circuit verifier
-        // sees the same extended point.
-        //
         // Inferred target dim: the proof's batch_evaluations are flat
         // 2^batch_dim entries; batch_dim = log2(batch_evals_flat.len()).
         // Combined with the known stack_dim, the target total dim is
-        // stack_dim + log2(batch_evals_flat.len().next_power_of_two()).
+        // stack_dim + log2(batch_evals_flat.len().next_power_of_two())
+        // == log2(area), matching the host's `target_dim`.
         let proof_batch_evals_count: usize = proof
             .batch_evaluations
             .iter()
@@ -185,6 +174,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
                 .trailing_zeros() as usize
         };
         let needed_total_dim = stack_dim + needed_batch_dim;
+        let mut padded_point: Vec<Ext<C::F, C::EF>> = point.to_vec();
         while padded_point.len() < needed_total_dim {
             padded_point.push(challenger.sample_ext(builder));
         }

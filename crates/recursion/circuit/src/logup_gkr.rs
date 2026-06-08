@@ -343,8 +343,12 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
     } = proof;
     let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
 
-    // (1) Check the proof-of-work grinding witness.
-    challenger.check_witness(builder, GKR_GRINDING_BITS, *witness);
+    // (1) Check the proof-of-work grinding witness.  Use `gkr_check_witness`
+    // (NOT `check_witness`): the host gates GKR grinding to the inner
+    // challenger — inner advances + checks, the OUTER/wrap ring is a no-op.
+    // The BaseFold open uses the distinct `check_witness`, which advances on
+    // both rings.
+    challenger.gkr_check_witness(builder, GKR_GRINDING_BITS, *witness);
 
     // (2) Sample the permutation challenges (alpha + beta_seed).
     // beta_seed dim is decided by chip metadata.  NOTE: the host

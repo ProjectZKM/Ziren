@@ -398,6 +398,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let jagged_evaluator_fn =
                 super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                     builder,
+                    column_counts_by_round.iter().flatten().sum(),
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 

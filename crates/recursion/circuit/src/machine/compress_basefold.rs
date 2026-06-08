@@ -451,8 +451,10 @@ pub fn verify_compress_basefold<C, SC, A>(
         // Jagged-eval sub-sumcheck verifier (#22.1).  Composes
         // verify_sumcheck + emit_branching_program_eval +
         // emit_prefix_sum_check + partial_lagrange_symbolic.
-        let _jagged_evaluator_fn =
-            real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(builder);
+        let _jagged_evaluator_fn = real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
+            builder,
+            _column_counts_by_round.iter().flatten().sum(),
+        );
 
         // Step 5d: opened_values built from the LogUp-GKR
         // chip_openings via the shared adapter.  // consume real per-chip cumulative_sums from witnessed
@@ -948,6 +950,7 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 /// - `challenger` — in-circuit transcript.
 pub fn real_jagged_evaluator_fn<C, FC>(
     _builder_outer: &mut Builder<C>,
+    real_num_cols: usize,
 ) -> impl FnOnce(
     &mut Builder<C>,
     &JaggedDimensionMetadata<Felt<C::F>>,
@@ -1017,24 +1020,55 @@ where
         let mut prefix_sum_felts: Vec<Felt<C::F>> = Vec::new();
         let mut expected_eval: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
 
-        // col_prefix_sums has num_cols + 1 entries; pair each with the next.
+        // col_prefix_sums has padded_cols + 1 entries; pair each with the next.
         let pairs = meta.col_prefix_sums.iter().zip(meta.col_prefix_sums.iter().skip(1));
         let proof_point_vec: Vec<Ext<C::F, C::EF>> = proof_point.to_vec();
 
-        for ((curr_ps, next_ps), z_col_eq) in pairs.zip(z_col_lagrange.iter()) {
-            // Merge bit decompositions: curr || next.
-            let mut merged: Vec<Felt<C::F>> = curr_ps.clone();
-            merged.extend_from_slice(next_ps);
+        // Pass 1 — prefix_sum_felts over EVERY padded col_prefix_sums pair: the
+        // caller's step-7 consistency check (recursive_jagged_pcs.rs) zips these
+        // against the accumulated padded row_counts and asserts ps_felt[k] equals
+        // the prefix sum offsets[k].  In the lift's col_prefix_sums the prefix sum
+        // at column k lives at index k+1 (the leading-0 offset), so ps_felt[k] is
+        // next_ps (= col_prefix_sums[k+1]).  It must be the FORWARD big-endian
+        // recompose (MSB-first, acc = bit + 2·acc) — the same recompose step-7
+        // applies to col_prefix_sums.last() for its final-area assert.
+        // (emit_prefix_sum_check's acc recomposes the full merged LSB-first and is
+        // bit-reversed, NOT the prefix sum, so recompose explicitly here.)
+        let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
+        for (_curr_ps, next_ps) in pairs {
+            let mut ps_acc: Felt<C::F> = builder.constant(C::F::ZERO);
+            for bit in next_ps.iter() {
+                ps_acc = builder.eval(*bit + two_felt * ps_acc);
+            }
+            prefix_sum_felts.push(ps_acc);
+        }
 
-            let (full_lagrange, ps_felt) =
+        // Pass 2 — jagged-eval sum over the REAL columns only.  The host prover
+        // sums over packing.offsets (prove_jagged_evaluation; num_chips =
+        // packing.offsets.len()-1 = real_num_cols), column k = (offsets[k],
+        // offsets[k+1]).  The lift's col_prefix_sums (shard_level_witness.rs:
+        // 995-1038) is mangled relative to packing.offsets: it prepends a
+        // leading 0 and inserts `added` artificial + padding columns BEFORE the
+        // final total_values entry.  For the single-round commit (every caller
+        // passes vec![main_widths]) this gives offsets[k] == col_prefix_sums[k+1]
+        // for k in 0..=real_num_cols-1, while offsets[real_num_cols] (= total)
+        // is the LAST col_prefix_sums entry — NOT col_prefix_sums[real_num_cols+1]
+        // (the artificial column).  Reconstruct host column k = (offsets[k],
+        // offsets[k+1]) and weight by z_col_lagrange[k].
+        let cps = &meta.col_prefix_sums;
+        let last_cps = cps.last().expect("col_prefix_sums non-empty");
+        for k in 0..real_num_cols {
+            let curr = &cps[k + 1];
+            let next = if k + 1 < real_num_cols { &cps[k + 2] } else { last_cps };
+            let mut merged: Vec<Felt<C::F>> = curr.clone();
+            merged.extend_from_slice(next);
+            let (full_lagrange, _ps) =
                 crate::jagged_eval_primitives::emit_prefix_sum_check::<C>(
                     builder,
                     merged,
                     proof_point_vec.clone(),
                 );
-            prefix_sum_felts.push(ps_felt);
-
-            expected_eval = expected_eval + (*z_col_eq * full_lagrange);
+            expected_eval = expected_eval + (z_col_lagrange[k] * full_lagrange);
         }
 
         // (6) Multiply by the branching-program evaluation.
