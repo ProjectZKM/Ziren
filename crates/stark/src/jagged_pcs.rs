@@ -1901,12 +1901,22 @@ pub mod jagged {
                     let _ = r_row_c;
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+                    // [#7898240 orient] bit-reverse the trace row index so
+                    // y_per_chip == opened_values (= MLE of bitrev(trace)).
+                    let is_pow2 = h.is_power_of_two();
+                    let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                     (0..w)
                         .into_par_iter()
                         .map(|col| {
                             let mut acc = InnerChallenge::ZERO;
                             for row in 0..h {
-                                acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
+                                let src = if is_pow2 {
+                                    ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                                } else {
+                                    row
+                                };
+                                acc += eq_c[row]
+                                    * InnerChallenge::from(trace.values[src * w + col]);
                             }
                             acc
                         })
@@ -2349,13 +2359,22 @@ pub mod jagged {
                     // eq_mle_table's LSB-first bitrev), matching build_weight_table.
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+                    // [#7898240 orient] bit-reverse the trace row index so
+                    // y_per_chip == opened_values (= MLE of bitrev(trace)).
+                    let is_pow2 = h.is_power_of_two();
+                    let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                     (0..w)
                         .into_par_iter()
                         .map(|col| {
                             let mut acc = InnerChallenge::ZERO;
                             for row in 0..h {
+                                let src = if is_pow2 {
+                                    ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                                } else {
+                                    row
+                                };
                                 acc += eq_c[row]
-                                    * InnerChallenge::from(trace.values[row * w + col]);
+                                    * InnerChallenge::from(trace.values[src * w + col]);
                             }
                             acc
                         })

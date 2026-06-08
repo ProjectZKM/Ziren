@@ -242,9 +242,20 @@ pub fn materialize_dense_jagged<F: Field>(
                 }
                 // Per-column parallel: each column writes into its own
                 // [col*height..(col+1)*height] slice.
+                // [#7898240 orient] bit-reverse the row index so the dense
+                // matches the zerocheck's bitrev_rows orientation (opened_values
+                // = MLE of bitrev(trace)); keeps the jagged reduction/BaseFold
+                // consistent with the in-circuit step-4 evaluation_claims.
+                let is_pow2 = height.is_power_of_two();
+                let log_h = if is_pow2 { (height as u32).trailing_zeros() } else { 0 };
                 slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
                     for row in 0..height {
-                        dst[row] = trace.values[row * width + col];
+                        let src = if is_pow2 {
+                            ((row as u32).reverse_bits() >> (32 - log_h)) as usize
+                        } else {
+                            row
+                        };
+                        dst[row] = trace.values[src * width + col];
                     }
                 });
             });
