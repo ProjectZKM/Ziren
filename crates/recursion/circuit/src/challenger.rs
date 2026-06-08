@@ -320,15 +320,22 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
     }
 
     pub fn check_witness(&mut self, builder: &mut Builder<C>, bits: usize, witness: Felt<C::F>) {
-        // Match native GrindingChallenger::check_witness: skip when bits == 0.
-        if bits == 0 {
-            return;
-        }
-        self.observe(builder, witness);
-        let element = self.sample_bits(builder, bits);
-        for bit in element {
-            builder.assert_var_eq(bit, C::N::from_usize(0));
-        }
+        // GKR grinding is a NO-OP for the OUTER/wrap challenger, mirroring the
+        // host `GkrGrind` (stark/src/logup_gkr.rs): both `gkr_grind` and
+        // `gkr_check_witness` are hard-gated to the INNER challenger (downcast
+        // to `InnerChallenger`); the OUTER/MultiField32 challenger falls
+        // through to `witness = ZERO` + `check = true`, observing NOTHING and
+        // sampling NOTHING (host verifier.rs:1115-1129 comment: "a no-op for
+        // the Outer/wrap (whose prover grind is itself a no-op)"). The previous
+        // body observed `witness` + sampled `bits` + asserted each bit == 0 —
+        // which (a) desynced the in-circuit challenger from the host (which
+        // never touches it here) and (b) enforced a 12-bit PoW the wrap prover
+        // never ground (witness is 0), failing `assert_var_eq(bit, 0)` as
+        // `1 == 0` at the very start of the in-circuit GKR phase. Keep the
+        // challenger UNTOUCHED so all subsequent alpha/beta sampling stays in
+        // lockstep with the host. (Inner grinding stays real via the separate
+        // DuplexChallengerVariable::check_witness.)
+        let _ = (builder, bits, witness);
     }
 }
 

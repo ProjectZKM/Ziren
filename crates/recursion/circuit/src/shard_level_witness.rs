@@ -1657,7 +1657,17 @@ pub fn jagged_reduction_to_partial_sumcheck(
     let claimed_sum = proof.rounds[0].evals[0] + proof.rounds[0].evals[1];
 
     let last_idx = proof.rounds.len() - 1;
-    let final_eval = univariate_polys[last_idx].eval_at_point(proof.eval_point[last_idx]);
+    // point_and_eval.1 must be the last round's poly evaluated at the LAST
+    // sampled challenge r_{n-1}, matching the circuit verify_sumcheck final
+    // check `previous_poly.eval_at(alpha_last) == point_and_eval.1` and the
+    // host's final claim `current_claim = jagged_eval_round_poly(round_{n-1},
+    // r_{n-1})`. The host's `eval_point` is in REVERSE-sampled order
+    // (verify_jagged_reduction asserts `sampled[i] == eval_point[n-1-i]`, so
+    // eval_point[0] = r_{n-1}, eval_point[last] = r_0). The previous code used
+    // `eval_point[last_idx]` = r_0 — the FIRST challenge — making point_and_eval.1
+    // = poly[last].eval_at(r_0) != eval_at(r_{n-1}), failing the in-circuit jagged
+    // sumcheck final-eval check (gnark wrap step5, n=24 rounds). Use eval_point[0].
+    let final_eval = univariate_polys[last_idx].eval_at_point(proof.eval_point[0]);
 
     PartialSumcheckProof {
         univariate_polys,

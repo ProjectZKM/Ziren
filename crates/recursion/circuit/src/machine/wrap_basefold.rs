@@ -340,6 +340,29 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         );
     let mut challenger = machine.config().challenger_variable(builder);
 
+    // Seed the transcript EXACTLY like the host `StarkMachine::verify`
+    // (machine.rs:693 `vk.observe_into` + machine.rs:707
+    // `observe_slice(public_values[0..num_pv_elts])`) BEFORE the shard
+    // prologue. The gnark wrap calls `verify_shard` directly — there is no
+    // `machine.verify` wrapper to do this seeding — so without it the sponge
+    // entering the LogUp-GKR phase is missing the vk seed + the PV absorb, and
+    // EVERY post-prologue squeeze (alpha/beta/eval_point + the whole GKR/
+    // zerocheck/jagged sumcheck) diverges from the prover's transcript. The
+    // wrap prover DID observe the vk (MachineProver::prove mirrors verify), so
+    // the proof's challenges are bound to a vk-seeded transcript. This is the
+    // identical fix already applied to the core path at core_basefold.rs:418-428
+    // (it was simply never ported to the wrap path) and was masked everywhere
+    // else because the wrap outer circuit only ever runs in gnark, where the
+    // asserts are real (not the vacuous recursion-runtime DivFAssert).
+    {
+        use crate::challenger::CanObserveVariable;
+        let num_pv = machine.num_pv_elts();
+        vk_legacy.observe_into(builder, &mut challenger);
+        for &pv in public_values_raw[0..num_pv].iter() {
+            CanObserveVariable::observe(&mut challenger, builder, pv);
+        }
+    }
+
     let basefold_shard_verifier = crate::shard_proof_variable_lift::build_basefold_shard_verifier::<SC>(
         max_log_row_count,
         max_log_row_count as u32,

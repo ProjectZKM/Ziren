@@ -691,13 +691,29 @@ where
         let len_felt: Felt<C::F> =
             builder.constant(C::F::from_canonical_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);
-        for opening in opened_values.chips.iter() {
+        // Observe the GKR CHIP-OPENINGS (NOT opened_values) — the host
+        // verify_zerocheck_host (verifier.rs:862-885) iterates
+        // `gkr_evaluations.chip_openings` (BTreeMap name order) and observes,
+        // per chip, preprocessed_trace_evaluations (if present) THEN
+        // main_trace_evaluations. The previous body observed
+        // `opened_values.chips[].{preprocessed,main}.local` (the trace@z
+        // openings), but the GKR openings are evaluated @z_gkr (≠ z*), so the
+        // VALUES differ and the in-circuit challenger desynced from the prover
+        // — invisible to the zerocheck's own asserts, surfacing only as the
+        // jagged-PCS z_col mismatch (gnark wrap step4 = round-0 identity
+        // failure). The host comment at verifier.rs:866-871 documents exactly
+        // this failure mode. Mirror the host source + order to stay in lockstep.
+        for chip_evaluation in gkr_evaluations.chip_openings.values() {
+            if let Some(prep) =
+                chip_evaluation.preprocessed_trace_evaluations.as_ref()
+            {
+                observe_ext_slice::<C, FC>(builder, challenger, prep);
+            }
             observe_ext_slice::<C, FC>(
                 builder,
                 challenger,
-                &opening.preprocessed.local,
+                &chip_evaluation.main_trace_evaluations,
             );
-            observe_ext_slice::<C, FC>(builder, challenger, &opening.main.local);
         }
     }
 }

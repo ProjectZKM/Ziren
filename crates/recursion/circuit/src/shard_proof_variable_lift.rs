@@ -521,12 +521,21 @@ where
             (name.clone(), log_h)
         })
         .collect();
-    // Sort by (Reverse(log_h), name) to match the host prover
-    // prologue ordering documented at
-    // `crates/stark/src/machine.rs:454` (StarkProvingKey's
-    // `chip_ordering` is the index into a Reverse(height)+name
-    // sort).
-    entries.sort_by(|a, b| (Reverse(a.1), &a.0).cmp(&(Reverse(b.1), &b.0)));
+    // Sort by NAME (ascending). The host prologue iterates
+    // `shard_chips_ordered(chip_ordering)` (machine.rs:704) and the
+    // prover's `chip_ordering` is the BTreeMap/name order — EMPIRICALLY
+    // confirmed via host-vs-circuit transcript probes on the wrap shard:
+    // the host observes per-chip metadata in
+    // [BaseAlu, ExtAlu, MemoryConst, MemoryVar, Poseidon2WideDeg9,
+    //  PublicValues, Select] = alphabetical, NOT height-descending. The
+    // previous `Reverse(log_h), name` sort reordered the per-chip observe
+    // (Poseidon2WideDeg9 is tall but 5th alphabetically) → the prologue
+    // sponge diverged from the prover at the per-chip stage → every
+    // post-prologue GKR/zerocheck/jagged squeeze was wrong (gnark wrap
+    // #7898240 first surfaced at gkr-r0-claimed-sum). Name order also
+    // aligns the height bits positionally with the name-ordered
+    // `chip_openings`/`opened_values` (both BTreeMap).
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
 
     let bit_len = max_log_row_count + 1;
     entries
