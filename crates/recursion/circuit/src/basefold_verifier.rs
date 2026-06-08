@@ -570,49 +570,56 @@ pub fn emit_basefold_query_chain<C>(
     builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
     initial_eval: zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
     initial_x: zkm_recursion_compiler::prelude::Felt<C::F>,
-    initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F>,
+    index_bits: &[C::Bit],
     sibling_pairs: &[[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>; 2]],
     betas: &[zkm_recursion_compiler::prelude::Ext<C::F, C::EF>],
 ) -> zkm_recursion_compiler::prelude::Ext<C::F, C::EF>
 where
-    C: zkm_recursion_compiler::prelude::Config,
+    C: crate::CircuitConfig,
 {
+    use core::iter::once;
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::ir::DslIr;
     assert_eq!(sibling_pairs.len(), betas.len(), "round count mismatch");
-    let _ = initial_idx_low_bit; // used implicitly by sibling_pairs ordering
-
-    // Per-round folding constants (avoid recompute inside the loop).
-    let two: C::F = C::F::ONE + C::F::ONE;
+    assert!(
+        index_bits.len() >= sibling_pairs.len(),
+        "index_bits must cover every fold round"
+    );
 
     let mut folded = initial_eval;
     let mut x = initial_x;
 
-    for ([eval0, eval1], beta) in sibling_pairs.iter().zip(betas.iter()) {
-        // Lagrange interp through (x, eval0) and (-x, eval1) at beta:
-        //   folded' = eval0 + (beta - x) * (eval1 - eval0) / (-2x)
-        // Mirrors `fri::verify_query`'s body — same arity-2 fold math.
+    for (round, ([eval0, eval1], beta)) in sibling_pairs.iter().zip(betas.iter()).enumerate() {
+        // #7898240 fix: the fold point depends on the query index's
+        // per-round bit (which sibling is at +x vs -x).  Mirror SP1
+        // (crates/recursion/circuit/src/basefold/mod.rs:347-406) and the
+        // host (crates/stark/src/basefold/verifier.rs:378-387):
+        //   xs = [x, -x]   if bit == 0   (current at +x)
+        //   xs = [-x, x]   if bit == 1   (current at -x)
+        //   folded' = eval0 + (beta - xs[0]) * (eval1 - eval0) / (xs[1] - xs[0])
+        // The previous code hardcoded xs = [x, -x] (the bit==0 case), so
+        // every odd query index folded through swapped points → the final
+        // `folded == final_poly` assert failed in gnark.
+        let zero: zkm_recursion_compiler::prelude::Felt<C::F> = builder.constant(C::F::ZERO);
+        let neg_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
+        builder.push_op(DslIr::SubF(neg_x, zero, x));
+        let xs = C::select_chain_f(builder, index_bits[round], once(x), once(neg_x));
 
         // diff = eval1 - eval0   (Ext - Ext)
         let diff: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
         builder.push_op(DslIr::SubE(diff, *eval1, *eval0));
 
-        // beta_minus_x = beta - x   (Ext - Felt)
-        let beta_minus_x: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::SubEF(beta_minus_x, *beta, x));
+        // beta_minus_xs0 = beta - xs[0]   (Ext - Felt)
+        let beta_minus_xs0: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
+        builder.push_op(DslIr::SubEF(beta_minus_xs0, *beta, xs[0]));
 
-        // numer = beta_minus_x * diff   (Ext * Ext)
+        // numer = beta_minus_xs0 * diff   (Ext * Ext)
         let numer: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
-        builder.push_op(DslIr::MulE(numer, beta_minus_x, diff));
+        builder.push_op(DslIr::MulE(numer, beta_minus_xs0, diff));
 
-        // denom = -2 * x = 0 - 2x   (Felt arithmetic — emitted as
-        // `2x` then negate via SubF(0, 2x) since DslIr has no NegF).
-        let two_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
-        builder.push_op(DslIr::MulFI(two_x, x, two));
-        let zero: zkm_recursion_compiler::prelude::Felt<C::F> =
-            builder.constant(C::F::ZERO);
+        // denom = xs[1] - xs[0]   (Felt - Felt)
         let denom: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
-        builder.push_op(DslIr::SubF(denom, zero, two_x));
+        builder.push_op(DslIr::SubF(denom, xs[1], xs[0]));
 
         // ratio = numer / denom   (Ext / Felt)
         let ratio: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> = builder.uninit();
@@ -846,14 +853,15 @@ where
                     query_indices[query_idx][..log_codeword_size].to_vec();
                 let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> =
                     C::exp_reverse_bits(builder, two_adic_generator, bits_for_exp);
-                let initial_idx_low_bit: zkm_recursion_compiler::prelude::Felt<C::F> = builder
-                    .eval(zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO);
 
+                // #7898240 fix: pass the per-round query index bits so the fold
+                // reorders (+x, -x) per round (which sibling is current).  Same
+                // bits used for `initial_x` above (SP1 parity: index[round]).
                 let folded = emit_basefold_query_chain::<C>(
                     builder,
                     initial_eval,
                     initial_x,
-                    initial_idx_low_bit,
+                    &query_indices[query_idx],
                     &sibling_pairs,
                     &betas,
                 );
