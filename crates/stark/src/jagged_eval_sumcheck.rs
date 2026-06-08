@@ -621,28 +621,6 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
         // cover correctness independently.
     }
 
-    // [TEMP PHASE-2 DIAG] Host replica of the in-circuit real_jagged_evaluator_fn
-    // eval closing on REAL data: (Σ_k z_col_eq * Π eq(merged_k, pp)) *
-    // BP(z_row, z_trace).eval(pp[..h], pp[h..]) must equal point_and_eval.1.
-    // (BP here == the in-circuit combo-25 emit, since z_trace = rev(z_star).)
-    {
-        let pp = &partial_sumcheck_proof.point_and_eval.0;
-        let h = pp.len() / 2;
-        let bp = BranchingProgram::new(z_row.to_vec(), z_trace.to_vec()).eval(&pp[..h], &pp[h..]);
-        let mut lag = InnerChallenge::ZERO;
-        for (k, merged) in merged_prefix_sums.iter().enumerate() {
-            let mut e = InnerChallenge::ONE;
-            for (mb, p) in merged.iter().zip(pp.iter()) {
-                e *= *mb * *p + (InnerChallenge::ONE - *mb) * (InnerChallenge::ONE - *p);
-            }
-            lag += z_col_eq_vals[k] * e;
-        }
-        eprintln!(
-            "[EVAL-CLOSE] match={} chips={} half={} n={}",
-            lag * bp == partial_sumcheck_proof.point_and_eval.1, num_chips, half, pp.len()
-        );
-    }
-
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 

@@ -205,7 +205,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         logup_gkr_proof,
         zerocheck_proof,
         evaluation_proof,
-        _proof_opened_values,
+        proof_opened_values,
     ) = proof_tuple;
 
     let chip_names: Vec<String> =
@@ -317,10 +317,19 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let cumsums_for_input = chip_cumulative_sums_per_input
         .first()
         .unwrap_or(&empty_cumsums_wrap);
+    // #7858680 fix: use the trace@z openings CARRIED from the host proof and
+    // finalize (overwrites the placeholder `degree` with the REAL big-endian
+    // height bits so `full_geq` masks padded rows correctly), matching
+    // core_basefold.rs:378.  The previous
+    // build_opened_values_from_chip_openings_with_cumsums left `degree` all-zero
+    // → full_geq=1 always → wrong padded-row mask → in-circuit zerocheck
+    // closing mismatch (gnark #7858680).
     let opened_values =
-        crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
+        crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
             builder,
-            &logup_gkr_proof.logup_evaluations.chip_openings,
+            proof_opened_values,
+            &chip_names,
+            chip_log_heights_for_input,
             cumsums_for_input,
             max_log_row_count,
         );
