@@ -2754,6 +2754,25 @@ pub mod tests {
                     }
                 }
                 eprintln!("[VKEQ-BT] traces.len()={} (0 = ZKM_DEBUG not set)", rtr.len());
+                // Find the const VALUE feeding the differing DivF/SubF denominator
+                // (and the in1 operands) — a recognizable constant names the op.
+                for k in first_diff_idx.unwrap_or(0).saturating_sub(2)
+                    ..ri.len().min(first_diff_idx.unwrap_or(0) + 6)
+                {
+                    eprintln!("[VKEQ-CTX] real instr@{k}: {:?}", ri[k]);
+                }
+                // Resolve the value written to each operand/denominator address.
+                for target in [73usize, 157623usize] {
+                    for k in 0..ri.len() {
+                        let s = format!("{:?}", ri[k]);
+                        if s.contains(&format!("inner: Address({target}) }}"))
+                            && s.contains("Write")
+                        {
+                            eprintln!("[VKEQ-CTX] value written to Address({target}): {s}");
+                            break;
+                        }
+                    }
+                }
             }
             for (tag, sp) in [("REAL", &input.shard_proofs[0]), ("DUMMY", &dummy.shard_proofs[0])] {
                 let qd: Vec<(usize, usize, i32)> = sp
