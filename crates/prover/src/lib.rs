@@ -61,7 +61,6 @@ use zkm_recursion_circuit::{
         ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
         ZKMCompressWitnessValues, ZKMDeferredWitnessValues,
         ZKMMerkleProofWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
-        ZKMRecursiveVerifier,
     },
     merkle_tree::MerkleTree,
     witness::Witnessable,
@@ -107,20 +106,6 @@ pub type InnerSC = KoalaBearPoseidon2;
 
 /// The configuration for the outer prover (D=4, 100-bit security).
 pub type OuterSC = KoalaBearPoseidon2Outer;
-
-// ── 128-bit security pipeline aliases (D=5) ──────────────────────────────
-//
-// These use quintic extension for provable 128-bit security.
-// Reference: Plonky3-recursion FriRecursionBackendD5
-
-/// Core prover config with D=5 (128-bit security).
-pub type CoreSC128 = zkm_stark::KoalaBearPoseidon2D5;
-
-/// Inner prover config with D=5 (128-bit security).
-pub type InnerSC128 = zkm_stark::KoalaBearPoseidon2D5;
-
-/// Outer prover config with D=5 (128-bit security).
-pub type OuterSC128 = zkm_recursion_core::stark::KoalaBearPoseidon2OuterD5;
 
 pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as MachineProver<
     KoalaBearPoseidon2,

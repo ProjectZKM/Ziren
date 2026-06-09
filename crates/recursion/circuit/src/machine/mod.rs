@@ -16,7 +16,6 @@ mod public_values;
 mod root;
 mod vkey_proof;
 mod witness;
-mod wrap;
 
 pub(crate) use complete::*;
 pub use compress::*;
@@ -30,7 +29,6 @@ pub use deferred_basefold_recursion::*;
 pub use public_values::*;
 pub use root::*;
 pub use vkey_proof::*;
-pub use wrap::*;
 pub use wrap_basefold::*;
 
 #[allow(unused_imports)]
