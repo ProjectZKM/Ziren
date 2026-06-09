@@ -2740,18 +2740,44 @@ pub mod tests {
                 // that HAS a trace (the first differing COMPUTED instr) — names
                 // the exact source line that bakes the divergent value.
                 let rtr = &prog_real.traces;
-                let mut bt_shown = 0;
+                // ALIGN: real has `delta` extra instructions inserted at the
+                // instruction-level first_diff.  Find that fd, verify the shift,
+                // and print ONLY the real-only inserted instructions (with
+                // resolved backtraces) — the true divergence.
+                let delta = ri.len().saturating_sub(di.len());
+                let mut ifd = None;
                 for k in 0..n {
                     if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
+                        ifd = Some(k);
+                        break;
+                    }
+                }
+                if let (Some(fd), true) = (ifd, delta > 0) {
+                    let resync = (fd + 10..di.len()).take(50).all(|j| {
+                        format!("{:?}", ri[j + delta]) == format!("{:?}", di[j])
+                    });
+                    eprintln!("[VKEQ-ALIGN] instr_first_diff={fd} delta={delta} resync_shift_ok={resync}");
+                    for off in 0..delta.min(12) {
+                        let k = fd + off;
+                        let frame = rtr.get(k).and_then(|t| t.as_ref()).map(|bt| {
+                            let mut b = bt.clone();
+                            b.resolve();
+                            let s = format!("{:?}", b);
+                            s.lines()
+                                .find(|l| l.contains("recursion/circuit/src/machine"))
+                                .unwrap_or("(no circuit frame)")
+                                .trim()
+                                .to_string()
+                        }).unwrap_or_else(|| "(const, no trace)".to_string());
+                        eprintln!("[VKEQ-INS] real-only@{k}: {} | {:?}", frame, ri[k]);
+                    }
+                }
+                let mut bt_shown = 0;
+                for k in 0..n {
+                    if false && format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
                         if let Some(Some(bt)) = rtr.get(k) {
-                            eprintln!("[VKEQ-BT] first traced diff @ instr {k}: {:?}", ri[k]);
-                            // Captured unresolved; resolve now so symbols/file:line
-                            // appear (needs package-scoped debug info on the
-                            // recursion crates).
                             let mut bt2 = bt.clone();
                             bt2.resolve();
-                            // Print only the first recursion-circuit frame (the
-                            // verifier source line that emitted this op).
                             let s = format!("{:?}", bt2);
                             let frame = s
                                 .lines()
