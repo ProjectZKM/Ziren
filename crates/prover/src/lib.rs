@@ -2686,6 +2686,66 @@ pub mod tests {
                 "[VKEQ] input {i}: EQUAL={} | prog_bytes real={} dummy={} first_diff_at={:?} | vk_real={:?} vk_dummy={:?}",
                 vk_real == vk_dummy, rb.len(), db.len(), first_diff, vk_real, vk_dummy,
             );
+            // P2b 452-residual localizer: measure the divergent region via the
+            // longest common suffix, and dump the real-only bytes there.
+            if let Some(fd) = first_diff {
+                let common_suffix =
+                    rb.iter().rev().zip(db.iter().rev()).position(|(a, b)| a != b).unwrap_or(0);
+                let re = rb.len() - common_suffix;
+                let de = db.len() - common_suffix;
+                eprintln!(
+                    "[VKEQ-DIFF] first_diff={fd} common_suffix={common_suffix} | real_divergent=[{fd}..{re}] ({}B) dummy_divergent=[{fd}..{de}] ({}B)",
+                    re.saturating_sub(fd), de.saturating_sub(fd),
+                );
+                let r_end = re.min(fd + 120);
+                let d_end = de.min(fd + 120);
+                eprintln!("[VKEQ-DIFF] real[{fd}..{r_end}]={:?}", &rb[fd..r_end]);
+                eprintln!("[VKEQ-DIFF] dummy[{fd}..{d_end}]={:?}", &db[fd..d_end]);
+            }
+            // P2b instruction-level localizer: counts + first differing instr.
+            {
+                let ri: Vec<_> = prog_real.iter_instructions().collect();
+                let di: Vec<_> = prog_dummy.iter_instructions().collect();
+                eprintln!(
+                    "[VKEQ-INSTR] real_instrs={} dummy_instrs={} (delta={}) total_mem real={} dummy={}",
+                    ri.len(), di.len(), ri.len() as i64 - di.len() as i64,
+                    prog_real.total_memory, prog_dummy.total_memory,
+                );
+                let n = ri.len().min(di.len());
+                let mut shown = 0;
+                let mut first_diff_idx = None;
+                for k in 0..n {
+                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
+                        if first_diff_idx.is_none() {
+                            first_diff_idx = Some(k);
+                        }
+                        eprintln!("[VKEQ-INSTR] diff@{k}: real={:?} | dummy={:?}", ri[k], di[k]);
+                        shown += 1;
+                        if shown >= 16 {
+                            break;
+                        }
+                    }
+                }
+                // Show the real-only tail instructions (the 9 extra) — print the
+                // last 20 real instrs that the dummy lacks.
+                if ri.len() > di.len() {
+                    let tail_start = di.len();
+                    for k in tail_start..ri.len().min(tail_start + 20) {
+                        eprintln!("[VKEQ-INSTR] real-only tail@{k}: {:?}", ri[k]);
+                    }
+                }
+            }
+            for (tag, sp) in [("REAL", &input.shard_proofs[0]), ("DUMMY", &dummy.shard_proofs[0])] {
+                let qd: Vec<(usize, usize, i32)> = sp
+                    .opened_values
+                    .chips
+                    .iter()
+                    .map(|c| {
+                        (c.quotient.len(), c.quotient.first().map(|q| q.len()).unwrap_or(0), c.log_degree as i32)
+                    })
+                    .collect();
+                eprintln!("[VKEQ-OV] {tag} (quot_outer,quot_inner0,log_deg) per chip={:?}", qd);
+            }
             eprintln!("[VKEQ] input {i} real shape={:?}", shape);
             {
                 use zkm_stark::shard_level::shard_proof::EvaluationProof;

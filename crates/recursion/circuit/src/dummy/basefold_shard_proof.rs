@@ -235,6 +235,8 @@ where
     // vk_map regeneration.  The values are zero (shape-only fixture).
     let opened_values = {
         let bit_len = max_log_row_count + 1;
+        let heights_map: BTreeMap<String, u8> =
+            chip_log_heights_pairs.iter().cloned().collect();
         let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
         name_sorted
             .sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
@@ -243,6 +245,30 @@ where
             .map(|chip| {
                 let prep_w = MachineAir::<F>::preprocessed_width(**chip);
                 let main_w = <_ as BaseAir<F>>::width(&chip.air);
+                let name = MachineAir::<F>::name(**chip);
+                let log_h = heights_map.get(&name).copied().unwrap_or(0) as usize;
+                // Review item 12 / P2b: quotient[0] carries the big-endian bits
+                // of the chip HEIGHT (2^log_h, the VirtualGeq threshold), MSB at
+                // index 0 — the SAME encoding the real prover emits
+                // (shard_level/prover.rs:486-507).  Zeroing it (the old dummy)
+                // made the recursion program's full_geq emit fewer ops than the
+                // real-input program (the 452B tail residual).
+                let height: u64 = 1u64 << log_h;
+                let degree_bits: Vec<EF> = (0..bit_len)
+                    .map(|i| {
+                        let shift = bit_len - 1 - i;
+                        let bit = if shift < u64::BITS as usize {
+                            (height >> shift) & 1
+                        } else {
+                            0
+                        };
+                        if bit == 1 {
+                            EF::ONE
+                        } else {
+                            EF::ZERO
+                        }
+                    })
+                    .collect();
                 ChipOpenedValues {
                     preprocessed: AirOpenedValues {
                         local: vec![EF::ZERO; prep_w],
@@ -253,10 +279,10 @@ where
                         next: Vec::new(),
                     },
                     permutation: AirOpenedValues { local: Vec::new(), next: Vec::new() },
-                    quotient: vec![vec![EF::ZERO; bit_len]],
+                    quotient: vec![degree_bits],
                     global_cumulative_sum: SepticDigest::<F>::zero(),
                     local_cumulative_sum: EF::ZERO,
-                    log_degree: 0,
+                    log_degree: log_h,
                 }
             })
             .collect();
