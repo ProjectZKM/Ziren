@@ -500,6 +500,96 @@ where
     }
 }
 
+// ── P2c STEP 2: value-independent (witness-stream) basefold proof ─────
+//
+// The Step-1 `Witnessable::read` above CONST-builds the proof (used by the
+// OUTER wrap lift, which never writes the bundle to the felt stream).  For
+// the INNER recursion path we instead read the felt/ext values FROM the
+// witness stream so the recursion program is value-INDEPENDENT (the program
+// emits `read` ops, not value-specific `const` ops).  These two free fns are
+// the read/write pair — they MUST emit/consume the stream in the SAME field
+// order.  Digests (`commitment`, `merkle_path_digests`) stay raw here and are
+// witnessed in STEP 3.  `component_openings` are dropped (verifier discards).
+pub fn read_basefold_proof_from_stream<C>(
+    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+    builder: &mut Builder<C>,
+) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    let rounds = host
+        .rounds
+        .iter()
+        .map(|r| RecursiveBasefoldRound {
+            uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
+            commitment: r.commitment, // raw digest (STEP 3)
+            _phantom_f: core::marker::PhantomData,
+        })
+        .collect();
+    let final_poly = host.final_poly.read(builder);
+    let pow_witness = host.pow_witness.read(builder);
+    let batch_grinding_witness = host.batch_grinding_witness.read(builder);
+    let query_phase_openings = host
+        .query_phase_openings
+        .iter()
+        .map(|round| {
+            round
+                .iter()
+                .map(|op| RecursiveBasefoldOpening {
+                    position: op.position,
+                    sibling_pair: [
+                        op.sibling_pair[0].read(builder),
+                        op.sibling_pair[1].read(builder),
+                    ],
+                    merkle_path_bytes: op.merkle_path_bytes.clone(),
+                    merkle_path_digests: op.merkle_path_digests.clone(), // raw (STEP 3)
+                    _phantom: core::marker::PhantomData,
+                })
+                .collect()
+        })
+        .collect();
+    let batch_evaluations = host
+        .batch_evaluations
+        .iter()
+        .map(|row| row.iter().map(|v| v.read(builder)).collect())
+        .collect();
+    RecursiveBasefoldProof {
+        rounds,
+        final_poly,
+        pow_witness,
+        batch_grinding_witness,
+        component_openings: Vec::new(),
+        query_phase_openings,
+        batch_evaluations,
+    }
+}
+
+pub fn write_basefold_proof_to_stream<C>(
+    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
+    witness: &mut impl WitnessWriter<C>,
+) where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    for r in host.rounds.iter() {
+        r.uni_poly[0].write(witness);
+        r.uni_poly[1].write(witness);
+    }
+    host.final_poly.write(witness);
+    host.pow_witness.write(witness);
+    host.batch_grinding_witness.write(witness);
+    for round in host.query_phase_openings.iter() {
+        for op in round.iter() {
+            op.sibling_pair[0].write(witness);
+            op.sibling_pair[1].write(witness);
+        }
+    }
+    for row in host.batch_evaluations.iter() {
+        for v in row.iter() {
+            v.write(witness);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

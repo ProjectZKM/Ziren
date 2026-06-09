@@ -86,7 +86,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         zkm_stark::shard_level::types::PartialSumcheckProof<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
-        zkm_stark::shard_level::shard_proof::EvaluationProof,
+        crate::shard_level_witness::LiftedEvalProof<C>,
         // Review item 12: per-chip trace@z openings carried from the
         // host proof so the in-circuit zerocheck verifier batches and
         // constrains the SAME values the prover reduced to the
@@ -275,31 +275,32 @@ pub fn verify_core_basefold<C, SC, A>(
             // (set to any value) falls back to the bytes lift; preserved
             // as a forensic kill switch when bundle-lift recursion shape
             // registration regresses.
-            use zkm_stark::shard_level::shard_proof::EvaluationProof;
+            use crate::shard_level_witness::LiftedEvalProof;
             let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
             let evaluation_proof_var = match &evaluation_proof {
-                EvaluationProof::Bundle(bundle) if !legacy_lift => {
+                LiftedEvalProof::Bundle { host, basefold_proof } if !legacy_lift => {
                     crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                         builder,
-                        bundle,
+                        host,
+                        basefold_proof.clone(),
                         max_log_row_count,
                         &column_counts_by_round_pre,
                         None,
                     )
                 }
-                EvaluationProof::Bundle(bundle) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                     builder,
-                    &bundle.to_bytes(),
+                    &host.to_bytes(),
                     max_log_row_count,
                     &column_counts_by_round_pre,
                 ),
-                EvaluationProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                LiftedEvalProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                     builder,
                     bytes,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                 ),
-                EvaluationProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+                LiftedEvalProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                     builder,
                     &[],
                     max_log_row_count,
@@ -431,13 +432,13 @@ pub fn verify_core_basefold<C, SC, A>(
 
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
-                EvaluationProof::Bundle(bundle) if !legacy_lift => {
+                LiftedEvalProof::Bundle { host, basefold_proof } if !legacy_lift => {
                     let bundle_num_vars =
-                        bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                        host.basefold_proof.basefold_proof.fri_commitments.len();
                     per_proof_verifier =
                         crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                             max_log_row_count,
-                            bundle.commit.log_stacking_height,
+                            host.commit.log_stacking_height,
                             bundle_num_vars,
                         );
                     &per_proof_verifier

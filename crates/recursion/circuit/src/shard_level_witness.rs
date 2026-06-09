@@ -217,6 +217,24 @@ where
     }
 }
 
+/// P2c STEP 2: the lifted (partially witnessed) evaluation proof carried out
+/// of `BasefoldShardProof::read` in tuple slot 4.  For the `Bundle` variant
+/// the basefold proof's felt/ext values are read INLINE from the witness
+/// stream here (so the read order matches the per-shard write order — the
+/// shard proofs are read in a single batched `shard_proofs.read()`), and the
+/// host bundle rides along for the still-const metadata (packing offsets,
+/// reduction sumcheck, jagged_eval, commit digest).  `Bytes` (outer wrap) and
+/// `Empty` carry no witnessed proof.
+pub enum LiftedEvalProof<C: CircuitConfig> {
+    Empty,
+    Bytes(Vec<u8>),
+    Bundle {
+        host: JaggedBasefoldBundle,
+        basefold_proof:
+            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+    },
+}
+
 // ── Top-level: BasefoldShardProof ────────────────────────────────
 //
 // Bridges `zkm_stark::shard_level::shard_proof::BasefoldShardProof`
@@ -248,7 +266,9 @@ where
         Vec<Felt<C::F>>,
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
-        zkm_stark::shard_level::shard_proof::EvaluationProof,
+        // P2c STEP 2: was the host `EvaluationProof` enum (passthrough); now
+        // the lifted form carrying the inline-witnessed basefold proof.
+        LiftedEvalProof<C>,
         // Review item 12: per-chip trace@z openings (name order).
         crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
             Felt<C::F>,
@@ -262,10 +282,25 @@ where
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
-        // evaluation_proof passes through as the host enum — the
-        // jagged-PCS-variable reconstruction step consumes it directly
-        // (no felt-level witness reads here).
-        let evaluation_proof = self.evaluation_proof.clone();
+        // P2c STEP 2: for the Bundle variant, READ the basefold proof's
+        // felt/ext values from the witness stream HERE (inline, in the
+        // batched per-shard read order) — this is what makes the recursion
+        // program value-independent.  Digests stay raw (rekeyed in the lift;
+        // witnessed in step 3).  Must mirror `write` exactly.
+        use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+        let evaluation_proof = match &self.evaluation_proof {
+            HostEvalProof::Empty => LiftedEvalProof::Empty,
+            HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
+            HostEvalProof::Bundle(bundle) => {
+                let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+                let basefold_proof =
+                    crate::basefold_witness::read_basefold_proof_from_stream::<C>(
+                        &host_proof,
+                        builder,
+                    );
+                LiftedEvalProof::Bundle { host: bundle.clone(), basefold_proof }
+            }
+        };
         // Review item 12: lift the host `ShardOpenedValues` (trace@z)
         // into the BaseFold-shape per-chip opening bundle.  `degree`
         // and the cumulative sums are placeholders here and are
@@ -288,9 +323,15 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
-        // evaluation_proof bytes are not written through the
-        // felt-witness stream — they're transported out-of-band
-        // and consumed by the jagged-PCS layer directly.
+        // P2c STEP 2: write the Bundle's basefold-proof felt/ext values in
+        // the SAME position `read` consumes them (between zerocheck and
+        // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
+        if let zkm_stark::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
+            &self.evaluation_proof
+        {
+            let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+            crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
+        }
         // Review item 12: write opened_values in the same shape `read`
         // consumes them.
         basefold_opened_values_from_host(&self.opened_values).write(witness);
@@ -1118,8 +1159,9 @@ where
     HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
+        let const_proof = const_basefold_proof_from_bundle::<C>(&bundle, builder);
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, max_log_row_count, column_counts_by_round, None,
+            builder, &bundle, const_proof, max_log_row_count, column_counts_by_round, None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1235,13 +1277,13 @@ where
 /// KoalaBearPoseidon2Outer`): maps to the default BN254 digest — the
 /// OUTER ring's real BN254 commitments are bound by a dedicated outer
 /// bundle path, so the inner-root lift is never the binding digest there.
-fn rekey_basefold_digests_to_hv<C, HV>(
-    src: RecursiveBasefoldProof<InnerVal, InnerChallenge>,
-) -> RecursiveBasefoldProof<
-    InnerVal,
-    InnerChallenge,
-    <HV as crate::hash::FieldHasher<C::F>>::Digest,
->
+// P2c: generic over the proof's base/ext type so it rekeys BOTH the raw
+// host proof (<InnerVal, InnerChallenge>) AND the STEP-2 witnessed variable
+// proof (<Felt, Ext>) — only the `[InnerVal;8]` digests are converted to
+// `HV::Digest`; uni_poly/sibling_pair/final_poly/etc. pass through unchanged.
+fn rekey_basefold_digests_to_hv<C, HV, F, EF>(
+    src: RecursiveBasefoldProof<F, EF, [InnerVal; 8]>,
+) -> RecursiveBasefoldProof<F, EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
@@ -1305,9 +1347,34 @@ where
     }
 }
 
+/// P2c STEP 2: const-build the basefold proof from a host bundle (the
+/// Step-1 `Witnessable::read` path — values baked, NOT witnessed).  Used by
+/// the legacy bytes-deserialize lift paths (`lift_evaluation_proof_bytes`,
+/// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
+/// lift time and so have no inline pre-read proof.  The production inner path
+/// pre-reads in `BasefoldShardProof::read` instead (value-independent).
+pub fn const_basefold_proof_from_bundle<C>(
+    bundle: &JaggedBasefoldBundle,
+    builder: &mut Builder<C>,
+) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    <_ as Witnessable<C>>::read(
+        &host_stacked_basefold_to_recursive(&bundle.basefold_proof),
+        builder,
+    )
+}
+
 pub fn lift_jagged_basefold_bundle<C, HV>(
     builder: &mut Builder<C>,
     bundle: &JaggedBasefoldBundle,
+    // P2c STEP 2: the basefold proof's felt/ext values, PRE-READ from the
+    // witness stream in `BasefoldShardProof::read` (digests still raw
+    // [InnerVal;8]; rekeyed to HV::Digest below).  This is what makes the
+    // recursion program value-independent: the proof values are witness
+    // inputs, not baked constants.
+    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1349,34 +1416,19 @@ where
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
         host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
 
-    // ── REAL: basefold proof from bundle.basefold_proof ──
-    // RecursiveBasefoldProof's Witnessable::read (basefold_witness.rs:443)
-    // happens to NOT call witness-stream reads (its scalar fields are
-    // pass-through F/EF constants and the nested rounds/openings
-    // also clone instead of streaming).  Safe to use `.read()` here
-    // — the call routes through the existing impl that emits no
-    // runtime stream consumption.
-    let host_basefold = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
-    // Re-key the host basefold proof's KoalaBear digests onto HV::Digest
-    // (inner: identity; outer: dedicated path supplies BN254 separately).
-    let host_basefold_hv =
-        rekey_basefold_digests_to_hv::<C, HV>(host_basefold);
-    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold_hv, builder);
+    // ── P2c STEP 2: basefold proof = the PRE-READ (witnessed) proof ──
+    // Rekey its raw [InnerVal;8] digests onto HV::Digest (inner: identity;
+    // outer ring uses the dedicated outer lift, not this fn).  No
+    // host_stacked_basefold_to_recursive / `.read()` here — the felt/ext
+    // values already came off the witness stream in BasefoldShardProof::read.
+    let basefold_proof_var = rekey_basefold_digests_to_hv::<C, HV, Felt<C::F>, Ext<C::F, C::EF>>(
+        preread_basefold_proof,
+    );
 
-    // ── REAL: batch_evaluations as Ext (constants for stacked layer) ──
-    // #245 fix: builder.constant() per element (was witness-stream
-    // .read on InnerChallenge values that aren't on the stream).
-    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
-        .basefold_proof
-        .batch_evaluations
-        .iter()
-        .map(|round| {
-            round
-                .iter()
-                .map(|ef| builder.constant(*ef))
-                .collect()
-        })
-        .collect();
+    // ── batch_evaluations for the stacked layer = the SAME witnessed
+    // values (reuse, don't re-read/re-const → no double-consume) ──
+    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> =
+        basefold_proof_var.batch_evaluations.clone();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
         RecursiveBasefoldProof<
