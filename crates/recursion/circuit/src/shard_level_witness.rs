@@ -237,6 +237,11 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
+        // P2b: original_commitments[0] = the BaseFold late-binding commit cap
+        // root, which equals `main_commitment` (basefold_commit_digest =
+        // commitment.roots()[0]).  Reuse the already-witnessed main_commitment
+        // so the lift doesn't BAKE the proof-specific root (value-independence).
+        commit_root: [Felt<C::F>; 8],
     },
 }
 
@@ -320,6 +325,9 @@ where
                     sumcheck,
                     jagged_eval,
                     expected_eval,
+                    // P2b: reuse the witnessed main_commitment (== the commit
+                    // cap root) — no extra stream felts, value-independent.
+                    commit_root: main_commitment_arr,
                 }
             }
         };
@@ -1198,9 +1206,9 @@ where
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
-        let (cp, sc, je, ee) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
+        let (cp, sc, je, ee, cr) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, cp, sc, je, ee, max_log_row_count, column_counts_by_round, None,
+            builder, &bundle, cp, sc, je, ee, cr, max_log_row_count, column_counts_by_round, None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1527,11 +1535,13 @@ pub fn const_basefold_proof_from_bundle<C, HV>(
     PartialSumcheckProof<Ext<C::F, C::EF>>,
     PartialSumcheckProof<Ext<C::F, C::EF>>,
     Ext<C::F, C::EF>,
+    [Felt<C::F>; 8],
 )
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
     HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
+    use p3_field::PrimeCharacteristicRing;
     // Rekey the host proof's raw [InnerVal;8] roots onto HV::Digest (inner:
     // identity; outer: BN254 default), read the scalar fields, then promote
     // the digests to HV::DigestVariable.
@@ -1549,7 +1559,15 @@ where
         &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
     );
     let ee = builder.constant(bundle.reduction.q_at_z);
-    (bp, sc, je, ee)
+    // P2b: const-build the commit cap root ([Felt;8]) for the bytes-fallback
+    // path (this legacy path bakes; the production inline path witnesses it).
+    let cap_roots = bundle.commit.commitment.roots();
+    let cr: [Felt<C::F>; 8] = if cap_roots.is_empty() {
+        core::array::from_fn(|_| builder.constant(C::F::ZERO))
+    } else {
+        core::array::from_fn(|i| builder.constant(cap_roots[0][i]))
+    };
+    (bp, sc, je, ee, cr)
 }
 
 pub fn lift_jagged_basefold_bundle<C, HV>(
@@ -1568,6 +1586,10 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
+    // P2b: the witnessed commit cap root (== main_commitment) for
+    // original_commitments[0]; replaces the baked const_digest of the
+    // proof-specific root (value-independence).
+    preread_commit_root: [Felt<C::F>; 8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1633,24 +1655,16 @@ where
         pcs_proof: basefold_proof_var,
     };
 
-    // ── REAL: original_commitments[0] from bundle.commit ──
-    // The committed cap is height-0 (1 root) for the BaseFold
-    // jagged-PCS adapter — see jagged_pcs.rs.
-    let cap_roots = bundle.commit.commitment.roots();
-    assert_eq!(
-        cap_roots.len(),
-        1,
-        "BasefoldLateBindingCommit cap must have exactly 1 root, got {}",
-        cap_roots.len(),
-    );
-    // #H: re-key the inner KoalaBear cap root onto HV::DigestVariable
-    // (inner: const_digest of the 8 KoalaBear limbs; outer: default
-    // BN254 digest — the BN254 commitment is bound by the dedicated
-    // outer bundle path, not this inner-root lift).
-    let first_root_raw: [p3_koala_bear::KoalaBear; 8] =
-        core::array::from_fn(|i| cap_roots[0][i]);
-    let first_commit_digest: HV::DigestVariable =
-        HV::const_digest(builder, HV::digest_from_koalabear_root(first_root_raw));
+    // ── REAL: original_commitments[0] = the witnessed commit cap root ──
+    // P2b: original_commitments[0] is the BaseFold late-binding commit cap
+    // root.  For the single-main-commit flow it EQUALS `main_commitment`
+    // (basefold_commit_digest(commit) = commit.commitment.roots()[0]), which
+    // is already witnessed in BasefoldShardProof::read.  Reuse that witnessed
+    // value (`preread_commit_root`) instead of BAKING the proof-specific root
+    // via const_digest — this is the final value-dependence in the lift, and
+    // witnessing it is what lets a same-shape dummy match the real program.
+    // (HV::DigestVariable == [Felt;8] for the inner ring per the where-bound.)
+    let first_commit_digest: HV::DigestVariable = preread_commit_root;
     let zero_digest_var: HV::DigestVariable = HV::const_digest(
         builder,
         <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),

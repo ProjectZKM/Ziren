@@ -242,7 +242,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         use crate::shard_level_witness::LiftedEvalProof;
         let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
         let evaluation_proof_var = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
                 crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                     builder,
                     host,
@@ -250,6 +250,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                         sumcheck.clone(),
                         jagged_eval.clone(),
                         *expected_eval,
+                        *commit_root,
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
@@ -326,7 +327,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
                 per_proof_verifier =
