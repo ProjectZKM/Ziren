@@ -2734,6 +2734,26 @@ pub mod tests {
                         eprintln!("[VKEQ-INSTR] real-only tail@{k}: {:?}", ri[k]);
                     }
                 }
+                // ZKM_DEBUG=1: per-instruction backtraces are captured (traces[k]
+                // parallel to iter_instructions; None for the leading const
+                // block).  Print the backtrace of the first differing instruction
+                // that HAS a trace (the first differing COMPUTED instr) — names
+                // the exact source line that bakes the divergent value.
+                let rtr = &prog_real.traces;
+                let mut bt_shown = 0;
+                for k in 0..n {
+                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
+                        if let Some(Some(bt)) = rtr.get(k) {
+                            eprintln!("[VKEQ-BT] first traced diff @ instr {k}: {:?}", ri[k]);
+                            eprintln!("[VKEQ-BT] backtrace:\n{:?}", bt);
+                            bt_shown += 1;
+                            if bt_shown >= 2 {
+                                break;
+                            }
+                        }
+                    }
+                }
+                eprintln!("[VKEQ-BT] traces.len()={} (0 = ZKM_DEBUG not set)", rtr.len());
             }
             for (tag, sp) in [("REAL", &input.shard_proofs[0]), ("DUMMY", &dummy.shard_proofs[0])] {
                 let qd: Vec<(usize, usize, i32)> = sp
@@ -2745,6 +2765,36 @@ pub mod tests {
                     })
                     .collect();
                 eprintln!("[VKEQ-OV] {tag} (quot_outer,quot_inner0,log_deg) per chip={:?}", qd);
+            }
+            {
+                use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                if let (EvaluationProof::Bundle(rbd), EvaluationProof::Bundle(dbd)) = (
+                    &input.shard_proofs[0].evaluation_proof,
+                    &dummy.shard_proofs[0].evaluation_proof,
+                ) {
+                    let ro = &rbd.packing.offsets;
+                    let dof = &dbd.packing.offsets;
+                    let mism: Vec<(usize, usize, usize)> = ro
+                        .iter()
+                        .zip(dof.iter())
+                        .enumerate()
+                        .filter(|(_, (a, b))| a != b)
+                        .map(|(i, (a, b))| (i, *a, *b))
+                        .take(12)
+                        .collect();
+                    eprintln!(
+                        "[VKEQ-OFF] offsets real.len={} dummy.len={} total_real={} total_dummy={} n_mismatch={} first={:?}",
+                        ro.len(), dof.len(), rbd.packing.total_values, dbd.packing.total_values,
+                        ro.iter().zip(dof.iter()).filter(|(a, b)| a != b).count(), mism,
+                    );
+                    // y_per_chip dims (real has 22, dummy 0 — check if it's witnessed)
+                    eprintln!(
+                        "[VKEQ-OFF] y_per_chip real outer={} inner0={} | reduction.q_at_z r={:?}",
+                        rbd.y_per_chip.len(),
+                        rbd.y_per_chip.first().map(|v| v.len()).unwrap_or(0),
+                        rbd.reduction.q_at_z,
+                    );
+                }
             }
             eprintln!("[VKEQ] input {i} real shape={:?}", shape);
             {
