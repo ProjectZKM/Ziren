@@ -677,7 +677,14 @@ where
     HV: crate::hash::FieldHasherVariable<C>,
 {
     type Commitment = HV::DigestVariable;
-    type Proof = RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>;
+    // P2c STEP 1: the proof now carries `Felt`/`Ext` circuit variables for
+    // its base/extension values (const-promotion moved into the Witnessable
+    // `read`); the digest type stays the raw `HV::Digest` (witnessed in STEP 3).
+    type Proof = RecursiveBasefoldProof<
+        zkm_recursion_compiler::prelude::Felt<C::F>,
+        zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest,
+    >;
 
     fn observe_commitment(
         &self,
@@ -720,8 +727,8 @@ where
         // (1) Verify batch grinding (host step 1):
         //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
         {
-            let batch_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
-                builder.constant(proof.batch_grinding_witness);
+            // STEP 1: already a Felt variable (const-built in the lift's read).
+            let batch_witness = proof.batch_grinding_witness;
             challenger.check_witness(builder, self.params.batch_grinding_bits, batch_witness);
         }
 
@@ -781,10 +788,8 @@ where
                 // observe the round's univariate message (2 EF coeffs)
                 // BEFORE the Merkle commitment, mirroring the prover's
                 // observe_algebra_element(uni_poly) + observe(commitment).
-                let p0: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
-                    builder.constant(round.uni_poly[0]);
-                let p1: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
-                    builder.constant(round.uni_poly[1]);
+                let p0 = round.uni_poly[0];
+                let p1 = round.uni_poly[1];
                 observe_ext_element::<C, FC>(builder, challenger, p0);
                 observe_ext_element::<C, FC>(builder, challenger, p1);
                 let digest_var = HV::const_digest(builder, round.commitment);
@@ -795,8 +800,7 @@ where
 
         // (5) Observe the final poly constant + PoW witnesses.
         {
-            let final_poly_ext: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
-                builder.constant(proof.final_poly);
+            let final_poly_ext = proof.final_poly;
             let final_felts = C::ext2felt(builder, final_poly_ext);
             for felt in final_felts.iter() {
                 challenger.observe(builder, *felt);
@@ -806,8 +810,7 @@ where
             //   witness and samples `pow_bits` zero-bits, advancing the
             //   transcript exactly as the host does BEFORE query-index
             //   sampling. Omitting it desync'd the query indices.
-            let pow_witness: zkm_recursion_compiler::prelude::Felt<C::F> =
-                builder.constant(proof.pow_witness);
+            let pow_witness = proof.pow_witness;
             challenger.check_witness(builder, self.params.pow_bits, pow_witness);
         }
 
@@ -819,7 +822,7 @@ where
 
         {
             use zkm_recursion_compiler::prelude::Ext;
-            let final_poly_ext: Ext<C::F, C::EF> = builder.constant(proof.final_poly);
+            let final_poly_ext: Ext<C::F, C::EF> = proof.final_poly;
             let num_queries = self.params.num_queries.min(
                 proof.query_phase_openings.first().map(|v| v.len()).unwrap_or(0),
             );
@@ -829,10 +832,7 @@ where
                     .iter()
                     .map(|round_openings| {
                         let op = &round_openings[query_idx];
-                        [
-                            builder.constant(op.sibling_pair[0]),
-                            builder.constant(op.sibling_pair[1]),
-                        ]
+                        [op.sibling_pair[0], op.sibling_pair[1]]
                     })
                     .collect();
 

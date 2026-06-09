@@ -78,8 +78,8 @@ pub fn lift_evaluation_proof_bytes<C, HV>(
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
     crate::basefold_verifier::RecursiveBasefoldProof<
-        C::F,
-        C::EF,
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
         <HV as crate::hash::FieldHasher<C::F>>::Digest,
     >,
     HV::DigestVariable,
@@ -156,28 +156,31 @@ where
     // Inner BaseFold proof.  rounds.len() must equal the
     // BasefoldVerifierParams::num_variables which build_basefold_shard_verifier
     // sets to max_log_row_count (see shard_proof_variable_lift.rs:206-212).
-    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest> {
+    // P2c STEP 1: the placeholder proof now carries Ext/Felt circuit
+    // variables (const-built here via the `zero_ext`/`zero_felt` helpers),
+    // matching the re-typed `RecursiveBasefoldProof<Felt, Ext, Dig>`.
+    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest> {
         rounds: (0..max_log_row_count)
             .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<
-                C::F,
-                C::EF,
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
                 <HV as crate::hash::FieldHasher<C::F>>::Digest,
             > {
-                uni_poly: [C::EF::ZERO; 2],
+                uni_poly: [zero_ext(builder), zero_ext(builder)],
                 commitment: <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
                 _phantom_f: core::marker::PhantomData,
             })
             .collect(),
-        final_poly: C::EF::ZERO,
-        pow_witness: C::F::ZERO,
-        batch_grinding_witness: C::F::ZERO,
+        final_poly: zero_ext(builder),
+        pow_witness: zero_felt(builder),
+        batch_grinding_witness: zero_felt(builder),
         component_openings: vec![vec![
             crate::basefold_verifier::RecursiveBasefoldComponentOpening::<
-                C::F,
-                C::EF,
+                Felt<C::F>,
+                Ext<C::F, C::EF>,
                 <HV as crate::hash::FieldHasher<C::F>>::Digest,
             > {
-                leaf_values: vec![vec![C::F::ZERO; 1]],
+                leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
                 _phantom: core::marker::PhantomData,
             },
@@ -190,19 +193,19 @@ where
         query_phase_openings: (0..max_log_row_count)
             .map(|_| vec![
                 crate::basefold_verifier::RecursiveBasefoldOpening::<
-                    C::F,
-                    C::EF,
+                    Felt<C::F>,
+                    Ext<C::F, C::EF>,
                     <HV as crate::hash::FieldHasher<C::F>>::Digest,
                 > {
                     position: 0,
-                    sibling_pair: [C::EF::ZERO; 2],
+                    sibling_pair: [zero_ext(builder), zero_ext(builder)],
                     merkle_path_bytes: vec![],
                     merkle_path_digests: vec![],
                     _phantom: core::marker::PhantomData,
                 },
             ])
             .collect(),
-        batch_evaluations: vec![vec![C::EF::ZERO; 1]],
+        batch_evaluations: vec![vec![zero_ext(builder)]],
     };
 
     // col_prefix_sums: per-round outer Vec, per-column inner Vec of
@@ -274,8 +277,8 @@ where
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
         crate::basefold_verifier::RecursiveBasefoldProof<
-            C::F,
-            C::EF,
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
             <HV as crate::hash::FieldHasher<C::F>>::Digest,
         >,
         C::F,

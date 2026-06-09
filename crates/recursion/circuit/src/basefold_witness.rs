@@ -356,22 +356,26 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldRound<C::F, C::EF, Dig>;
+    // P2c STEP 1 (behavior-preserving re-type): the variable now carries
+    // `Ext` circuit variables for `uni_poly` (the const-promotion moves
+    // here from the verifier body).  `commitment` stays the raw `Dig`
+    // (digest witnessing is STEP 3).  STEP 2 swaps `builder.constant`
+    // for `.read(builder)` + a real `write`.
+    type WitnessVariable = RecursiveBasefoldRound<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
-    fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
-        // The `uni_poly` / `commitment` fields carry raw base/
-        // extension values (not witness cells) — the in-circuit
-        // verifier body promotes them to `Felt::constant` /
-        // `Ext::constant` (or `HV::const_digest`) inside its body.
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldRound {
-            uni_poly: self.uni_poly,
+            uni_poly: [
+                builder.constant(self.uni_poly[0]),
+                builder.constant(self.uni_poly[1]),
+            ],
             commitment: self.commitment.clone(),
             _phantom_f: core::marker::PhantomData,
         }
     }
 
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // Constant values; no witness-stream writes required.
+        // STEP 1: still const-constructed in `read`; no stream writes.
     }
 }
 
@@ -380,12 +384,15 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldOpening<C::F, C::EF, Dig>;
+    type WitnessVariable = RecursiveBasefoldOpening<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
-    fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldOpening {
             position: self.position,
-            sibling_pair: self.sibling_pair,
+            sibling_pair: [
+                builder.constant(self.sibling_pair[0]),
+                builder.constant(self.sibling_pair[1]),
+            ],
             merkle_path_bytes: self.merkle_path_bytes.clone(),
             merkle_path_digests: self.merkle_path_digests.clone(),
             _phantom: core::marker::PhantomData,
@@ -400,11 +407,15 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldComponentOpening<C::F, C::EF, Dig>;
+    type WitnessVariable = RecursiveBasefoldComponentOpening<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
-    fn read(&self, _builder: &mut Builder<C>) -> Self::WitnessVariable {
+    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldComponentOpening {
-            leaf_values: self.leaf_values.clone(),
+            leaf_values: self
+                .leaf_values
+                .iter()
+                .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
+                .collect(),
             merkle_path_bytes: self.merkle_path_bytes.clone(),
             _phantom: core::marker::PhantomData,
         }
@@ -459,22 +470,33 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    type WitnessVariable = RecursiveBasefoldProof<C::F, C::EF, Dig>;
+    type WitnessVariable = RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         RecursiveBasefoldProof {
             rounds: self.rounds.read(builder),
-            final_poly: self.final_poly,
-            pow_witness: self.pow_witness,
-            batch_grinding_witness: self.batch_grinding_witness,
-            component_openings: self.component_openings.read(builder),
+            final_poly: builder.constant(self.final_poly),
+            pow_witness: builder.constant(self.pow_witness),
+            batch_grinding_witness: builder.constant(self.batch_grinding_witness),
+            // `component_openings` (and its `leaf_values`) are UNUSED by the
+            // verifier — `verify_untrusted_evaluations` explicitly discards
+            // them (`let _ = &proof.component_openings`, basefold_verifier.rs:936).
+            // The legacy raw-valued proof carried them for free (never
+            // promoted); promoting them here added ~25MB of dead consts to the
+            // program.  Emit empty so they stay out of the circuit entirely
+            // (also keeps them value-independent — nothing to witness).
+            component_openings: Vec::new(),
             query_phase_openings: self.query_phase_openings.read(builder),
-            batch_evaluations: self.batch_evaluations.clone(),
+            batch_evaluations: self
+                .batch_evaluations
+                .iter()
+                .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
+                .collect(),
         }
     }
 
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // Constant-valued fields; no witness-stream writes.
+        // STEP 1: const-constructed in `read`; no witness-stream writes.
     }
 }
 

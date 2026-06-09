@@ -843,8 +843,8 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     row_counts_by_round: Option<&[Vec<usize>]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<
-        C::F,
-        C::EF,
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
         <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasher<C::F>>::Digest,
     >,
     <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
@@ -934,7 +934,11 @@ where
         .collect();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+        >,
         C::F,
         C::EF,
     > {
@@ -1104,7 +1108,7 @@ pub fn lift_evaluation_proof_via_bundle<C, HV>(
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
     HV::DigestVariable,
     C::F,
     C::EF,
@@ -1308,7 +1312,7 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
     HV::DigestVariable,
     C::F,
     C::EF,
@@ -1375,7 +1379,11 @@ where
         .collect();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
-        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+        >,
         C::F,
         C::EF,
     > {

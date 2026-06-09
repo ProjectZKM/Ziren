@@ -158,7 +158,7 @@ pub struct BasefoldShardProofVariable<
     /// Jagged-PCS opening proof.  The inner BaseFold proof's raw
     /// digests + the per-round original commitments are `HV`-typed.
     pub evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<C::F, C::EF, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
         HV::DigestVariable,
         C::F,
         C::EF,
@@ -381,8 +381,8 @@ impl<P> BasefoldShardVerifier<P> {
                 FC,
                 Commitment = HV::DigestVariable,
                 Proof = RecursiveBasefoldProof<
-                    C::F,
-                    C::EF,
+                    Felt<C::F>,
+                    Ext<C::F, C::EF>,
                     <HV as crate::hash::FieldHasher<p3_koala_bear::KoalaBear>>::Digest,
                 >,
             > + Clone,
@@ -744,34 +744,36 @@ where
     // Jagged PCS proof — has the most nested structure.
     let evaluation_proof = {
         // Inner BaseFold proof.
-        let basefold_proof = RecursiveBasefoldProof::<C::F, C::EF> {
+        // P2c STEP 1: variable-typed proof (Ext/Felt const-built); digests
+        // stay raw `[C::F::ZERO; 8]`.
+        let basefold_proof = RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
             rounds: (0..shape.basefold_num_variables)
-                .map(|_| RecursiveBasefoldRound::<C::F, C::EF> {
-                    uni_poly: [C::EF::ZERO; 2],
+                .map(|_| RecursiveBasefoldRound::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+                    uni_poly: [zero_ext(builder), zero_ext(builder)],
                     commitment: [C::F::ZERO; 8],
                     _phantom_f: core::marker::PhantomData,
                 })
                 .collect(),
-            final_poly: C::EF::ZERO,
-            pow_witness: C::F::ZERO,
-            batch_grinding_witness: C::F::ZERO,
-            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<C::F, C::EF> {
-                leaf_values: vec![vec![C::F::ZERO; 1]],
+            final_poly: zero_ext(builder),
+            pow_witness: zero_felt(builder),
+            batch_grinding_witness: zero_felt(builder),
+            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+                leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
                 _phantom: core::marker::PhantomData,
             }]],
             query_phase_openings: (0..shape.basefold_num_variables)
                 .map(|_| {
-                    vec![RecursiveBasefoldOpening::<C::F, C::EF> {
+                    vec![RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
                         position: 0,
-                        sibling_pair: [C::EF::ZERO; 2],
+                        sibling_pair: [zero_ext(builder), zero_ext(builder)],
                         merkle_path_bytes: vec![],
                         merkle_path_digests: vec![],
                         _phantom: core::marker::PhantomData,
                     }]
                 })
                 .collect(),
-            batch_evaluations: vec![vec![C::EF::ZERO; 1]],
+            batch_evaluations: vec![vec![zero_ext(builder)]],
         };
         let jagged_dim_metadata = {
             let inner: Vec<Vec<Felt<C::F>>> = (0..2)
@@ -797,7 +799,7 @@ where
             },
         };
         let stacked_pcs_proof = RecursiveStackedPcsProof::<
-            RecursiveBasefoldProof<C::F, C::EF>,
+            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]>,
             C::F,
             C::EF,
         > {

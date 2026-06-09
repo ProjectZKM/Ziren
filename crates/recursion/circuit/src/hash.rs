@@ -9,7 +9,7 @@ use p3_bn254_fr::Bn254;
 use p3_symmetric::Permutation;
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
-    ir::{Builder, Config, DslIr, Felt, Var},
+    ir::{Builder, Config, DslIr, Ext, Felt, Var},
 };
 use zkm_recursion_core::stark::{outer_perm, OUTER_MULTI_FIELD_CHALLENGER_WIDTH};
 use zkm_recursion_core::{stark::KoalaBearPoseidon2Outer, DIGEST_SIZE};
@@ -117,8 +117,8 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         column_counts_by_round: &[Vec<usize>],
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
-            C::F,
-            C::EF,
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
             <Self as FieldHasher<C::F>>::Digest,
         >,
         Self::DigestVariable,
@@ -335,8 +335,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         column_counts_by_round: &[Vec<usize>],
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
-            C::F,
-            C::EF,
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
             <Self as FieldHasher<C::F>>::Digest,
         >,
         Self::DigestVariable,
