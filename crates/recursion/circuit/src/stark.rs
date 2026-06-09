@@ -299,11 +299,54 @@ where
         .enumerate()
         .map(|(i, (name, _))| (name.to_owned(), i))
         .collect::<HashMap<_, _>>();
+    // P2b: the vk hash (recursion/circuit/src/types.rs:hash) absorbs one
+    // prep-domain record per `chip_information` entry — (log_n, 2^log_n, shift,
+    // two_adic_generator(log_n)).  The dummy MUST carry the same preprocessed
+    // domains as the real vk (else the recursion program's vk.hash bakes a
+    // different number of inputs → the program diverges in assert_complete's
+    // vk-hash region).  Real builds these from the PREPROCESSED traces
+    // (machine.rs:457-464), sorted by (Reverse(height), name); the natural
+    // domain has shift = ONE.  For the chips that carry a preprocessed trace
+    // (preprocessed_width > 0), the prep height equals the chip height for the
+    // program-keyed chips on the shapes we enumerate (Program / Byte etc.).
+    let chip_information: Vec<(
+        String,
+        zkm_stark::SerializableDomain<KoalaBear>,
+        (usize, usize),
+    )> = {
+        let mut prep: Vec<(String, usize, usize)> = chip_log_heights_pairs
+            .iter()
+            .filter_map(|(name, log_h)| {
+                let chip = chips.iter().find(|c| c.name() == name.as_str())?;
+                let pw = MachineAir::<KoalaBear>::preprocessed_width(*chip);
+                if pw > 0 {
+                    Some((name.clone(), pw, *log_h as usize))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        // Sort by (Reverse(height), name) to match the prover's preprocessed
+        // trace ordering (machine.rs:454).
+        prep.sort_by(|a, b| b.2.cmp(&a.2).then_with(|| a.0.cmp(&b.0)));
+        prep.into_iter()
+            .map(|(name, pw, log_h)| {
+                (
+                    name,
+                    zkm_stark::SerializableDomain {
+                        shift: KoalaBear::ONE,
+                        log_size: log_h,
+                    },
+                    (pw, 1usize << log_h),
+                )
+            })
+            .collect()
+    };
     let vk = StarkVerifyingKey {
         commit: dummy_commit(),
         pc_start: KoalaBear::ZERO,
         initial_global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
-        chip_information: Vec::new(),
+        chip_information,
         chip_ordering,
     };
 

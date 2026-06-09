@@ -2771,6 +2771,39 @@ pub mod tests {
                         }).unwrap_or_else(|| "(const, no trace)".to_string());
                         eprintln!("[VKEQ-INS] real-only@{k}: {} | {:?}", frame, ri[k]);
                     }
+                    // For each real-only const Mem-Write, find its READER (the
+                    // instruction that consumes that address) and backtrace it —
+                    // names the verifier line that BAKES the per-chip eval.
+                    for off in 0..delta.min(12) {
+                        let k = fd + off;
+                        let s = format!("{:?}", ri[k]);
+                        // extract "inner: Address(N)" of the write
+                        if let Some(addr) = s
+                            .split("inner: Address(")
+                            .nth(1)
+                            .and_then(|t| t.split(')').next())
+                            .and_then(|t| t.parse::<usize>().ok())
+                        {
+                            let needle = format!("Address({addr})");
+                            for j in k + 1..ri.len() {
+                                let rs = format!("{:?}", ri[j]);
+                                if rs.contains(&needle) && !rs.contains("kind: Write") {
+                                    let frame = rtr.get(j).and_then(|t| t.as_ref()).map(|bt| {
+                                        let mut b = bt.clone();
+                                        b.resolve();
+                                        let fs = format!("{:?}", b);
+                                        fs.lines()
+                                            .find(|l| l.contains("recursion/circuit/src"))
+                                            .unwrap_or("(no circuit frame)")
+                                            .trim()
+                                            .to_string()
+                                    }).unwrap_or_else(|| "(no trace)".to_string());
+                                    eprintln!("[VKEQ-RDR] const@{addr} read by instr{j}: {} | {:?}", frame, ri[j]);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
                 let mut bt_shown = 0;
                 for k in 0..n {
