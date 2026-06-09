@@ -2504,6 +2504,84 @@ pub mod jagged {
             total_values: bundle.packing.total_values,
             log_dense_size: bundle.packing.log_dense_size,
         };
+        // [STEP7] faithful replication of the in-circuit step-7 prefix-sum
+        // consistency check (recursive_jagged_pcs.rs:260-272) on the lift's
+        // exact transform of this CORE bundle's packing — fires during the
+        // fast core verify to localize the `acc != prefix_sum_felts`
+        // divergence without the 40-min compress.  Mirrors
+        // shard_level_witness.rs lift_jagged_basefold_bundle.
+        if std::env::var("ZIREN_STEP7_DBG").is_ok() {
+            let pcc: Vec<usize> = bundle.packing.column_counts.clone();
+            let offsets = &bundle.packing.offsets;
+            let tv = bundle.packing.total_values;
+            // packing_row_counts (offset-walk, shard_level_witness.rs:874-895)
+            let mut prc: Vec<usize> = Vec::with_capacity(pcc.len());
+            {
+                let mut col_idx = 0usize;
+                for &cc in pcc.iter() {
+                    if cc == 0 { prc.push(0); continue; }
+                    let h = if col_idx + 1 < offsets.len() {
+                        offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+                    } else if col_idx < offsets.len() {
+                        tv.saturating_sub(offsets[col_idx])
+                    } else { 0 };
+                    prc.push(h);
+                    col_idx += cc;
+                }
+            }
+            let ccbr: Vec<Vec<usize>> = if pcc.is_empty() { vec![] } else { vec![pcc.clone()] };
+            let total_cols_before_pad: usize = ccbr.iter().map(|cc| {
+                let flat = cc.iter().sum::<usize>();
+                let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+                flat + added
+            }).sum();
+            let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
+            let col_prefix_sums_len = padded_cols + 1;
+            let jagged_pt_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+            let bits_per_entry = if jagged_pt_len >= 2 { jagged_pt_len / 2 } else { 0 };
+            let clamp = if bits_per_entry < 63 { (1usize << bits_per_entry) - 1 } else { usize::MAX };
+            let cap = |v: usize| -> usize { if bits_per_entry < 63 { v.min(clamp) } else { v } };
+            // col_prefix_sums (shard_level_witness.rs:994-1039)
+            let mut cps: Vec<usize> = vec![0usize];
+            let mut oi = 0usize; let mut co = 0usize;
+            for cc in ccbr.iter() {
+                let real = cc.iter().sum::<usize>();
+                for _ in 0..real {
+                    if oi < offsets.len() { co = offsets[oi]; oi += 1; }
+                    if cps.len() >= col_prefix_sums_len { break; }
+                    cps.push(cap(co));
+                }
+                let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+                for _ in 0..added { if cps.len() >= col_prefix_sums_len { break; } cps.push(cap(co)); }
+            }
+            while cps.len() < col_prefix_sums_len - 1 { cps.push(cap(co)); }
+            if cps.len() < col_prefix_sums_len { cps.push(cap(tv)); }
+            let prefix_sum: Vec<usize> = cps.iter().skip(1).copied().collect();
+            let mut repeated: Vec<usize> = Vec::new();
+            for (round_rc, round_cc) in std::iter::repeat(&prc).zip(ccbr.iter()) {
+                for (&rc, &cc) in round_rc.iter().zip(round_cc.iter()) {
+                    for _ in 0..cc { repeated.push(rc); }
+                }
+            }
+            let max_off = offsets.iter().copied().max().unwrap_or(0);
+            eprintln!("[STEP7] chips={} pcc.len={} offsets.len={} total_values={} log_dense={} jagged_pt_len={} bits_per_entry={} clamp={} max_off={} CLAMP_HIT={} padded_cols={} prefix_sum.len={} repeated.len={}",
+                chip_infos.len(), pcc.len(), offsets.len(), tv, bundle.packing.log_dense_size,
+                jagged_pt_len, bits_per_entry, clamp, max_off, max_off > clamp || tv > clamp,
+                padded_cols, prefix_sum.len(), repeated.len());
+            eprintln!("[STEP7] column_counts={:?}", pcc);
+            eprintln!("[STEP7] row_counts={:?}", prc);
+            eprintln!("[STEP7] offsets head={:?} tail={:?}", &offsets[..offsets.len().min(10)], &offsets[offsets.len().saturating_sub(6)..]);
+            let mut acc = 0usize; let mut found = false;
+            for (k, (rc, expected)) in repeated.iter().zip(prefix_sum.iter()).enumerate() {
+                if acc != *expected && !found {
+                    found = true;
+                    eprintln!("[STEP7] FIRST DIVERGENCE k={} acc={} prefix_sum[k]={} diff={} | offsets[k]={}",
+                        k, acc, *expected, acc as i64 - *expected as i64, offsets.get(k).copied().unwrap_or(tv));
+                }
+                acc += *rc;
+            }
+            if !found { eprintln!("[STEP7] NO divergence over {} pairs (acc==prefix_sum)", repeated.len().min(prefix_sum.len())); }
+        }
         // SP1-aligned: sample z_col at the matching transcript position
         // (after the commit observe, before the reduction), mirroring
         // the prover.

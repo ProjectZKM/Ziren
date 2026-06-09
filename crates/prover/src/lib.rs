@@ -2571,6 +2571,197 @@ pub mod tests {
         )
     }
 
+    /// Fast Test::Core fib (prove_core + host verify) — the host verify
+    /// (verify_jagged_basefold_inner) runs the [STEP7] probe under
+    /// ZIREN_STEP7_DBG to localize the step-7 prefix-sum divergence on the
+    /// fib core shape without the 40-min compress.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_core_fib() -> Result<()> {
+        let elf = test_artifacts::FIBONACCI_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Core,
+        )
+    }
+
+    /// [VKEQ] #6 de-risk: does the ENUMERATION dummy normalize program
+    /// (built from `dummy(machine, shape)`) reproduce the PROVE-PATH normalize
+    /// VK (built from the real fib core proof)?  If equal → the only gap is
+    /// that the real shape isn't enumerated (fix = enumerate the right shapes).
+    /// If not → the dummy reconstruction diverges from the real program.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_vk_equality_normalize_fib() -> Result<()> {
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = prover.prove_core(&pk_d, program, &ZKMStdin::default(), opts, context)?;
+        let inputs = prover
+            .get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, REDUCE_BATCH_SIZE, true)
+            .expect("basefold core inputs");
+        let machine = prover.core_prover.machine();
+        for (i, (input, batch)) in inputs
+            .iter()
+            .zip(core_proof.proof.0.chunks(REDUCE_BATCH_SIZE))
+            .enumerate()
+        {
+            let prog_real = prover.recursion_program_basefold(input);
+            let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
+            // The real shape, taken from the original core ShardProofs in this batch.
+            let shape = ZKMRecursionShape {
+                proof_shapes: batch.iter().map(|sp| sp.shape()).collect(),
+                is_complete: input.is_complete,
+            };
+            let mut dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            // [PROBE-BUNDLE] decisive cheap experiment: overwrite the dummy's
+            // evaluation_proof with the REAL one. If EQUAL becomes true, then
+            // (a) the bundle was the only remaining divergence and (b) whether
+            // a zero-bundle can ever match depends on whether the lift bakes
+            // bundle VALUES (builder.constant) vs witnesses them. Gated by env
+            // so the normal run is unaffected.
+            if std::env::var("PROBE_CLONE_BUNDLE").is_ok() {
+                let zero_vals = std::env::var("PROBE_ZERO_SCALARS").is_ok();
+                for (di, sp_real) in input.shard_proofs.iter().enumerate() {
+                    if let Some(d) = dummy.shard_proofs.get_mut(di) {
+                        let mut ep = sp_real.evaluation_proof.clone();
+                        if zero_vals {
+                            use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                            if let EvaluationProof::Bundle(bd) = &mut ep {
+                                use p3_field::PrimeCharacteristicRing;
+                                type EF = zkm_stark::InnerChallenge;
+                                // Zero every EF/F scalar value in place, keeping
+                                // all vec lengths. If the resulting program is
+                                // byte-identical to the real-value clone → the
+                                // program is value-INDEPENDENT (witnessed) and a
+                                // zero dummy bundle will work.
+                                for r in bd.reduction.rounds.iter_mut() { r.evals = [EF::ZERO; 3]; }
+                                bd.reduction.eval_point.iter_mut().for_each(|x| *x = EF::ZERO);
+                                bd.reduction.q_at_z = EF::ZERO;
+                                let bf = &mut bd.basefold_proof.basefold_proof;
+                                bf.univariate_messages.iter_mut().for_each(|m| *m = [EF::ZERO; 2]);
+                                bf.final_poly = EF::ZERO;
+                                for mo in bf.component_polynomials_query_openings_and_proofs.iter_mut() {
+                                    for l in mo.leaves.iter_mut() {
+                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_stark::InnerVal::ZERO); }
+                                    }
+                                }
+                                for mo in bf.query_phase_openings_and_proofs.iter_mut() {
+                                    for l in mo.leaves.iter_mut() {
+                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_stark::InnerVal::ZERO); }
+                                    }
+                                }
+                                for r in bd.basefold_proof.batch_evaluations.iter_mut() { r.iter_mut().for_each(|x| *x = EF::ZERO); }
+                                for c in bd.y_per_chip.iter_mut() { c.iter_mut().for_each(|x| *x = EF::ZERO); }
+                                let jp = &mut bd.jagged_eval.partial_sumcheck_proof;
+                                jp.claimed_sum = EF::ZERO;
+                                jp.point_and_eval.1 = EF::ZERO;
+                                jp.point_and_eval.0.iter_mut().for_each(|x| *x = EF::ZERO);
+                                for up in jp.univariate_polys.iter_mut() { up.coefficients.iter_mut().for_each(|x| *x = EF::ZERO); }
+                                bd.packing.offsets.iter_mut().for_each(|x| *x = 0);
+                                bd.packing.total_values = 0;
+                            }
+                        }
+                        d.evaluation_proof = ep;
+                    }
+                }
+            }
+            let prog_dummy = prover.recursion_program_basefold(&dummy);
+            let vk_dummy = prover.compress_prover.setup(&prog_dummy).1.hash_koalabear();
+            let rb = bincode::serialize(&*prog_real).unwrap();
+            let db = bincode::serialize(&*prog_dummy).unwrap();
+            let first_diff = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
+            eprintln!(
+                "[VKEQ] input {i}: EQUAL={} | prog_bytes real={} dummy={} first_diff_at={:?} | vk_real={:?} vk_dummy={:?}",
+                vk_real == vk_dummy, rb.len(), db.len(), first_diff, vk_real, vk_dummy,
+            );
+            eprintln!("[VKEQ] input {i} real shape={:?}", shape);
+            {
+                use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                for (tag, sp) in
+                    [("REAL", &input.shard_proofs[0]), ("DUMMY", &dummy.shard_proofs[0])]
+                {
+                    let ep = match &sp.evaluation_proof {
+                        EvaluationProof::Empty => "Empty".to_string(),
+                        EvaluationProof::Bytes(b) => format!("Bytes(len={})", b.len()),
+                        EvaluationProof::Bundle(bd) => format!(
+                            "Bundle(offsets={} total_values={} log_dense={} jagged_pt={})",
+                            bd.packing.offsets.len(),
+                            bd.packing.total_values,
+                            bd.packing.log_dense_size,
+                            bd.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len(),
+                        ),
+                    };
+                    eprintln!(
+                        "[VKEQ] input {i} {tag} dims: gkr_rounds={} zerocheck_rounds={} opened_chips={} evalproof={}",
+                        sp.logup_gkr_proof.round_proofs.len(),
+                        sp.zerocheck_proof.univariate_polys.len(),
+                        sp.opened_values.chips.len(),
+                        ep,
+                    );
+                    let gkr_dims: Vec<usize> = sp
+                        .logup_gkr_proof
+                        .round_proofs
+                        .iter()
+                        .map(|r| r.sumcheck_proof.univariate_polys.len())
+                        .collect();
+                    eprintln!("[VKEQ] input {i} {tag} gkr per-round sumcheck dims={gkr_dims:?}");
+                    // Full BaseFold bundle dim dump (ground truth for the
+                    // dummy_jagged_basefold_bundle construction — P2b).
+                    if let EvaluationProof::Bundle(bd) = &sp.evaluation_proof {
+                        let bf = &bd.basefold_proof.basefold_proof;
+                        let comp_paths: Vec<usize> = bf
+                            .component_polynomials_query_openings_and_proofs
+                            .iter()
+                            .flat_map(|mo| mo.leaves.iter().map(|l| l.proof.len()))
+                            .take(3)
+                            .collect();
+                        let query_round_lens: Vec<(usize, usize)> = bf
+                            .query_phase_openings_and_proofs
+                            .iter()
+                            .map(|mo| (mo.leaves.len(), mo.leaves.first().map(|l| l.proof.len()).unwrap_or(0)))
+                            .collect();
+                        let comp_leaf_val_dims: Vec<(usize, usize)> = bf
+                            .component_polynomials_query_openings_and_proofs
+                            .iter()
+                            .map(|mo| (mo.leaves.len(), mo.leaves.first().map(|l| l.values.len()).unwrap_or(0)))
+                            .collect();
+                        let batch_evals: Vec<usize> = bd.basefold_proof.batch_evaluations.iter().map(|v| v.len()).collect();
+                        eprintln!(
+                            "[VKEQ-BUNDLE] {tag}: uni_msgs={} fri_commits={} comp_openings_outer={} comp_leaf(len,valdim)={:?} query_rounds={} query_round(leaves,pathlen)={:?} comp_pathlens(first3)={:?} batch_evals={:?} reduction_rounds={} reduction_evalpt={} jagged_uni_polys={} jagged_pt={} cols={} log_stack={}",
+                            bf.univariate_messages.len(),
+                            bf.fri_commitments.len(),
+                            bf.component_polynomials_query_openings_and_proofs.len(),
+                            comp_leaf_val_dims,
+                            bf.query_phase_openings_and_proofs.len(),
+                            query_round_lens,
+                            comp_paths,
+                            batch_evals,
+                            bd.reduction.rounds.len(),
+                            bd.reduction.eval_point.len(),
+                            bd.jagged_eval.partial_sumcheck_proof.univariate_polys.len(),
+                            bd.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len(),
+                            bd.packing.column_counts.len(),
+                            bd.commit.log_stacking_height,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient
     // input data" syscall error).  Removed; fib + keccak already
     // characterize the per-cycle vs per-MLE-size cost.  See
