@@ -299,6 +299,30 @@ where
             })
             .collect();
 
+    // P2b: build a shape-faithful jagged-basefold Bundle (zero values) so the
+    // dummy's witness stream matches the real prover's byte-for-byte.  Chip
+    // dims in NAME-SORTED order (matches the lift's name-sorted
+    // `column_counts_by_round`); width = main trace width, height = 2^log_h.
+    let evaluation_proof = {
+        let heights: BTreeMap<String, u8> =
+            chip_log_heights_pairs.iter().cloned().collect();
+        let mut name_sorted: Vec<&&Chip<F, A>> = chips.iter().collect();
+        name_sorted
+            .sort_by(|a, b| MachineAir::<F>::name(**a).cmp(&MachineAir::<F>::name(**b)));
+        let chip_dims: Vec<(usize, u32)> = name_sorted
+            .iter()
+            .map(|chip| {
+                let name = MachineAir::<F>::name(**chip);
+                let w = <_ as BaseAir<F>>::width(&chip.air);
+                let log_h = heights.get(&name).copied().unwrap_or(0) as u32;
+                (w, log_h)
+            })
+            .collect();
+        zkm_stark::shard_level::shard_proof::EvaluationProof::Bundle(
+            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count),
+        )
+    };
+
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
         public_values,
@@ -308,10 +332,178 @@ where
         opened_values,
         chip_log_heights,
         chip_cumulative_sums,
-        evaluation_proof: zkm_stark::shard_level::shard_proof::EvaluationProof::Empty,
+        evaluation_proof,
         // Gap #10: verifier-simulation dummy emits MSB-folded proofs
         // (host-CPU convention — matches the CpuProver call site).
         fold_orientation: FoldOrientation::Msb,
+    }
+}
+
+/// P2b: build a SHAPE-FAITHFUL (zero-VALUE) [`JaggedBasefoldBundle`] for the
+/// dummy shard proof, so the witness stream the recursion program reads from a
+/// dummy matches the real prover's byte-for-byte (the recursion program is now
+/// value-independent — only field LENGTHS matter).  Replaces the prior
+/// `EvaluationProof::Empty`, which produced a tiny zero placeholder lift and
+/// made the dummy program diverge from the real one at byte 24.
+///
+/// `chip_dims` = per-chip `(main_width, log_height)` in the SAME order the
+/// jagged packing uses (name-sorted — matches the lift's `column_counts_by_round`
+/// AND the lift's `bundle.commit.chip_dims` row-count derivation).
+/// `max_log_row_count` = M (the BaseFold stacking height / verifier num_variables).
+///
+/// Field LENGTHS (all derived from the shape; see
+/// `ref_p2c_witness_the_bundle_plan` for the full law derivation):
+/// * packing via [`pack_traces_jagged`] on zero matrices → offsets,
+///   total_values, log_dense_size (L), column_counts.
+/// * basefold proof: M rounds (uni_poly `[EF;2]` + 1-cap root); M query rounds
+///   × Q (= `lb_fri_config().num_queries`) leaves × (sibling `[lo,hi]` +
+///   `(M-r)`-digest path); batch_evaluations = one vec of `2^(L-M)`.
+/// * reduction: L rounds (`evals=[EF;3]`), eval_point len L.
+/// * jagged_eval: `n = 2*(log_m+1)` rounds (`log_m =
+///   trailing_zeros(np2(total_values-1))`), each poly 3 coeffs (degree-2).
+pub fn dummy_jagged_basefold_bundle(
+    chip_dims: &[(usize, u32)],
+    max_log_row_count: usize,
+) -> zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle {
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_symmetric::MerkleCap;
+    use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
+    use zkm_stark::basefold::stacked::StackedBasefoldProof;
+    use zkm_stark::jagged::pack_traces_jagged;
+    use zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
+    use zkm_stark::jagged_pcs::jagged::{JaggedBasefoldBundle, PackingMeta};
+    use zkm_stark::jagged_pcs::{
+        lb_fri_config, pick_log_stacking_height, BasefoldLateBindingCommit, JaggedMmcs,
+    };
+    use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+    use zkm_stark::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
+    use zkm_stark::{InnerChallenge, InnerVal};
+
+    type F = InnerVal;
+    type EF = InnerChallenge;
+    const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
+
+    // max_log_row_count is the verifier's num_variables ceiling; the bundle's
+    // BaseFold shape keys off log_stacking_height (computed below) instead.
+    let _ = max_log_row_count;
+
+    // ── Packing from zero matrices of the shape's dimensions ──
+    // pack_traces_jagged uses only height/width, so zero data gives the
+    // exact offsets / total_values / log_dense_size / column_counts.
+    let traces: Vec<(String, RowMajorMatrix<F>)> = chip_dims
+        .iter()
+        .enumerate()
+        .map(|(i, (width, log_h))| {
+            let w = (*width).max(1);
+            let h = 1usize << *log_h;
+            (
+                format!("chip{i}"),
+                RowMajorMatrix::new(vec![F::ZERO; w * h], w),
+            )
+        })
+        .collect();
+    let packing = pack_traces_jagged::<F>(&traces);
+    let total_values = packing.total_values;
+    let log_dense_size = packing.log_dense_size;
+    let column_counts: Vec<usize> =
+        packing.chip_infos.iter().map(|ci| ci.column_count).collect();
+    let packing_meta = PackingMeta {
+        offsets: packing.offsets.clone(),
+        total_values,
+        log_dense_size,
+        column_counts,
+    };
+
+    // ── Derived sub-lengths ──
+    let l = log_dense_size;
+    // The BaseFold is over the STACKED poly: its rounds / query path lengths /
+    // batch width all key off log_stacking_height (the prover's clamped value),
+    // NOT max_log_row_count.  pick_log_stacking_height = min(14, log2(np2(total))-1).
+    let log_stacking = pick_log_stacking_height(total_values) as usize;
+    let num_stripes = 1usize << l.saturating_sub(log_stacking); // batch_evaluations width
+    let num_queries = lb_fri_config().num_queries;
+    let log_m = if total_values <= 1 {
+        0
+    } else {
+        (total_values - 1).next_power_of_two().trailing_zeros() as usize
+    };
+    let jagged_n = 2 * (log_m + 1);
+
+    let zero_cap = || MerkleCap::<F, [F; 8]>::new(vec![[F::ZERO; 8]]);
+
+    // ── BaseFold proof (log_stacking rounds; query openings drive the stream) ──
+    let univariate_messages: Vec<[EF; 2]> = vec![[EF::ZERO; 2]; log_stacking];
+    let fri_commitments: Vec<_> = (0..log_stacking).map(|_| zero_cap()).collect();
+    // query_phase_openings_and_proofs: log_stacking rounds, each Q leaves; round
+    // r leaf has a (log_stacking - r)-length Merkle path (FRI commit-phase
+    // folding).  Each leaf carries one matrix row of 2*D=8 base elements
+    // (parsed to [lo,hi]).
+    let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = (0..log_stacking)
+        .map(|r| {
+            let path_len = log_stacking - r;
+            let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
+                .map(|_| LeafOpening {
+                    values: vec![vec![F::ZERO; 2 * D]],
+                    proof: vec![[F::ZERO; 8]; path_len],
+                })
+                .collect();
+            MerkleOpening { leaves }
+        })
+        .collect();
+    let bf_proof = BasefoldProof::<F, EF, JaggedMmcs> {
+        univariate_messages,
+        fri_commitments,
+        // component openings are NOT witnessed (read_basefold_proof_from_stream
+        // drops them), so an empty vec is shape-correct for the stream.
+        component_polynomials_query_openings_and_proofs: Vec::new(),
+        query_phase_openings_and_proofs,
+        final_poly: EF::ZERO,
+        pow_witness: F::ZERO,
+        batch_grinding_witness: F::ZERO,
+    };
+    let stacked = StackedBasefoldProof::<F, EF, JaggedMmcs> {
+        basefold_proof: bf_proof,
+        batch_evaluations: vec![vec![EF::ZERO; num_stripes]],
+    };
+
+    // ── Reduction sumcheck (L rounds, degree-2 → evals=[EF;3]) ──
+    let reduction = JaggedReductionProof::<EF> {
+        rounds: vec![JaggedReductionRound { evals: [EF::ZERO; 3] }; l.max(1)],
+        eval_point: vec![EF::ZERO; l.max(1)],
+        q_at_z: EF::ZERO,
+    };
+
+    // ── Jagged-eval sub-sumcheck (n rounds, degree-2 → 3 coeffs) ──
+    let jagged_eval = JaggedSumcheckEvalProof::<EF> {
+        partial_sumcheck_proof: PartialSumcheckProof {
+            univariate_polys: vec![
+                UnivariatePolynomial { coefficients: vec![EF::ZERO; 3] };
+                jagged_n
+            ],
+            claimed_sum: EF::ZERO,
+            point_and_eval: (vec![EF::ZERO; jagged_n], EF::ZERO),
+        },
+    };
+
+    JaggedBasefoldBundle {
+        reduction,
+        basefold_proof: stacked,
+        // y_per_chip / commit.chip_dims / commit.area are NOT read by the inner
+        // lift or the witness stream, so leave them empty/zero.
+        y_per_chip: Vec::new(),
+        commit: BasefoldLateBindingCommit {
+            commitment: zero_cap(),
+            // The late-binding commit is over the DENSE stacked poly as a
+            // single column: chip_dims = [(width=1, log_h=log_dense_size)] (NOT
+            // the per-chip dims).  The lift derives row_counts from this single
+            // entry (heights = [2^log_dense_size]) when the machine passes
+            // row_counts_by_round=None.  (Real fib: [(1, 27)].)
+            chip_dims: vec![(1, l as u32)],
+            area: 0,
+            log_stacking_height: log_stacking as u32,
+        },
+        packing: packing_meta,
+        jagged_eval,
     }
 }
 

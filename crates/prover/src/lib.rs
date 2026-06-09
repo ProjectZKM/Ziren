@@ -2739,7 +2739,7 @@ pub mod tests {
                             .collect();
                         let batch_evals: Vec<usize> = bd.basefold_proof.batch_evaluations.iter().map(|v| v.len()).collect();
                         eprintln!(
-                            "[VKEQ-BUNDLE] {tag}: uni_msgs={} fri_commits={} comp_openings_outer={} comp_leaf(len,valdim)={:?} query_rounds={} query_round(leaves,pathlen)={:?} comp_pathlens(first3)={:?} batch_evals={:?} reduction_rounds={} reduction_evalpt={} jagged_uni_polys={} jagged_pt={} cols={} log_stack={}",
+                            "[VKEQ-BUNDLE] {tag}: uni_msgs={} fri_commits={} comp_openings_outer={} comp_leaf(len,valdim)={:?} query_rounds={} query_round(leaves,pathlen)={:?} comp_pathlens(first3)={:?} batch_evals={:?} reduction_rounds={} reduction_evalpt={} jagged_uni_polys={} jagged_pt={} cols={} log_stack={} offsets={} chip_dims={} y_per_chip={} red_poly_coeffs={:?} jag_poly_coeffs={:?}",
                             bf.univariate_messages.len(),
                             bf.fri_commitments.len(),
                             bf.component_polynomials_query_openings_and_proofs.len(),
@@ -2754,6 +2754,11 @@ pub mod tests {
                             bd.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len(),
                             bd.packing.column_counts.len(),
                             bd.commit.log_stacking_height,
+                            bd.packing.offsets.len(),
+                            format!("{:?}", bd.commit.chip_dims),
+                            bd.y_per_chip.len(),
+                            bd.reduction.rounds.first().map(|_| 3),
+                            bd.jagged_eval.partial_sumcheck_proof.univariate_polys.first().map(|p| p.coefficients.len()),
                         );
                     }
                 }
