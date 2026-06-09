@@ -26,6 +26,9 @@ var plonkWitnessPath string = "plonk_witness.json"
 var groth16WitnessPath string = "groth16_witness.json"
 var dvsnarkWitnessPath string = "dvsnark_witness.json"
 
+var LocLastConstraintIdx int = -1
+var LocLastOpcode string = ""
+
 type Circuit struct {
 	VkeyHash              frontend.Variable `gnark:",public"`
 	CommittedValuesDigest frontend.Variable `gnark:",public"`
@@ -100,7 +103,9 @@ func (circuit *Circuit) Define(api frontend.API) error {
 	}
 
 	// Iterate through the instructions and handle each opcode.
-	for _, cs := range constraints {
+	for idx, cs := range constraints {
+		LocLastConstraintIdx = idx
+		LocLastOpcode = cs.Opcode
 		switch cs.Opcode {
 		case "ImmV":
 			vars[cs.Args[0][0]] = frontend.Variable(cs.Args[1][0])

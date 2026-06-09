@@ -36,6 +36,7 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/frontend/cs/r1cs"
 	"github.com/consensys/gnark/frontend/cs/scs"
+	"github.com/consensys/gnark/test"
 	"github.com/consensys/gnark/test/unsafekzg"
 	zkm "github.com/ProjectZKM/zkm-recursion-gnark/zkm"
 	"github.com/ProjectZKM/zkm-recursion-gnark/zkm/koalabear"
@@ -283,6 +284,21 @@ func TestMain() error {
 	err = json.Unmarshal(data, &inputs)
 	if err != nil {
 		return err
+	}
+
+	if os.Getenv("ZIREN_LOCALIZE") == "1" {
+		sc := zkm.NewCircuit(inputs)
+		vc := zkm.NewCircuit(inputs)
+		zkm.LocLastConstraintIdx = -1
+		zkm.LocLastOpcode = ""
+		serr := test.IsSolved(&sc, &vc, ecc.BN254.ScalarField())
+		fmt.Printf("[localize] first-failing-assert constraintIdx=%d opcode=%s\n", zkm.LocLastConstraintIdx, zkm.LocLastOpcode)
+		if serr != nil {
+			fmt.Printf("[localize] engine error: %v\n", serr)
+		} else {
+			fmt.Printf("[localize] engine: circuit SOLVED\n")
+		}
+		return serr
 	}
 
 	// Compile the circuit.

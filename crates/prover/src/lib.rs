@@ -2522,6 +2522,38 @@ pub mod tests {
         )
     }
 
+    #[test]
+    #[serial]
+    #[ignore]
+    fn diag_localize_circuit() -> Result<()> {
+        setup_logger();
+        let path = std::env::var("LOCALIZE_PROOF")
+            .unwrap_or_else(|_| "proof-with-pis.bin".to_string());
+        let bytes = std::fs::read(&path)
+            .unwrap_or_else(|e| panic!("read cached wrap proof {path}: {e}"));
+        let wrapped: ZKMReduceProof<OuterSC> =
+            bincode::deserialize(&bytes).expect("deserialize cached ZKMReduceProof<OuterSC>");
+        // [HBP] run the HOST wrap STARK verify first so
+        // verify_jagged_basefold_inner_generic prints host bp[0]/f[0] vs circuit [CBP].
+        if std::env::var("ZIREN_GKR_DBG").is_ok() {
+            zkm_recursion_core::stark::outer_jagged_hooks::register_outer_jagged_hooks();
+            let prover = ZKMProver::<DefaultProverComponents>::new();
+            let mut challenger = prover.wrap_prover.config().challenger();
+            let machine_proof = zkm_stark::MachineProof {
+                shard_proofs: vec![wrapped.proof.clone()],
+            };
+            match prover.wrap_prover.machine().verify(&wrapped.vk, &machine_proof, &mut challenger) {
+                Ok(()) => tracing::info!("[HBP] host wrap verify OK"),
+                Err(e) => tracing::info!("[HBP] host wrap verify err: {e:?}"),
+            }
+        }
+        let (constraints, witness) =
+            build_constraints_and_witness(&wrapped.vk, &wrapped.proof);
+        tracing::info!("built outer circuit: {} constraints", constraints.len());
+        PlonkBn254Prover::test(constraints, witness);
+        Ok(())
+    }
+
     /// Tests an end-to-end workflow of proving a program across the entire proof generation
     /// pipeline in addition to verifying deferred proofs.
     #[test]
