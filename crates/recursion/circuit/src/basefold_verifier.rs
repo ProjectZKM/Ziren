@@ -683,7 +683,7 @@ where
     type Proof = RecursiveBasefoldProof<
         zkm_recursion_compiler::prelude::Felt<C::F>,
         zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
-        <HV as crate::hash::FieldHasher<C::F>>::Digest,
+        HV::DigestVariable,
     >;
 
     fn observe_commitment(
@@ -792,8 +792,8 @@ where
                 let p1 = round.uni_poly[1];
                 observe_ext_element::<C, FC>(builder, challenger, p0);
                 observe_ext_element::<C, FC>(builder, challenger, p1);
-                let digest_var = HV::const_digest(builder, round.commitment);
-                challenger.observe(builder, digest_var);
+                // STEP 3: round.commitment is a witnessed DigestVariable.
+                challenger.observe(builder, round.commitment);
                 challenger.sample_ext(builder)
             })
             .collect();
@@ -906,8 +906,8 @@ where
                     // log_codeword_size bits, so slice from `round_idx + 1`.
                     let path_bits = &query_indices[query_idx][round_idx + 1..];
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
-                        let sibling_variable: HV::DigestVariable =
-                            HV::const_digest(builder, *sibling_digest);
+                        // STEP 3: witnessed DigestVariable, no const promotion.
+                        let sibling_variable: HV::DigestVariable = *sibling_digest;
                         let bit = path_bits[level].clone();
                         let pair = HV::select_chain_digest(
                             builder,
@@ -925,8 +925,9 @@ where
                     // `&proof.fri_commitments` (crates/stark/src/basefold/
                     // verifier.rs:280, 394).
                     if round_idx < proof.rounds.len() {
+                        // STEP 3: commitment is a witnessed DigestVariable.
                         let round_commit: HV::DigestVariable =
-                            HV::const_digest(builder, proof.rounds[round_idx].commitment);
+                            proof.rounds[round_idx].commitment;
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
                     }
                 }

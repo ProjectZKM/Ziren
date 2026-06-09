@@ -513,7 +513,7 @@ where
 pub fn read_basefold_proof_from_stream<C>(
     host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
     builder: &mut Builder<C>,
-) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>
+) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -522,7 +522,8 @@ where
         .iter()
         .map(|r| RecursiveBasefoldRound {
             uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
-            commitment: r.commitment, // raw digest (STEP 3)
+            // STEP 3: witness the round commitment (8 felts = inner DigestVariable).
+            commitment: core::array::from_fn(|i| r.commitment[i].read(builder)),
             _phantom_f: core::marker::PhantomData,
         })
         .collect();
@@ -542,7 +543,12 @@ where
                         op.sibling_pair[1].read(builder),
                     ],
                     merkle_path_bytes: op.merkle_path_bytes.clone(),
-                    merkle_path_digests: op.merkle_path_digests.clone(), // raw (STEP 3)
+                    // STEP 3: witness each path sibling digest (8 felts).
+                    merkle_path_digests: op
+                        .merkle_path_digests
+                        .iter()
+                        .map(|d| core::array::from_fn(|i| d[i].read(builder)))
+                        .collect(),
                     _phantom: core::marker::PhantomData,
                 })
                 .collect()
@@ -573,6 +579,10 @@ pub fn write_basefold_proof_to_stream<C>(
     for r in host.rounds.iter() {
         r.uni_poly[0].write(witness);
         r.uni_poly[1].write(witness);
+        // STEP 3: write the round commitment (8 felts), same order as read.
+        for f in r.commitment.iter() {
+            f.write(witness);
+        }
     }
     host.final_poly.write(witness);
     host.pow_witness.write(witness);
@@ -581,6 +591,12 @@ pub fn write_basefold_proof_to_stream<C>(
         for op in round.iter() {
             op.sibling_pair[0].write(witness);
             op.sibling_pair[1].write(witness);
+            // STEP 3: write each path sibling digest (8 felts).
+            for d in op.merkle_path_digests.iter() {
+                for f in d.iter() {
+                    f.write(witness);
+                }
+            }
         }
     }
     for row in host.batch_evaluations.iter() {

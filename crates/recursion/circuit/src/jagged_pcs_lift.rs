@@ -80,7 +80,7 @@ pub fn lift_evaluation_proof_bytes<C, HV>(
     crate::basefold_verifier::RecursiveBasefoldProof<
         Felt<C::F>,
         Ext<C::F, C::EF>,
-        <HV as crate::hash::FieldHasher<C::F>>::Digest,
+        HV::DigestVariable,
     >,
     HV::DigestVariable,
     C::F,
@@ -88,10 +88,13 @@ pub fn lift_evaluation_proof_bytes<C, HV>(
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    // P2c STEP 3: the bytes-deserialize lift const-builds an inner basefold
+    // proof, which pins inner digests to [Felt;8].  The OUTER (BN254)
+    // dispatch reaches the empty placeholder via `lift_empty_placeholder`
+    // (no [Felt;8] bound), not this fn.
+    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
-    use p3_field::PrimeCharacteristicRing;
-
     // Part B: when bytes is non-empty, deserialize into a
     // `JaggedBasefoldBundle` and delegate to
     // `lift_jagged_basefold_bundle` (real wire-format pieces, no
@@ -104,7 +107,7 @@ where
             zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
         {
             let (cp, sc, je, ee) =
-                crate::shard_level_witness::const_basefold_proof_from_bundle::<C>(&bundle, builder);
+                crate::shard_level_witness::const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
             return crate::shard_level_witness::lift_jagged_basefold_bundle::<C, HV>(
                 builder,
                 &bundle,
@@ -118,6 +121,42 @@ where
             );
         }
     }
+
+    lift_empty_placeholder::<C, HV>(builder, max_log_row_count, column_counts_by_round)
+}
+
+/// P2c STEP 3: the all-zero structural placeholder for empty / malformed
+/// evaluation-proof bytes (the `EvaluationProof::Empty` + scaffolding-test
+/// paths, and the OUTER BN254 dispatch fallback).  Generic over `HV` WITHOUT
+/// the `[Felt;8]` digest bound so the outer ring can reach it; digests are
+/// const-promoted to `HV::DigestVariable` via `const_digest` (inner
+/// `[Felt;8]` / outer `[Var<Bn254>;1]`).
+pub fn lift_empty_placeholder<C, HV>(
+    builder: &mut Builder<C>,
+    max_log_row_count: usize,
+    column_counts_by_round: &[Vec<usize>],
+) -> JaggedPcsProofVariable<
+    crate::basefold_verifier::RecursiveBasefoldProof<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+        HV::DigestVariable,
+    >,
+    HV::DigestVariable,
+    C::F,
+    C::EF,
+>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    // P2c STEP 3: precompute the zero DigestVariable once (const_digest
+    // borrows the builder; the round-commitment closures reuse this Copy).
+    let zero_digest_var: HV::DigestVariable = HV::const_digest(
+        builder,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+    );
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
@@ -165,15 +204,16 @@ where
     // P2c STEP 1: the placeholder proof now carries Ext/Felt circuit
     // variables (const-built here via the `zero_ext`/`zero_felt` helpers),
     // matching the re-typed `RecursiveBasefoldProof<Felt, Ext, Dig>`.
-    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest> {
+    let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable> {
         rounds: (0..max_log_row_count)
             .map(|_| crate::basefold_verifier::RecursiveBasefoldRound::<
                 Felt<C::F>,
                 Ext<C::F, C::EF>,
-                <HV as crate::hash::FieldHasher<C::F>>::Digest,
+                HV::DigestVariable,
             > {
                 uni_poly: [zero_ext(builder), zero_ext(builder)],
-                commitment: <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+                // P2c STEP 3: commitment is now a DigestVariable.
+                commitment: zero_digest_var,
                 _phantom_f: core::marker::PhantomData,
             })
             .collect(),
@@ -184,7 +224,7 @@ where
             crate::basefold_verifier::RecursiveBasefoldComponentOpening::<
                 Felt<C::F>,
                 Ext<C::F, C::EF>,
-                <HV as crate::hash::FieldHasher<C::F>>::Digest,
+                HV::DigestVariable,
             > {
                 leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
@@ -201,7 +241,7 @@ where
                 crate::basefold_verifier::RecursiveBasefoldOpening::<
                     Felt<C::F>,
                     Ext<C::F, C::EF>,
-                    <HV as crate::hash::FieldHasher<C::F>>::Digest,
+                    HV::DigestVariable,
                 > {
                     position: 0,
                     sibling_pair: [zero_ext(builder), zero_ext(builder)],
@@ -285,7 +325,7 @@ where
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
-            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+            HV::DigestVariable,
         >,
         C::F,
         C::EF,
@@ -304,11 +344,8 @@ where
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
         .collect();
     // #H: zero-placeholder original commitments as HV::DigestVariable
-    // (inner [Felt;8] / outer [Var<Bn254>;1]).
-    let zero_digest_var: HV::DigestVariable = HV::const_digest(
-        builder,
-        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
-    );
+    // (inner [Felt;8] / outer [Var<Bn254>;1]).  Reuses the `zero_digest_var`
+    // computed at the top of the fn (P2c STEP 3).
     let original_commitments: Vec<HV::DigestVariable> =
         (0..num_rounds).map(|_| zero_digest_var).collect();
 

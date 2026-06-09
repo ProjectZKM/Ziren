@@ -155,10 +155,12 @@ pub struct BasefoldShardProofVariable<
     pub logup_gkr_proof: LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     /// Zerocheck sumcheck reduction proof.
     pub zerocheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>>,
-    /// Jagged-PCS opening proof.  The inner BaseFold proof's raw
-    /// digests + the per-round original commitments are `HV`-typed.
+    /// Jagged-PCS opening proof.  The inner BaseFold proof's digests +
+    /// the per-round original commitments are `HV::DigestVariable`-typed
+    /// (P2c STEP 3: digests are witnessed/const-promoted to circuit
+    /// variables, not raw host `FieldHasher::Digest`).
     pub evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
         HV::DigestVariable,
         C::F,
         C::EF,
@@ -380,10 +382,13 @@ impl<P> BasefoldShardVerifier<P> {
                 C,
                 FC,
                 Commitment = HV::DigestVariable,
+                // P2c STEP 3: the BaseFold proof's digests are now circuit
+                // variables (witnessed/const-promoted), matching the verifier's
+                // re-typed `type Proof` (basefold_verifier.rs).
                 Proof = RecursiveBasefoldProof<
                     Felt<C::F>,
                     Ext<C::F, C::EF>,
-                    <HV as crate::hash::FieldHasher<p3_koala_bear::KoalaBear>>::Digest,
+                    HV::DigestVariable,
                 >,
             > + Clone,
         EVPV: FnOnce(&mut RecursivePublicValuesConstraintFolder<C>),
@@ -744,27 +749,27 @@ where
     // Jagged PCS proof — has the most nested structure.
     let evaluation_proof = {
         // Inner BaseFold proof.
-        // P2c STEP 1: variable-typed proof (Ext/Felt const-built); digests
-        // stay raw `[C::F::ZERO; 8]`.
-        let basefold_proof = RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+        // P2c STEP 3: variable-typed proof (Ext/Felt const-built); digests are
+        // now circuit variables ([Felt;8] = inner DigestVariable).
+        let basefold_proof = RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
             rounds: (0..shape.basefold_num_variables)
-                .map(|_| RecursiveBasefoldRound::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+                .map(|_| RecursiveBasefoldRound::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                     uni_poly: [zero_ext(builder), zero_ext(builder)],
-                    commitment: [C::F::ZERO; 8],
+                    commitment: core::array::from_fn(|_| zero_felt(builder)),
                     _phantom_f: core::marker::PhantomData,
                 })
                 .collect(),
             final_poly: zero_ext(builder),
             pow_witness: zero_felt(builder),
             batch_grinding_witness: zero_felt(builder),
-            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+            component_openings: vec![vec![RecursiveBasefoldComponentOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                 leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
                 _phantom: core::marker::PhantomData,
             }]],
             query_phase_openings: (0..shape.basefold_num_variables)
                 .map(|_| {
-                    vec![RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]> {
+                    vec![RecursiveBasefoldOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                         position: 0,
                         sibling_pair: [zero_ext(builder), zero_ext(builder)],
                         merkle_path_bytes: vec![],
@@ -799,7 +804,7 @@ where
             },
         };
         let stacked_pcs_proof = RecursiveStackedPcsProof::<
-            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [C::F; 8]>,
+            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
             C::F,
             C::EF,
         > {

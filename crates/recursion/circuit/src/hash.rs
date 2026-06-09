@@ -110,6 +110,13 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// the in-circuit challenger observes the same BN254 digests the host
     /// outer verifier absorbs (the all-zero placeholder for those
     /// commitments was the residual gnark constraint-#488163 failure).
+    //
+    // P2c STEP 3: both lift dispatchers are REQUIRED (no default body).  A
+    // default that delegated to the inner const/witness lifts would need
+    // `Self::DigestVariable = [Felt;8]`, and a restrictive where-clause on a
+    // trait method propagates to EVERY caller (breaking the SC-generic wrap
+    // core for the outer ring).  Making them required lets each ring's impl
+    // supply a body specialized to its concrete `DigestVariable`.
     fn lift_evaluation_proof_bytes_dispatch(
         builder: &mut Builder<C>,
         bytes: &[u8],
@@ -119,7 +126,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
-            <Self as FieldHasher<C::F>>::Digest,
+            Self::DigestVariable,
         >,
         Self::DigestVariable,
         C::F,
@@ -127,15 +134,49 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     >
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
-        Self: Sized,
-    {
-        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, Self>(
-            builder,
-            bytes,
-            max_log_row_count,
-            column_counts_by_round,
-        )
-    }
+        Self: Sized;
+
+    /// P2c STEP 3 (ring-aware Bundle dispatch): lift a WITNESSED inner
+    /// jagged-basefold bundle (the value-independent production path) into the
+    /// in-circuit [`crate::jagged_circuit::JaggedPcsProofVariable`].
+    ///
+    /// The INNER ring witnesses the bundle via
+    /// [`crate::shard_level_witness::lift_jagged_basefold_bundle`] (digests as
+    /// `[Felt;8]`).  The OUTER ring (`KoalaBearPoseidon2Outer`) supplies a
+    /// structural placeholder: its wrap shard proof is always carried as
+    /// `EvaluationProof::Bytes` (BN254), so the `LiftedEvalProof::Bundle` arm is
+    /// dead for the outer instantiation and never executed — the override only
+    /// needs to TYPE-CHECK with `Self::DigestVariable = [Var<Bn254>; 1]`.  This
+    /// is the escape hatch that lets the SC-generic
+    /// `verify_wrap_basefold_core` compile for both rings.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_bundle_dispatch(
+        builder: &mut Builder<C>,
+        host: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle,
+        basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+        row_counts_by_round: Option<&[Vec<usize>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized;
 }
 
 impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
@@ -232,6 +273,78 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     ) -> <Self as FieldHasher<KoalaBear>>::Digest {
         // Inner digest IS [KoalaBear; 8] — identity.
         root
+    }
+
+    // P2c STEP 3: the INNER ring's lift dispatchers.  `Self::DigestVariable`
+    // is concretely `[Felt<KoalaBear>; 8]` here, so the const/witness lifts
+    // (which require that) type-check directly.
+    fn lift_evaluation_proof_bytes_dispatch(
+        builder: &mut Builder<C>,
+        bytes: &[u8],
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized,
+    {
+        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, Self>(
+            builder,
+            bytes,
+            max_log_row_count,
+            column_counts_by_round,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn lift_bundle_dispatch(
+        builder: &mut Builder<C>,
+        host: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle,
+        basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+        row_counts_by_round: Option<&[Vec<usize>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized,
+    {
+        crate::shard_level_witness::lift_jagged_basefold_bundle::<C, Self>(
+            builder,
+            host,
+            basefold_proof,
+            sumcheck,
+            jagged_eval,
+            expected_eval,
+            max_log_row_count,
+            column_counts_by_round,
+            row_counts_by_round,
+        )
     }
 }
 
@@ -337,7 +450,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
-            <Self as FieldHasher<C::F>>::Digest,
+            Self::DigestVariable,
         >,
         Self::DigestVariable,
         C::F,
@@ -348,7 +461,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         Self: Sized,
     {
         // OUTER ring: deserialize the BN254 bundle and lift its real
-        // commitments.  Falls back to the inner-style zero placeholder only
+        // commitments.  Falls back to the structural zero placeholder only
         // if deserialization fails (empty/placeholder paths).
         if let Some(bundle) =
             zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
@@ -363,12 +476,54 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
                 None,
             )
         } else {
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, Self>(
+            // P2c STEP 3: the inner bytes lift now requires [Felt;8] digests
+            // (which the outer ring lacks), so route the outer fallback to the
+            // digest-generic placeholder.
+            crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
                 builder,
-                bytes,
                 max_log_row_count,
                 column_counts_by_round,
             )
         }
+    }
+
+    /// P2c STEP 3: the OUTER ring never carries a `LiftedEvalProof::Bundle`
+    /// (its wrap shard proof is `Bytes`/BN254), so this arm is dead — build a
+    /// structural `[Var<Bn254>;1]` placeholder so the SC-generic
+    /// `verify_wrap_basefold_core` type-checks for the outer instantiation.
+    #[allow(clippy::too_many_arguments)]
+    fn lift_bundle_dispatch(
+        builder: &mut Builder<C>,
+        _host: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle,
+        _basefold_proof: crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [Felt<C::F>; 8],
+        >,
+        _sumcheck: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
+        _expected_eval: Ext<C::F, C::EF>,
+        max_log_row_count: usize,
+        column_counts_by_round: &[Vec<usize>],
+        _row_counts_by_round: Option<&[Vec<usize>]>,
+    ) -> crate::jagged_circuit::JaggedPcsProofVariable<
+        crate::basefold_verifier::RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            Self::DigestVariable,
+        >,
+        Self::DigestVariable,
+        C::F,
+        C::EF,
+    >
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized,
+    {
+        crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
+            builder,
+            max_log_row_count,
+            column_counts_by_round,
+        )
     }
 }

@@ -132,7 +132,7 @@ pub fn assemble_basefold_shard_proof_variable<C, HV>(
     logup_gkr_proof: &st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     zerocheck_proof: &st::PartialSumcheckProof<Ext<C::F, C::EF>>,
     evaluation_proof: JaggedPcsProofVariable<
-        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+        RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
         HV::DigestVariable,
         C::F,
         C::EF,

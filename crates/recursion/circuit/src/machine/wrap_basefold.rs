@@ -248,19 +248,22 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
     let evaluation_proof_var = match &evaluation_proof {
         LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval } if !legacy_lift => {
-            crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
+            // P2c STEP 3: route through the ring-aware trait dispatch so the
+            // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
+            // bundle) and outer (BN254, dead arm → placeholder).
+            <SC as FieldHasherVariable<C>>::lift_bundle_dispatch(
                 builder,
                 host,
                 basefold_proof.clone(),
-                        sumcheck.clone(),
-                        jagged_eval.clone(),
-                        *expected_eval,
+                sumcheck.clone(),
+                jagged_eval.clone(),
+                *expected_eval,
                 max_log_row_count,
                 &column_counts_by_round,
                 None,
             )
         }
-        LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+        LiftedEvalProof::Bundle { host, .. } => <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
             builder,
             &host.to_bytes(),
             max_log_row_count,
@@ -281,7 +284,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 &column_counts_by_round,
             )
         }
-        LiftedEvalProof::Empty => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
+        LiftedEvalProof::Empty => <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
             builder,
             &[],
             max_log_row_count,

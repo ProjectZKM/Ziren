@@ -231,7 +231,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     Bundle {
         host: JaggedBasefoldBundle,
         basefold_proof:
-            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+            RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
         // P2c STEP 2b: the reduction sumcheck, jagged-eval sub-sumcheck, and
         // expected_eval (q_at_z) — also pre-read from the witness stream.
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -918,7 +918,7 @@ pub fn lift_jagged_basefold_bundle_outer<C>(
     RecursiveBasefoldProof<
         Felt<C::F>,
         Ext<C::F, C::EF>,
-        <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasher<C::F>>::Digest,
+        <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
     >,
     <zkm_recursion_core::stark::KoalaBearPoseidon2Outer as crate::hash::FieldHasherVariable<C>>::DigestVariable,
     C::F,
@@ -994,9 +994,14 @@ where
         host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
 
     // ── REAL: basefold proof from bundle.basefold_proof (BN254 digests) ──
+    // P2c STEP 3: the verifier `type Proof` now carries `HV::DigestVariable`
+    // ([Var<Bn254>;1] for the outer ring), so const-promote the raw
+    // [Bn254;1] digests via `const_digest` after the scalar read.
     let host_basefold_outer =
         host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
-    let basefold_proof_var = <_ as Witnessable<C>>::read(&host_basefold_outer, builder);
+    let basefold_proof_raw = <_ as Witnessable<C>>::read(&host_basefold_outer, builder);
+    let basefold_proof_var =
+        proof_digests_to_digestvar::<C, HV>(builder, basefold_proof_raw);
 
     // ── REAL: batch_evaluations as Ext constants ──
     let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
@@ -1010,7 +1015,7 @@ where
         RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
-            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+            <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable,
         >,
         C::F,
         C::EF,
@@ -1181,17 +1186,19 @@ pub fn lift_evaluation_proof_via_bundle<C, HV>(
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
     HV::DigestVariable,
     C::F,
     C::EF,
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    // P2c STEP 3: the witnessing/const lift pins inner digests to [Felt;8].
+    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
-        let (cp, sc, je, ee) = const_basefold_proof_from_bundle::<C>(&bundle, builder);
+        let (cp, sc, je, ee) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
         lift_jagged_basefold_bundle::<C, HV>(
             builder, &bundle, cp, sc, je, ee, max_log_row_count, column_counts_by_round, None,
         )
@@ -1200,9 +1207,8 @@ where
         // placeholder (preserves shape compatibility with scaffolding
         // tests and the BasefoldShardProof::empty() construction
         // path).
-        crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, HV>(
+        crate::jagged_pcs_lift::lift_empty_placeholder::<C, HV>(
             builder,
-            bytes,
             max_log_row_count,
             column_counts_by_round,
         )
@@ -1424,29 +1430,116 @@ where
     }
 }
 
-/// P2c STEP 2: const-build the basefold proof from a host bundle (the
+/// P2c STEP 3: const-promote a raw-digest basefold proof
+/// (`RecursiveBasefoldProof<Felt, Ext, HV::Digest>`) into the verifier's
+/// `HV::DigestVariable` digest form via `HV::const_digest`.  The verifier's
+/// `type Proof` now carries `HV::DigestVariable` digests (not the raw host
+/// `FieldHasher::Digest`), so the const-build (bytes-fallback) inner path and
+/// the OUTER BN254 lift — both of which BAKE digest values — must promote.
+/// (The inner *production* path witnesses its digests in
+/// `read_basefold_proof_from_stream` instead; this is only for the baked
+/// legacy/outer paths where value-independence is unnecessary.)
+fn proof_digests_to_digestvar<C, HV>(
+    builder: &mut Builder<C>,
+    src: RecursiveBasefoldProof<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+        <HV as crate::hash::FieldHasher<C::F>>::Digest,
+    >,
+) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+{
+    use crate::basefold_verifier::{
+        RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldRound,
+    };
+    // const_digest borrows `builder` mutably, so thread it via explicit
+    // loops (closures can't re-borrow it per element).
+    let mut rounds = Vec::with_capacity(src.rounds.len());
+    for r in src.rounds.into_iter() {
+        let commitment = HV::const_digest(builder, r.commitment);
+        rounds.push(RecursiveBasefoldRound {
+            uni_poly: r.uni_poly,
+            commitment,
+            _phantom_f: core::marker::PhantomData,
+        });
+    }
+    let mut query_phase_openings = Vec::with_capacity(src.query_phase_openings.len());
+    for round in src.query_phase_openings.into_iter() {
+        let mut round_openings = Vec::with_capacity(round.len());
+        for o in round.into_iter() {
+            let mut merkle_path_digests = Vec::with_capacity(o.merkle_path_digests.len());
+            for d in o.merkle_path_digests.into_iter() {
+                merkle_path_digests.push(HV::const_digest(builder, d));
+            }
+            round_openings.push(RecursiveBasefoldOpening {
+                position: o.position,
+                sibling_pair: o.sibling_pair,
+                merkle_path_bytes: o.merkle_path_bytes,
+                merkle_path_digests,
+                _phantom: core::marker::PhantomData,
+            });
+        }
+        query_phase_openings.push(round_openings);
+    }
+    let component_openings = src
+        .component_openings
+        .into_iter()
+        .map(|round| {
+            round
+                .into_iter()
+                .map(|c| RecursiveBasefoldComponentOpening {
+                    leaf_values: c.leaf_values,
+                    merkle_path_bytes: c.merkle_path_bytes,
+                    _phantom: core::marker::PhantomData,
+                })
+                .collect()
+        })
+        .collect();
+    RecursiveBasefoldProof {
+        rounds,
+        final_poly: src.final_poly,
+        pow_witness: src.pow_witness,
+        batch_grinding_witness: src.batch_grinding_witness,
+        component_openings,
+        query_phase_openings,
+        batch_evaluations: src.batch_evaluations,
+    }
+}
+
+/// P2c STEP 2/3: const-build the basefold proof from a host bundle (the
 /// Step-1 `Witnessable::read` path — values baked, NOT witnessed).  Used by
 /// the legacy bytes-deserialize lift paths (`lift_evaluation_proof_bytes`,
 /// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
 /// lift time and so have no inline pre-read proof.  The production inner path
 /// pre-reads in `BasefoldShardProof::read` instead (value-independent).
+///
+/// STEP 3: digests are const-promoted to `HV::DigestVariable` (rekey raw
+/// KoalaBear roots → `HV::Digest`, read scalars, then const_digest each) so
+/// the returned proof matches the verifier's `type Proof` digest type.
 #[allow(clippy::type_complexity)]
-pub fn const_basefold_proof_from_bundle<C>(
+pub fn const_basefold_proof_from_bundle<C, HV>(
     bundle: &JaggedBasefoldBundle,
     builder: &mut Builder<C>,
 ) -> (
-    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
     PartialSumcheckProof<Ext<C::F, C::EF>>,
     PartialSumcheckProof<Ext<C::F, C::EF>>,
     Ext<C::F, C::EF>,
 )
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
-    let bp = <_ as Witnessable<C>>::read(
-        &host_stacked_basefold_to_recursive(&bundle.basefold_proof),
-        builder,
-    );
+    // Rekey the host proof's raw [InnerVal;8] roots onto HV::Digest (inner:
+    // identity; outer: BN254 default), read the scalar fields, then promote
+    // the digests to HV::DigestVariable.
+    let host_kb = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
+    let host_hv =
+        rekey_basefold_digests_to_hv::<C, HV, InnerVal, InnerChallenge>(host_kb);
+    let raw_var = <_ as Witnessable<C>>::read(&host_hv, builder);
+    let bp = proof_digests_to_digestvar::<C, HV>(builder, raw_var);
     let sc = host_sumcheck_to_const_var::<C>(
         builder,
         &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
@@ -1467,7 +1560,9 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // [InnerVal;8]; rekeyed to HV::Digest below).  This is what makes the
     // recursion program value-independent: the proof values are witness
     // inputs, not baked constants.
-    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+    // P2c STEP 3: digests are now witnessed too ([Felt;8] = inner
+    // DigestVariable), so no rekey is needed below.
+    preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
     // P2c STEP 2b: pre-read (witnessed) reduction sumcheck, jagged-eval
     // sub-sumcheck, and expected_eval — replace the lift's const-builds.
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
@@ -1477,14 +1572,15 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
 ) -> JaggedPcsProofVariable<
-    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, <HV as crate::hash::FieldHasher<C::F>>::Digest>,
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
     HV::DigestVariable,
     C::F,
     C::EF,
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
+    HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
+        + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     use p3_field::PrimeCharacteristicRing;
 
@@ -1514,9 +1610,10 @@ where
     // outer ring uses the dedicated outer lift, not this fn).  No
     // host_stacked_basefold_to_recursive / `.read()` here — the felt/ext
     // values already came off the witness stream in BasefoldShardProof::read.
-    let basefold_proof_var = rekey_basefold_digests_to_hv::<C, HV, Felt<C::F>, Ext<C::F, C::EF>>(
-        preread_basefold_proof,
-    );
+    // P2c STEP 3: digests are witnessed too ([Felt;8] = inner
+    // DigestVariable), so the proof is already in HV::DigestVariable form —
+    // no rekey needed.
+    let basefold_proof_var = preread_basefold_proof;
 
     // ── batch_evaluations for the stacked layer = the SAME witnessed
     // values (reuse, don't re-read/re-const → no double-consume) ──
@@ -1527,7 +1624,7 @@ where
         RecursiveBasefoldProof<
             Felt<C::F>,
             Ext<C::F, C::EF>,
-            <HV as crate::hash::FieldHasher<C::F>>::Digest,
+            HV::DigestVariable,
         >,
         C::F,
         C::EF,
