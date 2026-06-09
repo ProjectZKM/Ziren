@@ -351,17 +351,19 @@ impl<C: Config> MultiField32ChallengerVariable<C> {
         // un-advanced for the two 16-bit grind draws desync'd the betas /
         // query indices and produced a wrong final FRI fold (gnark step9).
         //
-        // We advance the transcript (observe + sample_bits) but do NOT assert
-        // the sampled bits are zero: the in-circuit bit decomposition order is
-        // not yet proven byte-identical to the host's, and the PoW soundness
-        // enforcement is deferred to the recursion-soundness pass.  Discarding
-        // the bits keeps the transcript advance without risking a spurious
-        // bit-order assert failure on an otherwise-valid witness.
+        // PoW soundness: after observing the witness, the low `bits` of the
+        // squeezed challenge must be zero (host `check_witness` returns
+        // `sample_bits(bits) == 0`; a wrap proof that fails this is rejected
+        // host-side).  Assert each sampled bit is 0 so the in-circuit verify
+        // ENFORCES the grind, not just replays its transcript advance.
         if bits == 0 {
             return;
         }
         self.observe(builder, witness);
-        let _sampled = self.sample_bits(builder, bits);
+        let sampled = self.sample_bits(builder, bits);
+        for bit in sampled {
+            builder.assert_var_eq(bit, C::N::ZERO);
+        }
     }
 }
 
