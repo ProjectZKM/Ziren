@@ -2745,9 +2745,21 @@ pub mod tests {
                     if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
                         if let Some(Some(bt)) = rtr.get(k) {
                             eprintln!("[VKEQ-BT] first traced diff @ instr {k}: {:?}", ri[k]);
-                            eprintln!("[VKEQ-BT] backtrace:\n{:?}", bt);
+                            // Captured unresolved; resolve now so symbols/file:line
+                            // appear (needs package-scoped debug info on the
+                            // recursion crates).
+                            let mut bt2 = bt.clone();
+                            bt2.resolve();
+                            // Print only the first recursion-circuit frame (the
+                            // verifier source line that emitted this op).
+                            let s = format!("{:?}", bt2);
+                            let frame = s
+                                .lines()
+                                .find(|l| l.contains("recursion/circuit/src/machine"))
+                                .unwrap_or("(no circuit frame)");
+                            eprintln!("[VKEQ-BT] @instr{k}: {} | {:?}", frame.trim(), ri[k]);
                             bt_shown += 1;
-                            if bt_shown >= 2 {
+                            if bt_shown >= 10 {
                                 break;
                             }
                         }
