@@ -103,12 +103,15 @@ where
         if let Some(bundle) =
             zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
         {
-            let const_proof =
+            let (cp, sc, je, ee) =
                 crate::shard_level_witness::const_basefold_proof_from_bundle::<C>(&bundle, builder);
             return crate::shard_level_witness::lift_jagged_basefold_bundle::<C, HV>(
                 builder,
                 &bundle,
-                const_proof,
+                cp,
+                sc,
+                je,
+                ee,
                 max_log_row_count,
                 column_counts_by_round,
                 None,

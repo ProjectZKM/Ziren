@@ -232,6 +232,11 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         host: JaggedBasefoldBundle,
         basefold_proof:
             RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+        // P2c STEP 2b: the reduction sumcheck, jagged-eval sub-sumcheck, and
+        // expected_eval (q_at_z) — also pre-read from the witness stream.
+        sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
     },
 }
 
@@ -298,7 +303,24 @@ where
                         &host_proof,
                         builder,
                     );
-                LiftedEvalProof::Bundle { host: bundle.clone(), basefold_proof }
+                // STEP 2b: read the reduction sumcheck, jagged-eval sub-sumcheck,
+                // and expected_eval (q_at_z) — same order as `write`.
+                let sumcheck = read_sumcheck_from_stream::<C>(
+                    &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                    builder,
+                );
+                let jagged_eval = read_sumcheck_from_stream::<C>(
+                    &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                    builder,
+                );
+                let expected_eval = bundle.reduction.q_at_z.read(builder);
+                LiftedEvalProof::Bundle {
+                    host: bundle.clone(),
+                    basefold_proof,
+                    sumcheck,
+                    jagged_eval,
+                    expected_eval,
+                }
             }
         };
         // Review item 12: lift the host `ShardOpenedValues` (trace@z)
@@ -331,6 +353,16 @@ where
         {
             let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
             crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
+            // STEP 2b: write sumcheck, jagged_eval, expected_eval (same order as read).
+            write_sumcheck_to_stream::<C>(
+                &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+                witness,
+            );
+            write_sumcheck_to_stream::<C>(
+                &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+                witness,
+            );
+            bundle.reduction.q_at_z.write(witness);
         }
         // Review item 12: write opened_values in the same shape `read`
         // consumes them.
@@ -1159,9 +1191,9 @@ where
     HV: crate::hash::FieldHasherVariable<C> + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
-        let const_proof = const_basefold_proof_from_bundle::<C>(&bundle, builder);
+        let (cp, sc, je, ee) = const_basefold_proof_from_bundle::<C>(&bundle, builder);
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, const_proof, max_log_row_count, column_counts_by_round, None,
+            builder, &bundle, cp, sc, je, ee, max_log_row_count, column_counts_by_round, None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1213,6 +1245,51 @@ where
             builder.constant(host.point_and_eval.1),
         ),
     }
+}
+
+// P2c STEP 2b: value-independent (witness-stream) PartialSumcheckProof — the
+// witnessed counterpart of `host_sumcheck_to_const_var`.  Read/write the ext
+// values in the SAME order.  Used for the reduction sumcheck + the jagged-eval
+// sub-sumcheck so the lift consumes witnessed (not baked) values.
+fn read_sumcheck_from_stream<C>(
+    host: &PartialSumcheckProof<InnerChallenge>,
+    builder: &mut Builder<C>,
+) -> PartialSumcheckProof<Ext<C::F, C::EF>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    PartialSumcheckProof {
+        univariate_polys: host
+            .univariate_polys
+            .iter()
+            .map(|poly| UnivariatePolynomial {
+                coefficients: poly.coefficients.iter().map(|c| c.read(builder)).collect(),
+            })
+            .collect(),
+        claimed_sum: host.claimed_sum.read(builder),
+        point_and_eval: (
+            host.point_and_eval.0.iter().map(|x| x.read(builder)).collect(),
+            host.point_and_eval.1.read(builder),
+        ),
+    }
+}
+
+fn write_sumcheck_to_stream<C>(
+    host: &PartialSumcheckProof<InnerChallenge>,
+    witness: &mut impl WitnessWriter<C>,
+) where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
+{
+    for poly in host.univariate_polys.iter() {
+        for c in poly.coefficients.iter() {
+            c.write(witness);
+        }
+    }
+    host.claimed_sum.write(witness);
+    for x in host.point_and_eval.0.iter() {
+        x.write(witness);
+    }
+    host.point_and_eval.1.write(witness);
 }
 
 /// Lift a host-side [`JaggedBasefoldBundle`] into the in-circuit
@@ -1353,17 +1430,33 @@ where
 /// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
 /// lift time and so have no inline pre-read proof.  The production inner path
 /// pre-reads in `BasefoldShardProof::read` instead (value-independent).
+#[allow(clippy::type_complexity)]
 pub fn const_basefold_proof_from_bundle<C>(
     bundle: &JaggedBasefoldBundle,
     builder: &mut Builder<C>,
-) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>
+) -> (
+    RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+    PartialSumcheckProof<Ext<C::F, C::EF>>,
+    PartialSumcheckProof<Ext<C::F, C::EF>>,
+    Ext<C::F, C::EF>,
+)
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    <_ as Witnessable<C>>::read(
+    let bp = <_ as Witnessable<C>>::read(
         &host_stacked_basefold_to_recursive(&bundle.basefold_proof),
         builder,
-    )
+    );
+    let sc = host_sumcheck_to_const_var::<C>(
+        builder,
+        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+    );
+    let je = host_sumcheck_to_const_var::<C>(
+        builder,
+        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+    );
+    let ee = builder.constant(bundle.reduction.q_at_z);
+    (bp, sc, je, ee)
 }
 
 pub fn lift_jagged_basefold_bundle<C, HV>(
@@ -1375,6 +1468,11 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // recursion program value-independent: the proof values are witness
     // inputs, not baked constants.
     preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [InnerVal; 8]>,
+    // P2c STEP 2b: pre-read (witnessed) reduction sumcheck, jagged-eval
+    // sub-sumcheck, and expected_eval — replace the lift's const-builds.
+    preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_expected_eval: Ext<C::F, C::EF>,
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1407,14 +1505,9 @@ where
     let num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
-    // ── REAL: sumcheck_proof from bundle.reduction ──
-    // Convert eval-form rounds to coeff-form polys via Phase 2's
-    // host converter, then promote to circuit variables via
-    // `builder.constant()` (#245 fix — bundle is host-side data, not
-    // witness-stream input).
-    let host_sumcheck = jagged_reduction_to_partial_sumcheck(&bundle.reduction);
-    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
-        host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
+    // ── P2c STEP 2b: sumcheck_proof = the PRE-READ (witnessed) reduction
+    // sumcheck (read in BasefoldShardProof::read), not a host const. ──
+    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
     // ── P2c STEP 2: basefold proof = the PRE-READ (witnessed) proof ──
     // Rekey its raw [InnerVal;8] digests onto HV::Digest (inner: identity;
@@ -1478,11 +1571,9 @@ where
     // variables via the same const-promotion path as the outer
     // reduction so the in-circuit `real_jagged_evaluator_fn`
     // (compress_basefold.rs) verifies a non-vacuous closing identity.
+    // STEP 2b: pre-read (witnessed) jagged-eval sub-sumcheck.
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
-        partial_sumcheck_proof: host_sumcheck_to_const_var::<C>(
-            builder,
-            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
-        ),
+        partial_sumcheck_proof: preread_jagged_eval,
     };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion ──
@@ -1631,8 +1722,8 @@ where
     // The in-circuit verifier's closing identity asserts
     //     jagged_eval * expected_eval == sumcheck.point_and_eval.1
     // mirroring the host verifier's q_at_z * w(z) == current_claim.
-    // #245 fix: builder.constant() instead of witness-stream read.
-    let expected_eval: Ext<C::F, C::EF> = builder.constant(bundle.reduction.q_at_z);
+    // STEP 2b: pre-read (witnessed) expected_eval (q_at_z).
+    let expected_eval: Ext<C::F, C::EF> = preread_expected_eval;
 
     // ── Top-level assembly ──
     JaggedPcsProofVariable {
