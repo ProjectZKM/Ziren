@@ -30,6 +30,16 @@ pub trait DeviceTraceProvider: Send + Sync {
         chip_name: &str,
     ) -> Option<Arc<dyn Any + Send + Sync>>;
 
+    /// Signal that `chip_name`'s device trace has been fully consumed
+    /// — called by the zerocheck `prepare` (device-fold) path AFTER it
+    /// successfully CLONED the trace into its own bit-reversed fold
+    /// buffer; the original is never read again (round folds and
+    /// openings all derive from the clone).  Implementations MAY drop
+    /// their entry here to release the device memory early (#367 OOM
+    /// shape: the original otherwise pins VRAM for the rest of the
+    /// prove call).  Default: no-op (no early release).
+    fn release_by_name(&self, _chip_name: &str) {}
+
     /// Enumerate chip names; order is implementation-defined.
     /// Default empty disables consumer batch fast paths.
     fn chip_names(&self) -> Vec<String> {
