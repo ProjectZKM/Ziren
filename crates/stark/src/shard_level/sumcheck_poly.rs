@@ -546,6 +546,14 @@ pub struct ZerocheckChipYTupleInput<'a> {
     pub alpha: Ef4,
     pub eq: &'a [Ef4],
     pub num_real: usize,
+    /// Device-RESIDENT cells for this chip (the #108 residency path): when
+    /// set, `main_cells`/`prep_cells` are EMPTY and the handle downcasts to
+    /// the provider's col-major device buffer (round 0:
+    /// `ColMajorMatrixDevice<KoalaBear>`; rounds >= 1: `DeviceEf4Cells`),
+    /// laid out `[main(nm) ++ prep(npc)]` with column stride = its row
+    /// count.  The fused hook reads it IN PLACE (pointer-array kernel) — no
+    /// host marshaling, no per-chip launch.
+    pub device_cells: Option<&'a (dyn core::any::Any + Send + Sync)>,
 }
 
 /// Batched per-round y-tuple hook: computes (y_0,y_2,y_3,y_4) for ALL
