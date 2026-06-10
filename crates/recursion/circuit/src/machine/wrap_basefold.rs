@@ -28,7 +28,7 @@ use crate::{
     challenger::CanObserveVariable,
     hash::{FieldHasher, FieldHasherVariable},
     machine::{
-        assert_root_public_values_valid, compress::PublicValuesOutputDigest,
+        compress::PublicValuesOutputDigest, recursion_public_values_digest,
         root_public_values_digest, RootPublicValues, ZKMMerkleProofVerifier,
         ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
     },
@@ -472,8 +472,25 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             inner.digest = root_public_values_digest::<C, SC>(builder, &inner);
         }
         PublicValuesOutputDigest::Reduce => {
-            // Intermediate (shrink) layer: keep the reflected recursion digest.
-            assert_root_public_values_valid::<C, SC>(builder, public_values);
+            // Intermediate (shrink) layer.  The input (compress) proof's
+            // reflected digest is the RECURSION digest
+            // (`hash(pv[..NUM_PV_ELMS_TO_HASH])`, set by
+            // compress_basefold/deferred_basefold's Reduce arm) — NOT the
+            // root digest, which only the final BN254 wrap computes.  Bind
+            // the reflected digest to the reflected fields and re-emit it
+            // (SP1 parity: compress.rs:468-472 recomputes the Reduce-kind
+            // output digest; root digest validity is only asserted by the
+            // HOST on the final wrap output).  The previous
+            // `assert_root_public_values_valid` demanded
+            // `digest == root_digest(pv)` of an honest compress output —
+            // honestly UNSATISFIABLE, masked while recursion asserts were
+            // vacuous (#7), and tripping the armed DivFAssert at the
+            // shrink program tail.
+            let expected = recursion_public_values_digest::<C, SC>(builder, &inner);
+            for (value, recomputed) in inner.digest.iter().copied().zip(expected) {
+                builder.assert_felt_eq(value, recomputed);
+            }
+            inner.digest = expected;
         }
     }
 

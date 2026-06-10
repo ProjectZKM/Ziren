@@ -305,7 +305,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // It takes several days.
             bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap()
         } else {
-            bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap()
+            // VERIFY_VK=false: the dummy map is a placeholder (membership is
+            // never enforced).  Truncate to the FIXED tree capacity so the
+            // legacy 10k-entry dummy_vk_map.bin doesn't trip the capacity
+            // assert below (the real vk_map is bounded by regen policy).
+            let full: BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+                bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap();
+            full.into_iter().take(1 << VK_MERKLE_TREE_HEIGHT).collect()
         };
 
         // Pad the leaf set to the FIXED tree capacity (see
@@ -1152,6 +1158,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     loop {
                         let received = { input_rx.lock().unwrap().recv() };
                         if let Ok((index, height, input)) = received {
+                            // #7 probe (env-gated): stash the serialized input
+                            // so a runtime trap below can dump it for offline
+                            // localization (variant + bincode payload).
+                            let trip_dump: Option<(&'static str, Vec<u8>)> =
+                                if std::env::var("DUMP_TRIP_INPUT").is_ok() {
+                                    match &input {
+                                        ZKMCircuitWitness::CoreBasefold(i) => {
+                                            Some(("core", bincode::serialize(i).unwrap()))
+                                        }
+                                        ZKMCircuitWitness::ComposeBasefold(i) => {
+                                            Some(("compose", bincode::serialize(i).unwrap()))
+                                        }
+                                        ZKMCircuitWitness::DeferredBasefold(i) => {
+                                            Some(("deferred", bincode::serialize(i).unwrap()))
+                                        }
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                };
                             // Get the program and witness stream.
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"
@@ -1215,6 +1241,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 runtime
                                     .run()
                                     .map_err(|e| {
+                                        // #7 probe: dump the failing input for
+                                        // offline localization (see trip_dump).
+                                        if let Some((variant, bytes)) = trip_dump.as_ref() {
+                                            let path =
+                                                format!("/tmp/trip_{variant}_{index}.bin");
+                                            let _ = std::fs::write(&path, bytes);
+                                            eprintln!(
+                                                "[TRIPDUMP] wrote {path} ({} bytes)",
+                                                bytes.len()
+                                            );
+                                        }
                                         ZKMRecursionProverError::RuntimeError(e.to_string())
                                     })
                                     .unwrap();
@@ -1378,7 +1415,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         StarkVerifyingKey<InnerSC>,
                         ShardProof<InnerSC>,
                     );
-                    let mut pending: Vec<Vec<Item>> =
+                    // #7 enforcement fix — PRESERVE CHAIN ORDER. The compose
+                    // program's shard-chain continuity asserts
+                    // (compress_basefold.rs Step 6f: input_{k+1}.start_{pc,
+                    // shard} == input_k.next_{pc,shard}) require every batch
+                    // to be a CONTIGUOUS, IN-ORDER segment of the proof
+                    // chain.  Proofs arrive on `proofs_rx` in prove-pool
+                    // completion order, so each height keeps a REORDER
+                    // BUFFER (`pending[h]`, keyed by index) plus the layer's
+                    // expected index order (`expected_order[h]`): items move
+                    // to `ready[h]` only in chain order, and chunks are cut
+                    // from `ready`.  (The previous arrival-order `Vec` was
+                    // "tolerant" only while the chain asserts were vacuous
+                    // DivFs — armed, an out-of-order batch like [s1,s3,s2]
+                    // honestly trips the runtime at the continuity assert.)
+                    let mut pending: Vec<std::collections::BTreeMap<usize, Item>> =
+                        (0..layer_sizes_worker.len()).map(|_| Default::default()).collect();
+                    let mut expected_order: Vec<std::collections::VecDeque<usize>> =
+                        (0..layer_sizes_worker.len()).map(|_| Default::default()).collect();
+                    if !layer_sizes_worker.is_empty() {
+                        expected_order[0].extend(0..layer_sizes_worker[0]);
+                    }
+                    let mut ready: Vec<Vec<Item>> =
                         (0..layer_sizes_worker.len()).map(|_| Vec::new()).collect();
                     let mut received_at_height: Vec<usize> =
                         vec![0usize; layer_sizes_worker.len()];
@@ -1400,28 +1458,46 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         if height >= layer_sizes_worker.len() {
                             continue;
                         }
-                        pending[height].push((index, height, vk, proof));
+                        pending[height].insert(index, (index, height, vk, proof));
                         received_at_height[height] += 1;
+
+                        // Move the in-order prefix from the reorder buffer
+                        // into the ready queue.
+                        while let Some(&next_idx) = expected_order[height].front() {
+                            if let Some(item) = pending[height].remove(&next_idx) {
+                                ready[height].push(item);
+                                expected_order[height].pop_front();
+                            } else {
+                                break;
+                            }
+                        }
 
                         let layer_exhausted = received_at_height[height]
                             >= layer_sizes_worker[height];
 
-                        // Drain pending[height] in chunks of up to
+                        // Drain ready[height] in chunks of up to
                         // `batch_size`. Once the source layer is exhausted
                         // we also flush the final partial chunk.
-                        while !pending[height].is_empty()
-                            && (pending[height].len() >= batch_size || layer_exhausted)
+                        while !ready[height].is_empty()
+                            && (ready[height].len() >= batch_size || layer_exhausted)
                         {
-                            let take = pending[height].len().min(batch_size);
+                            let take = ready[height].len().min(batch_size);
                             let chunk: Vec<Item> =
-                                pending[height].drain(..take).collect();
+                                ready[height].drain(..take).collect();
                             let next_input_height = height + 1;
                             // is_complete iff this emission produces the
                             // root and there's nothing else queued at this
                             // height (covers both N-power-of-arity and
                             // partial-final-chunk cases).
                             let is_complete = next_input_height == expected_height
+                                && ready[height].is_empty()
                                 && pending[height].is_empty();
+                            // Register this emission's index in the next
+                            // layer's expected chain order (the reorder
+                            // buffer drains in this order).
+                            if next_input_height < expected_order.len() {
+                                expected_order[next_input_height].push_back(count);
+                            }
 
                             // Basefold is the only path; every input must
                             // carry a basefold side-channel. Missing
@@ -1913,38 +1989,40 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vks: &[StarkVerifyingKey<InnerSC>],
     ) -> ZKMMerkleProofWitnessValues<InnerSC> {
         let num_vks = self.recursion_vk_map.len();
-        let (vk_indices, vk_digest_values): (Vec<_>, Vec<_>) = if self.vk_verification {
+        let vk_indices: Vec<usize> = if self.vk_verification {
             vks.iter()
                 .map(|vk| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = self
-                        .recursion_vk_map
-                        .get(&vk_digest)
-                        .expect("vk not allowed");
-                    (index, vk_digest)
+                    *self.recursion_vk_map.get(&vk_digest).expect("vk not allowed")
                 })
-                .unzip()
+                .collect()
         } else {
             vks.iter()
                 .map(|vk| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
-                    (index, [KoalaBear::from_usize(index); 8])
+                    (vk_digest[0].as_canonical_u32() as usize) % num_vks
                 })
-                .unzip()
+                .collect()
         };
 
-        let proofs = vk_indices
+        // #7 enforcement: the witnessed `value` MUST be the ACTUAL leaf at
+        // the opened index — the in-circuit `merkle_tree::verify` walks the
+        // path from `value` to the root UNCONDITIONALLY (only the
+        // value==vk_digest binding is gated on vk_verification).  The old
+        // code fabricated `[index; 8]` under VERIFY_VK=false, which can
+        // never re-derive the real root; that was masked while the
+        // recursion asserts were vacuous.  SP1 parity: RecursionVks::open
+        // returns MerkleTree::open's (value, proof) verbatim.  Under
+        // vk_verification=true the leaf IS the vk digest, so this is
+        // value-identical to the previous behavior there.
+        let (values, proofs): (Vec<_>, Vec<_>) = vk_indices
             .iter()
-            .map(|index| {
-                let (_, proof) = MerkleTree::open(&self.recursion_vk_tree, *index);
-                proof
-            })
-            .collect();
+            .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
+            .unzip();
 
         ZKMMerkleProofWitnessValues {
             root: self.recursion_vk_root,
-            values: vk_digest_values,
+            values,
             vk_merkle_proofs: proofs,
         }
     }
@@ -1954,39 +2032,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: ZKMCompressWitnessValues<CoreSC>,
     ) -> ZKMCompressWithVKeyWitnessValues<CoreSC> {
         let num_vks = self.recursion_vk_map.len();
-        let (vk_indices, vk_digest_values): (Vec<_>, Vec<_>) = if self.vk_verification {
+        let vk_indices: Vec<usize> = if self.vk_verification {
             input
                 .vks_and_proofs
                 .iter()
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = self.recursion_vk_map.get(&vk_digest).expect("vk not allowed");
-                    (index, vk_digest)
+                    *self.recursion_vk_map.get(&vk_digest).expect("vk not allowed")
                 })
-                .unzip()
+                .collect()
         } else {
             input
                 .vks_and_proofs
                 .iter()
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
-                    let index = (vk_digest[0].as_canonical_u32() as usize) % num_vks;
-                    (index, [KoalaBear::from_usize(index); 8])
+                    (vk_digest[0].as_canonical_u32() as usize) % num_vks
                 })
-                .unzip()
+                .collect()
         };
 
-        let proofs = vk_indices
+        // #7 enforcement: witness the ACTUAL opened leaf (see
+        // make_basefold_merkle_proofs for the full rationale) — the
+        // in-circuit merkle walk is unconditional, so a fabricated
+        // `[index; 8]` value is honestly unsatisfiable.
+        let (values, proofs): (Vec<_>, Vec<_>) = vk_indices
             .iter()
-            .map(|index| {
-                let (_, proof) = MerkleTree::open(&self.recursion_vk_tree, *index);
-                proof
-            })
-            .collect();
+            .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
+            .unzip();
 
         let merkle_val = ZKMMerkleProofWitnessValues {
             root: self.recursion_vk_root,
-            values: vk_digest_values,
+            values,
             vk_merkle_proofs: proofs,
         };
 
@@ -3552,12 +3629,17 @@ pub mod tests {
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced;
         let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
         let height = VK_MERKLE_TREE_HEIGHT;
-        let vk_merkle_data =
-            if prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear()) {
-                prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])
-            } else {
-                zkm_recursion_circuit::machine::ZKMMerkleProofWitnessValues::dummy(1, height)
-            };
+        // Mirror ZKMProver::shrink exactly: make_basefold_merkle_proofs is
+        // total under VERIFY_VK=false (hash-derived index); only fall back to
+        // the dummy when vk_verification=true AND the vk is missing (where
+        // the real call would panic "vk not allowed").
+        let vk_merkle_data = if !prover.vk_verification
+            || prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear())
+        {
+            prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])
+        } else {
+            zkm_recursion_circuit::machine::ZKMMerkleProofWitnessValues::dummy(1, height)
+        };
         let input = ZKMWrapBasefoldWitnessValues {
             vks_and_proofs: vec![(compressed_vk, basefold_proof)],
             vk_merkle_data,
@@ -3574,14 +3656,55 @@ pub mod tests {
                 eprintln!("[SPROBE] consumer flat={i}: {}", s.chars().take(170).collect::<String>());
             }
         }
+        // Run the REAL witness; on trap, print the full error (instr debug
+        // carries the in1 Address for the address-matching pass) and dump
+        // memory at every address referenced in the trap window.
+        let rt = {
+            let mut rt = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                prog.clone(),
+                prover.shrink_prover.config().perm.clone(),
+            );
+            let mut stream = Vec::new();
+            Witnessable::<InnerConfig>::write(&input, &mut stream);
+            rt.witness_stream = stream.into();
+            let res = rt.run();
+            match &res {
+                Err(e) => eprintln!(
+                    "[SPROBE] real-run TRAP: {}",
+                    format!("{e}").chars().take(600).collect::<String>()
+                ),
+                Ok(()) => eprintln!("[SPROBE] real-run OK (no trap)"),
+            }
+            rt
+        };
         if let Some(i) = hit {
-            for w in i.saturating_sub(12)..=(i + 2).min(instrs.len() - 1) {
+            for w in i.saturating_sub(60)..=(i + 18).min(instrs.len() - 1) {
                 let s = format!("{:?}", instrs[w]);
                 eprintln!(
                     "[SPROBE] W flat={w}{} {}",
                     if w == i { " <==FAIL" } else { "" },
-                    s.chars().take(170).collect::<String>()
+                    s.chars().take(400).collect::<String>()
                 );
+            }
+            // Dump memory at every address in the window.
+            use p3_field::PrimeCharacteristicRing as _;
+            let mut addrs: Vec<u32> = Vec::new();
+            for w in i.saturating_sub(60)..=(i + 18).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                for cap in s.split("Address(").skip(1) {
+                    if let Some(end) = cap.find(')') {
+                        if let Ok(a) = cap[..end].parse::<u32>() {
+                            if !addrs.contains(&a) {
+                                addrs.push(a);
+                            }
+                        }
+                    }
+                }
+            }
+            for &a in addrs.iter() {
+                let addr = zkm_recursion_core::Address(KoalaBear::from_u32(a));
+                let entry = unsafe { rt.memory.mr_unchecked(addr) };
+                eprintln!("[SPROBE] mem[{a}] = {:?}", entry.val);
             }
             // nearest trace below
             let mut p = i as i64;
@@ -3601,6 +3724,239 @@ pub mod tests {
                     break;
                 }
                 p -= 1;
+            }
+        }
+    }
+
+    /// #7 enforcement probe for a TRIPPED normalize (CoreBasefold) program:
+    /// load the input dumped by DUMP_TRIP_INPUT (env TRIP_INPUT, default
+    /// /tmp/trip_core_2.bin), rebuild the program, run the real witness,
+    /// and localize the failing Div{F,E}Assert by operand address
+    /// (env TRAP_IN1).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_enforce_probe_core_trip() {
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        std::env::set_var("ZKM_DEBUG", "true");
+        let trap_in1: u32 = std::env::var("TRAP_IN1")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(379644);
+        setup_logger();
+        let path = std::env::var("TRIP_INPUT")
+            .unwrap_or_else(|_| "/tmp/trip_core_2.bin".to_string());
+        let bytes = std::fs::read(&path).expect("need DUMP_TRIP_INPUT dump");
+        let input: ZKMCoreBasefoldWitnessValues<InnerSC> =
+            bincode::deserialize(&bytes).unwrap();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        // Host-side structural analysis: compare the circuit's column-claim
+        // geometry (name-sorted machine widths + added-zero heuristic)
+        // against the host bundle's actual packing.
+        {
+            use zkm_stark::air::MachineAir;
+            use zkm_stark::shard_level::shard_proof::EvaluationProof;
+            for (si, sp) in input.shard_proofs.iter().enumerate() {
+                let names: Vec<String> = sp.chip_log_heights.keys().cloned().collect();
+                eprintln!(
+                    "[CPROBE] shard {si}: chip_log_heights={:?}",
+                    sp.chip_log_heights
+                );
+                let _ = &names;
+                // Per-chip main widths exactly as the circuit's
+                // evaluation_claims sees them: opened_values main.local lens.
+                let widths: Vec<usize> = sp
+                    .opened_values
+                    .chips
+                    .iter()
+                    .map(|c| c.main.local.len())
+                    .collect();
+                let flat: usize = widths.iter().sum();
+                let added = if widths.len() >= 2 { widths[widths.len() - 2] + 1 } else { 1 };
+                let padded = (flat + added).next_power_of_two();
+                eprintln!(
+                    "[CPROBE] shard {si}: circuit widths(name-sorted)={widths:?} flat={flat} added(heuristic)={added} padded={padded} zcol_circ={}",
+                    padded.trailing_zeros()
+                );
+                if let EvaluationProof::Bundle(b) = &sp.evaluation_proof {
+                    let host_cols = b.packing.offsets.len().saturating_sub(1);
+                    eprintln!(
+                        "[CPROBE] shard {si}: host packing.column_counts={:?} offsets.len()-1={} total_values={} log_dense={} zcol_host={}",
+                        b.packing.column_counts,
+                        host_cols,
+                        b.packing.total_values,
+                        b.packing.log_dense_size,
+                        host_cols.next_power_of_two().trailing_zeros()
+                    );
+                    eprintln!(
+                        "[CPROBE] shard {si}: y_per_chip lens={:?} (Σ={})",
+                        b.y_per_chip.iter().map(|y| y.len()).collect::<Vec<_>>(),
+                        b.y_per_chip.iter().map(|y| y.len()).sum::<usize>()
+                    );
+                }
+            }
+        }
+        let prog = prover.recursion_program_basefold(&input);
+        use zkm_recursion_core::Instruction as RInstr;
+        let instrs: Vec<&RInstr<KoalaBear>> = prog.iter_instructions().collect();
+        eprintln!("[CPROBE] program instrs={}", instrs.len());
+        let mut hit = None;
+        for (i, ins) in instrs.iter().enumerate() {
+            let s = format!("{ins:?}");
+            if (s.contains("DivFAssert") || s.contains("DivEAssert"))
+                && s.contains(&format!("in1: Address({trap_in1})"))
+            {
+                hit = Some(i);
+                eprintln!(
+                    "[CPROBE] consumer flat={i}: {}",
+                    s.chars().take(170).collect::<String>()
+                );
+            }
+        }
+        let rt = {
+            let mut rt = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                prog.clone(),
+                prover.compress_prover.config().perm.clone(),
+            );
+            let mut stream = Vec::new();
+            Witnessable::<InnerConfig>::write(&input, &mut stream);
+            rt.witness_stream = stream.into();
+            let res = rt.run();
+            match &res {
+                Err(e) => eprintln!(
+                    "[CPROBE] real-run TRAP: {}",
+                    format!("{e}").chars().take(600).collect::<String>()
+                ),
+                Ok(()) => eprintln!("[CPROBE] real-run OK (no trap)"),
+            }
+            rt
+        };
+        if let Some(i) = hit {
+            for w in i.saturating_sub(60)..=(i + 18).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                eprintln!(
+                    "[CPROBE] W flat={w}{} {}",
+                    if w == i { " <==FAIL" } else { "" },
+                    s.chars().take(400).collect::<String>()
+                );
+            }
+            use p3_field::PrimeCharacteristicRing as _;
+            let mut addrs: Vec<u32> = Vec::new();
+            for w in i.saturating_sub(60)..=(i + 18).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                for cap in s.split("Address(").skip(1) {
+                    if let Some(end) = cap.find(')') {
+                        if let Ok(a) = cap[..end].parse::<u32>() {
+                            if !addrs.contains(&a) {
+                                addrs.push(a);
+                            }
+                        }
+                    }
+                }
+            }
+            for &a in addrs.iter() {
+                let addr = zkm_recursion_core::Address(KoalaBear::from_u32(a));
+                let entry = unsafe { rt.memory.mr_unchecked(addr) };
+                eprintln!("[CPROBE] mem[{a}] = {:?}", entry.val);
+            }
+        }
+    }
+
+    /// #7 enforcement probe for a TRIPPED compose (CompressBasefold)
+    /// program: load the input dumped by DUMP_TRIP_INPUT (env TRIP_INPUT,
+    /// default /tmp/trip_compose_3.bin), rebuild, run the real witness,
+    /// localize by operand address (env TRAP_IN1).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_enforce_probe_compose_trip() {
+        use zkm_recursion_circuit::machine::ZKMCompressBasefoldWitnessValues;
+        std::env::set_var("ZKM_DEBUG", "true");
+        let trap_in1: u32 = std::env::var("TRAP_IN1")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(400965);
+        setup_logger();
+        let path = std::env::var("TRIP_INPUT")
+            .unwrap_or_else(|_| "/tmp/trip_compose_3.bin".to_string());
+        let bytes = std::fs::read(&path).expect("need DUMP_TRIP_INPUT dump");
+        let input: ZKMCompressBasefoldWitnessValues<InnerSC> =
+            bincode::deserialize(&bytes).unwrap();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        eprintln!(
+            "[XPROBE] compose arity={} is_complete={:?}",
+            input.vks_and_proofs.len(),
+            input.is_complete,
+        );
+        for (pi, (_vk, p)) in input.vks_and_proofs.iter().enumerate() {
+            eprintln!(
+                "[XPROBE] input {pi}: chip_log_heights={:?} pv[..24]={:?}",
+                p.chip_log_heights,
+                p.public_values.iter().take(24).collect::<Vec<_>>()
+            );
+        }
+        let prog = prover.compose_program_basefold(&input);
+        use zkm_recursion_core::Instruction as RInstr;
+        let instrs: Vec<&RInstr<KoalaBear>> = prog.iter_instructions().collect();
+        eprintln!("[XPROBE] program instrs={}", instrs.len());
+        let mut hit = None;
+        for (i, ins) in instrs.iter().enumerate() {
+            let s = format!("{ins:?}");
+            if (s.contains("DivFAssert") || s.contains("DivEAssert"))
+                && s.contains(&format!("in1: Address({trap_in1})"))
+            {
+                hit = Some(i);
+                eprintln!(
+                    "[XPROBE] consumer flat={i}: {}",
+                    s.chars().take(170).collect::<String>()
+                );
+            }
+        }
+        let rt = {
+            let mut rt = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                prog.clone(),
+                prover.compress_prover.config().perm.clone(),
+            );
+            let mut stream = Vec::new();
+            Witnessable::<InnerConfig>::write(&input, &mut stream);
+            rt.witness_stream = stream.into();
+            let res = rt.run();
+            match &res {
+                Err(e) => eprintln!(
+                    "[XPROBE] real-run TRAP: {}",
+                    format!("{e}").chars().take(600).collect::<String>()
+                ),
+                Ok(()) => eprintln!("[XPROBE] real-run OK (no trap)"),
+            }
+            rt
+        };
+        if let Some(i) = hit {
+            for w in i.saturating_sub(220)..=(i + 40).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                eprintln!(
+                    "[XPROBE] W flat={w}{} {}",
+                    if w == i { " <==FAIL" } else { "" },
+                    s.chars().take(400).collect::<String>()
+                );
+            }
+            use p3_field::PrimeCharacteristicRing as _;
+            let mut addrs: Vec<u32> = Vec::new();
+            for w in i.saturating_sub(220)..=(i + 40).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                for cap in s.split("Address(").skip(1) {
+                    if let Some(end) = cap.find(')') {
+                        if let Ok(a) = cap[..end].parse::<u32>() {
+                            if !addrs.contains(&a) {
+                                addrs.push(a);
+                            }
+                        }
+                    }
+                }
+            }
+            for &a in addrs.iter() {
+                let addr = zkm_recursion_core::Address(KoalaBear::from_u32(a));
+                let entry = unsafe { rt.memory.mr_unchecked(addr) };
+                eprintln!("[XPROBE] mem[{a}] = {:?}", entry.val);
             }
         }
     }

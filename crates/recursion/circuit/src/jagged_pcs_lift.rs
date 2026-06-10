@@ -168,26 +168,24 @@ where
 
     // Compute the padded column count from the actual per-round
     // shape.  This must match the column_claims construction in
-    // [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`]
-    // (recursive_jagged_pcs.rs:190-223, mirror of
-    // SP1 crates/recursion/circuit/src/jagged/verifier.rs):
+    // [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`]:
     //
     //   column_claims.len() = Σ_r (sum(cc[r]))  // flattened claims
-    //                       + Σ_r (cc[r][len-2] + 1)  // artificial zero insertions
     // then resize-to-next_power_of_two.
     //
+    // #7 HOST parity: no artificial-zero column insertions — the host
+    // packing has no pad columns (`offsets.len()-1 == Σ widths`); see
+    // recursive_jagged_pcs.rs / shard_level_witness.rs for the full
+    // rationale (the old `cc[len-2]+1` heuristic desynced z_col counts).
+    //
     // The lift's `col_prefix_sums_len = padded_cols + 1` controls
-    // `num_col_variables = log2(padded_cols)`; the MLE assertion at
-    // recursive_jagged_pcs.rs:227 requires
+    // `num_col_variables = log2(padded_cols)`; the MLE assertion in
+    // verify_trusted_evaluations requires
     // `column_claims.len() == 2 ^ num_col_variables`, so these
     // formulas MUST agree.
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
-        .map(|cc| {
-            let flattened = cc.iter().sum::<usize>();
-            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-            flattened + added
-        })
+        .map(|cc| cc.iter().sum::<usize>())
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     // col_prefix_sums must satisfy `col_prefix_sums.len() - 1 == num_cols`
@@ -404,12 +402,12 @@ mod tests {
     fn lift_metadata_scales_with_max_log_row_count() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         // 2 rounds × 2 chips each with 3 cols.  Per-round formula
-        // (post-Phase 2 gate 3 fix): flattened = 3+3 = 6,
-        // added = cc[len-2]+1 = 3+1 = 4, total per round = 10.
-        // 2 rounds = 20 → padded to 32 → col_prefix_sums.len() = 33.
+        // (#7 host parity — flat only, no artificial-zero columns):
+        // flattened = 3+3 = 6 per round, 2 rounds = 12 → padded to 16
+        // → col_prefix_sums.len() = 17.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
         let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 8, &cols);
-        assert_eq!(var.params.col_prefix_sums.len(), 33);
+        assert_eq!(var.params.col_prefix_sums.len(), 17);
         assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }
 }

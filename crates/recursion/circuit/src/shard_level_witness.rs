@@ -984,13 +984,11 @@ where
     };
     let column_counts_by_round: &[Vec<usize>] = &real_column_counts_by_round;
     // ── Padding shape (mirror of lift_jagged_basefold_bundle) ──
+    // #7 HOST parity: flat column count only — no artificial-zero columns
+    // (see lift_jagged_basefold_bundle's padding-shape comment).
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
-        .map(|cc| {
-            let flattened = cc.iter().sum::<usize>();
-            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-            flattened + added
-        })
+        .map(|cc| cc.iter().sum::<usize>())
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
@@ -1101,17 +1099,8 @@ where
                 bits_per_entry,
             ));
         }
-        let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-        for _ in 0..added {
-            if col_prefix_sums.len() >= col_prefix_sums_len {
-                break;
-            }
-            col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                builder,
-                cap_to_bits(current_offset),
-                bits_per_entry,
-            ));
-        }
+        // #7 HOST parity: no artificial-zero columns; the pow2
+        // tail-pad below emits the same `current_offset` entries.
     }
     while col_prefix_sums.len() < col_prefix_sums_len - 1 {
         col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
@@ -1619,14 +1608,19 @@ where
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
 
-    // ── Padding shape (mirror of jagged_pcs_lift.rs:111-137) ──
+    // ── Padding shape (mirror of jagged_pcs_lift.rs) ──
+    // #7 HOST parity: column count = FLAT Σ chip widths (the host packing
+    // has no artificial pad columns: `offsets.len()-1 == Σ widths`), padded
+    // to the next power of two.  This drives `num_col_variables` =
+    // the number of z_col challenges the in-circuit verifier samples —
+    // it MUST equal the host's `log2(next_pow2(offsets.len()-1))`
+    // (jagged_pcs.rs verify_jagged_basefold_inner).  The previous
+    // `+ (cc[len-2]+1)` heuristic inflated this across a power-of-two
+    // boundary for some chip sets (keccak shard: 568→1024 vs host 415→512),
+    // desyncing the transcript under #7 enforcement.
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
-        .map(|cc| {
-            let flattened = cc.iter().sum::<usize>();
-            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-            flattened + added
-        })
+        .map(|cc| cc.iter().sum::<usize>())
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
@@ -1776,14 +1770,11 @@ where
                     acc = builder.eval(acc + h);
                 }
             }
-            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-            for _ in 0..added {
-                if col_prefix_sums.len() >= col_prefix_sums_len {
-                    break 'outer;
-                }
-                let bits = num2bits_be(builder, current_offset_felt);
-                col_prefix_sums.push(bits);
-            }
+            // #7 HOST parity: no artificial-zero columns (see padding-shape
+            // comment above); the pow2 tail-pad below reuses
+            // `current_offset_felt`, identical to what the old added-loop
+            // emitted, so the per-entry values are unchanged where lengths
+            // coincide.
         }
         while col_prefix_sums.len() < col_prefix_sums_len - 1 {
             let bits = num2bits_be(builder, current_offset_felt);
@@ -1819,20 +1810,8 @@ where
                     bits_per_entry,
                 ));
             }
-            // Artificial-zero columns: cc[len-2]+1 if cc has >=2 chips,
-            // else 1 (degenerate single-chip round).  They share the
-            // current_offset (no advance).
-            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-            for _ in 0..added {
-                if col_prefix_sums.len() >= col_prefix_sums_len {
-                    break;
-                }
-                col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-                    builder,
-                    cap_to_bits(current_offset),
-                    bits_per_entry,
-                ));
-            }
+            // #7 HOST parity: no artificial-zero columns; the pow2
+            // tail-pad below emits the same `current_offset` entries.
         }
         // Pad to padded_cols (skip last slot — that one's reserved for
         // total_values).  Padding columns also have zero advance.

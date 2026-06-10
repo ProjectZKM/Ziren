@@ -476,17 +476,30 @@ pub fn verify_compress_basefold<C, SC, A>(
             _column_counts_by_round.iter().flatten().sum(),
         );
 
-        // Step 5d: opened_values built from the LogUp-GKR
-        // chip_openings via the shared adapter.  // consume real per-chip cumulative_sums from witnessed
-        // BasefoldShardProof.chip_cumulative_sums (per-input).
+        // Step 5d: opened_values — use the CARRIED per-chip trace@z
+        // openings from the host proof (`proof_opened_values`), exactly
+        // like core_basefold.rs:417 / wrap_basefold.rs:349 (item-12),
+        // NOT the LogUp-GKR chip_openings rebuild.  #7 enforcement fix:
+        // the previous `build_opened_values_from_chip_openings_with_cumsums`
+        // emitted ALL-ZERO placeholder `degree` bits, so the zerocheck
+        // mixed-height EMBEDDING FACTOR (zerocheck.rs:651-665, driven by
+        // the degree one-hot) collapsed to Π_all(1-ζ[k]) instead of the
+        // host's Π_{k<dim-log_h} (verifier.rs G2-b) — tripping the armed
+        // `claimed_sum == λ-RLC(GKR openings)` assert (zerocheck.rs:678)
+        // on every compose input.  `finalize_carried_opened_values`
+        // keeps the proof's REAL big-endian height bits and splices the
+        // witnessed per-chip cumulative sums.
         let empty_cumsums_compress = std::collections::BTreeMap::new();
         let cumsums_for_input = chip_cumulative_sums_per_input
             .get(_i)
             .unwrap_or(&empty_cumsums_compress);
+        let empty_log_heights_compress = std::collections::BTreeMap::new();
         let _opened_values =
-            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
+            crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
                 builder,
-                &logup_gkr_proof.logup_evaluations.chip_openings,
+                proof_opened_values,
+                &chip_names,
+                &empty_log_heights_compress,
                 cumsums_for_input,
                 max_log_row_count,
             );
@@ -498,6 +511,26 @@ pub fn verify_compress_basefold<C, SC, A>(
         // this transcript prologue inside `verify_shard` itself,
         // so we pass a fresh challenger here.
         let mut _challenger = machine.config().challenger_variable(builder);
+
+        // Pre-prologue challenger seeding (#7 enforcement fix) — port of
+        // core_basefold.rs:443-468 / wrap_basefold.rs:370-390: the host
+        // machine verifier seeds the challenger with (1) vk.observe_into
+        // and (2) public_values[0..num_pv] BEFORE the shard prologue
+        // (crates/stark/src/machine.rs:693-707; the prover bakes both
+        // into basefold_challenger_snapshot).  The compose path created a
+        // FRESH challenger and did NEITHER, so every post-prologue squeeze
+        // (first visibly the 12-bit GKR grind check) diverged from the
+        // prover.  Masked by the vacuous recursion asserts; tripped the
+        // armed DivFAssert at the compose input-0 GKR grind
+        // (test_e2e_with_deferred_proofs).  Same fix, third ring.
+        {
+            use crate::challenger::CanObserveVariable;
+            let num_pv = machine.num_pv_elts();
+            vk_legacy.observe_into(builder, &mut _challenger);
+            for &pv in _pubvals_for_aggregate[0..num_pv].iter() {
+                CanObserveVariable::observe(&mut _challenger, builder, pv);
+            }
+        }
 
         // Step 5f: actual verify_shard call.
         // Explicit turbofish required because P (PCS verifier

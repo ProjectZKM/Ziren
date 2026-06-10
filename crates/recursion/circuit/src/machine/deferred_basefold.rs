@@ -316,14 +316,21 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 chip_height_bits,
             );
         // consume real per-chip cumulative_sums.
+        // #7 enforcement fix: use the CARRIED trace@z openings with REAL
+        // degree bits (mirror of core_basefold.rs:417 / the compose Step-5d
+        // fix in compress_basefold.rs) — the chip_openings rebuild emitted
+        // all-zero `degree`, breaking the zerocheck embedding factor.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
         let cumsums_for_input = chip_cumulative_sums_per_input
             .get(_deferred_i)
             .unwrap_or(&empty_cumsums_deferred);
+        let empty_log_heights_deferred = std::collections::BTreeMap::new();
         let opened_values =
-            crate::shard_proof_variable_lift::build_opened_values_from_chip_openings_with_cumsums::<C>(
+            crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
                 builder,
-                &logup_gkr_proof.logup_evaluations.chip_openings,
+                proof_opened_values,
+                &chip_names,
+                &empty_log_heights_deferred,
                 cumsums_for_input,
                 max_log_row_count,
             );
@@ -334,6 +341,22 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 column_counts_by_round.iter().flatten().sum(),
             );
         let mut challenger = machine.config().challenger_variable(builder);
+
+        // Pre-prologue challenger seeding (#7 enforcement fix) — port of
+        // core_basefold.rs:443-468 / wrap_basefold.rs:370-390 /
+        // compress_basefold.rs Step 5e: the host machine verifier seeds
+        // the challenger with vk.observe_into + public_values[0..num_pv]
+        // BEFORE the shard prologue (crates/stark/src/machine.rs:693-707).
+        // The deferred path created a fresh challenger and did neither —
+        // same desync class as the compose path, masked pre-#7.
+        {
+            use crate::challenger::CanObserveVariable;
+            let num_pv = machine.num_pv_elts();
+            vk_legacy.observe_into(builder, &mut challenger);
+            for &pv in public_values_raw[0..num_pv].iter() {
+                CanObserveVariable::observe(&mut challenger, builder, pv);
+            }
+        }
 
         // #244 + #249 fix: per-proof override when bundle path is active.
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.

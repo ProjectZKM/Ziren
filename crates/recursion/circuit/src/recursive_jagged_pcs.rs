@@ -195,38 +195,28 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let z_row: &[Ext<C::F, C::EF>] = point;
 
         // (2) Flatten per-round evaluation claims into a single
-        // column-claim vector + insert the artificial zero columns
-        // the prover padded the commitment with to hit the stacked-
-        // PCS stripe alignment.
+        // column-claim vector.
         let mut column_claims: Vec<Ext<C::F, C::EF>> = evaluation_claims
             .iter()
             .flat_map(|round| round.iter().copied())
             .collect();
 
-        // "Artificial zero" padding: one zero per round inserted
-        // at the corresponding insertion_point (reversed iteration
-        // so later insertions don't invalidate earlier indices).
-        // Guard against `cc.len() < 2` (degenerate single-chip
-        // shards — emit 1 zero-column pad as the penultimate-width
-        // fallback).
-        let added_columns: Vec<usize> = column_counts
-            .iter()
-            .map(|cc| {
-                if cc.len() >= 2 {
-                    cc[cc.len() - 2] + 1
-                } else {
-                    1
-                }
-            })
-            .collect();
+        // #7 HOST parity: Ziren's host packing has NO artificial zero
+        // columns — `packing.offsets.len()-1 == Σ chip widths` always
+        // (the dense vector's stripe-alignment padding extends the LAST
+        // column's tail entries, it does not add columns), and the host
+        // claim is the FLAT `Σ z_col_lagrange[k]·y[k]` walk
+        // (jagged_sumcheck.rs verify_jagged_reduction).  The previous
+        // `cc[len-2]+1` per-round zero-insertion was an SP1-ism: it
+        // inflated the padded column count, and whenever
+        // `next_pow2(flat+added) != next_pow2(flat)` (e.g. the keccak
+        // 415-column shard: 1024 vs 512) the circuit sampled a different
+        // number of z_col challenges than the host → transcript desync →
+        // the claim assert below trips under #7 enforcement.  Zeros now
+        // appear only as the power-of-two tail padding (weight-orthogonal
+        // to the real claims, matching the host's missing-column tail).
+        let _ = insertion_points;
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
-        for (insertion_point, num_added) in
-            insertion_points.iter().rev().zip(added_columns.iter().rev())
-        {
-            for _ in 0..*num_added {
-                column_claims.insert(*insertion_point, zero_ext);
-            }
-        }
 
         // (3) Pad the column claims to the next power of two so
         // the MLE evaluation is well-defined.
