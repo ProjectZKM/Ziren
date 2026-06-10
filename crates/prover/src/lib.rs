@@ -112,6 +112,19 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
+/// Fixed height of the allowed-vk Merkle tree (capacity 2^11 = 2048 vks).
+///
+/// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
+/// which bakes `merkle_tree_height` into every compose/deferred/shrink
+/// program) AND the runtime tree commit (`ZKMProver::new`) use this
+/// constant.  Previously each side derived a height from its own
+/// cardinality (enumerated-shape count vs vk_map size) — after the Site-2
+/// witnessed-heights change collapsed the vk space (1566 compose vks
+/// dedup to ~348), the two derivations diverged (11 vs 9) and the
+/// witnessed merkle paths would desync from the program shape.  A fixed
+/// ceiling kills the circularity permanently (the roadmap's G7).
+pub const VK_MERKLE_TREE_HEIGHT: usize = 11;
+
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
@@ -295,7 +308,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             bincode::deserialize(include_bytes!("../dummy_vk_map.bin")).unwrap()
         };
 
-        let (root, merkle_tree) = MerkleTree::commit(allowed_vk_map.keys().copied().collect());
+        // Pad the leaf set to the FIXED tree capacity (see
+        // VK_MERKLE_TREE_HEIGHT) with the all-zero digest — no known vk
+        // hashes to it, and the real keys keep their indices.  This makes
+        // the runtime tree height match the merkle_tree_height baked into
+        // the enumerated recursion programs regardless of map cardinality.
+        assert!(
+            allowed_vk_map.len() <= (1 << VK_MERKLE_TREE_HEIGHT),
+            "vk_map ({}) exceeds fixed merkle capacity 2^{}",
+            allowed_vk_map.len(),
+            VK_MERKLE_TREE_HEIGHT
+        );
+        let mut leaves: Vec<[KoalaBear; DIGEST_SIZE]> =
+            allowed_vk_map.keys().copied().collect();
+        leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
+        let (root, merkle_tree) = MerkleTree::commit(leaves);
 
         // Legacy FRI compress-program registry removed (May 2026): the
         // basefold path is now the only path. Compose / deferred / shrink
@@ -2063,7 +2090,7 @@ pub mod tests {
         )
         .collect();
         let num_shapes = all_shapes.len();
-        let height = num_shapes.next_power_of_two().ilog2() as usize;
+        let height = VK_MERKLE_TREE_HEIGHT;
         eprintln!("[VKROOT-LOC] num_shapes={num_shapes} merkle_tree_height={height}");
 
         // shape_key set, keyed by arity for diagnostics.
@@ -3181,8 +3208,7 @@ pub mod tests {
         // isn't (yet) in the map, substitute dummy merkle data of the same
         // shape — value-independence of the merkle witness is already
         // established, so the program/vk is unaffected.
-        let height_for_merkle =
-            prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let height_for_merkle = VK_MERKLE_TREE_HEIGHT;
         let vk_merkle_data =
             if prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear()) {
                 prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])
@@ -3201,7 +3227,7 @@ pub mod tests {
         let vk_real = prover.shrink_prover.setup(&prog_real).1.hash_koalabear();
 
         // DUMMY: exactly what the vk_map enumeration builds.
-        let height = prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let height = VK_MERKLE_TREE_HEIGHT;
         let shape = ZKMCompressWithVkeyShape {
             compress_shape: vec![os.clone()].into(),
             merkle_tree_height: height,
@@ -3525,7 +3551,7 @@ pub mod tests {
         let reduced: ZKMReduceProof<InnerSC> = bincode::deserialize(&bytes).unwrap();
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced;
         let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
-        let height = prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let height = VK_MERKLE_TREE_HEIGHT;
         let vk_merkle_data =
             if prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear()) {
                 prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])

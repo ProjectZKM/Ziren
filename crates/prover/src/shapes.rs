@@ -86,8 +86,9 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let num_shapes = all_maximal_shapes.len();
     tracing::info!("number of shapes: {}", num_shapes);
 
-    // The Merkle tree height.
-    let height = num_shapes.next_power_of_two().ilog2() as usize;
+    // The Merkle tree height (fixed ceiling — see crate::VK_MERKLE_TREE_HEIGHT).
+    let height = crate::VK_MERKLE_TREE_HEIGHT;
+    assert!(num_shapes <= (1 << height));
 
     let shape_rx = Mutex::new(shape_rx);
     let compress_ok = std::thread::scope(|s| {
@@ -158,7 +159,8 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         )
         .into_keys()
         .collect::<BTreeSet<_>>();
-        let height = dummy_set.len().next_power_of_two().ilog2() as usize;
+        let height = crate::VK_MERKLE_TREE_HEIGHT;
+        assert!(dummy_set.len() <= (1 << height));
         (dummy_set, vec![], height)
     } else {
         let start_time = Instant::now();
@@ -180,7 +182,11 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
 
-        let height = num_shapes.next_power_of_two().ilog2() as usize;
+        // Fixed-height ceiling (see crate::VK_MERKLE_TREE_HEIGHT): the
+        // enumeration and the runtime tree must agree on the height
+        // regardless of how many shapes/vks survive dedup.
+        let height = crate::VK_MERKLE_TREE_HEIGHT;
+        assert!(num_shapes <= (1 << height), "shape count {num_shapes} exceeds 2^{height}");
         let chunk_size = indices_set.as_ref().map(|indices| indices.len()).unwrap_or(num_shapes);
 
         let shape_rx = Mutex::new(shape_rx);
