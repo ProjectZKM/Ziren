@@ -20,6 +20,15 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriP
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
+    /// VERIFY_VK=true Site-3 fix: the per-preprocessed-domain `vk.hash`
+    /// inputs `[log_n, 2^log_n, shift, two_adic_generator(log_n)]`,
+    /// WITNESSED (read in the `StarkVerifyingKey` Witnessable) rather than
+    /// baked from the compile-time `chip_information` domains.  This makes
+    /// `vk.hash` value-independent so the recursion program's vk depends
+    /// only on the chip set, not on the verified core vk's preprocessed
+    /// (Program/Byte) heights.  Empty for vks constructed directly without
+    /// witnessing (their `hash()` is not on the value-independent path).
+    pub prep_domain_hash_inputs: Vec<[Felt<C::F>; 4]>,
 }
 
 #[derive(Clone)]
@@ -109,20 +118,22 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> Verif
         C::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     {
-        let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
-        let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * prep_domains.len());
+        let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * self.prep_domain_hash_inputs.len());
         let mut inputs = Vec::with_capacity(num_inputs);
         inputs.extend(self.commitment);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for domain in prep_domains {
-            inputs.push(builder.eval(C::F::from_usize(domain.log_size())));
-            let size = 1 << domain.log_size();
-            inputs.push(builder.eval(C::F::from_usize(size)));
-            let g = C::F::two_adic_generator(domain.log_size());
-            inputs.push(builder.eval(domain.shift()));
-            inputs.push(builder.eval(g));
+        // VERIFY_VK=true Site-3 fix: use the WITNESSED per-domain
+        // [log_n, 2^log_n, shift, two_adic_generator(log_n)] inputs (read in
+        // the StarkVerifyingKey Witnessable) instead of baking them from the
+        // compile-time chip_information domains.  Identical values for honest
+        // proofs (so the digest is unchanged) but value-independent program.
+        for fields in self.prep_domain_hash_inputs.iter() {
+            inputs.push(fields[0]); // log_n
+            inputs.push(fields[1]); // 2^log_n
+            inputs.push(fields[2]); // shift
+            inputs.push(fields[3]); // two_adic_generator(log_n)
         }
 
         SC::hash(builder, &inputs)

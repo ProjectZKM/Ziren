@@ -347,6 +347,9 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
+            // VERIFY_VK=true Site-2: the bytes/dispatch path has no witnessed
+            // heights (baked fallback); the witnessed path is the bundle lift.
+            None,
         )
     }
 }

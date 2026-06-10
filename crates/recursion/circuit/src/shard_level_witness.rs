@@ -1209,6 +1209,7 @@ where
         let (cp, sc, je, ee, cr) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
         lift_jagged_basefold_bundle::<C, HV>(
             builder, &bundle, cp, sc, je, ee, cr, max_log_row_count, column_counts_by_round, None,
+            None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1593,6 +1594,14 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
+    // VERIFY_VK=true Site-2 fix: per-chip WITNESSED height felts (2^log_h),
+    // name-sorted (parallel to each round's chip widths in
+    // `column_counts_by_round`).  When `Some`, `col_prefix_sums` and
+    // `row_counts` are reconstructed IN-CIRCUIT from these witnessed heights
+    // (value-independent program) instead of baked from the compile-time
+    // `bundle.packing.offsets` / `bundle.commit.chip_dims`.  When `None`,
+    // falls back to the legacy baked path (callers not yet wired / empty).
+    chip_height_felts: Option<&[Felt<C::F>]>,
 ) -> JaggedPcsProofVariable<
     RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
     HV::DigestVariable,
@@ -1604,6 +1613,7 @@ where
     HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
+    use zkm_recursion_compiler::circuit::CircuitV2Builder;
     use p3_field::PrimeCharacteristicRing;
 
     let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
@@ -1728,65 +1738,123 @@ where
             v
         }
     };
-    let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> = Vec::with_capacity(col_prefix_sums_len);
-    // [0] = 0 (always)
-    col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
-    let mut offset_idx: usize = 0;
-    let mut current_offset: usize = 0;
-    for cc in column_counts_by_round.iter() {
-        // Real columns: per-column advance via bundle.packing.offsets.
-        let real_in_round = cc.iter().sum::<usize>();
-        for _ in 0..real_in_round {
-            if offset_idx < bundle.packing.offsets.len() {
-                current_offset = bundle.packing.offsets[offset_idx];
-                offset_idx += 1;
+    let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
+        // VERIFY_VK=true Site-2 fix: reconstruct col_prefix_sums IN-CIRCUIT
+        // from the WITNESSED per-chip heights instead of baking
+        // bundle.packing.offsets.  offsets[k] = Σ (prior column heights);
+        // chip i (name-sorted) contributes column_counts[i] columns of
+        // height heights[i] (mirrors pack_traces_jagged jagged.rs:304-309).
+        // The artificial-zero + pad columns share the last real offset; the
+        // final slot is total_values = the running accumulator.
+        let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>| -> Vec<Felt<C::F>> {
+            let mut bits = b.num2bits_v2_f(v, bits_per_entry);
+            bits.reverse(); // big-endian (MSB first), matching the baked path
+            bits
+        };
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
+            Vec::with_capacity(col_prefix_sums_len);
+        let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
+        // [0] = 0
+        let bits0 = num2bits_be(builder, acc);
+        col_prefix_sums.push(bits0);
+        // `current_offset_felt` mirrors the baked path's `current_offset`:
+        // the last real-column offset pushed (artificial/pad columns reuse it).
+        let mut current_offset_felt: Felt<C::F> = acc;
+        'outer: for cc in column_counts_by_round.iter() {
+            for (chip_idx, &w) in cc.iter().enumerate() {
+                let h = heights
+                    .get(chip_idx)
+                    .copied()
+                    .unwrap_or_else(|| builder.constant(C::F::ZERO));
+                for _ in 0..w {
+                    if col_prefix_sums.len() >= col_prefix_sums_len {
+                        break 'outer;
+                    }
+                    current_offset_felt = acc;
+                    let bits = num2bits_be(builder, acc);
+                    col_prefix_sums.push(bits);
+                    acc = builder.eval(acc + h);
+                }
             }
-            if col_prefix_sums.len() >= col_prefix_sums_len {
-                break;
+            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+            for _ in 0..added {
+                if col_prefix_sums.len() >= col_prefix_sums_len {
+                    break 'outer;
+                }
+                let bits = num2bits_be(builder, current_offset_felt);
+                col_prefix_sums.push(bits);
             }
+        }
+        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
+            let bits = num2bits_be(builder, current_offset_felt);
+            col_prefix_sums.push(bits);
+        }
+        if col_prefix_sums.len() < col_prefix_sums_len {
+            // Final = total_values = the running accumulator (Σ w_i·h_i).
+            let bits = num2bits_be(builder, acc);
+            col_prefix_sums.push(bits);
+        }
+        JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }
+    } else {
+        let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
+            Vec::with_capacity(col_prefix_sums_len);
+        // [0] = 0 (always)
+        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(builder, 0, bits_per_entry));
+        let mut offset_idx: usize = 0;
+        let mut current_offset: usize = 0;
+        for cc in column_counts_by_round.iter() {
+            // Real columns: per-column advance via bundle.packing.offsets.
+            let real_in_round = cc.iter().sum::<usize>();
+            for _ in 0..real_in_round {
+                if offset_idx < bundle.packing.offsets.len() {
+                    current_offset = bundle.packing.offsets[offset_idx];
+                    offset_idx += 1;
+                }
+                if col_prefix_sums.len() >= col_prefix_sums_len {
+                    break;
+                }
+                col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                    builder,
+                    cap_to_bits(current_offset),
+                    bits_per_entry,
+                ));
+            }
+            // Artificial-zero columns: cc[len-2]+1 if cc has >=2 chips,
+            // else 1 (degenerate single-chip round).  They share the
+            // current_offset (no advance).
+            let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
+            for _ in 0..added {
+                if col_prefix_sums.len() >= col_prefix_sums_len {
+                    break;
+                }
+                col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
+                    builder,
+                    cap_to_bits(current_offset),
+                    bits_per_entry,
+                ));
+            }
+        }
+        // Pad to padded_cols (skip last slot — that one's reserved for
+        // total_values).  Padding columns also have zero advance.
+        while col_prefix_sums.len() < col_prefix_sums_len - 1 {
             col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
                 builder,
                 cap_to_bits(current_offset),
                 bits_per_entry,
             ));
         }
-        // Artificial-zero columns: cc[len-2]+1 if cc has >=2 chips,
-        // else 1 (degenerate single-chip round).  They share the
-        // current_offset (no advance).
-        let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-        for _ in 0..added {
-            if col_prefix_sums.len() >= col_prefix_sums_len {
-                break;
-            }
+        // Final slot = bit-decomp of total_values.  This is what the
+        // verifier's final_area Horner-decode at
+        // recursive_jagged_pcs.rs:262-272 asserts equals the
+        // accumulated row-count sum.
+        if col_prefix_sums.len() < col_prefix_sums_len {
             col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
                 builder,
-                cap_to_bits(current_offset),
+                cap_to_bits(total_values),
                 bits_per_entry,
             ));
         }
-    }
-    // Pad to padded_cols (skip last slot — that one's reserved for
-    // total_values).  Padding columns also have zero advance.
-    while col_prefix_sums.len() < col_prefix_sums_len - 1 {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(current_offset),
-            bits_per_entry,
-        ));
-    }
-    // Final slot = bit-decomp of total_values.  This is what the
-    // verifier's final_area Horner-decode at
-    // recursive_jagged_pcs.rs:262-272 asserts equals the
-    // accumulated row-count sum.
-    if col_prefix_sums.len() < col_prefix_sums_len {
-        col_prefix_sums.push(bit_decompose_usize_to_felts::<C>(
-            builder,
-            cap_to_bits(total_values),
-            bits_per_entry,
-        ));
-    }
-    let jagged_dim_metadata = JaggedDimensionMetadata::<Felt<C::F>> {
-        col_prefix_sums,
+        JaggedDimensionMetadata::<Felt<C::F>> { col_prefix_sums }
     };
 
     // ── row_counts: caller-plumbed if provided, else derived from the bundle ──
@@ -1799,7 +1867,13 @@ where
     // dereferences row as a Felt and repeats it `col` times).  Since
     // max_log_row_count is well within KoalaBear's 31-bit range, the
     // raw count fits in a single Felt constant.
-    let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(row_counts_src) = row_counts_by_round {
+    let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(heights) = chip_height_felts {
+        // VERIFY_VK=true Site-2 fix: per-chip row counts = the WITNESSED
+        // heights (2^log_h), reused for every round (a chip's prep + main
+        // traces share one height).  Value-independent (vs the baked
+        // chip_dims fallback below).
+        column_counts_by_round.iter().map(|_| heights.to_vec()).collect()
+    } else if let Some(row_counts_src) = row_counts_by_round {
         row_counts_src
             .iter()
             .map(|round| {

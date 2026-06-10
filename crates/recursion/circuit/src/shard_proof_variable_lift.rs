@@ -566,6 +566,137 @@ where
         .collect()
 }
 
+/// VALUE-INDEPENDENT `chip_height_bits` derivation (VERIFY_VK=true fix).
+///
+/// [`chip_height_bits_from_log_heights`] BAKES each height bit as a
+/// `builder.constant()` from the COMPILE-TIME `chip_log_heights`, so the
+/// recursion program's bytes depend on the per-chip heights of the proof
+/// being verified — the normalize/wrap program's vk then differs per
+/// workload and is never in the enumerated `vk_map` (root cause of the
+/// VERIFY_VK=true "Invalid verification key" failure).
+///
+/// This variant instead derives the SAME big-endian `log_h` bits the
+/// prologue observes (Horner-recomposed at `shard_basefold.rs:450-456`)
+/// from the WITNESSED per-chip `degree` (= host `quotient[0]`, the
+/// big-endian boolean coordinates of the chip HEIGHT `2^log_h`, lifted
+/// in [`crate::shard_level_witness::basefold_opened_values_from_host`]).
+/// Because the emitted ops are fixed (independent of the witnessed
+/// values), the program becomes chip-set-determined ⇒ one program per
+/// cluster ⇒ the enumerated `vk_map` covers every real workload.
+///
+/// Encoding: `degree` is big-endian (index 0 = MSB) bits of `2^log_h`,
+/// exactly one bit set at index `d-1-log_h` (`d = degree.len()`), so
+/// `log_h = Σ_i degree[i] * (d-1-i)`.  We recompose that in the
+/// extension field, project to the base field via `ext2felt` (which also
+/// asserts the higher components are zero ⇒ binds `degree[i]` to the
+/// base field), then `num2bits` + reverse to reproduce the exact
+/// big-endian `log_h` decomposition the consumer expects.
+///
+/// The observed value is identical to the baked path for honest proofs
+/// (= `log_h`), so the host transcript is UNCHANGED — only the recursion
+/// program bytes (and thus vk) change; the host proofs do not need
+/// re-proving, only the recursion `vk_map` is regenerated.
+pub fn chip_height_bits_from_opened_degrees<C>(
+    builder: &mut Builder<C>,
+    chip_names: &[String],
+    opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+    max_log_row_count: usize,
+) -> Vec<(String, Vec<Felt<C::F>>)>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    let bit_len = max_log_row_count + 1;
+    // Name order matches the host prologue per-chip observe and the
+    // name-sorted `chip_openings` / `opened_values.chips`.
+    let mut sorted_names: Vec<String> = chip_names.to_vec();
+    sorted_names.sort();
+
+    sorted_names
+        .into_iter()
+        .enumerate()
+        .map(|(idx, name)| {
+            // The witnessed per-chip degree bits (big-endian bits of
+            // 2^log_h).  Fall back to a single zero stub when absent
+            // (empty/legacy proofs) → log_h = 0.
+            let degree: &[Ext<C::F, C::EF>] = opened_values
+                .chips
+                .get(idx)
+                .map(|c| c.degree.as_slice())
+                .unwrap_or(&[]);
+            let dlen = degree.len();
+
+            // log_h = Σ_i degree[i] * (dlen-1-i), recomposed in the
+            // extension field then projected to the base field.
+            let mut acc_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            for (i, d) in degree.iter().enumerate() {
+                let coeff: Ext<C::F, C::EF> =
+                    builder.constant(C::EF::from_usize(dlen - 1 - i));
+                acc_ext = builder.eval(acc_ext + *d * coeff);
+            }
+            let log_h_felt: Felt<C::F> = if dlen == 0 {
+                builder.constant(C::F::ZERO)
+            } else {
+                C::ext2felt(builder, acc_ext)[0]
+            };
+
+            // Big-endian bit_len-wide decomposition of log_h (MSB first),
+            // matching the Horner consumer's `acc = bit + acc*2`.
+            let mut bits: Vec<Felt<C::F>> = C::num2bits(builder, log_h_felt, bit_len);
+            bits.reverse();
+            (name, bits)
+        })
+        .collect()
+}
+
+/// Per-chip HEIGHT felts (`2^log_h`) derived from the WITNESSED per-chip
+/// `degree` (= host `quotient[0]`, the big-endian bit-decomposition of the
+/// chip height `2^log_h`).  Used by the jagged-bundle lift to reconstruct
+/// `col_prefix_sums` (the cumulative column offsets) and `row_counts`
+/// value-independently instead of baking them from the compile-time
+/// `bundle.packing.offsets` / `bundle.commit.chip_dims` (the VERIFY_VK=true
+/// Site-2 fix).  Name-sorted to align with `column_counts_by_round` /
+/// `opened_values.chips`.
+///
+/// `height = Horner(degree) = Σ_i degree[i] * 2^(d-1-i)` (degree IS the
+/// big-endian bit-decomposition of the height), then projected to the base
+/// field via `ext2felt` (which binds `degree[i]` to the base field).
+pub fn chip_height_felts_from_opened_degrees<C>(
+    builder: &mut Builder<C>,
+    chip_names: &[String],
+    opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+) -> Vec<Felt<C::F>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+{
+    use p3_field::PrimeCharacteristicRing;
+
+    let mut sorted_names: Vec<String> = chip_names.to_vec();
+    sorted_names.sort();
+    sorted_names
+        .into_iter()
+        .enumerate()
+        .map(|(idx, _name)| {
+            let degree: &[Ext<C::F, C::EF>] = opened_values
+                .chips
+                .get(idx)
+                .map(|c| c.degree.as_slice())
+                .unwrap_or(&[]);
+            if degree.is_empty() {
+                return builder.constant(C::F::ZERO);
+            }
+            // Horner-recompose the big-endian height bits: acc = acc*2 + bit.
+            let two: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
+            let mut acc: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            for d in degree.iter() {
+                acc = builder.eval(acc * two + *d);
+            }
+            C::ext2felt(builder, acc)[0]
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

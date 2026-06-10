@@ -119,6 +119,7 @@ where
                 max_log_row_count,
                 column_counts_by_round,
                 None,
+                None,
             );
         }
     }

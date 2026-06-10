@@ -271,6 +271,18 @@ pub fn verify_core_basefold<C, SC, A>(
             let column_counts_by_round_pre: Vec<Vec<usize>> =
                 vec![main_widths_pre];
 
+            // VERIFY_VK=true Site-2 fix: per-chip WITNESSED heights (2^log_h),
+            // name-sorted (aligned with column_counts_by_round_pre, both from
+            // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
+            // / row_counts are reconstructed value-independently instead of
+            // baked from the compile-time bundle offsets/chip_dims.
+            let chip_height_felts_pre =
+                crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                );
+
             // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
             // (set to any value) falls back to the bytes lift; preserved
             // as a forensic kill switch when bundle-lift recursion shape
@@ -290,6 +302,7 @@ pub fn verify_core_basefold<C, SC, A>(
                         max_log_row_count,
                         &column_counts_by_round_pre,
                         None,
+                        Some(&chip_height_felts_pre),
                     )
                 }
                 LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
@@ -321,11 +334,21 @@ pub fn verify_core_basefold<C, SC, A>(
             let chip_log_heights_for_shard = chip_log_heights_per_shard
                 .get(i)
                 .unwrap_or(&empty_log_heights_core);
+            // VERIFY_VK=true fix: derive chip_height_bits from the
+            // WITNESSED per-chip `degree` (= host quotient[0], carried in
+            // `proof_opened_values`) instead of baking them from the
+            // COMPILE-TIME `chip_log_heights`.  The observed prologue
+            // value is identical (= log_h) so the host transcript is
+            // unchanged, but the program bytes become chip-set-determined
+            // (value-independent) so the normalize vk lands in the
+            // enumerated vk_map.  See
+            // `chip_height_bits_from_opened_degrees` for the encoding.
+            let _ = chip_log_heights_for_shard;
             let chip_height_bits =
-                crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+                crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                     builder,
                     &chip_names,
-                    chip_log_heights_for_shard,
+                    &proof_opened_values,
                     max_log_row_count,
                 );
             let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine

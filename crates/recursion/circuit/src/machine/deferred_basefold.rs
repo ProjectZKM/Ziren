@@ -254,6 +254,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
+                    // VERIFY_VK=true Site-2: deferred wiring TODO (baked fallback).
+                    None,
                 )
             }
             LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(

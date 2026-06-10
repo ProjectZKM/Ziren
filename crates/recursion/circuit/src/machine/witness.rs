@@ -4,7 +4,7 @@ use p3_challenger::DuplexChallenger;
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{Hash, MerkleCap};
 
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::Builder;
 use zkm_stark::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
@@ -115,6 +115,26 @@ where
         let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
             (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
         }).collect();
+        // VERIFY_VK=true Site-3 fix: WITNESS the per-domain vk.hash inputs
+        // [log_n, 2^log_n, shift, two_adic_generator(log_n)] so vk.hash is
+        // value-independent.  Read order MUST mirror `write` below.
+        let prep_domain_hash_inputs: Vec<[Felt<C::F>; 4]> = self
+            .chip_information
+            .iter()
+            .map(|(_, ser_domain, _)| {
+                let log_size = ser_domain.log_size;
+                let log_n = InnerVal::from_usize(log_size);
+                let size = InnerVal::from_usize(1usize << log_size);
+                let shift = ser_domain.shift;
+                let g = InnerVal::two_adic_generator(log_size);
+                [
+                    log_n.read(builder),
+                    size.read(builder),
+                    shift.read(builder),
+                    g.read(builder),
+                ]
+            })
+            .collect();
         let chip_ordering = self.chip_ordering.clone();
         VerifyingKeyVariable {
             commitment,
@@ -122,6 +142,7 @@ where
             initial_global_cumulative_sum,
             chip_information,
             chip_ordering,
+            prep_domain_hash_inputs,
         }
     }
 
@@ -129,6 +150,15 @@ where
         self.commit.write(witness);
         self.pc_start.write(witness);
         self.initial_global_cumulative_sum.write(witness);
+        // VERIFY_VK=true Site-3: write the per-domain vk.hash inputs in the
+        // same order `read` consumes them.
+        for (_, ser_domain, _) in self.chip_information.iter() {
+            let log_size = ser_domain.log_size;
+            InnerVal::from_usize(log_size).write(witness);
+            InnerVal::from_usize(1usize << log_size).write(witness);
+            ser_domain.shift.write(witness);
+            InnerVal::two_adic_generator(log_size).write(witness);
+        }
     }
 }
 
