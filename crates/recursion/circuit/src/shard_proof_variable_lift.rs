@@ -603,7 +603,11 @@ pub fn chip_height_bits_from_opened_degrees<C>(
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    // Site-2 (#25): bound relaxed from `Bit = Felt<InnerVal>` so the
+    // SC-generic compose/deferred/wrap verifiers can call this too —
+    // the body uses `num2bits_v2_f` directly (what both InnerConfig's
+    // and WrapConfig's `C::num2bits` delegate to), so no `C::Bit`.
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
 
@@ -643,7 +647,11 @@ where
 
             // Big-endian bit_len-wide decomposition of log_h (MSB first),
             // matching the Horner consumer's `acc = bit + acc*2`.
-            let mut bits: Vec<Felt<C::F>> = C::num2bits(builder, log_h_felt, bit_len);
+            // `num2bits_v2_f` == `C::num2bits` for InnerConfig/WrapConfig
+            // (both delegate, lib.rs:293/421) — used directly to avoid the
+            // `C::Bit` bound.
+            use zkm_recursion_compiler::circuit::CircuitV2Builder;
+            let mut bits: Vec<Felt<C::F>> = builder.num2bits_v2_f(log_h_felt, bit_len);
             bits.reverse();
             (name, bits)
         })
@@ -668,7 +676,9 @@ pub fn chip_height_felts_from_opened_degrees<C>(
     opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
+    // Site-2 (#25): bound relaxed (no `C::Bit` use in the body) so the
+    // SC-generic compose/deferred/wrap verifiers can call this too.
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
 

@@ -165,6 +165,11 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
+        // Site-2 (#25): per-chip WITNESSED height felts (2^log_h, from the
+        // opened `degree`) so the inner bundle lift reconstructs
+        // col_prefix_sums / row_counts value-independently.  The outer
+        // (BN254) impl's bundle arm is dead and ignores it.
+        chip_height_felts: Option<&[Felt<C::F>]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
@@ -322,6 +327,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
+        chip_height_felts: Option<&[Felt<C::F>]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,
@@ -347,9 +353,9 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
-            // VERIFY_VK=true Site-2: the bytes/dispatch path has no witnessed
-            // heights (baked fallback); the witnessed path is the bundle lift.
-            None,
+            // Site-2 (#25): witnessed per-chip heights forwarded from the
+            // SC-generic wrap verifier (None = baked fallback).
+            chip_height_felts,
         )
     }
 }
@@ -513,6 +519,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         _row_counts_by_round: Option<&[Vec<usize>]>,
+        _chip_height_felts: Option<&[Felt<C::F>]>,
     ) -> crate::jagged_circuit::JaggedPcsProofVariable<
         crate::basefold_verifier::RecursiveBasefoldProof<
             Felt<C::F>,

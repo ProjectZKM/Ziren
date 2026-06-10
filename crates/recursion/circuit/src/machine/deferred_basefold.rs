@@ -198,7 +198,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             logup_gkr_proof,
             zerocheck_proof,
             evaluation_proof,
-            _proof_opened_values,
+            proof_opened_values,
         ) = proof_tuple;
 
         let chip_names: Vec<String> =
@@ -235,6 +235,15 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
+        // VERIFY_VK=true Site-2 (#25): per-chip WITNESSED heights from the
+        // opened `degree` — same pattern as core/compress.
+        let chip_height_felts_pre =
+            crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                builder,
+                &chip_names,
+                &proof_opened_values,
+            );
+
         // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
         // (set to any value) falls back to the bytes lift; preserved
         // as a forensic kill switch when bundle-lift recursion shape
@@ -254,8 +263,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
-                    // VERIFY_VK=true Site-2: deferred wiring TODO (baked fallback).
-                    None,
+                    Some(&chip_height_felts_pre),
                 )
             }
             LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
@@ -277,17 +285,19 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &column_counts_by_round,
             ),
         };
-        // Real chip_height_bits derivation from per-input
-        // chip_log_heights (mirrors compress_basefold flow).
+        // VERIFY_VK=true Site-2 (#25): derive from the WITNESSED opened
+        // `degree` instead of baking from host-side chip_log_heights
+        // (mirrors core/compress).
         let empty_log_heights_deferred = std::collections::BTreeMap::<String, u8>::new();
         let chip_log_heights_for_input = chip_log_heights_per_input
             .get(_deferred_i)
             .unwrap_or(&empty_log_heights_deferred);
+        let _ = chip_log_heights_for_input;
         let chip_height_bits =
-            crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+            crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
                 &chip_names,
-                chip_log_heights_for_input,
+                &proof_opened_values,
                 max_log_row_count,
             );
         let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
