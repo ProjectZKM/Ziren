@@ -202,20 +202,29 @@ where
     /// `divisor * out = numerator` becomes `0 * out = (lhs - rhs)`,
     /// which has no solution unless `lhs == rhs`.
     ///
-    /// **Uses plain `DivF`** (SP1-parity — see SP1
-    /// `crates/recursion/compiler/src/circuit/compiler.rs`'s
-    /// `base_assert_eq`).  The runtime's `DivF` mult=0 guard makes
-    /// dead-branch execution graceful (returns 0; constraint gated
-    /// off via `is_div_active = is_div AND mult>0` so no AIR
-    /// obligation on the dead row).  Live-branch failures still
-    /// panic via `DivFOutOfDomain` since mult>0 bypasses the guard.
+    /// **TARGET: `DivFAssert` (workstream F / #7 soundness flip — NOT YET
+    /// LANDED).**  The flip is validated for compress (honest fib-compress
+    /// green with enforcement ON; tampered-PV negative test rejects) but the
+    /// shrink program still trips at the inner-ring BaseFold Merkle binding
+    /// (plan Step 1b/2 must land first).  Flip the four `DivF`/`DivE` emits
+    /// below to `DivFAssert`/`DivEAssert` once that binding is honest.  With
+    /// plain `DivF`, the assert row had `mult = 0` (nobody reads `out`),
+    /// so `is_div_active = is_div AND mult≠0 = 0` and the AIR identity
+    /// `when(is_div_active + is_div_soundness)·(in2·out − in1)` imposed
+    /// NO obligation — every recursion `assert_*` was VACUOUS (a prover
+    /// could satisfy the AIR with `in1 = diff ≠ 0`).  `DivFAssert` sets
+    /// `is_div_soundness = 1` (alu_base.rs:135) so the identity fires
+    /// unconditionally — restoring SP1's "assert identity always fires"
+    /// semantics (SP1 has no mult-guard at all: its div constraint is
+    /// `when(is_div).assert_eq(in2*out, in1)`).  Computational `DivF`s
+    /// keep the mult=0 dead-branch guard (Select branches) — the only
+    /// place Ziren deliberately diverges from SP1's blanket lowering.
     ///
-    /// The previous `DivFAssert` opcode used here was designed to
-    /// "always fire" the constraint even when mult=0 — but that
-    /// blocks the standard dead-branch idiom (assertions inside
-    /// Select branches where only one side's mult is nonzero), which
-    /// the recursion DSL relies on heavily.  Matches SP1's
-    /// behaviour on the same DSL patterns.
+    /// History: an earlier comment here justified plain `DivF` as
+    /// "SP1-parity" — that conflated the dead-branch guard (needed for
+    /// computational DivFs only) with assert lowering, and silently
+    /// disabled every structural soundness check in the recursion
+    /// machine.  Do not revert to `DivF` here.
     fn base_assert_eq(
         &mut self,
         lhs: impl Reg<C>,

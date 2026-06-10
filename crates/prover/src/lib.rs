@@ -3287,6 +3287,358 @@ pub mod tests {
         }
     }
 
+    /// Enforcement (#7) probe: build the fib normalize program with
+    /// ZKM_DEBUG=true and print the instructions + nearest backtraces around
+    /// a trap pc (env TRAP_PC, default 99368) to name the DSL site of an
+    /// enforced DivFAssert trip.  Program is value-independent, so the dummy
+    /// build has identical layout to the failing real run.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_enforce_probe() {
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_stark::shape::OrderedShape;
+        std::env::set_var("ZKM_DEBUG", "true");
+        let trap_pc: usize = std::env::var("TRAP_PC")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(99368);
+        let fib: Vec<(&str, usize)> = vec![
+            ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
+            ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
+            ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
+            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
+            ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
+            ("SyscallInstrs", 11),
+        ];
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let os = OrderedShape::from_log2_heights(
+            &fib.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+        );
+        let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
+        let dummy = ZKMCoreBasefoldWitnessValues::dummy(prover.core_prover.machine(), &shape);
+        let prog = prover.recursion_program_basefold(&dummy);
+        let n = prog.traces.len();
+        eprintln!("[PROBE] program instrs={} traces={}", prog.iter_instructions().count(), n);
+        let _ = trap_pc;
+
+        // The runtime's pc numbering diverges from flat order on Parallel
+        // blocks, but ADDRESSES are deterministic SSA.  Locate the failing
+        // DivFAssert by its addresses (env TRAP_IN1, default 2237763) and
+        // back-walk the dataflow to name the producing site.
+        use zkm_recursion_core::Instruction as RInstr;
+        let trap_in1: u32 = std::env::var("TRAP_IN1")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2237763);
+        let instrs: Vec<&RInstr<KoalaBear>> = prog.iter_instructions().collect();
+        // writer index: address -> flat idx (first writer wins; SSA so unique)
+        let fmt = |i: usize| -> String {
+            let has_trace = prog.traces.get(i).map(|t| t.is_some()).unwrap_or(false);
+            format!("flat={} trace={} {:?}", i, has_trace, instrs[i])
+        };
+        // find the DivFAssert consuming trap_in1
+        let mut found = Vec::new();
+        for (i, ins) in instrs.iter().enumerate() {
+            let s = format!("{ins:?}");
+            if s.contains("DivFAssert") && s.contains(&format!("in1: Address({trap_in1})")) {
+                found.push(i);
+            }
+        }
+        eprintln!("[PROBE] DivFAssert consumers of Address({trap_in1}): {:?}", found);
+        for &i in found.iter().take(2) {
+            eprintln!("[PROBE] consumer {}", fmt(i));
+        }
+        // back-walk: find writers of a frontier of addresses, 6 levels deep
+        let mut frontier: Vec<u32> = vec![trap_in1];
+        for level in 0..6 {
+            let mut next = Vec::new();
+            for &addr in frontier.iter().take(4) {
+                let pat = format!("out: Address({addr})");
+                let pat2 = format!("Address({addr}), C::F"); // unused, defensive
+                let _ = &pat2;
+                if let Some((i, ins)) = instrs
+                    .iter()
+                    .enumerate()
+                    .find(|(_, ins)| format!("{ins:?}").contains(&pat))
+                {
+                    eprintln!("[PROBE] L{level} writer of {addr}: {}", fmt(i));
+                    // harvest its input addresses
+                    let s = format!("{ins:?}");
+                    for cap in s.split("Address(").skip(1) {
+                        if let Some(end) = cap.find(')') {
+                            if let Ok(a) = cap[..end].parse::<u32>() {
+                                if a != addr && !next.contains(&a) {
+                                    next.push(a);
+                                }
+                            }
+                        }
+                    }
+                    // nearest trace at/below this flat index
+                    let mut p = i as i64;
+                    while p >= 0 {
+                        if let Some(Some(t)) = prog.traces.get(p as usize) {
+                            let mut t = t.clone();
+                            t.resolve();
+                            let txt = format!("{t:?}");
+                            let lines: Vec<&str> = txt
+                                .lines()
+                                .filter(|l| l.contains("zkm_") || l.contains("at /"))
+                                .take(14)
+                                .collect();
+                            eprintln!("[PROBE]   nearest-trace flat={}:\n{}", p, lines.join("\n"));
+                            break;
+                        }
+                        p -= 1;
+                    }
+                } else {
+                    eprintln!("[PROBE] L{level} writer of {addr}: NONE (witness/hint?)");
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+
+        // Exact window around the failing assert (flat=1863456): print every
+        // instruction so the loop body identifies the source site.
+        for (i, ins) in instrs.iter().enumerate() {
+            if !(1863430..=1863470).contains(&i) { continue; }
+            let s = format!("{ins:?}");
+            let short: String = s.chars().take(160).collect();
+            eprintln!("[PROBE] W flat={i}{} {}", if i == 1863456 { " <==FAIL" } else { "" }, short);
+        }
+
+        // With a cached REAL core proof, print the witness-stream values
+        // around the trap operand addresses — block index == hint address
+        // for the sequential allocation, so the VALUES identify the fields.
+        if let Ok(bytes) = std::fs::read("/tmp/fib_core.bin") {
+            let data: ZKMCoreProofData = bincode::deserialize(&bytes).unwrap();
+            let (_, _, _, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
+            let inputs = prover.get_recursion_core_inputs(
+                &vk.vk,
+                &data.0,
+                REDUCE_BATCH_SIZE,
+                true,
+            );
+            let mut stream = Vec::new();
+            Witnessable::<InnerConfig>::write(&inputs[0], &mut stream);
+            eprintln!("[PROBE] real witness stream blocks={}", stream.len());
+            // Execute the program on the REAL witness; at the trap, dump
+            // memory at the compared address ranges.
+            {
+                let mut rt = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+                    prog.clone(),
+                    prover.shrink_prover.config().perm.clone(),
+                );
+                rt.witness_stream = stream.clone().into();
+                let res = rt.run();
+                eprintln!("[PROBE] real-run result: {:?}", res.as_ref().err().map(|e| format!("{e}").chars().take(160).collect::<String>()));
+                use p3_field::PrimeCharacteristicRing as _;
+                for a in [84u32, 85, 86, 87, 88, 116, 117, 118, 119, 120, 170, 171] {
+                    let addr = zkm_recursion_core::Address(KoalaBear::from_u32(a));
+                    let entry = unsafe { rt.memory.mr_unchecked(addr) };
+                    eprintln!("[PROBE] mem[{a}] = {:?}", entry.val);
+                }
+            }
+            // Find all (i, j) with value_i + 1 == value_j (the observed
+            // diff = -1) among base-field blocks — names the two fields the
+            // failing assert compares.
+            use std::collections::HashMap as StdHashMap;
+            let vals: Vec<u32> = stream
+                .iter()
+                .map(|b| {
+                    let s = format!("{b:?}");
+                    s.trim_start_matches("Block([")
+                        .split(',')
+                        .next()
+                        .and_then(|x| x.trim().parse::<u32>().ok())
+                        .unwrap_or(0)
+                })
+                .collect();
+            let mut by_val: StdHashMap<u32, Vec<usize>> = StdHashMap::new();
+            for (i, &v) in vals.iter().enumerate() {
+                by_val.entry(v).or_default().push(i);
+            }
+            let mut pairs = 0;
+            for (i, &v) in vals.iter().enumerate() {
+                if v == 0 || v == 1 {
+                    continue; // skip trivially-common small values
+                }
+                if let Some(js) = by_val.get(&(v + 1)) {
+                    for &j in js.iter().take(3) {
+                        eprintln!("[PROBE] PAIR v[{i}]={v} + 1 == v[{j}]={}", v + 1);
+                        pairs += 1;
+                    }
+                }
+                if pairs > 30 { break; }
+            }
+            eprintln!("[PROBE] pairs={pairs}");
+            // Field-boundary map: write each top-level field separately and
+            // print the cumulative block offsets.
+            let w = &inputs[0];
+            let mut tmp = Vec::new();
+            Witnessable::<InnerConfig>::write(&w.vk, &mut tmp);
+            eprintln!("[PROBE] after vk: {}", tmp.len());
+            Witnessable::<InnerConfig>::write(&w.shard_proofs, &mut tmp);
+            eprintln!("[PROBE] after shard_proofs: {}", tmp.len());
+            Witnessable::<InnerConfig>::write(&w.is_complete, &mut tmp);
+            Witnessable::<InnerConfig>::write(&w.is_first_shard, &mut tmp);
+            Witnessable::<InnerConfig>::write(&w.vk_root, &mut tmp);
+            eprintln!("[PROBE] total: {}", tmp.len());
+            // And proof sub-fields to localize 1131-1157:
+            let pr = &w.shard_proofs[0];
+            let mut t2 = Vec::new();
+            Witnessable::<InnerConfig>::write(&pr.commitment, &mut t2);
+            eprintln!("[PROBE] +commitment: {}", t2.len());
+            Witnessable::<InnerConfig>::write(&pr.opened_values, &mut t2);
+            eprintln!("[PROBE] +opened_values: {}", t2.len());
+            Witnessable::<InnerConfig>::write(&pr.public_values, &mut t2);
+            eprintln!("[PROBE] +public_values: {}", t2.len());
+            eprintln!("[PROBE] context values 1120..1165:");
+            for a in 1120..=1165usize {
+                if let Some(&v) = vals.get(a) {
+                    eprintln!("[PROBE] v[{a}]={v}");
+                }
+            }
+        }
+    }
+
+    /// #7 enforcement probe for the SHRINK program: build it from the real
+    /// cached compress proof, locate the failing DivFAssert by operand
+    /// address (env TRAP_IN1), print the window + dataflow.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_enforce_probe_shrink() {
+        use zkm_recursion_circuit::machine::ZKMWrapBasefoldWitnessValues;
+        std::env::set_var("ZKM_DEBUG", "true");
+        let trap_in1: u32 = std::env::var("TRAP_IN1")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(95444);
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let bytes = std::fs::read("/tmp/fib_compress.bin").expect("need fresh compress dump");
+        let reduced: ZKMReduceProof<InnerSC> = bincode::deserialize(&bytes).unwrap();
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced;
+        let basefold_proof = *compressed_proof.basefold_shard_proof.clone().unwrap();
+        let height = prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let vk_merkle_data =
+            if prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear()) {
+                prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])
+            } else {
+                zkm_recursion_circuit::machine::ZKMMerkleProofWitnessValues::dummy(1, height)
+            };
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
+        };
+        let prog = prover.shrink_program_basefold(&input);
+        use zkm_recursion_core::Instruction as RInstr;
+        let instrs: Vec<&RInstr<KoalaBear>> = prog.iter_instructions().collect();
+        eprintln!("[SPROBE] shrink program instrs={}", instrs.len());
+        let mut hit = None;
+        for (i, ins) in instrs.iter().enumerate() {
+            let s = format!("{ins:?}");
+            if s.contains("DivFAssert") && s.contains(&format!("in1: Address({trap_in1})")) {
+                hit = Some(i);
+                eprintln!("[SPROBE] consumer flat={i}: {}", s.chars().take(170).collect::<String>());
+            }
+        }
+        if let Some(i) = hit {
+            for w in i.saturating_sub(12)..=(i + 2).min(instrs.len() - 1) {
+                let s = format!("{:?}", instrs[w]);
+                eprintln!(
+                    "[SPROBE] W flat={w}{} {}",
+                    if w == i { " <==FAIL" } else { "" },
+                    s.chars().take(170).collect::<String>()
+                );
+            }
+            // nearest trace below
+            let mut p = i as i64;
+            while p >= 0 {
+                if let Some(Some(t)) = prog.traces.get(p as usize) {
+                    let mut t = t.clone();
+                    t.resolve();
+                    let txt = format!("{t:?}");
+                    let lines: Vec<&str> = txt
+                        .lines()
+                        .filter(|l| l.contains("zkm_"))
+                        .take(10)
+                        .collect();
+                    eprintln!("[SPROBE] nearest-trace flat={p}:
+{}", lines.join("
+"));
+                    break;
+                }
+                p -= 1;
+            }
+        }
+    }
+
+    /// #7 enforcement NEGATIVE test: corrupt one public value (exit_code)
+    /// in an otherwise-honest core proof and run the normalize program —
+    /// the armed `assert_felt_eq(exit_code, 0)` (core_basefold.rs) must
+    /// reject with a runtime error.  Pre-DivFAssert this tampering was
+    /// silently ACCEPTED (the assert was vacuous).
+    /// Needs /tmp/fib_core.bin (DUMP_CORE_PROOF from a compress run).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_enforce_negtest() {
+        use std::borrow::BorrowMut as _;
+        use zkm_stark::air::PublicValues;
+        use zkm_stark::Word;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let bytes = std::fs::read("/tmp/fib_core.bin").expect("need /tmp/fib_core.bin");
+        let mut data: ZKMCoreProofData = bincode::deserialize(&bytes).unwrap();
+        let (_, _, _, vk) = prover.setup(test_artifacts::FIBONACCI_ELF);
+
+        // Tamper: exit_code 0 -> 1 in the BASEFOLD side-channel public
+        // values (what the normalize witness actually carries).
+        {
+            let bf = data.0[0]
+                .basefold_shard_proof
+                .as_mut()
+                .expect("core proof missing basefold side-channel");
+            let pv: &mut PublicValues<Word<KoalaBear>, KoalaBear> =
+                bf.public_values.as_mut_slice().borrow_mut();
+            pv.exit_code = KoalaBear::ONE;
+        }
+        let inputs = prover
+            .get_recursion_core_inputs_basefold(&vk.vk, &data.0, REDUCE_BATCH_SIZE, true)
+            .expect("basefold inputs");
+        let program = prover.recursion_program_basefold(&inputs[0]);
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program,
+            prover.compress_prover.config().perm.clone(),
+        );
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(&inputs[0], &mut witness_stream);
+        runtime.witness_stream = witness_stream.into();
+        let res = runtime.run();
+        match res {
+            Err(e) => {
+                let msg = format!("{e}");
+                eprintln!(
+                    "[NEGTEST] REJECTED as expected: {}",
+                    msg.chars().take(160).collect::<String>()
+                );
+                assert!(
+                    msg.contains("division"),
+                    "expected a DivFAssert trap, got: {msg}"
+                );
+            }
+            Ok(()) => panic!(
+                "[NEGTEST] tampered exit_code was ACCEPTED — enforcement is not armed"
+            ),
+        }
+    }
+
     /// VKROOT: is fib's normalize vk (computed on THIS box) in the (regen'd)
     /// recursion_vk_map?  Decisive check for the VERIFY_VK=true failure after
     /// the regen — distinguishes a coverage/enumeration gap from a cross-box

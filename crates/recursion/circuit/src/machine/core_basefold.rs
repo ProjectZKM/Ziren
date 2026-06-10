@@ -218,7 +218,17 @@ pub fn verify_core_basefold<C, SC, A>(
         .iter()
         .map(|names| {
             let cc = |n: &str| names.iter().any(|s| s.as_str() == n);
-            (cc("Cpu"), cc("MemoryInit"), cc("MemoryFinalize"))
+            // #7 enforcement fix: the memory chips are named
+            // "MemoryGlobalInit"/"MemoryGlobalFinalize" (Option-2 State-bus
+            // rename) — matching the host's
+            // `ShardProof::contains_global_memory_init/finalize`
+            // (stark/src/types.rs:219-225).  The previous stale names
+            // ("MemoryInit"/"MemoryFinalize") never matched, so
+            // `contains_memory_init` was always FALSE and the
+            // "no-init ⇒ prev_bits == last_bits" constraint was emitted on
+            // EVERY shard — honestly violated on any shard that initializes
+            // memory.  Vacuous pre-DivFAssert; armed enforcement caught it.
+            (cc("Cpu"), cc("MemoryGlobalInit"), cc("MemoryGlobalFinalize"))
         })
         .collect();
 
