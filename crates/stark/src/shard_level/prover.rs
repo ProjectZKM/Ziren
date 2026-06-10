@@ -251,13 +251,42 @@ where
     // `main_commitment` with its 8-felt digest, and thread the result into
     // Phase 4 so the in-band observe is skipped.  Matrices move in/out of
     // the named-tuple Vec with zero data copy.
-    let (main_traces, main_commitment, precomputed_commit) =
+    // #108 device residency, PCS-binding correctness: the jagged BaseFold
+    // commit must cover EVERY chip's real cells. Device-resident chips carry
+    // an EMPTY host main trace (the GKR / zerocheck phases read them through
+    // the per-shard provider), so the commit would silently DROP their cells
+    // (and, when every chip is device-resident, build an empty packing —
+    // log_dense_size == 0 → prove_jagged_reduction panic). Materialize those
+    // chips' traces from the provider into a commit-only trace set; the
+    // empty `main_traces` continue to drive the device GKR/zerocheck paths.
+    // Host-path behaviour is unchanged (no empty+provider chips there).
+    let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(chip, t)| {
+            if t.width == 0 {
+                if let Some(p) = _device_traces {
+                    if let Some((vals, w)) =
+                        crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
+                            &chip.name(),
+                            p,
+                        )
+                    {
+                        return RowMajorMatrix::new(vals, w);
+                    }
+                }
+            }
+            t.clone()
+        })
+        .collect();
+    let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A>(
             chips,
-            main_traces,
+            commit_traces,
             main_commitment,
             precomputed_commit,
         );
+    let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
     let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
 
     let n_chips = chips.len();
@@ -302,7 +331,21 @@ where
         for (chip, trace) in chips.iter().zip(main_traces.iter()) {
             // Per-chip log-height observe (gap #2). Source matches
             // the `chip_log_heights` BTreeMap populated below.
-            let h = trace.height().max(1);
+            //
+            // #108 device residency: an empty host trace (width == 0)
+            // means the chip's real trace lives device-side in the
+            // per-shard provider. Resolve the REAL height there so the
+            // observed transcript value is identical to the host-trace
+            // path (host parity); fall back to the legacy h=1/log_h=0
+            // for genuinely unexercised chips with no provider entry.
+            let h = if trace.width == 0 {
+                _device_traces
+                    .and_then(|p| p.chip_height(&chip.name()))
+                    .unwrap_or(0)
+                    .max(1)
+            } else {
+                trace.height().max(1)
+            };
             let log_h = if h.is_power_of_two() {
                 h.trailing_zeros() as u64
             } else {
@@ -414,7 +457,10 @@ where
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
         emit_jagged_pcs_bytes::<SC, A>(
             chips,
-            main_traces,
+            // #108: commit-coverage trace set (device-resident chips
+            // materialized) — MUST be the same traces the precompute
+            // committed, or the openings won't bind.
+            commit_traces,
             // ITEM-12: open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
@@ -441,7 +487,19 @@ where
     // decomposition — NOT bits of log_h.  Carry it per chip by name.
     let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, trace) in chips.iter().zip(main_traces.iter()) {
-        let h = trace.height().max(1);
+        // #108 device residency: resolve empty host traces' REAL height
+        // from the per-shard device provider (host parity with the
+        // host-trace path). Mirrors the Phase-1 prologue observe above —
+        // both MUST agree with what the verifier re-observes from
+        // `proof.chip_log_heights`.
+        let h = if trace.width == 0 {
+            _device_traces
+                .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
+                .unwrap_or(0)
+                .max(1)
+        } else {
+            trace.height().max(1)
+        };
         let log_h = if h.is_power_of_two() {
             h.trailing_zeros() as u8
         } else {
@@ -536,7 +594,11 @@ where
         crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
     > = chips
         .iter()
-        .zip(main_traces.iter())
+        // #108 device residency: cumulative sums must read the REAL trace
+        // cells — `commit_traces` carries provider-materialized traces for
+        // device-resident chips (host-empty); identical to `main_traces`
+        // on the host path.
+        .zip(commit_traces.iter())
         .map(|(chip, main_trace)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
             let global =

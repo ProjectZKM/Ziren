@@ -94,9 +94,25 @@ where
     // Determine num_row_variables = log2(max chip height rounded up).
     // Must be >= 2 so build_gkr_circuit's inner loop terminates at
     // num_row_variables == 1 for extract_outputs.
-    let max_height = main_traces
+    // #108 device residency: chips whose host trace was emptied (device
+    // resident) must still contribute their REAL height — resolved from
+    // the per-shard provider — otherwise `num_row_variables` shrinks
+    // below the device traces' log-heights and the Step-6 per-chip
+    // openings get a truncated eval point (per_chip_eval_at assert
+    // height == 2^|eval_point|). Seen when np>0 prep chips (Program,
+    // 2^19 = the tallest chip) go device-resident.
+    let max_height = chips
         .iter()
-        .map(|t| if t.width == 0 { 0 } else { t.values.len() / t.width })
+        .zip(main_traces.iter())
+        .map(|(chip, t)| {
+            if t.width == 0 {
+                _device_traces
+                    .and_then(|p| p.chip_height(&chip.name()))
+                    .unwrap_or(0)
+            } else {
+                t.values.len() / t.width
+            }
+        })
         .max()
         .unwrap_or(0);
     let num_row_variables = max_height.max(1).next_power_of_two().trailing_zeros().max(2) as usize;

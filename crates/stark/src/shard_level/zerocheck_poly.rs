@@ -1209,17 +1209,33 @@ where
                     if let Some(hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_zerocheck_extract_final_hook()
                     {
-                        if let Some(main_ef4) = hook(dc.as_ref(), self.num_main_cols) {
-                            out.extend(std::iter::repeat(EF::ZERO).take(self.num_prep_cols));
+                        // np>0: the device buffer is the COMBINED [main ++ prep]
+                        // col-major block (prep columns FOLLOW main, e051ffd), so
+                        // extract num_main_cols + num_prep_cols residuals and emit
+                        // them prep-then-main (the host/SP1 trace@z order below).
+                        // np==0 chips extract exactly num_main_cols (unchanged).
+                        let want = self.num_main_cols + self.num_prep_cols;
+                        if let Some(res_ef4) = hook(dc.as_ref(), want) {
                             // SAFETY: TypeId equality guarantees EF == Ef4.
-                            let main: Vec<EF> = unsafe {
-                                let len = main_ef4.len();
-                                let cap = main_ef4.capacity();
+                            let res: Vec<EF> = unsafe {
+                                let len = res_ef4.len();
+                                let cap = res_ef4.capacity();
                                 let ptr =
-                                    core::mem::ManuallyDrop::new(main_ef4).as_mut_ptr() as *mut EF;
+                                    core::mem::ManuallyDrop::new(res_ef4).as_mut_ptr() as *mut EF;
                                 Vec::from_raw_parts(ptr, len, cap)
                             };
-                            out.extend(main);
+                            if res.len() == want {
+                                // prep residuals (buffer cols nm..nm+np) first.
+                                out.extend_from_slice(&res[self.num_main_cols..]);
+                                out.extend_from_slice(&res[..self.num_main_cols]);
+                            } else {
+                                // Device buffer carries main only (legacy np==0
+                                // shape): zero prep slots, then main residuals.
+                                out.extend(
+                                    std::iter::repeat(EF::ZERO).take(self.num_prep_cols),
+                                );
+                                out.extend_from_slice(&res[..self.num_main_cols.min(res.len())]);
+                            }
                             return out;
                         }
                     }
