@@ -595,14 +595,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// Intentionally NOT calling `recursion_shape_config.fix_shape(...)` —
-    /// the legacy shape config's `allowed_shapes` was generated for the
-    /// smaller legacy recursion programs (~10s of K instructions). The
-    /// basefold normalize program is ~660K instructions and produces
-    /// chip heights that don't fit any legacy shape, panicking with
-    /// "no shape found for heights: ...". The basefold path produces
-    /// its own VK based on the program's actual structure; shape
-    /// fixing only matters once basefold-aware shapes are enumerated.
+    /// VERIFY_VK=true (#59 / task #24): `fix_shape` is now ENABLED for the
+    /// normalize program.  Without it the normalize proof is proven at its
+    /// ORGANIC chip heights, so the compress-proof shape feeding shrink (and
+    /// compose) is unbounded and `Shrink(shape)` can never be pre-enumerated
+    /// into the vk_map (localized by `tests::vkroot_shrink_vkeq`: EQUAL=true
+    /// but shape ∉ recursion_shape_config).  With fix_shape the record pads
+    /// to one of the finite `allowed_shapes` (the "basefold normalize-sized"
+    /// entries in `RecursionShapeConfig::default`), exactly like compose and
+    /// deferred already do — SP1's model.  Programs whose heights exceed
+    /// every allowed shape panic in `fix_shape` ("no shape found"); the
+    /// vk-map enumeration catch_unwinds those, and a production panic means
+    /// `allowed_shapes` needs a bigger band.
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
@@ -610,11 +614,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        let program = build_normalize_basefold_program(
+        let mut program = build_normalize_basefold_program(
             self.core_prover.machine(),
             input,
             max_log_row_count,
         );
+        if let Some(recursion_shape_config) = &self.compress_shape_config {
+            recursion_shape_config.fix_shape(&mut program);
+        }
         Arc::new(program)
     }
 
@@ -3124,6 +3131,160 @@ pub mod tests {
             }
         }
         Ok(())
+    }
+
+    /// VKROOT shrink localizer: build the shrink program from the REAL fib
+    /// compress proof (cached via DUMP_COMPRESS_PROOF=/tmp/fib_compress.bin)
+    /// vs the enumeration's DUMMY witness from the same OrderedShape, and
+    /// compare vk hashes + vk_map membership.
+    ///   vk_real == vk_dummy, ∉ map  => Shrink shape-coverage gap
+    ///   vk_real != vk_dummy         => value-dependence in the shrink
+    ///                                  program build (compress-level
+    ///                                  dummy-faithfulness / Site-2 baked)
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_shrink_vkeq() {
+        use zkm_recursion_circuit::machine::{
+            ZKMCompressWithVkeyShape, ZKMWrapBasefoldWitnessValues,
+        };
+        use zkm_stark::shape::OrderedShape;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let bytes = std::fs::read("/tmp/fib_compress.bin").expect(
+            "run test_e2e_compress_fibonacci with DUMP_COMPRESS_PROOF=/tmp/fib_compress.bin first",
+        );
+        let reduced: ZKMReduceProof<InnerSC> = bincode::deserialize(&bytes).unwrap();
+        let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = reduced;
+        let basefold_proof = *compressed_proof
+            .basefold_shard_proof
+            .clone()
+            .expect("compress proof missing basefold side-channel");
+
+        // Shape of the real compress (normalize) proof.
+        let lh: Vec<(String, usize)> = basefold_proof
+            .chip_log_heights
+            .iter()
+            .map(|(k, v)| (k.clone(), *v as usize))
+            .collect();
+        let os = OrderedShape::from_log2_heights(&lh);
+        eprintln!("[SHRINKEQ] compress proof shape: {os:?}");
+
+        // Coverage: is this OrderedShape among the enumerated compress shapes?
+        let rsc = prover.compress_shape_config.as_ref().unwrap();
+        let in_enum = rsc
+            .get_all_shape_combinations(1)
+            .any(|combo| combo.first() == Some(&os));
+        eprintln!("[SHRINKEQ] shape in recursion_shape_config combos: {in_enum}");
+
+        // REAL: exactly what `shrink()` builds.  If the input compress vk
+        // isn't (yet) in the map, substitute dummy merkle data of the same
+        // shape — value-independence of the merkle witness is already
+        // established, so the program/vk is unaffected.
+        let height_for_merkle =
+            prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let vk_merkle_data =
+            if prover.recursion_vk_map.contains_key(&compressed_vk.hash_koalabear()) {
+                prover.make_basefold_merkle_proofs(&[compressed_vk.clone()])
+            } else {
+                eprintln!("[SHRINKEQ] compress vk not in map — using dummy merkle data");
+                zkm_recursion_circuit::machine::ZKMMerkleProofWitnessValues::dummy(
+                    1,
+                    height_for_merkle,
+                )
+            };
+        let input_real = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(compressed_vk, basefold_proof)],
+            vk_merkle_data,
+        };
+        let prog_real = prover.shrink_program_basefold(&input_real);
+        let vk_real = prover.shrink_prover.setup(&prog_real).1.hash_koalabear();
+
+        // DUMMY: exactly what the vk_map enumeration builds.
+        let height = prover.recursion_vk_map.len().next_power_of_two().ilog2() as usize;
+        let shape = ZKMCompressWithVkeyShape {
+            compress_shape: vec![os.clone()].into(),
+            merkle_tree_height: height,
+        };
+        let input_dummy = ZKMWrapBasefoldWitnessValues::dummy(
+            prover.compress_prover.machine(),
+            &shape,
+        );
+        let prog_dummy = prover.shrink_program_basefold(&input_dummy);
+        let vk_dummy = prover.shrink_prover.setup(&prog_dummy).1.hash_koalabear();
+
+        let eq = vk_real == vk_dummy;
+        let real_in = prover.recursion_vk_map.contains_key(&vk_real);
+        let dummy_in = prover.recursion_vk_map.contains_key(&vk_dummy);
+        eprintln!(
+            "[SHRINKEQ] EQUAL={eq} vk_real={:?} in_map={real_in}",
+            vk_real.map(|x| x.as_canonical_u32())
+        );
+        eprintln!(
+            "[SHRINKEQ] vk_dummy={:?} in_map={dummy_in} (map_size={}, height={height})",
+            vk_dummy.map(|x| x.as_canonical_u32()),
+            prover.recursion_vk_map.len()
+        );
+
+        // Third leg: the EXACT enumeration path — the allowed-shape combo
+        // (which may carry retired chip names) whose machine-filtered
+        // heights match the real proof.  This is the true map-membership
+        // predicate: vk_enum is what `build_compress_vks` would store.
+        use zkm_stark::air::MachineAir;
+        let machine_names: std::collections::BTreeSet<String> = prover
+            .compress_prover
+            .machine()
+            .chips()
+            .iter()
+            .map(|c| <_ as MachineAir<KoalaBear>>::name(c))
+            .collect();
+        let matching_combo = rsc.get_all_shape_combinations(1).map(|mut v| v.pop().unwrap()).find(|combo| {
+            let filtered: Vec<(String, usize)> = combo
+                .inner
+                .iter()
+                .filter(|(n, _)| machine_names.contains(n))
+                .cloned()
+                .collect();
+            OrderedShape::from_log2_heights(&filtered) == os
+        });
+        match matching_combo {
+            Some(combo) => {
+                let shape_enum = ZKMCompressWithVkeyShape {
+                    compress_shape: vec![combo].into(),
+                    merkle_tree_height: height,
+                };
+                let input_enum = ZKMWrapBasefoldWitnessValues::dummy(
+                    prover.compress_prover.machine(),
+                    &shape_enum,
+                );
+                let prog_enum = prover.shrink_program_basefold(&input_enum);
+                let vk_enum = prover.shrink_prover.setup(&prog_enum).1.hash_koalabear();
+                eprintln!(
+                    "[SHRINKEQ] vk_enum(9-name combo)={:?} ==real:{} in_map={}",
+                    vk_enum.map(|x| x.as_canonical_u32()),
+                    vk_enum == vk_real,
+                    prover.recursion_vk_map.contains_key(&vk_enum)
+                );
+            }
+            None => eprintln!(
+                "[SHRINKEQ] NO allowed combo's filtered heights match the real shape"
+            ),
+        }
+        if !eq {
+            // Localize: compare instruction streams.
+            let a = format!("{:?}", prog_real.seq_blocks);
+            let b = format!("{:?}", prog_dummy.seq_blocks);
+            let n = a.len().min(b.len());
+            let fd = a.bytes().zip(b.bytes()).position(|(x, y)| x != y).unwrap_or(n);
+            eprintln!(
+                "[SHRINKEQ] instr streams: real_len={} dummy_len={} first_diff_at={fd}",
+                a.len(),
+                b.len()
+            );
+            let s = fd.saturating_sub(120);
+            eprintln!("[SHRINKEQ] real @diff: ...{}", &a[s..(fd + 120).min(a.len())]);
+            eprintln!("[SHRINKEQ] dummy@diff: ...{}", &b[s..(fd + 120).min(b.len())]);
+        }
     }
 
     /// VKROOT: is fib's normalize vk (computed on THIS box) in the (regen'd)

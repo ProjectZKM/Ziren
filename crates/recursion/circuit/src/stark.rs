@@ -254,25 +254,37 @@ where
     // crates/recursion/circuit/src/dummy/shard_proof.rs.
     //
     // Resolve each chip in the shape to a concrete &Chip from the
-    // machine. Skip names that don't exist (defensive — real shapes
-    // shouldn't include unknown chips).
-    let chips: Vec<&Chip<KoalaBear, A>> = shape
+    // machine, KEEPING ITS OWN log_height. Skip names that don't
+    // exist (the legacy `allowed_shapes` still carry retired chips —
+    // BatchFRI / ExpReverseBitsLen — that the basefold machine no
+    // longer has).
+    //
+    // VERIFY_VK=true fix (task #24): the previous code filtered the
+    // chip list but then `zip`'d it against the UNFILTERED
+    // `shape.inner`, so for shapes containing retired names every
+    // chip after the first dropped entry received the NEXT entry's
+    // height (e.g. ExtAlu got BatchFRI's 21). Every Compress /
+    // Deferred / Shrink vk enumerated into vk_map.bin was therefore
+    // built against misaligned dummy input shapes no real proof can
+    // produce. Localized by `zkm_prover::tests::vkroot_shrink_vkeq`
+    // (EQUAL=true, real shape == allowed shape, vk ∉ map).
+    let chips_and_heights: Vec<(&Chip<KoalaBear, A>, usize)> = shape
         .inner
         .iter()
-        .filter_map(|(name, _log_height)| {
-            machine.chips().iter().find(|c| c.name() == name.as_str())
+        .filter_map(|(name, log_height)| {
+            machine
+                .chips()
+                .iter()
+                .find(|c| c.name() == name.as_str())
+                .map(|c| (c, *log_height))
         })
         .collect();
+    let chips: Vec<&Chip<KoalaBear, A>> =
+        chips_and_heights.iter().map(|(c, _)| *c).collect();
 
-    // Build (name, log_height) pairs in shape order — mirrors the
-    // shape's chip enumeration so the dummy's `chip_log_heights` /
-    // `chip_cumulative_sums` map entries align with what the parity
-    // test (`stark.rs::tests::dummy_basefold_vk_and_shard_proof_shape_stable`)
-    // and the recursion-program builder expect.
-    let chip_log_heights_pairs: Vec<(String, u8)> = chips
+    let chip_log_heights_pairs: Vec<(String, u8)> = chips_and_heights
         .iter()
-        .zip(shape.inner.iter())
-        .map(|(chip, (_, log_height))| {
+        .map(|(chip, log_height)| {
             let name = MachineAir::<KoalaBear>::name(*chip);
             (name, *log_height as u8)
         })
@@ -293,8 +305,11 @@ where
     // the witness-stream order; chip_information is only consumed
     // by the legacy FRI vk-commit path which the basefold pipeline
     // doesn't exercise on the dummy fixture.
-    let chip_ordering = shape
-        .inner
+    // Same filtering as above: the real vk's chip_ordering only
+    // contains chips the machine actually has, so the dummy must
+    // not leak retired shape names (BatchFRI / ExpReverseBitsLen)
+    // into it either.
+    let chip_ordering = chip_log_heights_pairs
         .iter()
         .enumerate()
         .map(|(i, (name, _))| (name.to_owned(), i))
