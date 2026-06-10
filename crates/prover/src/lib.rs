@@ -3126,6 +3126,135 @@ pub mod tests {
         Ok(())
     }
 
+    /// VKROOT: is fib's normalize vk (computed on THIS box) in the (regen'd)
+    /// recursion_vk_map?  Decisive check for the VERIFY_VK=true failure after
+    /// the regen — distinguishes a coverage/enumeration gap from a cross-box
+    /// build mismatch.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_check_fib_in_map() {
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_stark::shape::OrderedShape;
+        let fib: Vec<(&str, usize)> = vec![
+            ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
+            ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
+            ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
+            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
+            ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
+            ("SyscallInstrs", 11),
+        ];
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        for ic in [true, false] {
+            let os = OrderedShape::from_log2_heights(
+                &fib.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            );
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: ic };
+            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let prog = prover.recursion_program_basefold(&dummy);
+            let vk = prover.compress_prover.setup(&prog).1.hash_koalabear();
+            eprintln!(
+                "[MAPCHK] is_complete={ic}: fib normalize vk={:?} in_map={} (map_size={})",
+                vk.map(|x| x.as_canonical_u32()),
+                prover.recursion_vk_map.contains_key(&vk),
+                prover.recursion_vk_map.len(),
+            );
+            // VKINJECT=1: add fib's normalize vk to crates/prover/vk_map.bin
+            // (on-disk) so a recompile embeds it — proves the recursion-circuit
+            // fix delivers VERIFY_VK=true for fib (pending the area-enumeration
+            // fix that would cover it via the regen).
+            if ic && std::env::var("VKINJECT").is_ok() {
+                use std::collections::BTreeMap;
+                let bytes = std::fs::read("vk_map.bin").expect("read vk_map.bin");
+                let mut map: BTreeMap<[KoalaBear; 8], usize> =
+                    bincode::deserialize(&bytes).expect("deser vk_map");
+                if !map.contains_key(&vk) {
+                    let idx = map.len();
+                    map.insert(vk, idx);
+                    std::fs::write("vk_map.bin", bincode::serialize(&map).unwrap())
+                        .expect("write vk_map.bin");
+                    eprintln!("[INJECT] added fib normalize vk; map -> {} entries", map.len());
+                } else {
+                    eprintln!("[INJECT] already present");
+                }
+            }
+        }
+    }
+
+    /// VKROOT Site-5 construction validation: the normalize program is
+    /// (chip_set, log_dense)-determined, so ANY valid memory-cluster shape at
+    /// log_dense=27 must produce fib's vk.  Find a CONSTRUCTIBLE one (area
+    /// concentrated in a byte-lookup-free chip so the VK-setup
+    /// `Σ byte_lookups·2^log_degree ≤ |F|` holds) that hits each log_dense
+    /// band — the recipe generate() will use.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_site5_construct() {
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_stark::shape::OrderedShape;
+        use zkm_stark::shard_level::shard_proof::EvaluationProof;
+        use zkm_stark::air::MachineAir;
+
+        let fib_vk = [
+            1995641422u32, 1126409227, 1338345684, 1611704093, 650337242, 439362553,
+            2125947076, 2022707873,
+        ];
+        // memory cluster = fib's 22 chips
+        let cluster: Vec<&str> = vec![
+            "AddSub", "Bitwise", "Branch", "Byte", "CloClz", "Cpu", "DivRem", "Global",
+            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "MemoryInstrs",
+            "MemoryLocal", "MiscInstrs", "MovCond", "Mul", "Program", "ShiftLeft",
+            "ShiftRight", "SyscallCore", "SyscallInstrs",
+        ];
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+
+        // byte-lookup count per cluster chip (0 = safe filler).
+        for c in machine.chips().iter() {
+            let cname = <_ as MachineAir<KoalaBear>>::name(c);
+            if cluster.contains(&cname.as_str()) {
+                eprintln!("[SITE5] {cname}: num_sent_byte_lookups={}", c.num_sent_byte_lookups());
+            }
+        }
+
+        let build = |hs: &[(&str, usize)]| -> ([u32; 8], usize) {
+            let os = OrderedShape::from_log2_heights(
+                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            );
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
+            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let ld = match &dummy.shard_proofs[0].evaluation_proof {
+                EvaluationProof::Bundle(bd) => bd.packing.log_dense_size,
+                _ => 0,
+            };
+            let prog = prover.recursion_program_basefold(&dummy);
+            let vk = prover.compress_prover.setup(&prog).1.hash_koalabear().map(|x| x.as_canonical_u32());
+            (vk, ld)
+        };
+
+        // Construct: spread area across the byte-lookup-FREE fillers at a uniform
+        // sweep height (each <= 2^22 max chip height); byte-lookup chips pinned
+        // minimal (so Σ byte_lookups·2^h stays tiny); Byte pinned at its table
+        // height 16.  Sweep the filler height to cover the log_dense range; the
+        // one at log_dense=27 must match fib.
+        let fillers = [
+            "Program", "Jump", "SyscallInstrs", "MemoryGlobalInit",
+            "MemoryGlobalFinalize", "MemoryLocal", "MovCond",
+        ];
+        for fh in [4usize, 8, 12, 15, 16, 17, 18, 20] {
+            let mut hs: Vec<(&str, usize)> = cluster.iter().map(|n| (*n, 1usize)).collect();
+            for e in hs.iter_mut() {
+                if e.0 == "Byte" { e.1 = 16; }
+                if fillers.contains(&e.0) { e.1 = fh; }
+            }
+            let (vk, ld) = build(&hs);
+            eprintln!("[SITE5] fillers@{fh}: log_dense={ld} vk_eq_fib={}", vk == fib_vk);
+        }
+    }
+
     /// VKROOT fix-validation (FAST, no core run): tests the hypothesis that
     /// the normalize program vk depends only on (chip_set, np2(total_values))
     /// — NOT the per-chip height distribution.  Uses fib's exact shape + real

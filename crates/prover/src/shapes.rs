@@ -360,7 +360,7 @@ impl ZKMProofShape {
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
         use zkm_core_machine::mips::MipsAir;
-        use zkm_stark::stacked_shapes::{build_mips_machine_shape, create_all_input_shapes};
+        use zkm_stark::stacked_shapes::{build_mips_machine_shape, types::consts};
         use zkm_stark::air::MachineAir;
         use crate::CoreSC;
 
@@ -391,33 +391,65 @@ impl ZKMProofShape {
         // bound so we have headroom against rounding/per-chip variance.
         const SAFE_BYTE_LOOKUP_BUDGET: u64 = 1u64 << 30;
 
+        let _ = SAFE_BYTE_LOOKUP_BUDGET; // retained for reference
         let machine_shape = build_mips_machine_shape();
-        let small_shapes: Vec<OrderedShape> = create_all_input_shapes(&machine_shape)
-            .into_iter()
-            .map(|cps| {
-                let mut shape = cps.to_ordered_shape();
-                shape.inner.retain(|(name, _)| chips_by_name.contains_key(name));
 
-                // Apply per-shape byte-lookup cap.
-                let total_byte_lookups: u64 = shape
-                    .inner
+        // VERIFY_VK=true Site-5 (AREA ENUMERATION): the normalize program is
+        // (chip_set, log_dense)-determined, so the recursion vk_map must cover
+        // each cluster's chip set at the log_dense (total-trace-area) bands real
+        // proofs hit.  The prior `create_all_input_shapes -> to_ordered_shape
+        // (uniform) + byte-lookup cap` collapsed every cluster to ONE tiny
+        // log_dense (~13), missing real proofs (e.g. fib needs log_dense=27).
+        //
+        // Construction (validated in `tests::vkroot_site5_construct`): per
+        // cluster, sweep a uniform height `h` on the byte-lookup-FREE chips
+        // (`num_sent_byte_lookups == 0`, each <= 2^CORE_MAX_LOG_ROW_COUNT so no
+        // single chip overflows the max-height); pin byte-lookup chips minimal
+        // (h=1) so the VK-setup `Σ byte_lookups·2^h ≤ |F|` always holds; pin
+        // Byte at its 2^16 lookup-table height.  Spreading area across the
+        // free fillers makes total_values span log_dense ~20..30 as `h` sweeps.
+        // Since the program is (chip_set, log_dense)-determined, any distribution
+        // hitting a target log_dense yields the same vk — so these synthetic
+        // shapes produce exactly the real proofs' normalize vks.  We over-emit;
+        // `build_compress_vks` catch_unwinds the few overflow shapes
+        // (log_dense>30) and the vk_set dedups equal-log_dense shapes.
+        let small_shapes: Vec<OrderedShape> = {
+            let mut set: BTreeSet<OrderedShape> = BTreeSet::new();
+            for cluster in &machine_shape.chip_clusters {
+                let names: Vec<String> = cluster
                     .iter()
-                    .map(|(name, _)| chips_by_name[name].num_sent_byte_lookups() as u64)
-                    .sum();
-                if total_byte_lookups > 0 {
-                    let max_log_height: u32 =
-                        (SAFE_BYTE_LOOKUP_BUDGET / total_byte_lookups.max(1)).trailing_zeros();
-                    for entry in &mut shape.inner {
-                        entry.1 = entry.1.min(max_log_height as usize);
-                    }
+                    .filter(|n| chips_by_name.contains_key(*n))
+                    .cloned()
+                    .collect();
+                if names.is_empty() {
+                    continue;
                 }
-
-                shape
-            })
-            .filter(|shape| !shape.inner.is_empty())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
+                let fillers: std::collections::HashSet<&String> = names
+                    .iter()
+                    .filter(|n| {
+                        n.as_str() != "Byte"
+                            && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+                    })
+                    .collect();
+                for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                    let inner: Vec<(String, usize)> = names
+                        .iter()
+                        .map(|n| {
+                            let height = if fillers.contains(n) {
+                                h
+                            } else if n == "Byte" {
+                                16
+                            } else {
+                                1
+                            };
+                            (n.clone(), height)
+                        })
+                        .collect();
+                    set.insert(OrderedShape::from_log2_heights(&inner));
+                }
+            }
+            set.into_iter().collect()
+        };
 
         small_shapes
             .into_iter()
