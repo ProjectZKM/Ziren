@@ -516,34 +516,25 @@ where
         if polys.is_empty() {
             return Some(Vec::new());
         }
-        // #108-core residency: the batched (fused) hook reads HOST main_cells.
-        // When any device-eligible chip has its host cells emptied (the core
-        // device-fold residency path leaves main_cells empty + device_cells set),
-        // the fused hook cannot serve it -> decline the whole round so the driver
-        // falls to the per-chip sum_as_poly path, where gpu_y_tuple_device reads
-        // the device cells. (This is the per-chip device-fold the operator opted
-        // into via ZIREN_GPU_CORE_DEVICE_FOLD; it forfeits fusion for residency.)
-        if polys.iter().any(|p| {
-            p.num_real_entries > 0
-                && p.num_prep_cols == 0
-                && p.main_cells.is_empty()
-                && p.device_cells.is_some()
-        }) {
-            return None;
-        }
 
         // Per REAL chip (num_real > 0): partial-lagrange + last coord + owned
         // name must outlive the borrowed inputs.  `real_poly_idx` maps the
         // real-chip order back to the full poly order.
+        //
+        // ALL real chips ride the fused launch now: np>0 chips marshal their
+        // prep cells alongside main ([main ++ prep] per-chip block — the
+        // kernel's preprocessed_ptr path, validated by the np>0 residency
+        // work), and device-RESIDENT chips (host cells emptied under
+        // ZIREN_GPU_CORE_DEVICE_FOLD / NP_PREP) pass their device handle so
+        // the hook's pointer-array kernel reads them IN PLACE.  One launch
+        // per round (SP1 jagged_constraint_poly_eval shape) instead of
+        // per-chip launches.
         let mut partials: Vec<Vec<EF>> = Vec::new();
         let mut names: Vec<String> = Vec::new();
         let mut lasts: Vec<EF> = Vec::new();
         let mut real_poly_idx: Vec<usize> = Vec::new();
         for (i, poly) in polys.iter().enumerate() {
-            // Device set = REAL chips with NO preprocessed trace. np>0 chips
-            // and pure-padding chips are handled on host below (the device
-            // kernel has no prep-cell path, matching the per-chip np==0 gate).
-            if poly.num_real_entries == 0 || poly.num_prep_cols != 0 {
+            if poly.num_real_entries == 0 {
                 continue;
             }
             let dim = poly.zeta.len();
@@ -553,7 +544,7 @@ where
             real_poly_idx.push(i);
         }
 
-        // No device-eligible (real, np==0) chip this round -> host fallback.
+        // No real chip this round -> host fallback.
         if real_poly_idx.is_empty() {
             return None;
         }
@@ -602,6 +593,7 @@ where
                         alpha: alpha_ef4,
                         eq: eq_ef4,
                         num_real: poly.num_real_entries,
+                        device_cells: poly.device_cells.as_deref(),
                     }
                 })
                 .collect();
@@ -626,11 +618,6 @@ where
                 out.push(UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] });
                 continue;
             }
-            if poly.num_prep_cols != 0 {
-                // np>0 chip: host path (device kernel has no prep-cell support).
-                out.push(poly.sum_as_poly(claims[i], is_first_round));
-                continue;
-            }
             let yt = &tuples[r];
             let claim = claims[i].expect("batched_device_round: claim required");
             out.push(poly.finalize_round_poly(
@@ -653,7 +640,7 @@ where
             .unwrap_or(false)
         {
             for (i, poly) in polys.iter().enumerate() {
-                if poly.num_real_entries == 0 || poly.num_prep_cols != 0 {
+                if poly.num_real_entries == 0 {
                     continue;
                 }
                 let reference = poly.sum_as_poly(claims[i], is_first_round);
