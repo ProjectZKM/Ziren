@@ -578,6 +578,51 @@ mod tests {
         println!("Number of compress shapes: {}", all_shapes.len());
     }
 
+    /// VKROOT-CIRCULARITY measurement: print enumeration height
+    /// (ceil(log2(num_shapes)) at production REDUCE_BATCH_SIZE) vs
+    /// production height (ceil(log2(map_size)) from the embedded
+    /// vk_map.bin).  If these differ, the entire vk_map was baked at a
+    /// merkle_tree_height the production prover never reproduces, so
+    /// `contains_key(compose_vk)` can never hit.
+    #[test]
+    #[ignore]
+    fn measure_vkroot_heights() {
+        use crate::REDUCE_BATCH_SIZE;
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config = RecursionShapeConfig::default();
+        let all_shapes: BTreeSet<_> = ZKMProofShape::generate(
+            &core_shape_config,
+            &recursion_shape_config,
+            REDUCE_BATCH_SIZE,
+        )
+        .collect();
+        let num_shapes = all_shapes.len();
+        let enum_height = num_shapes.next_power_of_two().ilog2() as usize;
+
+        let recursion_count =
+            all_shapes.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
+        let compress_count =
+            all_shapes.iter().filter(|s| matches!(s, ZKMProofShape::Compress(_))).count();
+        let deferred_count =
+            all_shapes.iter().filter(|s| matches!(s, ZKMProofShape::Deferred(_))).count();
+        let shrink_count =
+            all_shapes.iter().filter(|s| matches!(s, ZKMProofShape::Shrink(_))).count();
+
+        let map: std::collections::BTreeMap<[KoalaBear; DIGEST_SIZE], usize> =
+            bincode::deserialize(include_bytes!("../vk_map.bin")).unwrap();
+        let map_size = map.len();
+        let prod_height = map_size.next_power_of_two().ilog2() as usize;
+
+        eprintln!("[VKROOT] REDUCE_BATCH_SIZE={REDUCE_BATCH_SIZE}");
+        eprintln!("[VKROOT] num_shapes={num_shapes} (recursion={recursion_count} compress={compress_count} deferred={deferred_count} shrink={shrink_count})");
+        eprintln!("[VKROOT] enum_height = ceil(log2({num_shapes})) = {enum_height}");
+        eprintln!("[VKROOT] map_size={map_size}  prod_height = ceil(log2({map_size})) = {prod_height}");
+        eprintln!(
+            "[VKROOT] HEIGHTS {}",
+            if enum_height == prod_height { "MATCH ✓ (no height circularity)" } else { "MISMATCH ✗ (every key baked at wrong height)" }
+        );
+    }
+
     /// Task #32: the Recursion shape count is now strictly bounded
     /// by stacked_shapes' size-class quantization.  Before this change,
     /// `ZKMProofShape::generate` sourced ~1.25M shapes from the

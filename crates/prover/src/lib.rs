@@ -1414,13 +1414,37 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 bf_vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
                             let vk_merkle_data =
                                 self.make_basefold_merkle_proofs(&vks_only);
-                            let input = ZKMCircuitWitness::ComposeBasefold(
-                                ZKMCompressBasefoldWitnessValues {
-                                    vks_and_proofs: bf_vks_and_proofs,
-                                    vk_merkle_data,
-                                    is_complete,
-                                },
-                            );
+                            let compose_values = ZKMCompressBasefoldWitnessValues {
+                                vks_and_proofs: bf_vks_and_proofs,
+                                vk_merkle_data,
+                                is_complete,
+                            };
+                            if std::env::var("VKEQ_COMPOSE").is_ok() {
+                                let sk = compose_values.shape_key();
+                                let arity = compose_values.vks_and_proofs.len();
+                                let mpath = compose_values
+                                    .vk_merkle_data
+                                    .vk_merkle_proofs
+                                    .first()
+                                    .map(|p| p.path.len())
+                                    .unwrap_or(0);
+                                let per_proof: Vec<String> = compose_values
+                                    .vks_and_proofs
+                                    .iter()
+                                    .map(|(_, sp)| {
+                                        let hs: Vec<String> = sp
+                                            .chip_log_heights
+                                            .iter()
+                                            .map(|(n, h)| format!("{n}={h}"))
+                                            .collect();
+                                        format!("[{}]", hs.join(","))
+                                    })
+                                    .collect();
+                                eprintln!(
+                                    "[VKEQ-COMPOSE] shape_key={sk:#018x} arity={arity} is_complete={is_complete} merkle_path_len={mpath} per_proof={per_proof:?}"
+                                );
+                            }
+                            let input = ZKMCircuitWitness::ComposeBasefold(compose_values);
 
                             input_tx
                                 .lock()
@@ -2000,6 +2024,93 @@ pub mod tests {
     /// fibonacci doesn't trigger compose; multi-shard tests panic on
     /// pre-existing legacy-FRI removal regression), so this synthetic
     /// path is the only way to validate the chain without the GPU box.
+    /// VKROOT localizer: enumerate every Compress shape (the exact set
+    /// `build_vk_map` walks), build the dummy compose witness for each
+    /// at the production merkle_tree_height, compute its `shape_key()`,
+    /// and collect the set.  Then check whether the real fib compose
+    /// shape_key(s) (passed via `VKEQ_TARGETS=hex,hex,...`) are members.
+    ///
+    /// If a target ∈ set but the real compose vk is NOT in vk_map ⇒
+    /// value-dependence (the shape_key→program invariant is violated:
+    /// two equal-shape_key witnesses produce different programs ⇒ a
+    /// P2c-style baked-value remnant in the compose path).
+    /// If a target ∉ set ⇒ shape-coverage gap (the shape was never
+    /// enumerated; injecting it converges since heights match).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_localize_compose_shape_keys() {
+        use zkm_recursion_circuit::machine::ZKMCompressBasefoldWitnessValues;
+        use crate::shapes::{ZKMProofShape, ZKMCompressProgramShape};
+        use std::collections::BTreeSet;
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let core_shape_config = prover.core_shape_config.as_ref().unwrap();
+        let recursion_shape_config = prover.compress_shape_config.as_ref().unwrap();
+        let compress_machine = prover.compress_prover.machine();
+
+        let all_shapes: BTreeSet<_> = ZKMProofShape::generate(
+            core_shape_config,
+            recursion_shape_config,
+            REDUCE_BATCH_SIZE,
+        )
+        .collect();
+        let num_shapes = all_shapes.len();
+        let height = num_shapes.next_power_of_two().ilog2() as usize;
+        eprintln!("[VKROOT-LOC] num_shapes={num_shapes} merkle_tree_height={height}");
+
+        // shape_key set, keyed by arity for diagnostics.
+        let mut sk_set: BTreeSet<u64> = BTreeSet::new();
+        let mut sk_by_arity: std::collections::BTreeMap<usize, BTreeSet<u64>> =
+            std::collections::BTreeMap::new();
+        let mut n_compress = 0usize;
+        for shape in all_shapes.into_iter() {
+            if !matches!(shape, ZKMProofShape::Compress(_)) {
+                continue;
+            }
+            n_compress += 1;
+            let prog_shape = ZKMCompressProgramShape::from_proof_shape(shape, height);
+            let ZKMCompressProgramShape::Compress(vkey_shape) = prog_shape else { unreachable!() };
+            let mut dummy = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy::<CompressAir<KoalaBear>>(
+                compress_machine,
+                &vkey_shape,
+            );
+            let arity = dummy.vks_and_proofs.len();
+            // is_complete is witnessed (program-independent) but pollutes
+            // shape_key — insert both variants so the real final compose
+            // (is_complete=true) can match an enumerated (is_complete=false)
+            // shape.
+            dummy.is_complete = false;
+            let sk_f = dummy.shape_key();
+            dummy.is_complete = true;
+            let sk_t = dummy.shape_key();
+            sk_set.insert(sk_f);
+            sk_set.insert(sk_t);
+            sk_by_arity.entry(arity).or_default().insert(sk_f);
+            sk_by_arity.entry(arity).or_default().insert(sk_t);
+        }
+        eprintln!(
+            "[VKROOT-LOC] enumerated {n_compress} Compress shapes -> {} distinct shape_keys",
+            sk_set.len()
+        );
+        for (arity, set) in sk_by_arity.iter() {
+            eprintln!("[VKROOT-LOC]   arity={arity}: {} distinct shape_keys", set.len());
+        }
+
+        if let Ok(targets) = std::env::var("VKEQ_TARGETS") {
+            for t in targets.split(',').filter(|s| !s.is_empty()) {
+                let t = t.trim().trim_start_matches("0x");
+                let key = u64::from_str_radix(t, 16).expect("hex shape_key");
+                let member = sk_set.contains(&key);
+                eprintln!(
+                    "[VKROOT-LOC] target shape_key={key:#018x} member_of_enumerated={member} {}",
+                    if member { "=> VALUE-DEPENDENCE (shape enumerated, vk differs)" }
+                    else { "=> COVERAGE GAP (shape never enumerated)" }
+                );
+            }
+        }
+    }
+
     #[test]
     #[serial]
     fn compose_basefold_program_emits_seqblock_parallel() {
@@ -2963,8 +3074,247 @@ pub mod tests {
                     }
                 }
             }
+
+            // ===== VKROOT decisive check: map membership + shape coverage =====
+            // vk_real is the production normalize/compress vk for this batch
+            // (for fib arity-1 single shard this IS the final compressed-proof
+            // vk that verify_compressed checks at verify.rs:323).
+            let in_map = prover.recursion_vk_map.contains_key(&vk_real);
+            eprintln!(
+                "[VKROOT] input {i}: vk_real in recursion_vk_map = {in_map} (map_size={})",
+                prover.recursion_vk_map.len()
+            );
+            // Is fib's real per-shard core shape among the enumerated Recursion
+            // (small) shapes that build_vk_map walks?  If NOT => coverage gap:
+            // the normalize program for this shape was never enumerated, so its
+            // vk can never be in the map regardless of value-independence.
+            {
+                use crate::shapes::ZKMProofShape;
+                use zkm_stark::shape::OrderedShape;
+                let core_cfg = prover.core_shape_config.as_ref().unwrap();
+                let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
+                let enum_rec: std::collections::BTreeSet<OrderedShape> =
+                    ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
+                        .filter_map(|s| match s {
+                            ZKMProofShape::Recursion(os) => Some(os),
+                            _ => None,
+                        })
+                        .collect();
+                eprintln!("[VKROOT] enumerated Recursion shapes: {}", enum_rec.len());
+                for (j, sp) in batch.iter().enumerate() {
+                    let real_shape = sp.shape();
+                    let member = enum_rec.contains(&real_shape);
+                    eprintln!(
+                        "[VKROOT] input {i} shard {j}: real_core_shape member_of_enumerated={member}"
+                    );
+                    if !member {
+                        eprintln!("[VKROOT]   real_core_shape = {real_shape:?}");
+                        // Show the closest enumerated shapes (same chip set).
+                        let real_names: std::collections::BTreeSet<&String> =
+                            real_shape.inner.iter().map(|(n, _)| n).collect();
+                        for es in enum_rec.iter() {
+                            let es_names: std::collections::BTreeSet<&String> =
+                                es.inner.iter().map(|(n, _)| n).collect();
+                            if es_names == real_names {
+                                eprintln!("[VKROOT]   same-chipset enumerated = {es:?}");
+                            }
+                        }
+                    }
+                }
+            }
         }
         Ok(())
+    }
+
+    /// VKROOT fix-validation (FAST, no core run): tests the hypothesis that
+    /// the normalize program vk depends only on (chip_set, np2(total_values))
+    /// — NOT the per-chip height distribution.  Uses fib's exact shape + real
+    /// vk captured from `test_vk_equality_normalize_fib`.  If alternate
+    /// same-band distributions reproduce vk_real, the coverage fix is sound:
+    /// generate() need only emit one shape per (cluster, log_dense band).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn vkroot_normalize_vk_equivalence_class() {
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_stark::shape::OrderedShape;
+        use zkm_stark::shard_level::shard_proof::EvaluationProof;
+
+        // fib's exact real core shape (from test_vk_equality_normalize_fib dump).
+        let fib: Vec<(&str, usize)> = vec![
+            ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
+            ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
+            ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
+            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
+            ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
+            ("SyscallInstrs", 11),
+        ];
+        let vk_real: [u32; 8] = [
+            1115632139, 1688068798, 1650214975, 1858294344, 1237422514,
+            2047442675, 305119098, 273862066,
+        ];
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+
+        // Build dummy from shape, read total_values/log_dense from its bundle,
+        // build the normalize program, setup -> vk (canonical u32).  Also
+        // returns the program so we can byte/instruction-diff divergent ones.
+        let build = |hs: &[(&str, usize)]| -> ([u32; 8], usize, usize, std::sync::Arc<zkm_recursion_core::RecursionProgram<KoalaBear>>) {
+            let os = OrderedShape::from_log2_heights(
+                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            );
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
+            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let (tv, ld) = match &dummy.shard_proofs[0].evaluation_proof {
+                EvaluationProof::Bundle(bd) => {
+                    (bd.packing.total_values, bd.packing.log_dense_size)
+                }
+                _ => (0, 0),
+            };
+            let prog = prover.recursion_program_basefold(&dummy);
+            let vk = prover
+                .compress_prover
+                .setup(&prog)
+                .1
+                .hash_koalabear()
+                .map(|x| x.as_canonical_u32());
+            (vk, tv, ld, prog)
+        };
+
+        // Candidate distributions (same chip_set), incl. very different ones.
+        let mut alts: Vec<(&str, Vec<(&str, usize)>)> = Vec::new();
+        alts.push(("fib_itself", fib.clone()));
+        {
+            let mut a = fib.clone();
+            for e in a.iter_mut() { if e.0 == "Program" { e.1 = 18; } }
+            alts.push(("program_19to18", a));
+        }
+        {
+            // Aggressive redistribute: flatten the big chips, raise small ones.
+            let mut a = fib.clone();
+            for e in a.iter_mut() {
+                match e.0 {
+                    "Global" => e.1 = 16,
+                    "MemoryGlobalFinalize" => e.1 = 16,
+                    "MemoryGlobalInit" => e.1 = 16,
+                    "Cpu" => e.1 = 18,
+                    "Mul" => e.1 = 18,
+                    "DivRem" => e.1 = 18,
+                    _ => {}
+                }
+            }
+            alts.push(("redistribute", a));
+        }
+
+        let mut fib_prog = None;
+        let mut fib_vk: Option<[u32; 8]> = None;
+        for (tag, hs) in &alts {
+            let (vk, tv, ld, prog) = build(hs);
+            // After the chip_height_bits witnessing fix the program changes,
+            // so vk no longer matches the OLD baked vk_real; the correct
+            // success criterion is chip_set-DETERMINISM: every same-chip_set
+            // shape (fib + alts) must produce the SAME vk (== fib's vk this
+            // run).  vk_eq_real is kept for reference only.
+            eprintln!(
+                "[EQUIV] {tag}: total_values={tv} log_dense={ld} vk_eq_real={} vk_eq_fib={} vk={vk:?}",
+                vk == vk_real,
+                fib_vk.map(|f| f == vk).unwrap_or(true),
+            );
+            if *tag == "fib_itself" {
+                fib_prog = Some(prog);
+                fib_vk = Some(vk);
+                continue;
+            }
+            // Localize ANY residual per-chip-height dependence: diff fib's
+            // program vs this alt's (same chip_set, different heights).  After
+            // the fix this should show NO diff (vk == fib's vk).
+            if Some(vk) != fib_vk {
+                let fp = fib_prog.as_ref().unwrap();
+                let rb = bincode::serialize(&**fp).unwrap();
+                let db = bincode::serialize(&*prog).unwrap();
+                let first_diff = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
+                let ri: Vec<_> = fp.iter_instructions().collect();
+                let di: Vec<_> = prog.iter_instructions().collect();
+                eprintln!(
+                    "[EQUIV-DIFF] {tag} vs fib: prog_bytes fib={} alt={} first_byte_diff={:?} | instrs fib={} alt={} (delta={}) total_mem fib={} alt={}",
+                    rb.len(), db.len(), first_diff, ri.len(), di.len(),
+                    ri.len() as i64 - di.len() as i64, fp.total_memory, prog.total_memory,
+                );
+                let n = ri.len().min(di.len());
+                let mut shown = 0;
+                let mut first_idx = None;
+                for k in 0..n {
+                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
+                        if first_idx.is_none() { first_idx = Some(k); }
+                        eprintln!("[EQUIV-DIFF] {tag} diff@{k}: fib={:?} | alt={:?}", ri[k], di[k]);
+                        shown += 1;
+                        if shown >= 8 { break; }
+                    }
+                }
+                // The divergent instrs are const-block Mem-Writes (no
+                // trace).  Find the READER of each divergent const address
+                // and backtrace IT — names the verifier line that BAKES the
+                // height-derived bit.  (ZKM_DEBUG=1 + package debug symbols.)
+                let rtr = &fp.traces;
+                if let Some(fd) = first_idx {
+                    let mut shown_rdr = 0;
+                    for k in fd..ri.len() {
+                        let s = format!("{:?}", ri[k]);
+                        if !(s.contains("kind: Write") && format!("{:?}", di.get(k)) != format!("{:?}", Some(&ri[k]))) {
+                            continue;
+                        }
+                        if let Some(addr) = s
+                            .split("inner: Address(")
+                            .nth(1)
+                            .and_then(|t| t.split(')').next())
+                            .and_then(|t| t.parse::<usize>().ok())
+                        {
+                            let needle = format!("Address({addr})");
+                            for j in (k + 1)..ri.len() {
+                                let rs = format!("{:?}", ri[j]);
+                                if rs.contains(&needle) && !rs.contains("kind: Write") {
+                                    let frame = rtr.get(j).and_then(|t| t.as_ref()).map(|bt| {
+                                        let mut b = bt.clone();
+                                        b.resolve();
+                                        let fs = format!("{:?}", b);
+                                        fs.lines()
+                                            .find(|l| l.contains("recursion/circuit/src") || l.contains("stark/src"))
+                                            .unwrap_or("(no circuit frame)")
+                                            .trim()
+                                            .to_string()
+                                    }).unwrap_or_else(|| "(reader no trace)".to_string());
+                                    eprintln!("[EQUIV-RDR] {tag} const@{addr} (write instr{k}) read by instr{j}: {frame} | {:?}", ri[j]);
+                                    // Reader has no trace; scan a window around it
+                                    // for the nearest traced instr → names the phase.
+                                    let lo = j.saturating_sub(60);
+                                    let hi = (j + 60).min(ri.len());
+                                    for w in lo..hi {
+                                        if let Some(Some(bt)) = rtr.get(w) {
+                                            let mut b = bt.clone();
+                                            b.resolve();
+                                            let fs = format!("{:?}", b);
+                                            if let Some(line) = fs.lines().find(|l| {
+                                                (l.contains("recursion/circuit/src") || l.contains("stark/src"))
+                                                    && !l.contains("shard_proof_variable_lift")
+                                            }) {
+                                                eprintln!("[EQUIV-NEAR] {tag} @{j} nearest-traced@{w}: {}", line.trim());
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            shown_rdr += 1;
+                            if shown_rdr >= 6 { break; }
+                        }
+                    }
+                }
+                eprintln!("[EQUIV-DIFF] {tag}: traces.len()={} (0 = ZKM_DEBUG unset)", rtr.len());
+            }
+        }
     }
 
     // SHA2_RUST_ELF requires stdin input (ZKMStdin::default() → "insufficient
