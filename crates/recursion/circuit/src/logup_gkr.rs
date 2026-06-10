@@ -328,6 +328,7 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
     chip_metadata: &LogupGkrShardChipMetadata,
     proof: &crate::logup_proof::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
     public_values: &[Felt<C::F>],
+    max_log_row_count: usize,
     challenger: &mut FC,
     eval_public_values_fn: EVPV,
 ) where
@@ -342,6 +343,19 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
         witness,
     } = proof;
     let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
+
+    // P3 (#18, SP1 contract): the GKR round count is FIXED — the prover
+    // pads to max_log_row_count-1 rounds and SP1's verifier asserts
+    // `round_proofs.len() + 1 == max_log_row_count`.  The count is
+    // STRUCTURAL in the recursion program (the loop below unrolls over
+    // the lifted vec), so enforcement happens at program build: refuse
+    // to build a verifier circuit for a shortened reduction.  Mirrors
+    // the host check in shard_level/verifier.rs::verify_logup_gkr_host.
+    assert_eq!(
+        round_proofs.len() + 1,
+        max_log_row_count,
+        "LogUp-GKR proof must carry exactly max_log_row_count-1 padded rounds"
+    );
 
     // (1) Check the proof-of-work grinding witness.  Use `gkr_check_witness`
     // (NOT `check_witness`): the host gates GKR grinding to the inner
@@ -709,6 +723,9 @@ mod tests {
             &metadata,
             &proof,
             &public_values,
+            // P3 (#18): round count is now asserted == max_log_row_count - 1;
+            // this synthetic proof has 1 round → mlrc = 2.
+            2,
             &mut challenger,
             |_folder| {
                 // No per-record constraints — see

@@ -1128,6 +1128,20 @@ where
     let mut denominator_eval: Challenge<SC> = evaluate_mle_host(denominator, &eval_point);
     let _ = (numerator_eval, denominator_eval);
 
+    // P3 (#18, SP1 contract): the prover pads GKR to a FIXED round count
+    // (SP1's verifier asserts `round_proofs.len() + 1 == max_log_row_count`).
+    // Enforce it here so a malicious prover cannot shorten the reduction
+    // (each missing round is an unverified MLE halving) — the round count
+    // must be checked, not derived from the proof.
+    if proof.round_proofs.len() + 1 != max_log_row_count {
+        return Err(BasefoldVerifyError::LogupGkr(format!(
+            "GKR round count {} + 1 != max_log_row_count {} (proof must be \
+             padded to the fixed round count)",
+            proof.round_proofs.len(),
+            max_log_row_count
+        )));
+    }
+
     // (4) Walk round_proofs.  For each round:
     //   - sample lambda
     //   - check claimed_sum == λ·n_eval + d_eval

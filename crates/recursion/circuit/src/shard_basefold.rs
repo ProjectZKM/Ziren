@@ -484,6 +484,7 @@ impl<P> BasefoldShardVerifier<P> {
             chip_metadata,
             logup_gkr_proof,
             public_values,
+            self.max_log_row_count,
             challenger,
             eval_public_values_fn,
         );
