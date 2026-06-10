@@ -101,28 +101,35 @@ where
     // (`hypercube/logup_gkr/verifier.rs:198`) and lazily zero-pads the
     // first-layer MLEs to `max_log_row_count` (`execution.rs:226`).
     //
-    // Previously Ziren set `num_row_variables = log2(max MAIN-trace
-    // height).max(2)` (data-dependent → 18 rounds for fib core, 22-dim
-    // zerocheck point), which made the recursion program NON-enumerable
-    // (its GKR loop bound varied with the input) and was the root cause
-    // of the VERIFY_VK=true "Invalid verification key" failure.
-    //
-    // `generate_first_layer` already zero-fills the per-chip GKR tables
-    // up to `2^(num_row_variables-1)` rows; padded leaves carry
-    // numerator 0 (multiplicity 0) so they contribute 0/den = 0 to the
-    // LogUp grand-sum — the claimed sum is unchanged (transcript-safe).
+    // #108 device residency (merged from 63f8cd49): chips whose host
+    // trace was emptied (device resident) resolve their REAL height
+    // from the per-shard provider inside the ceiling check below, so a
+    // device-resident tall chip (e.g. np>0 Program at 2^19) is still
+    // bounds-checked.  Note the FIXED `num_row_variables` already
+    // subsumes that commit's original concern (a data-dependent count
+    // shrinking below device-trace heights) — the count can no longer
+    // shrink at all.
     debug_assert!(
         {
-            let max_height = main_traces
+            let max_height = chips
                 .iter()
-                .map(|t| if t.width == 0 { 0 } else { t.values.len() / t.width })
+                .zip(main_traces.iter())
+                .map(|(chip, t)| {
+                    if t.width == 0 {
+                        _device_traces
+                            .and_then(|p| p.chip_height(&chip.name()))
+                            .unwrap_or(0)
+                    } else {
+                        t.values.len() / t.width
+                    }
+                })
                 .max()
                 .unwrap_or(0);
             let actual_log_height =
                 max_height.max(1).next_power_of_two().trailing_zeros().max(2) as usize;
             actual_log_height <= max_log_row_count
         },
-        "max main-trace log height exceeds the shard ceiling \
+        "max trace log height (provider-resolved) exceeds the shard ceiling \
          max_log_row_count {max_log_row_count} — GKR padding would truncate"
     );
     let num_row_variables = max_log_row_count;
