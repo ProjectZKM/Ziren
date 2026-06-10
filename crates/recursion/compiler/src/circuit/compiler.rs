@@ -202,12 +202,15 @@ where
     /// `divisor * out = numerator` becomes `0 * out = (lhs - rhs)`,
     /// which has no solution unless `lhs == rhs`.
     ///
-    /// **TARGET: `DivFAssert` (workstream F / #7 soundness flip — NOT YET
-    /// LANDED).**  The flip is validated for compress (honest fib-compress
-    /// green with enforcement ON; tampered-PV negative test rejects) but the
-    /// shrink program still trips at the inner-ring BaseFold Merkle binding
-    /// (plan Step 1b/2 must land first).  Flip the four `DivF`/`DivE` emits
-    /// below to `DivFAssert`/`DivEAssert` once that binding is honest.  With
+    /// **LANDED: `DivFAssert` (workstream F / #7 soundness flip).**  The
+    /// four assert lowerings below emit `DivFAssert`/`DivEAssert`,
+    /// validated end-to-end: honest fib core→compress→shrink→wrap green
+    /// with enforcement ON, tampered-PV negative test rejects.  (The two
+    /// honest-unsatisfiability blockers — the fabricated vk-merkle leaf
+    /// `[index; 8]` under VERIFY_VK=false and the shrink-layer
+    /// root-digest assert on a compress output — were fixed first; see
+    /// `prover/src/lib.rs make_basefold_merkle_proofs` and
+    /// `machine/wrap_basefold.rs` Reduce arm.)  With
     /// plain `DivF`, the assert row had `mult = 0` (nobody reads `out`),
     /// so `is_div_active = is_div AND mult≠0 = 0` and the AIR identity
     /// `when(is_div_active + is_div_soundness)·(in2·out − in1)` imposed
@@ -234,7 +237,7 @@ where
         use BaseAluOpcode::*;
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, diff, Imm::F(C::F::ZERO)));
+        f(self.base_alu(DivFAssert, out, diff, Imm::F(C::F::ZERO)));
     }
 
     fn base_assert_ne(
@@ -247,7 +250,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.base_alu(SubF, diff, lhs, rhs));
-        f(self.base_alu(DivF, out, Imm::F(C::F::ONE), diff));
+        f(self.base_alu(DivFAssert, out, Imm::F(C::F::ONE), diff));
     }
 
     fn ext_assert_eq(
@@ -260,7 +263,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, diff, Imm::EF(C::EF::ZERO)));
+        f(self.ext_alu(DivEAssert, out, diff, Imm::EF(C::EF::ZERO)));
     }
 
     fn ext_assert_ne(
@@ -273,7 +276,7 @@ where
         let [diff, out] = core::array::from_fn(|_| Self::alloc(&mut self.next_addr));
 
         f(self.ext_alu(SubE, diff, lhs, rhs));
-        f(self.ext_alu(DivE, out, Imm::EF(C::EF::ONE), diff));
+        f(self.ext_alu(DivEAssert, out, Imm::EF(C::EF::ONE), diff));
     }
 
     #[inline(always)]
