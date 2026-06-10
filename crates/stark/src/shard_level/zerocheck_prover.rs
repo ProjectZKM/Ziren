@@ -234,7 +234,17 @@ where
                             } else {
                                 (&[], 0)
                             };
-                        prep_hook(raw.as_ref(), prep_kb, np_hook)
+                        let prepared = prep_hook(raw.as_ref(), prep_kb, np_hook);
+                        if prepared.is_some() {
+                            // The prepare hook CLONED the trace into its own
+                            // bit-reversed fold buffer; the provider's original
+                            // is never read again (folds + openings derive from
+                            // the clone) — let the provider release it early
+                            // (#367 VRAM window). No-op for legacy providers.
+                            drop(raw);
+                            p.release_by_name(&name);
+                        }
+                        prepared
                     })
                 } else {
                     None
