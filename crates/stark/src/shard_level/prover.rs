@@ -305,6 +305,46 @@ where
             t.clone()
         })
         .collect();
+    // #32 (commit-traces D2H removal, step 1): capture the
+    // cumulative-sum TAILS (last 14 row-major values) for
+    // device-resident chips via a ~56-byte provider gather, EARLY —
+    // before the zerocheck prepare's release_by_name (#367 drain) can
+    // drop the provider entry.  Host-trace chips stay `None` (Phase 5
+    // reads their host cells as before); `None` for a device chip
+    // falls back to its materialized commit trace.  Once step-3
+    // y_per_chip is device-served too, this gather replaces the
+    // full-trace materialize as the cumsum source entirely.
+    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(chip, t)| {
+            if t.width != 0 {
+                return None;
+            }
+            let p = _device_traces?;
+            crate::shard_level::logup_gkr_prover::chip_main_tail_via_provider::<Val<SC>>(
+                &MachineAir::<Val<SC>>::name(*chip),
+                14,
+                p,
+            )
+        })
+        .collect();
+    {
+        let n_tails = chip_cum_tails.iter().filter(|t| t.is_some()).count();
+        if n_tails > 0 {
+            use std::sync::OnceLock;
+            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+            FIRED_ONCE.get_or_init(|| {
+                tracing::info!(
+                    chips = chips.len(),
+                    tails = n_tails,
+                    "#32 cumsum provider-tail gather FIRED (first shard) — \
+                     device-resident chips' cumulative sums read 14-felt \
+                     tails, not the full materialize",
+                );
+            });
+        }
+    }
     let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A>(
             chips,
@@ -625,13 +665,23 @@ where
         // cells — `commit_traces` carries provider-materialized traces for
         // device-resident chips (host-empty); identical to `main_traces`
         // on the host path.
+        // #32: device-resident chips prefer the early-captured provider
+        // TAIL (chip_cum_tails) — same 14 values, no dependence on the
+        // full materialize.  Validated identical via the bf-digest
+        // cumulative_sums section canary.
         .zip(commit_traces.iter())
-        .map(|(chip, main_trace)| {
+        .zip(chip_cum_tails.iter())
+        .map(|((chip, main_trace), tail)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
-            let global =
+            let global = if let Some(tail14) = tail {
+                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_tail(
+                    *chip, tail14,
+                )
+            } else {
                 crate::shard_level::zerocheck_prover::chip_global_cumulative_sum(
                     *chip, main_trace,
-                );
+                )
+            };
             let local = Challenge::<SC>::ZERO;
             (
                 name,
@@ -741,12 +791,20 @@ where
 
     // Per-chip `r_row` = trailing log(chip_height) coords of the
     // shared eval_point.
+    // #32: width-0 (device-resident, un-materialized) chips resolve
+    // their REAL height via the per-shard provider — forward-compat
+    // for the commit-traces D2H removal (today emit receives the
+    // materialized commit_traces, so width-0 only means truly-empty).
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chips
         .iter()
         .zip(main_traces.iter())
-        .map(|(_, trace)| {
+        .map(|(chip, trace)| {
             let main_height = if trace.width == 0 {
-                1
+                _device_traces
+                    .and_then(|p| {
+                        p.chip_height(&MachineAir::<Val<SC>>::name(*chip))
+                    })
+                    .unwrap_or(1)
             } else {
                 trace.values.len() / trace.width
             };

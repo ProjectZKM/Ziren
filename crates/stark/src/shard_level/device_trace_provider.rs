@@ -83,4 +83,20 @@ pub trait DeviceTraceProvider: Send + Sync {
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         None
     }
+
+    /// #32 (commit-traces D2H removal): read the LAST `k` row-major
+    /// values of the chip's main trace — `trace.values[h*w - k ..]` in
+    /// host layout — i.e. the trailing `k` cells of the last row(s).
+    /// This is the cumulative-sum tail (`k == 14`: septic x ++ y), a
+    /// ~56-byte D2H gather instead of the full-trace materialize.
+    /// Non-consuming (peek semantics).  Returns `None` when the chip
+    /// is absent, already drained, or `h*w < k` (callers fall back to
+    /// the host trace / zero digest).  Default `None`.
+    fn chip_main_tail(
+        &self,
+        _chip_name: &str,
+        _k: usize,
+    ) -> Option<alloc::vec::Vec<p3_koala_bear::KoalaBear>> {
+        None
+    }
 }

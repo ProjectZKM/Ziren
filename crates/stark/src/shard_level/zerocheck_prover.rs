@@ -454,6 +454,33 @@ where
     crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
 }
 
+/// #32 (commit-traces D2H removal): tail-only variant of
+/// [`chip_global_cumulative_sum`].  `tail14` MUST be the last 14
+/// row-major values of the chip's main trace (x = 0..7, y = 7..14),
+/// e.g. from `DeviceTraceProvider::chip_main_tail` — a ~56-byte D2H
+/// gather instead of the full-trace materialize.  Identical output to
+/// the full-trace fn for the same chip/trace (the provider returns
+/// `None` when `h*w < 14`, mirroring the `sz < 14` zero branch).
+pub fn chip_global_cumulative_sum_from_tail<F, A>(
+    chip: &crate::Chip<F, A>,
+    tail14: &[F],
+) -> crate::septic_digest::SepticDigest<F>
+where
+    F: PrimeField,
+    A: MachineAir<F>,
+{
+    if chip.commit_scope() == crate::air::LookupScope::Local || tail14.len() != 14 {
+        return crate::septic_digest::SepticDigest::<F>::zero();
+    }
+    let x = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
+        |j| tail14[j],
+    );
+    let y = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
+        |j| tail14[j + 7],
+    );
+    crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
+}
+
 
 
 /// Max log_degree across a shard's main traces; equals the
