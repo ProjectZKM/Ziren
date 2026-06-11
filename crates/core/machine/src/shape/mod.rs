@@ -732,3 +732,48 @@ pub mod tests {
         try_generate_dummy_proof(&prover, &shape);
     }
 }
+
+/// Canonicalize a fixed record shape UP to the smallest stacked-shapes
+/// cluster that contains its chip set (VERIFY_VK multi-shard coverage,
+/// task #27).
+///
+/// Chip sets are event-driven: a guest that never executes (say) a MISC
+/// instruction drops `MiscInstrs` from its execution shards, so the
+/// per-shard chip-set space is combinatorial and can never be fully
+/// pre-enumerated into the vk_map.  SP1 solves this by making core
+/// shapes carry the FULL cluster chip set (zero-event chips emit
+/// shape-height padding traces — Ziren tracegen already honors this via
+/// `fixed_log2_rows`).  This post-pass extends `record.shape` with the
+/// missing cluster chips at log-height 1 so every shard of a given type
+/// presents the canonical chip set to the recursion layer.
+///
+/// No-op when the record has no shape or no cluster contains its set
+/// (the recursion vk lookup will then fail loudly with the digest).
+pub fn canonicalize_shape_to_cluster(record: &mut ExecutionRecord) {
+    use std::collections::BTreeSet;
+    use std::str::FromStr;
+    let Some(shape) = record.shape.as_mut() else { return };
+    let present: BTreeSet<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
+    let clusters = zkm_stark::stacked_shapes::build_mips_machine_shape().chip_clusters;
+    // Parse each cluster's names into MipsAirIds (skip names without a
+    // live machine id) and pick the smallest superset cluster.
+    let mut best: Option<BTreeSet<MipsAirId>> = None;
+    for cluster in clusters.iter() {
+        let ids: BTreeSet<MipsAirId> = cluster
+            .iter()
+            .filter_map(|n| MipsAirId::from_str(n).ok())
+            .collect();
+        if present.is_subset(&ids)
+            && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true)
+        {
+            best = Some(ids);
+        }
+    }
+    if let Some(cluster) = best {
+        for id in cluster {
+            if !present.contains(&id) {
+                shape.insert(id, 1);
+            }
+        }
+    }
+}

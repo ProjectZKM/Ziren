@@ -427,6 +427,10 @@ where
                                     for record in records_clone.iter_mut() {
                                         if shape_config.fix_shape(record).is_err() {
                                             fixed_shape = false;
+                                        } else {
+                                            // VERIFY_VK multi-shard (#27): canonical
+                                            // cluster chip set (see the other site).
+                                            crate::shape::canonicalize_shape_to_cluster(record);
                                         }
                                     }
                                 }
@@ -509,6 +513,11 @@ where
                                 if let Some(shape_config) = shape_config {
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
+                                        // VERIFY_VK multi-shard (#27): extend the
+                                        // chosen shape up to the canonical stacked
+                                        // cluster so per-guest event-driven chip
+                                        // subsets don't explode the vk space.
+                                        crate::shape::canonicalize_shape_to_cluster(record);
                                     }
                                 }
                                 // Diagnostic: dump per-shard shape to /tmp for diff'ing
