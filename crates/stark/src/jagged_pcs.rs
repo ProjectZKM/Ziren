@@ -597,11 +597,20 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 /// not registered).  Implementations MAY return `None` to signal a
 /// hard fall-through to the host body (e.g. when shape constraints
 /// the GPU path doesn't support are detected).
+/// SP1 re-align (Jun 11 2026): the hook now ALSO receives `z_col` (the
+/// caller-sampled column point — the hook must NOT sample anything
+/// before the round loop; gamma-mixing is retired) and `z_row` (the
+/// full zerocheck-reduced z* driving the row-eq embedding weights).
+/// These mirror `prove_jagged_reduction_owned`'s post-ITEM-12
+/// signature; the pre-ITEM-12 gamma/evals-observe/LSB-fold scaffold
+/// produced INVALID proofs once the host moved (s4 R4 fib rejection).
 pub type GpuJaggedReductionFn = fn(
     dense_q: alloc::vec::Vec<JaggedVal>,
     packing: &crate::jagged::JaggedPacking<JaggedVal>,
     r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
     y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    z_col: &[JaggedChallenge],
+    z_row: &[JaggedChallenge],
     challenger: &mut JaggedChallenger,
 ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
 
@@ -675,6 +684,8 @@ pub type GpuJaggedReductionFnV2 = fn(
     packing: &crate::jagged::JaggedPacking<JaggedVal>,
     r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
     y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+    z_col: &[JaggedChallenge],
+    z_row: &[JaggedChallenge],
     challenger: &mut JaggedChallenger,
 ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
 
@@ -2036,16 +2047,24 @@ pub mod jagged {
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            // A0 attempt (Jun 10 2026) REVERTED to opt-in: with the
-            // default flipped ON, the fib core packed shard (log_dense=27,
-            // 22 chips) produced an INVALID proof — host verify rejected
-            // the jagged sumcheck reduction ("reduction REJECTED",
-            // s4_r4.log).  The GPU reduction hook is only validated on the
-            // compress-pipeline shapes; keep it opt-in until the core-shape
-            // divergence is root-caused.
+            // A0 (Jun 11 2026): DEFAULT ON (=0 opt-out).  The s4-R4
+            // invalid proof at the fib packed shard (log_dense=27, 22
+            // chips) was ROOT-CAUSED to a stale GPU scaffold: it
+            // implemented the pre-ITEM-12 reduction (y-observe + gamma
+            // column mixing, LSB pair fold, evals-observe, push point
+            // order) while this host moved to caller-sampled z_col
+            // Lagrange weights + full row_eq(rev(z_row)) embedding +
+            // MSB fold + coeff observe + insert(0, r).  The
+            // MIN_LOG_SIZE=23 gate had masked the divergence on
+            // compress/tendermint shapes.  Fixed by passing z_col/z_row
+            // through the hook signatures and re-aligning the ziren-gpu
+            // scaffold + CUDA kernels (jagged_sumcheck_kernels.cu MSB).
+            // Validated: fib core digest byte-identical hook-on (V2
+            // device handle AND host-dense legs) vs pure host
+            // (0x9f51315d72d76b37, s6 logs).
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                .map(|v| v == "1")
-                .unwrap_or(false);
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
 
             // Win A: look up BOTH hooks so we can emit diagnostics on
             // mismatches (env-set/unregistered, hook-registered/env-unset).
@@ -2189,6 +2208,8 @@ pub mod jagged {
                         &packing,
                         &r_row,
                         &y_clone,
+                        &z_col,
+                        z_row,
                         challenger,
                     ) {
                         Some(p) => p,
@@ -2254,7 +2275,7 @@ pub mod jagged {
                     } else {
                         None
                     };
-                    match f(dense_q, &packing, &r_row, &y_clone, challenger) {
+                    match f(dense_q, &packing, &r_row, &y_clone, &z_col, z_row, challenger) {
                         Some(p) => p,
                         None => {
                             let n = super::jagged_dispatch_diag::bump(
@@ -3161,6 +3182,8 @@ mod test {
         _packing: &crate::jagged::JaggedPacking<JaggedVal>,
         _r_row_per_chip: &[Vec<JaggedChallenge>],
         _y_per_chip: &[Vec<JaggedChallenge>],
+        _z_col: &[JaggedChallenge],
+        _z_row: &[JaggedChallenge],
         _challenger: &mut JaggedChallenger,
     ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>> {
         // Hook returns None — dispatcher would fall through to the

@@ -662,6 +662,24 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
     JaggedReductionProof { rounds, eval_point, q_at_z }
 }
 
+/// Build the SP1-aligned jagged-reduction weight table for an EXTERNAL
+/// (GPU-hook) prover.  Exactly the table `prove_jagged_reduction_owned`
+/// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
+/// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
+/// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
+/// of re-deriving the (retired) gamma-mixing weights — the s4-R4
+/// invalid-proof root cause.  Keep in lockstep with the host body; any
+/// weight-table change MUST update both.
+pub fn build_weight_table_sp1(
+    packing: &JaggedPacking<InnerVal>,
+    r_row_per_chip: &[Vec<InnerChallenge>],
+    z_col: &[InnerChallenge],
+    z_row: &[InnerChallenge],
+) -> Vec<InnerChallenge> {
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
+    build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row)
+}
+
 pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     proof: &JaggedReductionProof<InnerChallenge>,
     packing: &JaggedPacking<InnerVal>,
