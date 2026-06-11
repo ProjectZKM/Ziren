@@ -1744,6 +1744,30 @@ pub mod jagged {
         PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None }
     }
 
+    /// #32 (commit-traces D2H removal): provider-aware host precompute.
+    /// Identical to [`precompute_jagged_basefold_commit`] but first
+    /// re-materializes any empty (device-resident) chip trace from the
+    /// per-shard provider, so the host commit body covers every chip's
+    /// real cells even when `commit_traces` no longer eagerly D2H's them.
+    /// This is the FALLBACK body for the device commit hook (#A) — taken
+    /// only on a CUDA error / unsupported geometry — so the slower host
+    /// re-materialize is acceptable and, critically, SOUND (no silently
+    /// dropped device-chip cells / zero commitment).
+    pub fn precompute_jagged_basefold_commit_provider(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    ) -> PrecomputedJaggedCommit {
+        // No empty entry / no provider → identical to the plain path
+        // (a cheap clone-through when nothing needs re-materializing).
+        let needs_remat =
+            provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
+        if !needs_remat {
+            return precompute_jagged_basefold_commit(chip_traces);
+        }
+        let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
+        precompute_jagged_basefold_commit(&full)
+    }
+
     /// #H (BaseFold-over-BN254) generic precompute: build the BaseFold commit
     /// over an arbitrary Mmcs (the ring's `BasefoldRing::BfMmcs`). Inner uses
     /// Poseidon2-KoalaBear; the wrap (OuterSC) passes the Poseidon2-BN254

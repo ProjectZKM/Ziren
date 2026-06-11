@@ -53,6 +53,16 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
+    /// #32: per-chip main-trace WIDTH (committed column count) for a
+    /// device-resident chip whose host trace is empty.  Lets dims-only
+    /// consumers (e.g. the commit-traces D2H-skip soundness gate, which
+    /// predicts the dense size from `width * height` without a host D2H)
+    /// resolve the chip's real width.  `None` when unknown (caller falls
+    /// back to a conservative path).
+    fn chip_width(&self, _name: &str) -> Option<usize> {
+        None
+    }
+
     /// Authoritative chip index from the machine's `chip_ordering`
     /// (preprocessed-trace based, constant per chip). Required for
     /// the SP1_PREFOLD path — `chip_height` is per-shard and yields

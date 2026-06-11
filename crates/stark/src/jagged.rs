@@ -124,13 +124,42 @@ pub struct JaggedPacking<F> {
 pub fn compute_jagged_metadata<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
 ) -> JaggedPacking<F> {
-    let mut chip_infos = Vec::with_capacity(traces.len());
+    // Delegate to the dims-based core so callers that have only the
+    // per-chip (name, height, width) — e.g. the #32 device commit hook,
+    // which resolves device-resident chip dims from the per-shard
+    // provider without a host-side D2H of the trace values — can build
+    // the identical packing.
+    let dims: Vec<(String, usize, usize)> = traces
+        .iter()
+        .map(|(name, trace)| {
+            (
+                name.clone(),
+                <RowMajorMatrix<F> as Matrix<F>>::height(trace),
+                <RowMajorMatrix<F> as Matrix<F>>::width(trace),
+            )
+        })
+        .collect();
+    compute_jagged_metadata_from_dims::<F>(&dims)
+}
+
+/// **Dims-only jagged metadata** — identical to [`compute_jagged_metadata`]
+/// but driven by an explicit per-chip `(name, height, width)` list instead
+/// of materialized `RowMajorMatrix` traces.
+///
+/// `#32` (commit-traces D2H removal): the device commit hook resolves a
+/// device-resident chip's dims from the per-shard provider (the on-device
+/// `ColMajorMatrixDevice` carries its height/width) and packs its cells
+/// D2D — so it never needs the host trace values that the eager
+/// `commit_traces` D2H used to supply purely for these dims.
+pub fn compute_jagged_metadata_from_dims<F: Field>(
+    dims: &[(String, usize, usize)],
+) -> JaggedPacking<F> {
+    let mut chip_infos = Vec::with_capacity(dims.len());
     let mut offsets = Vec::new();
     let mut total_values: usize = 0;
 
-    for (name, trace) in traces {
-        let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
-        let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+    for (name, height, width) in dims {
+        let (height, width) = (*height, *width);
         chip_infos.push(JaggedChipInfo {
             name: name.clone(),
             row_count: height,

@@ -127,8 +127,13 @@ where
         });
         match device_precompute {
             Some(pre) => pre,
-            None => crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
+            // #32: host fallback for the #A device commit hook — must be
+            // provider-aware so empty (device-resident) chip traces are
+            // re-materialized before the host commit body (otherwise their
+            // cells would be silently dropped → wrong commitment).
+            None => crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
                 &named_inner,
+                device_traces,
             ),
         }
     };
@@ -286,12 +291,88 @@ where
     // chips' traces from the provider into a commit-only trace set; the
     // empty `main_traces` continue to drive the device GKR/zerocheck paths.
     // Host-path behaviour is unchanged (no empty+provider chips there).
+    // #32 (commit-traces D2H removal): on the GPU happy path the dense
+    // commit is built by the device #A hook (resident chips D2D, dims
+    // resolved from the provider) and the jagged reduction consumes the
+    // registered device dense handle — so the per-chip FULL-trace D2H here
+    // is pure waste for device-resident chips (their host values are never
+    // read).
+    //
+    // SOUNDNESS GATE: the skip is taken ONLY when that device-handle happy
+    // path is GUARANTEED, i.e. the dense commit hook fires (COMMIT_DENSE),
+    // the V2 reduction consumes the handle (JAGGED_PCS), and the dense
+    // size clears the GPU reduction threshold (handle is only registered
+    // for log_dense >= the GPU min; mirror its env+default here).  If any
+    // condition fails the device handle is NOT registered and the jagged
+    // reduction falls back to a HOST materialize — but the per-shard
+    // provider uses drain-on-lookup (#367), so by reduction time the
+    // device traces are GONE and a late re-materialize cannot recover
+    // them.  In that case we MUST keep the eager early D2H (captured here,
+    // pre-drain) for a correct dense_q.  Kill-switch
+    // ZIREN_GPU_COMMIT_TRACES_D2H=1 forces the eager materialize too.
+    let eager_kill = std::env::var("ZIREN_GPU_COMMIT_TRACES_D2H")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let commit_dense_on = std::env::var("ZIREN_GPU_COMMIT_DENSE")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    let jagged_on = std::env::var("ZIREN_GPU_JAGGED_PCS")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    // GPU reduction min log-dense (mirror ziren-gpu
+    // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
+    // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 23).  The device dense
+    // handle is registered only at/above this size.
+    let gpu_min_log_dense = std::env::var("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(23);
+    // Prospective dense size from the FULL (provider-resolved) per-chip
+    // dims — identical to what the dense commit hook will compute.
+    let prospective_total: usize = chips
+        .iter()
+        .zip(main_traces.iter())
+        .map(|(chip, t)| {
+            let (w, h) = if t.width == 0 {
+                match (
+                    _device_traces.and_then(|p| p.chip_width(&chip.name())),
+                    _device_traces.and_then(|p| p.chip_height(&chip.name())),
+                ) {
+                    (Some(w), Some(h)) => (w, h),
+                    _ => (0, 0),
+                }
+            } else {
+                (t.width, t.values.len() / t.width.max(1))
+            };
+            w * h
+        })
+        .sum();
+    let prospective_log_dense = if prospective_total == 0 {
+        0
+    } else {
+        (prospective_total.next_power_of_two()).trailing_zeros() as usize
+    };
+    let handle_path_guaranteed = commit_dense_on
+        && jagged_on
+        && prospective_log_dense >= gpu_min_log_dense;
+    let skip_device_d2h = !eager_kill && handle_path_guaranteed;
+    let mut commit_d2h_skipped = 0usize;
     let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
         .iter()
         .zip(main_traces.iter())
         .map(|(chip, t)| {
             if t.width == 0 {
                 if let Some(p) = _device_traces {
+                    if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
+                        // Device-resident chip with an empty host trace and
+                        // the handle path guaranteed: skip the D2H, keep it
+                        // empty.  The #A hook packs it D2D.
+                        commit_d2h_skipped += 1;
+                        return t.clone();
+                    }
+                    // Otherwise (handle path NOT guaranteed, or kill-switch):
+                    // eager D2H here, PRE-DRAIN, so the host reduction
+                    // fallback has correct cells.
                     if let Some((vals, w)) =
                         crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
                             &chip.name(),
@@ -305,6 +386,20 @@ where
             t.clone()
         })
         .collect();
+    if commit_d2h_skipped > 0 {
+        use std::sync::OnceLock;
+        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+        FIRED_ONCE.get_or_init(|| {
+            tracing::info!(
+                chips = chips.len(),
+                skipped = commit_d2h_skipped,
+                "#32 commit-traces D2H SKIPPED (first shard) — device-resident \
+                 chips left empty; dense commit packs them D2D and fallbacks \
+                 re-materialize via provider (kill-switch \
+                 ZIREN_GPU_COMMIT_TRACES_D2H=1 to restore eager materialize)",
+            );
+        });
+    }
     // #32 (commit-traces D2H removal, step 1): capture the
     // cumulative-sum TAILS (last 14 row-major values) for
     // device-resident chips via a ~56-byte provider gather, EARLY —
@@ -546,8 +641,26 @@ where
                 .zip(commit_traces.iter())
                 .zip(preprocessed_traces.iter())
             {
-                let w = ctrace.width;
-                let h = if w == 0 { 0 } else { ctrace.values.len() / w };
+                let name = MachineAir::<Val<SC>>::name(*chip);
+                // #32: a device-resident chip now carries an EMPTY commit
+                // trace (its full cells were never D2H'd).  Resolve its REAL
+                // dims so the residual openings still cover it: height from
+                // the provider, width from the residual itself
+                // (evals.len() == prep_width + main_width).  A genuinely
+                // unexercised chip (no provider entry) stays empty.
+                let (w, h) = if ctrace.width == 0 {
+                    let dev_h = _device_traces
+                        .and_then(|p| p.chip_height(&name))
+                        .unwrap_or(0);
+                    let dev_w = trace_at_z
+                        .get(&name)
+                        .map(|evals| evals.len().saturating_sub(ptrace.width))
+                        .unwrap_or(0);
+                    (dev_w, dev_h)
+                } else {
+                    let w = ctrace.width;
+                    (w, ctrace.values.len() / w)
+                };
                 if h == 0 || w == 0 {
                     // Jagged step-3 convention for empty chips: empty Vec
                     // (the downstream reduction skips empty y slots).
@@ -558,7 +671,6 @@ where
                     ok = false;
                     break;
                 }
-                let name = MachineAir::<Val<SC>>::name(*chip);
                 match trace_at_z.get(&name) {
                     // Strict shape check: prep-then-main, main slice is the
                     // last `w` values (zerocheck num_main_cols == trace width).
@@ -602,13 +714,32 @@ where
                 for ((chip, ctrace), pre) in
                     chips.iter().zip(commit_traces.iter()).zip(resid.iter())
                 {
-                    let w = ctrace.width;
-                    let h = if w == 0 { 0 } else { ctrace.values.len() / w };
+                    let name = MachineAir::<Val<SC>>::name(*chip);
+                    // #32: this DIAGNOSTIC recomputes the legacy step-3 y
+                    // from raw cells.  When the commit trace is empty
+                    // (device-resident under the default D2H skip), pull the
+                    // chip's full cells from the provider so the xcheck can
+                    // still validate it.  XCHECK is off by default, so this
+                    // re-materialize is paid only on validation runs.
+                    let owned_dev: Option<(Vec<Val<SC>>, usize)> = if ctrace.width == 0 {
+                        _device_traces.and_then(|p| {
+                            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
+                                &name, p,
+                            )
+                        })
+                    } else {
+                        None
+                    };
+                    let (cells, w): (&[Val<SC>], usize) = match &owned_dev {
+                        Some((vals, w)) => (vals.as_slice(), *w),
+                        None => (ctrace.values.as_slice(), ctrace.width),
+                    };
+                    let h = if w == 0 { 0 } else { cells.len() / w };
                     if h == 0 || w == 0 {
                         assert!(
                             pre.is_empty(),
                             "#33 S0: empty chip must map to empty y (chip={})",
-                            MachineAir::<Val<SC>>::name(*chip),
+                            name,
                         );
                         continue;
                     }
@@ -623,14 +754,14 @@ where
                                 ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
                             };
                             acc += eq_c[row]
-                                * Challenge::<SC>::from(ctrace.values[src * w + col]);
+                                * Challenge::<SC>::from(cells[src * w + col]);
                         }
                         assert_eq!(
                             acc,
                             pre[col],
                             "#33 S0 xcheck FAILED chip={} col={col} \
                              (legacy step-3 recompute vs zerocheck residual)",
-                            MachineAir::<Val<SC>>::name(*chip),
+                            name,
                         );
                         n_vals_checked += 1;
                     }
@@ -928,9 +1059,11 @@ where
     // Per-chip `r_row` = trailing log(chip_height) coords of the
     // shared eval_point.
     // #32: width-0 (device-resident, un-materialized) chips resolve
-    // their REAL height via the per-shard provider — forward-compat
-    // for the commit-traces D2H removal (today emit receives the
-    // materialized commit_traces, so width-0 only means truly-empty).
+    // their REAL height via the per-shard provider.  As of the #32 D2H
+    // removal, `commit_traces` no longer eagerly materializes device
+    // chips, so width-0 here is the NORMAL device-resident case — the
+    // dense commit packed them D2D and the reduction reads the device
+    // handle; only the host fallback re-materializes from the provider.
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chips
         .iter()
         .zip(main_traces.iter())
