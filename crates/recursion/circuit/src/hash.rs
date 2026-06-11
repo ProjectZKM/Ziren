@@ -183,6 +183,24 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
         Self: Sized;
+
+    /// Ring-aware chip-height-bits derivation for the SC-generic wrap
+    /// verifier.  INNER ring: WITNESSED (from the opened `degree`,
+    /// value-independent — VERIFY_VK Site-1/#25).  OUTER/gnark ring:
+    /// BAKED from chip_log_heights — the gnark constraint compiler has
+    /// no `CircuitV2HintBitsF`, and the gnark circuit is a single
+    /// artifact whose inputs have canonical shapes, so value-dependence
+    /// is moot there (pre-#25 behavior preserved).
+    fn chip_height_bits_dispatch(
+        builder: &mut Builder<C>,
+        chip_names: &[String],
+        opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        max_log_row_count: usize,
+    ) -> Vec<(String, Vec<Felt<C::F>>)>
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+        Self: Sized;
 }
 
 impl FieldHasher<KoalaBear> for KoalaBearPoseidon2 {
@@ -356,6 +374,25 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             // Site-2 (#25): witnessed per-chip heights forwarded from the
             // SC-generic wrap verifier (None = baked fallback).
             chip_height_felts,
+        )
+    }
+
+    fn chip_height_bits_dispatch(
+        builder: &mut Builder<C>,
+        chip_names: &[String],
+        opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        _chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        max_log_row_count: usize,
+    ) -> Vec<(String, Vec<Felt<C::F>>)>
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+    {
+        // INNER ring: WITNESSED (value-independent, VERIFY_VK Site-1/#25).
+        crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
+            builder,
+            chip_names,
+            opened_values,
+            max_log_row_count,
         )
     }
 }
@@ -538,6 +575,28 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
             builder,
             max_log_row_count,
             column_counts_by_round,
+        )
+    }
+
+    fn chip_height_bits_dispatch(
+        builder: &mut Builder<C>,
+        chip_names: &[String],
+        _opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        max_log_row_count: usize,
+    ) -> Vec<(String, Vec<Felt<C::F>>)>
+    where
+        C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
+    {
+        // OUTER/gnark ring: BAKED from chip_log_heights — the gnark
+        // constraint compiler has no CircuitV2HintBitsF, and the single
+        // gnark artifact's inputs have canonical shapes (pre-#25 wrap
+        // behavior preserved on this ring).
+        crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+            builder,
+            chip_names,
+            chip_log_heights,
+            max_log_row_count,
         )
     }
 }

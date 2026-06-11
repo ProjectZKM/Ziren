@@ -312,10 +312,11 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let chip_log_heights_for_input = chip_log_heights_per_input
         .first()
         .unwrap_or(&empty_log_heights_wrap);
-    let chip_height_bits = crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
+    let chip_height_bits = <SC as FieldHasherVariable<C>>::chip_height_bits_dispatch(
         builder,
         &chip_names,
         &proof_opened_values,
+        chip_log_heights_for_input,
         max_log_row_count,
     );
     let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
