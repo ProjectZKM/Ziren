@@ -68,4 +68,19 @@ pub trait DeviceTraceProvider: Send + Sync {
     fn dense_pack(&self) -> Option<&(dyn Any + Send + Sync)> {
         None
     }
+
+    /// Non-consuming variant of [`Self::lookup_by_name`]: NEVER drains
+    /// or releases the entry, regardless of the provider's
+    /// drain-on-lookup mode.  Side-observers (e.g. the device jagged
+    /// commit pack, which reads every resident chip's trace D2D
+    /// without being part of the provider's consumer chain) MUST use
+    /// this so they don't steal the single drain-mode lookup from the
+    /// real consumer.  Default `None` (observers fall back to host
+    /// cells).
+    fn peek_by_name(
+        &self,
+        _chip_name: &str,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        None
+    }
 }

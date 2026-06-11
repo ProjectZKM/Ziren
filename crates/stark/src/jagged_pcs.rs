@@ -1607,9 +1607,60 @@ pub mod jagged {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
+        /// #A (single shard-wide commit buffer): opaque handle to the
+        /// device-resident dense polynomial the commit was built from,
+        /// registered in ziren-gpu's `dense_q_device_registry`.  When
+        /// `Some`, the step-4 jagged reduction passes it through the V2
+        /// GPU hook so the SAME device buffer serves commit + reduction
+        /// (no host re-materialize, no H2D re-upload).  `None` on the
+        /// host build path — behaviour unchanged.
+        pub dense_device_handle: Option<u64>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
+
+    // ─────────────────────────────────────────────────────────────────
+    // #A (single shard-wide commit buffer) — GPU precompute-commit hook.
+    //
+    // Replaces the HOST body of `precompute_jagged_basefold_commit`
+    // (host dense pack + host stripe interleave + H2D re-upload) with a
+    // device-side build: resident chips are packed D2D from the
+    // per-shard provider, host chips H2D once, the stripes/encode/
+    // Merkle all run on device, and the dense buffer is retained
+    // device-side (registered handle) for the step-4 jagged reduction.
+    // Output MUST be byte-identical to the host precompute (commit
+    // digest, prover_data shapes, interleaved MLE bytes) — the commit
+    // is transcript-critical.
+    // ─────────────────────────────────────────────────────────────────
+
+    /// Signature of the GPU jagged precompute-commit hook.  Inputs are
+    /// the per-chip COMMIT trace set (provider-materialized for
+    /// device-resident chips — the hook may ignore those host bytes and
+    /// read the provider directly) and the per-shard device-trace
+    /// provider.  Returns `None` to fall through to the host precompute
+    /// (any CUDA error / unsupported shape).
+    pub type GpuJaggedPrecomputeCommitFn = fn(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        provider: &dyn crate::shard_level::DeviceTraceProvider,
+    ) -> Option<PrecomputedJaggedCommit>;
+
+    static GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK: std::sync::OnceLock<GpuJaggedPrecomputeCommitFn> =
+        std::sync::OnceLock::new();
+
+    /// Register the GPU precompute-commit hook.  Idempotent; returns
+    /// `Err(existing)` when already registered.  Called once by
+    /// ziren-gpu's prover startup blocks.
+    pub fn register_gpu_jagged_precompute_commit_hook(
+        f: GpuJaggedPrecomputeCommitFn,
+    ) -> Result<(), GpuJaggedPrecomputeCommitFn> {
+        GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK.set(f)
+    }
+
+    /// Read the registered GPU precompute-commit hook, if any.
+    #[must_use]
+    pub fn get_gpu_jagged_precompute_commit_hook() -> Option<GpuJaggedPrecomputeCommitFn> {
+        GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK.get().copied()
+    }
 
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
@@ -1661,7 +1712,7 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        PrecomputedJaggedCommit { packing, commit, prover_data }
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None }
     }
 
     /// #H (BaseFold-over-BN254) generic precompute: build the BaseFold commit
@@ -1691,7 +1742,7 @@ pub mod jagged {
                 dense_traces, mmcs, dft,
             )
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -1790,12 +1841,14 @@ pub mod jagged {
         // shard-level Phase 1 prologue.  Skip the in-band commit
         // observe in that case to keep transcripts aligned with the
         // verifier (which uses `verify_jagged_basefold_no_observe`).
-        let (packing, commit, prover_data) = if let Some(pre) = precomputed {
+        let (packing, commit, prover_data, precomputed_dense_handle) = if let Some(pre) =
+            precomputed
+        {
             tracing::debug!(
                 chips = n_chips,
                 "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
             );
-            (pre.packing, pre.commit, pre.prover_data)
+            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle)
         } else {
             let _t_meta = std::time::Instant::now();
             let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
@@ -1836,7 +1889,7 @@ pub mod jagged {
                 sub_phase = "dense_commit",
                 "jagged sub-phase done"
             );
-            (packing, commit, prover_data)
+            (packing, commit, prover_data, None)
         };
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
@@ -1983,9 +2036,13 @@ pub mod jagged {
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
-
+            // A0 attempt (Jun 10 2026) REVERTED to opt-in: with the
+            // default flipped ON, the fib core packed shard (log_dense=27,
+            // 22 chips) produced an INVALID proof — host verify rejected
+            // the jagged sumcheck reduction ("reduction REJECTED",
+            // s4_r4.log).  The GPU reduction hook is only validated on the
+            // compress-pipeline shapes; keep it opt-in until the core-shape
+            // divergence is root-caused.
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v == "1")
                 .unwrap_or(false);
@@ -1995,6 +2052,21 @@ pub mod jagged {
             let hook_v1 = super::get_gpu_jagged_reduction_hook();
             let hook_v2 = super::get_gpu_jagged_reduction_hook_v2();
             let any_hook_registered = hook_v1.is_some() || hook_v2.is_some();
+
+            // #A (single shard-wide commit buffer): when the precompute
+            // registered a device-resident dense_q AND the V2 hook will
+            // consume it, skip the host dense materialization entirely —
+            // the device buffer (the same one the commit was packed
+            // from) is the source.  Every fallback edge below
+            // re-materializes on host before running the host body.
+            let skip_host_dense = precomputed_dense_handle.is_some()
+                && try_gpu
+                && hook_v2.is_some();
+            let dense_q = if skip_host_dense {
+                Vec::new()
+            } else {
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size)
+            };
 
             // Win A diag (1): env=1 but no hook → warn once, count.
             if try_gpu && !any_hook_registered {
@@ -2060,12 +2132,18 @@ pub mod jagged {
                 ActiveHook::None
             };
 
-            // Win B: device handle source.  Currently always `None` —
-            // the Ziren host path materializes dense_q on host at line
-            // ~1413.  Wired here so future Ziren-side device residency
-            // (e.g. GPU-driven chip-trace pre-materialization) can flip
-            // this to `Some(handle)` without further hook surgery.
-            let dense_q_device_handle: Option<u64> = None;
+            // Win B: device handle source.  #A (single shard-wide commit
+            // buffer): the Option B precompute's device dense pack
+            // registers the buffer and threads its handle through
+            // `PrecomputedJaggedCommit::dense_device_handle`; the V2
+            // hook takes it from the registry (`DenseQDevice::Owned`) so
+            // commit + reduction share ONE device buffer.  `None` on the
+            // host build path — V2 collapses to V1 semantics.
+            let dense_q_device_handle: Option<u64> = if try_gpu && hook_v2.is_some() {
+                precomputed_dense_handle
+            } else {
+                None
+            };
 
             match active {
                 ActiveHook::V2(f) => {
@@ -2094,8 +2172,12 @@ pub mod jagged {
                     });
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
-                    let saved_dense = if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
-                        .map(|v| v == "1").unwrap_or(false)
+                    // #A: with the device-handle skip, `dense_q` is an
+                    // empty placeholder — never save it as a fallback
+                    // source (the None edge below re-materializes).
+                    let saved_dense = if !dense_q.is_empty()
+                        && std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
+                            .map(|v| v == "1").unwrap_or(false)
                     {
                         Some(dense_q.clone())
                     } else {
@@ -2332,7 +2414,7 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _ } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the ITEM-12 embedding factor + empty-chip skip).

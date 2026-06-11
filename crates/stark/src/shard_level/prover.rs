@@ -51,6 +51,7 @@ fn maybe_auto_precompute_basefold<SC, A>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
@@ -104,8 +105,33 @@ where
         })
         .collect();
 
-    let precomputed =
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(&named_inner);
+    // #A (single shard-wide commit buffer): when a per-shard device
+    // provider is present and ziren-gpu registered the device
+    // precompute-commit hook, build the dense pack + BaseFold commit
+    // device-side (resident chips D2D, host chips H2D once; dense
+    // buffer retained device-side for the step-4 reduction).  The hook
+    // is byte-identical to the host precompute; any `None` (CUDA
+    // error / shape) falls through to the host body.  Opt-out:
+    // ZIREN_GPU_COMMIT_DENSE=0.
+    let precomputed = {
+        let device_precompute = device_traces.and_then(|p| {
+            let on = std::env::var("ZIREN_GPU_COMMIT_DENSE")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+            if !on {
+                return None;
+            }
+            let hook =
+                crate::jagged_pcs::jagged::get_gpu_jagged_precompute_commit_hook()?;
+            hook(&named_inner, p)
+        });
+        match device_precompute {
+            Some(pre) => pre,
+            None => crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
+                &named_inner,
+            ),
+        }
+    };
     let digest_inner: [InnerVal; 8] =
         crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
@@ -285,6 +311,7 @@ where
             commit_traces,
             main_commitment,
             precomputed_commit,
+            _device_traces,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
     let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
