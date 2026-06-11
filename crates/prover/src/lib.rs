@@ -1178,6 +1178,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 } else {
                                     None
                                 };
+                            // s4 diagnostic: dump EVERY input (not just on
+                            // trap) when DUMP_TRIP_INPUT_ALL is set — lets the
+                            // CPROBE harness inspect a NON-tripping witness at
+                            // the trap addresses for value diffing.
+                            if std::env::var("DUMP_TRIP_INPUT_ALL").is_ok() {
+                                if let Some((variant, bytes)) = trip_dump.as_ref() {
+                                    let path = format!("/tmp/allinput_{variant}_{index}.bin");
+                                    let _ = std::fs::write(&path, bytes);
+                                    eprintln!("[ALLDUMP] wrote {path} ({} bytes)", bytes.len());
+                                }
+                            }
                             // Get the program and witness stream.
                             let (program, witness_stream) = tracing::debug_span!(
                                 "get program and witness stream"

@@ -336,7 +336,15 @@ impl SplitOpts {
             sha_compress: 32 * deferred_split_threshold / 80,
             boolean_circuit_garble: deferred_split_threshold / 8,
             memory: 64 * deferred_split_threshold,
-            combine_memory_threshold: 1 << 17,
+            // s4 diagnostic knob: ZIREN_COMBINE_MEM_THRESHOLD overrides the
+            // packed-memory combine threshold (set =0 to force the split
+            // memory-shard structure even for tiny programs — used to test
+            // the recursion circuit against split shards from the CPU
+            // prover).  Default unchanged (1 << 17).
+            combine_memory_threshold: std::env::var("ZIREN_COMBINE_MEM_THRESHOLD")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1 << 17),
         }
     }
 }
