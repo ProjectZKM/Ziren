@@ -266,6 +266,11 @@ pub fn commit_jagged_pcs(
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            // s7-B transcript-safety: snapshot + restore around the
+            // fallible device hook so an Err after any challenger
+            // interaction cannot double-advance the transcript (see
+            // the open_jagged_pcs twin below for the full rationale).
+            let challenger_snapshot = challenger.clone();
             match hook(chip_traces, challenger) {
                 Ok(out) => {
                     FIRED_ONCE.get_or_init(|| {
@@ -287,6 +292,7 @@ pub fn commit_jagged_pcs(
                              host commit is the source of truth."
                         );
                     });
+                    *challenger = challenger_snapshot;
                     return commit_jagged_pcs_host(returned_traces, challenger);
                 }
             }
@@ -1199,6 +1205,16 @@ pub fn open_jagged_pcs(
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
+            // s7-B transcript-safety: the device open ADVANCES the
+            // challenger (pre-prove grind, per-round digest observes,
+            // FRI PoW, query sampling) before it can fail —
+            // `FriCudaProver::prove` allocates on device mid-flight,
+            // so an `Err` here is pressure-dependent.  Snapshot +
+            // restore so the host fallback re-runs on the SAME
+            // transcript state; without the restore the transcript is
+            // double-advanced and the emitted proof is silently
+            // INVALID (the s6 T3c armed-assert class).
+            let challenger_snapshot = challenger.clone();
             match hook(prover_data, eval_point, challenger) {
                 Ok(proof) => {
                     FIRED_ONCE.get_or_init(|| {
@@ -1213,11 +1229,13 @@ pub fn open_jagged_pcs(
                     FELLBACK_ONCE.get_or_init(|| {
                         tracing::warn!(
                             "GPU BaseFold open hook returned Err — falling \
-                             back to host open_jagged_pcs. The \
-                             device side could not handle this shape; the \
-                             host open is the source of truth."
+                             back to host open_jagged_pcs on the RESTORED \
+                             challenger state. The device side could not \
+                             handle this shape; the host open is the \
+                             source of truth."
                         );
                     });
+                    *challenger = challenger_snapshot;
                     return open_jagged_pcs_host(
                         returned_prover_data,
                         returned_eval_point,
@@ -2061,19 +2079,29 @@ pub mod jagged {
             // device-handle AND host-dense legs, 0x9f51315d72d76b37),
             // tendermint core A/B 7/7 shards, fib full chain + wrap.
             //
-            // STILL OPT-IN (=1 to enable): a brief default-ON window
-            // (s6) hit an ARMED in-circuit DivEAssert in MULTI-GPU
-            // tendermint COMPRESS (compose rejected a hook-on
-            // first-layer recursion proof, log_dense=29) while the
-            // identical run with the hook off completed green
-            // (s6 T3c vs T3d, /tmp/gpu_agent_log.md).  Single-GPU
-            // hook-on is green everywhere validated; suspect a
-            // cross-GPU/stream issue in the compress-pipeline V2
-            // device-handle path.  Re-flip the default after that is
-            // root-caused + single-GPU TM compress hook-on validates.
+            // DEFAULT ON (=0/false to opt out).  History: the s6
+            // default-ON window hit an ARMED in-circuit trip in
+            // MULTI-GPU tendermint COMPRESS (a compose rejected a
+            // hook-on first-layer recursion proof) while the identical
+            // hook-off run was green (s6 T3c vs T3d).  s7-B
+            // ROOT-CAUSED it to a TRANSCRIPT-POISON window in the
+            // ziren-gpu round-0 device path: the fold-output buffers
+            // (2 x 4 GiB at log_dense=29) were allocated AFTER the
+            // round-0 observe+sample; an OOM there (T3c peaked at
+            // ~29.5 GiB VRAM) returned None and the caller re-ran
+            // round 0 on host, double-advancing the transcript and
+            // emitting a (log_n+1)-round proof.  NOT cross-GPU: the
+            // dump-replay of the same shards hook-on verified GREEN at
+            // low VRAM pressure, and fault-injecting the alloc failure
+            // reproduced the compose rejection exactly (point.len()=
+            // log_n+1).  Fixed in ziren-gpu jagged_sumcheck.rs by
+            // hoisting ALL fallible allocs before any transcript
+            // interaction and resuming (not restarting) on host for
+            // mid-loop failures; validated by injection A/B +
+            // byte-identity gates (see /tmp/gpu_agent_log.md s7-B).
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                .map(|v| v == "1")
-                .unwrap_or(false);
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
 
             // Win A: look up BOTH hooks so we can emit diagnostics on
             // mismatches (env-set/unregistered, hook-registered/env-unset).
@@ -2211,6 +2239,13 @@ pub mod jagged {
                     } else {
                         None
                     };
+                    // s7-B transcript-safety: snapshot + restore so a
+                    // hook None after any challenger interaction
+                    // cannot double-advance the transcript (the hook's
+                    // internal round-0 restructure already guarantees
+                    // None is pre-transcript; this is defense-in-depth
+                    // for the whole hook surface).
+                    let challenger_snapshot = challenger.clone();
                     match f(
                         dense_q,
                         dense_q_device_handle,
@@ -2223,6 +2258,7 @@ pub mod jagged {
                     ) {
                         Some(p) => p,
                         None => {
+                            *challenger = challenger_snapshot;
                             let n = super::jagged_dispatch_diag::bump(
                                 &super::jagged_dispatch_diag::SHAPE_REJECTED,
                             );
@@ -2284,9 +2320,12 @@ pub mod jagged {
                     } else {
                         None
                     };
+                    // s7-B transcript-safety: see the V2 twin above.
+                    let challenger_snapshot = challenger.clone();
                     match f(dense_q, &packing, &r_row, &y_clone, &z_col, z_row, challenger) {
                         Some(p) => p,
                         None => {
+                            *challenger = challenger_snapshot;
                             let n = super::jagged_dispatch_diag::bump(
                                 &super::jagged_dispatch_diag::SHAPE_REJECTED,
                             );

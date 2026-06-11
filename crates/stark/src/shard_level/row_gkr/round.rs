@@ -3320,6 +3320,34 @@ where
 /// taking a generic `Challenger` parameter (which would prevent
 /// function-pointer dispatch).
 #[allow(clippy::too_many_arguments)]
+/// s7-B transcript-safety: TypeId-gated snapshot of the caller's
+/// challenger for the GPU logup dispatch helpers.  The hooks
+/// observe/sample into the LIVE challenger; if the device body fails
+/// MID-LOOP (e.g. a pressure-dependent CUDA alloc inside ziren-gpu's
+/// `run_device_loop_pooled`) the hook returns `None` and the caller
+/// falls back to the host body — without restoring the snapshot the
+/// transcript would be double-advanced and the emitted proof silently
+/// INVALID (the s6 T3c armed-assert class, root-caused in s7-B).
+/// Returns `None` when `Challenger` is not the concrete
+/// `InnerChallenger`; callers must then SKIP the GPU dispatch (host
+/// path only) since a sound fallback could not be guaranteed.
+fn snapshot_inner_challenger<Challenger: 'static>(ch: &Challenger) -> Option<Challenger> {
+    use core::any::TypeId;
+    if TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>() {
+        // SAFETY: TypeId equality guarantees the same concrete type;
+        // clone through the concrete type, then move the OWNED clone
+        // back to the generic type (transmute_copy + forget = move).
+        let concrete: &crate::InnerChallenger =
+            unsafe { &*(ch as *const Challenger as *const crate::InnerChallenger) };
+        let cloned: crate::InnerChallenger = concrete.clone();
+        let back: Challenger = unsafe { core::mem::transmute_copy(&cloned) };
+        core::mem::forget(cloned);
+        Some(back)
+    } else {
+        None
+    }
+}
+
 fn try_logup_round_gpu<F, EF, Challenger>(
     circuit: &GkrCircuitLayer<F, EF>,
     eval_point: &[EF],
@@ -3332,7 +3360,7 @@ fn try_logup_round_gpu<F, EF, Challenger>(
 where
     F: PrimeField,
     EF: ExtensionField<F> + BasedVectorSpace<F>,
-    Challenger: FieldChallenger<F>,
+    Challenger: FieldChallenger<F> + 'static,
 {
     type Ef4 = p3_field::extension::BinomialExtensionField<
         p3_koala_bear::KoalaBear, 4>;
@@ -3394,6 +3422,12 @@ where
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
+    // s7-B transcript-safety: snapshot for a sound fallback; skip the
+    // GPU dispatch entirely if the challenger type can't be snapshot.
+    let Some(challenger_snapshot) = snapshot_inner_challenger(&*challenger) else {
+        return None;
+    };
+
     // Transcript closures — capture `&mut Challenger` so the hook
     // drives the same transcript bytes as the host trait-driven path.
     // We use `RefCell` + `&` so both closures can borrow.
@@ -3421,7 +3455,20 @@ where
         total_vars,
         &observe,
         &sample,
-    )?;
+    );
+    drop(observe);
+    drop(sample);
+    let challenger = challenger_cell.into_inner();
+    let result = match result {
+        Some(r) => r,
+        None => {
+            // s7-B transcript-safety: the device body may have
+            // observed/sampled before failing — restore the snapshot
+            // so the host fallback re-runs on the SAME transcript.
+            *challenger = challenger_snapshot;
+            return None;
+        }
+    };
 
     // Reassemble the LogupGkrRoundProof from the GPU result.  Order
     // of openings MUST match `ComponentPoly::get_component_poly_evals`
@@ -3537,6 +3584,9 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
+    // s7-B transcript-safety: snapshot for a sound fallback (see
+    // snapshot_inner_challenger docs).
+    let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
     let result = gpu_hook_v2(
         cast_vec_ef_to_ef4::<EF>(n0_flat),
         cast_vec_ef_to_ef4::<EF>(d0_flat),
@@ -3548,7 +3598,16 @@ where
         cast_ef_to_ef4::<EF>(initial_claim),
         total_vars,
         inner_challenger,
-    )?;
+    );
+    let result = match result {
+        Some(r) => r,
+        None => {
+            // s7-B transcript-safety: restore so the host fallback
+            // re-runs on the SAME transcript state.
+            *inner_challenger = challenger_snapshot;
+            return None;
+        }
+    };
 
     let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
         .univariate_polys
@@ -3728,6 +3787,9 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
+    // s7-B transcript-safety: snapshot for a sound fallback (see
+    // snapshot_inner_challenger docs).
+    let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
     let result = gpu_hook_v3(
         input_handle,
         cast_vec_ef_to_ef4::<EF>(n0_flat),
@@ -3740,7 +3802,16 @@ where
         cast_ef_to_ef4::<EF>(initial_claim),
         total_vars,
         inner_challenger,
-    )?;
+    );
+    let result = match result {
+        Some(r) => r,
+        None => {
+            // s7-B transcript-safety: restore so the host fallback
+            // re-runs on the SAME transcript state.
+            *inner_challenger = challenger_snapshot;
+            return None;
+        }
+    };
 
     // Stash next-layer handle for the subsequent round's call.
     if let Some(next) = result.next_layer.clone() {
