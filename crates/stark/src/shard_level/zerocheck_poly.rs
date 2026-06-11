@@ -247,6 +247,31 @@ pub(crate) fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
     evals
 }
 
+/// Single entry of [`partial_lagrange`]`(point)` in `O(|point|)`:
+/// `eq(point, bits(index))` with `index` read big-endian (`point[0]` =
+/// MSB), i.e. `partial_lagrange(point)[index]`.  Returns `EF::ZERO` when
+/// `index >= 2^|point|` (mirrors the finalize step's out-of-table guard).
+///
+/// #34 device-eq: when the eq table is built ON DEVICE, the host-side
+/// `finalize_round_poly` still needs exactly ONE entry of it
+/// (`partial[threshold_half]`) — this computes that entry without
+/// materializing the `2^{dim-1}` table.
+pub(crate) fn eq_at_index<EF: Field>(point: &[EF], index: usize) -> EF {
+    let n = point.len();
+    if n < usize::BITS as usize && (index >> n) != 0 {
+        return EF::ZERO;
+    }
+    let mut acc = EF::ONE;
+    for (k, &z) in point.iter().enumerate() {
+        if (index >> (n - 1 - k)) & 1 == 1 {
+            acc *= z;
+        } else {
+            acc *= EF::ONE - z;
+        }
+    }
+    acc
+}
+
 /// Lagrange-interpolate the polynomial through `(xs[i], ys[i])` into
 /// monomial-basis coefficients.  Port of
 /// `slop_algebra::interpolate_univariate_polynomial`.  Panics if `xs`
@@ -493,7 +518,12 @@ where
         // original fused loop (validated by `orientation_sweep` inv1/inv2 and
         // `sum_as_poly_matches_spec_reference`).
         let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round);
-        self.finalize_round_poly(claim, last, &partial, y_0, y_2, y_3, y_4)
+        // finalize needs only partial[threshold_half] (ZERO when the
+        // boundary index falls past the table — same guard as before the
+        // #34 scalar refactor; `partial.len() == 2^{num_variables-1}`).
+        let threshold_half = num_real.div_ceil(2) - 1;
+        let partial_at_threshold = partial.get(threshold_half).copied().unwrap_or(EF::ZERO);
+        self.finalize_round_poly(claim, last, partial_at_threshold, y_0, y_2, y_3, y_4)
     }
 
     /// B2.2 chip fusion: compute ALL chips' (y_0,y_2,y_3,y_4) in ONE fused
@@ -529,6 +559,21 @@ where
         // the hook's pointer-array kernel reads them IN PLACE.  One launch
         // per round (SP1 jagged_constraint_poly_eval shape) instead of
         // per-chip launches.
+        // #34 device-eq: under ZIREN_GPU_DEVICE_EQ (default ON, =0/false
+        // kill-switch) the host SKIPS the per-chip per-round
+        // `partial_lagrange` table build entirely — the hook constructs the
+        // eq table ON DEVICE from `zeta_rest` (passed below; `eq` left
+        // empty), and the finalize step's single needed entry is computed
+        // in O(dim) via `eq_at_index`.  With the switch off, the legacy
+        // host-build-and-upload path is byte-identical to before.
+        let device_eq: bool = {
+            static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+            *GATE.get_or_init(|| {
+                std::env::var("ZIREN_GPU_DEVICE_EQ")
+                    .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+                    .unwrap_or(true)
+            })
+        };
         let mut partials: Vec<Vec<EF>> = Vec::new();
         let mut names: Vec<String> = Vec::new();
         let mut lasts: Vec<EF> = Vec::new();
@@ -539,7 +584,11 @@ where
             }
             let dim = poly.zeta.len();
             lasts.push(poly.zeta[dim - 1]);
-            partials.push(partial_lagrange(&poly.zeta[..dim - 1]));
+            if device_eq {
+                partials.push(Vec::new());
+            } else {
+                partials.push(partial_lagrange(&poly.zeta[..dim - 1]));
+            }
             names.push(poly.air.name());
             real_poly_idx.push(i);
         }
@@ -582,6 +631,15 @@ where
                             partials[r].len(),
                         )
                     };
+                    // #34 device-eq: the point the eq table is built from
+                    // (`zeta[..dim-1]`); the hook builds the table on device
+                    // when `eq` is empty.
+                    let zeta_rest_ef4: &[Ef4] = unsafe {
+                        core::slice::from_raw_parts(
+                            poly.zeta.as_ptr().cast::<Ef4>(),
+                            poly.zeta.len() - 1,
+                        )
+                    };
                     let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&poly.alpha) };
                     crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput {
                         chip_name: names[r].as_str(),
@@ -592,6 +650,7 @@ where
                         gkr_powers: gkr_ef4,
                         alpha: alpha_ef4,
                         eq: eq_ef4,
+                        zeta_rest: zeta_rest_ef4,
                         num_real: poly.num_real_entries,
                         device_cells: poly.device_cells.as_deref(),
                     }
@@ -620,10 +679,21 @@ where
             }
             let yt = &tuples[r];
             let claim = claims[i].expect("batched_device_round: claim required");
+            // #34 device-eq: finalize needs only partial[threshold_half] —
+            // with the device-built table it is recomputed in O(dim);
+            // otherwise it is read from the host table (same guard as the
+            // pre-refactor in-bounds check: partial.len() == 2^{dim-1}).
+            let threshold_half = poly.num_real_entries.div_ceil(2) - 1;
+            let partial_at_threshold = if device_eq {
+                let dim = poly.zeta.len();
+                eq_at_index(&poly.zeta[..dim - 1], threshold_half)
+            } else {
+                partials[r].get(threshold_half).copied().unwrap_or(EF::ZERO)
+            };
             out.push(poly.finalize_round_poly(
                 claim,
                 lasts[r],
-                &partials[r],
+                partial_at_threshold,
                 to_ef(&yt[0]),
                 to_ef(&yt[1]),
                 to_ef(&yt[2]),
@@ -883,9 +953,13 @@ where
     /// Analytic finalize (host-only, transcript-critical): scale the per-pair
     /// accumulators by `elf_X · eq_adjustment`, subtract the VirtualGeq
     /// padded-row correction, fix `y_1 = claim − y_0`, and Lagrange-interpolate
-    /// the degree-4 round poly over `{0,1,2,3,4}`.  `last` / `partial` are the
-    /// same values `accumulate_y_tuple_host` consumed.  Pure extraction of the
-    /// original fused tail.
+    /// the degree-4 round poly over `{0,1,2,3,4}`.  `last` is the same value
+    /// `accumulate_y_tuple_host` consumed; `partial_at_threshold` is
+    /// `partial_lagrange(zeta[..dim-1])[threshold_half]` (ZERO when the
+    /// boundary index falls past the table) — the ONLY table entry finalize
+    /// needs, pre-resolved by the caller so the #34 device-eq path can skip
+    /// materializing the host table (via [`eq_at_index`]).  Pure extraction
+    /// of the original fused tail.
     ///
     /// Interpolation samples: the degree-4 round poly over the always-distinct
     /// points {0,1,2,3,4}.  Point 1 is fixed by the sumcheck relation
@@ -899,7 +973,7 @@ where
         &self,
         claim: EF,
         last: EF,
-        partial: &[EF],
+        partial_at_threshold: EF,
         y_0: EF,
         y_2: EF,
         y_3: EF,
@@ -908,14 +982,10 @@ where
         let (mut y_0, mut y_2, mut y_3, mut y_4) = (y_0, y_2, y_3, y_4);
         let num_pairs = self.num_real_entries.div_ceil(2);
 
-        // Padded-row correction at the boundary index.
+        // Padded-row correction at the boundary index.  The caller resolved
+        // `partial_at_threshold = partial[threshold_half]` (ZERO out of range).
         let threshold_half = num_pairs - 1;
-        let msb_lagrange_eval: EF = self.eq_adjustment
-            * if threshold_half < (1usize << (self.num_variables - 1)) {
-                partial[threshold_half]
-            } else {
-                EF::ZERO
-            };
+        let msb_lagrange_eval: EF = self.eq_adjustment * partial_at_threshold;
         let virtual_0 = self.virtual_geq.fix_last_variable(EF::ZERO).eval_at_usize(threshold_half);
         let virtual_2 =
             self.virtual_geq.fix_last_variable(EF::from_u64(2)).eval_at_usize(threshold_half);

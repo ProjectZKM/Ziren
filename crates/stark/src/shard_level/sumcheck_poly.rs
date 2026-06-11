@@ -545,6 +545,14 @@ pub struct ZerocheckChipYTupleInput<'a> {
     pub gkr_powers: &'a [Ef4],
     pub alpha: Ef4,
     pub eq: &'a [Ef4],
+    /// #34 device-eq: `zeta[..dim-1]` — the point whose `partial_lagrange`
+    /// table (big-endian, `zeta_rest[0]` = MSB) is this round's eq weight
+    /// vector.  When `eq` is EMPTY (the `ZIREN_GPU_DEVICE_EQ=1` path) the
+    /// hook must build the `2^{zeta_rest.len()}` table ON DEVICE from this
+    /// point (reversed, for the LSB-first `partial_lagrange_ef` kernel)
+    /// instead of uploading a host table.  When `eq` is non-empty the hook
+    /// may ignore this field (legacy host-built table).
+    pub zeta_rest: &'a [Ef4],
     pub num_real: usize,
     /// Device-RESIDENT cells for this chip (the #108 residency path): when
     /// set, `main_cells`/`prep_cells` are EMPTY and the handle downcasts to
