@@ -899,6 +899,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .iter()
                 .map(|sp| *sp.basefold_shard_proof.as_ref().unwrap().clone())
                 .collect::<Vec<_>>();
+            if std::env::var("ZIREN_VK_COVERAGE_PROBE").is_ok() {
+                for bf in bf_proofs.iter() {
+                    let total: u128 = bf
+                        .chip_log_heights
+                        .iter()
+                        .map(|(_, h)| 1u128 << *h)
+                        .sum::<u128>();
+                    eprintln!(
+                        "[VKCOV] batch={batch_idx} chip_log_heights={:?} approx_log_total={}",
+                        bf.chip_log_heights,
+                        128 - total.leading_zeros()
+                    );
+                }
+            }
             core_inputs.push(ZKMCoreBasefoldWitnessValues {
                 vk: vk.clone(),
                 shard_proofs: bf_proofs,
@@ -2004,7 +2018,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             vks.iter()
                 .map(|vk| {
                     let vk_digest = vk.hash_koalabear();
-                    *self.recursion_vk_map.get(&vk_digest).expect("vk not allowed")
+                    *self.recursion_vk_map.get(&vk_digest).unwrap_or_else(|| {
+                        panic!(
+                            "vk not allowed: {:?} (map_size={})",
+                            vk_digest.map(|x| {
+                                use p3_field::PrimeField32;
+                                x.as_canonical_u32()
+                            }),
+                            self.recursion_vk_map.len()
+                        )
+                    })
                 })
                 .collect()
         } else {
@@ -2049,7 +2072,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .iter()
                 .map(|(vk, _)| {
                     let vk_digest = vk.hash_koalabear();
-                    *self.recursion_vk_map.get(&vk_digest).expect("vk not allowed")
+                    *self.recursion_vk_map.get(&vk_digest).unwrap_or_else(|| {
+                        panic!(
+                            "vk not allowed: {:?} (map_size={})",
+                            vk_digest.map(|x| {
+                                use p3_field::PrimeField32;
+                                x.as_canonical_u32()
+                            }),
+                            self.recursion_vk_map.len()
+                        )
+                    })
                 })
                 .collect()
         } else {

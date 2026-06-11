@@ -85,8 +85,8 @@ fn memory_cluster_extras() -> &'static [&'static str] {
 /// expected per-cluster shapes.
 fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
     &[
-        ("keccak", &["KeccakSponge"]),
-        ("sha256", &["ShaExtend", "ShaCompress"]),
+        ("keccak", &["KeccakSponge", "KeccakSpongeControl"]),
+        ("sha256", &["ShaExtend", "ShaExtendControl", "ShaCompress", "ShaCompressControl"]),
         ("poseidon2", &["Poseidon2Permute"]),
         (
             "k256",
@@ -129,7 +129,7 @@ fn precompile_families() -> &'static [(&'static str, &'static [&'static str])] {
         ),
         ("ed25519", &["EdAddAssign", "EdDecompress"]),
         ("uint256", &["Uint256MulMod", "U256XU2048Mul"]),
-        ("boolean_circuit_garble", &["BooleanCircuitGarble"]),
+        ("boolean_circuit_garble", &["BooleanCircuitGarble", "BooleanCircuitGarbleControl"]),
         ("syslinux", &["SysLinux"]),
     ]
 }
@@ -160,9 +160,27 @@ pub fn build_mips_machine_shape() -> MachineShape {
     };
     let memory = extend_cluster(&core_base, memory_cluster_extras());
 
-    let mut clusters: Vec<BTreeSet<String>> = vec![core_base.clone(), memory.clone()];
+    // Multi-shard runs partition the work into SHARD-TYPE chip sets that
+    // differ from the single-shard union (observed via
+    // ZIREN_VK_COVERAGE_PROBE on the keccak deferred e2e):
+    //   * main execution shards carry `Global` but NOT the
+    //     MemoryGlobalInit/Finalize pair;
+    //   * memory shards are MINIMAL: preprocessed + Global + the
+    //     MemoryGlobal pair (no core chips);
+    //   * precompile shards are MINIMAL: preprocessed + Global +
+    //     MemoryLocal + SyscallPrecompile + the family chips (incl. the
+    //     sponge Control twins) — not core + family.
+    let main_exec = extend_cluster(&core_base, &["Global"]);
+    let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
+    let precompile_base =
+        extend_cluster(&preprocessed, &["Global", "MemoryLocal", "SyscallPrecompile"]);
+
+    let mut clusters: Vec<BTreeSet<String>> =
+        vec![core_base.clone(), main_exec, memory.clone(), memory_min];
     for (_, extras) in precompile_families() {
+        // Single-shard union (legacy) + the minimal precompile shard.
         clusters.push(extend_cluster(&memory, extras));
+        clusters.push(extend_cluster(&precompile_base, extras));
     }
 
     MachineShape::new(clusters)
