@@ -880,7 +880,8 @@ where
 {
     use core::any::{Any, TypeId};
     use crate::jagged_pcs::jagged::{
-        prove_jagged_basefold_with_precomputed, prove_jagged_basefold_with_y_per_chip,
+        prove_jagged_basefold_with_precomputed_provider,
+        prove_jagged_basefold_with_y_per_chip,
     };
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
@@ -1044,7 +1045,7 @@ where
                  JaggedChallenger",
             )
         };
-        let bundle = prove_jagged_basefold_with_precomputed(
+        let bundle = prove_jagged_basefold_with_precomputed_provider(
             &chip_traces,
             &r_row_per_chip,
             z_row,
@@ -1052,6 +1053,9 @@ where
             // #33 S1: zerocheck-residual openings (skips host step 3).
             pre_y_inner,
             lb_challenger,
+            // #32: provider arms the host-fallback re-materialize for empty
+            // (device-resident) chip traces — no-op on the happy path.
+            _device_traces,
         );
         return EvaluationProof::Bundle(bundle);
     }

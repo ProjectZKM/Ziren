@@ -1809,6 +1809,39 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
+        prove_jagged_basefold_with_precomputed_provider(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            precomputed,
+            pre_y_per_chip,
+            challenger,
+            None,
+        )
+    }
+
+    /// #32 (commit-traces D2H removal): same as
+    /// [`prove_jagged_basefold_with_precomputed`] but additionally accepts
+    /// the per-shard `DeviceTraceProvider`.  The provider is used ONLY on
+    /// the slow GPU-reduction fallback edge: when the device handle / V2
+    /// hook declines and the host body must run, any chip whose
+    /// `chip_traces` entry is empty (width 0 — its real cells live
+    /// device-side) is re-materialized from the provider so the host
+    /// `materialize_dense_jagged` rebuilds a correct dense_q.  On the
+    /// happy path (V2 hook consumes the registered device dense handle)
+    /// the provider is never touched, so passing `Some` is behaviour- and
+    /// byte-neutral — it only ARMS the fallback against empty device-chip
+    /// traces, removing the silent invalid-proof edge that an unconditional
+    /// `commit_traces` D2H skip would otherwise leave.
+    pub fn prove_jagged_basefold_with_precomputed_provider(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        precomputed: PrecomputedJaggedCommit,
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
             r_row_per_chip,
@@ -1816,6 +1849,7 @@ pub mod jagged {
             pre_y_per_chip,
             Some(precomputed),
             challenger,
+            provider,
         )
     }
 
@@ -1838,7 +1872,39 @@ pub mod jagged {
             pre_y_per_chip,
             None,
             challenger,
+            None,
         )
+    }
+
+    /// #32: re-materialize a provider-aware view of `chip_traces` for the
+    /// host fallback.  Any entry whose host trace is empty (width 0 — the
+    /// chip is device-resident, its real cells never D2H'd onto the host
+    /// `chip_traces`) is rebuilt from the per-shard provider via the
+    /// `register_materialize_trace_hook` D2H path; non-empty entries and
+    /// provider-misses are cloned through unchanged.  Returns an owned
+    /// `Vec` so the dense materialize sees real dims + values exactly as a
+    /// full eager `commit_traces` D2H would have produced.  Cold path only.
+    fn rematerialize_chip_traces_via_provider(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    ) -> alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> {
+        chip_traces
+            .iter()
+            .map(|(name, trace)| {
+                if trace.width == 0 {
+                    if let Some(p) = provider {
+                        if let Some((vals, w)) =
+                            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<InnerVal>(
+                                name, p,
+                            )
+                        {
+                            return (name.clone(), RowMajorMatrix::new(vals, w));
+                        }
+                    }
+                }
+                (name.clone(), trace.clone())
+            })
+            .collect()
     }
 
     /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
@@ -1854,6 +1920,9 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: Option<PrecomputedJaggedCommit>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        // #32: per-shard device-trace provider, used only to re-materialize
+        // empty (device-resident) chip traces on the host-fallback edges.
+        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
@@ -1879,6 +1948,14 @@ pub mod jagged {
             );
             (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle)
         } else {
+            // #32: no precompute → this path materializes the dense commit on
+            // host.  Re-materialize empty device-resident chips from the
+            // provider first so metadata dims + dense values are correct
+            // (no-op clone when provider is None / traces already full).
+            let chip_traces_full =
+                rematerialize_chip_traces_via_provider(chip_traces, provider);
+            let chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)] =
+                &chip_traces_full;
             let _t_meta = std::time::Instant::now();
             let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
             let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
@@ -1950,7 +2027,14 @@ pub mod jagged {
             // reduction skips it naturally.
             pre
         } else {
-            chip_traces
+            // #32: when the residual openings are unavailable (kill-switch
+            // ZIREN_ZC_RESIDUAL_Y=0) the host triple-loop reads chip cells
+            // directly — re-materialize empty device-resident chips from the
+            // provider first so the reduction sees real cells (cold path;
+            // happy path takes the `pre` branch above).
+            let rematerialized_for_y =
+                rematerialize_chip_traces_via_provider(chip_traces, provider);
+            rematerialized_for_y
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
                 .map(|((_name, trace), r_row_c)| {
@@ -2121,7 +2205,12 @@ pub mod jagged {
             let dense_q = if skip_host_dense {
                 Vec::new()
             } else {
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size)
+                // #32: when device-resident chips carry empty host traces,
+                // re-materialize them from the provider before the host
+                // dense pack (cold path — happy path takes skip_host_dense).
+                let rematerialized =
+                    rematerialize_chip_traces_via_provider(chip_traces, provider);
+                materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size)
             };
 
             // Win A diag (1): env=1 but no hook → warn once, count.
@@ -2273,8 +2362,17 @@ pub mod jagged {
                                 );
                             }
                             let dense_q = saved_dense.unwrap_or_else(|| {
+                                // #32: re-materialize empty (device-resident)
+                                // chip traces from the provider so the host
+                                // reduction fallback rebuilds the correct
+                                // dense_q (not a partial zero buffer).
+                                let rematerialized =
+                                    rematerialize_chip_traces_via_provider(
+                                        chip_traces,
+                                        provider,
+                                    );
                                 materialize_dense_jagged::<InnerVal>(
-                                    chip_traces,
+                                    &rematerialized,
                                     packing.log_dense_size,
                                 )
                             });
@@ -2340,8 +2438,14 @@ pub mod jagged {
                                 );
                             }
                             let dense_q = saved_dense.unwrap_or_else(|| {
+                                // #32: provider-aware re-materialize (V1 twin).
+                                let rematerialized =
+                                    rematerialize_chip_traces_via_provider(
+                                        chip_traces,
+                                        provider,
+                                    );
                                 materialize_dense_jagged::<InnerVal>(
-                                    chip_traces,
+                                    &rematerialized,
                                     packing.log_dense_size,
                                 )
                             });
