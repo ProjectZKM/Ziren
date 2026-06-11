@@ -147,41 +147,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
 
         // Specify allowed shapes.
         let allowed_shapes = [
-            // Fastest shape.
-            [
-                (mem_var.clone(), 18),
-                (select.clone(), 18),
-                (mem_const.clone(), 16),
-                (batch_fri.clone(), 17),
-                (base_alu.clone(), 15),
-                (ext_alu.clone(), 15),
-                (exp_reverse_bits_len.clone(), 17),
-                (poseidon2_wide.clone(), 16),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            // Second fastest shape.
-            [
-                (mem_var.clone(), 19),
-                (select.clone(), 19),
-                (mem_const.clone(), 17),
-                (batch_fri.clone(), 19),
-                (base_alu.clone(), 16),
-                (ext_alu.clone(), 16),
-                (exp_reverse_bits_len.clone(), 18),
-                (poseidon2_wide.clone(), 17),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            [
-                (mem_var.clone(), 20),
-                (select.clone(), 20),
-                (mem_const.clone(), 18),
-                (batch_fri.clone(), 21),
-                (base_alu.clone(), 16),
-                (ext_alu.clone(), 19),
-                (exp_reverse_bits_len.clone(), 18),
-                (poseidon2_wide.clone(), 18),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
+            // The three legacy tiny bands (pre-basefold programs, ~10s of K
+            // instructions) were removed: every basefold recursion program
+            // is >= 2^17 per chip, so they never matched and only emitted
+            // unreachable vks into the enumeration.
             // Basefold normalize-sized shape.  The basefold normalize
             // program produces ~660K instructions with chip heights:
             // MemoryConst≈33842, MemoryVar≈11253, BaseAlu≈74980,
@@ -243,6 +212,21 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (ext_alu.clone(), 20),
                 (exp_reverse_bits_len.clone(), 18),
                 (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // GAP-2a/2b band: the component-opening witnessing (bound
+            // initial_eval + Merkle binding) grew compose programs past
+            // the older caps (observed fib compose: MemoryVar 663k -> 20,
+            // ExtAlu 865k -> 20).  One-bit headroom on the binding dims.
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 20),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 20),
+                (ext_alu.clone(), 21),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
         ]

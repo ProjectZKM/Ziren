@@ -200,6 +200,10 @@ pub struct RecursiveBasefoldComponentOpening<F, EF, Dig = [F; 8]> {
     /// = column count for that stripe.
     pub leaf_values: Vec<Vec<F>>,
     pub merkle_path_bytes: Vec<u8>,
+    /// GAP-2 binding: the Merkle inclusion path (sibling digests,
+    /// leaf-to-root) for this leaf against the round's ORIGINAL
+    /// component commitment — host `MerkleOpening.leaves[q].proof`.
+    pub merkle_path_digests: Vec<Dig>,
     pub _phantom: core::marker::PhantomData<(EF, Dig)>,
 }
 
@@ -721,8 +725,8 @@ where
         // into the transcript.  The previous spurious observes desync'd
         // every downstream challenge; masked by vacuous recursion-VM
         // asserts, ENFORCED (and thus failing) in the gnark OUTER wrap.
-        let _ = commitments;
-        let _ = batch_evaluations;
+        // GAP-2a/2b: `commitments` + `batch_evaluations` are now consumed
+        // by the per-query component binding below (no longer discarded).
 
         // (1) Verify batch grinding (host step 1):
         //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
@@ -739,15 +743,38 @@ where
         //   host does NOT bind into the transcript (host step 3), so we
         //   only need to consume the same number of challenges here to
         //   keep the FS state aligned.
-        {
+        // GAP-2a: KEEP the sampled batching point — the per-query batched
+        // initial_eval below recombines the component-opening leaf values
+        // with partial_lagrange(batching_point) coefficients, mirroring the
+        // host (crates/stark/src/basefold/verifier.rs:110-125, 208-246).
+        let batching_coefficients: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = {
             let total_polys: usize =
                 batch_evaluations.iter().map(|r| r.len()).sum();
             let num_batching_vars =
                 total_polys.max(1).next_power_of_two().trailing_zeros() as usize;
-            for _ in 0..num_batching_vars {
-                let _b = challenger.sample_ext(builder);
+            let batching_point: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> =
+                (0..num_batching_vars).map(|_| challenger.sample_ext(builder)).collect();
+            // In-circuit partial_lagrange — EXACT mirror of the host
+            // (verifier.rs:72-83): per accumulated element push v*(1-r)
+            // then v*r ADJACENT (interleaved; each new variable becomes
+            // the low bit), NOT block-appended.
+            let one: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                builder.constant(C::EF::ONE);
+            let mut coeffs: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = vec![one];
+            for x in batching_point.iter() {
+                let mut next = Vec::with_capacity(coeffs.len() * 2);
+                for &c in coeffs.iter() {
+                    let lo: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                        builder.eval(c * (one - *x));
+                    let hi: zkm_recursion_compiler::prelude::Ext<C::F, C::EF> =
+                        builder.eval(c * *x);
+                    next.push(lo);
+                    next.push(hi);
+                }
+                coeffs = next;
             }
-        }
+            coeffs
+        };
 
         // (3) Structural sanity.
         assert_eq!(
@@ -836,15 +863,85 @@ where
                     })
                     .collect();
 
-                let initial_eval: Ext<C::F, C::EF> = sibling_pairs
-                    .first()
-                    .map(|pair| pair[0])
-                    .unwrap_or_else(|| {
-                        builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<
-                            C::F,
-                            C::EF,
-                        >::ZERO)
-                    });
+                // GAP-2a/2b: BOUND initial_eval.  When the proof carries
+                // component openings (the inner production path), the query
+                // chain's start value is RECOMPUTED from the component-
+                // opening leaf values batched with the Lagrange coefficients
+                // (host verifier.rs:208-246, step 8), and each leaf is
+                // Merkle-verified against the round's ORIGINAL commitment
+                // (host step 9).  The previous `sibling_pairs[0][0]` read
+                // was prover-supplied and unbound.  Empty component
+                // openings (legacy/outer placeholder paths) keep the old
+                // fallback — structurally decided at program build.
+                let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
+                    let mut acc: Ext<C::F, C::EF> = builder.eval(
+                        zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO,
+                    );
+                    let mut batch_idx = 0usize;
+                    for (round_idx, round_openings) in
+                        proof.component_openings.iter().enumerate()
+                    {
+                        let round_polys = batch_evaluations
+                            .get(round_idx)
+                            .map(|r| r.len())
+                            .unwrap_or(0);
+                        let op = &round_openings[query_idx];
+                        // (8) inner product: acc += coeff[batch_idx + k] * leaf[k]
+                        // over the flat per-matrix leaf values (host :229-237).
+                        let mut poly_offset = 0usize;
+                        for mat_values in op.leaf_values.iter() {
+                            for &v in mat_values.iter() {
+                                let c = batching_coefficients[batch_idx + poly_offset];
+                                acc = builder.eval(acc + c * v);
+                                poly_offset += 1;
+                            }
+                        }
+                        assert_eq!(
+                            poly_offset, round_polys,
+                            "component leaf width != round poly count (round {round_idx})"
+                        );
+                        batch_idx += round_polys;
+                        // (9) Merkle-verify the leaf against the ORIGINAL
+                        // round commitment (host :249-278): leaf =
+                        // HV::hash(concat of all matrix rows) — p3
+                        // MerkleTreeMmcs multi-matrix same-height leaf —
+                        // path dir bit at level k = query index bit k
+                        // (LSB-first, full-height tree).
+                        if !op.merkle_path_digests.is_empty() {
+                            let leaf_felts: Vec<zkm_recursion_compiler::prelude::Felt<C::F>> =
+                                op.leaf_values.iter().flatten().copied().collect();
+                            let mut leaf_digest: HV::DigestVariable =
+                                HV::hash(builder, &leaf_felts);
+                            for (level, sibling_digest) in
+                                op.merkle_path_digests.iter().enumerate()
+                            {
+                                let bit = query_indices[query_idx][level].clone();
+                                let pair = HV::select_chain_digest(
+                                    builder,
+                                    bit,
+                                    [leaf_digest, *sibling_digest],
+                                );
+                                leaf_digest = HV::compress(builder, pair);
+                            }
+                            HV::assert_digest_eq(
+                                builder,
+                                leaf_digest,
+                                commitments[round_idx],
+                            );
+                        }
+                    }
+                    acc
+                } else {
+                    sibling_pairs
+                        .first()
+                        .map(|pair| pair[0])
+                        .unwrap_or_else(|| {
+                            builder.eval(zkm_recursion_compiler::ir::SymbolicExt::<
+                                C::F,
+                                C::EF,
+                            >::ZERO)
+                        })
+                };
 
                 use p3_field::TwoAdicField;
                 let two_adic_generator: zkm_recursion_compiler::prelude::Felt<C::F> =
@@ -934,7 +1031,6 @@ where
             }
         }
 
-        let _ = &proof.component_openings;
         let _ = &proof.query_phase_openings;
         let _ = &proof.batch_evaluations;
     }

@@ -476,12 +476,24 @@ pub fn dummy_jagged_basefold_bundle(
             MerkleOpening { leaves }
         })
         .collect();
+    // GAP-2a/2b: component openings are now WITNESSED + consumed (the
+    // bound initial_eval + the component Merkle binding), so the dummy
+    // must carry the shape-correct zero-filled structure: ONE round (the
+    // single stacked commit), `num_queries` leaves, each leaf = one
+    // matrix row of `num_stripes` values with a full-height Merkle path
+    // (codeword height = 2^(log_stacking + log_blowup), log_blowup = 1).
+    let component_openings_dummy: Vec<MerkleOpening<F, JaggedMmcs>> = vec![MerkleOpening {
+        leaves: (0..num_queries)
+            .map(|_| LeafOpening {
+                values: vec![vec![F::ZERO; num_stripes]],
+                proof: vec![[F::ZERO; 8]; log_stacking + 1],
+            })
+            .collect(),
+    }];
     let bf_proof = BasefoldProof::<F, EF, JaggedMmcs> {
         univariate_messages,
         fri_commitments,
-        // component openings are NOT witnessed (read_basefold_proof_from_stream
-        // drops them), so an empty vec is shape-correct for the stream.
-        component_polynomials_query_openings_and_proofs: Vec::new(),
+        component_polynomials_query_openings_and_proofs: component_openings_dummy,
         query_phase_openings_and_proofs,
         final_poly: EF::ZERO,
         pow_witness: F::ZERO,

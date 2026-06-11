@@ -454,6 +454,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
+        if std::env::var("ZIREN_SETUP_HEIGHTS").is_ok() {
+            for (name, _, trace) in named_preprocessed_traces.iter() {
+                eprintln!("[SETUP-H] {} h={} log={}", name, trace.height(), trace.height().next_power_of_two().trailing_zeros());
+            }
+        }
         let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
             .iter()
             .map(|(name, _, trace)| {
@@ -464,8 +469,37 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .unzip();
 
         // Commit to the batch of traces.
-        let (commit, data) = tracing::debug_span!("commit to preprocessed traces")
-            .in_scope(|| pcs.commit(domains_and_traces));
+        let (commit, data) = if SC::prep_commit_via_hook() {
+            // SP1-style prep commit (no two-adic coset LDE) — see
+            // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
+            // `pcs.commit` LDE caps prep heights at
+            // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
+            // on the basefold path.
+            let hook = crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook().expect(
+                "prep_commit_via_hook config without a registered \
+                 OuterPrepCommitFn (recursion-core::register_outer_jagged_hooks)",
+            );
+            let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
+                .iter()
+                .map(|(name, _, trace)| (name.to_string(), trace.clone()))
+                .collect();
+            // Bridge the generic Val<SC> -> KoalaBear type gap via serde
+            // (the hook is only registered for KoalaBear-valued configs).
+            let named_kb: Vec<(String, RowMajorMatrix<p3_koala_bear::KoalaBear>)> =
+                bincode::deserialize(&bincode::serialize(&named).unwrap()).unwrap();
+            let commit_bytes = hook(named_kb);
+            let commit: Com<SC> = bincode::deserialize(&commit_bytes)
+                .expect("prep commit hook: commitment type mismatch");
+            // pk.data is unused on the basefold path — 1-row zero dummy.
+            let dummy_domain = pcs.natural_domain_for_degree(1);
+            let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
+            let (_dc, dummy_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+            let _ = domains_and_traces;
+            (commit, dummy_data)
+        } else {
+            tracing::debug_span!("commit to preprocessed traces")
+                .in_scope(|| pcs.commit(domains_and_traces))
+        };
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -585,8 +619,37 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .unzip();
 
         // Commit to the batch of traces.
-        let (commit, data) = tracing::debug_span!("commit to preprocessed traces")
-            .in_scope(|| pcs.commit(domains_and_traces));
+        let (commit, data) = if SC::prep_commit_via_hook() {
+            // SP1-style prep commit (no two-adic coset LDE) — see
+            // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
+            // `pcs.commit` LDE caps prep heights at
+            // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
+            // on the basefold path.
+            let hook = crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook().expect(
+                "prep_commit_via_hook config without a registered \
+                 OuterPrepCommitFn (recursion-core::register_outer_jagged_hooks)",
+            );
+            let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
+                .iter()
+                .map(|(name, _, trace)| (name.to_string(), trace.clone()))
+                .collect();
+            // Bridge the generic Val<SC> -> KoalaBear type gap via serde
+            // (the hook is only registered for KoalaBear-valued configs).
+            let named_kb: Vec<(String, RowMajorMatrix<p3_koala_bear::KoalaBear>)> =
+                bincode::deserialize(&bincode::serialize(&named).unwrap()).unwrap();
+            let commit_bytes = hook(named_kb);
+            let commit: Com<SC> = bincode::deserialize(&commit_bytes)
+                .expect("prep commit hook: commitment type mismatch");
+            // pk.data is unused on the basefold path — 1-row zero dummy.
+            let dummy_domain = pcs.natural_domain_for_degree(1);
+            let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
+            let (_dc, dummy_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+            let _ = domains_and_traces;
+            (commit, dummy_data)
+        } else {
+            tracing::debug_span!("commit to preprocessed traces")
+                .in_scope(|| pcs.commit(domains_and_traces))
+        };
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces

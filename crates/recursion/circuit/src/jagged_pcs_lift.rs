@@ -228,6 +228,7 @@ where
             > {
                 leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
+                merkle_path_digests: vec![],
                 _phantom: core::marker::PhantomData,
             },
         ]],

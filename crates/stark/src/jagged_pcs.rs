@@ -84,7 +84,7 @@ pub type BasefoldLateBindingProverData = BasefoldLateBindingProverDataGeneric<Ja
 /// 131K shard-split cliff that worked for tendermint at 51.7 GB.
 /// Small commits (under 16K total entries) clamp this down so the
 /// stacked PCS doesn't end up over-padding past the actual data.
-pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 14;
+pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
 /// streams packed into each stripe.  **`32`** matches SP1's

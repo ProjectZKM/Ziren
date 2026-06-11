@@ -167,6 +167,15 @@ impl Default for KoalaBearPoseidon2Outer {
 }
 
 impl StarkGenericConfig for KoalaBearPoseidon2Outer {
+    fn prep_commit_via_hook() -> bool {
+        // SP1-style: the wrap machine's PREPROCESSED commit goes through the
+        // stacked BaseFold (outer_prep_commit hook) — no two-adic coset LDE.
+        // The legacy `pcs.commit` LDE capped prep heights at
+        // 2^(TWO_ADICITY - log_blowup) = 2^20 (blowup 4) and panicked once
+        // the wrap program's tallest prep trace crossed it; its ProverData
+        // has no consumers on the basefold path.
+        true
+    }
     type Val = OuterVal;
     type Domain = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Domain;
     type Pcs = OuterPcs;
@@ -229,6 +238,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // FRI deletion remain.)
         true
     }
+
 
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_stark::jagged_pcs::JaggedVal>>::Commitment,
@@ -467,6 +477,25 @@ pub mod outer_jagged_hooks {
             zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_open_hook(outer_open);
         let _ =
             zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
+        let _ = zkm_stark::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
+            outer_prep_commit,
+        );
+    }
+
+    /// SP1-style PREPROCESSED-trace setup commit for the OuterSC wrap
+    /// machine: stacked BaseFold over the Poseidon2-BN254 `OuterValMmcs`
+    /// (no two-adic coset LDE).  Returns bincode of the
+    /// `OuterValMmcs::Commitment` (== `Com<KoalaBearPoseidon2Outer>` since
+    /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>`).
+    fn outer_prep_commit(
+        chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    ) -> Vec<u8> {
+        use zkm_stark::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
+        use zkm_stark::BasefoldRing as _;
+        let mmcs = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::bf_mmcs();
+        let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(&chip_traces, mmcs);
+        bincode::serialize(&pre.commit.commitment)
+            .expect("outer_prep_commit: serialize commitment")
     }
 }
 

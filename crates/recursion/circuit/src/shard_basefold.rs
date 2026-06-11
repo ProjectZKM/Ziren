@@ -766,6 +766,7 @@ where
             component_openings: vec![vec![RecursiveBasefoldComponentOpening::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
                 leaf_values: vec![vec![zero_felt(builder)]],
                 merkle_path_bytes: vec![],
+                merkle_path_digests: vec![],
                 _phantom: core::marker::PhantomData,
             }]],
             query_phase_openings: (0..shape.basefold_num_variables)

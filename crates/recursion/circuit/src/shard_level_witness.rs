@@ -604,6 +604,8 @@ fn host_component_opening_to_recursive(
         .map(|leaf| RecursiveBasefoldComponentOpening {
             leaf_values: leaf.values.clone(),
             merkle_path_bytes: Vec::new(),
+            // GAP-2 binding: thread the structured path digests through.
+            merkle_path_digests: leaf.proof.clone(),
             _phantom: core::marker::PhantomData,
         })
         .collect()
@@ -790,6 +792,8 @@ fn host_component_opening_to_recursive_outer(
         .map(|leaf| RecursiveBasefoldComponentOpening {
             leaf_values: leaf.values.clone(),
             merkle_path_bytes: Vec::new(),
+            // GAP-2 binding: thread the structured path digests through.
+            merkle_path_digests: leaf.proof.clone(),
             _phantom: core::marker::PhantomData,
         })
         .collect()
@@ -1399,6 +1403,11 @@ where
                     .map(|c| RecursiveBasefoldComponentOpening {
                         leaf_values: c.leaf_values,
                         merkle_path_bytes: c.merkle_path_bytes,
+                        merkle_path_digests: c
+                            .merkle_path_digests
+                            .into_iter()
+                            .map(conv_digest)
+                            .collect(),
                         _phantom: core::marker::PhantomData,
                     })
                     .collect()
@@ -1487,10 +1496,18 @@ where
         .map(|round| {
             round
                 .into_iter()
-                .map(|c| RecursiveBasefoldComponentOpening {
-                    leaf_values: c.leaf_values,
-                    merkle_path_bytes: c.merkle_path_bytes,
-                    _phantom: core::marker::PhantomData,
+                .map(|c| {
+                    let mut merkle_path_digests =
+                        Vec::with_capacity(c.merkle_path_digests.len());
+                    for d in c.merkle_path_digests.into_iter() {
+                        merkle_path_digests.push(HV::const_digest(builder, d));
+                    }
+                    RecursiveBasefoldComponentOpening {
+                        leaf_values: c.leaf_values,
+                        merkle_path_bytes: c.merkle_path_bytes,
+                        merkle_path_digests,
+                        _phantom: core::marker::PhantomData,
+                    }
                 })
                 .collect()
         })

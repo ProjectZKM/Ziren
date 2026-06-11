@@ -417,6 +417,10 @@ where
                 .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
                 .collect(),
             merkle_path_bytes: self.merkle_path_bytes.clone(),
+            // GAP-2: raw digests pass through (promotion happens at the
+            // binding site / stream pair, mirroring merkle_path_digests
+            // handling on the query openings).
+            merkle_path_digests: self.merkle_path_digests.clone(),
             _phantom: core::marker::PhantomData,
         }
     }
@@ -530,6 +534,34 @@ where
     let final_poly = host.final_poly.read(builder);
     let pow_witness = host.pow_witness.read(builder);
     let batch_grinding_witness = host.batch_grinding_witness.read(builder);
+    // GAP-2a/2b: component openings are now CONSUMED by the verifier
+    // (batched initial_eval + Merkle binding vs the original
+    // commitments) — witness the leaf values and path digests.
+    // Element counts are shape-determined (stripe widths x queries x
+    // path depth), so the program stays value-independent.
+    let component_openings = host
+        .component_openings
+        .iter()
+        .map(|round| {
+            round
+                .iter()
+                .map(|c| crate::basefold_verifier::RecursiveBasefoldComponentOpening {
+                    leaf_values: c
+                        .leaf_values
+                        .iter()
+                        .map(|row| row.iter().map(|v| v.read(builder)).collect())
+                        .collect(),
+                    merkle_path_bytes: c.merkle_path_bytes.clone(),
+                    merkle_path_digests: c
+                        .merkle_path_digests
+                        .iter()
+                        .map(|d| core::array::from_fn(|i| d[i].read(builder)))
+                        .collect(),
+                    _phantom: core::marker::PhantomData,
+                })
+                .collect()
+        })
+        .collect();
     let query_phase_openings = host
         .query_phase_openings
         .iter()
@@ -564,7 +596,7 @@ where
         final_poly,
         pow_witness,
         batch_grinding_witness,
-        component_openings: Vec::new(),
+        component_openings,
         query_phase_openings,
         batch_evaluations,
     }
@@ -587,6 +619,21 @@ pub fn write_basefold_proof_to_stream<C>(
     host.final_poly.write(witness);
     host.pow_witness.write(witness);
     host.batch_grinding_witness.write(witness);
+    // GAP-2a/2b: component openings — SAME order as the read pair.
+    for round in host.component_openings.iter() {
+        for c in round.iter() {
+            for row in c.leaf_values.iter() {
+                for v in row.iter() {
+                    v.write(witness);
+                }
+            }
+            for d in c.merkle_path_digests.iter() {
+                for f in d.iter() {
+                    f.write(witness);
+                }
+            }
+        }
+    }
     for round in host.query_phase_openings.iter() {
         for op in round.iter() {
             op.sibling_pair[0].write(witness);

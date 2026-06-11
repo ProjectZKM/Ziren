@@ -70,6 +70,15 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
 
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;
+    /// Whether `StarkMachine::setup` commits PREPROCESSED traces via the
+    /// registered `OuterPrepCommitFn` hook (SP1-style stacked BaseFold, no
+    /// two-adic coset LDE) instead of `pcs.commit`.  The legacy LDE caps
+    /// prep heights at `2^(TWO_ADICITY - log_blowup)`; the BaseFold path
+    /// never consumes the LDE `ProverData`.  Default false; the OuterSC
+    /// wrap config overrides to true.
+    fn prep_commit_via_hook() -> bool {
+        false
+    }
 }
 
 pub trait ZeroCommitment<SC: StarkGenericConfig> {
@@ -124,6 +133,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// (vs. the legacy two-adic FRI path).  Replaces the open-coded
     /// `use_basefold_path` TypeId gate.
     fn use_basefold() -> bool;
+
 
     /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap

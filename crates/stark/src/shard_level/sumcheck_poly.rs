@@ -994,6 +994,20 @@ pub type OuterJaggedVerifyFn = fn(
 gpu_hook_accessors!(OUTER_JAGGED_VERIFY_HOOK: OuterJaggedVerifyFn
     => register_outer_jagged_verify_hook, get_outer_jagged_verify_hook);
 
+/// Outer PREPROCESSED-trace setup commit (SP1-style: stacked BaseFold over
+/// the Poseidon2-BN254 `OuterValMmcs`, NO two-adic coset LDE).  Input =
+/// the machine's named preprocessed traces; output = bincode of the
+/// `Com<OuterSC>` commitment.  Replaces the legacy `pcs.commit` coset-LDE
+/// path in `StarkMachine::setup` for configs whose
+/// `prep_commit_via_hook()` is true — the LDE capped prep heights at
+/// `2^(TWO_ADICITY - log_blowup)` (the wrap program crossed it) and its
+/// `ProverData` has no consumers on the basefold path.
+pub type OuterPrepCommitFn =
+    fn(Vec<(String, p3_matrix::dense::RowMajorMatrix<p3_koala_bear::KoalaBear>)>) -> Vec<u8>;
+
+gpu_hook_accessors!(OUTER_PREP_COMMIT_HOOK: OuterPrepCommitFn
+    => register_outer_prep_commit_hook, get_outer_prep_commit_hook);
+
 #[cfg(test)]
 mod tests {
     use p3_challenger::DuplexChallenger;
