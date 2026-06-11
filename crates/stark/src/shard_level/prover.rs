@@ -517,6 +517,135 @@ where
         "shard phase done"
     );
 
+    // ── #33 S1 (openings-for-free): reuse the zerocheck residual as the
+    // jagged step-3 y_per_chip ────────────────────────────────────────────
+    // `trace_at_z[name]` is the zerocheck reduction's component_poly_evals
+    // (prep-then-main per chip, = padded-MLE_BE(bitrev(trace)) @ z) — exactly
+    // the per-column values jagged step (3) recomputes from the trace
+    // ("y_per_chip == opened_values", jagged_pcs.rs step-3 bitrev comment;
+    // SP1 model: openings are the zerocheck sumcheck residual,
+    // sp1-gpu zerocheck/lib.rs:658-702).  Passing the main slice as
+    // pre_y_per_chip skips the host triple-nested step-3 reduction; the
+    // proof bytes are unchanged (identical values, and step 3 is
+    // transcript-silent).  Kill-switch: ZIREN_ZC_RESIDUAL_Y=0 → legacy
+    // recompute.  Declines whole-shard (legacy fallback, identical bytes)
+    // when any chip's residual is missing or shape-mismatched, or when a
+    // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
+    // natural-row conventions diverge.
+    let residual_y: Option<Vec<Vec<Challenge<SC>>>> = {
+        let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(true);
+        if !on {
+            None
+        } else {
+            let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
+            let mut ok = true;
+            for ((chip, ctrace), ptrace) in chips
+                .iter()
+                .zip(commit_traces.iter())
+                .zip(preprocessed_traces.iter())
+            {
+                let w = ctrace.width;
+                let h = if w == 0 { 0 } else { ctrace.values.len() / w };
+                if h == 0 || w == 0 {
+                    // Jagged step-3 convention for empty chips: empty Vec
+                    // (the downstream reduction skips empty y slots).
+                    out.push(Vec::new());
+                    continue;
+                }
+                if !h.is_power_of_two() {
+                    ok = false;
+                    break;
+                }
+                let name = MachineAir::<Val<SC>>::name(*chip);
+                match trace_at_z.get(&name) {
+                    // Strict shape check: prep-then-main, main slice is the
+                    // last `w` values (zerocheck num_main_cols == trace width).
+                    Some(evals) if evals.len() == ptrace.width + w => {
+                        out.push(evals[ptrace.width..].to_vec());
+                    }
+                    _ => {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+            if ok {
+                Some(out)
+            } else {
+                tracing::warn!(
+                    "#33 residual_y DECLINED (missing/shape-mismatched residual or \
+                     non-pow2 height) — legacy jagged step-3 recompute"
+                );
+                None
+            }
+        }
+    };
+
+    // #33 S0 validation: ZIREN_ZC_RESIDUAL_XCHECK=1 recomputes the legacy
+    // jagged step-3 y values from the commit traces (the exact formula at
+    // jagged_pcs.rs step 3: eq table over rev(z), bit-reversed row source)
+    // and asserts they equal the zerocheck residual per chip per column.
+    if std::env::var("ZIREN_ZC_RESIDUAL_XCHECK").map(|v| v == "1").unwrap_or(false) {
+        match residual_y.as_ref() {
+            None => tracing::warn!(
+                "#33 S0 xcheck: residual_y is None (kill-switched or declined) — \
+                 nothing to check"
+            ),
+            Some(resid) => {
+                let z = &zerocheck_proof.point_and_eval.0;
+                let z_rev: Vec<Challenge<SC>> = z.iter().rev().copied().collect();
+                let eq_c = crate::zerocheck_prover::eq_mle_table::<Challenge<SC>>(&z_rev);
+                let mut n_chips_checked = 0usize;
+                let mut n_vals_checked = 0usize;
+                for ((chip, ctrace), pre) in
+                    chips.iter().zip(commit_traces.iter()).zip(resid.iter())
+                {
+                    let w = ctrace.width;
+                    let h = if w == 0 { 0 } else { ctrace.values.len() / w };
+                    if h == 0 || w == 0 {
+                        assert!(
+                            pre.is_empty(),
+                            "#33 S0: empty chip must map to empty y (chip={})",
+                            MachineAir::<Val<SC>>::name(*chip),
+                        );
+                        continue;
+                    }
+                    assert_eq!(pre.len(), w, "#33 S0: y width mismatch");
+                    let log_h2 = (h as u32).trailing_zeros();
+                    for col in 0..w {
+                        let mut acc = Challenge::<SC>::ZERO;
+                        for row in 0..h {
+                            let src = if h <= 1 {
+                                row
+                            } else {
+                                ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                            };
+                            acc += eq_c[row]
+                                * Challenge::<SC>::from(ctrace.values[src * w + col]);
+                        }
+                        assert_eq!(
+                            acc,
+                            pre[col],
+                            "#33 S0 xcheck FAILED chip={} col={col} \
+                             (legacy step-3 recompute vs zerocheck residual)",
+                            MachineAir::<Val<SC>>::name(*chip),
+                        );
+                        n_vals_checked += 1;
+                    }
+                    n_chips_checked += 1;
+                }
+                tracing::info!(
+                    chips = n_chips_checked,
+                    values = n_vals_checked,
+                    "#33 S0 xcheck PASSED: zerocheck residual == legacy jagged \
+                     step-3 y_per_chip"
+                );
+            }
+        }
+    }
+
     // Phase 4: jagged-PCS opening. Per-chip `r_row` is the trailing
     // log(chip_height) coords of the LogUp-GKR final eval_point.
     let _t_phase4 = std::time::Instant::now();
@@ -533,6 +662,7 @@ where
             challenger,
             _device_traces,
             precomputed_commit,
+            residual_y,
         )
     };
     tracing::info!(
@@ -735,6 +865,11 @@ fn emit_jagged_pcs_bytes<SC, A>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
+    // #33 S1 (openings-for-free): per-chip main-column openings at z from
+    // the zerocheck residual (trace_at_z main slice), parallel to `chips`;
+    // empty Vec per empty chip.  `Some` skips the jagged step-3 host
+    // recompute (identical values, identical bytes); `None` = legacy.
+    pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -745,7 +880,7 @@ where
 {
     use core::any::{Any, TypeId};
     use crate::jagged_pcs::jagged::{
-        prove_jagged_basefold, prove_jagged_basefold_with_precomputed,
+        prove_jagged_basefold_with_precomputed, prove_jagged_basefold_with_y_per_chip,
     };
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
@@ -869,6 +1004,23 @@ where
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
+    // #33 S1: reinterpret the residual openings to InnerChallenge
+    // (Challenge<SC> == InnerChallenge under the TypeId gate above; the
+    // outer-ring hook path above keeps its own legacy step-3 recompute —
+    // identical values either way).
+    let pre_y_inner: Option<Vec<Vec<InnerChallenge>>> = pre_y_per_chip.map(|per| {
+        per.into_iter()
+            .map(|v| {
+                let (ptr, len, cap) = {
+                    let mut v = core::mem::ManuallyDrop::new(v);
+                    (v.as_mut_ptr(), v.len(), v.capacity())
+                };
+                // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
+                unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+            })
+            .collect()
+    });
+
     // Option B single-main-commit fast path: when the orchestrator
     // pre-computed the BaseFold commit, drive the host
     // `prove_jagged_basefold_with_precomputed` body directly.  GPU
@@ -897,7 +1049,8 @@ where
             &r_row_per_chip,
             z_row,
             precomputed_inner,
-            None,
+            // #33 S1: zerocheck-residual openings (skips host step 3).
+            pre_y_inner,
             lb_challenger,
         );
         return EvaluationProof::Bundle(bundle);
@@ -963,7 +1116,15 @@ where
         return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
     }
 
-    let bundle = prove_jagged_basefold(&chip_traces, &r_row_per_chip, z_row, lb_challenger);
+    // #33 S1: thread the zerocheck-residual openings into the legacy
+    // (no-precompute) flow too — `None` keeps the host step-3 recompute.
+    let bundle = prove_jagged_basefold_with_y_per_chip(
+        &chip_traces,
+        &r_row_per_chip,
+        z_row,
+        pre_y_inner,
+        lb_challenger,
+    );
     EvaluationProof::Bundle(bundle)
 }
 
