@@ -2095,6 +2095,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         vks: &[StarkVerifyingKey<InnerSC>],
     ) -> ZKMMerkleProofWitnessValues<InnerSC> {
         let num_vks = self.recursion_vk_map.len();
+        if std::env::var("ZIREN_VK_COVERAGE_PROBE").is_ok() {
+            for (i, vk) in vks.iter().enumerate() {
+                let d = vk.hash_koalabear();
+                eprintln!(
+                    "[VKCOV-MERKLE] vk[{}/{}] digest={:?} in_map={}",
+                    i,
+                    vks.len(),
+                    d.map(|x| {
+                        use p3_field::PrimeField32;
+                        x.as_canonical_u32()
+                    }),
+                    self.recursion_vk_map.contains_key(&d)
+                );
+            }
+        }
         let vk_indices: Vec<usize> = if self.vk_verification {
             vks.iter()
                 .map(|vk| {
@@ -3849,6 +3864,51 @@ pub mod tests {
                 }
                 p -= 1;
             }
+        }
+    }
+
+    /// s7-B probe for a TRIPPED compose (ComposeBasefold) witness:
+    /// load the input dumped by the pipelined executor's DUMP_TRIP_INPUT
+    /// (env TRIP_INPUT, default /tmp/tripinput_compose_h1_i4.bin),
+    /// rebuild the compose program WITH ZKM_DEBUG=true (embeds source
+    /// backtraces) and run the real witness on the host runtime — the
+    /// trap error then carries "nearest pc with backtrace" naming the
+    /// failing in-circuit assert.  Context: the residual hook-independent
+    /// multi-GPU compress flake (DivEAssert pc 986076) rejects compose
+    /// children that ALL host-verify OK individually (layer-verify
+    /// localizer) — this names the cross-child / binding assert.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn s7b_compose_trip_replay() {
+        use zkm_recursion_circuit::machine::ZKMCompressBasefoldWitnessValues;
+        std::env::set_var("ZKM_DEBUG", "true");
+        setup_logger();
+        let path = std::env::var("TRIP_INPUT")
+            .unwrap_or_else(|_| "/tmp/tripinput_compose_h1_i4.bin".to_string());
+        let bytes = std::fs::read(&path).expect("need DUMP_TRIP_INPUT compose dump");
+        let input: ZKMCompressBasefoldWitnessValues<InnerSC> =
+            bincode::deserialize(&bytes).unwrap();
+        eprintln!(
+            "[S7B] loaded {path}: arity={} is_complete={}",
+            input.vks_and_proofs.len(),
+            input.is_complete
+        );
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let program = prover.compose_program_basefold(&input);
+        let mut witness_stream = Vec::new();
+        Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
+        let mut runtime = RecursionRuntime::<Val<InnerSC>, Challenge<InnerSC>, _>::new(
+            program.clone(),
+            prover.compress_prover.config().perm.clone(),
+        );
+        runtime.witness_stream = witness_stream.into();
+        match runtime.run() {
+            Ok(()) => eprintln!(
+                "[S7B] compose witness REPLAYS GREEN on host — trap was \
+                 execution-environment-dependent (NOT witness content)"
+            ),
+            Err(e) => eprintln!("[S7B] compose witness TRIPS on host replay: {e}"),
         }
     }
 
