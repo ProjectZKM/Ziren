@@ -2047,24 +2047,33 @@ pub mod jagged {
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            // A0 (Jun 11 2026): DEFAULT ON (=0 opt-out).  The s4-R4
-            // invalid proof at the fib packed shard (log_dense=27, 22
-            // chips) was ROOT-CAUSED to a stale GPU scaffold: it
-            // implemented the pre-ITEM-12 reduction (y-observe + gamma
-            // column mixing, LSB pair fold, evals-observe, push point
-            // order) while this host moved to caller-sampled z_col
-            // Lagrange weights + full row_eq(rev(z_row)) embedding +
-            // MSB fold + coeff observe + insert(0, r).  The
-            // MIN_LOG_SIZE=23 gate had masked the divergence on
-            // compress/tendermint shapes.  Fixed by passing z_col/z_row
-            // through the hook signatures and re-aligning the ziren-gpu
-            // scaffold + CUDA kernels (jagged_sumcheck_kernels.cu MSB).
-            // Validated: fib core digest byte-identical hook-on (V2
-            // device handle AND host-dense legs) vs pure host
-            // (0x9f51315d72d76b37, s6 logs).
+            // A0 history (Jun 11 2026): the s4-R4 invalid proof at the
+            // fib packed shard (log_dense=27, 22 chips) was ROOT-CAUSED
+            // to a stale GPU scaffold: it implemented the pre-ITEM-12
+            // reduction (y-observe + gamma column mixing, LSB pair
+            // fold, evals-observe, push point order) while this host
+            // moved to caller-sampled z_col Lagrange weights + full
+            // row_eq(rev(z_row)) embedding + MSB fold + coeff observe +
+            // insert(0, r).  Fixed by passing z_col/z_row through the
+            // hook signatures and re-aligning the ziren-gpu scaffold +
+            // CUDA kernels (jagged_sumcheck_kernels.cu MSB).
+            // Validated byte-identical vs pure host: fib core (V2
+            // device-handle AND host-dense legs, 0x9f51315d72d76b37),
+            // tendermint core A/B 7/7 shards, fib full chain + wrap.
+            //
+            // STILL OPT-IN (=1 to enable): a brief default-ON window
+            // (s6) hit an ARMED in-circuit DivEAssert in MULTI-GPU
+            // tendermint COMPRESS (compose rejected a hook-on
+            // first-layer recursion proof, log_dense=29) while the
+            // identical run with the hook off completed green
+            // (s6 T3c vs T3d, /tmp/gpu_agent_log.md).  Single-GPU
+            // hook-on is green everywhere validated; suspect a
+            // cross-GPU/stream issue in the compress-pipeline V2
+            // device-handle path.  Re-flip the default after that is
+            // root-caused + single-GPU TM compress hook-on validates.
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
+                .map(|v| v == "1")
+                .unwrap_or(false);
 
             // Win A: look up BOTH hooks so we can emit diagnostics on
             // mismatches (env-set/unregistered, hook-registered/env-unset).
