@@ -1626,6 +1626,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
+        // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): digest of the
+        // INPUT (root compress) basefold proof, to localize divergence
+        // between the compress and shrink stages across A/B legs.
+        if std::env::var("ZIREN_BF_PROOF_DIGEST").as_deref() == Ok("1") {
+            fn fnv(bytes: &[u8]) -> u64 {
+                let mut h: u64 = 0xcbf29ce484222325;
+                for &b in bytes {
+                    h ^= b as u64;
+                    h = h.wrapping_mul(0x100000001b3);
+                }
+                h
+            }
+            if let Ok(bytes) = bincode::serialize(&basefold_proof) {
+                eprintln!(
+                    "[bf-digest] shrink-input-compress bytes={} fnv=0x{:016x}",
+                    bytes.len(),
+                    fnv(&bytes)
+                );
+            }
+        }
         // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
@@ -1702,6 +1722,38 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
             let data = self.shrink_prover.commit(&bf_record, traces.clone());
 
+            // #36 shrink device routing (kill-switch ZIREN_GPU_SHRINK_DEVICE=0):
+            // when the shrink prover keeps the committed main traces
+            // device-resident (StarkGpuProver), hand prove_shard_to_basefold
+            // the same per-shard DeviceTraceProvider snapshot the GPU
+            // compress pipeline uses, and skip the host rehydrate of the
+            // device-only RecursionAir chips below — the interaction-eval
+            // hook + device-fold zerocheck resolve them from the provider
+            // (mirrors ziren-gpu pipeline/prover.rs, the #108 pattern).
+            // On the CPU prover `shard_device_trace_provider` returns None
+            // and this whole block is a no-op (legacy path, bit-for-bit).
+            let shrink_device_enabled = std::env::var("ZIREN_GPU_SHRINK_DEVICE")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+            let device_provider = if shrink_device_enabled {
+                self.shrink_prover.shard_device_trace_provider(&data)
+            } else {
+                None
+            };
+            // Pin this thread's GPU-pool TLS to the provider's device so
+            // the device-keyed dispatch hooks (gate 1b in
+            // try_run_device_path) see a worker context, exactly like the
+            // pipeline dispatch does before driving the basefold prove.
+            let _shrink_gpu_guard = device_provider
+                .as_ref()
+                .map(|(_, dev)| zkm_stark::gpu_worker_context::GpuPoolWorkerGuard::new(*dev));
+            // Escape hatch: ZIREN_GPU_SHRINK_DEVICE_REHYDRATE=1 keeps the
+            // host rehydrate even with a provider attached (provider-
+            // preferred paths still fire; host fallbacks stay covered).
+            let shrink_force_rehydrate = std::env::var("ZIREN_GPU_SHRINK_DEVICE_REHYDRATE")
+                .map(|v| v == "1")
+                .unwrap_or(false);
+
             // Snapshot the challenger at the state the BaseFold verifier
             // sees at entry to `BasefoldShardVerifier::verify_shard`:
             // fresh challenger -> pk.observe_into -> observe pv. Matches
@@ -1724,7 +1776,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 String,
                 RowMajorMatrix<Val<InnerSC>>,
             > = traces.into_iter().collect();
-            {
+            // #36: skipped when the device provider is attached — the
+            // device-only chips resolve from the provider, like the GPU
+            // compress pipeline's default (ZIREN_GPU_PIPELINE_DEVICE_REHYDRATE).
+            if device_provider.is_none() || shrink_force_rehydrate {
                 let machine = self.shrink_prover.machine();
                 for chip in machine.chips() {
                     let name = chip.name();
@@ -1808,14 +1863,40 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 data.public_values.clone(),
                 max_log_row_count,
                 &mut bf_challenger,
-                // Host path: no device traces.
-                None,
-                // CPU/host emits MSB-folded proofs.
+                // #36: per-shard device traces when the shrink prover is
+                // device-resident; None on the CPU prover (legacy host path).
+                device_provider
+                    .as_ref()
+                    .map(|(p, _)| p.as_ref() as &dyn zkm_stark::shard_level::DeviceTraceProvider),
+                // Both the CPU/host prover and the GPU device path emit
+                // MSB-folded proofs (resolve_gpu_fold_orientation() default).
                 zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,
             );
+
+            // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over
+            // the serialized shrink basefold proof — compare device-routed
+            // vs host (ZIREN_GPU_SHRINK_DEVICE=0) legs.  Mirrors the
+            // ziren-gpu core_multi_gpu canary format.
+            if std::env::var("ZIREN_BF_PROOF_DIGEST").as_deref() == Ok("1") {
+                fn fnv(bytes: &[u8]) -> u64 {
+                    let mut h: u64 = 0xcbf29ce484222325;
+                    for &b in bytes {
+                        h ^= b as u64;
+                        h = h.wrapping_mul(0x100000001b3);
+                    }
+                    h
+                }
+                if let Ok(bytes) = bincode::serialize(&bf_proof) {
+                    eprintln!(
+                        "[bf-digest] shrink bytes={} fnv=0x{:016x}",
+                        bytes.len(),
+                        fnv(&bytes)
+                    );
+                }
+            }
 
             proof.basefold_shard_proof = Some(Box::new(bf_proof));
         }

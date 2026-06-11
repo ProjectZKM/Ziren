@@ -114,6 +114,24 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
+    /// Build a device-trace provider over the committed shard data —
+    /// plus the CUDA device id the traces live on — when this prover
+    /// keeps the main traces device-resident.  Host provers return
+    /// `None` (the default).
+    ///
+    /// #36 (shrink device routing): lets generic orchestration code
+    /// (e.g. the shrink stage in `zkm-prover`) hand
+    /// `prove_shard_to_basefold` a [`crate::shard_level::DeviceTraceProvider`]
+    /// without naming GPU crate types, exactly like the GPU compress
+    /// pipeline does with its per-shard `DeviceShardTraces` snapshot.
+    #[allow(unused_variables)]
+    fn shard_device_trace_provider(
+        &self,
+        data: &ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
+    ) -> Option<(Box<dyn crate::shard_level::DeviceTraceProvider>, usize)> {
+        None
+    }
+
     /// Observe the main commitment and public values and update the challenger.
     fn observe(
         &self,
