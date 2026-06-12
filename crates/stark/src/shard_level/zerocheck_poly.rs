@@ -1932,11 +1932,15 @@ mod tests {
             "host final check: p_last(z_last)==point_and_eval.1 (host ACCEPTS)"
         );
 
-        // CONCLUSION: every host structural check passes on a proof whose
-        // claimed eval the circuit's rlc_eval assert rejects ⇒ the host
-        // verifier UNDER-CHECKS (explanation (b)).
+        // CONCLUSION: every host STRUCTURAL check (verify_sumcheck_host)
+        // passes on a proof whose claimed eval the circuit's rlc_eval assert
+        // rejects ⇒ the structural layer UNDER-CHECKS (explanation (b)).
+        // #43 closes this at the verify_zerocheck_host level by recomputing
+        // rlc_eval (= eq·(C+batch) over the openings@z*) and rejecting when
+        // it != point_and_eval.1 — the binding the structural layer omits.
+        // This test stays as the witness for WHY that binding is required.
         eprintln!(
-            "[S8J-b] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host structural sumcheck checks PASS"
+            "[S8J-b] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host STRUCTURAL sumcheck checks PASS (verify_zerocheck_host now binds rlc_eval, #43)"
         );
     }
 

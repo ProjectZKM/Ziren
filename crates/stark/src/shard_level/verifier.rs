@@ -662,27 +662,39 @@ where
         challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // ── s8-J #42 DISCRIMINATOR (gated, verifier-neutral) ──────────────
-    // Independently recompute the in-circuit `rlc_eval` (recursion
-    // zerocheck.rs:474-613) ON THE HOST from the SAME inputs the circuit
-    // uses — the trace@z* openings carried in `opened_values`, the
-    // transcript-sampled (alpha, gkr_batch_open, lambda), the GKR point and
-    // the zerocheck-reduced point — and compare to the proof's claimed
-    // `point_and_eval.1`.  This settles whether the circuit's :613 reject is
-    // (a) the circuit over-rejecting a CONSISTENT proof, or (b) the host
-    // accepting an INCONSISTENT one.  Pure read-only print behind S8J_RLC;
-    // does NOT touch the challenger or the verdict.
-    if std::env::var("S8J_RLC").is_ok() {
-        recompute_and_report_rlc_eval_host::<SC, A>(
-            chips,
-            zerocheck_proof,
-            gkr_evaluations,
-            public_values,
-            _alpha,
-            gkr_batch_open,
-            lambda,
-            opened_values,
-        );
+    // ── #43 item-12 / GAP-2 constraint-RLC BINDING (HARD CHECK) ───────
+    // Recompute the in-circuit `rlc_eval` (recursion zerocheck.rs:474-613)
+    // ON THE HOST from the SAME inputs the circuit uses — the trace@z*
+    // openings carried in `opened_values`, the transcript-sampled (alpha,
+    // gkr_batch_open, lambda), the GKR point and the zerocheck-reduced
+    // point — and BIND it to the proof's claimed `point_and_eval.1`.
+    //
+    // This is the cross-chip constraint-RLC half the host previously
+    // DEFERRED (the `verify_zerocheck_cryptographic_identity_host` comment
+    // below).  Without it the structural sumcheck only ties
+    // `point_and_eval.1` back to `claimed_sum` (telescoping) and the GKR
+    // openings (G2-b) — nothing forces it to equal the constraint-RLC of
+    // the commitment-bound openings@z*.  #42 PROVED that omission is a real
+    // soundness hole: a prover (e.g. the racing GPU compress device-fold,
+    // #44) can emit a proof the in-circuit `verify_shard` correctly rejects
+    // at zerocheck.rs:613 yet the host accepted.  Verifier-only,
+    // transcript-neutral (only already-sampled challenges + opened values),
+    // no vk regen.  Set S8J_RLC=1 for the per-shard diagnostic print.
+    let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
+        chips,
+        zerocheck_proof,
+        gkr_evaluations,
+        public_values,
+        _alpha,
+        gkr_batch_open,
+        lambda,
+        opened_values,
+    );
+    if rlc_eval != zerocheck_proof.point_and_eval.1 {
+        return Err(BasefoldVerifyError::Zerocheck(
+            "zerocheck rlc_eval != point_and_eval.1 (item-12 constraint-RLC binding)"
+                .to_string(),
+        ));
     }
 
     // (2) Point dimension == max_log_row_count.
@@ -840,7 +852,7 @@ where
 ///   * `gkr_evaluations.point` = z_gkr; `zerocheck_proof.point_and_eval.0`
 ///     = z* (the reduced point).
 #[allow(clippy::too_many_arguments)]
-fn recompute_and_report_rlc_eval_host<SC, A>(
+fn recompute_zerocheck_rlc_eval_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
     gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
@@ -849,7 +861,8 @@ fn recompute_and_report_rlc_eval_host<SC, A>(
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
-) where
+) -> Challenge<SC>
+where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
         + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
@@ -955,18 +968,24 @@ fn recompute_and_report_rlc_eval_host<SC, A>(
         ));
     }
 
-    let claimed = zerocheck_proof.point_and_eval.1;
-    let equal = rlc_eval == claimed;
-    eprintln!(
-        "[S8J-RLC] chips={n_chips} EQUAL={equal} | host_rlc_eval={rlc_eval:?} | point_and_eval.1={claimed:?} | eq(z_gkr,z*)={zerocheck_eq_val:?} alpha={alpha:?} beta={gkr_batch_open:?} lambda={lambda:?} | z*_dim={zsd} z_gkr_dim={zgd}",
-        zsd = z_star.len(),
-        zgd = z_gkr.len(),
-    );
-    if std::env::var("S8J_PERCHIP").is_ok() {
-        for l in per_chip_lines {
-            eprintln!("{l}");
+    if std::env::var("S8J_RLC").is_ok() {
+        let claimed = zerocheck_proof.point_and_eval.1;
+        let equal = rlc_eval == claimed;
+        eprintln!(
+            "[S8J-RLC] chips={n_chips} EQUAL={equal} | host_rlc_eval={rlc_eval:?} | point_and_eval.1={claimed:?} | eq(z_gkr,z*)={zerocheck_eq_val:?} alpha={alpha:?} beta={gkr_batch_open:?} lambda={lambda:?} | z*_dim={zsd} z_gkr_dim={zgd}",
+            zsd = z_star.len(),
+            zgd = z_gkr.len(),
+        );
+        if std::env::var("S8J_PERCHIP").is_ok() {
+            for l in per_chip_lines {
+                eprintln!("{l}");
+            }
         }
+    } else {
+        // `per_chip_lines` only feeds the gated diagnostic.
+        let _ = &per_chip_lines;
     }
+    rlc_eval
 }
 
 
