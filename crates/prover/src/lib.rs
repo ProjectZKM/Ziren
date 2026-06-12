@@ -3376,6 +3376,64 @@ pub mod tests {
         Ok(())
     }
 
+    /// s8-J #42 DISCRIMINATOR harness: prove a real fib CORE proof and run
+    /// the HOST `verify_shard` on each shard (a host-VALID / GREEN child).
+    /// With `S8J_RLC=1` set, `verify_zerocheck_host` independently recomputes
+    /// the in-circuit `rlc_eval` (recursion zerocheck.rs:613) on the host from
+    /// the SAME inputs the circuit uses (the trace@z* openings in
+    /// `opened_values`, the transcript-sampled alpha/gkr_batch_open/lambda, the
+    /// GKR point and the zerocheck-reduced point) and prints it alongside the
+    /// proof's `point_and_eval.1`.  EQUAL ⇒ the claimed eval is consistent with
+    /// the openings (the host recompute is trustworthy, so the circuit's
+    /// formula is what would diverge on a failing child → explanation (a) for
+    /// any reject); UNEQUAL on a green child ⇒ the host recompute itself is
+    /// untrustworthy (re-derive FS order before drawing a verdict).
+    ///
+    /// This is the GREEN-child leg of the discriminator: every core shard
+    /// host-verifies (so they are all valid), and we read off whether the
+    /// host-recomputed rlc_eval matches the claimed eval by construction.
+    /// Run with: S8J_RLC=1 [S8J_PERCHIP=1] cargo test -p zkm-prover
+    ///   s8j_rlc_eval_discriminator -- --ignored --nocapture
+    #[test]
+    #[serial]
+    #[ignore]
+    fn s8j_rlc_eval_discriminator() -> Result<()> {
+        setup_logger();
+        std::env::set_var("S8J_RLC", "1");
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof =
+            prover.prove_core(&pk_d, program, &ZKMStdin::default(), opts, context)?;
+        eprintln!(
+            "[S8J] fib core: {} shard proof(s) — running host verify_shard on each",
+            core_proof.proof.0.len()
+        );
+        // Host-verify exactly as ZKMProver::verify does (verify.rs:291-293):
+        // routes each shard through Verifier::verify_shard ->
+        // BasefoldShardVerifier::verify_shard -> verify_zerocheck_host ->
+        // (S8J_RLC) recompute_and_report_rlc_eval_host.
+        let mut challenger = prover.core_prover.config().challenger();
+        let machine_proof = zkm_stark::MachineProof {
+            shard_proofs: core_proof.proof.0.to_vec(),
+        };
+        let res = prover.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger);
+        match &res {
+            Ok(()) => eprintln!(
+                "[S8J] host core verify GREEN — all {} shard(s) host-VALID; \
+                 the [S8J-RLC] lines above show host rlc_eval vs point_and_eval.1 \
+                 per shard (EQUAL on every green child ⇒ host recompute is faithful \
+                 and the identity holds by construction).",
+                core_proof.proof.0.len()
+            ),
+            Err(e) => eprintln!("[S8J] host core verify FAILED: {e:?}"),
+        }
+        res.expect("fib core must host-verify (green children)");
+        Ok(())
+    }
+
     /// VKROOT shrink localizer: build the shrink program from the REAL fib
     /// compress proof (cached via DUMP_COMPRESS_PROOF=/tmp/fib_compress.bin)
     /// vs the enumeration's DUMMY witness from the same OrderedShape, and

@@ -15,7 +15,7 @@ use super::basefold_constraint_folder::{
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
-use crate::types::{AirOpenedValues, ChipOpenedValues};
+use crate::types::{AirOpenedValues, ChipOpenedValues, ShardOpenedValues};
 use crate::lookup::LookupKind;
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
@@ -268,6 +268,10 @@ impl BasefoldShardVerifier {
             &proof.public_values,
             self.max_log_row_count,
             challenger,
+            // s8-J #42 discriminator: opened_values carries the trace@z*
+            // openings the circuit's rlc_eval (zerocheck.rs:613) is built
+            // from; pass it so the gated host-recompute can compare.
+            &proof.opened_values,
         )?;
 
         // ── Phase 4: Jagged-PCS opening verification ────────────
@@ -633,6 +637,7 @@ where
 /// which does not satisfy the SP1-shape identity the cryptographic
 /// check enforces.  Callers with an SP1-shape zerocheck proof may
 /// invoke the cryptographic helper independently.
+#[allow(clippy::too_many_arguments)]
 fn verify_zerocheck_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
@@ -640,6 +645,7 @@ fn verify_zerocheck_host<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
+    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
 ) -> Result<(), BasefoldVerifyError>
 where
     SC: StarkGenericConfig,
@@ -655,6 +661,29 @@ where
     let gkr_batch_open: Challenge<SC> =
         challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
+
+    // ── s8-J #42 DISCRIMINATOR (gated, verifier-neutral) ──────────────
+    // Independently recompute the in-circuit `rlc_eval` (recursion
+    // zerocheck.rs:474-613) ON THE HOST from the SAME inputs the circuit
+    // uses — the trace@z* openings carried in `opened_values`, the
+    // transcript-sampled (alpha, gkr_batch_open, lambda), the GKR point and
+    // the zerocheck-reduced point — and compare to the proof's claimed
+    // `point_and_eval.1`.  This settles whether the circuit's :613 reject is
+    // (a) the circuit over-rejecting a CONSISTENT proof, or (b) the host
+    // accepting an INCONSISTENT one.  Pure read-only print behind S8J_RLC;
+    // does NOT touch the challenger or the verdict.
+    if std::env::var("S8J_RLC").is_ok() {
+        recompute_and_report_rlc_eval_host::<SC, A>(
+            chips,
+            zerocheck_proof,
+            gkr_evaluations,
+            public_values,
+            _alpha,
+            gkr_batch_open,
+            lambda,
+            opened_values,
+        );
+    }
 
     // (2) Point dimension == max_log_row_count.
     let point_dim = zerocheck_proof.point_and_eval.0.len();
@@ -788,6 +817,156 @@ where
     }
 
     Ok(())
+}
+
+/// s8-J #42 host recompute of the in-circuit zerocheck `rlc_eval`.
+///
+/// Bit-for-bit mirror of the recursion verifier's
+/// `BasefoldZerocheckVerifier::verify_zerocheck` accumulator
+/// (crates/recursion/circuit/src/zerocheck.rs:474-613), executed over
+/// concrete host field elements instead of symbolic circuit exprs.  The
+/// circuit asserts `rlc_eval == zerocheck_proof.point_and_eval.1` (:613);
+/// this prints both sides so the (a)/(b) verdict can read off whether the
+/// claimed eval is consistent with the openings.
+///
+/// Inputs match the circuit exactly:
+///   * `opened_values.chips[i].main.local / preprocessed.local` = trace@z*
+///     (the zerocheck-reduced point, the SAME values the circuit batches).
+///   * `opened_values.chips[i].quotient[0]` = the per-chip big-endian
+///     `degree` bits (length `max_log_row_count + 1`) the circuit feeds to
+///     `full_geq` (= prover.rs E1d, real-height bits).
+///   * `(alpha, gkr_batch_open, lambda)` = the three transcript samples,
+///     in the prover/verifier order.
+///   * `gkr_evaluations.point` = z_gkr; `zerocheck_proof.point_and_eval.0`
+///     = z* (the reduced point).
+#[allow(clippy::too_many_arguments)]
+fn recompute_and_report_rlc_eval_host<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    zerocheck_proof: &PartialSumcheckProof<Challenge<SC>>,
+    gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    public_values: &[Val<SC>],
+    alpha: Challenge<SC>,
+    gkr_batch_open: Challenge<SC>,
+    lambda: Challenge<SC>,
+    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+) where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
+{
+    use p3_air::BaseAir;
+
+    let z_star = &zerocheck_proof.point_and_eval.0;
+    let z_gkr = &gkr_evaluations.point;
+
+    // (2) eq(z_gkr, z*) — circuit zerocheck.rs:480-489.
+    let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(z_gkr, z_star);
+
+    // (3) gkr_batch_open powers [β¹ .. β^max_width], circuit :491-505.
+    let max_elements = chips
+        .iter()
+        .map(|chip| {
+            <_ as BaseAir<Val<SC>>>::width(*chip)
+                + <A as MachineAir<Val<SC>>>::preprocessed_width(&chip.air)
+        })
+        .max()
+        .unwrap_or(0);
+    let mut beta_powers: Vec<Challenge<SC>> = Vec::with_capacity(max_elements);
+    {
+        let mut acc = Challenge::<SC>::ONE;
+        for _ in 0..max_elements {
+            acc = acc * gkr_batch_open;
+            beta_powers.push(acc);
+        }
+    }
+
+    // z* extended by one front ZERO coord (circuit :537-538 insert(0,0)).
+    let mut z_extended: Vec<Challenge<SC>> = Vec::with_capacity(z_star.len() + 1);
+    z_extended.push(Challenge::<SC>::ZERO);
+    z_extended.extend_from_slice(z_star);
+
+    let mut rlc_eval = Challenge::<SC>::ZERO;
+    let n_chips = chips.len();
+    let mut per_chip_lines: Vec<String> = Vec::with_capacity(n_chips);
+
+    for (idx, (chip, opening)) in chips.iter().zip(opened_values.chips.iter()).enumerate()
+    {
+        // degree = quotient[0] (circuit opening.degree), real-height bits.
+        let degree: &[Challenge<SC>] = opening
+            .quotient
+            .first()
+            .map(|v| v.as_slice())
+            .unwrap_or(&[]);
+
+        // (4e) geq + padded-row adjustment.  full_geq over (degree, z_ext);
+        // when degree.len() != z_extended.len() (e.g. placeholder lift) the
+        // circuit would still pair them — here we guard so the probe never
+        // panics and report the dimension so a mismatch is visible.
+        let geq_val = if degree.len() == z_extended.len() {
+            full_geq_host::<Challenge<SC>>(degree, &z_extended)
+        } else {
+            // dimension mismatch: report it (degree placeholder/zero path).
+            Challenge::<SC>::ONE
+        };
+        let pra = compute_padded_row_adjustment_basefold_host::<Val<SC>, Challenge<SC>, A>(
+            chip,
+            opening,
+            alpha,
+            public_values,
+        );
+
+        // (4f) constraint_eval = C(trace@z*, alpha) - pra·geq, circuit :566-577.
+        let ce = eval_constraints_basefold_host::<Val<SC>, Challenge<SC>, A>(
+            chip,
+            opening,
+            alpha,
+            public_values,
+        );
+        let constraint_eval = ce - pra * geq_val;
+
+        // (4g) openings_batch = Σ (main ++ prep) · β^(1..), circuit :579-600.
+        let openings_batch: Challenge<SC> = opening
+            .main
+            .local
+            .iter()
+            .chain(opening.preprocessed.local.iter())
+            .copied()
+            .zip(beta_powers.iter().copied())
+            .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + o * p);
+
+        // (4h) fold: rlc = rlc·λ + eq·(constraint_eval + openings_batch).
+        rlc_eval = rlc_eval * lambda
+            + zerocheck_eq_val * (constraint_eval + openings_batch);
+
+        per_chip_lines.push(format!(
+            "  [S8J-CHIP {idx} {name}] deg_dim={dd}/z_ext={ze} geq={geq:?} pra={pra:?} C={ce:?} ce_net={cen:?} batch={ob:?} (main={mw},prep={pw})",
+            name = <A as MachineAir<Val<SC>>>::name(&chip.air),
+            dd = degree.len(),
+            ze = z_extended.len(),
+            geq = geq_val,
+            pra = pra,
+            ce = ce,
+            cen = constraint_eval,
+            ob = openings_batch,
+            mw = opening.main.local.len(),
+            pw = opening.preprocessed.local.len(),
+        ));
+    }
+
+    let claimed = zerocheck_proof.point_and_eval.1;
+    let equal = rlc_eval == claimed;
+    eprintln!(
+        "[S8J-RLC] chips={n_chips} EQUAL={equal} | host_rlc_eval={rlc_eval:?} | point_and_eval.1={claimed:?} | eq(z_gkr,z*)={zerocheck_eq_val:?} alpha={alpha:?} beta={gkr_batch_open:?} lambda={lambda:?} | z*_dim={zsd} z_gkr_dim={zgd}",
+        zsd = z_star.len(),
+        zgd = z_gkr.len(),
+    );
+    if std::env::var("S8J_PERCHIP").is_ok() {
+        for l in per_chip_lines {
+            eprintln!("{l}");
+        }
+    }
 }
 
 

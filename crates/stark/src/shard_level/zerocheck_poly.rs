@@ -1758,6 +1758,17 @@ mod tests {
     /// `point_and_eval.1 == eq_eval(zeta_ORIGINAL, z)·(C+batch)` still holds
     /// (invariant 2 preserved, because zeta is untouched).
     fn run_orientation_case(fix: bool) -> bool {
+        run_orientation_case_full(fix).0
+    }
+
+    /// s8-J #42: same as [`run_orientation_case`] but also returns the proof
+    /// and the verifier-recon `expected` so the (b) test can show the host
+    /// structural sumcheck ACCEPTS the (unfixed/inconsistent) proof while the
+    /// circuit identity `point_and_eval.1 == eq·(C+batch)` is violated.
+    /// Returns (identity_holds, proof, point_and_eval.1, expected_recon).
+    fn run_orientation_case_full(
+        fix: bool,
+    ) -> (bool, PartialSumcheckProof<EF>, EF, EF) {
         use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
         use p3_challenger::DuplexChallenger;
         use p3_koala_bear::Poseidon2KoalaBear;
@@ -1847,7 +1858,86 @@ mod tests {
         let z = &proof.point_and_eval.0;
         let main_at_z = &cpe[0][prep_width..];
         let expected = eq_pt(&zeta, z) * (cval(main_at_z) + batch(main_at_z));
-        proof.point_and_eval.1 == expected
+        let claimed = proof.point_and_eval.1;
+        (claimed == expected, proof, claimed, expected)
+    }
+
+    /// s8-J #42 — DECISIVE (b) WITNESS, host-replicable.
+    ///
+    /// Takes the UNFIXED orientation case: the prover emits an internally
+    /// CONSISTENT structural sumcheck (round-0 sums to claimed_sum; every round
+    /// telescopes; `p_last(α_last) == point_and_eval.1`) — so the HOST
+    /// `verify_zerocheck_host` / `verify_sumcheck_host` ACCEPTS it — BUT its
+    /// claimed `point_and_eval.1` does NOT equal the cross-chip RLC
+    /// `eq(zeta,z)·(C(trace@z)+batch(trace@z))` the circuit recomputes at
+    /// zerocheck.rs:613.  ⇒ host-accept, circuit-reject = the host is missing a
+    /// soundness check (explanation (b)).  We assert BOTH legs here so the
+    /// verdict is reproducible without GPU dumps.
+    #[test]
+    fn s8j_host_accepts_circuit_rejects_inconsistent_eval() {
+        // Unfixed prover → inconsistent proof.
+        let (identity_holds, proof, claimed, expected) =
+            run_orientation_case_full(false);
+
+        // Leg 1: the CIRCUIT identity is VIOLATED (this is what zerocheck.rs:613
+        // would reject).
+        assert!(
+            !identity_holds,
+            "expected the inconsistent proof to violate point_and_eval.1 == eq·(C+batch)"
+        );
+        assert_ne!(
+            claimed, expected,
+            "s8-J (b): claimed point_and_eval.1 ({claimed:?}) != circuit rlc_eval recon ({expected:?})"
+        );
+
+        // Leg 2: the HOST structural sumcheck (verify_sumcheck_host) ACCEPTS the
+        // SAME proof.  We replicate its three checks against the proof's OWN
+        // (point_and_eval.0) reduced point, which is exactly the challenge
+        // sequence the host re-derives: (i) p_0(0)+p_0(1)==claimed_sum,
+        // (ii) telescoping p_{i-1}(z_i)==p_i(0)+p_i(1), (iii)
+        // p_last(z_last)==point_and_eval.1.  (Single-round here: num_vars=4 but
+        // the sumcheck has n=num_vars rounds; we check the full chain.)
+        let polys = &proof.univariate_polys;
+        let z = &proof.point_and_eval.0; // reduced point = sampled challenges
+        assert_eq!(polys.len(), z.len(), "round count == point dim");
+
+        // (i) round 0 vs claimed_sum.
+        let p0 = &polys[0].coefficients;
+        assert_eq!(
+            poly_horner(p0, EF::ZERO) + poly_horner(p0, EF::ONE),
+            proof.claimed_sum,
+            "host round-0 check: p0(0)+p0(1)==claimed_sum (host ACCEPTS)"
+        );
+        // (ii) telescoping. The host samples challenges and insert(0,·)s them,
+        // so proof.point_and_eval.0 is the REVERSED challenge order; round i
+        // binds challenge z[n-1-i] (the i-th SAMPLED challenge). Walk the chain
+        // in sampling order.
+        let n = polys.len();
+        for i in 1..n {
+            let chal = z[n - i]; // i-th sampled challenge (insert-at-front ⇒ reverse)
+            let prev = &polys[i - 1].coefficients;
+            let curr = &polys[i].coefficients;
+            assert_eq!(
+                poly_horner(prev, chal),
+                poly_horner(curr, EF::ZERO) + poly_horner(curr, EF::ONE),
+                "host telescoping round {i} (host ACCEPTS)"
+            );
+        }
+        // (iii) final eval.
+        let last = &polys[n - 1].coefficients;
+        let z_last = z[0]; // last sampled challenge (front of the reversed point)
+        assert_eq!(
+            poly_horner(last, z_last),
+            proof.point_and_eval.1,
+            "host final check: p_last(z_last)==point_and_eval.1 (host ACCEPTS)"
+        );
+
+        // CONCLUSION: every host structural check passes on a proof whose
+        // claimed eval the circuit's rlc_eval assert rejects ⇒ the host
+        // verifier UNDER-CHECKS (explanation (b)).
+        eprintln!(
+            "[S8J-b] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host structural sumcheck checks PASS"
+        );
     }
 
     /// Same harness over a NON-power-of-two height (3 real rows in 2^4) to
