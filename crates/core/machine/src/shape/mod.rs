@@ -731,6 +731,60 @@ pub mod tests {
 
         try_generate_dummy_proof(&prover, &shape);
     }
+
+    /// #38: canonicalize_shape_to_cluster must pad a raw event-driven
+    /// main_exec shard (missing the optional CloClz/DivRem/Syscall* chips) UP
+    /// to the full 20-chip main_exec cluster, so the GPU multi-shard prove path
+    /// (which now calls this — ziren-gpu core_multi_gpu.rs) presents the
+    /// canonical chip set to the recursion vk_map. Without this, the raw
+    /// 16/18-chip variants produce normalize vks not in the map ("vk not
+    /// allowed").
+    #[test]
+    fn canonicalize_pads_main_exec_to_cluster() {
+        // A raw main_exec-family shard with only 16 of the 20 chips
+        // (no CloClz, DivRem, SyscallCore, SyscallInstrs — event-driven drop).
+        let raw: Vec<(MipsAirId, usize)> = vec![
+            (MipsAirId::AddSub, 21),
+            (MipsAirId::Bitwise, 16),
+            (MipsAirId::Branch, 17),
+            (MipsAirId::Byte, 16),
+            (MipsAirId::Cpu, 21),
+            (MipsAirId::Global, 16),
+            (MipsAirId::Jump, 17),
+            (MipsAirId::Lt, 18),
+            (MipsAirId::MemoryInstrs, 20),
+            (MipsAirId::MemoryLocal, 17),
+            (MipsAirId::MiscInstrs, 17),
+            (MipsAirId::MovCond, 17),
+            (MipsAirId::Mul, 17),
+            (MipsAirId::Program, 19),
+            (MipsAirId::ShiftLeft, 16),
+            (MipsAirId::ShiftRight, 16),
+        ];
+        let shape = Shape::<MipsAirId>::from_log2_heights(
+            &raw.iter().map(|(k, h)| (*k, *h)).collect::<Vec<_>>(),
+        );
+        let mut record = create_dummy_record(&shape);
+        assert_eq!(record.shape.as_ref().unwrap().len(), 16, "precondition: raw 16 chips");
+
+        canonicalize_shape_to_cluster(&mut record);
+
+        let canon = record.shape.as_ref().unwrap();
+        // The full main_exec cluster has 20 chips; the 4 event-driven ones must
+        // now be present (at log-height 1) while the originals are untouched.
+        for must in [
+            MipsAirId::CloClz,
+            MipsAirId::DivRem,
+            MipsAirId::SyscallCore,
+            MipsAirId::SyscallInstrs,
+        ] {
+            assert!(canon.contains(&must), "canonicalize must add {must:?}");
+        }
+        assert_eq!(canon.len(), 20, "canonicalized main_exec must have 20 chips, got {}", canon.len());
+        // Originals preserved at their real heights.
+        assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::Cpu).unwrap().1, 21);
+        assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::AddSub).unwrap().1, 21);
+    }
 }
 
 /// Canonicalize a fixed record shape UP to the smallest stacked-shapes
