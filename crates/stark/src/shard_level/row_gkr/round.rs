@@ -3418,7 +3418,22 @@ where
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    let eq_row = build_eq_table(row_point);
+    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
+    // per-round H2D upload.  Stash the tiny LSB-first `row_point`
+    // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
+    // Vec as the device-build signal.  The host eq_int (tiny,
+    // interaction vars) is still uploaded.  `row_point` is
+    // already LSB-first == `partialLagrangeNaiveEf`-native, so the
+    // device table is byte-identical (NO reversal).
+    let eq_row: Vec<EF> =
+        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
+            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+            Vec::new()
+        } else {
+            build_eq_table(row_point)
+        };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3574,7 +3589,22 @@ where
 
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    let eq_row = build_eq_table(row_point);
+    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
+    // per-round H2D upload.  Stash the tiny LSB-first `row_point`
+    // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
+    // Vec as the device-build signal.  The host eq_int (tiny,
+    // interaction vars) is still uploaded.  `row_point` is
+    // already LSB-first == `partialLagrangeNaiveEf`-native, so the
+    // device table is byte-identical (NO reversal).
+    let eq_row: Vec<EF> =
+        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
+            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+            Vec::new()
+        } else {
+            build_eq_table(row_point)
+        };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3777,7 +3807,22 @@ where
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    let eq_row = build_eq_table(row_point);
+    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
+    // per-round H2D upload.  Stash the tiny LSB-first `row_point`
+    // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
+    // Vec as the device-build signal.  The host eq_int (tiny,
+    // interaction vars) is still uploaded.  `row_point` is
+    // already LSB-first == `partialLagrangeNaiveEf`-native, so the
+    // device table is byte-identical (NO reversal).
+    let eq_row: Vec<EF> =
+        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
+            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+            Vec::new()
+        } else {
+            build_eq_table(row_point)
+        };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 

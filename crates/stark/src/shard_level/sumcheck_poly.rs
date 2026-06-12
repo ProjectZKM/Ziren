@@ -941,6 +941,57 @@ pub fn clear_logup_v3_next_handle() {
     LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take());
 }
 
+// ------------------------------------------------------------------
+// #50 (s9-DR2): device-built logup-round eq_row tables.
+//
+// The GKR logup-round `eq_row` weight table is up to `2^row_vars` x
+// 16 B (2^21 for a 2M-cycle shard) and was host-built via
+// `build_eq_table` then H2D-uploaded EVERY round/layer.  When the
+// device-eq path is enabled the host instead stashes the tiny
+// `row_point` coordinates here (<= row_vars Ef4 elements) and passes
+// an EMPTY `eq_row` Vec to the GPU hook; the ziren-gpu hook detects
+// the empty slot, reads this point, and builds the table on device
+// via the `partialLagrangeNaiveEf` kernel -- eliminating the
+// multi-MB per-round upload.
+//
+// `build_eq_table` is LSB-first (index bit k <-> coords[k]), identical
+// to the kernel's `(i >> k) & 1 ? point[k] : 1-point[k]`, so the
+// device table is byte-identical to the host table -- NO point
+// reversal (unlike the #34 big-endian fused-zerocheck path).
+//
+// Slot is per-round transient: the host publishes immediately before
+// the hook call and the hook takes it at entry; consistent with the
+// other per-call logup TLS above.
+std::thread_local! {
+    static LOGUP_DEVICE_EQ_ROW_POINT: std::cell::RefCell<Option<Vec<Ef4>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// #50: kill-switch for the device-built logup-round eq_row table.
+/// `ZIREN_GPU_LOGUP_DEVICE_EQ=0` forces the legacy host build+upload.
+/// Default ON.
+#[must_use]
+pub fn logup_device_eq_enabled() -> bool {
+    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        std::env::var("ZIREN_GPU_LOGUP_DEVICE_EQ").as_deref() != Ok("0")
+    })
+}
+
+/// #50: host stashes the row_point (LSB-first coords) for the GPU hook
+/// to device-build the eq_row table from.  Published immediately
+/// before the hook dispatch; the empty `eq_row` Vec is the signal.
+pub fn publish_logup_device_eq_row_point(point: Vec<Ef4>) {
+    LOGUP_DEVICE_EQ_ROW_POINT.with(|c| *c.borrow_mut() = Some(point));
+}
+
+/// #50: hook consumes the stashed row_point.  `None` => legacy host
+/// eq_row was uploaded (device-build disabled or not published).
+#[must_use]
+pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
+    LOGUP_DEVICE_EQ_ROW_POINT.with(|c| c.borrow_mut().take())
+}
+
 /// First-round chip-structured hook. Returns `(gpu_partials,
 /// post_fix)` where `gpu_partials = [sum_zero, sum_half, eq_sum]`
 /// and `post_fix` is the packed strided payload that
