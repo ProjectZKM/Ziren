@@ -170,10 +170,30 @@ impl ZKMProverOpts {
             .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
             .filter(|&n| n > 0)
             .unwrap_or(1);
+        // #45 small-card concurrency bound: the default lower clamp of 4
+        // forces FOUR concurrent recursion-compress workers even with a
+        // SINGLE GPU (`(1*2).clamp(4,8) == 4`).  Under default-on device
+        // residency each worker pins a recursion device tracegen buffer
+        // (recursion.cuh:429 poseidon2_wide) AND a full BaseFold commit
+        // codeword stack (commit_dispatch.rs, ~4 GiB at log_dense≈29);
+        // four of those on one 32 GB card overruns VRAM (s8-L: TM
+        // compress-from-dump OOM at recursion.cuh:429 / encode_batch).
+        // On small cards (`gpu_ram_gb <= 36`, the 32 GB 5090 with SP1's
+        // `ceil()+4` pad) cap the *lower* clamp at 2 so a single GPU runs
+        // 2 workers (≈ s6's safe profile) instead of 4 — per-GPU
+        // concurrency stays ≤ 2 at every device count
+        // (1 GPU → 2, 2 GPU → 4, 4 GPU → 8: unchanged for ≥2 GPUs).
+        // RECURSION_SHARD_BATCH_SIZE always overrides; restore the legacy
+        // `.clamp(4,8)` with ZIREN_GPU_SMALL_CARD_SBS=0.
+        let small_card_sbs = gpu_ram_gb <= 36
+            && std::env::var("ZIREN_GPU_SMALL_CARD_SBS")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+        let sbs_lo = if small_card_sbs { 2 } else { 4 };
         opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or_else(|| (gpu_count * 2).clamp(4, 8));
+            .unwrap_or_else(|| (gpu_count * 2).clamp(sbs_lo, 8));
         opts.recursion_opts.records_and_traces_channel_capacity =
             opts.recursion_opts.shard_batch_size.max(2);
         opts.recursion_opts.trace_gen_workers =
