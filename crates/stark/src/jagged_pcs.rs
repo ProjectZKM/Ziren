@@ -1691,6 +1691,60 @@ pub mod jagged {
         GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK.get().copied()
     }
 
+    // ─────────────────────────────────────────────────────────────────
+    // s9-DR5 (#51 Phase A) — device BaseFold-over-BN254 wrap Merkle commit.
+    //
+    // The wrap stage (OuterSC) builds its BaseFold commit over the
+    // Poseidon2-BN254 `OuterValMmcs` (Digest = [Bn254Fr; 1]) via
+    // `precompute_jagged_basefold_commit_generic::<OuterValMmcs>`.  On the
+    // host CpuProver path the BN254 Merkle leaf-hash + compress-layers run
+    // on CPU (the ~860ms wrap `commit=` phase).  This type-erased hook lets
+    // ziren-gpu (which CAN name OuterValMmcs via zkm_recursion_core) move
+    // that Merkle commit onto the device while keeping the host DFT encode,
+    // host challenger FS, and host grind unchanged.
+    //
+    // TRANSCRIPT-NEUTRALITY: the device FieldMerkleTreeGpu<KoalaBear,
+    // [Bn254Fr;1]> produces byte-identical roots to the host
+    // MerkleTree<OuterHash, OuterCompress> (validated by ziren-gpu
+    // bn254_tests::test_commit_matrices); the reconstructed host-shaped
+    // prover_data drives the unchanged host BaseFold open.  Output is
+    // byte-identical to the host precompute -> same wrap proof bytes.
+    //
+    // Type erasure: zkm-stark cannot name OuterValMmcs, so the hook takes
+    // the `MT` TypeId and returns the concrete-typed
+    // `(commit, prover_data)` boxed as `dyn Any`.  The hook returns `None`
+    // (host fallback) when the TypeId is not the BN254 OuterValMmcs, the
+    // CUDA path errors, or the shape is unsupported.
+    // ─────────────────────────────────────────────────────────────────
+
+    /// Signature of the device BN254 wrap-commit hook.  `mt_type_id` is
+    /// `TypeId::of::<MT>()` from the generic precompute call site; the hook
+    /// matches it against `TypeId::of::<OuterValMmcs>()`.  On a match it
+    /// builds the device BN254 Merkle commit over the supplied dense traces
+    /// and returns a boxed
+    /// `(BasefoldLateBindingCommitGeneric<OuterValMmcs>,
+    ///   BasefoldLateBindingProverDataGeneric<OuterValMmcs>)`.
+    pub type GpuBn254CommitFn = fn(
+        mt_type_id: core::any::TypeId,
+        dense_traces: &[(alloc::string::String, RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
+    ) -> Option<alloc::boxed::Box<dyn core::any::Any + Send>>;
+
+    static GPU_BN254_COMMIT_HOOK: std::sync::OnceLock<GpuBn254CommitFn> =
+        std::sync::OnceLock::new();
+
+    /// Register the device BN254 wrap-commit hook (idempotent).
+    pub fn register_gpu_bn254_commit_hook(
+        f: GpuBn254CommitFn,
+    ) -> Result<(), GpuBn254CommitFn> {
+        GPU_BN254_COMMIT_HOOK.set(f)
+    }
+
+    /// Read the registered device BN254 wrap-commit hook, if any.
+    #[must_use]
+    pub fn get_gpu_bn254_commit_hook() -> Option<GpuBn254CommitFn> {
+        GPU_BN254_COMMIT_HOOK.get().copied()
+    }
+
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
     /// Returns the packing metadata plus the BaseFold commit + prover
@@ -1779,7 +1833,17 @@ pub mod jagged {
         mmcs: MT,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
-        MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
+        // `'static` bounds (Commitment + ProverData) are required by the
+        // s9-DR5 device BN254 commit hook's `Box<dyn Any>` downcast back to
+        // `BasefoldLateBindingCommitGeneric<MT>`.  Both rings (JaggedMmcs /
+        // OuterValMmcs) are concrete `'static` types, so this is a no-op
+        // tightening for every existing caller.
+        MT: p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+                Commitment: Clone + Send + 'static,
+                ProverData<RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: Send + 'static,
+            > + Clone
+            + 'static,
     {
         let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
         let (commit, prover_data) = {
@@ -1790,10 +1854,44 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
-                dense_traces, mmcs, dft,
-            )
+
+            // s9-DR5 (#51 Phase A): device BN254 wrap Merkle commit.  When
+            // ziren-gpu has registered the hook AND `MT` is the BN254
+            // OuterValMmcs AND `ZIREN_GPU_BASEFOLD_BN254_COMMIT != 0`, the
+            // Merkle leaf-hash + compress-layers run on the device (the
+            // host DFT encode is still consumed by the open path).  Output
+            // is byte-identical to the host commit (transcript-neutral).
+            // Any miss (wrong TypeId / CUDA error / env off) falls through
+            // to the unchanged host commit below.
+            let bn254_device = if std::env::var("ZIREN_GPU_BASEFOLD_BN254_COMMIT")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true)
+            {
+                if let Some(hook) = get_gpu_bn254_commit_hook() {
+                    hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
+                        boxed
+                            .downcast::<(
+                                crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
+                                crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
+                            )>()
+                            .ok()
+                            .map(|b| *b)
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            if let Some((commit, prover_data)) = bn254_device {
+                (commit, prover_data)
+            } else {
+                let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+                crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
+                    dense_traces, mmcs, dft,
+                )
+            }
         };
         PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None }
     }

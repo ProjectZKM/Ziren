@@ -900,6 +900,35 @@ where
             )
         });
 
+    // s9-DR5 (#51 Phase A) — commit-ROOT byte-equality canary.  The
+    // `main_commit` (BN254 Merkle root for the wrap) is the transcript-
+    // critical value the prologue + verifier observe.  Unlike the full
+    // wrap proof (whose query phase rides the nondeterministic device FRI
+    // grind), this root is a pure function of the trace, so it is the
+    // deterministic invariant proving the device BN254 commit is
+    // transcript-neutral vs host.  Compare device (=1) vs host (=0).
+    if std::env::var("ZIREN_COMMIT_ROOT_DIGEST").is_ok() {
+        // Raw-byte FNV over `main_commit` (a POD MerkleCap digest;
+        // Hash<KoalaBear,Bn254,1> for the wrap).  Avoids a Serialize bound
+        // on the generic Com<SC>.  Diagnostic only.
+        let raw: &[u8] = unsafe {
+            core::slice::from_raw_parts(
+                (&main_commit as *const Com<SC>) as *const u8,
+                core::mem::size_of::<Com<SC>>(),
+            )
+        };
+        let mut h: u64 = 0xcbf29ce484222325;
+        for b in raw {
+            h ^= *b as u64;
+            h = h.wrapping_mul(0x100000001b3);
+        }
+        eprintln!(
+            ">>> COMMIT_ROOT_DIGEST size={} fnv1a=0x{:016x}",
+            core::mem::size_of::<Com<SC>>(),
+            h
+        );
+    }
+
     // Move named_traces back from the InnerVal alias (we still need
     // them for the placeholder `pcs.commit` + the per-chip Arc list).
     let named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)> = unsafe {
