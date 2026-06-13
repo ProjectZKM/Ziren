@@ -239,6 +239,16 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         true
     }
 
+    fn fri_config(
+    ) -> zkm_stark::basefold::config::FriConfig<zkm_stark::jagged_pcs::JaggedVal> {
+        // WRAP-stage params: SP1-faithful (log_blowup=3, num_queries=94,
+        // pow_bits=22) for full 100-bit query-phase soundness on the on-chain
+        // wrap proof.  The inner env-default (1,94,16) here would be only
+        // ~55-bit.  Two-adicity: codeword = log_stacking(≤21) + 3 ≤ 24 = OK.
+        // See `FriConfig::wrap_fri_config`.
+        zkm_stark::basefold::config::FriConfig::<zkm_stark::jagged_pcs::JaggedVal>::wrap_fri_config()
+    }
+
 
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_stark::jagged_pcs::JaggedVal>>::Commitment,
@@ -296,7 +306,7 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 #[cfg(test)]
 #[allow(dead_code, clippy::type_complexity)]
 mod basefold_over_bn254_generic_typecheck {
-    use super::{OuterChallenger, OuterDft, OuterValMmcs};
+    use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
     use std::sync::Arc;
     use zkm_stark::jagged_pcs::{
         commit_jagged_pcs_host_generic, commit_jagged_pcs_no_observe_generic,
@@ -322,7 +332,8 @@ mod basefold_over_bn254_generic_typecheck {
         BasefoldLateBindingCommitGeneric<OuterValMmcs>,
         BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
     ) {
-        commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft)
+        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
     }
 
     // commit (with observe) — exercises `OuterChallenger:
@@ -337,8 +348,9 @@ mod basefold_over_bn254_generic_typecheck {
         BasefoldLateBindingCommitGeneric<OuterValMmcs>,
         BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
     ) {
+        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
         commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            traces, ch, mmcs, dft,
+            traces, ch, mmcs, dft, fri,
         )
     }
 
@@ -350,8 +362,9 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
+        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
         open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            pd, eval_point, ch, mmcs, dft,
+            pd, eval_point, ch, mmcs, dft, fri,
         )
     }
 
@@ -370,6 +383,7 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> Result<(), StackedVerifierError> {
+        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
         verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             commitment,
             area,
@@ -380,6 +394,7 @@ mod basefold_over_bn254_generic_typecheck {
             ch,
             mmcs,
             dft,
+            fri,
         )
     }
 }
@@ -421,6 +436,7 @@ pub mod outer_jagged_hooks {
             .downcast_mut::<OuterChallenger>()
             .expect("outer_open: challenger downcast to OuterChallenger");
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
+        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
         let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
             chip_traces,
             r_row_per_chip,
@@ -429,6 +445,7 @@ pub mod outer_jagged_hooks {
             precomputed,
             challenger,
             mmcs,
+            fri,
         );
         bundle.to_bytes()
     }
@@ -456,6 +473,7 @@ pub mod outer_jagged_hooks {
             build_jagged_verify_inputs(&bundle.packing, chip_widths, eval_point);
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
+        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
         verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &chip_infos,
             &r_row_per_chip,
@@ -465,6 +483,7 @@ pub mod outer_jagged_hooks {
             mmcs,
             dft,
             /* skip_commit_observe = */ true,
+            fri,
         )
     }
 
@@ -493,7 +512,10 @@ pub mod outer_jagged_hooks {
         use zkm_stark::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         use zkm_stark::BasefoldRing as _;
         let mmcs = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::bf_mmcs();
-        let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(&chip_traces, mmcs);
+        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
+            &chip_traces, mmcs, fri,
+        );
         bincode::serialize(&pre.commit.commitment)
             .expect("outer_prep_commit: serialize commitment")
     }
@@ -592,8 +614,12 @@ mod basefold_over_bn254_roundtrip_test {
             .cloned()
             .unwrap_or_default();
 
-        let precompute =
-            precompute_jagged_basefold_commit_generic::<OuterValMmcs>(&traces, mmcs.clone());
+        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
+        let precompute = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
+            &traces,
+            mmcs.clone(),
+            fri.clone(),
+        );
         let commitment = precompute.commit.commitment.clone();
 
         let mut p_chal = make_challenger();
@@ -606,6 +632,7 @@ mod basefold_over_bn254_roundtrip_test {
             precompute,
             &mut p_chal,
             mmcs.clone(),
+            fri.clone(),
         );
 
         let chip_infos =
@@ -621,6 +648,7 @@ mod basefold_over_bn254_roundtrip_test {
             mmcs,
             dft,
             /* skip_commit_observe = */ true,
+            fri,
         );
         assert!(
             ok,

@@ -70,19 +70,52 @@ pub struct BasefoldVerifierParams {
 }
 
 impl BasefoldVerifierParams {
-    /// Production default — matches `crates/stark/src/basefold/config.rs::production_default`:
-    /// `log_blowup = 1` (rate-1/2) and `num_queries = 94` per SP1's
-    /// Gruen-Diamond analysis. Was `log_blowup=4, num_queries=100`,
-    /// which mismatched the prover's rate-1/2 LDEs and would have
-    /// the recursion-circuit verifier reading 16× more bytes per
-    /// stripe than the prover produced — structural divergence.
-    /// Reconciles the stark prover's log_blowup=1 with the recursion
-    /// verifier's previous log_blowup=4.
+    /// Inner-stage production default — the in-circuit twin of
+    /// `zkm_stark::basefold::config::FriConfig::default_fri_config`:
+    /// `(log_blowup=2, num_queries=124, pow_bits=16)` (#57).  This is the
+    /// verifier the recursion programs use for EVERY inner KoalaBear child:
+    /// compress→core, shrink→compress, AND wrap→shrink (the shrink proof is
+    /// a KoalaBear inner-Mmcs proof verified through this arm, NOT the BN254
+    /// `wrap_default` Bytes arm).  Since all three inner host stages
+    /// (core/compress/shrink) now produce at `(2, 124, 16)`, this single
+    /// param matches the committed codeword rate for all of them.
+    ///
+    /// **Soundness.** `124 · (-log2(0.5 + (1/4)/2)) + 16 = 124 · 0.6781 + 16
+    /// ≈ 100.08` bits (vs the old `(1, 94, 16)` = ~55 bits, the inner hole
+    /// #57 closes).  The component-opening Merkle path is `log_stacking + 2`
+    /// levels and the query index span is `num_variables + 2` bits — both
+    /// keyed off `log_blowup`, so they MUST match the host `blowup=2`.
+    ///
+    /// Two-adicity: `num_variables(≤21) + 2 ≤ 24`.  Was `(1, 94)` ≈ 55 bits.
     pub const fn production_default(num_variables: usize) -> Self {
         Self {
-            log_blowup: 1,
-            num_queries: 94,
+            log_blowup: 2,
+            num_queries: 124,
             pow_bits: 16,
+            batch_grinding_bits: 16,
+            num_variables,
+        }
+    }
+
+    /// **WRAP-stage in-circuit params** — the in-circuit twin of
+    /// `zkm_stark::basefold::config::FriConfig::wrap_fri_config`:
+    /// `(log_blowup=3, num_queries=94, pow_bits=22)`.  Used by the gnark
+    /// OUTER circuit that verifies the on-chain WRAP STARK proof, so the
+    /// in-circuit verifier reads the codeword at the SAME rate the wrap
+    /// prover committed (rate 1/8).  The component-opening Merkle path is
+    /// `log_stacking + log_blowup = log_stacking + 3` levels and the query
+    /// index span is `num_variables + 3` bits — both keyed off `log_blowup`.
+    ///
+    /// `batch_grinding_bits` stays 16 (the batching-coefficient grind is a
+    /// separate re-randomization defense, unchanged from SP1's split).
+    ///
+    /// Soundness: `94 · (-log2(0.5 + (1/8)/2)) + 22 ≈ 100` bits (vs ~55 bits
+    /// at the inner default).  Two-adicity: `num_variables(≤21) + 3 ≤ 24`.
+    pub const fn wrap_default(num_variables: usize) -> Self {
+        Self {
+            log_blowup: 3,
+            num_queries: 94,
+            pow_bits: 22,
             batch_grinding_bits: 16,
             num_variables,
         }
@@ -874,9 +907,16 @@ where
                 // openings (legacy/outer placeholder paths) keep the old
                 // fallback — structurally decided at program build.
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
-                    let mut acc: Ext<C::F, C::EF> = builder.eval(
-                        zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO,
-                    );
+                    // Accumulate the step-8 inner product SYMBOLICALLY across the
+                    // whole leaf loop and materialize it ONCE per query (mirrors
+                    // SP1 basefold/mod.rs:250-266: `*batch_eval += coeff*value`
+                    // then a single `builder.eval` per query).  The previous code
+                    // called `builder.eval` per leaf value (O(queries x rounds x
+                    // widths) materialized adds); keeping `acc` a SymbolicExt and
+                    // letting the DSL CSE the single downstream eval is
+                    // value-identical (pure deferred materialization).
+                    let mut acc: zkm_recursion_compiler::ir::SymbolicExt<C::F, C::EF> =
+                        zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO;
                     let mut batch_idx = 0usize;
                     for (round_idx, round_openings) in
                         proof.component_openings.iter().enumerate()
@@ -892,7 +932,7 @@ where
                         for mat_values in op.leaf_values.iter() {
                             for &v in mat_values.iter() {
                                 let c = batching_coefficients[batch_idx + poly_offset];
-                                acc = builder.eval(acc + c * v);
+                                acc = acc + c * v;
                                 poly_offset += 1;
                             }
                         }
@@ -930,7 +970,8 @@ where
                             );
                         }
                     }
-                    acc
+                    // Materialize the accumulated inner product ONCE per query.
+                    builder.eval(acc)
                 } else {
                     sibling_pairs
                         .first()

@@ -447,7 +447,13 @@ pub fn dummy_jagged_basefold_bundle(
     // NOT max_log_row_count.  pick_log_stacking_height = min(14, log2(np2(total))-1).
     let log_stacking = pick_log_stacking_height(total_values) as usize;
     let num_stripes = 1usize << l.saturating_sub(log_stacking); // batch_evaluations width
-    let num_queries = lb_fri_config().num_queries;
+    let inner_fri = lb_fri_config();
+    let num_queries = inner_fri.num_queries;
+    // #57: the component-opening Merkle path length keys off the codeword
+    // height = 2^(log_stacking + log_blowup).  At the SP1-faithful inner
+    // default this is blowup=2 (was 1), so the dummy path length must track
+    // the config, not a hardcoded `+1`.
+    let inner_log_blowup = inner_fri.log_blowup();
     let log_m = if total_values <= 1 {
         0
     } else {
@@ -481,12 +487,13 @@ pub fn dummy_jagged_basefold_bundle(
     // must carry the shape-correct zero-filled structure: ONE round (the
     // single stacked commit), `num_queries` leaves, each leaf = one
     // matrix row of `num_stripes` values with a full-height Merkle path
-    // (codeword height = 2^(log_stacking + log_blowup), log_blowup = 1).
+    // (codeword height = 2^(log_stacking + log_blowup); #57 default
+    // log_blowup = 2).
     let component_openings_dummy: Vec<MerkleOpening<F, JaggedMmcs>> = vec![MerkleOpening {
         leaves: (0..num_queries)
             .map(|_| LeafOpening {
                 values: vec![vec![F::ZERO; num_stripes]],
-                proof: vec![[F::ZERO; 8]; log_stacking + 1],
+                proof: vec![[F::ZERO; 8]; log_stacking + inner_log_blowup],
             })
             .collect(),
     }];

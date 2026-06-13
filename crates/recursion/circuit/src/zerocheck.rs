@@ -649,20 +649,27 @@ where
                     .sum::<SymbolicExt<C::F, C::EF>>();
 
                 // Embedding factor from the degree one-hot prefix.
-                let mut prefix: Ext<C::F, C::EF> = zero_ext;
-                let mut factor: Ext<C::F, C::EF> = one_ext;
+                // SP1-faithful deferred materialization: keep the
+                // per-coordinate prefix/factor accumulation in
+                // SymbolicExt (NO builder.eval inside the k-loop) and
+                // let the DSL CSE the products. The degree one-hot
+                // (degree[k] ∈ {0,1}, Σ ≤ 1, asserted in section (4d))
+                // keeps `prefix` a 0/1 step function so each factor
+                // term `(1 − is_high·zeta)` stays effectively linear.
+                // is_high[k] = 1 − Σ_{j≤k} degree[k]; factor = Π_k (1 −
+                // is_high[k]·zeta[k]). Value-identical to the prior
+                // per-coordinate builder.eval form (host verifier.rs
+                // step (G2-b)), just one materialization per chip.
+                let mut prefix: SymbolicExt<C::F, C::EF> = SymbolicExt::ZERO;
+                let mut factor: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE;
                 for (k, zk) in gkr_evaluations.point.iter().enumerate() {
                     let dk: SymbolicExt<C::F, C::EF> = opening.degree[k].into();
-                    let prefix_sym: SymbolicExt<C::F, C::EF> = prefix.into();
-                    prefix = builder.eval(prefix_sym + dk);
-                    let prefix_now: SymbolicExt<C::F, C::EF> = prefix.into();
-                    let is_high: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE - prefix_now;
+                    prefix = prefix + dk;
+                    let is_high: SymbolicExt<C::F, C::EF> = SymbolicExt::ONE - prefix.clone();
                     let zk_sym: SymbolicExt<C::F, C::EF> = (*zk).into();
-                    let factor_sym: SymbolicExt<C::F, C::EF> = factor.into();
-                    factor = builder.eval(factor_sym * (SymbolicExt::ONE - is_high * zk_sym));
+                    factor = factor * (SymbolicExt::ONE - is_high * zk_sym);
                 }
-                let factor_sym: SymbolicExt<C::F, C::EF> = factor.into();
-                raw * factor_sym
+                raw * factor
             })
             .collect();
 

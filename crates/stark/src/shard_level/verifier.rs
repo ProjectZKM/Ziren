@@ -80,13 +80,16 @@ pub struct BasefoldShardVerifier {
 }
 
 impl BasefoldShardVerifier {
-    /// Production default (max_log_row_count = 22 — KoalaBear's
-    /// TWO_ADICITY is 24 and BaseFold log_blowup is 1 since
-    /// `basefold/config.rs::production_default`, so
-    /// `log_max_height = num_variables + log_blowup = 22 + 1 = 23 ≤ 24`
-    /// is satisfied and the recursion-circuit basefold verifier's
-    /// `two_adic_generator(log_codeword_size)` no longer panics.
-    /// Previous cap of 20 was tied to the legacy `log_blowup = 4`.
+    /// Production default (max_log_row_count = 22).  The BaseFold codeword
+    /// two-adicity bound is over the STACKED poly's `log_stacking_height`
+    /// (≤ DEFAULT_LOG_STACKING_HEIGHT = 21), NOT max_log_row_count: the
+    /// LDE domain is `2^(log_stacking + log_blowup)`.  At the #57 inner
+    /// default `log_blowup = 2` (`basefold/config.rs::default_fri_config`),
+    /// `log_stacking(≤21) + 2 ≤ 23 ≤ KoalaBear TWO_ADICITY = 24`, so the
+    /// recursion-circuit verifier's `two_adic_generator(log_codeword_size)`
+    /// does not panic (one bit of headroom; the wrap stage at blowup=3 sits
+    /// at exactly 24).  Previous cap of 20 was tied to the legacy
+    /// `log_blowup = 4`.
     #[must_use]
     pub const fn production_default() -> Self {
         Self { max_log_row_count: 22 }

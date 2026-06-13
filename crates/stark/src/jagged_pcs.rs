@@ -130,6 +130,7 @@ fn build_pcs_generic<MT, D>(
     log_stacking_height: u32,
     mmcs: MT,
     dft: Arc<D>,
+    fri: FriConfig<JaggedVal>,
 ) -> (
     StackedPcsProver<JaggedVal, JaggedChallenge, MT, D>,
     StackedPcsVerifier<JaggedVal, JaggedChallenge, MT>,
@@ -138,9 +139,11 @@ where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
     D: p3_dft::TwoAdicSubgroupDft<JaggedVal>,
 {
-    // Route through `from_env_or_default` so `ZIREN_BASEFOLD_LOG_BLOWUP`
-    // can override the rate for memory-measurement runs.
-    let fri = FriConfig::<JaggedVal>::from_env_or_default();
+    // The FRI config (rate/queries/pow) is supplied by the caller so the
+    // per-stage params are a single source of truth carried from commit
+    // through open/verify (inner stages pass `from_env_or_default()`; the
+    // wrap path passes `wrap_fri_config()` = blowup3/pow22 for 100-bit
+    // soundness — see `FriConfig::wrap_fri_config`).
     let basefold_prover = BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(
         fri.clone(),
         dft,
@@ -174,8 +177,13 @@ fn build_pcs(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    let (prover, verifier) =
-        build_pcs_generic::<JaggedMmcs, JaggedDft>(log_stacking_height, mmcs.clone(), dft);
+    // Inner stage: env-default rate (ZIREN_BASEFOLD_LOG_BLOWUP override).
+    let (prover, verifier) = build_pcs_generic::<JaggedMmcs, JaggedDft>(
+        log_stacking_height,
+        mmcs.clone(),
+        dft,
+        FriConfig::<JaggedVal>::from_env_or_default(),
+    );
     (prover, verifier, mmcs)
 }
 
@@ -331,6 +339,7 @@ pub fn commit_jagged_pcs_host(
         challenger,
         mmcs,
         dft,
+        FriConfig::<JaggedVal>::from_env_or_default(),
     )
 }
 
@@ -346,6 +355,7 @@ pub fn commit_jagged_pcs_host_generic<Challenger, MT, D>(
     challenger: &mut Challenger,
     mmcs: MT,
     dft: Arc<D>,
+    fri: FriConfig<JaggedVal>,
 ) -> (
     BasefoldLateBindingCommitGeneric<MT>,
     BasefoldLateBindingProverDataGeneric<MT>,
@@ -356,7 +366,7 @@ where
     Challenger: CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
     let (commit, prover_data) =
-        commit_jagged_pcs_no_observe_generic::<MT, D>(chip_traces, mmcs, dft);
+        commit_jagged_pcs_no_observe_generic::<MT, D>(chip_traces, mmcs, dft, fri);
     challenger.observe(commit.commitment.clone());
     (commit, prover_data)
 }
@@ -427,7 +437,12 @@ pub fn commit_jagged_pcs_host_no_observe(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    commit_jagged_pcs_no_observe_generic::<JaggedMmcs, JaggedDft>(chip_traces, mmcs, dft)
+    commit_jagged_pcs_no_observe_generic::<JaggedMmcs, JaggedDft>(
+        chip_traces,
+        mmcs,
+        dft,
+        FriConfig::<JaggedVal>::from_env_or_default(),
+    )
 }
 
 /// BaseFold-over-BN254 port: GC-generic commit core (no challenger
@@ -440,6 +455,7 @@ pub fn commit_jagged_pcs_no_observe_generic<MT, D>(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     mmcs: MT,
     dft: Arc<D>,
+    fri: FriConfig<JaggedVal>,
 ) -> (
     BasefoldLateBindingCommitGeneric<MT>,
     BasefoldLateBindingProverDataGeneric<MT>,
@@ -453,7 +469,7 @@ where
     let log_stacking_height = pick_log_stacking_height(total_entries);
     let area = total_entries.next_multiple_of(1usize << log_stacking_height);
 
-    let (prover, _verifier) = build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft);
+    let (prover, _verifier) = build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft, fri);
     let (commitment, stacked_data) = prover.commit_multilinears(mles);
 
     let commit = BasefoldLateBindingCommitGeneric::<MT> {
@@ -1319,6 +1335,7 @@ pub fn open_jagged_pcs_host(
         challenger,
         mmcs,
         dft,
+        FriConfig::<JaggedVal>::from_env_or_default(),
     )
 }
 
@@ -1335,6 +1352,7 @@ pub fn open_jagged_pcs_host_generic<Challenger, MT, D>(
     challenger: &mut Challenger,
     mmcs: MT,
     dft: Arc<D>,
+    fri: FriConfig<JaggedVal>,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>
 where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -1344,7 +1362,7 @@ where
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
     let (prover, _verifier) =
-        build_pcs_generic::<MT, D>(prover_data.log_stacking_height, mmcs, dft);
+        build_pcs_generic::<MT, D>(prover_data.log_stacking_height, mmcs, dft, fri);
     prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
 }
 
@@ -1433,6 +1451,7 @@ pub fn verify_jagged_pcs(
         challenger,
         mmcs,
         dft,
+        FriConfig::<JaggedVal>::from_env_or_default(),
     )
 }
 
@@ -1453,6 +1472,7 @@ pub fn verify_jagged_pcs_generic<Challenger, MT, D>(
     challenger: &mut Challenger,
     mmcs: MT,
     dft: Arc<D>,
+    fri: FriConfig<JaggedVal>,
 ) -> Result<(), crate::basefold::StackedVerifierError>
 where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -1462,7 +1482,7 @@ where
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
     let (_prover, verifier) =
-        build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft);
+        build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft, fri);
     verifier.verify_trusted_evaluation(
         core::slice::from_ref(commitment),
         &[area],
@@ -1494,12 +1514,16 @@ where
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
+    // Self-consistency roundtrip: commit/open/verify must agree on ONE
+    // config; env-default rate keeps prover==verifier (any rate works here).
+    let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
     let mut p_chal = make_challenger();
     let (commit, prover_data) = commit_jagged_pcs_host_generic::<Challenger, MT, D>(
         traces,
         &mut p_chal,
         mmcs.clone(),
         dft.clone(),
+        rt_fri.clone(),
     );
 
     let stack_dim = commit.log_stacking_height as usize;
@@ -1542,6 +1566,7 @@ where
         &mut p_chal,
         mmcs.clone(),
         dft.clone(),
+        rt_fri.clone(),
     );
 
     let mut v_chal = make_challenger();
@@ -1556,6 +1581,7 @@ where
         &mut v_chal,
         mmcs,
         dft,
+        rt_fri,
     )
 }
 
@@ -1588,6 +1614,7 @@ pub mod jagged {
 
     use super::{
         BasefoldLateBindingCommit,
+        FriConfig,
         commit_jagged_pcs, open_jagged_pcs,
         verify_jagged_pcs,
     };
@@ -1914,6 +1941,7 @@ pub mod jagged {
     pub fn precompute_jagged_basefold_commit_generic<MT>(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         mmcs: MT,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
         // `'static` bounds (Commitment + ProverData) are required by the
@@ -1972,7 +2000,7 @@ pub mod jagged {
             } else {
                 let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
                 crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
-                    dense_traces, mmcs, dft,
+                    dense_traces, mmcs, dft, fri,
                 )
             }
         };
@@ -2859,6 +2887,7 @@ pub mod jagged {
         precomputed: PrecomputedJaggedCommitGeneric<MT>,
         challenger: &mut Challenger,
         mmcs: MT,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
     ) -> JaggedBasefoldBundleGeneric<MT>
     where
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
@@ -2953,7 +2982,7 @@ pub mod jagged {
             Challenger,
             MT,
             crate::jagged_pcs::JaggedDft,
-        >(prover_data, extended_eval_point, challenger, mmcs, dft);
+        >(prover_data, extended_eval_point, challenger, mmcs, dft, fri);
 
         let packing_meta = PackingMeta {
             offsets: packing.offsets.clone(),
@@ -3251,6 +3280,7 @@ pub mod jagged {
         mmcs: MT,
         dft: std::sync::Arc<D>,
         skip_commit_observe: bool,
+        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
     ) -> bool
     where
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
@@ -3307,6 +3337,7 @@ pub mod jagged {
             challenger,
             mmcs,
             dft,
+            fri,
         );
         if let Err(e) = &res {
             eprintln!("[basefold verify outer] basefold opening REJECTED: {:?}", e);

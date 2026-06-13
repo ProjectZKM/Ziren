@@ -881,7 +881,11 @@ where
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
     let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
         <SC as BasefoldRing>::BfMmcs,
-    >(&named_traces_inner, <SC as BasefoldRing>::bf_mmcs());
+    >(
+        &named_traces_inner,
+        <SC as BasefoldRing>::bf_mmcs(),
+        <SC as BasefoldRing>::fri_config(),
+    );
 
     // Com<SC> == BfMmcs::Commitment for both rings (FRI commits via the
     // val-mmcs root), so the BaseFold commitment IS Com<SC>. Carry it directly.

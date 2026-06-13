@@ -267,9 +267,14 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         let last_sum = params.col_prefix_sums.last().expect(
             "jagged-pcs: col_prefix_sums must have at least one entry",
         );
-        let mut final_area: Felt<C::F> = builder.constant(C::F::ZERO);
+        // Horner-recompose SYMBOLICALLY (SP1 jagged/verifier.rs:158-162:
+        // final_area = SymbolicFelt::zero(); `*bit + two*final_area` with NO
+        // per-bit eval).  Materialization is deferred to the single
+        // `assert_felt_eq` below — value-identical, fewer eval ops per area.
+        let mut final_area: zkm_recursion_compiler::ir::SymbolicFelt<C::F> =
+            zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO;
         for bit in last_sum.iter() {
-            final_area = builder.eval(*bit + two * final_area);
+            final_area = *bit + two * final_area;
         }
         builder.assert_felt_eq(acc, final_area);
 
