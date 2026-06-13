@@ -426,8 +426,14 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             {
                 let bundle_num_vars =
                     outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
+                // #56 soundness: the OUTER (wrap) proof was committed at the
+                // WRAP rate (log_blowup=3, pow=22 — `wrap_fri_config`), so the
+                // in-circuit verifier MUST read it at blowup=3 too (component
+                // Merkle path = log_stacking+3, query span = num_vars+3).  Using
+                // the inner blowup=1 here would (a) read the wrong codeword
+                // geometry and (b) accept a ~55-bit proof as if 100-bit.
                 per_proof_verifier =
-                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
+                    crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
                         max_log_row_count,
                         outer_bundle.commit.log_stacking_height,
                         bundle_num_vars,

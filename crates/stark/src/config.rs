@@ -134,6 +134,23 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// `use_basefold_path` TypeId gate.
     fn use_basefold() -> bool;
 
+    /// Per-stage BaseFold FRI config (rate / query count / grinding).
+    ///
+    /// SP1 keeps SEPARATE per-stage configs (core/recursion vs shrink/wrap;
+    /// `crates/primitives/src/fri_params.rs`).  The Ziren default returns the
+    /// inner / env-overridable config (`FriConfig::from_env_or_default()` =
+    /// `(log_blowup=1, num_queries=94, pow_bits=16)`), which is used by
+    /// core/compress/shrink.  The **wrap** ring (`KoalaBearPoseidon2Outer`)
+    /// overrides this to `FriConfig::wrap_fri_config()` = `(3, 94, 22)` so the
+    /// on-chain wrap proof hits the full 100-bit query-phase soundness target
+    /// (the inner default at the wrap is only ~55-bit — see
+    /// `FriConfig::wrap_fri_config`).  Carried as a single source of truth from
+    /// commit through open/verify so the prover and verifier always agree on
+    /// the codeword rate.
+    fn fri_config() -> crate::basefold::config::FriConfig<crate::jagged_pcs::JaggedVal> {
+        crate::basefold::config::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default()
+    }
+
 
     /// #H: per-ring projection of the BaseFold commitment to 8 KoalaBear felts
     /// for the `[F;8] main_commitment` FS observe (host path). Inner = MerkleCap

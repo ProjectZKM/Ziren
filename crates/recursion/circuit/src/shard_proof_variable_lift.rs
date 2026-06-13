@@ -230,9 +230,45 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
 ) -> crate::shard_basefold::BasefoldShardVerifier<
     crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
 > {
-    let basefold_verifier = crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(
+    // Inner stages (core/compress/shrink): production default (log_blowup=1).
+    build_basefold_shard_verifier_with_params::<HV>(
+        max_log_row_count,
+        log_stacking_height,
         crate::basefold_verifier::BasefoldVerifierParams::production_default(num_variables),
-    );
+    )
+}
+
+/// WRAP-stage in-circuit verifier: SP1-faithful `wrap_default`
+/// (log_blowup=3, num_queries=94, pow_bits=22) so the gnark OUTER circuit
+/// reads the wrap codeword at the same rate the wrap prover committed
+/// (100-bit query-phase soundness; the inner default would be ~55-bit).
+/// See `BasefoldVerifierParams::wrap_default`.
+pub fn build_basefold_shard_verifier_wrap<HV>(
+    max_log_row_count: usize,
+    log_stacking_height: u32,
+    num_variables: usize,
+) -> crate::shard_basefold::BasefoldShardVerifier<
+    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
+> {
+    build_basefold_shard_verifier_with_params::<HV>(
+        max_log_row_count,
+        log_stacking_height,
+        crate::basefold_verifier::BasefoldVerifierParams::wrap_default(num_variables),
+    )
+}
+
+/// Lowest-level builder: explicit `BasefoldVerifierParams` (rate / queries
+/// / grinding).  All stage builders funnel through here so the FRI rate is
+/// a single source of truth per stage.
+pub fn build_basefold_shard_verifier_with_params<HV>(
+    max_log_row_count: usize,
+    log_stacking_height: u32,
+    params: crate::basefold_verifier::BasefoldVerifierParams,
+) -> crate::shard_basefold::BasefoldShardVerifier<
+    crate::basefold_verifier::RecursiveBasefoldVerifier<HV>,
+> {
+    let basefold_verifier =
+        crate::basefold_verifier::RecursiveBasefoldVerifier::<HV>::new(params);
     let stacked_pcs_verifier = crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::new(
         basefold_verifier,
         log_stacking_height,
@@ -956,8 +992,10 @@ mod tests {
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 1);
-        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 94);
+        // #57: inner production default is now SP1-faithful (2, 124, 16) =
+        // provable 100-bit (was the ~55-bit (1, 94, 16) hole).
+        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 2);
+        assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 124);
     }
 
     /// Verify build_basefold_shard_verifier with mismatched
