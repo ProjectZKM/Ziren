@@ -347,6 +347,22 @@ pub type GpuEvalAtProviderFn = fn(
 gpu_hook_accessors!(GPU_EVAL_AT_PROVIDER_HOOK: GpuEvalAtProviderFn
     => register_gpu_eval_at_provider_hook, get_gpu_eval_at_provider_hook);
 
+// #49 BATCHED device-trace residency eval-at: ONE call evaluates EVERY
+// device-only chip at its trailing-coord GKR point, building one eq-table per
+// DISTINCT eval-point instead of one eq-build per chip. `requests[i] =
+// (chip_name, eval_point)` (eval_point = trailing log(chip_height) coords, the
+// same slice the per-chip hook gets). Returns `results[i] = Some(per-column
+// Ef4)` for resolved chips, `None` for chips the provider can't resolve
+// (caller emits the legacy zero vector). Byte-identical to N per-chip calls.
+pub type GpuEvalAtBatchProviderFn = fn(
+    requests: &[alloc::string::String],
+    eval_points: &[alloc::vec::Vec<Ef4>],
+    device_traces: &dyn super::DeviceTraceProvider,
+) -> alloc::vec::Vec<Option<alloc::vec::Vec<Ef4>>>;
+
+gpu_hook_accessors!(GPU_EVAL_AT_BATCH_PROVIDER_HOOK: GpuEvalAtBatchProviderFn
+    => register_gpu_eval_at_batch_provider_hook, get_gpu_eval_at_batch_provider_hook);
+
 // #108 phase-3: materialize a device-only chip's FULL main trace to host
 // (row-major Felt) from the per-shard provider, for the zerocheck constraint
 // eval (ZeroCheckPoly needs the full trace cells, not just a point-eval).

@@ -348,6 +348,83 @@ where
     let _t_extract = std::time::Instant::now();
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
+
+    // #49 BATCHED step-6 eval (default ON; ZIREN_GPU_EVAL_AT_BATCH=0 opt-out):
+    // collect every device-only chip (empty host trace, non-zero declared
+    // width) + its trailing-coord eval-point, then evaluate them ALL in ONE
+    // batched provider call that builds one eq-table per DISTINCT eval-point
+    // instead of one eq-build per chip. Byte-identical to the per-chip path
+    // (same kernels, same fold); the par_iter below reads each device chip's
+    // result from this map. Falls back to the per-chip hook when disabled, the
+    // batch hook is unregistered, or a chip is absent from the batch result.
+    let batch_enabled =
+        std::env::var("ZIREN_GPU_EVAL_AT_BATCH").map(|v| v != "0").unwrap_or(true);
+    let batched_main_evals: BTreeMap<String, Vec<EF>> =
+        if let (true, Some(provider)) = (batch_enabled, _device_traces) {
+            let mut names: Vec<String> = Vec::new();
+            let mut points: Vec<Vec<EF>> = Vec::new();
+            for (chip, main_trace) in chips.iter().zip(main_traces.iter()) {
+                let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
+                if main_trace.width != 0 || chip_main_width == 0 {
+                    continue;
+                }
+                let main_height = provider.chip_height(&chip.name()).unwrap_or(1);
+                let log_main_height =
+                    main_height.max(1).next_power_of_two().trailing_zeros() as usize;
+                let main_eval_point: Vec<EF> = if eval_point.len() >= log_main_height {
+                    eval_point[eval_point.len() - log_main_height..].to_vec()
+                } else {
+                    eval_point.clone()
+                };
+                names.push(chip.name().to_string());
+                points.push(main_eval_point);
+            }
+            if names.is_empty() {
+                BTreeMap::new()
+            } else {
+                let results =
+                    crate::shard_level::logup_gkr_prover::eval_chips_at_points_batched_via_provider::<F, EF>(
+                        &names, &points, provider,
+                    );
+                let mut map = BTreeMap::new();
+                for (name, res) in names.iter().zip(results.into_iter()) {
+                    if let Some(v) = res {
+                        map.insert(name.clone(), v);
+                    }
+                }
+                // #49 parity gate (ZIREN_GPU_EVAL_AT_BATCH_VERIFY=1): re-run the
+                // legacy per-chip eval-at for every batched chip and assert the
+                // batched result is BYTE-IDENTICAL. Proves the batched path is
+                // transcript-neutral before the per-chip path is retired.
+                if std::env::var("ZIREN_GPU_EVAL_AT_BATCH_VERIFY").is_ok() {
+                    for (name, point) in names.iter().zip(points.iter()) {
+                        let per_chip =
+                            crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
+                                name, point, provider,
+                            );
+                        match (map.get(name), per_chip.as_ref()) {
+                            (Some(b), Some(pc)) => {
+                                assert_eq!(
+                                    b, pc,
+                                    "#49 parity: batched != per-chip for chip {name}"
+                                );
+                                tracing::info!(chip = %name, "#49 eval-at parity OK (byte-identical)");
+                            }
+                            (None, None) => {}
+                            (b, pc) => panic!(
+                                "#49 parity presence mismatch chip {name}: batched={} per_chip={}",
+                                b.is_some(),
+                                pc.is_some()
+                            ),
+                        }
+                    }
+                }
+                map
+            }
+        } else {
+            BTreeMap::new()
+        };
+
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
         .par_iter()
         .zip(main_traces.par_iter())
@@ -378,15 +455,20 @@ where
                 // #108: device-only chip — eval its device-resident trace
                 // (from the provider) at the GKR point on device, instead of
                 // emitting a zero vector (which breaks the zerocheck GKR
-                // sum-modification identity). Fall back to zeros only when no
-                // provider / hook (legacy unexercised-chip behaviour).
-                _device_traces
-                    .and_then(|p| {
-                        crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
-                            &chip.name(),
-                            main_eval_point,
-                            p,
-                        )
+                // sum-modification identity). #49: prefer the BATCHED result
+                // (one eq-build per distinct point); fall back to the per-chip
+                // hook, then to zeros (legacy unexercised-chip behaviour).
+                batched_main_evals
+                    .get(&chip.name().to_string())
+                    .cloned()
+                    .or_else(|| {
+                        _device_traces.and_then(|p| {
+                            crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
+                                &chip.name(),
+                                main_eval_point,
+                                p,
+                            )
+                        })
                     })
                     .unwrap_or_else(|| vec![EF::ZERO; chip_main_width])
             } else {

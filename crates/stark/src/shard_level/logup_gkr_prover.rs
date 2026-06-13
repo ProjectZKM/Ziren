@@ -242,6 +242,51 @@ where
     }
 }
 
+/// #49: BATCHED eval_at via the per-shard device-trace provider. Evaluates
+/// EVERY device-only chip in `names` at its `eval_points[i]` (trailing
+/// log(chip_height) coords) in ONE call that builds one eq-table per distinct
+/// eval-point. Returns `results[i] = Some(per-column EF)` for resolved chips,
+/// `None` (caller emits the legacy zero vector) for chips the provider can't
+/// resolve. Byte-identical to N per-chip `eval_chip_columns_at_point_via_provider`
+/// calls. Returns all-`None` when the batch hook is unregistered or
+/// (F,EF) != (KoalaBear, Ef4).
+pub fn eval_chips_at_points_batched_via_provider<F, EF>(
+    names: &[String],
+    eval_points: &[Vec<EF>],
+    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+) -> Vec<Option<Vec<EF>>>
+where
+    F: PrimeField,
+    EF: ExtensionField<F>,
+{
+    let none = || (0..names.len()).map(|_| None).collect::<Vec<_>>();
+    let Some(hook) =
+        crate::shard_level::sumcheck_poly::get_gpu_eval_at_batch_provider_hook()
+    else {
+        return none();
+    };
+    use core::any::TypeId;
+    type Kb = p3_koala_bear::KoalaBear;
+    type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
+    if TypeId::of::<F>() != TypeId::of::<Kb>() || TypeId::of::<EF>() != TypeId::of::<Ef4>() {
+        return none();
+    }
+    // SAFETY: TypeId equality guarantees EF == Ef4; Vec<EF> and Vec<Ef4> have
+    // identical layout, so the slice-of-Vec reinterpret is sound.
+    unsafe {
+        let eps: &[Vec<Ef4>] = core::slice::from_raw_parts(
+            eval_points.as_ptr().cast::<Vec<Ef4>>(),
+            eval_points.len(),
+        );
+        let res: Vec<Option<Vec<Ef4>>> = hook(names, eps, device_traces);
+        // Reinterpret Vec<Option<Vec<Ef4>>> -> Vec<Option<Vec<EF>>> (same layout).
+        let len = res.len();
+        let cap = res.capacity();
+        let ptr = core::mem::ManuallyDrop::new(res).as_mut_ptr() as *mut Option<Vec<EF>>;
+        Vec::from_raw_parts(ptr, len, cap)
+    }
+}
+
 /// Compute per-column MLE evaluations of a row-major trace at a
 /// multilinear point.
 ///
