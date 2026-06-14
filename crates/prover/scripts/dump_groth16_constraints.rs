@@ -36,5 +36,9 @@ pub fn main() {
     let witness_path = args.build_dir.join("groth16_witness.json");
     File::create(&witness_path).unwrap().write_all(serialized.as_bytes()).unwrap();
 
-    println!("[dr23] wrote constraints ({} ops) + witness to {:?}", constraints.len(), args.build_dir);
+    println!(
+        "[dr23] wrote constraints ({} ops) + witness to {:?}",
+        constraints.len(),
+        args.build_dir
+    );
 }
