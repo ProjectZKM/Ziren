@@ -71,7 +71,7 @@ use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 /// the May 6 fix session) produce IDENTICAL `compressed_proof.vk
 /// .hash_koalabear()`; baseline (without fix) produced 3 distinct
 /// hashes (v8/v9/v10).
-fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
+pub(crate) fn deterministic_grind<F, C>(challenger: &mut C, bits: usize) -> F
 where
     F: p3_field::PrimeField64 + p3_field::integers::QuotientMap<u64> + Send + Sync,
     C: GrindingChallenger<Witness = F>,

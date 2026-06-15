@@ -80,9 +80,15 @@ where
         use core::any::{Any, TypeId};
         if TypeId::of::<F>() == TypeId::of::<crate::InnerVal>() {
             if let Some(c) = (self as &mut dyn Any).downcast_mut::<crate::InnerChallenger>() {
-                // `InnerChallenger: GrindingChallenger<Witness = InnerVal>`;
-                // `grind` finds the witness AND observes it into the challenger.
-                let w: crate::InnerVal = c.grind(bits);
+                // `InnerChallenger: GrindingChallenger<Witness = InnerVal>`.
+                // s9-H36 (#231 extension): use the DETERMINISTIC grind
+                // (smallest-index witness via find_first) instead of plonky3's
+                // nondeterministic `grind` (find_any) so the GKR pow witness —
+                // observed into the challenger — is reproducible.  Otherwise
+                // every subsequent GKR alpha/beta (and the whole logup_gkr
+                // proof) varies run-to-run (valid-but-different compress proofs).
+                let w: crate::InnerVal =
+                    crate::basefold::prover::deterministic_grind(c, bits);
                 // SAFETY: the TypeId guard proves `F == InnerVal` on this path.
                 return unsafe { core::mem::transmute_copy::<crate::InnerVal, F>(&w) };
             }
