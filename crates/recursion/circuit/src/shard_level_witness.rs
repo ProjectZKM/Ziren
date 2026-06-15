@@ -243,6 +243,31 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // so the lift doesn't BAKE the proof-specific root (value-independence).
         commit_root: [Felt<C::F>; 8],
     },
+    // P2c-for-outer: the gnark wrap path.  The host carries the outer bundle
+    // (`JaggedBasefoldBundleGeneric<OuterValMmcs>`, BN254 commitments) as
+    // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
+    // `lift_jagged_basefold_bundle_outer` (the previous behavior, which made the
+    // gnark R1CS proof-specific → a fresh proof trips `assertIsEqual`), we
+    // WITNESS them from the gnark stream here.  Digests are BN254 1-caps
+    // (`[Var<C::N>; 1]`, N = Bn254 in the outer config).  This variant is only
+    // populated by `OuterConfig` (via `CircuitConfig::read_outer_eval_bundle`);
+    // for inner configs the field types still resolve (`Var<C::N>` is generic)
+    // but the variant is never constructed.
+    OuterBundle {
+        host: zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+            zkm_recursion_core::stark::OuterValMmcs,
+        >,
+        basefold_proof: RecursiveBasefoldProof<
+            Felt<C::F>,
+            Ext<C::F, C::EF>,
+            [zkm_recursion_compiler::ir::Var<C::N>; 1],
+        >,
+        sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+        expected_eval: Ext<C::F, C::EF>,
+        // original_commitments[0] = the witnessed BN254 commit cap root.
+        commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
+    },
 }
 
 // ── Top-level: BasefoldShardProof ────────────────────────────────
@@ -298,7 +323,16 @@ where
         // program value-independent.  Digests stay raw (rekeyed in the lift;
         // witnessed in step 3).  Must mirror `write` exactly.
         use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
-        let evaluation_proof = match &self.evaluation_proof {
+        // P2c-for-outer: for the gnark wrap (OuterConfig), WITNESS the outer
+        // BN254 bundle from the stream HERE (at the eval-proof position) via the
+        // config dispatch — value-independent gnark R1CS.  Inner configs return
+        // None and fall through to the existing Empty/Bytes/Bundle handling.
+        let evaluation_proof = if let Some(outer) =
+            C::read_outer_eval_bundle(builder, &self.evaluation_proof)
+        {
+            outer
+        } else {
+            match &self.evaluation_proof {
             HostEvalProof::Empty => LiftedEvalProof::Empty,
             HostEvalProof::Bytes(b) => LiftedEvalProof::Bytes(b.clone()),
             HostEvalProof::Bundle(bundle) => {
@@ -330,6 +364,7 @@ where
                     commit_root: main_commitment_arr,
                 }
             }
+            }
         };
         // Review item 12: lift the host `ShardOpenedValues` (trace@z)
         // into the BaseFold-shape per-chip opening bundle.  `degree`
@@ -353,6 +388,12 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
+        // P2c-for-outer: for the gnark wrap, WRITE the witnessed outer BN254
+        // bundle here (mirrors the read dispatch).  Returns true when handled
+        // (outer config + outer bundle bytes), so the inner Bundle write below
+        // is skipped.  Inner configs return false → fall through.
+        let _handled_outer =
+            C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
         // P2c STEP 2: write the Bundle's basefold-proof felt/ext values in
         // the SAME position `read` consumes them (between zerocheck and
         // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
@@ -902,6 +943,116 @@ fn host_stacked_basefold_to_recursive_outer(
     )
 }
 
+/// P2c-for-outer: WITNESS the OUTER (BN254) jagged-basefold bundle's
+/// proof-specific values from the gnark witness stream (the value-independent
+/// replacement for the const-baking in `lift_jagged_basefold_bundle_outer`).
+///
+/// Called from `BasefoldShardProof::read` via
+/// `CircuitConfig::read_outer_eval_bundle` (OuterConfig override).  Returns the
+/// witnessed `LiftedEvalProof::OuterBundle` when `host` is an
+/// `EvaluationProof::Bytes` that deserializes as an outer bundle; otherwise
+/// `None` (Empty / inner Bundle / malformed → fall back to the bytes path).
+///
+/// The witnessed values (read order MUST match
+/// [`write_outer_eval_bundle_impl`]): the BaseFold proof (uni_polys, BN254 round
+/// commitments, final_poly, pow/grind witnesses, per-query sibling pairs + BN254
+/// merkle path digests, batch_evaluations), the reduction sumcheck, the
+/// jagged-eval sub-sumcheck, expected_eval (q_at_z), and the BN254 commit cap
+/// root.  Shape metadata (packing, column counts) stays in `host` and is read by
+/// the lift as compile-time constants (shape-derived, value-independent).
+pub fn read_outer_eval_bundle_impl<C>(
+    builder: &mut Builder<C>,
+    host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+) -> Option<LiftedEvalProof<C>>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254>,
+{
+    use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+    let bytes = match host {
+        HostEvalProof::Bytes(b) => b,
+        _ => return None,
+    };
+    let bundle = zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+        OuterValMmcs,
+    >::from_bytes(bytes)?;
+
+    // BaseFold proof (BN254 digests) — witnessed felt/ext + BN254 digests.
+    let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
+    let basefold_proof =
+        crate::basefold_witness::read_basefold_proof_outer_from_stream::<C>(
+            &host_basefold_outer,
+            builder,
+        );
+    // reduction sumcheck + jagged-eval sub-sumcheck (field-typed, ring-agnostic).
+    let sumcheck = read_sumcheck_from_stream::<C>(
+        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+        builder,
+    );
+    let jagged_eval = read_sumcheck_from_stream::<C>(
+        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+        builder,
+    );
+    let expected_eval = bundle.reduction.q_at_z.read(builder);
+    // BN254 commit cap root (original_commitments[0]).
+    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    let commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1] =
+        core::array::from_fn(|i| first_root[i].read(builder));
+
+    Some(LiftedEvalProof::OuterBundle {
+        host: bundle,
+        basefold_proof,
+        sumcheck,
+        jagged_eval,
+        expected_eval,
+        commit_root,
+    })
+}
+
+/// Prover-side counterpart of [`read_outer_eval_bundle_impl`]: WRITE the outer
+/// bundle's proof-specific values to the witness stream in the SAME order the
+/// read consumes them.  Returns `true` when handled (outer bundle bytes), so
+/// `BasefoldShardProof::write` skips its default Bytes/Bundle write.
+pub fn write_outer_eval_bundle_impl<C, W>(
+    host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+    witness: &mut W,
+) -> bool
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254>,
+    W: crate::witness::WitnessWriter<C>,
+{
+    use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+    let bytes = match host {
+        HostEvalProof::Bytes(b) => b,
+        _ => return false,
+    };
+    let bundle = match zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+        OuterValMmcs,
+    >::from_bytes(bytes)
+    {
+        Some(b) => b,
+        None => return false,
+    };
+    let host_basefold_outer = host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
+    crate::basefold_witness::write_basefold_proof_outer_to_stream::<C>(
+        &host_basefold_outer,
+        witness,
+    );
+    write_sumcheck_to_stream::<C>(
+        &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
+        witness,
+    );
+    write_sumcheck_to_stream::<C>(
+        &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
+        witness,
+    );
+    bundle.reduction.q_at_z.write(witness);
+    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    for v in first_root.iter() {
+        v.write(witness);
+    }
+    true
+}
+
 /// #H (BaseFold-over-BN254 wrap port): lift the OUTER-ring jagged BaseFold
 /// bundle into the in-circuit `JaggedPcsProofVariable`.
 ///
@@ -920,9 +1071,29 @@ fn host_stacked_basefold_to_recursive_outer(
 ///
 /// `HV` is pinned to `KoalaBearPoseidon2Outer` (the only outer hasher); the
 /// generic param keeps the output type aligned with the dispatch call site.
+///
+/// P2c-for-outer (value-independence): the proof-specific values
+/// (`preread_basefold_proof`, `preread_sumcheck`, `preread_jagged_eval`,
+/// `preread_expected_eval`, `preread_commit_root`) are PRE-READ from the gnark
+/// witness stream (`read_outer_eval_bundle_impl`, routed via
+/// `BasefoldShardProof::read`) — they are NO LONGER baked as `builder.constant`,
+/// so the gnark R1CS verifies any fresh wrap proof.  Only the SHAPE metadata
+/// (`bundle.packing`, column/row counts) is read here as compile-time constants
+/// (shape-derived, identical across proofs of the same shape).
+#[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
     bundle: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
+    // P2c-for-outer: witnessed proof-specific values (replace the const-builds).
+    preread_basefold_proof: RecursiveBasefoldProof<
+        Felt<C::F>,
+        Ext<C::F, C::EF>,
+        [zkm_recursion_compiler::ir::Var<C::N>; 1],
+    >,
+    preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
+    preread_expected_eval: Ext<C::F, C::EF>,
+    preread_commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -998,27 +1169,19 @@ where
     let col_prefix_sums_len = padded_cols + 1;
     let num_rounds = column_counts_by_round.len().max(1);
 
-    // ── REAL: sumcheck_proof from bundle.reduction ──
-    let host_sumcheck = jagged_reduction_to_partial_sumcheck(&bundle.reduction);
-    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> =
-        host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
+    // ── P2c-for-outer: sumcheck_proof = the WITNESSED reduction sumcheck ──
+    let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
-    // ── REAL: basefold proof from bundle.basefold_proof (BN254 digests) ──
-    // P2c STEP 3: the verifier `type Proof` now carries `HV::DigestVariable`
-    // ([Var<Bn254>;1] for the outer ring), so const-promote the raw
-    // [Bn254;1] digests via `const_digest` after the scalar read.
-    let host_basefold_outer =
-        host_stacked_basefold_to_recursive_outer(&bundle.basefold_proof);
-    let basefold_proof_raw = <_ as Witnessable<C>>::read(&host_basefold_outer, builder);
-    let basefold_proof_var =
-        proof_digests_to_digestvar::<C, HV>(builder, basefold_proof_raw);
+    // ── P2c-for-outer: basefold proof = the WITNESSED proof (BN254 digests) ──
+    // The felt/ext values and the BN254 round/merkle digests came off the gnark
+    // witness stream in `read_outer_eval_bundle_impl` (no more const-bake).
+    let basefold_proof_var = preread_basefold_proof;
 
-    // ── REAL: batch_evaluations as Ext constants ──
-    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = bundle
-        .basefold_proof
+    // ── P2c-for-outer: batch_evaluations = the WITNESSED values (reuse) ──
+    let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = basefold_proof_var
         .batch_evaluations
         .iter()
-        .map(|round| round.iter().map(|ef| builder.constant(*ef)).collect())
+        .map(|round| round.iter().copied().collect())
         .collect();
 
     let stacked_pcs_proof = RecursiveStackedPcsProof::<
@@ -1034,10 +1197,11 @@ where
         pcs_proof: basefold_proof_var,
     };
 
-    // ── REAL: original_commitments[0] = BN254 commit cap root ──
-    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    // ── P2c-for-outer: original_commitments[0] = WITNESSED BN254 commit root ──
+    // `HV::DigestVariable == [Var<Bn254>; 1] == [Var<C::N>; 1]` for the outer
+    // ring; the witnessed `preread_commit_root` replaces the baked const_digest.
     let first_commit_digest: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
-        HV::const_digest(builder, first_root);
+        preread_commit_root;
     let zero_digest_var: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
         HV::const_digest(builder, <HV as crate::hash::FieldHasher<C::F>>::Digest::default());
     let mut original_commitments: Vec<
@@ -1048,12 +1212,9 @@ where
         original_commitments.push(zero_digest_var);
     }
 
-    // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
+    // ── P2c-for-outer: jagged_eval_proof = the WITNESSED sub-sumcheck ──
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
-        partial_sumcheck_proof: host_sumcheck_to_const_var::<C>(
-            builder,
-            &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
-        ),
+        partial_sumcheck_proof: preread_jagged_eval,
     };
 
     // ── REAL: col_prefix_sums with artificial-zero insertion (mirror) ──
@@ -1145,8 +1306,8 @@ where
         column_counts_by_round.iter().map(|_| heights.clone()).collect()
     };
 
-    // ── REAL: expected_eval from bundle.reduction.q_at_z ──
-    let expected_eval: Ext<C::F, C::EF> = builder.constant(bundle.reduction.q_at_z);
+    // ── P2c-for-outer: expected_eval = the WITNESSED q_at_z ──
+    let expected_eval: Ext<C::F, C::EF> = preread_expected_eval;
 
     JaggedPcsProofVariable {
         params: jagged_dim_metadata,

@@ -333,6 +333,11 @@ pub fn verify_core_basefold<C, SC, A>(
                     max_log_row_count,
                     &column_counts_by_round_pre,
                 ),
+                // P2c-for-outer: OuterBundle is only produced for the gnark wrap
+                // (OuterConfig); the core path is inner-only → unreachable.
+                LiftedEvalProof::OuterBundle { .. } => {
+                    unreachable!("core path never carries an OUTER (gnark) bundle")
+                }
             };
             // Real chip_height_bits derivation: pulls per-chip log
             // heights from `chip_log_heights_per_shard` (witnessed from

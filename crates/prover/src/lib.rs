@@ -1974,9 +1974,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> PlonkBn254Proof {
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
-            is_complete: true,
+        // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
+        // verifies the BaseFold shard proof, so the witness MUST be built from the
+        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues, which
+        // emits a stale 523-flat witness incompatible with the 15208-flat circuit).
+        let basefold_proof = *proof
+            .proof
+            .basefold_shard_proof
+            .clone()
+            .expect(
+                "wrap_plonk_bn254: wrap proof missing basefold_shard_proof \
+                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+            );
+        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+            vk_merkle_data,
         };
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
@@ -2009,9 +2022,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         proof: ZKMReduceProof<OuterSC>,
         build_dir: &Path,
     ) -> Groth16Bn254Proof {
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
-            is_complete: true,
+        // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
+        // verifies the BaseFold shard proof, so the witness MUST be built from the
+        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues, which
+        // emits a stale 523-flat witness incompatible with the 15208-flat circuit).
+        let basefold_proof = *proof
+            .proof
+            .basefold_shard_proof
+            .clone()
+            .expect(
+                "wrap_groth16_bn254: wrap proof missing basefold_shard_proof \
+                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+            );
+        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+            vk_merkle_data,
         };
         let mut vkey_hash = zkm_vkey_digest_bn254(&proof);
 
@@ -2050,9 +2076,21 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         build_dir: &Path,
         store_dir: &Path,
     ) -> DvSnarkBn254Proof {
-        let input = ZKMCompressWitnessValues {
-            vks_and_proofs: vec![(proof.vk.clone(), proof.proof.clone())],
-            is_complete: true,
+        // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
+        // verifies the BaseFold shard proof, so the witness MUST be built from the
+        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues).
+        let basefold_proof = *proof
+            .proof
+            .basefold_shard_proof
+            .clone()
+            .expect(
+                "wrap_dvsnark_bn254: wrap proof missing basefold_shard_proof \
+                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+            );
+        let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
+        let input = ZKMWrapBasefoldWitnessValues {
+            vks_and_proofs: vec![(proof.vk.clone(), basefold_proof)],
+            vk_merkle_data,
         };
         let vkey_hash = zkm_vkey_digest_bn254(&proof);
         let committed_values_digest = zkm_committed_values_digest_bn254(&proof);
@@ -2866,6 +2904,108 @@ pub mod tests {
             opts,
             Test::CircuitTest,
         )
+    }
+
+    /// P2c-for-outer VALUE-INDEPENDENCE GATE: build the gnark outer circuit
+    /// (R1CS constraints) from wrap proof A, then SOLVE it with the witness
+    /// built from a DIFFERENT fresh wrap proof B.  Before the fix the outer
+    /// lift BAKED proof-A's q_at_z / jagged-eval / sumcheck as `builder.constant`,
+    /// so B's witness tripped `assertIsEqual` (the constraint-#6246887 failure).
+    /// After the fix those values are WITNESS inputs, so the A-shaped circuit
+    /// accepts B's witness — the gnark verifier verifies ANY fresh proof.
+    ///
+    /// Reuses the same shrink proof for both wraps (the grind `find_any` nonce
+    /// re-rolls per wrap, so the two wrap proofs carry DIFFERENT q_at_z /
+    /// sumcheck / basefold values at the SAME shape — exactly the fresh-proof
+    /// scenario the on-chain verifier faces).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_outer_value_independence() -> Result<()> {
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+
+        // Two DISTINCT fib inputs → same compress/shrink/wrap SHAPE but
+        // different proof VALUES (wrap_bn254 is deterministic given its input,
+        // so re-wrapping the same shrink is vacuous — distinct inputs are what
+        // gives two genuinely different fresh proofs of the same shape, exactly
+        // the on-chain "any fresh proof" scenario).
+        let wrap_for = |n: u32| -> Result<crate::ZKMReduceProof<OuterSC>> {
+            let mut stdin = ZKMStdin::new();
+            stdin.write(&n);
+            let core = prover
+                .prove_core(&pk_d, program.clone(), &stdin, opts, ZKMContext::default())
+                .unwrap();
+            let compressed = prover.compress(&vk, core, vec![], opts)?;
+            let shrink = prover.shrink(compressed, opts)?;
+            Ok(prover.wrap_bn254(shrink, opts)?)
+        };
+
+        tracing::info!("[VI] wrap A (fib n=100): core→compress→shrink→wrap");
+        let wrap_a = wrap_for(100)?;
+        tracing::info!("[VI] wrap B (fib n=200): core→compress→shrink→wrap");
+        let wrap_b = wrap_for(200)?;
+
+        // Sanity: the two wrap proofs MUST carry different proof-specific
+        // values (else the test is vacuous).  Compare the serialized
+        // basefold shard proof bytes.
+        let a_bytes = bincode::serialize(
+            wrap_a.proof.basefold_shard_proof.as_ref().expect("A bundle"),
+        )
+        .unwrap();
+        let b_bytes = bincode::serialize(
+            wrap_b.proof.basefold_shard_proof.as_ref().expect("B bundle"),
+        )
+        .unwrap();
+        tracing::info!(
+            "[VI] wrap A bundle {} bytes, wrap B bundle {} bytes, identical={}",
+            a_bytes.len(),
+            b_bytes.len(),
+            a_bytes == b_bytes
+        );
+        assert_ne!(
+            a_bytes, b_bytes,
+            "[VI] wrap A and B carry IDENTICAL proof bytes — test would be vacuous \
+             (need two distinct fresh proofs of the same shape)"
+        );
+
+        tracing::info!("[VI] build outer circuit (R1CS) from proof A");
+        let (constraints_a, _witness_a) =
+            build_constraints_and_witness(&wrap_a.vk, &wrap_a.proof);
+        tracing::info!("[VI] built {} constraints from A", constraints_a.len());
+
+        tracing::info!("[VI] build circuit + witness from proof B");
+        let (constraints_b, witness_b) =
+            build_constraints_and_witness(&wrap_b.vk, &wrap_b.proof);
+        tracing::info!("[VI] built {} constraints from B", constraints_b.len());
+
+        // Value-independence signal #1: the R1CS structure (constraint count)
+        // is identical for two DIFFERENT proofs of the same shape.  (A baked
+        // proof-specific value can change the const-folded instruction count;
+        // a witnessed value cannot.)
+        assert_eq!(
+            constraints_a.len(),
+            constraints_b.len(),
+            "[VI] constraint counts differ between two same-shape proofs \
+             ({} vs {}) — circuit is NOT value-independent (still baking?)",
+            constraints_a.len(),
+            constraints_b.len(),
+        );
+
+        tracing::info!(
+            "[VI] SOLVE circuit_A with witness_B (the value-independence gate)"
+        );
+        // PlonkBn254Prover::test runs gnark's test.IsSolved — it panics if any
+        // constraint (e.g. a baked assertIsEqual) is violated.  Passing proves
+        // the A-shaped circuit accepts B's fresh witness ⇒ value-independent.
+        PlonkBn254Prover::test(constraints_a, witness_b);
+        tracing::info!(
+            "[VI] PASS — circuit_A solved by witness_B: outer wrap is VALUE-INDEPENDENT"
+        );
+        Ok(())
     }
 
     #[test]

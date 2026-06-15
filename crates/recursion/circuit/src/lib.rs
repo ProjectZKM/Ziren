@@ -217,6 +217,44 @@ pub trait CircuitConfig: Config {
             Self::assert_bit_zero(builder, bit);
         }
     }
+
+    /// P2c-for-outer (value-independent gnark wrap): WITNESS the outer
+    /// (BN254) jagged-basefold bundle's proof-specific values from the
+    /// witness stream, returning the witnessed
+    /// [`crate::shard_level_witness::LiftedEvalProof::OuterBundle`].
+    ///
+    /// The default (inner configs) returns `None` — the inner recursion path
+    /// witnesses its bundle via the `Bundle` variant instead, and the OUTER
+    /// bundle never appears there.  Only [`OuterConfig`] overrides this to
+    /// witness the BN254 bundle so the gnark R1CS is value-independent.
+    ///
+    /// Called from `BasefoldShardProof::read` at the evaluation-proof stream
+    /// position so the witnessed values land in the same order
+    /// [`Self::write_outer_eval_bundle`] produces them.
+    fn read_outer_eval_bundle(
+        _builder: &mut Builder<Self>,
+        _host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+    ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Prover-side counterpart of [`Self::read_outer_eval_bundle`]: WRITE the
+    /// outer bundle's proof-specific values to the witness stream in the SAME
+    /// order `read` consumes them.  Returns `true` when it handled the proof
+    /// (outer config + outer bundle bytes), so `BasefoldShardProof::write` can
+    /// skip the default Bytes/Bundle write.  Default (inner) = `false`.
+    fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
+        _host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        _witness: &mut W,
+    ) -> bool
+    where
+        Self: Sized,
+    {
+        false
+    }
 }
 
 impl CircuitConfig for InnerConfig {
@@ -618,6 +656,22 @@ impl CircuitConfig for OuterConfig {
             result = builder.eval(multiplier * result);
         }
         result
+    }
+
+    // P2c-for-outer: WITNESS the outer (BN254) bundle so the gnark R1CS is
+    // value-independent (delegates to the shard_level_witness helpers).
+    fn read_outer_eval_bundle(
+        builder: &mut Builder<Self>,
+        host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+    ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>> {
+        crate::shard_level_witness::read_outer_eval_bundle_impl(builder, host)
+    }
+
+    fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
+        host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        witness: &mut W,
+    ) -> bool {
+        crate::shard_level_witness::write_outer_eval_bundle_impl(host, witness)
     }
 }
 
