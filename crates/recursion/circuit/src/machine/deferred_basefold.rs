@@ -284,6 +284,11 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 max_log_row_count,
                 &column_counts_by_round,
             ),
+            // P2c-for-outer: OuterBundle is gnark-wrap-only (OuterConfig);
+            // the deferred path is inner-only → unreachable.
+            LiftedEvalProof::OuterBundle { .. } => {
+                unreachable!("deferred path never carries an OUTER (gnark) bundle")
+            }
         };
         // VERIFY_VK=true: derive from the WITNESSED opened
         // `degree` instead of baking from host-side chip_log_heights

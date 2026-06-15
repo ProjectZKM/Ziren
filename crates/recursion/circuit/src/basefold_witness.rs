@@ -654,6 +654,115 @@ pub fn write_basefold_proof_to_stream<C>(
     }
 }
 
+// ── OUTER (BN254) value-independent (witness-stream) basefold proof ───
+//
+// P2c-for-outer: the gnark wrap path previously BAKED the outer bundle's
+// proof-specific values as `builder.constant` (in
+// `lift_jagged_basefold_bundle_outer`).  This pair witnesses them from the
+// gnark witness stream instead, so the R1CS is value-INDEPENDENT (a fresh
+// wrap proof feeds new witness values rather than tripping a baked
+// `assertIsEqual`).  It mirrors `read_/write_basefold_proof_from_stream`
+// but the digests are BN254 1-caps (`[Bn254; 1]`) read as `[Var<N>; 1]`
+// (`Bn254: Witnessable<C, WitnessVariable = Var<Bn254>>`, N = Bn254).
+// `component_openings` are dropped (the verifier discards them, identical
+// to the inner pair).
+pub fn read_basefold_proof_outer_from_stream<C>(
+    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [p3_bn254_fr::Bn254; 1]>,
+    builder: &mut Builder<C>,
+) -> RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [zkm_recursion_compiler::ir::Var<C::N>; 1]>
+where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = p3_bn254_fr::Bn254>,
+{
+    let rd_digest =
+        |d: &[p3_bn254_fr::Bn254; 1], b: &mut Builder<C>| -> [zkm_recursion_compiler::ir::Var<C::N>; 1] {
+            core::array::from_fn(|i| d[i].read(b))
+        };
+    let rounds = host
+        .rounds
+        .iter()
+        .map(|r| RecursiveBasefoldRound {
+            uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
+            commitment: rd_digest(&r.commitment, builder),
+            _phantom_f: core::marker::PhantomData,
+        })
+        .collect();
+    let final_poly = host.final_poly.read(builder);
+    let pow_witness = host.pow_witness.read(builder);
+    let batch_grinding_witness = host.batch_grinding_witness.read(builder);
+    let query_phase_openings = host
+        .query_phase_openings
+        .iter()
+        .map(|round| {
+            round
+                .iter()
+                .map(|op| RecursiveBasefoldOpening {
+                    position: op.position,
+                    sibling_pair: [
+                        op.sibling_pair[0].read(builder),
+                        op.sibling_pair[1].read(builder),
+                    ],
+                    merkle_path_bytes: op.merkle_path_bytes.clone(),
+                    merkle_path_digests: op
+                        .merkle_path_digests
+                        .iter()
+                        .map(|d| rd_digest(d, builder))
+                        .collect(),
+                    _phantom: core::marker::PhantomData,
+                })
+                .collect()
+        })
+        .collect();
+    let batch_evaluations = host
+        .batch_evaluations
+        .iter()
+        .map(|row| row.iter().map(|v| v.read(builder)).collect())
+        .collect();
+    RecursiveBasefoldProof {
+        rounds,
+        final_poly,
+        pow_witness,
+        batch_grinding_witness,
+        // verifier discards component_openings (basefold_verifier.rs:936).
+        component_openings: Vec::new(),
+        query_phase_openings,
+        batch_evaluations,
+    }
+}
+
+pub fn write_basefold_proof_outer_to_stream<C>(
+    host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [p3_bn254_fr::Bn254; 1]>,
+    witness: &mut impl WitnessWriter<C>,
+) where
+    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = p3_bn254_fr::Bn254>,
+{
+    for r in host.rounds.iter() {
+        r.uni_poly[0].write(witness);
+        r.uni_poly[1].write(witness);
+        for f in r.commitment.iter() {
+            f.write(witness);
+        }
+    }
+    host.final_poly.write(witness);
+    host.pow_witness.write(witness);
+    host.batch_grinding_witness.write(witness);
+    for round in host.query_phase_openings.iter() {
+        for op in round.iter() {
+            op.sibling_pair[0].write(witness);
+            op.sibling_pair[1].write(witness);
+            for d in op.merkle_path_digests.iter() {
+                for f in d.iter() {
+                    f.write(witness);
+                }
+            }
+        }
+    }
+    for row in host.batch_evaluations.iter() {
+        for v in row.iter() {
+            v.write(witness);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

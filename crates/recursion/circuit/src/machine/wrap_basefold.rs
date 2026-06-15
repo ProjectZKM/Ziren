@@ -258,6 +258,23 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     use crate::shard_level_witness::LiftedEvalProof;
     let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
     let evaluation_proof_var = match &evaluation_proof {
+        // P2c-for-outer: the gnark wrap path — WITNESSED outer BN254 bundle.
+        // Routed via the ring dispatch (OUTER impl lifts it value-independently;
+        // the INNER impl's arm is dead — inner never produces OuterBundle).
+        LiftedEvalProof::OuterBundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } => {
+            <SC as FieldHasherVariable<C>>::lift_outer_bundle_dispatch(
+                builder,
+                host,
+                basefold_proof.clone(),
+                sumcheck.clone(),
+                jagged_eval.clone(),
+                *expected_eval,
+                *commit_root,
+                max_log_row_count,
+                &column_counts_by_round,
+                None,
+            )
+        }
         LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
             // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
@@ -410,7 +427,22 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 );
             &per_proof_verifier
         }
-        // BaseFold-over-BN254 wrap port: the OUTER wrap proof carries
+        // P2c-for-outer: the OUTER wrap proof is now WITNESSED as OuterBundle.
+        // The verifier's num_variables / log_stacking_height come from the
+        // witnessed outer bundle's `host` (shape metadata) — identical to the
+        // former Bytes-deserialize override below (#244/#56 blowup=3 rate).
+        LiftedEvalProof::OuterBundle { host, .. } => {
+            let bundle_num_vars =
+                host.basefold_proof.basefold_proof.fri_commitments.len();
+            per_proof_verifier =
+                crate::shard_proof_variable_lift::build_basefold_shard_verifier_wrap::<SC>(
+                    max_log_row_count,
+                    host.commit.log_stacking_height,
+                    bundle_num_vars,
+                );
+            &per_proof_verifier
+        }
+        // #H (BaseFold-over-BN254 wrap port): the OUTER wrap proof carries
         // its bundle as Bytes (JaggedBasefoldBundleGeneric<OuterValMmcs>).
         // The verifier's num_variables must match the OUTER bundle's FRI
         // round count (== fri_commitments.len()), not max_log_row_count,

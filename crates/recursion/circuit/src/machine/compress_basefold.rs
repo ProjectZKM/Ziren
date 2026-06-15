@@ -370,6 +370,11 @@ pub fn verify_compress_basefold<C, SC, A>(
                 max_log_row_count,
                 &column_counts_by_round_pre,
             ),
+            // P2c-for-outer: OuterBundle is gnark-wrap-only (OuterConfig);
+            // the compress path is inner-only → unreachable.
+            LiftedEvalProof::OuterBundle { .. } => {
+                unreachable!("compress path never carries an OUTER (gnark) bundle")
+            }
         };
 
         // Real chip_height_bits derivation from per-input
