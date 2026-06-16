@@ -67,7 +67,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
     challenger
 }
 
-/// Step 5 Phase 3b basefold-shaped recursion shard dummy (May 19 2026).
+/// Builds a basefold-shaped recursion shard dummy (May 19 2026).
 ///
 /// Produces a `(StarkVerifyingKey, ShardProof)` pair whose
 /// `ShardProof` carries:
@@ -225,7 +225,7 @@ where
 /// witness-stream `read()` count is shape-stable across dummy and
 /// real proofs.
 ///
-/// Phase 4 — unblocks `program_from_shape` basefold
+/// Unblocks `program_from_shape` basefold
 /// dispatch and downstream `dummy()` constructors for
 /// `ZKMCoreBasefoldWitnessValues` etc.
 pub fn dummy_basefold_vk_and_shard_proof<A>(
@@ -259,7 +259,7 @@ where
     // BatchFRI / ExpReverseBitsLen — that the basefold machine no
     // longer has).
     //
-    // VERIFY_VK=true fix (task #24): the previous code filtered the
+    // VERIFY_VK=true fix: the previous code filtered the
     // chip list but then `zip`'d it against the UNFILTERED
     // `shape.inner`, so for shapes containing retired names every
     // chip after the first dropped entry received the NEXT entry's
@@ -314,7 +314,7 @@ where
         .enumerate()
         .map(|(i, (name, _))| (name.to_owned(), i))
         .collect::<HashMap<_, _>>();
-    // P2b: the vk hash (recursion/circuit/src/types.rs:hash) absorbs one
+    // The vk hash (recursion/circuit/src/types.rs:hash) absorbs one
     // prep-domain record per `chip_information` entry — (log_n, 2^log_n, shift,
     // two_adic_generator(log_n)).  The dummy MUST carry the same preprocessed
     // domains as the real vk (else the recursion program's vk.hash bakes a
