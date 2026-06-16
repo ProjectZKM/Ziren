@@ -47,7 +47,7 @@ pub struct ZKMWrapBasefoldWitnessValues<
     /// Single `(vk, root-proof)` pair to wrap.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the input VK against the canonical
-    /// vk_root.  #261 SP1 alignment — mirrors SP1's
+    /// vk_root.  Mirrors SP1's
     /// `SP1CompressRootVerifierWithVKey::verify` which forwards to
     /// `SP1MerkleProofVerifier` (`/tmp/sp1/crates/recursion/circuit/src/machine/root.rs:30-50`).
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
@@ -131,7 +131,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         vk_merkle_data,
     } = input;
 
-    // #261 SP1 alignment: bind the single input VK to the witnessed
+    // Bind the single input VK to the witnessed
     // vk_root via merkle proof, mirroring SP1's
     // `SP1CompressRootVerifierWithVKey::verify` (forwards to
     // `SP1CompressWithVKeyVerifier::verify` which runs
@@ -211,12 +211,12 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let chip_names: Vec<String> =
         logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-    // #83 fix: build column_counts_by_round BEFORE the lift call,
-    // matching compress_basefold.rs:268-275. Empty placeholder
+    // Build column_counts_by_round BEFORE the lift call,
+    // matching compress_basefold.rs:268-275. An empty placeholder
     // caused JaggedPcsParams to see num_cols=1 → z_col empty →
     // evaluate_mle_ext panic at logup_gkr.rs:105 with column_claims
     // sized to the real ~1024-entry padded width. Same fix as
-    // deferred_basefold.rs in the same commit.
+    // deferred_basefold.rs.
     let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
         .chips()
         .iter()
@@ -238,7 +238,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         .collect();
     let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
-    // VERIFY_VK=true Site-2 (#25): per-chip WITNESSED heights from the
+    // Under VK enforcement: per-chip WITNESSED heights from the
     // opened `degree` — same pattern as core/compress/deferred.  Computed
     // before the lift (borrows proof_opened_values; the move into
     // finalize_carried_opened_values happens later).
@@ -259,7 +259,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
     let evaluation_proof_var = match &evaluation_proof {
         LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
-            // P2c STEP 3: route through the ring-aware trait dispatch so the
+            // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
             // bundle) and outer (BN254, dead arm → placeholder).
             <SC as FieldHasherVariable<C>>::lift_bundle_dispatch(
@@ -283,13 +283,13 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &column_counts_by_round,
         ),
         LiftedEvalProof::Bytes(bytes) => {
-            // #H (BaseFold-over-BN254 wrap port): ring-aware dispatch.
+            // BaseFold-over-BN254 wrap port: ring-aware dispatch.
             // SC is the field hasher (HV); its impl deserializes the OUTER
             // bundle (JaggedBasefoldBundleGeneric<OuterValMmcs>, BN254
             // commitments) for the gnark wrap and the INNER bundle for the
             // recursion wrap. The OUTER path lifts the real BN254 round
-            // commitments (was an all-zero placeholder -> constraint
-            // #488163 failure in the Groth16 setup).
+            // commitments (was an all-zero placeholder -> Groth16 setup
+            // constraint failure).
             <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                 builder,
                 bytes,
@@ -304,7 +304,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &column_counts_by_round,
         ),
     };
-    // VERIFY_VK=true Site-2 (#25): derive from the WITNESSED opened
+    // Under VK enforcement: derive from the WITNESSED opened
     // `degree` instead of baking from host-side chip_log_heights
     // (mirrors core/compress/deferred).  chip_log_heights_for_input is
     // still consumed by finalize_carried_opened_values below.
@@ -339,13 +339,13 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let cumsums_for_input = chip_cumulative_sums_per_input
         .first()
         .unwrap_or(&empty_cumsums_wrap);
-    // #7858680 fix: use the trace@z openings CARRIED from the host proof and
+    // Use the trace@z openings CARRIED from the host proof and
     // finalize (overwrites the placeholder `degree` with the REAL big-endian
     // height bits so `full_geq` masks padded rows correctly), matching
     // core_basefold.rs:378.  The previous
     // build_opened_values_from_chip_openings_with_cumsums left `degree` all-zero
     // → full_geq=1 always → wrong padded-row mask → in-circuit zerocheck
-    // closing mismatch (gnark #7858680).
+    // closing mismatch in the gnark wrap.
     let opened_values =
         crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
             builder,
@@ -395,7 +395,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         max_log_row_count as u32,
     );
 
-    // #244 + #249 fix: per-proof override when bundle path is active.
+    // Per-proof verifier override when the bundle path is active.
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier = match &evaluation_proof {
@@ -410,12 +410,12 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 );
             &per_proof_verifier
         }
-        // #H (BaseFold-over-BN254 wrap port): the OUTER wrap proof carries
+        // BaseFold-over-BN254 wrap port: the OUTER wrap proof carries
         // its bundle as Bytes (JaggedBasefoldBundleGeneric<OuterValMmcs>).
         // The verifier's num_variables must match the OUTER bundle's FRI
         // round count (== fri_commitments.len()), not max_log_row_count,
         // and its log_stacking_height must match the OUTER commit — same
-        // per-proof override the Bundle arm applies (mirrors #244). Deser
+        // per-proof override the Bundle arm applies. Deserialization
         // is Option, so a non-outer Bytes payload (placeholder/empty)
         // cleanly falls through to the default verifier.
         LiftedEvalProof::Bytes(bytes) => {
