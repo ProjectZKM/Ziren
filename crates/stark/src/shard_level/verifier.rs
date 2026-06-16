@@ -137,11 +137,11 @@ impl BasefoldShardVerifier {
             });
         }
 
-        // ── Phase 1: Transcript prologue ────────────────────────
+        // ── Stage 1 — Transcript prologue ────────────────────────
         //
         // Observe public values, main commitment, and per-chip
         // metadata.  Order MUST match the prover's ordering at
-        // `shard_level::prover::prove_shard_to_basefold` (Phase 1
+        // `shard_level::prover::prove_shard_to_basefold` (transcript
         // prologue):
         //   1. public_values (each felt)
         //   2. main_commitment (8 felts)
@@ -192,7 +192,7 @@ impl BasefoldShardVerifier {
             }
         }
 
-        // ── Phase 2: LogUp-GKR sumcheck verification ────────────
+        // ── Stage 2 — LogUp-GKR sumcheck verification ────────────
         //
         // Ported from
         //   crates/recursion/circuit/src/logup_gkr.rs::verify_logup_gkr
@@ -247,7 +247,7 @@ impl BasefoldShardVerifier {
             challenger,
         )?;
 
-        // ── Phase 3: Zerocheck sumcheck verification ────────────
+        // ── Stage 3 — Zerocheck sumcheck verification ────────────
         //
         // Host port of the active Ziren zerocheck proof shape.  It
         // samples the same phase challenges as the in-circuit verifier,
@@ -274,7 +274,7 @@ impl BasefoldShardVerifier {
             &proof.opened_values,
         )?;
 
-        // ── Phase 4: Jagged-PCS opening verification ────────────
+        // ── Stage 4 — Jagged-PCS opening verification ────────────
         //
         // Delegate to the existing host-side verifier at
         // crate::jagged_pcs::jagged::verify_jagged_basefold
@@ -293,7 +293,7 @@ impl BasefoldShardVerifier {
     }
 }
 
-/// Host-side jagged-PCS opening verification (Phase 4).
+/// Host-side jagged-PCS opening verification (Stage 4).
 ///
 /// Deserialises the bundle bytes and delegates to the long-standing
 /// host-side verifier at
@@ -513,7 +513,7 @@ where
 
     // Delegate to the existing host-side verifier.
     //
-    // Option B single-main-commit: the prover's Phase 1 prologue
+    // Option B single-main-commit: the prover's transcript prologue
     // already observed the BaseFold commit's 8-felt digest as
     // `main_commitment` (this verifier mirrors that at lines 152-153).
     // Use the `_no_observe` variant so the verifier doesn't observe
@@ -991,7 +991,7 @@ where
 
 
 // ─────────────────────────────────────────────────────────────
-// Phase 2: host-side LogUp-GKR verification helpers
+// LogUp-GKR stage: host-side verification helpers
 // ─────────────────────────────────────────────────────────────
 
 /// Host-side `eq_eval`: the multilinear equality indicator
