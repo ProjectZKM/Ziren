@@ -19,8 +19,8 @@ pub struct ExecutionRecord<F> {
     /// (cached server-side by `program_cache_key`) and the shard-server
     /// re-attaches it to the deserialized record before driving the
     /// shard-level prover.  Avoids paying the program serialization cost
-    /// per shard when many shards share the same compose program (#272
-    /// process-per-GPU architecture).
+    /// per shard when many shards share the same compose program
+    /// (process-per-GPU architecture).
     #[serde(skip)]
     pub program: Arc<RecursionProgram<F>>,
     /// The index of the shard.
