@@ -93,8 +93,8 @@ pub struct JaggedPacking<F> {
     /// Per-chip metadata (row count, column count).
     pub chip_infos: Vec<JaggedChipInfo>,
     /// Cumulative offsets: `offsets[k]` is the starting index of the
-    /// k-th column in `dense_values`.  SP1 parity (Phase 1 of gap #1,
-    /// May 28 2026): the slice carries `total_cols + 1` entries with
+    /// k-th column in `dense_values`.  For SP1 parity (May 28 2026):
+    /// the slice carries `total_cols + 1` entries with
     /// the final sentinel `offsets[total_cols] = total_values`,
     /// matching SP1's `JaggedLittlePolynomialProverParams::col_prefix_sums_usize`
     /// (slop/crates/jagged/src/poly.rs:236-254).  The recursion lift
@@ -125,7 +125,7 @@ pub fn compute_jagged_metadata<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
 ) -> JaggedPacking<F> {
     // Delegate to the dims-based core so callers that have only the
-    // per-chip (name, height, width) — e.g. the #32 device commit hook,
+    // per-chip (name, height, width) — e.g. the device commit hook,
     // which resolves device-resident chip dims from the per-shard
     // provider without a host-side D2H of the trace values — can build
     // the identical packing.
@@ -146,7 +146,7 @@ pub fn compute_jagged_metadata<F: Field>(
 /// but driven by an explicit per-chip `(name, height, width)` list instead
 /// of materialized `RowMajorMatrix` traces.
 ///
-/// `#32` (commit-traces D2H removal): the device commit hook resolves a
+/// Commit-traces D2H removal: the device commit hook resolves a
 /// device-resident chip's dims from the per-shard provider (the on-device
 /// `ColMajorMatrixDevice` carries its height/width) and packs its cells
 /// D2D — so it never needs the host trace values that the eager
@@ -170,7 +170,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
             total_values += height;
         }
     }
-    // SP1 parity (gap #1 Phase 1): append final sentinel
+    // For SP1 parity: append final sentinel
     // `offsets[total_cols] = total_values`.  Mirrors SP1
     // `JaggedLittlePolynomialProverParams::new`
     // (slop/crates/jagged/src/poly.rs:236-254) which closes
@@ -271,7 +271,7 @@ pub fn materialize_dense_jagged<F: Field>(
                 }
                 // Per-column parallel: each column writes into its own
                 // [col*height..(col+1)*height] slice.
-                // [#7898240 orient] bit-reverse the row index so the dense
+                // Bit-reverse the row index so the dense
                 // matches the zerocheck's bitrev_rows orientation (opened_values
                 // = MLE of bitrev(trace)); keeps the jagged reduction/BaseFold
                 // consistent with the in-circuit step-4 evaluation_claims.
@@ -339,7 +339,7 @@ pub fn pack_traces_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
-    // SP1 parity (gap #1 Phase 1): final sentinel — see
+    // For SP1 parity: final sentinel — see
     // `compute_jagged_metadata` for the rationale.
     offsets.push(total_values);
 
@@ -530,7 +530,7 @@ pub fn pack_folded_tables_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
-    // SP1 parity (gap #1 Phase 1): final sentinel — see
+    // For SP1 parity: final sentinel — see
     // `compute_jagged_metadata` for the rationale.
     offsets.push(total_values);
     let log_dense_size = if total_values == 0 {
