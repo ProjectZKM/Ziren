@@ -321,7 +321,7 @@ pub struct LogupGkrShardChipMetadata {
 ///     [`crate::zerocheck::eq_eval`]
 ///   - `Point::add_dimension_back` → `Vec::push`
 ///   - Trace-evaluation reconstruction from per-chip openings
-///     (SP1 logup_gkr.rs:180-280) is deferred to Phase 3 zerocheck
+///     (SP1 logup_gkr.rs:180-280) is deferred to the zerocheck stage
 ///     in Ziren; consumed via `proof.logup_evaluations`.
 pub fn verify_logup_gkr<C, FC, EVPV>(
     builder: &mut Builder<C>,
@@ -344,7 +344,7 @@ pub fn verify_logup_gkr<C, FC, EVPV>(
     } = proof;
     let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
 
-    // P3 (#18, SP1 contract): the GKR round count is FIXED — the prover
+    // The GKR round count is FIXED — the prover
     // pads to max_log_row_count-1 rounds and SP1's verifier asserts
     // `round_proofs.len() + 1 == max_log_row_count`.  The count is
     // STRUCTURAL in the recursion program (the loop below unrolls over
@@ -723,7 +723,7 @@ mod tests {
             &metadata,
             &proof,
             &public_values,
-            // P3 (#18): round count is now asserted == max_log_row_count - 1;
+            // Round count is now asserted == max_log_row_count - 1;
             // this synthetic proof has 1 round → mlrc = 2.
             2,
             &mut challenger,
