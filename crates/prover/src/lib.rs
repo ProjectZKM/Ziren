@@ -118,11 +118,11 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
 /// program) AND the runtime tree commit (`ZKMProver::new`) use this
 /// constant.  Previously each side derived a height from its own
-/// cardinality (enumerated-shape count vs vk_map size) — after the Site-2
+/// cardinality (enumerated-shape count vs vk_map size) — after the
 /// witnessed-heights change collapsed the vk space (1566 compose vks
 /// dedup to ~348), the two derivations diverged (11 vs 9) and the
 /// witnessed merkle paths would desync from the program shape.  A fixed
-/// ceiling kills the circularity permanently (the roadmap's G7).
+/// ceiling kills the circularity permanently.
 pub const VK_MERKLE_TREE_HEIGHT: usize = 11;
 
 const COMPRESS_DEGREE: usize = 3;
@@ -930,7 +930,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// each input proof. Returns `None` when any deferred proof is
     /// missing the side channel (caller falls back to the legacy path).
     ///
-    /// Phase 4. Mirrors the layout of
+    /// Mirrors the layout of
     /// `get_recursion_core_inputs_basefold` — same `if all_have_bf
     /// { Some } else { None }` pattern.
     pub fn get_recursion_deferred_inputs_basefold<'a>(
@@ -1067,7 +1067,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        // Phase 4: when all deferred proofs carry a basefold
+        // when all deferred proofs carry a basefold
         // side channel, emit DeferredBasefold witnesses; otherwise fall
         // back to legacy Deferred.
         if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(
@@ -2285,7 +2285,7 @@ pub mod tests {
     /// If a target ∈ set but the real compose vk is NOT in vk_map ⇒
     /// value-dependence (the shape_key→program invariant is violated:
     /// two equal-shape_key witnesses produce different programs ⇒ a
-    /// P2c-style baked-value remnant in the compose path).
+    /// baked-value remnant in the compose path).
     /// If a target ∉ set ⇒ shape-coverage gap (the shape was never
     /// enumerated; injecting it converges since heights match).
     #[test]
@@ -2829,7 +2829,7 @@ pub mod tests {
         )
     }
 
-    /// Validates the Phase 4 wrap fix end-to-end: compress + shrink +
+    /// Validates the wrap path end-to-end: compress + shrink +
     /// wrap_bn254 + verify_wrap_bn254 — without the heavy PLONK
     /// artifact build that follows.
     #[test]
@@ -3049,8 +3049,8 @@ pub mod tests {
                 "[VKEQ] input {i}: EQUAL={} | prog_bytes real={} dummy={} first_diff_at={:?} | vk_real={:?} vk_dummy={:?}",
                 vk_real == vk_dummy, rb.len(), db.len(), first_diff, vk_real, vk_dummy,
             );
-            // P2b 452-residual localizer: measure the divergent region via the
-            // longest common suffix, and dump the real-only bytes there.
+            // program-bytes divergence localizer: measure the divergent region
+            // via the longest common suffix, and dump the real-only bytes there.
             if let Some(fd) = first_diff {
                 let common_suffix =
                     rb.iter().rev().zip(db.iter().rev()).position(|(a, b)| a != b).unwrap_or(0);
@@ -3065,7 +3065,7 @@ pub mod tests {
                 eprintln!("[VKEQ-DIFF] real[{fd}..{r_end}]={:?}", &rb[fd..r_end]);
                 eprintln!("[VKEQ-DIFF] dummy[{fd}..{d_end}]={:?}", &db[fd..d_end]);
             }
-            // P2b instruction-level localizer: counts + first differing instr.
+            // instruction-level localizer: counts + first differing instr.
             {
                 let ri: Vec<_> = prog_real.iter_instructions().collect();
                 let di: Vec<_> = prog_dummy.iter_instructions().collect();
@@ -3281,7 +3281,7 @@ pub mod tests {
                         .collect();
                     eprintln!("[VKEQ] input {i} {tag} gkr per-round sumcheck dims={gkr_dims:?}");
                     // Full BaseFold bundle dim dump (ground truth for the
-                    // dummy_jagged_basefold_bundle construction — P2b).
+                    // dummy_jagged_basefold_bundle construction).
                     if let EvaluationProof::Bundle(bd) = &sp.evaluation_proof {
                         let bf = &bd.basefold_proof.basefold_proof;
                         let comp_paths: Vec<usize> = bf
@@ -3443,7 +3443,7 @@ pub mod tests {
     ///   vk_real == vk_dummy, ∉ map  => Shrink shape-coverage gap
     ///   vk_real != vk_dummy         => value-dependence in the shrink
     ///                                  program build (compress-level
-    ///                                  dummy-faithfulness / Site-2 baked)
+    ///                                  dummy-faithfulness / baked heights)
     #[test]
     #[serial]
     #[ignore]
@@ -4322,7 +4322,7 @@ pub mod tests {
         }
     }
 
-    /// VKROOT Site-5 construction validation: the normalize program is
+    /// VK-root construction validation: the normalize program is
     /// (chip_set, log_dense)-determined, so ANY valid memory-cluster shape at
     /// log_dense=27 must produce fib's vk.  Find a CONSTRUCTIBLE one (area
     /// concentrated in a byte-lookup-free chip so the VK-setup
