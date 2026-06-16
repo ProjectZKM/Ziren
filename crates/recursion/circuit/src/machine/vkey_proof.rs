@@ -1,6 +1,6 @@
 //! VK-merkle-proof verifier + compress-with-vkey **data-type carriers**.
 //!
-//! ## Task #397 (May 19 2026) — FRI compose-with-vkey body deletion
+//! ## FRI compose-with-vkey body deletion (May 19 2026)
 //!
 //! The legacy `ZKMCompressWithVKeyVerifier::verify` body (which performed
 //! the VK merkle check and then re-entered the FRI compose verifier) has
@@ -151,7 +151,7 @@ where
 }
 
 impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
-    /// Step 5 Phase 3b (May 19 2026) bound widening matches the
+    /// The bound widening (May 19 2026) matches the
     /// `ZKMCompressWitnessValues::dummy` delegate below — propagates
     /// the `Air<VerifierConstraintFolder>` bound required by the
     /// basefold-shaped dummy under
