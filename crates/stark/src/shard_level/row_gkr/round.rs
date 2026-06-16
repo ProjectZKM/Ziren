@@ -381,7 +381,7 @@ struct ChipLayerState<EF> {
 /// Build a post-fix `ChipLayerState` from the strided GPU output
 /// buffer + packed header metadata.
 ///
-/// Inputs (decoded from the post_fix Vec by the B2.2 parser):
+/// Inputs (decoded from the post_fix Vec by the packed-header parser):
 /// - `post_fix_data`: 4 * n_output_pairs Ef4 cells, laid out as
 ///   `[n0, n1, d0, d1]` per output pair (kernel outputLayer + 4*i).
 /// - `chip_offsets`: length n_chips + 1, cumulative global col indices
@@ -502,8 +502,7 @@ fn synthetic_diff_test_step7z() {
     let c1 = mk_ef(13);
     let eval_point: Vec<ProdEF> = vec![c0, c1];
     let lambda = mk_ef(3);
-    // claim picked arbitrarily.
-    // Step 8b: claim = TRUE p(0) + TRUE p(1) = -48816 + 78936 = 30120.
+    // claim = TRUE p(0) + TRUE p(1) = -48816 + 78936 = 30120.
     // Hand-computed for the fixed synthetic inputs.  Required so host's
     // claim - p(1) formula yields the actual polynomial constant term.
     let claim = mk_ef(30120);
@@ -559,7 +558,7 @@ fn synthetic_diff_test_step7z() {
         denominator_concat.push(d1_vals[k]);
         denominator_concat.push(d1_vals[k + 2]);
     }
-    // Step 8: sum-only needs col_index.len() == input_height == 2
+    // sum-only path needs col_index.len() == input_height == 2
     let col_index: Vec<u32> = vec![0u32, 0u32]; // 2 entries (1 chip)
     let start_indices: Vec<u32> = vec![0u32, 2u32];
 
@@ -571,7 +570,7 @@ fn synthetic_diff_test_step7z() {
     // alpha = eval_point.last() (Ziren binds last coord)
     let alpha = c1;
 
-    // Step 8c: synthetic uses single chip with offset 0.
+    // Synthetic test uses a single chip with offset 0.
     let eq_row_chip_offsets: Vec<u32> = vec![0u32];
     let result = hook(
         &numerator_concat,
@@ -604,7 +603,7 @@ fn synthetic_diff_test_step7z() {
     let two_c_m1 = alpha.double() - one;
     let one_m_c = one - alpha;
 
-    // Step 8b: skip SP1 eq_correction (kernel materialized rows already include contributions).
+    // Skip SP1 eq_correction (kernel materialized rows already include contributions).
     let _ = pad_eq_int_sum;
     let _ = eq_sum;
     let _ = four;
@@ -726,9 +725,9 @@ fn marshal_thread_pool() -> &'static std::sync::Arc<rayon::ThreadPool> {
 
 /// Returns `(round_0_univariate, Option<post_fix_chip_state>)`.
 ///
-/// Sprint B4 extension: when SP1 mode (ZIREN_GPU_SP1_FIRST_LAYER=1)
-/// produces a fully-decoded post-fix ChipLayerState via Sprint B3's
-/// `from_strided_post_fix`, the inner Option is `Some(state)` — the
+/// When SP1 mode (ZIREN_GPU_SP1_FIRST_LAYER=1) produces a
+/// fully-decoded post-fix ChipLayerState via `from_strided_post_fix`,
+/// the inner Option is `Some(state)` — the
 /// caller can wire it into `PolynomialLayer::GpuPrefolded { ... }`
 /// to fully skip the host Chip path for rounds 1..N.
 ///
@@ -829,9 +828,9 @@ where
         None => {
             static HOOK_MISSING_WARN: OnceLock<()> = OnceLock::new();
             HOOK_MISSING_WARN.get_or_init(|| {
-                // T0 May-14: demoted from warn to debug. shard-server
-                // does not register the first-round device hook (only
-                // compress_multi_gpu does). #102/#113 host orchestrator
+                // Demoted from warn to debug: shard-server does not
+                // register the first-round device hook (only
+                // compress_multi_gpu does), so the host orchestrator
                 // is the correct behavior on shard-server.
                 tracing::debug!(
                     "first_round_dispatch GPU first-round dispatch FELL THROUGH                      (env=set, but register_gpu_first_round_hook was                      never called)"
@@ -841,8 +840,8 @@ where
         }
     };
 
-    // Marshal layer data — same padded-MLE-aware path as step 7v.
-    // Step 8h: parallel marshal — pre-allocate output, rayon par_iter
+    // Marshal layer data — padded-MLE-aware path.
+    // Parallel marshal: pre-allocate output, rayon par_iter
     // per chip writes directly to its slice.  Eliminates per-chip
     // intermediate Vec<Vec> overhead.
     //
@@ -873,7 +872,7 @@ where
         chip_pair_counts.push(chip_cells / 2);
         chip_cell_counts.push(chip_cells);
     }
-    // Step 9: detect padding chips (real=0) — compute their contribution
+    // Detect padding chips (real=0) — compute their contribution
     // analytically on host, skip them from GPU upload + kernel work.
     // Env-gated: default OFF until per-shard validation extends beyond
     // the first-dispatch COEFFS_MATCH check.
@@ -1033,7 +1032,7 @@ where
         n_chips = n_chips,
         elapsed_us = _marshal_elapsed_us as u64,
     );
-    // Step 8h: marshal_dump removed (per_chip_n0 no longer exists).
+    // marshal_dump removed (per_chip_n0 no longer exists).
 
     if quadrant_mismatch {
         static QUAD_WARN: OnceLock<()> = OnceLock::new();
@@ -1043,14 +1042,14 @@ where
         return None;
     }
 
-    // Step 8h: isolation block removed (referenced removed per_chip vecs).
+    // Isolation diagnostics block removed (referenced removed per_chip vecs).
     // To re-enable isolation diagnostics, modify slices in-place after marshal.
 
-    // Step 8h: numerator_concat / denominator_concat already filled
+    // numerator_concat / denominator_concat already filled
     // by parallel par_iter above (no concat step needed).
 
     let total_pairs: usize = chip_pair_counts.iter().sum();
-    // Step 8d FIX: SP1 semantics — colIndex[i] maps OUTPUT pair position
+    // SP1 semantics: colIndex[i] maps OUTPUT pair position
     // to a GLOBAL COLUMN id (across all chips), NOT to a chip.  Each
     // (chip, col-within-chip) pair is a distinct global col.
     //
@@ -1064,7 +1063,7 @@ where
     let total_cols: usize = (0..n_chips)
         .map(|c| first_layer.numerator_0[c].num_interactions)
         .sum();
-    // Step 9: skip padding chips from col_index.  start_indices still
+    // Skip padding chips from col_index.  start_indices still
     // sized at total_cols+1 to allow indexing by global col id, but
     // pad-chip entries get a sentinel (won't be referenced).
     let effective_total_pairs: usize = (0..n_chips)
@@ -1130,13 +1129,13 @@ where
         });
     }
 
-    // Step 7w: REAL eq tables (passed-in from caller).  Transmute_copy
+    // REAL eq tables (passed-in from caller).  Transmute_copy
     // EF -> ProdEF is sound by TypeId guard above.  Slice cast via
     // raw pointer so we can pass &[ProdEF] without rebuilding.
     unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
         core::slice::from_raw_parts(s.as_ptr().cast::<B>(), s.len())
     }
-    // Step 7y: build a SEPARATE eq_row from REVERSED row coords so the
+    // Build a SEPARATE eq_row from REVERSED row coords so the
     // GPU kernels LSB-binding (adjacent (2i, 2i+1)) targets the same
     // variable Ziren binds via MSB (last coord of row_point).
     //
@@ -1152,7 +1151,7 @@ where
         .map(|c| 1usize << first_layer.numerator_0[c].num_row_variables)
         .max()
         .unwrap_or(1);
-    // Step 8d: single shuffled eq_row shared across ALL global cols.
+    // Single shuffled eq_row shared across ALL global cols.
     // All chips have chip_rows = layer_chip_rows = 2^num_row_vars,
     // so single shuffled buffer of length chip_rows works.
     let num_row_vars = first_layer.num_row_variables;
@@ -1175,7 +1174,7 @@ where
     let eq_row_chip_offsets_v: Vec<u32> = vec![0u32; total_cols];
     let _ = max_chip_rows;
     let eq_row_real: &[ProdEF] = &shuffled_eq_row;
-    // Step 8d: use ORIGINAL interaction_point for GPU eq_int (matches
+    // Use ORIGINAL interaction_point for GPU eq_int (matches
     // Zirens host indexing — eq_int[global_col_id] reads correctly).
     let num_int_vars = total_dim.saturating_sub(num_row_vars);
     let interaction_point_orig: Vec<EF> = eval_point[..num_int_vars].to_vec();
@@ -1195,10 +1194,10 @@ where
     let lambda_ef: ProdEF = unsafe { core::mem::transmute_copy::<EF, ProdEF>(&_lambda) };
 
 
-    // Phase 4: device-variant attempt.  When env flag is set
+    // Device-variant attempt.  When env flag is set
     // AND TLS handle present, try the device-resident dispatch first.
     // Returns same (Vec<Ef4>, Vec<Ef4>) partials shape as the host
-    // hook — Step 8e reconstruction continues unchanged.  On None,
+    // hook — the SP1-style reconstruction continues unchanged.  On None,
     // fall through to host hook (default behavior preserved).
     // C3 May-14: dump metadata buffers for diff (just before device dispatch).
     {
@@ -1368,7 +1367,7 @@ where
         unsafe { core::mem::transmute_copy::<ProdEF, EF>(v) }
     } else { return None; };
 
-    // Step 9: add back analytic contributions from skipped padding chips.
+    // Add back analytic contributions from skipped padding chips.
     // Per padding chip c: contribution to sum_zero = chip_eq_int_sum_c * sum_eq_lo,
     // to sum_half = chip_eq_int_sum_c * (sum_eq_lo + sum_eq_hi),
     // to eq_sum = chip_eq_int_sum_c (one per pair = chip_eq_int_sum total).
@@ -1419,8 +1418,8 @@ where
     let four = EF::from_u32(4);
     let eight_inv = EF::from_u32(8).try_inverse().expect("8 has inverse in EF");
 
-    // Step 8e FIX: restore col-axis padding correction.
-    // Per diagnostic in step 8d: host_evals[0] = GPU sum_zero +
+    // Restore col-axis padding correction.
+    // Diagnostically: host_evals[0] = GPU sum_zero +
     // pad_eq_int_sum * (1-alpha).  Ziren's polynomial includes
     // col-axis padding (virtual cols [total_real_cols..2^num_int_vars)
     // contribute identity * eq_int values).  GPU only iterates real
@@ -1465,10 +1464,9 @@ where
     });
 
     // One-shot side-by-side log (per process — first dispatch only).
-    // Step 8d diagnostic: check sum_zero vs host_evals[0] directly.
+    // Diagnostic: check sum_zero vs host_evals[0] directly.
     // If kernel correct, GPU sum_zero should equal host_evals[0] (= true p(0))
     // since host derives p(0) = claim - p(1) and sumcheck identity gives same value.
-    // Step 8e: analytic per-chip f_chip(0) computation for isolation diff.
     static DIFF_LOG: OnceLock<()> = OnceLock::new();
     DIFF_LOG.get_or_init(|| {
         let fp_diff = if denominator_concat.is_empty() { format!("empty") } else { format!("{:?}", denominator_concat[0]) };
@@ -1492,9 +1490,9 @@ where
         );
     });
 
-    // Sprint B2.2 + B4 (SP1 port): decode the full packed header from
+    // SP1 port: decode the full packed header from
     // post_fix when SP1 mode emits the packed payload, then build the
-    // post-fix ChipLayerState via the B3 constructor.  When the build
+    // post-fix ChipLayerState via the strided-post-fix constructor.  When the build
     // succeeds, the caller (LogupRoundPolynomial::new) wires it into
     // PolynomialLayer::GpuPrefolded.  When it doesn't, the caller
     // falls back to PolynomialLayer::Chip(host_chip_state) +
@@ -2254,7 +2252,7 @@ pub struct LogupRoundPolynomial<EF> {
     /// Original (= layer-global) `num_interaction_variables` — needed
     /// at the chip→packed transition to size the packed MLE.
     layer_int_vars: usize,
-    /// Step 8g: cached round-0 poly from GPU (when ZIREN_GPU_FUSED_FIRST_ROUND=1
+    /// Cached round-0 poly from GPU (when ZIREN_GPU_FUSED_FIRST_ROUND=1
     /// fires successfully).  Consumed on first sum_as_poly_in_last_variable
     /// call.  Cleared by fix_last_variable so subsequent rounds use the
     /// normal host path.
@@ -2398,7 +2396,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             claimed_sum,
         );
 
-        // Sprint B4: when GPU returns a fully-built post-fix
+        // When GPU returns a fully-built post-fix
         // ChipLayerState (Some inner Option), wire into
         // PolynomialLayer::GpuPrefolded.  Otherwise fall back to
         // PolynomialLayer::Chip(chip_state) + cached round-0 poly
@@ -2529,7 +2527,7 @@ impl<EF: Field + Send + Sync> ComponentPoly<EF> for LogupRoundPolynomial<EF> {
 
 impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
     fn fix_last_variable(mut self, alpha: EF) -> Self {
-        // Step 8g: clear GPU first-round cache once round 0 is bound.
+        // Clear GPU first-round cache once round 0 is bound.
         self.gpu_cached_first_poly = None;
         // Fold n/d data based on current mode.
         match &mut self.state {
@@ -2672,9 +2670,9 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
     }
 
     fn sum_as_poly_in_last_variable(&self, claim: Option<EF>) -> UnivariatePolynomial<EF> {
-        // Step 8g: GPU first-round cache.  Returns SP1-reconstructed
+        // GPU first-round cache.  Returns SP1-reconstructed
         // poly from try_first_round_on_gpu (verified COEFFS_MATCH=true
-        // on production tendermint, step 8e).  Saves the heavy
+        // on production tendermint).  Saves the heavy
         // round_poly_evaluations work.  Cache cleared on
         // fix_last_variable so subsequent rounds use the host path.
         if let Some(cached) = &self.gpu_cached_first_poly {
@@ -3320,14 +3318,14 @@ where
 /// taking a generic `Challenger` parameter (which would prevent
 /// function-pointer dispatch).
 #[allow(clippy::too_many_arguments)]
-/// s7-B transcript-safety: TypeId-gated snapshot of the caller's
+/// Transcript-safety: TypeId-gated snapshot of the caller's
 /// challenger for the GPU logup dispatch helpers.  The hooks
 /// observe/sample into the LIVE challenger; if the device body fails
 /// MID-LOOP (e.g. a pressure-dependent CUDA alloc inside ziren-gpu's
 /// `run_device_loop_pooled`) the hook returns `None` and the caller
 /// falls back to the host body — without restoring the snapshot the
 /// transcript would be double-advanced and the emitted proof silently
-/// INVALID (the s6 T3c armed-assert class, root-caused in s7-B).
+/// INVALID (caught by the armed transcript-consistency assert).
 /// Returns `None` when `Challenger` is not the concrete
 /// `InnerChallenger`; callers must then SKIP the GPU dispatch (host
 /// path only) since a sound fallback could not be guaranteed.
@@ -3418,7 +3416,7 @@ where
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // When the device-eq path is enabled, skip the
     // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
     // per-round H2D upload.  Stash the tiny LSB-first `row_point`
     // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
@@ -3437,7 +3435,7 @@ where
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
-    // s7-B transcript-safety: snapshot for a sound fallback; skip the
+    // Transcript-safety: snapshot for a sound fallback; skip the
     // GPU dispatch entirely if the challenger type can't be snapshot.
     let Some(challenger_snapshot) = snapshot_inner_challenger(&*challenger) else {
         return None;
@@ -3477,7 +3475,7 @@ where
     let result = match result {
         Some(r) => r,
         None => {
-            // s7-B transcript-safety: the device body may have
+            // Transcript-safety: the device body may have
             // observed/sampled before failing — restore the snapshot
             // so the host fallback re-runs on the SAME transcript.
             *challenger = challenger_snapshot;
@@ -3589,7 +3587,7 @@ where
 
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // When the device-eq path is enabled, skip the
     // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
     // per-round H2D upload.  Stash the tiny LSB-first `row_point`
     // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
@@ -3614,7 +3612,7 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
-    // s7-B transcript-safety: snapshot for a sound fallback (see
+    // Transcript-safety: snapshot for a sound fallback (see
     // snapshot_inner_challenger docs).
     let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
     let result = gpu_hook_v2(
@@ -3632,7 +3630,7 @@ where
     let result = match result {
         Some(r) => r,
         None => {
-            // s7-B transcript-safety: restore so the host fallback
+            // Transcript-safety: restore so the host fallback
             // re-runs on the SAME transcript state.
             *inner_challenger = challenger_snapshot;
             return None;
@@ -3807,7 +3805,7 @@ where
     };
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
-    // #50 (s9-DR2): when the device-eq path is enabled, skip the
+    // When the device-eq path is enabled, skip the
     // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
     // per-round H2D upload.  Stash the tiny LSB-first `row_point`
     // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
@@ -3832,7 +3830,7 @@ where
         &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
     };
 
-    // s7-B transcript-safety: snapshot for a sound fallback (see
+    // Transcript-safety: snapshot for a sound fallback (see
     // snapshot_inner_challenger docs).
     let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
     let result = gpu_hook_v3(
@@ -3851,7 +3849,7 @@ where
     let result = match result {
         Some(r) => r,
         None => {
-            // s7-B transcript-safety: restore so the host fallback
+            // Transcript-safety: restore so the host fallback
             // re-runs on the SAME transcript state.
             *inner_challenger = challenger_snapshot;
             return None;
