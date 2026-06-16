@@ -142,7 +142,7 @@ where
 ///   - `t_{X=2}(i) = 2·t[i+half] - t[i]`
 ///   - `t_{X=3}(i) = 3·t[i+half] - 2·t[i]`
 ///
-/// ## Factored eq decomposition (Tier 1 Phase 1)
+/// ## Factored eq decomposition
 ///
 /// Instead of materializing a global `eq` table of length
 /// `2^total_vars × 16 B`, we keep two factored slices:
@@ -338,7 +338,7 @@ fn poly_coefficients_from_evals<EF: Field>(evals: [EF; 4]) -> [EF; 4] {
 
 /// Evaluate a coefficient-form polynomial at a point via Horner's.
 ///
-/// Retained for tests after Phase 3 refactor moved the production
+/// Retained for tests after the refactor moved the production
 /// driver into `crate::shard_level::sumcheck_poly`.
 #[allow(dead_code)]
 fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
@@ -778,8 +778,8 @@ where
     // stash and install into TLS for this scope.  Gated by
     // `ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=1` (separate from the
     // stash-populating `ZIREN_GPU_DEVICE_FIRST_LAYER` flag) so
-    // operators don't pay the per-shard cudaFree churn until Phase 3
-    // (device-side first-round kernel) ships and actually USES the
+    // operators don't pay the per-shard cudaFree churn until the
+    // device-side first-round kernel ships and actually USES the
     // handle.  Default OFF preserves stash-only behavior.
     let _device_first_layer_guard = {
         static CONSUME_GATE: OnceLock<bool> = OnceLock::new();
@@ -792,7 +792,7 @@ where
                 .unwrap_or(true)
         });
         use crate::shard_level::device_first_layer_context as dfl;
-        // C6 May-14 fix: ALWAYS drain on each shard's first dispatch.
+        // ALWAYS drain on each shard's first dispatch.
         // The TLS slot persists across shards (Drop is no-op), so the
         // is_none() check would skip drain after shard 1 → all later
         // shards would reuse shard 1's stale handle. Drain unconditionally
@@ -845,8 +845,8 @@ where
     // per chip writes directly to its slice.  Eliminates per-chip
     // intermediate Vec<Vec> overhead.
     //
-    // Phase 2 ROI probe: time the marshal so we can validate whether the
-    // multi-day device-resident dispatch refactor delivers its
+    // ROI probe: time the marshal so we can validate whether the
+    // device-resident dispatch refactor delivers its
     // estimated savings.  Aggregate across shards to compare against
     // baseline wall.
     let _marshal_start = std::time::Instant::now();
@@ -1024,7 +1024,7 @@ where
         });
         });  // marshal_thread_pool().install
     }
-    // Phase 2 ROI probe: per-shard marshal elapsed.
+    // ROI probe: per-shard marshal elapsed.
     let _marshal_elapsed_us = _marshal_start.elapsed().as_micros();
     tracing::info!(
         target = "first_round_marshal",
@@ -2124,7 +2124,7 @@ fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, 
 /// collapsed to a single row each via row binding).  The output four
 /// vectors each have length `1 << num_interaction_variables` and match
 /// the layout `flatten_layer` would have produced after the same number
-/// of row-binding folds — see Phase 2A `flatten_layer` for the layout.
+/// of row-binding folds — see `flatten_layer` for the layout.
 ///
 /// **PaddedMle pattern **: chips with `num_real_rows == 0`
 /// were fully-padding and contributed nothing materialised — their
@@ -2197,8 +2197,7 @@ fn fold_eq<EF: Field + Send + Sync>(tab: &[EF], alpha: EF) -> Vec<EF> {
     out
 }
 
-/// Sumcheck-poly wrapper around the row-only LogUp-GKR layer state
-/// (Tier 1 Phase 3).
+/// Sumcheck-poly wrapper around the row-only LogUp-GKR layer state.
 ///
 /// Mirrors SP1's
 /// [`LogupRoundPolynomial`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs#L13-L28)
@@ -2211,7 +2210,7 @@ fn fold_eq<EF: Field + Send + Sync>(tab: &[EF], alpha: EF) -> Vec<EF> {
 /// Differences from SP1:
 ///   * Uses Ziren's `Vec<Vec<EF>>` chip-structured representation
 ///     plus a flat `Vec<EF>` packed-interaction representation,
-///     matching Phase 2B's two-mode prover.
+///     matching the two-mode prover.
 ///   * Numerators are pre-lifted to `EF` (Ziren currently lacks a
 ///     base-field first-round optimization).  Therefore there is only
 ///     one type for both `Self` and `NextRoundPoly`.
@@ -2641,7 +2640,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         // Fold the eq factor that corresponds to the variable bound
         // this round.  MSB-first cadence: row first, then interaction.
         // We use eq_row.len() > 1 as the discriminator (matches the
-        // original Phase 2A logic).
+        // original flatten-layer logic).
         if self.eq_row.len() > 1 {
             self.eq_row = fold_eq(&self.eq_row, alpha);
             // Row fold doesn't affect pad_eq_int_sum.
@@ -2786,7 +2785,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 )
             }
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
-                // Task dispatch hook (Phase 2): when
+                // GPU dispatch hook: when
                 // ZIREN_GPU_SUMCHECK=1 AND a GPU evaluator is
                 // registered via
                 // `crate::shard_level::sumcheck_poly::register_gpu_sumcheck_hook`
@@ -2935,7 +2934,7 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// per-layer openings `(n_0, n_1, d_0, d_1)` at the sumcheck's reduced
 /// point.
 ///
-/// ## Memory layout (Tier 1 Phase 2B — chip-structured folding)
+/// ## Memory layout (chip-structured folding)
 ///
 /// During the first `num_row_variables` rounds the n/d data is kept
 /// in **per-chip** `Vec<Vec<EF>>` form (`Σ_c chip_rows × chip_cols`)
@@ -2946,12 +2945,12 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// production reth shards the saving is on the order of 10–60×
 /// because `Σ chip_cols ≪ 2^num_int_vars` for most layer shapes.
 ///
-/// ## Tier 1 Phase 3 — trait-driven sumcheck
+/// ## Trait-driven sumcheck
 ///
 /// The body now constructs a `LogupRoundPolynomial` and dispatches to
 /// the generic [`reduce_sumcheck_to_evaluation`] driver.  The
 /// transcript bytes (round polynomials, openings, final eval) are
-/// byte-identical to the post-Phase-2B prover; only the dispatch
+/// byte-identical to the earlier chip-structured prover; only the dispatch
 /// shape changes (manual loop → trait-driven driver).
 ///
 /// The caller must sample `lambda` via the challenger BEFORE calling
