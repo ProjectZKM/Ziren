@@ -681,7 +681,7 @@ mod jagged_orchestration_hook {
     /// equal `log2(padded_height)` per chip.
     ///
     /// `z_row` is the full shared zerocheck eval point used by the
-    /// Phase 3 branching-program jagged-eval sub-protocol (matches
+    /// zerocheck-stage branching-program jagged-eval sub-protocol (matches
     /// the host `prove_jagged_basefold` 3rd param).
     pub type GpuJaggedOrchestrationFn = fn(
         chip_traces: &[(String, RowMajorMatrix<KoalaBear>)],
@@ -727,7 +727,7 @@ mod jagged_pcs_device_hook {
     /// heights can exceed `1 << r_row.len()` (would OOB the eq table).
     ///
     /// `z_row` is the full shared zerocheck eval point used by the
-    /// Phase 3 branching-program jagged-eval sub-protocol (matches
+    /// zerocheck-stage branching-program jagged-eval sub-protocol (matches
     /// the host `prove_jagged_basefold` 3rd param).
     pub type GpuJaggedPcsDeviceFn = fn(
         chip_names: &[String],
