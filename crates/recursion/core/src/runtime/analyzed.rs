@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(mem_offsets, vec![0]);
     }
 
-    // (removed) sumcheck_verify_carries_secondary_offset — #391:
+    // (removed) sumcheck_verify_carries_secondary_offset test:
     // SumcheckVerify pipeline deleted, no multi-chip emitters remain.
 
     #[test]
