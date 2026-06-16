@@ -201,10 +201,8 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             .flatten()
             .copied()
             .collect();
-        // Phase 2 gate 3 diagnostic: on assertion failure, log
-        // per-round lengths + dimensions so the next session can
-        // fingerprint the exact shape mismatch.  See
-        // docs/phase2_gate3_analysis.md for the three candidate fixes.
+        // Diagnostic: on assertion failure, log per-round lengths +
+        // dimensions so the exact shape mismatch can be fingerprinted.
         assert_eq!(
             batch_evals_flat.len(),
             1 << batch_dim,
