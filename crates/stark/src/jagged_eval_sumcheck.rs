@@ -3,7 +3,7 @@
 //! Source-mapped from
 //! `slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:182-243`.
 //!
-//! # Status (#243 scaffolding — May 6 2026)
+//! # Status (scaffolding — May 6 2026)
 //!
 //! This file lays the **foundation** for the SP1 jagged-eval port.
 //! [`JaggedSumcheckEvalProof`] mirrors the SP1 wire-format struct;
@@ -81,7 +81,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 
 /// Prove the jagged-evaluation sub-protocol.
 ///
-/// **#243 Phase 1 (THIS scaffolding)**: returns a structurally-valid
+/// **Scaffolding**: returns a structurally-valid
 /// placeholder.  The polynomial construction + sumcheck prover body
 /// is the day-2 work — see this module's "Math" section above.
 ///
@@ -517,7 +517,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
 }
 
 #[allow(clippy::too_many_arguments)]
-// #H (BaseFold-over-BN254): generic over the challenger (FieldChallenger only).
+// Generic over the challenger (FieldChallenger only) so the BN254 wrap reuses it.
 pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     prefix_sums: &[usize],
     z_row: &[InnerChallenge],
