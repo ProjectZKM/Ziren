@@ -27,7 +27,7 @@ use crate::Chip;
 ///
 /// **Output:**
 /// `(LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)` — same shape as
-/// the `generate_gkr_circuit` return type, lets the caller (step 5)
+/// the `generate_gkr_circuit` return type, lets the caller
 /// walk the layer stack bottom-up to drive per-round sumchecks.
 ///
 /// **Panics** when `num_row_variables == 0` (degenerate empty shard
@@ -258,7 +258,7 @@ where
 
     // Push the first EF layer as a Host entry — the host transition
     // out of the FirstLayer already happened, and the sumcheck round
-    // dispatcher (Step 4d, future) needs the per-layer cells anyway.
+    // dispatcher needs the per-layer cells anyway.
     // Storing it host-side here matches the host path's behavior for
     // this one layer; only SUBSEQUENT layers go through Device.
     layers.push(LayerState::Host(GkrCircuitLayer::Layer(first_ef_layer)));
@@ -271,7 +271,7 @@ where
     // The host loop pushes EVERY layer (including the final null
     // terminal at num=0).  We do the same to keep `layers.len()`
     // identical to the host path so `layers[layers.len() - 2]`
-    // indexing in downstream code (Step 4d round.rs migration, future)
+    // indexing in downstream code (the round.rs migration)
     // still resolves to the terminal at num=1.
     //
     // We capture the handle at num=1 (the TERMINAL layer
@@ -416,7 +416,7 @@ mod tests {
     fn build_gkr_circuit_shape_smoke() {
         // The Chip<F, A> wrapper requires an A: MachineAir<F> instance.
         // Constructing one in unit tests requires a real chip type, which
-        // pulls in zkm_core_machine.  Step 6 (top-level wiring) is the
+        // pulls in zkm_core_machine.  The top-level wiring is the
         // appropriate place to exercise this end-to-end via real chips.
         let _ = one_chip_shard(2);
     }
@@ -424,7 +424,7 @@ mod tests {
     /// `build_gkr_circuit`'s zero-row-variables panic guard is
     /// validated by inspection — the assertion at the function head
     /// is its own test.  An end-to-end runtime panic test requires a
-    /// real `Chip<F, A>` instance, deferred to step 6.
+    /// real `Chip<F, A>` instance, deferred to the top-level wiring.
     #[allow(dead_code)]
     fn _zero_row_variables_panic_guard_is_visible_in_signature() {
         // assertion at build.rs:36: "build_gkr_circuit requires num_row_variables >= 1"
