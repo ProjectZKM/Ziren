@@ -1,4 +1,4 @@
-//! Step 5 Phase 3b — Compress recursion-side basefold verifier program (May 19 2026).
+//! Compress recursion-side basefold verifier program (May 19 2026).
 //!
 //! Counterpart to [`super::compress_basefold`] that targets the
 //! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
@@ -57,7 +57,7 @@
 //!   the cryptographic soundness of *that chip* under the basefold
 //!   pipeline needs separate verification.  This program builder
 //!   produces a syntactically-correct program either way — soundness
-//!   checks are deferred to Phase 3c (vk_map regen + smoke tests).
+//!   checks are deferred to vk_map regen + smoke tests.
 //!
 //! # Reference
 //!
@@ -83,7 +83,7 @@ use super::compress_basefold::{verify_compress_basefold, ZKMCompressBasefoldWitn
 ///
 /// Direct analog of [`super::basefold_programs::build_compose_basefold_program`]
 /// that's expected to be invoked with `A = RecursionAir<KoalaBear, DEGREE>`
-/// for the Step 5 Phase 3 retirement of the legacy FRI path on
+/// for the retirement of the legacy FRI path on
 /// recursion shards.  The generic `A` bound is identical to the MIPS
 /// program builder — call sites distinguish via the concrete type
 /// they pass for `machine`'s chip parameter.
