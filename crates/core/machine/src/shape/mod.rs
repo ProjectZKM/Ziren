@@ -732,11 +732,11 @@ pub mod tests {
         try_generate_dummy_proof(&prover, &shape);
     }
 
-    /// #38: canonicalize_shape_to_cluster must pad a raw event-driven
+    /// canonicalize_shape_to_cluster must pad a raw event-driven
     /// main_exec shard (missing the optional CloClz/DivRem/Syscall* chips) UP
     /// to the full 20-chip main_exec cluster, so the GPU multi-shard prove path
-    /// (which now calls this — ziren-gpu core_multi_gpu.rs) presents the
-    /// canonical chip set to the recursion vk_map. Without this, the raw
+    /// (which calls this) presents the canonical chip set to the recursion
+    /// vk_map. Without this, the raw
     /// 16/18-chip variants produce normalize vks not in the map ("vk not
     /// allowed").
     #[test]
@@ -788,8 +788,7 @@ pub mod tests {
 }
 
 /// Canonicalize a fixed record shape UP to the smallest stacked-shapes
-/// cluster that contains its chip set (VERIFY_VK multi-shard coverage,
-/// task #27).
+/// cluster that contains its chip set (VERIFY_VK multi-shard coverage).
 ///
 /// Chip sets are event-driven: a guest that never executes (say) a MISC
 /// instruction drops `MiscInstrs` from its execution shards, so the
