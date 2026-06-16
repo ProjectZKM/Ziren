@@ -1591,8 +1591,8 @@ mod platform {
                 // `--include-ignored ZIREN_DISABLE_JIT=1`).
                 // MIPS extension instructions: backend lowerings now
                 // present and validated against the executor by
-                // mipstest_instruction_suites under the post-#68
-                // control-flow JIT.  Lifted; if a regression appears,
+                // mipstest_instruction_suites under the control-flow
+                // JIT.  Lifted; if a regression appears,
                 // re-add the failing opcode to this match.
                 _ => {}
             }
@@ -1717,18 +1717,18 @@ pub use platform_diag::snapshot as jit_cache_stats;
 // today is the interp `Executor::execute_state` pass) emitting a
 // `MinimalTrace` with per-shard `mem_reads` oracle entries. The
 // existing path uses interp + the in-mr/mw `recording_chunk_mem_reads`
-// hook (D.4 producer wiring).
+// hook for producer wiring.
 //
-// D.5 swaps in the JIT for the same producer role. The JIT runs
-// native code at ~7× the interp speed (per
+// The eventual goal is to swap in the JIT for the same producer role.
+// The JIT runs native code at ~7× the interp speed (per
 // the related design memo), so even with a per-memory-op
 // recorder callback, the producer wins ~3-4× over the interp baseline.
 //
-// **Step 1 (this commit)**: scaffold a C-ABI extern recorder function +
+// This scaffold provides a C-ABI extern recorder function +
 // thread-local buffer + `take_recorded_mem_reads` drain. NO codegen
-// changes — future steps wire the trait `TraceCollector::trace_mem_value`
+// changes — later, the trait `TraceCollector::trace_mem_value`
 // implementation in `crates/core/jit/src/backends/x86/transpiler.rs`
-// to emit a call to `jit_record_mem_read` after every LW/LH/LB/SW/SH/SB
+// will emit a call to `jit_record_mem_read` after every LW/LH/LB/SW/SH/SB
 // lowering site.
 //
 // Codegen-level wiring is deferred because:
@@ -1737,7 +1737,7 @@ pub use platform_diag::snapshot as jit_cache_stats;
 //       end-to-end but we can't validate locally.
 //   (b) The host-side recorder is the harder-to-test piece (atomics,
 //       thread-local lifecycle, drain semantics). Landing it standalone
-//       lets the codegen wiring be a 1-line `.call` emit in step 2.
+//       lets the codegen wiring be a 1-line `.call` emit later.
 
 /// Single memory-read oracle entry, matching
 /// `crate::minimal_trace::MemValue` layout. Re-exported here so
