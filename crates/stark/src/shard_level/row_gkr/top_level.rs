@@ -57,7 +57,7 @@ where
             &mut logup_task_scope,
         );
 
-    // Step 0: proof-of-work grinding. MUST run BEFORE sampling alpha/beta to
+    // Proof-of-work grinding. MUST run BEFORE sampling alpha/beta to
     // match the in-circuit verifier's `check_witness`, which is the FIRST
     // challenger op in `verify_logup_gkr` (recursion logup_gkr.rs:347). p3's
     // `grind` finds the witness AND observes it into the challenger, so the
@@ -70,7 +70,7 @@ where
     // itself unenforced; see compiler.rs base_assert_eq / DivFAssert).
     let witness: F = challenger.gkr_grind(GKR_GRINDING_BITS);
 
-    // Step 1: sample [alpha, beta].  `beta_seed_dim` = log2(max_arity
+    // Sample the LogUp challenges [alpha, beta].  `beta_seed_dim` = log2(max_arity
     // rounded up).  `betas.len()` = 1 + max_arity (slot 0 is for
     // argument_index, slots 1..=arity for per-column values).
     let alpha: EF = challenger.sample_algebra_element::<EF>();
@@ -101,14 +101,13 @@ where
     // (`hypercube/logup_gkr/verifier.rs:198`) and lazily zero-pads the
     // first-layer MLEs to `max_log_row_count` (`execution.rs:226`).
     //
-    // #108 device residency (merged from 63f8cd49): chips whose host
-    // trace was emptied (device resident) resolve their REAL height
-    // from the per-shard provider inside the ceiling check below, so a
-    // device-resident tall chip (e.g. np>0 Program at 2^19) is still
-    // bounds-checked.  Note the FIXED `num_row_variables` already
-    // subsumes that commit's original concern (a data-dependent count
-    // shrinking below device-trace heights) — the count can no longer
-    // shrink at all.
+    // Device residency: chips whose host trace was emptied (device
+    // resident) resolve their REAL height from the per-shard provider
+    // inside the ceiling check below, so a device-resident tall chip
+    // (e.g. np>0 Program at 2^19) is still bounds-checked.  Note the
+    // FIXED `num_row_variables` already subsumes the original concern
+    // (a data-dependent count shrinking below device-trace heights) —
+    // the count can no longer shrink at all.
     debug_assert!(
         {
             let max_height = chips
@@ -136,7 +135,7 @@ where
 
     let n_chips = chips.len();
 
-    // Step 2: build GKR circuit + extract output MLEs.
+    // Build GKR circuit + extract output MLEs.
     let _t_first = std::time::Instant::now();
     let _first_span = tracing::info_span!("logup_gkr_first_layer").entered();
     let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
@@ -209,7 +208,7 @@ where
         }
     }
 
-    // Step 3: sample first eval_point (dim = num_interaction_variables + 1).
+    // Sample the first eval_point (dim = num_interaction_variables + 1).
     let mut eval_point: Vec<EF> = (0..(num_interaction_variables + 1))
         .map(|_| challenger.sample_algebra_element::<EF>())
         .collect();
@@ -237,7 +236,7 @@ where
     let mut numerator_eval: EF = evaluate_mle::<EF>(&output.numerator, &eval_point);
     let mut denominator_eval: EF = evaluate_mle::<EF>(&output.denominator, &eval_point);
 
-    // Step 5: walk layers bottom-up.  `circuit.layers` is stored
+    // Walk layers bottom-up.  `circuit.layers` is stored
     // top-down (first = largest num_row_vars); `pop_bottom` pops the
     // smallest first, which is the extraction source — skip it and
     // start from the next one up (num_row_variables == 1 terminal).
@@ -341,7 +340,7 @@ where
         "logup_gkr sub-phase done"
     );
 
-    // Step 6: per-chip trace evaluations. The eval_point has dim
+    // Per-chip trace evaluations. The eval_point has dim
     // `num_row_variables + num_interaction_variables + 1`; each
     // chip's evaluation point is the trailing `log(chip_height)`
     // coords.
@@ -349,7 +348,7 @@ where
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
 
-    // #49 BATCHED step-6 eval (default ON; ZIREN_GPU_EVAL_AT_BATCH=0 opt-out):
+    // BATCHED per-chip eval (default ON; ZIREN_GPU_EVAL_AT_BATCH=0 opt-out):
     // collect every device-only chip (empty host trace, non-zero declared
     // width) + its trailing-coord eval-point, then evaluate them ALL in ONE
     // batched provider call that builds one eq-table per DISTINCT eval-point
@@ -392,7 +391,7 @@ where
                         map.insert(name.clone(), v);
                     }
                 }
-                // #49 parity gate (ZIREN_GPU_EVAL_AT_BATCH_VERIFY=1): re-run the
+                // Parity gate (ZIREN_GPU_EVAL_AT_BATCH_VERIFY=1): re-run the
                 // legacy per-chip eval-at for every batched chip and assert the
                 // batched result is BYTE-IDENTICAL. Proves the batched path is
                 // transcript-neutral before the per-chip path is retired.
@@ -431,7 +430,7 @@ where
         .zip(preprocessed_traces.par_iter())
         .map(|((chip, main_trace), prep_trace)| {
             let main_height = if main_trace.width == 0 {
-                // #108: device-only chip — its real height lives in the
+                // Device-only chip — its real height lives in the
                 // per-shard provider (host trace empty). Falls back to 1
                 // (legacy unexercised-chip) when no provider entry.
                 _device_traces
@@ -452,10 +451,10 @@ where
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
             let main_evals = if main_trace.width == 0 && chip_main_width > 0 {
-                // #108: device-only chip — eval its device-resident trace
+                // Device-only chip — eval its device-resident trace
                 // (from the provider) at the GKR point on device, instead of
                 // emitting a zero vector (which breaks the zerocheck GKR
-                // sum-modification identity). #49: prefer the BATCHED result
+                // sum-modification identity). Prefer the BATCHED result
                 // (one eq-build per distinct point); fall back to the per-chip
                 // hook, then to zeros (legacy unexercised-chip behaviour).
                 batched_main_evals
