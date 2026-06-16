@@ -1,4 +1,4 @@
-//! ## Task #397 (May 19 2026) — FRI root-verifier deletion
+//! ## FRI root-verifier deletion (May 19 2026)
 //!
 //! `ZKMCompressRootVerifier` and `ZKMCompressRootVerifierWithVKey` were
 //! thin wrappers around `ZKMCompressVerifier::verify` /
