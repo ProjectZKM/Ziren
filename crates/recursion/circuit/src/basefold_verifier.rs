@@ -76,8 +76,8 @@ impl BasefoldVerifierParams {
     /// which mismatched the prover's rate-1/2 LDEs and would have
     /// the recursion-circuit verifier reading 16× more bytes per
     /// stripe than the prover produced — structural divergence.
-    /// Closes #54 (stark log_blowup=1 vs recursion log_blowup=4
-    /// reconciliation).
+    /// Reconciles the stark prover's log_blowup=1 with the recursion
+    /// verifier's previous log_blowup=4.
     pub const fn production_default(num_variables: usize) -> Self {
         Self {
             log_blowup: 1,
@@ -200,9 +200,9 @@ pub struct RecursiveBasefoldComponentOpening<F, EF, Dig = [F; 8]> {
     /// = column count for that stripe.
     pub leaf_values: Vec<Vec<F>>,
     pub merkle_path_bytes: Vec<u8>,
-    /// GAP-2 binding: the Merkle inclusion path (sibling digests,
-    /// leaf-to-root) for this leaf against the round's ORIGINAL
-    /// component commitment — host `MerkleOpening.leaves[q].proof`.
+    /// The Merkle inclusion path (sibling digests, leaf-to-root) that
+    /// binds this leaf against the round's ORIGINAL component
+    /// commitment — host `MerkleOpening.leaves[q].proof`.
     pub merkle_path_digests: Vec<Dig>,
     pub _phantom: core::marker::PhantomData<(EF, Dig)>,
 }
@@ -533,7 +533,7 @@ where
             core::array::from_fn(|_| builder.uninit());
         // Tuple order is (dst, src) — see compiler.rs dispatch which
         // calls `poseidon2_permute(data.0 as dst, data.1 as src)`.
-        // Pre-#246 this was `(input, output)` (backwards) but the
+        // This was previously `(input, output)` (backwards) but the
         // bug stayed latent because the merkle binding loop's
         // is_empty() guard short-circuited every call.
         builder.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, input))));
@@ -594,8 +594,8 @@ where
     let mut x = initial_x;
 
     for (round, ([eval0, eval1], beta)) in sibling_pairs.iter().zip(betas.iter()).enumerate() {
-        // #7898240 fix: the fold point depends on the query index's
-        // per-round bit (which sibling is at +x vs -x).  Mirror SP1
+        // The fold point depends on the query index's per-round bit
+        // (which sibling is at +x vs -x).  Mirror SP1
         // (crates/recursion/circuit/src/basefold/mod.rs:347-406) and the
         // host (crates/stark/src/basefold/verifier.rs:378-387):
         //   xs = [x, -x]   if bit == 0   (current at +x)
@@ -681,9 +681,9 @@ where
     HV: crate::hash::FieldHasherVariable<C>,
 {
     type Commitment = HV::DigestVariable;
-    // P2c STEP 1: the proof now carries `Felt`/`Ext` circuit variables for
-    // its base/extension values (const-promotion moved into the Witnessable
-    // `read`); the digest type stays the raw `HV::Digest` (witnessed in STEP 3).
+    // The proof carries `Felt`/`Ext` circuit variables for its
+    // base/extension values (const-promotion moved into the Witnessable
+    // `read`); the digest type stays the raw `HV::Digest` (witnessed below).
     type Proof = RecursiveBasefoldProof<
         zkm_recursion_compiler::prelude::Felt<C::F>,
         zkm_recursion_compiler::prelude::Ext<C::F, C::EF>,
@@ -725,13 +725,13 @@ where
         // into the transcript.  The previous spurious observes desync'd
         // every downstream challenge; masked by vacuous recursion-VM
         // asserts, ENFORCED (and thus failing) in the gnark OUTER wrap.
-        // GAP-2a/2b: `commitments` + `batch_evaluations` are now consumed
-        // by the per-query component binding below (no longer discarded).
+        // `commitments` + `batch_evaluations` are now consumed by the
+        // per-query component binding below (no longer discarded).
 
         // (1) Verify batch grinding (host step 1):
         //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
         {
-            // STEP 1: already a Felt variable (const-built in the lift's read).
+            // Already a Felt variable (const-built in the lift's read).
             let batch_witness = proof.batch_grinding_witness;
             challenger.check_witness(builder, self.params.batch_grinding_bits, batch_witness);
         }
@@ -743,7 +743,7 @@ where
         //   host does NOT bind into the transcript (host step 3), so we
         //   only need to consume the same number of challenges here to
         //   keep the FS state aligned.
-        // GAP-2a: KEEP the sampled batching point — the per-query batched
+        // KEEP the sampled batching point — the per-query batched
         // initial_eval below recombines the component-opening leaf values
         // with partial_lagrange(batching_point) coefficients, mirroring the
         // host (crates/stark/src/basefold/verifier.rs:110-125, 208-246).
@@ -819,7 +819,7 @@ where
                 let p1 = round.uni_poly[1];
                 observe_ext_element::<C, FC>(builder, challenger, p0);
                 observe_ext_element::<C, FC>(builder, challenger, p1);
-                // STEP 3: round.commitment is a witnessed DigestVariable.
+                // round.commitment is a witnessed DigestVariable.
                 challenger.observe(builder, round.commitment);
                 challenger.sample_ext(builder)
             })
@@ -863,7 +863,7 @@ where
                     })
                     .collect();
 
-                // GAP-2a/2b: BOUND initial_eval.  When the proof carries
+                // BOUND initial_eval.  When the proof carries
                 // component openings (the inner production path), the query
                 // chain's start value is RECOMPUTED from the component-
                 // opening leaf values batched with the Lagrange coefficients
@@ -951,7 +951,7 @@ where
                 let initial_x: zkm_recursion_compiler::prelude::Felt<C::F> =
                     C::exp_reverse_bits(builder, two_adic_generator, bits_for_exp);
 
-                // #7898240 fix: pass the per-round query index bits so the fold
+                // Pass the per-round query index bits so the fold
                 // reorders (+x, -x) per round (which sibling is current).  Same
                 // bits used for `initial_x` above (SP1 parity: index[round]).
                 let folded = emit_basefold_query_chain::<C>(
@@ -1003,7 +1003,7 @@ where
                     // log_codeword_size bits, so slice from `round_idx + 1`.
                     let path_bits = &query_indices[query_idx][round_idx + 1..];
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
-                        // STEP 3: witnessed DigestVariable, no const promotion.
+                        // Witnessed DigestVariable, no const promotion.
                         let sibling_variable: HV::DigestVariable = *sibling_digest;
                         let bit = path_bits[level].clone();
                         let pair = HV::select_chain_digest(
@@ -1022,7 +1022,7 @@ where
                     // `&proof.fri_commitments` (crates/stark/src/basefold/
                     // verifier.rs:280, 394).
                     if round_idx < proof.rounds.len() {
-                        // STEP 3: commitment is a witnessed DigestVariable.
+                        // commitment is a witnessed DigestVariable.
                         let round_commit: HV::DigestVariable =
                             proof.rounds[round_idx].commitment;
                         HV::assert_digest_eq(builder, leaf_digest, round_commit);
@@ -1046,7 +1046,7 @@ mod tests {
         assert_eq!(p.total_sumcheck_rounds(), 20);
         assert_eq!(p.total_merkle_commits(), 21);
         // log_codeword_size = num_variables + log_blowup = 20 + 1
-        // (post-#54: log_blowup aligned to 1 with stark prover).
+        // (log_blowup aligned to 1 with the stark prover).
         assert_eq!(p.log_codeword_size(), 21);
         assert!(p.estimated_recursion_constraints() > 0);
     }
