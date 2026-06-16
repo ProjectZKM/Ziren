@@ -97,13 +97,13 @@ where
     use p3_field::PrimeCharacteristicRing;
 
     // Per-shard zerocheck sub-phase timing.  Three sub-phases:
-    //   (a) per-chip C-table build (Step 2 par_iter — typically the
+    //   (a) per-chip constraint-table build (par_iter — typically the
     //       hot kernel for column-rich chips like Cpu, MemoryLocal).
-    //   (b) lambda-RLC fold (Step 4 — N×target_size ext-mul-adds).
-    //   (c) sumcheck driver (Step 5 — log_n rounds of MSB folds).
+    //   (b) lambda-RLC fold (N×target_size ext-mul-adds).
+    //   (c) sumcheck driver (log_n rounds of MSB folds).
     let n_chips = chips.len();
 
-    // Step 1: sample the per-chip constraint-batching challenge
+    // Sample the per-chip constraint-batching challenge
     // (powers-of-alpha), the gkr_batch_open challenge (transcript
     // alignment with verify_zerocheck_host — see verifier.rs:544),
     // and the inter-chip RLC challenge (lambda).  SP1 samples
@@ -178,13 +178,13 @@ where
                     panic!("chip {name} missing from logup_evaluations.chip_openings")
                 });
 
-            // #108 device-fold: for device-only chips (empty host main trace),
+            // Device-fold: for device-only chips (empty host main trace),
             // run the zerocheck FULLY on device — build the round-0 device cells
             // from the per-shard provider (bit-reversed by the prepare hook to
             // match the host bitrev_rows below). No materialize D2H. Falls back
             // to the materialize path (host cells) when the device-fold prepare
             // hook isn't registered.
-            // #108 device-fold: DEFAULT ON (kill-switch ZIREN_GPU_DEVICE_FOLD=0)
+            // Default on (kill-switch ZIREN_GPU_DEVICE_FOLD=0)
             // for ALL device-only chips. Mixed-height is handled in fold_device_hook
             // (odd num_real folds host-side, div_ceil + ZERO tail, matching host
             // fold_cells); the virtual_geq/padded_row_adjustment pad correction stays
@@ -198,7 +198,8 @@ where
                         let prep_hook =
                             crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;
                         let raw = p.lookup_by_name(&name)?;
-                        // #108-core np>0: build the chip's preprocessed cells in
+                        // For chips with preprocessed columns (np>0): build the
+                        // chip's preprocessed cells in
                         // column-major at the PROVIDER main height so the device
                         // prepare hook can append them to the main device cells and
                         // fold [main ++ prep] as one buffer. KoalaBear-only (the
@@ -240,7 +241,7 @@ where
                             // bit-reversed fold buffer; the provider's original
                             // is never read again (folds + openings derive from
                             // the clone) — let the provider release it early
-                            // (#367 VRAM window). No-op for legacy providers.
+                            // to shrink the peak VRAM window. No-op for legacy providers.
                             drop(raw);
                             p.release_by_name(&name);
                         }
@@ -386,7 +387,7 @@ where
                 padded_row_adjustment,
                 virtual_geq,
             );
-            // #108 device-fold: attach device cells so the per-round y-tuple +
+            // Device-fold: attach device cells so the per-round y-tuple +
             // fold run on device (no host cells).
             let poly = if let Some(dc) = device_cells_opt {
                 poly.with_device_cells(dc, None)
@@ -399,7 +400,8 @@ where
         // `_component_poly_evals` are the per-chip trace openings at the
         // reduced point z (padded-MLE@z, prep-then-main, name order) — the
         // values the jagged PCS must open at z for the full SP1 chain
-        // (review item 12).  Ignored for now: the host jagged-PCS still
+        // (the trace@z opening the recursion verifier reconstructs).
+        // Ignored for now: the host jagged-PCS still
         // opens at the GKR point per its own per-chip (jagged) dimension,
         // so re-pointing it to z requires reconciling padded-MLE@z vs
         // Ziren's per-chip jagged opening — a transcript-changing,
@@ -412,7 +414,7 @@ where
                 SC::Challenger,
             >(zerocheck_polys, challenger, chip_sumcheck_claims, 1, lambda);
         // Per-chip trace@z openings keyed by chip NAME (name order), feeding
-        // the item-12 opened_values (prover.rs E1d) the recursion verifier's
+        // the opened_values the recursion verifier's
         // recon consumes.  With the bitrev-rows orientation fix these are
         // bitrev_trace@z, matching the poly's reduced value.
         let mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>> =
@@ -454,7 +456,7 @@ where
     crate::septic_digest::SepticDigest(crate::septic_curve::SepticCurve { x, y })
 }
 
-/// #32 (commit-traces D2H removal): tail-only variant of
+/// Commit-traces D2H removal: tail-only variant of
 /// [`chip_global_cumulative_sum`].  `tail14` MUST be the last 14
 /// row-major values of the chip's main trace (x = 0..7, y = 7..14),
 /// e.g. from `DeviceTraceProvider::chip_main_tail` — a ~56-byte D2H
