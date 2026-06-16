@@ -109,9 +109,9 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// [`crate::shard_level_witness::lift_jagged_basefold_bundle_outer`], so
     /// the in-circuit challenger observes the same BN254 digests the host
     /// outer verifier absorbs (the all-zero placeholder for those
-    /// commitments was the residual gnark constraint-#488163 failure).
+    /// commitments was the residual gnark constraint failure).
     //
-    // P2c STEP 3: both lift dispatchers are REQUIRED (no default body).  A
+    // Both lift dispatchers are REQUIRED (no default body).  A
     // default that delegated to the inner const/witness lifts would need
     // `Self::DigestVariable = [Felt;8]`, and a restrictive where-clause on a
     // trait method propagates to EVERY caller (breaking the SC-generic wrap
@@ -136,7 +136,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
         Self: Sized;
 
-    /// P2c STEP 3 (ring-aware Bundle dispatch): lift a WITNESSED inner
+    /// Ring-aware Bundle dispatch: lift a WITNESSED inner
     /// jagged-basefold bundle (the value-independent production path) into the
     /// in-circuit [`crate::jagged_circuit::JaggedPcsProofVariable`].
     ///
@@ -165,7 +165,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
-        // Site-2 (#25): per-chip WITNESSED height felts (2^log_h, from the
+        // Per-chip WITNESSED height felts (2^log_h, from the
         // opened `degree`) so the inner bundle lift reconstructs
         // col_prefix_sums / row_counts value-independently.  The outer
         // (BN254) impl's bundle arm is dead and ignores it.
@@ -186,11 +186,11 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
 
     /// Ring-aware chip-height-bits derivation for the SC-generic wrap
     /// verifier.  INNER ring: WITNESSED (from the opened `degree`,
-    /// value-independent — VERIFY_VK Site-1/#25).  OUTER/gnark ring:
+    /// value-independent — keeps the witnessed vk verifiable).  OUTER/gnark ring:
     /// BAKED from chip_log_heights — the gnark constraint compiler has
     /// no `CircuitV2HintBitsF`, and the gnark circuit is a single
     /// artifact whose inputs have canonical shapes, so value-dependence
-    /// is moot there (pre-#25 behavior preserved).
+    /// is moot there (earlier baked behavior preserved).
     fn chip_height_bits_dispatch(
         builder: &mut Builder<C>,
         chip_names: &[String],
@@ -299,7 +299,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         root
     }
 
-    // P2c STEP 3: the INNER ring's lift dispatchers.  `Self::DigestVariable`
+    // The INNER ring's lift dispatchers.  `Self::DigestVariable`
     // is concretely `[Felt<KoalaBear>; 8]` here, so the const/witness lifts
     // (which require that) type-check directly.
     fn lift_evaluation_proof_bytes_dispatch(
@@ -371,7 +371,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
-            // Site-2 (#25): witnessed per-chip heights forwarded from the
+            // Witnessed per-chip heights forwarded from the
             // SC-generic wrap verifier (None = baked fallback).
             chip_height_felts,
         )
@@ -387,7 +387,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_stark::InnerChallenge>,
     {
-        // INNER ring: WITNESSED (value-independent, VERIFY_VK Site-1/#25).
+        // INNER ring: WITNESSED (value-independent).
         crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
             builder,
             chip_names,
@@ -525,7 +525,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
                 None,
             )
         } else {
-            // P2c STEP 3: the inner bytes lift now requires [Felt;8] digests
+            // The inner bytes lift now requires [Felt;8] digests
             // (which the outer ring lacks), so route the outer fallback to the
             // digest-generic placeholder.
             crate::jagged_pcs_lift::lift_empty_placeholder::<C, Self>(
@@ -536,7 +536,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         }
     }
 
-    /// P2c STEP 3: the OUTER ring never carries a `LiftedEvalProof::Bundle`
+    /// The OUTER ring never carries a `LiftedEvalProof::Bundle`
     /// (its wrap shard proof is `Bytes`/BN254), so this arm is dead — build a
     /// structural `[Var<Bn254>;1]` placeholder so the SC-generic
     /// `verify_wrap_basefold_core` type-checks for the outer instantiation.
@@ -590,7 +590,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     {
         // OUTER/gnark ring: BAKED from chip_log_heights — the gnark
         // constraint compiler has no CircuitV2HintBitsF, and the single
-        // gnark artifact's inputs have canonical shapes (pre-#25 wrap
+        // gnark artifact's inputs have canonical shapes (earlier baked wrap
         // behavior preserved on this ring).
         crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
             builder,
