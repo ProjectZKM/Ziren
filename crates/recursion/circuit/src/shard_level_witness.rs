@@ -217,7 +217,7 @@ where
     }
 }
 
-/// P2c STEP 2: the lifted (partially witnessed) evaluation proof carried out
+/// The lifted (partially witnessed) evaluation proof carried out
 /// of `BasefoldShardProof::read` in tuple slot 4.  For the `Bundle` variant
 /// the basefold proof's felt/ext values are read INLINE from the witness
 /// stream here (so the read order matches the per-shard write order — the
@@ -232,12 +232,12 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         host: JaggedBasefoldBundle,
         basefold_proof:
             RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
-        // P2c STEP 2b: the reduction sumcheck, jagged-eval sub-sumcheck, and
+        // the reduction sumcheck, jagged-eval sub-sumcheck, and
         // expected_eval (q_at_z) — also pre-read from the witness stream.
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
-        // P2b: original_commitments[0] = the BaseFold late-binding commit cap
+        // original_commitments[0] = the BaseFold commit cap
         // root, which equals `main_commitment` (basefold_commit_digest =
         // commitment.roots()[0]).  Reuse the already-witnessed main_commitment
         // so the lift doesn't BAKE the proof-specific root (value-independence).
@@ -276,10 +276,10 @@ where
         Vec<Felt<C::F>>,
         st::LogupGkrProof<Felt<C::F>, Ext<C::F, C::EF>>,
         st::PartialSumcheckProof<Ext<C::F, C::EF>>,
-        // P2c STEP 2: was the host `EvaluationProof` enum (passthrough); now
+        // was the host `EvaluationProof` enum (passthrough); now
         // the lifted form carrying the inline-witnessed basefold proof.
         LiftedEvalProof<C>,
-        // Review item 12: per-chip trace@z openings (name order).
+        // per-chip trace@z openings (name order).
         crate::basefold_chip_opened_values::BasefoldShardOpenedValues<
             Felt<C::F>,
             Ext<C::F, C::EF>,
@@ -292,11 +292,11 @@ where
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
-        // P2c STEP 2: for the Bundle variant, READ the basefold proof's
+        // for the Bundle variant, READ the basefold proof's
         // felt/ext values from the witness stream HERE (inline, in the
         // batched per-shard read order) — this is what makes the recursion
         // program value-independent.  Digests stay raw (rekeyed in the lift;
-        // witnessed in step 3).  Must mirror `write` exactly.
+        // witnessed separately).  Must mirror `write` exactly.
         use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
         let evaluation_proof = match &self.evaluation_proof {
             HostEvalProof::Empty => LiftedEvalProof::Empty,
@@ -308,7 +308,7 @@ where
                         &host_proof,
                         builder,
                     );
-                // STEP 2b: read the reduction sumcheck, jagged-eval sub-sumcheck,
+                // read the reduction sumcheck, jagged-eval sub-sumcheck,
                 // and expected_eval (q_at_z) — same order as `write`.
                 let sumcheck = read_sumcheck_from_stream::<C>(
                     &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
@@ -325,13 +325,13 @@ where
                     sumcheck,
                     jagged_eval,
                     expected_eval,
-                    // P2b: reuse the witnessed main_commitment (== the commit
+                    // reuse the witnessed main_commitment (== the commit
                     // cap root) — no extra stream felts, value-independent.
                     commit_root: main_commitment_arr,
                 }
             }
         };
-        // Review item 12: lift the host `ShardOpenedValues` (trace@z)
+        // lift the host `ShardOpenedValues` (trace@z)
         // into the BaseFold-shape per-chip opening bundle.  `degree`
         // and the cumulative sums are placeholders here and are
         // finalized in the verifier from the real height / cumsum maps.
@@ -353,7 +353,7 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
-        // P2c STEP 2: write the Bundle's basefold-proof felt/ext values in
+        // write the Bundle's basefold-proof felt/ext values in
         // the SAME position `read` consumes them (between zerocheck and
         // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
         if let zkm_stark::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
@@ -361,7 +361,7 @@ where
         {
             let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
             crate::basefold_witness::write_basefold_proof_to_stream::<C>(&host_proof, witness);
-            // STEP 2b: write sumcheck, jagged_eval, expected_eval (same order as read).
+            // write sumcheck, jagged_eval, expected_eval (same order as read).
             write_sumcheck_to_stream::<C>(
                 &jagged_reduction_to_partial_sumcheck(&bundle.reduction),
                 witness,
@@ -372,13 +372,13 @@ where
             );
             bundle.reduction.q_at_z.write(witness);
         }
-        // Review item 12: write opened_values in the same shape `read`
+        // write opened_values in the same shape `read`
         // consumes them.
         basefold_opened_values_from_host(&self.opened_values).write(witness);
     }
 }
 
-/// Review item 12: convert the host `ShardOpenedValues` (legacy 4-batch
+/// Convert the host `ShardOpenedValues` (legacy 4-batch
 /// FRI shape) into the BaseFold-pipeline per-chip opening bundle.
 ///
 /// Only `preprocessed.local`, `main.local`, and the cumulative sums are
@@ -402,9 +402,9 @@ fn basefold_opened_values_from_host(
             main: crate::basefold_chip_opened_values::BasefoldAirOpenedValues {
                 local: c.main.local.clone(),
             },
-            // Review item 12: the REAL big-endian height bits were carried
-            // host-side in `quotient[0]` (prover.rs E1d) — the VirtualGeq
-            // threshold for `full_geq`.  Fall back to a 1-elt zero stub if
+            // the REAL big-endian height bits were carried
+            // host-side in `quotient[0]` (set by the host prover) — the
+            // VirtualGeq threshold for `full_geq`.  Fall back to a 1-elt zero stub if
             // absent (legacy/empty proofs).
             degree: c
                 .quotient
@@ -432,7 +432,7 @@ fn basefold_opened_values_from_host(
 // The Ziren bundle stores per-round eval-form sumcheck rounds
 // (`JaggedReductionRound { evals: [EF; 3] }`) where SP1 stores
 // coefficient-form (`UnivariatePolynomial { coefficients }`); the
-// eval→coeff conversion lives at the Phase 2 bundle assembly site,
+// eval→coeff conversion lives at the bundle assembly site,
 // not in these per-piece witness reads.
 
 use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
@@ -546,7 +546,7 @@ where
 }
 
 /// Bit-decompose a `usize` value into exactly `num_bits` LSB-first
-/// felts, each constrained to `{0, 1}`.  Helper for the Phase 4b
+/// felts, each constrained to `{0, 1}`.  Helper for the
 /// lift fields that need bit-decomposed metadata
 /// (`params.col_prefix_sums[k]` and `row_counts[round][chip]`); the
 /// in-circuit verifier Horner-decodes these via
@@ -1008,7 +1008,7 @@ where
         host_sumcheck_to_const_var::<C>(builder, &host_sumcheck);
 
     // ── REAL: basefold proof from bundle.basefold_proof (BN254 digests) ──
-    // P2c STEP 3: the verifier `type Proof` now carries `HV::DigestVariable`
+    // the verifier `type Proof` now carries `HV::DigestVariable`
     // ([Var<Bn254>;1] for the outer ring), so const-promote the raw
     // [Bn254;1] digests via `const_digest` after the scalar read.
     let host_basefold_outer =
@@ -1176,11 +1176,11 @@ where
 /// from `lift_evaluation_proof_bytes` so behavior matches the existing
 /// recursion-circuit machine flows byte-for-byte.
 ///
-/// Phase 4a callers (compress/wrap/deferred/core_basefold +
+/// Callers (compress/wrap/deferred/core_basefold +
 /// shard_proof_variable_lift) can adopt this adapter via a one-line
 /// swap from `lift_evaluation_proof_bytes(...)` →
-/// `lift_evaluation_proof_via_bundle(...)`.  Phase 4b will then
-/// finish the cutover by changing the upstream
+/// `lift_evaluation_proof_via_bundle(...)`.  A later cutover can
+/// finish the migration by changing the upstream
 /// `BasefoldShardProof.evaluation_proof` field type from `Vec<u8>` to
 /// `JaggedBasefoldBundle`, eliminating this adapter and the
 /// rmp-serde round trip — which is the actual fix for the
@@ -1198,7 +1198,7 @@ pub fn lift_evaluation_proof_via_bundle<C, HV>(
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    // P2c STEP 3: the witnessing/const lift pins inner digests to [Felt;8].
+    // the witnessing/const lift pins inner digests to [Felt;8].
     HV: crate::hash::FieldHasherVariable<C, DigestVariable = [Felt<C::F>; 8]>
         + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
 {
@@ -1259,7 +1259,7 @@ where
     }
 }
 
-// P2c STEP 2b: value-independent (witness-stream) PartialSumcheckProof — the
+// value-independent (witness-stream) PartialSumcheckProof — the
 // witnessed counterpart of `host_sumcheck_to_const_var`.  Read/write the ext
 // values in the SAME order.  Used for the reduction sumcheck + the jagged-eval
 // sub-sumcheck so the lift consumes witnessed (not baked) values.
@@ -1308,7 +1308,7 @@ fn write_sumcheck_to_stream<C>(
 /// [`JaggedPcsProofVariable`] shape — the structured replacement for
 /// [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`].
 ///
-/// **Phase 4a substance** (real data threaded into the variable):
+/// **Real data threaded into the variable**:
 /// * `sumcheck_proof` ← [`jagged_reduction_to_partial_sumcheck`] on `bundle.reduction`
 ///   (eval-form rounds → coeff-form polys, claimed_sum derived).
 /// * `pcs_proof.batch_evaluations` ← witnessed copy of
@@ -1319,7 +1319,7 @@ fn write_sumcheck_to_stream<C>(
 ///   (witnessed as `[Felt<F>; 8]`).
 /// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
 ///
-/// **NOT placeholders (resolved via Phase 4a/4b commits)**:
+/// **NOT placeholders (resolved here / by later cutover commits)**:
 /// * `expected_eval` ← `bundle.reduction.q_at_z` — the verifier's
 ///   closing identity at recursive_jagged_pcs.rs:279 asserts
 ///   `jagged_eval * expected_eval == sumcheck.point_and_eval.1`
@@ -1336,7 +1336,7 @@ fn write_sumcheck_to_stream<C>(
 /// * `position` field on RecursiveBasefoldOpening — informational
 ///   only; verifier samples positions from challenger transcript.
 ///
-/// **Phase 4b STRUCTURAL TODO** (call-site swap blocked on these):
+/// **STRUCTURAL TODO** (the full call-site swap is blocked on these):
 /// * `jagged_eval_proof` — Ziren's bundle does not carry the SP1
 ///   jagged-eval sub-proof.  The placeholder zero-coefs satisfy the
 ///   `real_jagged_evaluator_fn` closure trivially when ALL adjacent
@@ -1366,8 +1366,8 @@ fn write_sumcheck_to_stream<C>(
 /// KoalaBearPoseidon2Outer`): maps to the default BN254 digest — the
 /// OUTER ring's real BN254 commitments are bound by a dedicated outer
 /// bundle path, so the inner-root lift is never the binding digest there.
-// P2c: generic over the proof's base/ext type so it rekeys BOTH the raw
-// host proof (<InnerVal, InnerChallenge>) AND the STEP-2 witnessed variable
+// generic over the proof's base/ext type so it rekeys BOTH the raw
+// host proof (<InnerVal, InnerChallenge>) AND the witnessed variable
 // proof (<Felt, Ext>) — only the `[InnerVal;8]` digests are converted to
 // `HV::Digest`; uni_poly/sibling_pair/final_poly/etc. pass through unchanged.
 fn rekey_basefold_digests_to_hv<C, HV, F, EF>(
@@ -1441,7 +1441,7 @@ where
     }
 }
 
-/// P2c STEP 3: const-promote a raw-digest basefold proof
+/// const-promote a raw-digest basefold proof
 /// (`RecursiveBasefoldProof<Felt, Ext, HV::Digest>`) into the verifier's
 /// `HV::DigestVariable` digest form via `HV::const_digest`.  The verifier's
 /// `type Proof` now carries `HV::DigestVariable` digests (not the raw host
@@ -1527,14 +1527,14 @@ where
     }
 }
 
-/// P2c STEP 2/3: const-build the basefold proof from a host bundle (the
-/// Step-1 `Witnessable::read` path — values baked, NOT witnessed).  Used by
+/// const-build the basefold proof from a host bundle (the
+/// `Witnessable::read` path — values baked, NOT witnessed).  Used by
 /// the legacy bytes-deserialize lift paths (`lift_evaluation_proof_bytes`,
 /// `lift_jagged_basefold_bundle_from_bytes`) which deserialize the bundle at
 /// lift time and so have no inline pre-read proof.  The production inner path
 /// pre-reads in `BasefoldShardProof::read` instead (value-independent).
 ///
-/// STEP 3: digests are const-promoted to `HV::DigestVariable` (rekey raw
+/// Digests are const-promoted to `HV::DigestVariable` (rekey raw
 /// KoalaBear roots → `HV::Digest`, read scalars, then const_digest each) so
 /// the returned proof matches the verifier's `type Proof` digest type.
 #[allow(clippy::type_complexity)]
@@ -1570,7 +1570,7 @@ where
         &stark_to_local_psp(&bundle.jagged_eval.partial_sumcheck_proof),
     );
     let ee = builder.constant(bundle.reduction.q_at_z);
-    // P2b: const-build the commit cap root ([Felt;8]) for the bytes-fallback
+    // const-build the commit cap root ([Felt;8]) for the bytes-fallback
     // path (this legacy path bakes; the production inline path witnesses it).
     let cap_roots = bundle.commit.commitment.roots();
     let cr: [Felt<C::F>; 8] = if cap_roots.is_empty() {
@@ -1584,27 +1584,25 @@ where
 pub fn lift_jagged_basefold_bundle<C, HV>(
     builder: &mut Builder<C>,
     bundle: &JaggedBasefoldBundle,
-    // P2c STEP 2: the basefold proof's felt/ext values, PRE-READ from the
-    // witness stream in `BasefoldShardProof::read` (digests still raw
-    // [InnerVal;8]; rekeyed to HV::Digest below).  This is what makes the
+    // the basefold proof's felt/ext values, PRE-READ from the
+    // witness stream in `BasefoldShardProof::read`.  This is what makes the
     // recursion program value-independent: the proof values are witness
-    // inputs, not baked constants.
-    // P2c STEP 3: digests are now witnessed too ([Felt;8] = inner
-    // DigestVariable), so no rekey is needed below.
+    // inputs, not baked constants.  Digests are now witnessed too ([Felt;8] =
+    // inner DigestVariable), so no rekey is needed below.
     preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
-    // P2c STEP 2b: pre-read (witnessed) reduction sumcheck, jagged-eval
+    // pre-read (witnessed) reduction sumcheck, jagged-eval
     // sub-sumcheck, and expected_eval — replace the lift's const-builds.
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
-    // P2b: the witnessed commit cap root (== main_commitment) for
+    // the witnessed commit cap root (== main_commitment) for
     // original_commitments[0]; replaces the baked const_digest of the
     // proof-specific root (value-independence).
     preread_commit_root: [Felt<C::F>; 8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
-    // VERIFY_VK=true Site-2 fix: per-chip WITNESSED height felts (2^log_h),
+    // per-chip WITNESSED height felts (2^log_h),
     // name-sorted (parallel to each round's chip widths in
     // `column_counts_by_round`).  When `Some`, `col_prefix_sums` and
     // `row_counts` are reconstructed IN-CIRCUIT from these witnessed heights
@@ -1648,18 +1646,15 @@ where
     let num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
-    // ── P2c STEP 2b: sumcheck_proof = the PRE-READ (witnessed) reduction
+    // ── sumcheck_proof = the PRE-READ (witnessed) reduction
     // sumcheck (read in BasefoldShardProof::read), not a host const. ──
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
-    // ── P2c STEP 2: basefold proof = the PRE-READ (witnessed) proof ──
-    // Rekey its raw [InnerVal;8] digests onto HV::Digest (inner: identity;
-    // outer ring uses the dedicated outer lift, not this fn).  No
-    // host_stacked_basefold_to_recursive / `.read()` here — the felt/ext
+    // ── basefold proof = the PRE-READ (witnessed) proof ──
+    // No host_stacked_basefold_to_recursive / `.read()` here — the felt/ext
     // values already came off the witness stream in BasefoldShardProof::read.
-    // P2c STEP 3: digests are witnessed too ([Felt;8] = inner
-    // DigestVariable), so the proof is already in HV::DigestVariable form —
-    // no rekey needed.
+    // Digests are witnessed too ([Felt;8] = inner DigestVariable), so the
+    // proof is already in HV::DigestVariable form — no rekey needed.
     let basefold_proof_var = preread_basefold_proof;
 
     // ── batch_evaluations for the stacked layer = the SAME witnessed
@@ -1681,7 +1676,7 @@ where
     };
 
     // ── REAL: original_commitments[0] = the witnessed commit cap root ──
-    // P2b: original_commitments[0] is the BaseFold late-binding commit cap
+    // original_commitments[0] is the BaseFold commit cap
     // root.  For the single-main-commit flow it EQUALS `main_commitment`
     // (basefold_commit_digest(commit) = commit.commitment.roots()[0]), which
     // is already witnessed in BasefoldShardProof::read.  Reuse that witnessed
@@ -1707,7 +1702,7 @@ where
     // variables via the same const-promotion path as the outer
     // reduction so the in-circuit `real_jagged_evaluator_fn`
     // (compress_basefold.rs) verifies a non-vacuous closing identity.
-    // STEP 2b: pre-read (witnessed) jagged-eval sub-sumcheck.
+    // pre-read (witnessed) jagged-eval sub-sumcheck.
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
         partial_sumcheck_proof: preread_jagged_eval,
     };
@@ -1754,7 +1749,7 @@ where
         }
     };
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
-        // VERIFY_VK=true Site-2 fix: reconstruct col_prefix_sums IN-CIRCUIT
+        // reconstruct col_prefix_sums IN-CIRCUIT
         // from the WITNESSED per-chip heights instead of baking
         // bundle.packing.offsets.  offsets[k] = Σ (prior column heights);
         // chip i (name-sorted) contributes column_counts[i] columns of
@@ -1868,7 +1863,7 @@ where
     // max_log_row_count is well within KoalaBear's 31-bit range, the
     // raw count fits in a single Felt constant.
     let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(heights) = chip_height_felts {
-        // VERIFY_VK=true Site-2 fix: per-chip row counts = the WITNESSED
+        // per-chip row counts = the WITNESSED
         // heights (2^log_h), reused for every round (a chip's prep + main
         // traces share one height).  Value-independent (vs the baked
         // chip_dims fallback below).
@@ -1907,7 +1902,7 @@ where
     // The in-circuit verifier's closing identity asserts
     //     jagged_eval * expected_eval == sumcheck.point_and_eval.1
     // mirroring the host verifier's q_at_z * w(z) == current_claim.
-    // STEP 2b: pre-read (witnessed) expected_eval (q_at_z).
+    // pre-read (witnessed) expected_eval (q_at_z).
     let expected_eval: Ext<C::F, C::EF> = preread_expected_eval;
 
     // ── Top-level assembly ──
@@ -2426,7 +2421,7 @@ mod tests {
 
     /// row_counts_by_round plumbed through produces
     /// non-zero row_counts in the variable (one Felt per chip).
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion (P2c) —
+    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion —
     /// the 5-arg lift call needs a full RecursiveBasefoldProof + sumcheck
     /// fixtures rework.  Compile-gated out, not silently deleted.
     #[cfg(any())]
@@ -2491,7 +2486,7 @@ mod tests {
     /// the wiring that replaced the all-zero fallback.  (Felt *values* are IR
     /// handles, so the numeric binding is asserted by the host-level test
     /// below and exercised in-circuit by the e2e compress gate.)
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion (P2c) —
+    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion —
     /// the 5-arg lift call needs RecursiveBasefoldProof + sumcheck fixture
     /// rework.  Compile-gated out, not silently deleted.
     #[cfg(any())]
@@ -2599,7 +2594,7 @@ mod tests {
     /// bundle lift produces a structurally valid
     /// JaggedPcsProofVariable with shape matching the existing
     /// lift_evaluation_proof_bytes placeholder for empty bundles.
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion (P2c).
+    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion.
     /// Compile-gated out, not silently deleted.
     #[cfg(any())]
     #[test]
