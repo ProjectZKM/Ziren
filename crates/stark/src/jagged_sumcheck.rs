@@ -81,16 +81,15 @@ fn build_weight_table(
         let eq_c = &eq_per_chip[c_idx];
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
-            // Bounds guard (#95 fix, May 2 2026): catches the case
+            // Bounds guard (May 2 2026): catches the case
             // where a chip's column_count (from verifier-side
             // chip.width()) exceeds the per-chip column_count the
             // prover committed (from main_trace.width).  This used to
             // overflow with an opaque 'index out of bounds'; now caught
-            // here with chip name + offsets context.  The W2
+            // here with chip name + offsets context.  The
             // emit_jagged_pcs_bytes width-pad fix is what should keep
             // this from firing in production.
-            // Release-mode bounds guard for #95 — keep until W2 perf
-            // green to avoid silent OOBs.
+            // Kept as a release-mode bounds guard to avoid silent OOBs.
             assert!(
                 off.saturating_add(h_c) <= n,
                 "build_weight_table OOB: chip #{c_idx} '{}' col_k={k} off={off} \
@@ -591,7 +590,7 @@ where
 /// drops `dense_q` as soon as the round-0 fold completes, trimming
 /// `4N` bytes off the peak for the duration of rounds 1 through
 /// `n-1`.  Meaningful for wide workloads (tendermint, large-sum).
-// #H (BaseFold-over-BN254): generic over the challenger (only FieldChallenger
+// Generic over the challenger (only FieldChallenger
 // methods used) so the wrap (OuterChallenger) reuses the same reduction. Inner
 // callers infer C = InnerChallenger (non-breaking).
 pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>(
