@@ -207,7 +207,7 @@ impl ZeroCommitment<KoalaBearPoseidon2Inner> for InnerPcs {
     }
 }
 
-// #H (BaseFold-over-BN254 wrap port): `KoalaBearPoseidon2Inner` shares the
+// BaseFold-over-BN254 wrap port: `KoalaBearPoseidon2Inner` shares the
 // inner Val=KoalaBear / Challenge=KoalaBear⁴ / JaggedChallenger stack, so it
 // proves via BaseFold (legacy TypeId gate == true). Provided so the
 // `SC: BasefoldRing` bound is satisfiable wherever this config is used.
@@ -323,7 +323,7 @@ impl ZeroCommitment<KoalaBearPoseidon2D5> for Inner128Pcs {
     }
 }
 
-// #H (BaseFold-over-BN254 wrap port): the D=5 (quintic) config uses
+// BaseFold-over-BN254 wrap port: the D=5 (quintic) config uses
 // Challenge = Inner128Challenge != KoalaBear⁴, so the legacy TypeId gate is
 // FALSE and it stays on the FRI path → `use_basefold() = false`. `BfMmcs` is
 // supplied (never actually exercised) only to satisfy the bound; the generic
@@ -553,7 +553,7 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
-    // #H (BaseFold-over-BN254 wrap port): the inner (default core / compress /
+    // BaseFold-over-BN254 wrap port: the inner (default core / compress /
     // shrink) config proves via the BaseFold jagged-PCS over the
     // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `bf_mmcs()` reproduces
     // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
