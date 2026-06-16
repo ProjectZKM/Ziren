@@ -50,19 +50,18 @@ impl GpuResidencyProfile {
     /// (host side) and populated (GPU dispatch side).  ON for `full`
     /// only — `hybrid` keeps the audited-HEAD default (OFF) intact so
     /// no production behavior shifts on profile defaulting.  The cache
-    /// is documented as sound post-#373 / May 19 audit (see
-    /// project_recursion_phase_gpu_audit.md); long-lived GPU provers
-    /// can opt into `full` to enable it.
+    /// is documented as sound by the recursion-phase GPU audit;
+    /// long-lived GPU provers can opt into `full` to enable it.
     pub fn allows_compose_pk_cache(self) -> bool {
         matches!(self, Self::Full)
     }
 
     /// Returns true when the per-arity compose recursion program cache
     /// should be used.  ON for `full` only — the cache was reverted
-    /// from default-on in #256 (project_256_cache_perf_reverted.md)
-    /// because fix_shape proof bloat dominates cache savings on the
-    /// shape spread Ziren sees today.  Available as `full` opt-in for
-    /// long-lived provers where compile cost dominates.
+    /// from default-on because fix_shape proof bloat dominates cache
+    /// savings on the shape spread Ziren sees today.  Available as
+    /// `full` opt-in for long-lived provers where compile cost
+    /// dominates.
     pub fn allows_program_cache(self) -> bool {
         matches!(self, Self::Full)
     }
@@ -201,15 +200,14 @@ mod tests {
 
     #[test]
     fn default_profile_matches_audited_head_behavior() {
-        // Defaults at audited HEAD (083e6f63 / bd51dbce, May 21 2026):
+        // Defaults at the audited HEAD:
         //   program cache: OFF, compose-pk cache: OFF, pre-warm: OFF,
         //   audit: OFF.
         //
-        // After this refactor with no env set, the Hybrid profile
-        // MUST reproduce: program cache OFF, pre-warm OFF, audit OFF,
-        // compose-pk cache OFF — all four residency knobs were OFF
-        // by default at the audited HEAD and Phase 4 must not flip
-        // any of them.
+        // With no env set, the Hybrid profile MUST reproduce: program
+        // cache OFF, pre-warm OFF, audit OFF, compose-pk cache OFF —
+        // all four residency knobs were OFF by default at the audited
+        // HEAD and this refactor must not flip any of them.
         let profile = GpuResidencyProfile::Hybrid;
         assert!(!profile.allows_program_cache());
         assert!(!profile.allows_program_cache_audit());
