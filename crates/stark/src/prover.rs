@@ -294,17 +294,17 @@ where
 
         let pcs = self.config().pcs();
 
-        // Option B single-main-commit gate — KoalaBear/JaggedChallenger
+        // Single-main-commit gate — KoalaBear/JaggedChallenger
         // config skips the legacy FRI `pcs.commit(main_traces)` and
         // instead computes the BaseFold jagged-PCS commit up-front
-        // (the one Phase 4 of the shard-level prover would otherwise
-        // produce).  Its 8-felt digest becomes the `main_commitment`
-        // observed in the Phase 1 prologue, eliminating the
+        // (the same commit the shard-level prover's jagged-PCS body would
+        // otherwise produce).  Its 8-felt digest becomes the `main_commitment`
+        // observed in the prologue, eliminating the
         // double-commit (FRI + BaseFold) on the same trace data.
         // BaseFold-over-BN254: both the inner (KoalaBear / JaggedChallenger) and
         // the OUTER wrap (BN254 / MultiField32) rings now commit via the BaseFold
         // jagged-PCS up-front — its 8-felt digest becomes the `main_commitment`
-        // observed in the Phase-1 prologue.  The legacy two-adic-quotient FRI
+        // observed in the prologue.  The legacy two-adic-quotient FRI
         // commit path has been retired.  Name-order the commit (SP1 BTreeMap chip
         // order) so the recursion verifier's compile-time name-order
         // column_counts / opened_values match the committed column order.
@@ -352,7 +352,7 @@ where
         // before calling `Verifier::verify_shard`, which dispatches to
         // `BasefoldShardVerifier::verify_shard` WITHOUT doing any further
         // ops on the challenger.  Capture that state here so the
-        // shard-level prover's Phase 1 sees an aligned transcript
+        // shard-level prover's prologue sees an aligned transcript
         // (otherwise round 0's claimed_sum check desyncs).
         //
         // The snapshot is consumed only by the basefold branch but must
@@ -528,10 +528,10 @@ where
             // envelope, but `Verifier::verify_shard` dispatches to
             // `BasefoldShardVerifier` whenever this field is `Some(_)`.
             //
-            // Option B single-main-commit: pass the precomputed
+            // Single-main-commit: pass the precomputed
             // BaseFold commit (stashed by `commit()` in
             // `data.precomputed_basefold`) through to the shard-level
-            // prover, which routes it to Phase 4's jagged-PCS body to
+            // prover, which routes it to the jagged-PCS body to
             // skip the in-band commit step + observe.
             let precomputed_basefold_taken = data.precomputed_basefold;
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
@@ -822,13 +822,13 @@ where
     Some(Box::new(proof))
 }
 
-/// Option B single-main-commit `commit()` body for the
+/// Single-main-commit `commit()` body for the
 /// KoalaBear/JaggedChallenger config: compute the BaseFold jagged-PCS
-/// commit up-front (the one Phase 4 of the shard-level prover would
+/// commit up-front (the same commit the shard-level prover would
 /// otherwise produce), seed `main_commit` with its 8-felt digest, and
 /// stash the precomputed-commit state in `precomputed_basefold` so
 /// `open()` / `try_prove_shard_to_basefold_boxed` can route it into
-/// the shard-level Phase 4 jagged-PCS body (skipping the
+/// the shard-level jagged-PCS body (skipping the
 /// double-commit + in-band observe).
 ///
 /// Runs a *placeholder* `pcs.commit` on a single 1×1 dummy trace to
