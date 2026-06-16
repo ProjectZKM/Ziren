@@ -242,10 +242,10 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
     }
 }
 
-/// Backend-parametrized layer storage — Step 4a scaffolding from
-/// Per-layer storage: host-resident `Host(GkrCircuitLayer)` or an
-/// opaque `Device` handle into the GPU prover's side-channel
-/// registry. `u64` handle keeps device types out of stark.
+/// Backend-parametrized per-layer storage: host-resident
+/// `Host(GkrCircuitLayer)` or an opaque `Device` handle into the GPU
+/// prover's side-channel registry. `u64` handle keeps device types out
+/// of stark.
 ///
 /// `circuit_id` scopes the handle to one `build_gkr_circuit` call so
 /// concurrent shards on the same GPU stay isolated; the registry is
