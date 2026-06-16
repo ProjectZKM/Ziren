@@ -1,4 +1,4 @@
-//! Per-thread "GPU pool worker context" — #266 follow-up to #263.
+//! Per-thread "GPU pool worker context".
 //!
 //! ## Purpose
 //!
@@ -11,7 +11,7 @@
 //! GPU.  When the same dispatch fires from a thread WITHOUT a
 //! `cudaSetDevice` context (typically an off-pool basefold rayon
 //! worker — see `core_multi_gpu.rs:194-209` `build_basefold_pool`,
-//! and the May 9 #142 design that moves basefold off the GPU
+//! and the design that moves basefold off the GPU
 //! pool worker), the kernel either fails (cudaErrorInvalidValue)
 //! or silently runs on the wrong device, paying full PCIe +
 //! kernel-launch overhead for zero benefit.
