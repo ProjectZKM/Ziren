@@ -418,14 +418,14 @@ fn basefold_opened_values_from_host(
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
-// ── Jagged-PCS bundle Witnessable surface (#241 Phase 1) ─────────
+// ── Jagged-PCS bundle Witnessable surface ────────────────────────
 //
 // Additive Witnessable bridges for the host-side jagged-PCS bundle
 // pieces.  These compile against the existing in-circuit verifier
-// surface but are NOT yet wired into call sites — that's Phase 2-4
-// per task #241.  Phase 1's purpose is to establish the field-by-
-// field witness mapping so subsequent phases can compose the full
-// `JaggedBasefoldBundle::Witnessable` from these primitives.
+// surface but are NOT yet wired into call sites.  Their purpose is to
+// establish the field-by-field witness mapping so the full
+// `JaggedBasefoldBundle::Witnessable` can be composed from these
+// primitives.
 //
 // Reference: SP1's [`JaggedSumcheckEvalProof` / `JaggedPcsProof`
 // Witnessable](file:///tmp/sp1/crates/recursion/circuit/src/jagged/witness.rs).
@@ -604,7 +604,9 @@ fn host_component_opening_to_recursive(
         .map(|leaf| RecursiveBasefoldComponentOpening {
             leaf_values: leaf.values.clone(),
             merkle_path_bytes: Vec::new(),
-            // GAP-2 binding: thread the structured path digests through.
+            // Soundness binding: thread the structured Merkle path
+            // digests through so the in-circuit verifier can bind the
+            // opened leaf to its committed root.
             merkle_path_digests: leaf.proof.clone(),
             _phantom: core::marker::PhantomData,
         })
@@ -659,8 +661,8 @@ fn host_query_opening_to_recursive(
                 row[D..2 * D].iter().copied(),
             )
             .expect("EF parse from D base elements");
-            // #246 re-enable: thread the bundle's MT::Proof
-            // structured digests through.  See verifier site at
+            // Thread the bundle's MT::Proof structured digests
+            // through.  See verifier site at
             // basefold_verifier.rs:957-959 for promotion + binding.
             RecursiveBasefoldOpening {
                 position: 0,
@@ -792,7 +794,9 @@ fn host_component_opening_to_recursive_outer(
         .map(|leaf| RecursiveBasefoldComponentOpening {
             leaf_values: leaf.values.clone(),
             merkle_path_bytes: Vec::new(),
-            // GAP-2 binding: thread the structured path digests through.
+            // Soundness binding: thread the structured Merkle path
+            // digests through so the in-circuit verifier can bind the
+            // opened leaf to its committed root.
             merkle_path_digests: leaf.proof.clone(),
             _phantom: core::marker::PhantomData,
         })
@@ -988,7 +992,7 @@ where
     };
     let column_counts_by_round: &[Vec<usize>] = &real_column_counts_by_round;
     // ── Padding shape (mirror of lift_jagged_basefold_bundle) ──
-    // #7 HOST parity: flat column count only — no artificial-zero columns
+    // Host parity: flat column count only — no artificial-zero columns
     // (see lift_jagged_basefold_bundle's padding-shape comment).
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
@@ -1103,7 +1107,7 @@ where
                 bits_per_entry,
             ));
         }
-        // #7 HOST parity: no artificial-zero columns; the pow2
+        // Host parity: no artificial-zero columns; the pow2
         // tail-pad below emits the same `current_offset` entries.
     }
     while col_prefix_sums.len() < col_prefix_sums_len - 1 {
@@ -1179,8 +1183,8 @@ where
 /// finish the cutover by changing the upstream
 /// `BasefoldShardProof.evaluation_proof` field type from `Vec<u8>` to
 /// `JaggedBasefoldBundle`, eliminating this adapter and the
-/// rmp-serde round trip — which is the actual fix for the #240
-/// determinism cascade.
+/// rmp-serde round trip — which is the actual fix for the
+/// serialization-induced determinism cascade.
 pub fn lift_evaluation_proof_via_bundle<C, HV>(
     builder: &mut Builder<C>,
     bytes: &[u8],
@@ -1222,12 +1226,12 @@ where
 /// witness-stream `.read()` — the bundle is host-side data, NOT
 /// witness-stream input.
 ///
-/// **#245 fix**: previously called `<host_sumcheck as
-/// Witnessable<C>>::read(...)` which consumed felts from the runtime
-/// witness stream that were never written there (bundle is added
-/// separately on `BasefoldShardProof.evaluation_proof_bundle`,
-/// outside the felt-stream).  Empty-stream panic at e2e test time.
-/// Treating bundle values as IR constants matches their semantics.
+/// Previously called `<host_sumcheck as Witnessable<C>>::read(...)`
+/// which consumed felts from the runtime witness stream that were
+/// never written there (bundle is added separately on
+/// `BasefoldShardProof.evaluation_proof_bundle`, outside the
+/// felt-stream).  Empty-stream panic at e2e test time.  Treating
+/// bundle values as IR constants matches their semantics.
 fn host_sumcheck_to_const_var<C>(
     builder: &mut Builder<C>,
     host: &PartialSumcheckProof<InnerChallenge>,
@@ -1626,7 +1630,7 @@ where
     let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
 
     // ── Padding shape (mirror of jagged_pcs_lift.rs) ──
-    // #7 HOST parity: column count = FLAT Σ chip widths (the host packing
+    // Host parity: column count = FLAT Σ chip widths (the host packing
     // has no artificial pad columns: `offsets.len()-1 == Σ widths`), padded
     // to the next power of two.  This drives `num_col_variables` =
     // the number of z_col challenges the in-circuit verifier samples —
@@ -1634,7 +1638,7 @@ where
     // (jagged_pcs.rs verify_jagged_basefold_inner).  The previous
     // `+ (cc[len-2]+1)` heuristic inflated this across a power-of-two
     // boundary for some chip sets (keccak shard: 568→1024 vs host 415→512),
-    // desyncing the transcript under #7 enforcement.
+    // desyncing the transcript under host-parity enforcement.
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
         .map(|cc| cc.iter().sum::<usize>())
@@ -1787,7 +1791,7 @@ where
                     acc = builder.eval(acc + h);
                 }
             }
-            // #7 HOST parity: no artificial-zero columns (see padding-shape
+            // Host parity: no artificial-zero columns (see padding-shape
             // comment above); the pow2 tail-pad below reuses
             // `current_offset_felt`, identical to what the old added-loop
             // emitted, so the per-entry values are unchanged where lengths
@@ -1827,7 +1831,7 @@ where
                     bits_per_entry,
                 ));
             }
-            // #7 HOST parity: no artificial-zero columns; the pow2
+            // Host parity: no artificial-zero columns; the pow2
             // tail-pad below emits the same `current_offset` entries.
         }
         // Pad to padded_cols (skip last slot — that one's reserved for
@@ -1935,8 +1939,6 @@ where
 /// lifter consumes the local variant.  This adapter performs a
 /// field-by-field rebuild between the two — zero data transformation,
 /// purely a type re-wrap.
-///
-/// Gap #1 Phase 3 unblock — see #508 diagnosis.
 fn stark_to_local_psp(
     host: &st::PartialSumcheckProof<InnerChallenge>,
 ) -> PartialSumcheckProof<InnerChallenge> {
@@ -2036,7 +2038,7 @@ mod tests {
         assert!(matches!(evaluation_proof, LiftedEvalProof::Empty));
     }
 
-    /// #241 Phase 1: JaggedReductionRound Witnessable round-trips a
+    /// JaggedReductionRound Witnessable round-trips a
     /// 3-EF struct through the witness stream.
     #[test]
     fn jagged_reduction_round_witnessable_reads() {
@@ -2049,7 +2051,7 @@ mod tests {
         assert_eq!(var.evals.len(), 3);
     }
 
-    /// #241 Phase 1: JaggedReductionProof Witnessable cascades through
+    /// JaggedReductionProof Witnessable cascades through
     /// rounds + eval_point + q_at_z.
     #[test]
     fn jagged_reduction_proof_witnessable_reads() {
@@ -2067,7 +2069,7 @@ mod tests {
         assert_eq!(var.eval_point.len(), 4);
     }
 
-    /// #241 Phase 1: LeafOpening Witnessable handles the (Vec<Vec<F>>,
+    /// LeafOpening Witnessable handles the (Vec<Vec<F>>,
     /// MT::Proof const-passthrough) split correctly.
     #[test]
     fn leaf_opening_witnessable_reads() {
@@ -2082,7 +2084,7 @@ mod tests {
         assert_eq!(var.proof.len(), 3);
     }
 
-    /// #241 Phase 1: MerkleOpening Witnessable composes through a Vec
+    /// MerkleOpening Witnessable composes through a Vec
     /// of LeafOpenings.
     #[test]
     fn merkle_opening_witnessable_reads() {
@@ -2098,7 +2100,7 @@ mod tests {
         assert_eq!(var.leaves.len(), 2);
     }
 
-    /// #241 Phase 2: eval-form → coeff-form converter shape sanity.
+    /// eval-form → coeff-form converter shape sanity.
     /// Output univariate count matches input round count and the
     /// reconstructed polys agree with the input evals at x ∈ {0,1,2}.
     #[test]
@@ -2148,7 +2150,7 @@ mod tests {
         assert_eq!(psp.point_and_eval.1, expected_final);
     }
 
-    /// #241 Phase 2: converter output flows through the existing
+    /// converter output flows through the existing
     /// `PartialSumcheckProof` Witnessable impl.  Confirms the bridge
     /// composes with the pre-existing recursion-circuit witness
     /// surface (basefold_witness.rs:73).
@@ -2168,7 +2170,7 @@ mod tests {
             <_ as Witnessable<C>>::read(&psp, &mut builder);
     }
 
-    /// #241 Phase 3: empty BaseFold proof converts to empty
+    /// empty BaseFold proof converts to empty
     /// recursive shape — exercises the rounds.iter().zip path with
     /// zero rounds and the components/query_phase pass-through.
     #[test]
@@ -2189,7 +2191,7 @@ mod tests {
         assert_eq!(recur.batch_evaluations.len(), 0);
     }
 
-    /// #241 Phase 3: rounds preserve uni_poly + extracted cap root.
+    /// rounds preserve uni_poly + extracted cap root.
     /// The cap-extraction asserts the 1-cap invariant in
     /// host_basefold_proof_to_recursive.
     #[test]
@@ -2218,7 +2220,7 @@ mod tests {
         assert_eq!(recur.batch_grinding_witness, InnerVal::from_u8(17));
     }
 
-    /// #241 Phase 3: query-phase opening parses leaf row
+    /// query-phase opening parses leaf row
     /// `[F; 2*D]` into `[EF; 2]` sibling pair via the binomial
     /// extension's `from_basis_coefficients_iter`.
     #[test]
@@ -2256,12 +2258,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(recur[0].sibling_pair, [expected_lo, expected_hi]);
-        // #246: merkle_path_digests populated from leaf.proof.
+        // merkle_path_digests is populated from leaf.proof.
         assert_eq!(recur[0].merkle_path_digests.len(), 5);
         assert_eq!(recur[0].position, 0);
     }
 
-    /// #241 Phase 3: stacked converter threads batch_evaluations from
+    /// stacked converter threads batch_evaluations from
     /// the host StackedBasefoldProof verbatim.
     #[test]
     fn host_stacked_basefold_threads_batch_evaluations() {
@@ -2289,7 +2291,7 @@ mod tests {
         assert_eq!(recur.batch_evaluations[0][0], InnerChallenge::from_u8(1));
     }
 
-    /// #241 Phase 3: converter output flows through the existing
+    /// converter output flows through the existing
     /// `RecursiveBasefoldProof` Witnessable impl
     /// (basefold_witness.rs:443) — confirms the bridge composes
     /// end-to-end with the pre-existing witness surface.
@@ -2310,8 +2312,8 @@ mod tests {
         let _var = <_ as Witnessable<C>>::read(&recur, &mut builder);
     }
 
-    /// #241 Phase 4b infrastructure: bit_decompose_usize_to_felts
-    /// MSB-first ordering matches the verifier's Horner decode at
+    /// bit_decompose_usize_to_felts uses MSB-first ordering that
+    /// matches the verifier's Horner decode at
     /// recursive_jagged_pcs.rs:262-272 (`final_area = bit + 2*final_area`).
     #[test]
     fn bit_decompose_zero_yields_all_zero_felts() {
@@ -2325,7 +2327,7 @@ mod tests {
         let _ = InnerVal::ZERO;
     }
 
-    /// #241 Phase 4b: bit decomposition shape with non-zero values.
+    /// bit decomposition shape with non-zero values.
     /// 4 bits LSB-first: 5 = [0, 1, 0, 1] when read MSB-first.
     #[test]
     fn bit_decompose_shape_matches_num_bits() {
@@ -2338,7 +2340,7 @@ mod tests {
         assert_eq!(bits_max.len(), 8);
     }
 
-    /// #241 Phase 4b: overflow panic when value exceeds bit budget.
+    /// overflow panic when value exceeds bit budget.
     #[test]
     #[should_panic(expected = "exceeds 4 bits")]
     fn bit_decompose_overflow_panics() {
@@ -2347,7 +2349,7 @@ mod tests {
         let _ = bit_decompose_usize_to_felts::<C>(&mut builder, 16, 4);
     }
 
-    /// #241 Phase 4b: edge case — zero bits is meaningful only for
+    /// edge case — zero bits is meaningful only for
     /// value zero.  Returns empty Vec.
     #[test]
     fn bit_decompose_zero_bits_for_zero_value() {
@@ -2356,7 +2358,7 @@ mod tests {
         assert_eq!(bits.len(), 0);
     }
 
-    /// #241 Phase 4a: bytes adapter falls back to zero placeholder
+    /// bytes adapter falls back to zero placeholder
     /// for empty bytes (matches the BasefoldShardProof::empty path).
     #[test]
     fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
@@ -2367,7 +2369,7 @@ mod tests {
         assert_eq!(var.original_commitments.len(), 2);
     }
 
-    /// #241 Phase 4a: bytes adapter routes a real bundle's bytes
+    /// bytes adapter routes a real bundle's bytes
     /// through lift_jagged_basefold_bundle.  Round-trips serialize +
     /// deserialize via rmp-serde, then lifts.
     #[test]
@@ -2422,7 +2424,7 @@ mod tests {
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
     }
 
-    /// #241 Phase 4b: row_counts_by_round plumbed through produces
+    /// row_counts_by_round plumbed through produces
     /// non-zero row_counts in the variable (one Felt per chip).
     /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion (P2c) —
     /// the 5-arg lift call needs a full RecursiveBasefoldProof + sumcheck
@@ -2594,7 +2596,7 @@ mod tests {
         );
     }
 
-    /// #241 Phase 4a: bundle lift produces a structurally valid
+    /// bundle lift produces a structurally valid
     /// JaggedPcsProofVariable with shape matching the existing
     /// lift_evaluation_proof_bytes placeholder for empty bundles.
     /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion (P2c).
