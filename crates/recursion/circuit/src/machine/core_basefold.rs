@@ -87,7 +87,7 @@ pub struct ZKMCoreBasefoldWitnessVariable<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
-        // Review item 12: per-chip trace@z openings carried from the
+        // Per-chip trace@z openings carried from the
         // host proof so the in-circuit zerocheck verifier batches and
         // constrains the SAME values the prover reduced to the
         // zerocheck point (not the trace@z_gkr LogUp-GKR openings).
@@ -281,7 +281,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let column_counts_by_round_pre: Vec<Vec<usize>> =
                 vec![main_widths_pre];
 
-            // VERIFY_VK=true Site-2 fix: per-chip WITNESSED heights (2^log_h),
+            // VERIFY_VK=true: per-chip WITNESSED heights (2^log_h),
             // name-sorted (aligned with column_counts_by_round_pre, both from
             // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
             // / row_counts are reconstructed value-independently instead of
@@ -402,7 +402,7 @@ pub fn verify_core_basefold<C, SC, A>(
             let cumsums_for_shard = cumsums_per_shard_ref
                 .get(i)
                 .unwrap_or(&empty_cumsums);
-            // Review item 12: use the per-chip trace@z openings carried
+            // Use the per-chip trace@z openings carried
             // from the host proof (`proof_opened_values`) instead of the
             // LogUp-GKR openings (trace@z_gkr).  The host reduced the
             // trace to the zerocheck point z; the in-circuit zerocheck
@@ -798,7 +798,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPose
     ///
     /// Sole dummy constructor for the basefold recursion pipeline
     /// (the legacy FRI-shaped counterpart `ZKMRecursionWitnessValues::dummy`
-    /// was retired in #393). Used by `program_from_shape` to
+    /// has since been retired). Used by `program_from_shape` to
     /// build basefold recursion programs from cached shapes.
     pub fn dummy(
         machine: &zkm_stark::StarkMachine<
