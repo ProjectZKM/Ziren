@@ -204,7 +204,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
-        // #83 fix: compute column_counts_by_round BEFORE the
+        // Compute column_counts_by_round BEFORE the
         // lift_evaluation_proof_bytes call. Previously the lift was
         // passed an empty placeholder, which made the JaggedPcsParams
         // see num_cols = 1 (post-padding) → num_col_variables = 0 →
@@ -235,7 +235,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
-        // VERIFY_VK=true Site-2 (#25): per-chip WITNESSED heights from the
+        // VERIFY_VK=true: per-chip WITNESSED heights from the
         // opened `degree` — same pattern as core/compress.
         let chip_height_felts_pre =
             crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
@@ -285,7 +285,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 &column_counts_by_round,
             ),
         };
-        // VERIFY_VK=true Site-2 (#25): derive from the WITNESSED opened
+        // VERIFY_VK=true: derive from the WITNESSED opened
         // `degree` instead of baking from host-side chip_log_heights
         // (mirrors core/compress).
         let empty_log_heights_deferred = std::collections::BTreeMap::<String, u8>::new();
@@ -342,13 +342,14 @@ pub fn verify_deferred_basefold<C, SC, A>(
             );
         let mut challenger = machine.config().challenger_variable(builder);
 
-        // Pre-prologue challenger seeding (#7 enforcement fix) — port of
+        // Pre-prologue challenger seeding — port of
         // core_basefold.rs:443-468 / wrap_basefold.rs:370-390 /
-        // compress_basefold.rs Step 5e: the host machine verifier seeds
+        // compress_basefold.rs: the host machine verifier seeds
         // the challenger with vk.observe_into + public_values[0..num_pv]
         // BEFORE the shard prologue (crates/stark/src/machine.rs:693-707).
         // The deferred path created a fresh challenger and did neither —
-        // same desync class as the compose path, masked pre-#7.
+        // same desync class as the compose path, masked before the
+        // VK-enforcement fix landed.
         {
             use crate::challenger::CanObserveVariable;
             let num_pv = machine.num_pv_elts();
@@ -358,7 +359,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             }
         }
 
-        // #244 + #249 fix: per-proof override when bundle path is active.
+        // Per-proof override when bundle path is active.
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
@@ -466,7 +467,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             >,
     {
         use p3_field::PrimeCharacteristicRing;
-        // #261: compress dummy now requires the full ZKMCompressWithVkeyShape so
+        // The compress dummy now requires the full ZKMCompressWithVkeyShape so
         // its vk_merkle_data can be sized.  Deferred overrides vk_merkle_data
         // below with its own proof set, so the inner one is throwaway.
         let inner_shape = super::ZKMCompressWithVkeyShape {
