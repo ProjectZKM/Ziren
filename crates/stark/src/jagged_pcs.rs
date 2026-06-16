@@ -39,7 +39,7 @@ pub type JaggedChallenger = InnerChallenger;
 /// One committed batch of chip traces, plus the per-chip metadata
 /// needed to recompute evaluation points on the verifier side.
 ///
-/// **#H (BaseFold-over-BN254 port)** — generic over the MMCS `MT` so
+/// BaseFold-over-BN254 port — generic over the MMCS `MT` so
 /// the inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254)
 /// commit paths share one struct.  `Val`/`Challenge` stay KoalaBear /
 /// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear,KoalaBear⁴>`); only
@@ -99,8 +99,8 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// leaves at least one batch_point variable.  Required for tiny
 /// commits where total entries < `1 << DEFAULT_LOG_STACKING_HEIGHT`.
 ///
-/// **#244 (May 6 2026)**: this clamping creates prover/verifier param
-/// divergence — prover scales the stacking height down for small
+/// Caution: this clamping creates a prover/verifier param
+/// divergence — the prover scales the stacking height down for small
 /// commits, but the in-circuit verifier (built once per shard with
 /// max_log_row_count) does not.  The bundle-lift path in
 /// `crates/recursion/circuit/src/machine/core_basefold.rs` rebuilds
@@ -110,7 +110,7 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// path's verifier matches the prover.  The default (bytes) path's
 /// verifier still uses max_log_row_count but the all-zero placeholder
 /// lift's shape doesn't depend on the prover-emitted shape, so the
-/// mismatch is invisible.  See #244 for the chain analysis.
+/// mismatch is invisible.
 pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
     let log_total = total_entries.next_power_of_two().trailing_zeros();
     // Reserve at least 1 var for the batching point (= 2 stripes
@@ -119,8 +119,8 @@ pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
     DEFAULT_LOG_STACKING_HEIGHT.min(max_for_data)
 }
 
-// #H (BaseFold-over-BN254 port): GC-generic PCS core. Val/Challenge stay
-// KoalaBear (SP1's BNGC<KoalaBear,KoalaBear^4> keeps the same field for outer);
+// BaseFold-over-BN254 port: GC-generic PCS core. Val/Challenge stay
+// KoalaBear (the outer context keeps the same field for inner and outer);
 // only the Mmcs (hash) + Dft vary by context. Inner uses Poseidon2-KoalaBear
 // Merkle; the wrap (OuterSC) will pass Poseidon2-BN254 Merkle (OuterValMmcs).
 // Non-breaking: `build_pcs` below stays a concrete wrapper so every existing
@@ -210,7 +210,7 @@ fn chips_to_mles(
     (mles, dims)
 }
 
-/// Public for the GPU dispatch hook (#76 / D2 — ): the
+/// Public for the GPU commit-dispatch hook: the
 /// device-side commit path needs to run the same MLE-construction +
 /// padding logic as the host before invoking the GPU encoder.
 pub fn chips_to_mles_owned(
@@ -243,7 +243,7 @@ pub fn chips_to_mles_owned(
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
 ///
-/// **#76 / D2 ( plan §5)** — when `ZIREN_GPU_BASEFOLD=1` is
+/// GPU commit dispatch — when `ZIREN_GPU_BASEFOLD=1` is
 /// set AND ziren-gpu has registered the device commit hook (via
 /// [`register_gpu_basefold_commit_hook`]), the commit dispatches
 /// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
@@ -266,7 +266,7 @@ pub fn commit_jagged_pcs(
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
-            // s7-B transcript-safety: snapshot + restore around the
+            // Transcript safety: snapshot + restore around the
             // fallible device hook so an Err after any challenger
             // interaction cannot double-advance the transcript (see
             // the open_jagged_pcs twin below for the full rationale).
@@ -334,7 +334,7 @@ pub fn commit_jagged_pcs_host(
     )
 }
 
-/// #H (BaseFold-over-BN254 port): GC-generic host commit core (observes
+/// BaseFold-over-BN254 port: GC-generic host commit core (observes
 /// the commitment into `challenger`).  Parameterized over the challenger
 /// `Challenger` + MMCS `MT` + DFT `D`; the caller supplies the concrete
 /// `mmcs`/`dft`.  The inner path uses `JaggedChallenger` + Poseidon2-KoalaBear
@@ -361,8 +361,8 @@ where
     (commit, prover_data)
 }
 
-/// GPU-dispatched no-observe variant — Option B precompute uses this
-/// so the main-trace BaseFold commit runs on the device when
+/// GPU-dispatched no-observe variant — the single-main-commit precompute
+/// uses this so the main-trace BaseFold commit runs on the device when
 /// `ZIREN_GPU_BASEFOLD=1` AND the hook is registered.  The hook's
 /// internal `challenger.observe` is absorbed by a throwaway challenger
 /// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
@@ -407,7 +407,7 @@ pub fn commit_jagged_pcs_no_observe(
 }
 
 /// Same as [`commit_jagged_pcs_host`] but does NOT observe
-/// the commitment into the challenger.  Used by the Option B
+/// the commitment into the challenger.  Used by the
 /// single-main-commit flow, where the BaseFold commit happens BEFORE
 /// the shard-level Phase 1 prologue and the prologue's 8-felt
 /// `main_commitment` observe IS the BaseFold-digest observation —
@@ -430,7 +430,7 @@ pub fn commit_jagged_pcs_host_no_observe(
     commit_jagged_pcs_no_observe_generic::<JaggedMmcs, JaggedDft>(chip_traces, mmcs, dft)
 }
 
-/// #H (BaseFold-over-BN254 port): GC-generic commit core (no challenger
+/// BaseFold-over-BN254 port: GC-generic commit core (no challenger
 /// observe).  Parameterized over the MMCS `MT` + DFT `D`; the caller
 /// supplies the concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear)
 /// and the wrap (OuterSC, Poseidon2-BN254) paths share one body.
@@ -473,14 +473,14 @@ where
 
 /// Extract the 8-felt MMCS digest from a [`BasefoldLateBindingCommit`].
 /// The digest is the value the verifier's Phase 1 prologue observes as
-/// `main_commitment` in the Option B single-main-commit flow.
+/// `main_commitment` in the single-main-commit flow.
 ///
 /// The commitment is a `MerkleCap<KoalaBear, [KoalaBear; 8]>` (the
 /// Plonky3 `MerkleTreeMmcs::Commitment` for `InnerValMmcs`).  This
 /// helper pulls out the first cap root — the same byte sequence
 /// `DuplexChallenger::observe(MerkleCap)` consumes.
 #[must_use]
-/// #H: extract the 8-felt MerkleCap root from a JaggedMmcs commitment (the
+/// Extract the 8-felt MerkleCap root from a JaggedMmcs commitment (the
 /// inner BasefoldRing::digest_felts body).
 pub fn basefold_commit_digest_felts(
     commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
@@ -499,7 +499,7 @@ pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal;
     roots[0]
 }
 
-/// #H (BaseFold-over-BN254): ring-native commitment digest. Inner (KoalaBear)
+/// BaseFold-over-BN254: ring-native commitment digest. Inner (KoalaBear)
 /// callers use `basefold_commit_digest` (8-felt MerkleCap root); the wrap
 /// (OuterSC) carries the BN254 `MT::Commitment` directly via this generic
 /// accessor -- the seam the digest tunnel observes / serializes.
@@ -523,7 +523,7 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 // ─────────────────────────────────────────────────────────────────────
 // GPU BaseFold commit dispatch hook.
 //
-// Mirror of the #174 () jagged-PCS device-trace hook pattern
+// Mirror of the jagged-PCS device-trace hook pattern
 // in `crate::shard_level::sumcheck_poly::jagged_pcs_device_hook`.  The
 // hook receives the same inputs as `commit_jagged_pcs` and
 // returns a byte-identical `(commit, prover_data)` — the device side
@@ -532,7 +532,7 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 //   * uploading the per-chip traces to GPU memory,
 //   * running `FriCudaProver::encode_and_commit` (the existing 1349
 //     LOC device commit) + the SP1 `compress([root, hash([h, w])])`
-//     post-processing step (C4 risk #3) so the digest matches Plonky3
+//     post-processing step so the digest matches Plonky3
 //     `MerkleTreeMmcs`,
 //   * observing the resulting commitment into the supplied
 //     `JaggedChallenger` (so the transcript stays in lock-step with the
@@ -540,14 +540,15 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 //   * assembling a `BasefoldLateBindingProverData` whose
 //     `stacked_data.pcs_batch_data.prover_data` is shape-compatible
 //     with the host `MerkleTreeMmcs::ProverData` consumed downstream by
-//     `open_jagged_pcs`.  The shape compatibility risk is
-//     C4 risk #1 — until the open-path adapter lands the device hook
-//     can return `Err` on un-handled shapes and we fall back to host.
+//     `open_jagged_pcs`.  Because that prover-data shape compatibility
+//     is not guaranteed for every shape, until the open-path adapter
+//     lands the device hook can return `Err` on un-handled shapes and
+//     we fall back to host.
 //
 // The hook returns `Result<.., Vec<...>>` instead of `Option<..>` so
 // the device side can tunnel ownership of the host-input back to the
 // host fallback on error (mirrors the `try_emit_jagged_pcs_bytes_device`
-// fall-through contract in B1).
+// fall-through contract on the bytes path).
 // ─────────────────────────────────────────────────────────────────────
 
 /// Signature of the GPU BaseFold commit driver.  Same inputs as
@@ -592,7 +593,7 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 // `ZIREN_GPU_JAGGED_PCS=1` is set.
 //
 // Per-shard wall: 2.41–2.76s × 25 shards ≈ 62s of the 144s tendermint
-// compress wall (per E2's per-shard logs) — the largest remaining
+// compress wall (measured) — the largest remaining
 // per-shard host bottleneck after the BaseFold commit moved to GPU.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -639,10 +640,10 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Win B (jagged_assist hook hardening) — V2 signature with optional
-// device-resident dense_q handle.
+// V2 jagged-reduction hook signature with optional device-resident
+// dense_q handle (hardening of the device hook).
 //
-// Rationale (from the related design memo narrow win #2):
+// Rationale:
 // V1's hook accepts an owned `Vec<JaggedVal>` for `dense_q`.  When the
 // producer (`ziren-gpu/basefold/src/jagged_reduction_dispatch.rs`)
 // wraps it as `DenseQDevice::Host(...)`, the device round-0 path in
@@ -661,10 +662,10 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // Opaque-`u64`-handle pattern mirrors `GpuLayerTransitionFn` /
 // `GpuLayerInitFn` / `GpuLayerPullFn` above — stark crate never
 // dereferences the handle, that's entirely GPU-side bookkeeping.  This
-// is the simpler newtype wrapper fallback the diag calls out (passing
+// is the simpler newtype-wrapper approach (passing
 // a real `&DeviceBuffer<JaggedVal>` would require pulling
-// `zkm-gpu-core` into `zkm-stark`'s public API, which is the 
-// Backend abstraction — explicitly out of scope).
+// `zkm-gpu-core` into `zkm-stark`'s public API — a backend
+// abstraction that is explicitly out of scope here).
 //
 // **Backward compatible** — V1 hook remains.  Dispatch site prefers
 // V2 when both are registered; otherwise falls back to V1; otherwise
@@ -713,7 +714,7 @@ pub fn get_gpu_jagged_reduction_hook_v2() -> Option<GpuJaggedReductionFnV2> {
     GPU_JAGGED_REDUCTION_HOOK_V2.get().copied()
 }
 
-// ─── Win A (hook hardening) — diagnostic counters / loggers ──────────
+// ─── Hook-hardening diagnostic counters / loggers ────────────────────
 //
 // Counts the number of times the dispatch path was rejected for each
 // reason.  Logged on each Nth rejection (geometric — 1, 8, 64, ...)
@@ -786,16 +787,15 @@ pub mod jagged_dispatch_diag {
 // layer's device-resident state.  Stark side never dereferences the
 // handle — that's entirely the GPU prover's bookkeeping.
 //
-// Three previous attempts (#218 Q1, #219 Q2, #220 R1) wired a
-// transition CUDA kernel via a side-channel registry but
-// `build_gkr_circuit` STILL ran host transitions, so the kernel was
-// redundant — the host materialization always overrode the device
-// result.  Step 4 fixes this by making `LayerState::Device` a true
-// alternative to `LayerState::Host`, with the GPU hook as the only
-// path that produces it.
+// Earlier attempts wired a transition CUDA kernel via a side-channel
+// registry but `build_gkr_circuit` STILL ran host transitions, so the
+// kernel was redundant — the host materialization always overrode the
+// device result.  This design fixes that by making `LayerState::Device`
+// a true alternative to `LayerState::Host`, with the GPU hook as the
+// only path that produces it.
 //
-// **NOT YET WIRED** — Step 4a is scaffolding only.  Step 4c will be
-// the first commit that actually consults the registered hook.
+// NOT YET WIRED — this is hook scaffolding only; a later change is the
+// first to actually consult the registered hook from `build_gkr_circuit`.
 // ─────────────────────────────────────────────────────────────────────
 
 /// Signature of the GPU row-GKR layer-transition driver.  Consumes
@@ -804,10 +804,10 @@ pub mod jagged_dispatch_diag {
 /// allocation / deallocation of the device-resident state behind the
 /// handles — the stark crate never dereferences them.
 ///
-/// Step 4a scaffolding only — no caller invokes this yet.  Step 4c
-/// will wire the dispatch into `build_gkr_circuit`.
+/// Scaffolding only — no caller invokes this yet; a later change wires
+/// the dispatch into `build_gkr_circuit`.
 ///
-/// **#230 multi-GPU fix** — `circuit_id` scopes the hook to a single
+/// Multi-GPU isolation — `circuit_id` scopes the hook to a single
 /// GKR-circuit build call.  The GPU side keys its registry by
 /// `(device_id, circuit_id)` so concurrent shards on the same GPU
 /// don't share a `next_handle` counter (which previously caused
@@ -821,7 +821,7 @@ static GPU_LAYER_TRANSITION_HOOK: std::sync::OnceLock<GpuLayerTransitionFn> =
 /// Register the GPU row-GKR layer-transition driver.  Idempotent;
 /// returns `Err(existing_hook)` when a hook was already registered.
 /// Will be called once by `ziren-gpu`'s `compress_multi_gpu` at
-/// startup once Step 4c lands.
+/// startup once the device layer-transition dispatch is wired in.
 pub fn register_gpu_layer_transition_hook(
     f: GpuLayerTransitionFn,
 ) -> Result<(), GpuLayerTransitionFn> {
@@ -835,14 +835,13 @@ pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Step 4c (`/tmp/step4_backend_parametrize_plan.md`) — companion hooks
-// for layer-state lifecycle on device:
+// Companion hooks for the row-GKR layer-state lifecycle on device:
 //
 //   * `GpuLayerInitFn`     — upload the FIRST EF Layer (post-FirstLayer
 //                            host transition) to device, return handle.
 //   * `GpuLayerTransitionFn` (defined above) — produce the next
 //                            device-resident layer state from a prev
-//                            handle.  Step 4a contract; unchanged.
+//                            handle (the transition-hook contract above).
 //   * `GpuLayerPullFn`     — materialize a device handle back into a
 //                            host `LogUpGkrCpuLayer<EF, EF>` so the
 //                            terminal extraction can run on host.
@@ -858,7 +857,7 @@ pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
 // `build_gkr_circuit` is generic over `F`/`EF`, so the dispatch site
 // uses `core::any::TypeId` to confirm the generics match before calling
 // the hook; on type mismatch the host path runs unchanged.  This
-// matches the architecture in #76 / D2 (commit hook) where the device
+// matches the commit-hook architecture above, where the device
 // only ever sees concrete JaggedVal/JaggedChallenge buffers.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -883,13 +882,13 @@ pub struct HostLayerView<'a> {
 /// FirstLayer) to device memory, returns an opaque handle the
 /// transition / pull hooks can consume.
 ///
-/// Step 4c: declared but only invoked when this hook + the transition
+/// Declared but only invoked when this hook + the transition
 /// hook + the pull hook are all registered, the calling thread has a
 /// `gpu_worker_context` TLS (i.e. a `MultiGpuDevicePool` worker), AND
 /// the `build_gkr_circuit` generic types resolve to (`JaggedVal`,
 /// `JaggedChallenge`).
 ///
-/// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
+/// Multi-GPU isolation — `circuit_id` scopes this hook to a single
 /// GKR-circuit build call.  See `GpuLayerTransitionFn` docs for the
 /// per-circuit registry rationale.
 pub type GpuLayerInitFn =
@@ -923,7 +922,7 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 /// on a 1-row layer, so the pull cost is dominated by a
 /// `4 × num_chips × num_interactions` element copy back from device.
 ///
-/// **#230 multi-GPU fix** — `circuit_id` scopes this hook to a single
+/// Multi-GPU isolation — `circuit_id` scopes this hook to a single
 /// GKR-circuit build call.  The GPU side can SAFELY drain that
 /// circuit's intermediate states after extracting the requested
 /// terminal (no concurrent shards' state to step on, since they have
@@ -1001,8 +1000,8 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
 /// `pop()`s a layer per call (see
 /// `sp1-gpu/crates/logup_gkr/src/tracegen.rs:188-246`).  Ziren's
 /// `top_level.rs::prove_shard_logup_gkr_rows` now allocates a
-/// `LogupTaskScope` at the same lifetime boundary (#383 )
-/// and invokes this hook () so the ziren-gpu side can fill
+/// `LogupTaskScope` at the same lifetime boundary
+/// and invokes this hook so the ziren-gpu side can fill
 /// the scope's `DeviceLogupGkrCircuit` from its own device-resident
 /// per-circuit registry.
 ///
@@ -1028,7 +1027,7 @@ pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
 /// **No-op fallback**: when this hook is not registered (older
 /// ziren-gpu builds, or when the feature is disabled), `top_level.rs`
 /// skips the install call and the scope's `circuit` stays `None` —
-/// byte-equivalent to pre-#383 dispatch via the legacy TLS handle.
+/// byte-equivalent to the legacy TLS-handle dispatch.
 pub type GpuLogupScopePopulateFn = fn(
     circuit_id: u64,
 ) -> Option<
@@ -1153,7 +1152,7 @@ pub fn get_gpu_generate_first_layer_hook() -> Option<GpuGenerateFirstLayerFn> {
 /// through every [`GpuLayerInitFn`] / [`GpuLayerTransitionFn`] /
 /// [`GpuLayerPullFn`] invocation.  The GPU side keys its registry by
 /// `(device_id, circuit_id)` so concurrent shards on the same GPU are
-/// fully isolated — fixes #230 multi-GPU panics caused by a shared
+/// fully isolated — fixes multi-GPU panics caused by a shared
 /// `next_handle` counter being stepped on across shards.
 // Backing storage uses AtomicUsize, not AtomicU64, so the file
 // compiles on the zkvm-elf target (mipsel — no
@@ -1185,7 +1184,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
 ///
-/// **#191 / H3 ( plan §5 sister to E2)** — when
+/// GPU open dispatch — when
 /// `ZIREN_GPU_BASEFOLD=1` is set AND ziren-gpu has registered the GPU
 /// open hook (via [`register_gpu_basefold_open_hook`]), the open
 /// dispatches through `FriCudaProver::prove` on device.  Output proof
@@ -1205,7 +1204,7 @@ pub fn open_jagged_pcs(
             use std::sync::OnceLock;
             static FIRED_ONCE: OnceLock<()> = OnceLock::new();
             static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
-            // s7-B transcript-safety: the device open ADVANCES the
+            // Transcript safety: the device open ADVANCES the
             // challenger (pre-prove grind, per-round digest observes,
             // FRI PoW, query sampling) before it can fail —
             // `FriCudaProver::prove` allocates on device mid-flight,
@@ -1213,7 +1212,7 @@ pub fn open_jagged_pcs(
             // restore so the host fallback re-runs on the SAME
             // transcript state; without the restore the transcript is
             // double-advanced and the emitted proof is silently
-            // INVALID (the s6 T3c armed-assert class).
+            // INVALID (caught only by the in-circuit verifier).
             let challenger_snapshot = challenger.clone();
             match hook(prover_data, eval_point, challenger) {
                 Ok(proof) => {
@@ -1276,7 +1275,7 @@ pub fn open_jagged_pcs_host(
     )
 }
 
-/// #H (BaseFold-over-BN254 port): GC-generic host open core.  Parameterized
+/// BaseFold-over-BN254 port: GC-generic host open core.  Parameterized
 /// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
 /// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
 /// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
@@ -1306,7 +1305,7 @@ where
 // GPU BaseFold open
 // dispatch hook.
 //
-// Mirror of the E2 commit hook ([`register_gpu_basefold_commit_hook`]).
+// Mirror of the GPU commit hook ([`register_gpu_basefold_commit_hook`]).
 // The hook receives the same inputs as `open_jagged_pcs` and
 // returns a byte-identical `StackedBasefoldProof` — the device side is
 // responsible for:
@@ -1390,7 +1389,7 @@ pub fn verify_jagged_pcs(
     )
 }
 
-/// #H (BaseFold-over-BN254 port): GC-generic verify core.  Parameterized
+/// BaseFold-over-BN254 port: GC-generic verify core.  Parameterized
 /// over the challenger `Challenger` + MMCS `MT` + DFT `D`; the caller
 /// supplies the concrete `mmcs`/`dft`.  The inner path uses `JaggedChallenger`
 /// + Poseidon2-KoalaBear Mmcs; the wrap (OuterSC) will pass the BN254
@@ -1427,7 +1426,7 @@ where
     )
 }
 
-/// #H (BaseFold-over-BN254 wrap port): generic commit -> open -> verify
+/// BaseFold-over-BN254 wrap port: generic commit -> open -> verify
 /// roundtrip of the stacked BaseFold jagged-PCS over an arbitrary MMCS +
 /// challenger.  Lets a downstream crate (recursion-core) validate the PCS over
 /// the OUTER ring (`OuterValMmcs` / `OuterChallenger`, BN254) using the same
@@ -1552,7 +1551,7 @@ pub mod jagged {
     /// `dense_values` (that's the multi-GB vector we just committed
     /// to BaseFold).
     ///
-    /// `column_counts` (#95-fix, May 2 2026): per-chip *actual*
+    /// `column_counts`: per-chip *actual*
     /// column count as exercised by this shard's trace, written by
     /// the prover from `compute_jagged_metadata`.  The verifier reads
     /// this instead of `BaseAir::width(chip)` so the prover can send
@@ -1570,7 +1569,7 @@ pub mod jagged {
         pub column_counts: Vec<usize>,
     }
 
-    // #H (BaseFold-over-BN254): generic over the Mmcs so the wrap (OuterSC)
+    // BaseFold-over-BN254: generic over the Mmcs so the wrap (OuterSC)
     // bundle holds the BN254 commitment + proof; inner alias below keeps every
     // caller + the rmp wire-format unchanged. serde(bound) mirrors the
     // BasefoldLateBindingCommitGeneric pattern (commitment + proof must serde).
@@ -1589,11 +1588,11 @@ pub mod jagged {
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
         pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
         pub packing: PackingMeta,
-        /// Jagged-eval sub-protocol proof (#243 — SP1 port scaffold).
+        /// Jagged-eval sub-protocol proof (SP1 port scaffold).
         ///
         /// Produced by [`crate::jagged_eval_sumcheck::prove_jagged_evaluation`]
         /// alongside the outer reduction sumcheck.  Currently a
-        /// scaffold dummy; the real body is the day-2 work of #243.
+        /// scaffold dummy; the real body is still to be ported.
         ///
         /// `serde(default)` so existing wire-format bundles
         /// deserialize cleanly with a placeholder.
@@ -1623,7 +1622,7 @@ pub mod jagged {
         }
     }
 
-    /// Pre-computed jagged-PCS commit bundle for the Option B
+    /// Pre-computed jagged-PCS commit bundle for the
     /// single-main-commit flow.  Produced by
     /// [`precompute_jagged_basefold_commit`] before the shard-level
     /// Phase 1 prologue, then consumed by
@@ -1636,7 +1635,7 @@ pub mod jagged {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
-        /// #A (single shard-wide commit buffer): opaque handle to the
+        /// Single shard-wide commit buffer: opaque handle to the
         /// device-resident dense polynomial the commit was built from,
         /// registered in ziren-gpu's `dense_q_device_registry`.  When
         /// `Some`, the step-4 jagged reduction passes it through the V2
@@ -1649,7 +1648,7 @@ pub mod jagged {
     pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
 
     // ─────────────────────────────────────────────────────────────────
-    // #A (single shard-wide commit buffer) — GPU precompute-commit hook.
+    // Single shard-wide commit buffer — GPU precompute-commit hook.
     //
     // Replaces the HOST body of `precompute_jagged_basefold_commit`
     // (host dense pack + host stripe interleave + H2D re-upload) with a
@@ -1692,7 +1691,7 @@ pub mod jagged {
     }
 
     // ─────────────────────────────────────────────────────────────────
-    // s9-DR5 (#51 Phase A) — device BaseFold-over-BN254 wrap Merkle commit.
+    // Device BaseFold-over-BN254 wrap Merkle commit.
     //
     // The wrap stage (OuterSC) builds its BaseFold commit over the
     // Poseidon2-BN254 `OuterValMmcs` (Digest = [Bn254Fr; 1]) via
@@ -1798,12 +1797,13 @@ pub mod jagged {
         PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None }
     }
 
-    /// #32 (commit-traces D2H removal): provider-aware host precompute.
-    /// Identical to [`precompute_jagged_basefold_commit`] but first
+    /// Provider-aware host precompute (used when commit-traces are not
+    /// eagerly copied device→host).  Identical to
+    /// [`precompute_jagged_basefold_commit`] but first
     /// re-materializes any empty (device-resident) chip trace from the
     /// per-shard provider, so the host commit body covers every chip's
     /// real cells even when `commit_traces` no longer eagerly D2H's them.
-    /// This is the FALLBACK body for the device commit hook (#A) — taken
+    /// This is the FALLBACK body for the device commit hook — taken
     /// only on a CUDA error / unsupported geometry — so the slower host
     /// re-materialize is acceptable and, critically, SOUND (no silently
     /// dropped device-chip cells / zero commitment).
@@ -1822,7 +1822,7 @@ pub mod jagged {
         precompute_jagged_basefold_commit(&full)
     }
 
-    /// #H (BaseFold-over-BN254) generic precompute: build the BaseFold commit
+    /// BaseFold-over-BN254 generic precompute: build the BaseFold commit
     /// over an arbitrary Mmcs (the ring's `BasefoldRing::BfMmcs`). Inner uses
     /// Poseidon2-KoalaBear; the wrap (OuterSC) passes the Poseidon2-BN254
     /// `OuterValMmcs` so the commitment is the BN254 root. The DFT is over
@@ -1834,7 +1834,7 @@ pub mod jagged {
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
         // `'static` bounds (Commitment + ProverData) are required by the
-        // s9-DR5 device BN254 commit hook's `Box<dyn Any>` downcast back to
+        // device BN254 commit hook's `Box<dyn Any>` downcast back to
         // `BasefoldLateBindingCommitGeneric<MT>`.  Both rings (JaggedMmcs /
         // OuterValMmcs) are concrete `'static` types, so this is a no-op
         // tightening for every existing caller.
@@ -1855,7 +1855,7 @@ pub mod jagged {
                 RowMajorMatrix::new(dense_q, 1),
             )];
 
-            // s9-DR5 (#51 Phase A): device BN254 wrap Merkle commit.  When
+            // Device BN254 wrap Merkle commit.  When
             // ziren-gpu has registered the hook AND `MT` is the BN254
             // OuterValMmcs AND `ZIREN_GPU_BASEFOLD_BN254_COMMIT != 0`, the
             // Merkle leaf-hash + compress-layers run on the device (the
@@ -1915,7 +1915,7 @@ pub mod jagged {
         )
     }
 
-    /// Option B single-main-commit variant: run steps (3)+(4)+(5)
+    /// Single-main-commit variant: run steps (3)+(4)+(5)
     /// using a `precompute_jagged_basefold_commit` result.  Does NOT
     /// observe `precomputed.commit.commitment` into the challenger —
     /// the orchestrator/Phase 1 prologue already observed the 8-felt
@@ -1942,7 +1942,7 @@ pub mod jagged {
         )
     }
 
-    /// #32 (commit-traces D2H removal): same as
+    /// Provider-aware reduction prove: same as
     /// [`prove_jagged_basefold_with_precomputed`] but additionally accepts
     /// the per-shard `DeviceTraceProvider`.  The provider is used ONLY on
     /// the slow GPU-reduction fallback edge: when the device handle / V2
@@ -1998,7 +1998,7 @@ pub mod jagged {
         )
     }
 
-    /// #32: re-materialize a provider-aware view of `chip_traces` for the
+    /// Re-materialize a provider-aware view of `chip_traces` for the
     /// host fallback.  Any entry whose host trace is empty (width 0 — the
     /// chip is device-resident, its real cells never D2H'd onto the host
     /// `chip_traces`) is rebuilt from the per-shard provider via the
@@ -2031,7 +2031,7 @@ pub mod jagged {
 
     /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
     /// observe-inside flow) and [`prove_jagged_basefold_with_precomputed`]
-    /// (Option B single-commit flow).  When `precomputed` is `Some`,
+    /// (the single-commit flow).  When `precomputed` is `Some`,
     /// steps (1) + (2) are skipped and the in-band commit observe is
     /// suppressed (the caller already observed the digest at the Phase 1
     /// prologue position).
@@ -2042,7 +2042,7 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: Option<PrecomputedJaggedCommit>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        // #32: per-shard device-trace provider, used only to re-materialize
+        // Per-shard device-trace provider, used only to re-materialize
         // empty (device-resident) chip traces on the host-fallback edges.
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     ) -> JaggedBasefoldBundle {
@@ -2055,8 +2055,8 @@ pub mod jagged {
 
         // (1) + (2): Pack metadata + commit dense as a single Mle via
         // BaseFold-stacked.  When `precomputed` is `Some`, both steps
-        // were run up-front by the orchestrator's Option B path —
-        // single-main-commit flow has already observed the 8-felt
+        // were run up-front by the orchestrator's single-main-commit
+        // path, which has already observed the 8-felt
         // digest of `commit.commitment` as `main_commitment` in the
         // shard-level Phase 1 prologue.  Skip the in-band commit
         // observe in that case to keep transcripts aligned with the
@@ -2070,7 +2070,7 @@ pub mod jagged {
             );
             (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle)
         } else {
-            // #32: no precompute → this path materializes the dense commit on
+            // No precompute → this path materializes the dense commit on
             // host.  Re-materialize empty device-resident chips from the
             // provider first so metadata dims + dense values are correct
             // (no-op clone when provider is None / traces already full).
@@ -2149,7 +2149,7 @@ pub mod jagged {
             // reduction skips it naturally.
             pre
         } else {
-            // #32: when the residual openings are unavailable (kill-switch
+            // When the residual openings are unavailable (kill-switch
             // ZIREN_ZC_RESIDUAL_Y=0) the host triple-loop reads chip cells
             // directly — re-materialize empty device-resident chips from the
             // provider first so the reduction sees real cells (cold path;
@@ -2189,7 +2189,7 @@ pub mod jagged {
                     let _ = r_row_c;
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // [#7898240 orient] bit-reverse the trace row index so
+                    // Orientation: bit-reverse the trace row index so
                     // y_per_chip == opened_values (= MLE of bitrev(trace)).
                     let is_pow2 = h.is_power_of_two();
                     let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
@@ -2239,7 +2239,7 @@ pub mod jagged {
         // the hook returns `None` (unsupported shape) or is not
         // registered, the host fallback path runs unchanged.
         //
-        // Win A (May 21 2026 jagged-wins) — hook hardening:
+        // Hook hardening / diagnostics:
         //   * V2 hook (with optional device handle) preferred over V1
         //   * `env_set_but_unregistered` warn-once when ZIREN_GPU_JAGGED_PCS=1
         //     but neither V1 nor V2 hook is registered
@@ -2249,8 +2249,8 @@ pub mod jagged {
         //   * V2 hook with `Some(device_handle)` is logged separately to
         //     confirm the device-resident path is exercised
         //
-        // Win B (May 21 2026 jagged-wins) — device-resident dense_q
-        // signature: when a V2 hook is registered, the dispatch passes
+        // Device-resident dense_q signature:
+        // when a V2 hook is registered, the dispatch passes
         // `device_handle = None` (Ziren has no on-device dense_q yet —
         // the host materialization at line ~1413 is the source).  V2
         // semantics with `None` collapse to V1 behaviour; the signature
@@ -2271,51 +2271,46 @@ pub mod jagged {
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            // A0 history (Jun 11 2026): the s4-R4 invalid proof at the
-            // fib packed shard (log_dense=27, 22 chips) was ROOT-CAUSED
-            // to a stale GPU scaffold: it implemented the pre-ITEM-12
-            // reduction (y-observe + gamma column mixing, LSB pair
-            // fold, evals-observe, push point order) while this host
-            // moved to caller-sampled z_col Lagrange weights + full
-            // row_eq(rev(z_row)) embedding + MSB fold + coeff observe +
-            // insert(0, r).  Fixed by passing z_col/z_row through the
-            // hook signatures and re-aligning the ziren-gpu scaffold +
-            // CUDA kernels (jagged_sumcheck_kernels.cu MSB).
-            // Validated byte-identical vs pure host: fib core (V2
-            // device-handle AND host-dense legs, 0x9f51315d72d76b37),
-            // tendermint core A/B 7/7 shards, fib full chain + wrap.
+            // History: an earlier invalid proof at the fib packed shard
+            // (log_dense=27, 22 chips) was root-caused to a stale GPU
+            // scaffold: it implemented an OLDER reduction (y-observe +
+            // gamma column mixing, LSB pair fold, evals-observe, push
+            // point order) while this host had moved to caller-sampled
+            // z_col Lagrange weights + full row_eq(rev(z_row)) embedding +
+            // MSB fold + coeff observe + insert(0, r).  Fixed by passing
+            // z_col/z_row through the hook signatures and re-aligning the
+            // ziren-gpu scaffold + CUDA kernels (jagged_sumcheck_kernels.cu
+            // MSB).  Validated byte-identical vs pure host (fib core both
+            // the V2 device-handle and host-dense legs, tendermint core
+            // shards, fib full chain + wrap).
             //
-            // DEFAULT ON (=0/false to opt out).  History: the s6
-            // default-ON window hit an ARMED in-circuit trip in
-            // MULTI-GPU tendermint COMPRESS (a compose rejected a
-            // hook-on first-layer recursion proof) while the identical
-            // hook-off run was green (s6 T3c vs T3d).  s7-B
-            // ROOT-CAUSED it to a TRANSCRIPT-POISON window in the
-            // ziren-gpu round-0 device path: the fold-output buffers
-            // (2 x 4 GiB at log_dense=29) were allocated AFTER the
-            // round-0 observe+sample; an OOM there (T3c peaked at
-            // ~29.5 GiB VRAM) returned None and the caller re-ran
-            // round 0 on host, double-advancing the transcript and
-            // emitting a (log_n+1)-round proof.  NOT cross-GPU: the
-            // dump-replay of the same shards hook-on verified GREEN at
-            // low VRAM pressure, and fault-injecting the alloc failure
+            // DEFAULT ON (=0/false to opt out).  History: an earlier
+            // default-ON window hit an armed in-circuit trip in MULTI-GPU
+            // tendermint COMPRESS (a compose rejected a hook-on first-layer
+            // recursion proof) while the identical hook-off run was green.
+            // Root cause was a TRANSCRIPT-POISON window in the ziren-gpu
+            // round-0 device path: the fold-output buffers (2 x 4 GiB at
+            // log_dense=29) were allocated AFTER the round-0 observe+sample;
+            // an OOM there (peaked at ~29.5 GiB VRAM) returned None and the
+            // caller re-ran round 0 on host, double-advancing the transcript
+            // and emitting a (log_n+1)-round proof.  NOT a cross-GPU race:
+            // dump-replay of the same shards hook-on verified GREEN at low
+            // VRAM pressure, and fault-injecting the alloc failure
             // reproduced the compose rejection exactly (point.len()=
-            // log_n+1).  Fixed in ziren-gpu jagged_sumcheck.rs by
-            // hoisting ALL fallible allocs before any transcript
-            // interaction and resuming (not restarting) on host for
-            // mid-loop failures; validated by injection A/B +
-            // byte-identity gates (see /tmp/gpu_agent_log.md s7-B).
+            // log_n+1).  Fixed in ziren-gpu jagged_sumcheck.rs by hoisting
+            // ALL fallible allocs before any transcript interaction and
+            // resuming (not restarting) on host for mid-loop failures.
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true);
 
-            // Win A: look up BOTH hooks so we can emit diagnostics on
+            // Look up BOTH hooks so we can emit diagnostics on
             // mismatches (env-set/unregistered, hook-registered/env-unset).
             let hook_v1 = super::get_gpu_jagged_reduction_hook();
             let hook_v2 = super::get_gpu_jagged_reduction_hook_v2();
             let any_hook_registered = hook_v1.is_some() || hook_v2.is_some();
 
-            // #A (single shard-wide commit buffer): when the precompute
+            // Single shard-wide commit buffer: when the precompute
             // registered a device-resident dense_q AND the V2 hook will
             // consume it, skip the host dense materialization entirely —
             // the device buffer (the same one the commit was packed
@@ -2327,7 +2322,7 @@ pub mod jagged {
             let dense_q = if skip_host_dense {
                 Vec::new()
             } else {
-                // #32: when device-resident chips carry empty host traces,
+                // When device-resident chips carry empty host traces,
                 // re-materialize them from the provider before the host
                 // dense pack (cold path — happy path takes skip_host_dense).
                 let rematerialized =
@@ -2335,7 +2330,7 @@ pub mod jagged {
                 materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size)
             };
 
-            // Win A diag (1): env=1 but no hook → warn once, count.
+            // Diagnostic (1): env=1 but no hook → warn once, count.
             if try_gpu && !any_hook_registered {
                 use std::sync::OnceLock;
                 static WARN_ONCE: OnceLock<()> = OnceLock::new();
@@ -2358,7 +2353,7 @@ pub mod jagged {
                 });
             }
 
-            // Win A diag (2): hook registered but env=0 → warn once,
+            // Diagnostic (2): hook registered but env=0 → warn once,
             // count.  This is normally fine (caller explicitly opted
             // out) but on a perf-experiment run it can mask intended
             // GPU acceleration.
@@ -2736,7 +2731,7 @@ pub mod jagged {
                     // eq_mle_table's LSB-first bitrev), matching build_weight_table.
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // [#7898240 orient] bit-reverse the trace row index so
+                    // Orientation: bit-reverse the trace row index so
                     // y_per_chip == opened_values (= MLE of bitrev(trace)).
                     let is_pow2 = h.is_power_of_two();
                     let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
