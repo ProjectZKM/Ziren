@@ -147,12 +147,12 @@ impl BasefoldShardVerifier {
         //   2. main_commitment (8 felts)
         //   3. num_chips (1 felt)
         //   4. for each chip:
-        //        a. log_height (1 felt) — gap #2 SP1 parity
+        //        a. log_height (1 felt) — SP1-parity transcript binding
         //        b. name_length_felt
         //        c. per-byte felts
         //
-        // The per-chip log_height observe (gap #2 from
-        // `project_sp1_parity_three_tracks.md`) sources from
+        // The per-chip log_height observe (an SP1-parity transcript
+        // binding) sources from
         // `proof.chip_log_heights` keyed by chip name. SP1's
         // counterpart binds raw `num_real_entries`
         // (`/tmp/sp1/crates/hypercube/src/prover/shard.rs:687-694`)
@@ -173,7 +173,7 @@ impl BasefoldShardVerifier {
         for chip in chips.iter() {
             let name = chip.name();
 
-            // Per-chip log-height observe (gap #2). Mirrors the
+            // Per-chip log-height observe. Mirrors the
             // prover's `trace.height()` derivation via
             // `proof.chip_log_heights[name]`. Default 0 if absent
             // (matches legacy proof bytes where the map is empty).
@@ -268,7 +268,7 @@ impl BasefoldShardVerifier {
             &proof.public_values,
             self.max_log_row_count,
             challenger,
-            // s8-J #42 discriminator: opened_values carries the trace@z*
+            // Discriminator: opened_values carries the trace@z*
             // openings the circuit's rlc_eval (zerocheck.rs:613) is built
             // from; pass it so the gated host-recompute can compare.
             &proof.opened_values,
@@ -327,7 +327,7 @@ where
     use crate::{InnerChallenge, InnerVal};
 
     // Type gate (same as prover-side emit_jagged_pcs_bytes).
-    // #H (BaseFold-over-BN254 wrap port): this verifier-side gate is kept as a
+    // BaseFold-over-BN254 wrap port: this verifier-side gate is kept as a
     // TypeId transmute-safety guard (rather than `BasefoldRing::use_basefold()`)
     // so the `BasefoldRing` bound does not have to thread through the entire
     // host-verify generic API (`Verifier::verify_shard` -> `StarkMachine::verify`
@@ -343,7 +343,7 @@ where
         return Ok(());
     }
 
-    // #H (BaseFold-over-BN254 wrap port): OUTER ring dispatch. Val/Challenge are
+    // BaseFold-over-BN254 wrap port: OUTER ring dispatch. Val/Challenge are
     // KoalaBear / KoalaBear^4 here, but the challenger is OuterChallenger (not
     // JaggedChallenger). Verify via the recursion-core-registered hook over
     // OuterValMmcs / OuterChallenger (zkm-stark cannot name those types); the
@@ -435,8 +435,8 @@ where
     // Patch row_count from bundle.packing.offsets.
     //
     // Important: `offsets` has ONE ENTRY PER COLUMN plus a final
-    // sentinel `offsets[total_cols] = total_values` (gap #1 Phase 1,
-    // SP1 parity — see `crate::jagged::JaggedPacking::offsets`).  The
+    // sentinel `offsets[total_cols] = total_values`
+    // (SP1 parity — see `crate::jagged::JaggedPacking::offsets`).  The
     // prover's `compute_jagged_metadata` pushes `chip.width` offsets
     // per chip and closes the slice with the sentinel.  Within a
     // single chip's run of columns, consecutive offsets differ by
@@ -662,7 +662,7 @@ where
         challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // ── #43 item-12 / GAP-2 constraint-RLC BINDING (HARD CHECK) ───────
+    // ── constraint-RLC BINDING (HARD CHECK) ───────
     // Recompute the in-circuit `rlc_eval` (recursion zerocheck.rs:474-613)
     // ON THE HOST from the SAME inputs the circuit uses — the trace@z*
     // openings carried in `opened_values`, the transcript-sampled (alpha,
@@ -673,10 +673,11 @@ where
     // DEFERRED (the `verify_zerocheck_cryptographic_identity_host` comment
     // below).  Without it the structural sumcheck only ties
     // `point_and_eval.1` back to `claimed_sum` (telescoping) and the GKR
-    // openings (G2-b) — nothing forces it to equal the constraint-RLC of
-    // the commitment-bound openings@z*.  #42 PROVED that omission is a real
-    // soundness hole: a prover (e.g. the racing GPU compress device-fold,
-    // #44) can emit a proof the in-circuit `verify_shard` correctly rejects
+    // openings — nothing forces it to equal the constraint-RLC of
+    // the commitment-bound openings@z*.  This omission was proven to be a
+    // real soundness hole: a prover (e.g. the racing GPU compress
+    // device-fold) can emit a proof the in-circuit `verify_shard` correctly
+    // rejects
     // at zerocheck.rs:613 yet the host accepted.  Verifier-only,
     // transcript-neutral (only already-sampled challenges + opened values),
     // no vk regen.  Set S8J_RLC=1 for the per-shard diagnostic print.
@@ -831,7 +832,7 @@ where
     Ok(())
 }
 
-/// s8-J #42 host recompute of the in-circuit zerocheck `rlc_eval`.
+/// Host recompute of the in-circuit zerocheck `rlc_eval`.
 ///
 /// Bit-for-bit mirror of the recursion verifier's
 /// `BasefoldZerocheckVerifier::verify_zerocheck` accumulator
@@ -1326,7 +1327,7 @@ where
     let mut denominator_eval: Challenge<SC> = evaluate_mle_host(denominator, &eval_point);
     let _ = (numerator_eval, denominator_eval);
 
-    // P3 (#18, SP1 contract): the prover pads GKR to a FIXED round count
+    // SP1 contract: the prover pads GKR to a FIXED round count
     // (SP1's verifier asserts `round_proofs.len() + 1 == max_log_row_count`).
     // Enforce it here so a malicious prover cannot shorten the reduction
     // (each missing round is an unverified MLE halving) — the round count
@@ -1374,12 +1375,12 @@ where
 
         // Final-eval identity.
         //
-        // Gap #10: the eq pairing depends on the prover's fold
-        // orientation.  CPU/LEGACY V2/Path B' (MSB) pair `eval_point`
-        // in original order; GPU Path 1' SP1 packed-pool (LSB) pair
-        // the reversed `eval_point` (mirrors the algebra from the
-        // reverted e5b9ef69 attempt, now dispatched safely off the
-        // proof tag instead of env vars).
+        // The eq pairing depends on the prover's fold orientation.
+        // The CPU/legacy MSB-orientation fold pairs `eval_point`
+        // in original order; the GPU SP1 packed-pool LSB-orientation
+        // fold pairs the reversed `eval_point`.  Dispatched off the
+        // proof tag (not env vars) so the verifier matches whichever
+        // prover produced the proof.
         let sumcheck_point = &round_proof.sumcheck_proof.point_and_eval.0;
         let final_eval = round_proof.sumcheck_proof.point_and_eval.1;
         let eq_val = match fold_orientation {
