@@ -102,7 +102,7 @@ impl<F: Field> Mle<F> {
     /// monomial-basis reduction — so the K-round constants match
     /// (the BaseFold key invariant).
     ///
-    /// Phase 4 perf fix (Apr 25 2026): parallelize the per-row pair
+    /// Performance optimization: parallelize the per-row pair
     /// fold. Each row pair `(2i, 2i+1)` is independent → write into
     /// separate slots of the pre-allocated output. Called per round
     /// in `commit_phase_round`; total work across rounds is ~2N
