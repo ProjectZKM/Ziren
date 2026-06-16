@@ -316,7 +316,7 @@ pub type GpuSumcheckEvalsFn = fn(
 gpu_hook_accessors!(GPU_SUMCHECK_HOOK: GpuSumcheckEvalsFn
     => register_gpu_sumcheck_hook, get_gpu_sumcheck_hook);
 
-// GPU per-chip eval_at hook for LogUp-GKR Step 6.
+// GPU per-chip eval_at hook for the LogUp-GKR final-layer eval-at step.
 type Kb = p3_koala_bear::KoalaBear;
 
 /// Signature: `(trace_row_major: &[Kb], width: usize, eval_point: &[Ef4])
@@ -332,7 +332,7 @@ pub type GpuEvalAtFn = fn(
 gpu_hook_accessors!(GPU_EVAL_AT_HOOK: GpuEvalAtFn
     => register_gpu_eval_at_hook, get_gpu_eval_at_hook);
 
-// #108 device trace residency: per-chip eval_at that reads the chip's
+// Device trace residency: per-chip eval_at that reads the chip's
 // device trace from the per-shard provider (for device-only chips that
 // have NO host main trace). `eval_point` is the trailing log(chip_height)
 // coords. The hook downcasts the provider handle to its device-matrix type,
@@ -347,7 +347,7 @@ pub type GpuEvalAtProviderFn = fn(
 gpu_hook_accessors!(GPU_EVAL_AT_PROVIDER_HOOK: GpuEvalAtProviderFn
     => register_gpu_eval_at_provider_hook, get_gpu_eval_at_provider_hook);
 
-// #49 BATCHED device-trace residency eval-at: ONE call evaluates EVERY
+// BATCHED device-trace residency eval-at: ONE call evaluates EVERY
 // device-only chip at its trailing-coord GKR point, building one eq-table per
 // DISTINCT eval-point instead of one eq-build per chip. `requests[i] =
 // (chip_name, eval_point)` (eval_point = trailing log(chip_height) coords, the
@@ -363,7 +363,7 @@ pub type GpuEvalAtBatchProviderFn = fn(
 gpu_hook_accessors!(GPU_EVAL_AT_BATCH_PROVIDER_HOOK: GpuEvalAtBatchProviderFn
     => register_gpu_eval_at_batch_provider_hook, get_gpu_eval_at_batch_provider_hook);
 
-// #108 phase-3: materialize a device-only chip's FULL main trace to host
+// Materialize a device-only chip's FULL main trace to host
 // (row-major Felt) from the per-shard provider, for the zerocheck constraint
 // eval (ZeroCheckPoly needs the full trace cells, not just a point-eval).
 // Read at zerocheck time (after commit/open) so the D2H does not stall on the
@@ -377,7 +377,7 @@ pub type GpuMaterializeTraceFn = fn(
 gpu_hook_accessors!(GPU_MATERIALIZE_TRACE_HOOK: GpuMaterializeTraceFn
     => register_gpu_materialize_trace_hook, get_gpu_materialize_trace_hook);
 
-// #108 device-fold: per-round per-pair y-tuple computed from DEVICE-resident
+// Device-fold: per-round per-pair y-tuple computed from DEVICE-resident
 // cells (no host upload). `dev_cells` is the erased device handle held by the
 // ZeroCheckPoly (ColMajorMatrixDevice<Felt> round 0, DeviceBuffer<Ef4> later).
 // Returns (y0,y2,y3,y4) or None to fall back. The hook downcasts the handle.
@@ -398,7 +398,7 @@ pub type GpuZerocheckYTupleDeviceFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_DEVICE_HOOK: GpuZerocheckYTupleDeviceFn
     => register_gpu_zerocheck_ytuple_device_hook, get_gpu_zerocheck_ytuple_device_hook);
 
-// #108 device-fold: fold the device-resident cells on the last variable to
+// Device-fold: fold the device-resident cells on the last variable to
 // `alpha`, on device. Returns the new erased device handle (DeviceBuffer<Ef4>).
 // `is_first_round` => current cells are Felt (round 0); fold lifts Felt->Ef4.
 pub type GpuZerocheckFoldDeviceFn = fn(
@@ -412,9 +412,9 @@ pub type GpuZerocheckFoldDeviceFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
     => register_gpu_zerocheck_fold_device_hook, get_gpu_zerocheck_fold_device_hook);
 
-// #108 device-fold: bit-reverse + prepare the provider trace once into the
+// Device-fold: bit-reverse + prepare the provider trace once into the
 // device-cell handle the ZeroCheckPoly carries (round-0 cells). Erased handle.
-// #108-core np>0: the prepare hook also receives the chip's preprocessed
+// Core np>0 path: the prepare hook also receives the chip's preprocessed
 // cells (column-major, KoalaBear, height = provider main height) + prep width,
 // so it can build a combined [main ++ prep] device buffer that folds as one.
 // Empty slice / np==0 => main-only (the np==0 device-fold path, unchanged).
@@ -427,9 +427,10 @@ pub type GpuZerocheckPrepareCellsFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_PREPARE_CELLS_HOOK: GpuZerocheckPrepareCellsFn
     => register_gpu_zerocheck_prepare_cells_hook, get_gpu_zerocheck_prepare_cells_hook);
 
-// #108 device-fold: extract the fully-folded per-chip openings (1 row) from the
-// device cells so the host get_component_poly_evals (item-12 trace_at_z) reads
-// the device result. A single-row D2H -- cheap (not the full-trace materialize).
+// Device-fold: extract the fully-folded per-chip openings (1 row) from the
+// device cells so the host get_component_poly_evals (the trace_at_z openings)
+// reads the device result. A single-row D2H -- cheap (not the full-trace
+// materialize).
 pub type GpuZerocheckExtractFinalFn =
     fn(dev_cells: &(dyn core::any::Any + Send + Sync), num_main_cols: usize) -> Option<Vec<Ef4>>;
 
@@ -549,7 +550,7 @@ pub type GpuZerocheckYTupleFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_HOOK: GpuZerocheckYTupleFn
     => register_gpu_zerocheck_ytuple_hook, get_gpu_zerocheck_ytuple_hook);
 
-/// Per-chip input for the BATCHED device y-tuple hook (B2.2 chip fusion):
+/// Per-chip input for the BATCHED device y-tuple hook (chip fusion):
 /// one fused device launch over ALL chips in a round.  Slices borrow the
 /// per-chip ZeroCheckPoly data; the hook must not retain them past the call.
 pub struct ZerocheckChipYTupleInput<'a> {
@@ -561,7 +562,7 @@ pub struct ZerocheckChipYTupleInput<'a> {
     pub gkr_powers: &'a [Ef4],
     pub alpha: Ef4,
     pub eq: &'a [Ef4],
-    /// #34 device-eq: `zeta[..dim-1]` — the point whose `partial_lagrange`
+    /// Device-eq: `zeta[..dim-1]` — the point whose `partial_lagrange`
     /// table (big-endian, `zeta_rest[0]` = MSB) is this round's eq weight
     /// vector.  When `eq` is EMPTY (the `ZIREN_GPU_DEVICE_EQ=1` path) the
     /// hook must build the `2^{zeta_rest.len()}` table ON DEVICE from this
@@ -570,7 +571,7 @@ pub struct ZerocheckChipYTupleInput<'a> {
     /// may ignore this field (legacy host-built table).
     pub zeta_rest: &'a [Ef4],
     pub num_real: usize,
-    /// Device-RESIDENT cells for this chip (the #108 residency path): when
+    /// Device-RESIDENT cells for this chip (the device-residency path): when
     /// set, `main_cells`/`prep_cells` are EMPTY and the handle downcasts to
     /// the provider's col-major device buffer (round 0:
     /// `ColMajorMatrixDevice<KoalaBear>`; rounds >= 1: `DeviceEf4Cells`),
@@ -958,7 +959,7 @@ pub fn clear_logup_v3_next_handle() {
 }
 
 // ------------------------------------------------------------------
-// #50 (s9-DR2): device-built logup-round eq_row tables.
+// Device-built logup-round eq_row tables.
 //
 // The GKR logup-round `eq_row` weight table is up to `2^row_vars` x
 // 16 B (2^21 for a 2M-cycle shard) and was host-built via
@@ -973,7 +974,7 @@ pub fn clear_logup_v3_next_handle() {
 // `build_eq_table` is LSB-first (index bit k <-> coords[k]), identical
 // to the kernel's `(i >> k) & 1 ? point[k] : 1-point[k]`, so the
 // device table is byte-identical to the host table -- NO point
-// reversal (unlike the #34 big-endian fused-zerocheck path).
+// reversal (unlike the big-endian fused-zerocheck device-eq path).
 //
 // Slot is per-round transient: the host publishes immediately before
 // the hook call and the hook takes it at entry; consistent with the
@@ -983,7 +984,7 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// #50: kill-switch for the device-built logup-round eq_row table.
+/// Kill-switch for the device-built logup-round eq_row table.
 /// `ZIREN_GPU_LOGUP_DEVICE_EQ=0` forces the legacy host build+upload.
 /// Default ON.
 #[must_use]
@@ -994,14 +995,14 @@ pub fn logup_device_eq_enabled() -> bool {
     })
 }
 
-/// #50: host stashes the row_point (LSB-first coords) for the GPU hook
+/// Host stashes the row_point (LSB-first coords) for the GPU hook
 /// to device-build the eq_row table from.  Published immediately
 /// before the hook dispatch; the empty `eq_row` Vec is the signal.
 pub fn publish_logup_device_eq_row_point(point: Vec<Ef4>) {
     LOGUP_DEVICE_EQ_ROW_POINT.with(|c| *c.borrow_mut() = Some(point));
 }
 
-/// #50: hook consumes the stashed row_point.  `None` => legacy host
+/// Hook consumes the stashed row_point.  `None` => legacy host
 /// eq_row was uploaded (device-build disabled or not published).
 #[must_use]
 pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
@@ -1027,7 +1028,7 @@ pub type GpuFirstRoundHookFn = fn(
 gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
     => register_gpu_first_round_hook, get_gpu_first_round_hook);
 
-// ── #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify ──
+// ── BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify ──
 //
 // The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
