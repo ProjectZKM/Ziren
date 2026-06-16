@@ -400,7 +400,7 @@ impl ZKMProofShape {
         let _ = SAFE_BYTE_LOOKUP_BUDGET; // retained for reference
         let machine_shape = build_mips_machine_shape();
 
-        // VERIFY_VK=true Site-5 (AREA ENUMERATION): the normalize program is
+        // Area enumeration (for VERIFY_VK=true): the normalize program is
         // (chip_set, log_dense)-determined, so the recursion vk_map must cover
         // each cluster's chip set at the log_dense (total-trace-area) bands real
         // proofs hit.  The prior `create_all_input_shapes -> to_ordered_shape
@@ -661,7 +661,7 @@ mod tests {
         );
     }
 
-    /// Task #32: the Recursion shape count is now strictly bounded
+    /// The Recursion shape count is now strictly bounded
     /// by stacked_shapes' size-class quantization.  Before this change,
     /// `ZKMProofShape::generate` sourced ~1.25M shapes from the
     /// per-chip cartesian `CoreShapeConfig::all_shapes`; now it
