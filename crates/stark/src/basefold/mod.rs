@@ -29,8 +29,8 @@ pub mod fri;
 pub mod mle;
 pub mod padded;
 pub mod proof;
-// jagged_per_chip module removed (Ziren #97, May 2 2026): per-chip
-// jagged-PCS path was an E3 perf experiment that diverged from SP1's
+// jagged_per_chip module removed: per-chip
+// jagged-PCS path was a perf experiment that diverged from SP1's
 // single-dense design and never landed.  Removed in favor of the
 // SP1-aligned dense path in `jagged_pcs::jagged`.
 pub mod prover;
