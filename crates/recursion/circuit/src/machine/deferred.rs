@@ -1,6 +1,6 @@
 //! Deferred-stage witness/value/shape **data-type carriers**.
 //!
-//! ## Task #397 (May 19 2026) — FRI deferred-body deletion
+//! ## FRI deferred-body deletion (May 19 2026)
 //!
 //! The legacy in-circuit `ZKMDeferredVerifier::verify` body (the FRI-shaped
 //! deferred-shard verifier originally inherited from SP1) has been retired.
@@ -97,7 +97,7 @@ pub struct ZKMDeferredWitnessVariable<
 }
 
 impl ZKMDeferredWitnessValues<KoalaBearPoseidon2> {
-    /// Step 5 Phase 3b (May 19 2026) bound widening — see the matching
+    /// The bound widening (May 19 2026) — see the matching
     /// note on `ZKMCompressWitnessValues::dummy`.
     pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
