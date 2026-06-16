@@ -384,7 +384,7 @@ mod tests {
     ///
     /// Catches the most common breakage class — generic-bound drift
     /// after upstream changes — without requiring proof fixtures.
-    /// End-to-end smoke test (#23 first byte): construct a normalize
+    /// End-to-end smoke test: construct a normalize
     /// recursion program from a minimal dummy witness, verify the
     /// AsmCompiler produces a non-empty `RecursionProgram`.
     ///
@@ -407,7 +407,6 @@ mod tests {
     ///
     /// The zero-filled trace doesn't pass cryptographic soundness,
     /// but the structural invariants are all satisfied by construction.
-    /// Closed tasks #23, #24, #25, #26, #27.
     #[test]
     fn build_normalize_basefold_program_compiles_dummy_witness() {
         use zkm_core_machine::mips::MipsAir;
