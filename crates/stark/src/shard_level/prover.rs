@@ -22,11 +22,11 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `precomputed_commit` (Option B single-main-commit flow): when
 /// `Some`, the BaseFold jagged-PCS commit was produced up-front by
 /// the orchestrator and its 8-felt digest IS `main_commitment`.  The
-/// Phase 4 jagged-PCS body skips its own commit step and the in-band
+/// jagged-PCS opening body skips its own commit step and the in-band
 /// commit observe; the verifier counterpart
 /// (`verify_jagged_basefold_no_observe`) matches.  When `None`, the
 /// legacy two-commit flow runs (FRI commit upstream, jagged-PCS
-/// re-commits in Phase 4).
+/// re-commits during opening).
 /// Option B auto-precompute helper (GPU pipeline path).
 ///
 /// When `precomputed_commit` is already `Some` (the host CPU path,
@@ -40,7 +40,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
 /// registered), returns the 8-felt BaseFold digest as the new
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
-/// threads it into Phase 4.  The matrices are moved into a named-tuple
+/// threads it into the jagged-PCS opening.  The matrices are moved into a named-tuple
 /// Vec for the commit and moved back out — no trace data is copied.
 fn maybe_auto_precompute_basefold<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -280,8 +280,8 @@ where
     // the BaseFold pre-commit now (GPU-accelerated via the
     // ZIREN_GPU_BASEFOLD hook) on the already-materialized traces, override
     // `main_commitment` with its 8-felt digest, and thread the result into
-    // Phase 4 so the in-band observe is skipped.  Matrices move in/out of
-    // the named-tuple Vec with zero data copy.
+    // the jagged-PCS opening so the in-band observe is skipped.  Matrices
+    // move in/out of the named-tuple Vec with zero data copy.
     // Device residency, PCS-binding correctness: the jagged BaseFold
     // commit must cover EVERY chip's real cells. Device-resident chips carry
     // an EMPTY host main trace (the GKR / zerocheck phases read them through
@@ -404,7 +404,7 @@ where
     // (last 14 row-major values) for device-resident chips via a
     // ~56-byte provider gather, EARLY — before the zerocheck prepare's
     // release_by_name (drain-on-lookup) can drop the provider entry.
-    // Host-trace chips stay `None` (Phase 5
+    // Host-trace chips stay `None` (the assembly step
     // reads their host cells as before); `None` for a device chip
     // falls back to its materialized commit trace.  Once step-3
     // y_per_chip is device-served too, this gather replaces the
@@ -458,7 +458,7 @@ where
     )
     .entered();
 
-    // Phase 1: transcript prologue. Chip metadata observe (count +
+    // Stage 1 — transcript prologue. Chip metadata observe (count +
     // per-chip log-height + name length + name bytes) binds post-
     // commit challenges to the shard's chip-set identity AND each
     // chip's row count.
@@ -531,7 +531,7 @@ where
         "shard phase done"
     );
 
-    // Phase 2: LogUp-GKR.
+    // Stage 2 — LogUp-GKR.
     let _t_phase2 = std::time::Instant::now();
     let logup_gkr_proof = {
         let _span = tracing::info_span!("phase_logup_gkr").entered();
@@ -551,7 +551,7 @@ where
         "shard phase done"
     );
 
-    // Phase 3: SP1-aligned per-chip zerocheck.  Takes the LogUp-GKR
+    // Stage 3 — SP1-aligned per-chip zerocheck.  Takes the LogUp-GKR
     // evaluations so each chip's sumcheck claim chains to its GKR
     // openings (`claimed_sum = λ-RLC(Σ openings·β^k)`), eq-anchored at
     // the shared GKR point.
@@ -576,7 +576,7 @@ where
         "shard phase done"
     );
 
-    // Phase 3 → 4 bridge: observe per-chip openings to keep challenger
+    // zerocheck → jagged-PCS bridge: observe per-chip openings to keep challenger
     // state in sync with the verifier. Order matters: num_chips felt,
     // then per-chip preprocessed then main basis coefficients in
     // chip-NAME order — matching the recursion verifier's step (9)
@@ -777,7 +777,7 @@ where
         }
     }
 
-    // Phase 4: jagged-PCS opening. Per-chip `r_row` is the trailing
+    // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
     // log(chip_height) coords of the LogUp-GKR final eval_point.
     let _t_phase4 = std::time::Instant::now();
     let evaluation_proof = {
@@ -803,12 +803,12 @@ where
         "shard phase done"
     );
 
-    // Phase 5: assembly.
+    // Stage 5 — assembly.
     let _t_phase5 = std::time::Instant::now();
     let _phase5_span = tracing::info_span!("phase_assembly").entered();
 
     let mut chip_log_heights = std::collections::BTreeMap::new();
-    // Review item 12: the REAL per-chip height (row count, possibly
+    // the REAL per-chip height (row count, possibly
     // non-power-of-2) is the VirtualGeq threshold the prover uses
     // (zerocheck_prover.rs:487 `VirtualGeq::new(main_height,..)`), so the
     // recursion's `full_geq` (zerocheck.rs:517) degree must be its bit
@@ -838,7 +838,7 @@ where
         chip_heights.insert(name, h);
     }
 
-    // Review item 12: populate `opened_values` with the per-chip
+    // populate `opened_values` with the per-chip
     // trace@z openings from the zerocheck reduction (the values the
     // recursion zerocheck verifier batches/constrains at the reduced
     // point z and asserts equal `point_and_eval.1`, recursion
@@ -864,7 +864,7 @@ where
                     let split = prep_width.min(evals.len());
                     let (prep_local, main_local) = evals.split_at(split);
                     let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
-                    // Review item 12: big-endian bit decomposition of the
+                    // big-endian bit decomposition of the
                     // REAL height (the VirtualGeq threshold) carried via the
                     // unused `quotient` slot for the recursion `full_geq`
                     // degree.  bit_len = max_log_row_count + 1 (matches the
@@ -982,7 +982,7 @@ where
 /// produced up-front by the orchestrator (Option B single-main-commit
 /// flow); steps (1)+(2) of the jagged-PCS pipeline are skipped and
 /// the in-band commit observe is suppressed — the commit's 8-felt
-/// digest was already observed in the Phase 1 prologue as
+/// digest was already observed in the transcript prologue as
 /// `main_commitment`.  GPU jagged-PCS hooks (which do their own
 /// commit) are bypassed in that case to avoid a double-commit.
 fn emit_jagged_pcs_bytes<SC, A>(
