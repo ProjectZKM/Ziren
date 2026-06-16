@@ -35,9 +35,9 @@ pub trait DeviceTraceProvider: Send + Sync {
     /// successfully CLONED the trace into its own bit-reversed fold
     /// buffer; the original is never read again (round folds and
     /// openings all derive from the clone).  Implementations MAY drop
-    /// their entry here to release the device memory early (#367 OOM
-    /// shape: the original otherwise pins VRAM for the rest of the
-    /// prove call).  Default: no-op (no early release).
+    /// their entry here to release the device memory early (the
+    /// original otherwise pins VRAM for the rest of the
+    /// prove call, which can OOM).  Default: no-op (no early release).
     fn release_by_name(&self, _chip_name: &str) {}
 
     /// Enumerate chip names; order is implementation-defined.
@@ -53,7 +53,7 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
-    /// #32: per-chip main-trace WIDTH (committed column count) for a
+    /// Per-chip main-trace WIDTH (committed column count) for a
     /// device-resident chip whose host trace is empty.  Lets dims-only
     /// consumers (e.g. the commit-traces D2H-skip soundness gate, which
     /// predicts the dense size from `width * height` without a host D2H)
@@ -94,7 +94,7 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
-    /// #32 (commit-traces D2H removal): read the LAST `k` row-major
+    /// Commit-traces D2H removal: read the LAST `k` row-major
     /// values of the chip's main trace — `trace.values[h*w - k ..]` in
     /// host layout — i.e. the trailing `k` cells of the last row(s).
     /// This is the cumulative-sum tail (`k == 14`: septic x ++ y), a
