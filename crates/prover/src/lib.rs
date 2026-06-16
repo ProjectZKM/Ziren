@@ -628,7 +628,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// VERIFY_VK=true (#59 / task #24): `fix_shape` is now ENABLED for the
+    /// VERIFY_VK=true: `fix_shape` is now ENABLED for the
     /// normalize program.  Without it the normalize proof is proven at its
     /// ORGANIC chip heights, so the compress-proof shape feeding shrink (and
     /// compose) is unbounded and `Shrink(shape)` can never be pre-enumerated
@@ -755,9 +755,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         let max_log_row_count =
             zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
-        // Step 5 Phase 3e (May 19 2026): basefold-for-recursion is now
-        // the default. Mirrors the cutover on
-        // `build_compose_program_basefold_uncached`.
+        // basefold-for-recursion is now the default. Mirrors the
+        // cutover on `build_compose_program_basefold_uncached`.
         let mut program = build_deferred_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
@@ -1089,7 +1088,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Reduce shard proofs to a single shard proof using the recursion prover.
     #[instrument(name = "compress", level = "info", skip_all)]
-    // META #59 Phase C vk_map regen Apr 24 v14 (jagged lift: cc[len-2]+1 zero-column formula)
+    // NOTE: the vk_map was last regenerated for the jagged-lift
+    // column-count formula (cc[len-2]+1 zero-column padding).
     pub fn compress(
         &self,
         vk: &ZKMVerifyingKey,
@@ -1172,9 +1172,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     loop {
                         let received = { input_rx.lock().unwrap().recv() };
                         if let Ok((index, height, input)) = received {
-                            // #7 probe (env-gated): stash the serialized input
-                            // so a runtime trap below can dump it for offline
-                            // localization (variant + bincode payload).
+                            // Diagnostic probe (env-gated): stash the
+                            // serialized input so a runtime trap below can
+                            // dump it for offline localization (variant +
+                            // bincode payload).
                             let trip_dump: Option<(&'static str, Vec<u8>)> =
                                 if std::env::var("DUMP_TRIP_INPUT").is_ok() {
                                     match &input {
@@ -1241,16 +1242,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
                             // Execute the runtime.
                             //
-                            // #259 pre-sprint instrumentation: upgraded
-                            // span to info level + recorded the program's
-                            // total instruction count.  Bounds the SeqBlock
-                            // parallelism win BEFORE committing the 3-5 week
-                            // refactor — if per-call wall is small or the
-                            // instruction count is small, the win ceiling
-                            // is correspondingly bounded.  Per-compose-call
-                            // span lets `cargo run … 2>&1 | grep "execute
-                            // runtime"` extract the per-call wall histogram
-                            // for any production run.
+                            // Instrumentation: info-level span recording the
+                            // program's total instruction count.  Bounds the
+                            // potential SeqBlock parallelism win before
+                            // committing to that refactor — if per-call wall
+                            // is small or the instruction count is small, the
+                            // win ceiling is correspondingly bounded.  The
+                            // per-compose-call span lets `cargo run … 2>&1 |
+                            // grep "execute runtime"` extract the per-call
+                            // wall histogram for any production run.
                             let n_instructions = program.instruction_count();
                             let _t_run = std::time::Instant::now();
                             let record = tracing::info_span!(
@@ -1266,8 +1266,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 runtime
                                     .run()
                                     .map_err(|e| {
-                                        // #7 probe: dump the failing input for
-                                        // offline localization (see trip_dump).
+                                        // Diagnostic: dump the failing input
+                                        // for offline localization (see
+                                        // trip_dump).
                                         if let Some((variant, bytes)) = trip_dump.as_ref() {
                                             let path =
                                                 format!("/tmp/trip_{variant}_{index}.bin");
@@ -1282,11 +1283,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .unwrap();
                                 runtime.record
                             });
-                            // #259 instrumentation: emit per-compose-call
-                            // wall after the span exits.  Use to bound
-                            // the SeqBlock parallelism win — if this is
-                            // routinely <100ms, the win ceiling is small
-                            // and #259 isn't worth the multi-week sprint.
+                            // Instrumentation: emit per-compose-call wall
+                            // after the span exits.  Use to bound the
+                            // potential SeqBlock parallelism win — if this is
+                            // routinely <100ms, the win ceiling is small and
+                            // the parallelism refactor is not worthwhile.
                             tracing::info!(
                                 event = "execute_runtime_done",
                                 elapsed_ms = _t_run.elapsed().as_millis() as u64,
@@ -1440,9 +1441,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         StarkVerifyingKey<InnerSC>,
                         ShardProof<InnerSC>,
                     );
-                    // #7 enforcement fix — PRESERVE CHAIN ORDER. The compose
-                    // program's shard-chain continuity asserts
-                    // (compress_basefold.rs Step 6f: input_{k+1}.start_{pc,
+                    // PRESERVE CHAIN ORDER. The compose program's
+                    // shard-chain continuity asserts
+                    // (compress_basefold.rs: input_{k+1}.start_{pc,
                     // shard} == input_k.next_{pc,shard}) require every batch
                     // to be a CONTIGUOUS, IN-ORDER segment of the proof
                     // chain.  Proofs arrive on `proofs_rx` in prove-pool
@@ -1542,7 +1543,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     (vk, bf)
                                 })
                                 .collect();
-                            // #261: bundle vk-merkle witness so the compose
+                            // Bundle the vk-merkle witness so the compose
                             // program can read vk_root from input rather than
                             // baking it as a compile-time constant.
                             let vks_only: Vec<StarkVerifyingKey<InnerSC>> =
@@ -1646,7 +1647,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 );
             }
         }
-        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -1722,14 +1723,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
             let data = self.shrink_prover.commit(&bf_record, traces.clone());
 
-            // #36 shrink device routing (kill-switch ZIREN_GPU_SHRINK_DEVICE=0):
+            // Shrink device routing (kill-switch ZIREN_GPU_SHRINK_DEVICE=0):
             // when the shrink prover keeps the committed main traces
             // device-resident (StarkGpuProver), hand prove_shard_to_basefold
             // the same per-shard DeviceTraceProvider snapshot the GPU
             // compress pipeline uses, and skip the host rehydrate of the
             // device-only RecursionAir chips below — the interaction-eval
             // hook + device-fold zerocheck resolve them from the provider
-            // (mirrors ziren-gpu pipeline/prover.rs, the #108 pattern).
+            // (mirrors ziren-gpu pipeline/prover.rs, the device-resident
+            // zerocheck pattern).
             // On the CPU prover `shard_device_trace_provider` returns None
             // and this whole block is a no-op (legacy path, bit-for-bit).
             let shrink_device_enabled = std::env::var("ZIREN_GPU_SHRINK_DEVICE")
@@ -1776,7 +1778,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 String,
                 RowMajorMatrix<Val<InnerSC>>,
             > = traces.into_iter().collect();
-            // #36: skipped when the device provider is attached — the
+            // Skipped when the device provider is attached — the
             // device-only chips resolve from the provider, like the GPU
             // compress pipeline's default (ZIREN_GPU_PIPELINE_DEVICE_REHYDRATE).
             if device_provider.is_none() || shrink_force_rehydrate {
@@ -1863,7 +1865,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 data.public_values.clone(),
                 max_log_row_count,
                 &mut bf_challenger,
-                // #36: per-shard device traces when the shrink prover is
+                // Per-shard device traces when the shrink prover is
                 // device-resident; None on the CPU prover (legacy host path).
                 device_provider
                     .as_ref()
@@ -1920,7 +1922,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
-        // #261 SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -2085,7 +2087,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         digest
     }
 
-    /// #261 helper: build a merkle witness for a slice of VKs without
+    /// Build a merkle witness for a slice of VKs without
     /// going through the legacy `ZKMCompressWitnessValues` shape.
     /// Used by basefold compose/wrap to bundle vk_merkle_data into the
     /// witness that the recursion program reads.  Mirror of the inner
@@ -2135,9 +2137,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect()
         };
 
-        // #7 enforcement: the witnessed `value` MUST be the ACTUAL leaf at
-        // the opened index — the in-circuit `merkle_tree::verify` walks the
-        // path from `value` to the root UNCONDITIONALLY (only the
+        // VK-binding soundness: the witnessed `value` MUST be the ACTUAL
+        // leaf at the opened index — the in-circuit `merkle_tree::verify`
+        // walks the path from `value` to the root UNCONDITIONALLY (only the
         // value==vk_digest binding is gated on vk_verification).  The old
         // code fabricated `[index; 8]` under VERIFY_VK=false, which can
         // never re-derive the real root; that was masked while the
@@ -2191,7 +2193,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .collect()
         };
 
-        // #7 enforcement: witness the ACTUAL opened leaf (see
+        // VK-binding soundness: witness the ACTUAL opened leaf (see
         // make_basefold_merkle_proofs for the full rationale) — the
         // in-circuit merkle walk is unconditional, so a fabricated
         // `[index; 8]` value is honestly unsatisfiable.
@@ -2262,8 +2264,8 @@ pub mod tests {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, true)
     }
 
-    /// #259 unlock-chain validation: build a synthetic compose program
-    /// with N=4 dummy inputs and verify that the resulting
+    /// Parallelism unlock-chain validation: build a synthetic compose
+    /// program with N=4 dummy inputs and verify that the resulting
     /// `RecursionProgram` has at least 1 `SeqBlock::Parallel` block,
     /// containing N sub-programs (one per `ir_par_map_collect` element).
     ///
@@ -2913,7 +2915,7 @@ pub mod tests {
     /// Phase-1-perf-comparison fixture: prove_core only (Test::Core) on
     /// keccak-sponge ELF.  Multi-shard sha-cluster workload — exercises
     /// the basefold side channel population path in `prove_shard_to_basefold`
-    /// without invoking the compose tree (which is blocked on #48).
+    /// without invoking the compose tree.
     /// Use to capture per-shard basefold prove perf for keccak vs fib-1k.
     #[test]
     #[serial]
@@ -2953,7 +2955,7 @@ pub mod tests {
         )
     }
 
-    /// [VKEQ] #6 de-risk: does the ENUMERATION dummy normalize program
+    /// VK-equality check: does the ENUMERATION dummy normalize program
     /// (built from `dummy(machine, shape)`) reproduce the PROVE-PATH normalize
     /// VK (built from the real fib core proof)?  If equal → the only gap is
     /// that the real shape isn't enumerated (fix = enumerate the right shapes).
@@ -3376,7 +3378,7 @@ pub mod tests {
         Ok(())
     }
 
-    /// s8-J #42 DISCRIMINATOR harness: prove a real fib CORE proof and run
+    /// DISCRIMINATOR harness: prove a real fib CORE proof and run
     /// the HOST `verify_shard` on each shard (a host-VALID / GREEN child).
     /// With `S8J_RLC=1` set, `verify_zerocheck_host` independently recomputes
     /// the in-circuit `rlc_eval` (recursion zerocheck.rs:613) on the host from
@@ -3587,7 +3589,7 @@ pub mod tests {
         }
     }
 
-    /// Enforcement (#7) probe: build the fib normalize program with
+    /// VK-enforcement probe: build the fib normalize program with
     /// ZKM_DEBUG=true and print the instructions + nearest backtraces around
     /// a trap pc (env TRAP_PC, default 99368) to name the DSL site of an
     /// enforced DivFAssert trip.  Program is value-independent, so the dummy
@@ -3806,7 +3808,7 @@ pub mod tests {
         }
     }
 
-    /// #7 enforcement probe for the SHRINK program: build it from the real
+    /// VK-enforcement probe for the SHRINK program: build it from the real
     /// cached compress proof, locate the failing DivFAssert by operand
     /// address (env TRAP_IN1), print the window + dataflow.
     #[test]
@@ -3925,7 +3927,7 @@ pub mod tests {
         }
     }
 
-    /// s7-B probe for a TRIPPED compose (ComposeBasefold) witness:
+    /// Probe for a TRIPPED compose (ComposeBasefold) witness:
     /// load the input dumped by the pipelined executor's DUMP_TRIP_INPUT
     /// (env TRIP_INPUT, default /tmp/tripinput_compose_h1_i4.bin),
     /// rebuild the compose program WITH ZKM_DEBUG=true (embeds source
@@ -3970,7 +3972,7 @@ pub mod tests {
         }
     }
 
-    /// #7 enforcement probe for a TRIPPED normalize (CoreBasefold) program:
+    /// VK-enforcement probe for a TRIPPED normalize (CoreBasefold) program:
     /// load the input dumped by DUMP_TRIP_INPUT (env TRIP_INPUT, default
     /// /tmp/trip_core_2.bin), rebuild the program, run the real witness,
     /// and localize the failing Div{F,E}Assert by operand address
@@ -4104,7 +4106,7 @@ pub mod tests {
         }
     }
 
-    /// #7 enforcement probe for a TRIPPED compose (CompressBasefold)
+    /// VK-enforcement probe for a TRIPPED compose (CompressBasefold)
     /// program: load the input dumped by DUMP_TRIP_INPUT (env TRIP_INPUT,
     /// default /tmp/trip_compose_3.bin), rebuild, run the real witness,
     /// localize by operand address (env TRAP_IN1).
@@ -4203,7 +4205,7 @@ pub mod tests {
         }
     }
 
-    /// #7 enforcement NEGATIVE test: corrupt one public value (exit_code)
+    /// VK-enforcement NEGATIVE test: corrupt one public value (exit_code)
     /// in an otherwise-honest core proof and run the normalize program —
     /// the armed `assert_felt_eq(exit_code, 0)` (core_basefold.rs) must
     /// reject with a runtime error.  Pre-DivFAssert this tampering was
