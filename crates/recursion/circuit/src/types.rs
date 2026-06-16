@@ -20,7 +20,7 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriP
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
-    /// VERIFY_VK=true Site-3 fix: the per-preprocessed-domain `vk.hash`
+    /// VERIFY_VK=true: the per-preprocessed-domain `vk.hash`
     /// inputs `[log_n, 2^log_n, shift, two_adic_generator(log_n)]`,
     /// WITNESSED (read in the `StarkVerifyingKey` Witnessable) rather than
     /// baked from the compile-time `chip_information` domains.  This makes
@@ -124,7 +124,7 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> Verif
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        // VERIFY_VK=true Site-3 fix: use the WITNESSED per-domain
+        // VERIFY_VK=true: use the WITNESSED per-domain
         // [log_n, 2^log_n, shift, two_adic_generator(log_n)] inputs (read in
         // the StarkVerifyingKey Witnessable) instead of baking them from the
         // compile-time chip_information domains.  Identical values for honest
