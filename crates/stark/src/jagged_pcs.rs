@@ -773,8 +773,7 @@ pub mod jagged_dispatch_diag {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// Step 4a (`/tmp/step4_backend_parametrize_plan.md`) — GPU row-GKR
-// layer-transition dispatch hook scaffolding.
+// GPU row-GKR layer-transition dispatch hook scaffolding.
 //
 // Mirror of the existing GpuJaggedReductionFn pattern above.  Used by
 // future steps (4b/4c) that migrate
@@ -955,7 +954,7 @@ pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
 /// observed but never explicitly pulled).  Idempotent — calling drain
 /// on a circuit_id whose bucket has already been removed is a no-op.
 ///
-/// **Step 4 multi-GPU fix** — `GpuLayerPullFn` only releases the
+/// **Multi-GPU fix** — `GpuLayerPullFn` only releases the
 /// SINGLE handle it was asked to materialize, so the per-circuit
 /// bucket retains all the OTHER intermediate layer states until the
 /// GPU process exits or the bucket is dropped.  Across 8 concurrent
@@ -2394,7 +2393,7 @@ pub mod jagged {
                 ActiveHook::None
             };
 
-            // Win B: device handle source.  #A (single shard-wide commit
+            // Device handle source (single shard-wide commit
             // buffer): the Option B precompute's device dense pack
             // registers the buffer and threads its handle through
             // `PrecomputedJaggedCommit::dense_device_handle`; the V2
@@ -2445,7 +2444,7 @@ pub mod jagged {
                     } else {
                         None
                     };
-                    // s7-B transcript-safety: snapshot + restore so a
+                    // Transcript-safety: snapshot + restore so a
                     // hook None after any challenger interaction
                     // cannot double-advance the transcript (the hook's
                     // internal round-0 restructure already guarantees
@@ -2479,7 +2478,7 @@ pub mod jagged {
                                 );
                             }
                             let dense_q = saved_dense.unwrap_or_else(|| {
-                                // #32: re-materialize empty (device-resident)
+                                // Re-materialize empty (device-resident)
                                 // chip traces from the provider so the host
                                 // reduction fallback rebuilds the correct
                                 // dense_q (not a partial zero buffer).
@@ -2535,7 +2534,7 @@ pub mod jagged {
                     } else {
                         None
                     };
-                    // s7-B transcript-safety: see the V2 twin above.
+                    // Transcript-safety: see the V2 twin above.
                     let challenger_snapshot = challenger.clone();
                     match f(dense_q, &packing, &r_row, &y_clone, &z_col, z_row, challenger) {
                         Some(p) => p,
@@ -2555,7 +2554,7 @@ pub mod jagged {
                                 );
                             }
                             let dense_q = saved_dense.unwrap_or_else(|| {
-                                // #32: provider-aware re-materialize (V1 twin).
+                                // Provider-aware re-materialize (V1 twin).
                                 let rematerialized =
                                     rematerialize_chip_traces_via_provider(
                                         chip_traces,
@@ -2682,7 +2681,7 @@ pub mod jagged {
         }
     }
 
-    /// #H (BaseFold-over-BN254) generic host open orchestration: the
+    /// BaseFold-over-BN254 generic host open orchestration: the
     /// challenger + Mmcs-generic mirror of the HOST path of
     /// `prove_jagged_basefold_inner` (no GPU jagged-reduction hooks -- those are
     /// inner-typed). The wrap (OuterChallenger + OuterValMmcs) calls this to
@@ -3015,7 +3014,7 @@ pub mod jagged {
         res.is_ok()
     }
 
-    /// #H (BaseFold-over-BN254 wrap port): build the ring-agnostic verifier
+    /// BaseFold-over-BN254 wrap port: build the ring-agnostic verifier
     /// inputs (chip_infos / r_row_per_chip / z_row) from the bundle's PackingMeta
     /// + per-chip column widths + the shared zerocheck eval point. Mirrors the
     /// host verifier's construction (shard_level/verifier.rs) so the outer-ring
@@ -3073,7 +3072,7 @@ pub mod jagged {
         (chip_infos, r_row_per_chip, z_row)
     }
 
-    /// #H (BaseFold-over-BN254 wrap port): verifier mirror of
+    /// BaseFold-over-BN254 wrap port: verifier mirror of
     /// `prove_jagged_basefold_inner_generic`, generic over the challenger + MMCS.
     /// The OUTER (wrap) ring drives this with OuterChallenger + OuterValMmcs via
     /// the registered verify hook; the inner ring keeps the concrete
@@ -3374,7 +3373,7 @@ mod test {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Win A (May 21 2026 jagged-wins) — hook hardening diagnostic
+    // Hook hardening diagnostic
     // counters: smoke tests for the geometric back-off and the bump()
     // helper.  The full dispatch-site behaviour (env-set/unregistered
     // warn, hook-registered/env-unset warn, V2-preferred-over-V1) is
@@ -3431,7 +3430,7 @@ mod test {
         );
     }
 
-    // Win B (May 21 2026 jagged-wins) — V2 hook signature smoke test.
+    // V2 hook signature smoke test.
     // Registers a thin V2 hook that records whether a device handle
     // was passed, asserts the signature is callable end-to-end.
     #[test]
