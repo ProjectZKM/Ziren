@@ -83,7 +83,7 @@ pub struct ZKMCompressBasefoldWitnessValues<
     /// allowed-VK set.  Mirrors SP1's
     /// `SP1CompressWithVKeyWitnessValues::merkle_val`
     /// (`/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:107`).
-    /// #261 fix: vk_root is sourced from this witness rather than baked
+    /// vk_root is sourced from this witness rather than baked
     /// as a compile-time constant, so the compose program is independent
     /// of the vk_map root and vk_map regen is self-consistent.
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
@@ -209,7 +209,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         is_complete,
     } = input;
 
-    // #261: source vk_root from the merkle witness (SP1 pattern at
+    // Source vk_root from the merkle witness (SP1 pattern at
     // `/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:118`)
     // and bind each input's VK hash to that root via merkle proof.
     // Replaces the previous compile-time `vk_root` parameter, decoupling
@@ -219,7 +219,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
-    // Step 6 (pre-loop): initialize aggregated public-output
+    // Pre-loop: initialize aggregated public-output
     // accumulators.  Verbatim copy from
     // `crate::machine::compress::ZKMCompressVerifier::verify`
     // lines 105-142 — the new compress aggregates the same
@@ -254,7 +254,7 @@ pub fn verify_compress_basefold<C, SC, A>(
     use p3_field::PrimeCharacteristicRing;
     let mut _contains_execution_shard: Felt<C::F> = builder.eval(C::F::ZERO);
 
-    // Step 4: construct the BasefoldShardVerifier once for the
+    // Construct the BasefoldShardVerifier once for the
     // batch — production defaults via the shared helper.
     // log_stacking_height = max_log_row_count is the standard
     // single-stripe-per-power-of-two-rows setting.
@@ -264,7 +264,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             max_log_row_count as u32,
         );
 
-    // #259 Phase D: split the per-input loop into a parallel-friendly
+    // Split the per-input loop into a parallel-friendly
     // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
     // sequential AGGREGATE pass. Mirrors SP1's compress.rs:159+182
     // pattern. Verify ops have no aggregator-state dependencies; only
@@ -287,7 +287,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // `assemble_basefold_shard_proof_variable` below.
         let _pubvals_for_aggregate: Vec<Felt<C::F>> = public_values.clone();
 
-        // Step 2: derive chip names + per-round column counts from the
+        // Derive chip names + per-round column counts from the
         // shard's logup_gkr_proof.chip_openings (same pattern as
         // verify_core_basefold at core_basefold.rs:270-287). This
         // replaces the previous empty-placeholder that broke the jagged-PCS
@@ -319,8 +319,8 @@ pub fn verify_compress_basefold<C, SC, A>(
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![main_widths_pre];
 
-        // VERIFY_VK=true Site-2 (#25): per-chip WITNESSED heights (2^log_h)
-        // from the opened `degree`, name-sorted to align with
+        // VERIFY_VK=true height-binding site: per-chip WITNESSED heights
+        // (2^log_h) from the opened `degree`, name-sorted to align with
         // column_counts_by_round_pre — same pattern as core_basefold.rs.
         let chip_height_felts_pre =
             crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
@@ -383,7 +383,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         let chip_log_heights_for_input = chip_log_heights_per_input
             .get(_i)
             .unwrap_or(&empty_log_heights_compress);
-        // VERIFY_VK=true Site-2 (#25): derive from the WITNESSED opened
+        // VERIFY_VK=true height-binding site: derive from the WITNESSED opened
         // `degree` instead of baking from the host-side chip_log_heights —
         // same switch core_basefold made for the normalize program.
         let _ = chip_log_heights_for_input;
@@ -395,7 +395,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 max_log_row_count,
             );
 
-        // Step 5a: derive per-shard chip set from the machine —
+        // Derive per-shard chip set from the machine —
         // filter machine.chips() to the chips actually present
         // in this shard (per logup_gkr_proof.chip_openings names).
         // SP1's `chip_metadata_from_chips` consumes this slice to
@@ -413,7 +413,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::chip_metadata_from_chips::<SC, A>(&_shard_chips);
 
-        // Step 5b: derive insertion_points from per-round column
+        // Derive insertion_points from per-round column
         // counts.  For BaseFold pipeline: 2 rounds (preprocessed,
         // main).  Chip<F, A> directly implements BaseAir<F> +
         // MachineAir<F> via delegation, so width() and
@@ -442,7 +442,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 chip_height_bits,
             );
 
-        // Step 5c: build the BasefoldVerifyingKeyVariable from
+        // Build the BasefoldVerifyingKeyVariable from
         // the legacy VerifyingKeyVariable via the shared adapter.
         // Real `pc_start` (single felt) lifted into the BaseFold
         // 3-felt shape; preprocessed_commit + enable_untrusted
@@ -454,7 +454,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 &vk_legacy,
             );
 
-        // Step 4: per-machine wiring closures.
+        // Per-machine wiring closures.
         //
         // The compress program aggregates already-recursed proofs,
         // so its public-values constraints are minimal — the
@@ -466,9 +466,9 @@ pub fn verify_compress_basefold<C, SC, A>(
         // EVPV: noop is correct at the Compose stage — input proofs
         // were already verified upstream (Normalize), so their
         // public values are already bound by the inner AIR.  See
-        // docs/task_22_plan.md #22.2 for the audit.
+        // docs/task_22_plan.md for the audit.
         let _eval_public_values_fn = noop_eval_public_values_fn::<C>();
-        // Jagged-eval sub-sumcheck verifier (#22.1).  Composes
+        // Jagged-eval sub-sumcheck verifier.  Composes
         // verify_sumcheck + emit_branching_program_eval +
         // emit_prefix_sum_check + partial_lagrange_symbolic.
         let _jagged_evaluator_fn = real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
@@ -476,10 +476,10 @@ pub fn verify_compress_basefold<C, SC, A>(
             _column_counts_by_round.iter().flatten().sum(),
         );
 
-        // Step 5d: opened_values — use the CARRIED per-chip trace@z
+        // opened_values — use the CARRIED per-chip trace@z
         // openings from the host proof (`proof_opened_values`), exactly
-        // like core_basefold.rs:417 / wrap_basefold.rs:349 (item-12),
-        // NOT the LogUp-GKR chip_openings rebuild.  #7 enforcement fix:
+        // like core_basefold.rs:417 / wrap_basefold.rs:349 (the trace_at_z
+        // openings), NOT the LogUp-GKR chip_openings rebuild.  Soundness fix:
         // the previous `build_opened_values_from_chip_openings_with_cumsums`
         // emitted ALL-ZERO placeholder `degree` bits, so the zerocheck
         // mixed-height EMBEDDING FACTOR (zerocheck.rs:651-665, driven by
@@ -504,7 +504,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 max_log_row_count,
             );
 
-        // Step 5e: per-shard challenger.  In the legacy compress,
+        // Per-shard challenger.  In the legacy compress,
         // constructed via `machine.config().challenger_variable(builder)`
         // and observes the vk + main_commit + pubvals upstream
         // of verify_shard.  The BasefoldShardVerifier embeds
@@ -512,7 +512,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // so we pass a fresh challenger here.
         let mut _challenger = machine.config().challenger_variable(builder);
 
-        // Pre-prologue challenger seeding (#7 enforcement fix) — port of
+        // Pre-prologue challenger seeding (soundness fix) — port of
         // core_basefold.rs:443-468 / wrap_basefold.rs:370-390: the host
         // machine verifier seeds the challenger with (1) vk.observe_into
         // and (2) public_values[0..num_pv] BEFORE the shard prologue
@@ -532,12 +532,12 @@ pub fn verify_compress_basefold<C, SC, A>(
             }
         }
 
-        // Step 5f: actual verify_shard call.
+        // Actual verify_shard call.
         // Explicit turbofish required because P (PCS verifier
         // type inside BasefoldShardVerifier) has a Pcs::Domain
         // associated type that the inferencer can't pin down
         // from the call alone.
-        // #244 + #249 fix: when bundle path is active and bundle is
+        // Bundle-shape fix: when bundle path is active and bundle is
         // Some, rebuild verifier with the bundle's clamped
         // `log_stacking_height` AND the actual num_variables (=
         // bundle.basefold_proof.fri_commitments.len()).  Mirrors the
@@ -621,7 +621,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // bounds of `ZKMCompressVerifier::verify` at
         // `super::compress.rs:75-80`).
 
-        // #259 Phase D: end of verify pass — emit `public_values`
+        // End of verify pass — emit `public_values`
         // (cloned at closure entry) for the sequential aggregate pass.
         _pubvals_for_aggregate
     });
@@ -629,21 +629,19 @@ pub fn verify_compress_basefold<C, SC, A>(
     // Sequential aggregate pass: state mutations + consistency checks.
     // Mirrors SP1's compress.rs:182 sequential loop.
     for (_i, public_values) in _verify_pubvals.into_iter().enumerate() {
-        // Step 6: aggregate public values into the compress
-        // output digest.  Begin copy-over of legacy logic at
+        // Aggregate public values into the compress output digest.
+        // Ports the legacy logic at
         // `crate::machine::compress::ZKMCompressVerifier::verify`
-        // (lines 169-400).  This iteration ports the entry
-        // boilerplate; subsequent iterations port the
-        // 360-LOC accumulator state machine.
+        // (lines 169-400) — the per-input accumulator state machine.
         //
-        // Step 6a: borrow the proof's public_values as a typed
+        // Borrow the proof's public_values as a typed
         // RecursionPublicValues view.  Source is the verify-pass
         // output (Vec<Felt> cloned from the proof tuple).
         use std::borrow::Borrow;
         let _current_public_values: &zkm_recursion_core::air::RecursionPublicValues<Felt<C::F>> =
             public_values.as_slice().borrow();
 
-        // Step 6b: assert the public values are valid.  Lifts
+        // Assert the public values are valid.  Lifts
         // [`crate::machine::assert_recursion_public_values_valid`]
         // — same helper used by legacy compress.
         crate::machine::assert_recursion_public_values_valid::<C, SC>(
@@ -651,16 +649,16 @@ pub fn verify_compress_basefold<C, SC, A>(
             _current_public_values,
         );
 
-        // Step 6c: assert vk_root matches the witnessed root.
+        // Assert vk_root matches the witnessed root.
         for (expected, actual) in vk_root.iter().zip(_current_public_values.vk_root.iter()) {
             builder.assert_felt_eq(*expected, *actual);
         }
 
-        // Step 6d: propagate exit_code (already constrained to 0
+        // Propagate exit_code (already constrained to 0
         // in the previous proof).
         _exit_code = _current_public_values.exit_code;
 
-        // Step 6e: first-iteration init block.  Lifts
+        // First-iteration init block.  Lifts
         // compress.rs:181-252 — initialize all per-input
         // accumulators from the first input's public values
         // (zkm_vk_digest, pc, shard, exec shard, addr bits,
@@ -732,7 +730,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             }
         }
 
-        // Step 6f: per-iteration consistency assertions.  Lifts
+        // Per-iteration consistency assertions.  Lifts
         // compress.rs:254-329 — assert each input's start state
         // matches the accumulated state from the previous input.
         use itertools::Itertools;
@@ -802,7 +800,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             builder.assert_felt_eq(*bit, *current_bit);
         }
 
-        // Step 6g: digest constraints + updates.  Lifts
+        // Digest constraints + updates.  Lifts
         // compress.rs:331-398.  committed_value_digest and
         // deferred_proofs_digest each get a "non-zero filter"
         // assertion (only assert equality if accumulated value
@@ -865,7 +863,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             }
         }
 
-        // Step 6h: contains_execution_shard accumulator update —
+        // contains_execution_shard accumulator update —
         // OR-fold the current shard's flag into the running
         // accumulator (boolean addition with subtraction
         // identity).
@@ -875,7 +873,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                     * (SymbolicFelt::ONE - _contains_execution_shard),
         );
 
-        // Step 6i: execution_shard end-state update conditional
+        // execution_shard end-state update conditional
         // on contains_execution_shard.
         _execution_shard = builder.eval(
             _current_public_values.next_execution_shard
@@ -884,7 +882,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                     * (SymbolicFelt::ONE - _current_public_values.contains_execution_shard),
         );
 
-        // Step 6j: reconstruct_deferred_digest end-state update.
+        // reconstruct_deferred_digest end-state update.
         for (digest, current_digest) in _reconstruct_deferred_digest
             .iter_mut()
             .zip_eq(_current_public_values.end_reconstruct_deferred_digest.iter())
@@ -892,7 +890,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             *digest = *current_digest;
         }
 
-        // Step 6k: pc + shard + addr_bits end-state updates.
+        // pc + shard + addr_bits end-state updates.
         _pc = _current_public_values.next_pc;
         _shard = _current_public_values.next_shard;
         for (bit, next_bit) in
@@ -907,12 +905,12 @@ pub fn verify_compress_basefold<C, SC, A>(
             *bit = *next_bit;
         }
 
-        // Step 6l: global cumulative-sum accumulation.  Push
+        // Global cumulative-sum accumulation.  Push
         // the per-shard sum into the Vec; final reduction via
         // builder.sum_digest_v2 happens outside the loop.
         _global_cumulative_sums.push(_current_public_values.global_cumulative_sum);
     }
-    // Step 6m: post-loop output assembly.  Lifts compress.rs:454-498.
+    // Post-loop output assembly.  Lifts compress.rs:454-498.
     use zkm_recursion_compiler::circuit::CircuitV2Builder;
     let _global_cumulative_sum = builder.sum_digest_v2(_global_cumulative_sums);
 
@@ -1163,7 +1161,8 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
     /// Used by `program_from_shape` to build basefold compress
     /// programs from cached shapes.  Takes the full `ZKMCompressWithVkeyShape`
     /// so the embedded `merkle_tree_height` sizes the vk-merkle witness —
-    /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (#261 fix).
+    /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (vk-root from
+    /// witness, not a baked constant).
     pub fn dummy<A>(
         machine: &zkm_stark::StarkMachine<
             zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
@@ -1205,9 +1204,9 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
     /// only occur when the cached program's `Hint` instruction count
     /// matches the next input's witness stream length, eliminating
     /// the `RuntimeError::EmptyWitnessStream` panic that fires when
-    /// two same-arity calls have different per-input shapes (#256
-    /// audit `assert_eq!` documented this as the cache's failure
-    /// mode; see `project_256_cache_perf_reverted.md`).
+    /// two same-arity calls have different per-input shapes (the
+    /// program-cache audit `assert_eq!` documented this as the cache's
+    /// failure mode).
     ///
     /// **Not** a cryptographic commitment — collisions are tolerable
     /// in principle because a divergent program will only fail at
