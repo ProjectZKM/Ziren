@@ -39,13 +39,13 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
-    /// Option B single-main-commit: the BaseFold jagged-PCS commit
+    /// Single-main-commit: the BaseFold jagged-PCS commit
     /// produced up-front by `commit()` (KoalaBear/JaggedChallenger
     /// config).  `main_commit` carries its 8-felt digest (preserving
     /// the `Com<SC>` shape for the legacy fields) and `main_data`
     /// carries a placeholder.  `open()` passes this to
     /// `prove_shard_to_basefold` as `precomputed_commit`, which threads
-    /// it into the Phase 4 jagged-PCS body (skipping the double-commit
+    /// it into the jagged-PCS body (skipping the double-commit
     /// + in-band observe).  `None` in the legacy FRI path (BN254 wrap /
     /// OuterSC), which has no jagged commit.
     ///
@@ -53,7 +53,7 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     /// `PrecomputedJaggedCommit` is the concrete KoalaBear jagged-PCS
     /// state; the type is independent of the `SC`/`M`/`P` generics so
     /// it sits cleanly in the struct (the wrap simply holds `None`).
-    // #H (BaseFold-over-BN254 wrap port): type-erased so it can carry either
+    // BaseFold-over-BN254 wrap port: type-erased so it can carry either
     // the inner PrecomputedJaggedCommit (=Generic<JaggedMmcs>) OR the wrap
     // PrecomputedJaggedCommitGeneric<OuterValMmcs>. open() downcasts to
     // PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
@@ -157,7 +157,7 @@ pub struct ShardProof<SC: StarkGenericConfig> {
     pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
-    /// Shard-level BaseFold proof (#13 always-on for KoalaBear MIPS shards).
+    /// Shard-level BaseFold proof (always-on for KoalaBear MIPS shards).
     ///
     /// When `Some`, the shard was produced via
     /// `crate::shard_level::prove_shard_to_basefold` — one LogUp-GKR
