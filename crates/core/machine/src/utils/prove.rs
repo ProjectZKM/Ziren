@@ -119,7 +119,7 @@ where
 
         // Spawn the checkpoint generator thread.
         //
-        // Task #101 (in-memory shard checkpoints): pin each per-shard
+        // In-memory shard checkpoints: pin each per-shard
         // `ExecutionState` in RAM and send it directly through the channel.
         // The previous implementation wrote each checkpoint to a `tempfile`,
         // sent the `File` handle downstream, and the trace-gen worker
@@ -277,7 +277,7 @@ where
                         if let Ok((index, execution_state, done, num_cycles, chunks_sidecar))
                             = received
                         {
-                            // Task #101: in-memory checkpoint — no
+                            // In-memory checkpoint — no
                             // tempfile read, no bincode::deserialize.
                             tracing::trace!(
                                 target = "checkpoint_pin",
@@ -428,7 +428,7 @@ where
                                         if shape_config.fix_shape(record).is_err() {
                                             fixed_shape = false;
                                         } else {
-                                            // VERIFY_VK multi-shard (#27): canonical
+                                            // VERIFY_VK multi-shard: canonical
                                             // cluster chip set (see the other site).
                                             crate::shape::canonicalize_shape_to_cluster(record);
                                         }
@@ -513,7 +513,7 @@ where
                                 if let Some(shape_config) = shape_config {
                                     for record in records.iter_mut() {
                                         shape_config.fix_shape(record).unwrap();
-                                        // VERIFY_VK multi-shard (#27): extend the
+                                        // VERIFY_VK multi-shard: extend the
                                         // chosen shape up to the canonical stacked
                                         // cluster so per-guest event-driven chip
                                         // subsets don't explode the vk space.
