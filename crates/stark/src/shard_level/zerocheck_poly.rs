@@ -252,7 +252,7 @@ pub(crate) fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
 /// MSB), i.e. `partial_lagrange(point)[index]`.  Returns `EF::ZERO` when
 /// `index >= 2^|point|` (mirrors the finalize step's out-of-table guard).
 ///
-/// #34 device-eq: when the eq table is built ON DEVICE, the host-side
+/// Device-eq: when the eq table is built ON DEVICE, the host-side
 /// `finalize_round_poly` still needs exactly ONE entry of it
 /// (`partial[threshold_half]`) — this computes that entry without
 /// materializing the `2^{dim-1}` table.
@@ -401,7 +401,7 @@ pub struct ZeroCheckPoly<'a, F: Field, EF: ExtensionField<F>, A> {
     padded_row_adjustment: EF,
     /// Virtual padded-row indicator.
     virtual_geq: VirtualGeq<EF>,
-    /// #108 device-fold: erased device cell handle (ColMajorMatrixDevice<Felt>
+    /// Device-fold: erased device cell handle (ColMajorMatrixDevice<Felt>
     /// at round 0, DeviceBuffer<Ef4> after the first fold). When `Some`, the
     /// per-round y-tuple + the fold run on DEVICE (no host `main_cells`).
     device_cells: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>,
@@ -462,7 +462,7 @@ where
         }
     }
 
-    /// #108: attach device-resident cells (the chip's trace on device, from the
+    /// Attach device-resident cells (the chip's trace on device, from the
     /// per-shard provider) so the zerocheck runs fully on device for this chip.
     /// `cells` is round-0 Felt (`ColMajorMatrixDevice<KoalaBear>`); the fold
     /// hook returns later-round Ef4 buffers.
@@ -520,13 +520,13 @@ where
         let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round);
         // finalize needs only partial[threshold_half] (ZERO when the
         // boundary index falls past the table — same guard as before the
-        // #34 scalar refactor; `partial.len() == 2^{num_variables-1}`).
+        // device-eq scalar refactor; `partial.len() == 2^{num_variables-1}`).
         let threshold_half = num_real.div_ceil(2) - 1;
         let partial_at_threshold = partial.get(threshold_half).copied().unwrap_or(EF::ZERO);
         self.finalize_round_poly(claim, last, partial_at_threshold, y_0, y_2, y_3, y_4)
     }
 
-    /// B2.2 chip fusion: compute ALL chips' (y_0,y_2,y_3,y_4) in ONE fused
+    /// Chip fusion: compute ALL chips' (y_0,y_2,y_3,y_4) in ONE fused
     /// device call (TypeId-guarded), then per-chip host finalize.  Returns the
     /// same per-chip round polynomials as the per-chip `sum_as_poly` loop, or
     /// `None` to signal whole-round host fallback (no hook / wrong field /
@@ -559,7 +559,7 @@ where
         // the hook's pointer-array kernel reads them IN PLACE.  One launch
         // per round (SP1 jagged_constraint_poly_eval shape) instead of
         // per-chip launches.
-        // #34 device-eq: under ZIREN_GPU_DEVICE_EQ (default ON, =0/false
+        // Device-eq: under ZIREN_GPU_DEVICE_EQ (default ON, =0/false
         // kill-switch) the host SKIPS the per-chip per-round
         // `partial_lagrange` table build entirely — the hook constructs the
         // eq table ON DEVICE from `zeta_rest` (passed below; `eq` left
@@ -631,7 +631,7 @@ where
                             partials[r].len(),
                         )
                     };
-                    // #34 device-eq: the point the eq table is built from
+                    // Device-eq: the point the eq table is built from
                     // (`zeta[..dim-1]`); the hook builds the table on device
                     // when `eq` is empty.
                     let zeta_rest_ef4: &[Ef4] = unsafe {
@@ -679,7 +679,7 @@ where
             }
             let yt = &tuples[r];
             let claim = claims[i].expect("batched_device_round: claim required");
-            // #34 device-eq: finalize needs only partial[threshold_half] —
+            // Device-eq: finalize needs only partial[threshold_half] —
             // with the device-built table it is recomputed in O(dim);
             // otherwise it is read from the host table (same guard as the
             // pre-refactor in-bounds check: partial.len() == 2^{dim-1}).
@@ -734,14 +734,14 @@ where
     /// transcript is unaffected either way — `finalize_round_poly` and the
     /// challenger stay host.
     fn accumulate_y_tuple(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
-        // #108 device-fold: if cells live on device, compute the y-tuple on
+        // Device-fold: if cells live on device, compute the y-tuple on
         // device directly (no host upload). Falls through to the host-cell
         // paths below if the device hook is unregistered.
         if self.device_cells.is_some() {
             if let Some(dev) = self.gpu_y_tuple_device(partial, is_first_round) {
                 return dev;
             }
-            // #108-core residency: device cells were set (host trace emptied)
+            // Core residency: device cells were set (host trace emptied)
             // but the device y-tuple hook declined for this chip. main_cells is
             // empty, so the host-cell paths below would OOB. Fail loudly +
             // actionably rather than corrupt -- this chip type is not yet
@@ -833,7 +833,7 @@ where
         Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
     }
 
-    /// #108 device-fold: per-round y-tuple from DEVICE cells via the registered
+    /// Device-fold: per-round y-tuple from DEVICE cells via the registered
     /// device hook. `None` unless EF==Ef4, F==Kb, device_cells set, hook present.
     fn gpu_y_tuple_device(&self, partial: &[EF], is_first_round: bool) -> Option<(EF, EF, EF, EF)> {
         use core::any::TypeId;
@@ -874,7 +874,7 @@ where
         Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
     }
 
-    /// #108 device-fold: fold the device cells on the last variable, on device.
+    /// Device-fold: fold the device cells on the last variable, on device.
     fn gpu_fold_device(&self, alpha: EF) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> {
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
@@ -957,7 +957,7 @@ where
     /// `accumulate_y_tuple_host` consumed; `partial_at_threshold` is
     /// `partial_lagrange(zeta[..dim-1])[threshold_half]` (ZERO when the
     /// boundary index falls past the table) — the ONLY table entry finalize
-    /// needs, pre-resolved by the caller so the #34 device-eq path can skip
+    /// needs, pre-resolved by the caller so the device-eq path can skip
     /// materializing the host table (via [`eq_at_index`]).  Pure extraction
     /// of the original fused tail.
     ///
@@ -1029,7 +1029,7 @@ where
 
     /// Fix the last (least-significant) variable to `alpha`.
     fn fix_last(self, alpha: EF) -> Self {
-        // #108 device-fold: fold the device cells on device; host cells unused.
+        // Device-fold: fold the device cells on device; host cells unused.
         let new_device_cells: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
             if self.device_cells.is_some() {
                 Some(self.gpu_fold_device(alpha).expect(
@@ -1258,7 +1258,7 @@ where
         debug_assert_eq!(self.num_variables, 0, "get_component_poly_evals before full reduction");
         let mut out = Vec::with_capacity(self.num_prep_cols + self.num_main_cols);
         if self.num_real_entries >= 1 {
-            // #108 device-fold: extract the folded 1-row openings from device cells.
+            // Device-fold: extract the folded 1-row openings from device cells.
             if let Some(dc) = self.device_cells.as_ref() {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
@@ -1761,7 +1761,7 @@ mod tests {
         run_orientation_case_full(fix).0
     }
 
-    /// s8-J #42: same as [`run_orientation_case`] but also returns the proof
+    /// Same as [`run_orientation_case`] but also returns the proof
     /// and the verifier-recon `expected` so the (b) test can show the host
     /// structural sumcheck ACCEPTS the (unfixed/inconsistent) proof while the
     /// circuit identity `point_and_eval.1 == eq·(C+batch)` is violated.
@@ -1862,7 +1862,7 @@ mod tests {
         (claimed == expected, proof, claimed, expected)
     }
 
-    /// s8-J #42 — DECISIVE (b) WITNESS, host-replicable.
+    /// DECISIVE (b) WITNESS, host-replicable.
     ///
     /// Takes the UNFIXED orientation case: the prover emits an internally
     /// CONSISTENT structural sumcheck (round-0 sums to claimed_sum; every round
@@ -1935,7 +1935,7 @@ mod tests {
         // CONCLUSION: every host STRUCTURAL check (verify_sumcheck_host)
         // passes on a proof whose claimed eval the circuit's rlc_eval assert
         // rejects ⇒ the structural layer UNDER-CHECKS (explanation (b)).
-        // #43 closes this at the verify_zerocheck_host level by recomputing
+        // The verify_zerocheck_host hard-check closes this by recomputing
         // rlc_eval (= eq·(C+batch) over the openings@z*) and rejecting when
         // it != point_and_eval.1 — the binding the structural layer omits.
         // This test stays as the witness for WHY that binding is required.
