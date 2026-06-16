@@ -263,7 +263,7 @@ mod tests {
     }
 }
 
-/// Task #382 Phase 3a sub-sprint A: compile-time proof that every
+/// Compile-time proof that every
 /// `RecursionAir` chip implements
 /// `Air<BasefoldConstraintFolder<'a, InnerConfig>>` — the in-circuit
 /// counterpart to the host-side assertion in
