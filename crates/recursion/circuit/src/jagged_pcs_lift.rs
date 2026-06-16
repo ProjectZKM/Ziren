@@ -15,7 +15,8 @@
 //!
 //! # Status
 //!
-//! Step 1 wired (rmp-serde deserialize is one call).  Step 2/3
+//! Deserialization (pipeline step 1) is wired (rmp-serde is one call).
+//! The Witnessable mapping and assembly (steps 2 and 3) are
 //! deferred — the mapping requires Witnessable impls for
 //! [`zkm_stark::jagged_pcs::jagged::JaggedReductionProof`]
 //! and `StackedBasefoldProof`, which are stark-side internal
@@ -88,7 +89,7 @@ pub fn lift_evaluation_proof_bytes<C, HV>(
 >
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
-    // P2c STEP 3: the bytes-deserialize lift const-builds an inner basefold
+    // The bytes-deserialize lift const-builds an inner basefold
     // proof, which pins inner digests to [Felt;8].  The OUTER (BN254)
     // dispatch reaches the empty placeholder via `lift_empty_placeholder`
     // (no [Felt;8] bound), not this fn.
@@ -127,7 +128,7 @@ where
     lift_empty_placeholder::<C, HV>(builder, max_log_row_count, column_counts_by_round)
 }
 
-/// P2c STEP 3: the all-zero structural placeholder for empty / malformed
+/// The all-zero structural placeholder for empty / malformed
 /// evaluation-proof bytes (the `EvaluationProof::Empty` + scaffolding-test
 /// paths, and the OUTER BN254 dispatch fallback).  Generic over `HV` WITHOUT
 /// the `[Felt;8]` digest bound so the outer ring can reach it; digests are
@@ -153,7 +154,7 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
-    // P2c STEP 3: precompute the zero DigestVariable once (const_digest
+    // Precompute the zero DigestVariable once (const_digest
     // borrows the builder; the round-commitment closures reuse this Copy).
     let zero_digest_var: HV::DigestVariable = HV::const_digest(
         builder,
@@ -201,7 +202,7 @@ where
     // Inner BaseFold proof.  rounds.len() must equal the
     // BasefoldVerifierParams::num_variables which build_basefold_shard_verifier
     // sets to max_log_row_count (see shard_proof_variable_lift.rs:206-212).
-    // P2c STEP 1: the placeholder proof now carries Ext/Felt circuit
+    // The placeholder proof now carries Ext/Felt circuit
     // variables (const-built here via the `zero_ext`/`zero_felt` helpers),
     // matching the re-typed `RecursiveBasefoldProof<Felt, Ext, Dig>`.
     let basefold_proof = crate::basefold_verifier::RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable> {
@@ -212,7 +213,7 @@ where
                 HV::DigestVariable,
             > {
                 uni_poly: [zero_ext(builder), zero_ext(builder)],
-                // P2c STEP 3: commitment is now a DigestVariable.
+                // commitment is now a DigestVariable.
                 commitment: zero_digest_var,
                 _phantom_f: core::marker::PhantomData,
             })
@@ -344,9 +345,9 @@ where
         .iter()
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
         .collect();
-    // #H: zero-placeholder original commitments as HV::DigestVariable
+    // Zero-placeholder original commitments as HV::DigestVariable
     // (inner [Felt;8] / outer [Var<Bn254>;1]).  Reuses the `zero_digest_var`
-    // computed at the top of the fn (P2c STEP 3).
+    // computed at the top of the fn.
     let original_commitments: Vec<HV::DigestVariable> =
         (0..num_rounds).map(|_| zero_digest_var).collect();
 
