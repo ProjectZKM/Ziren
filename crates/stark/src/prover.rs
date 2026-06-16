@@ -119,7 +119,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// keeps the main traces device-resident.  Host provers return
     /// `None` (the default).
     ///
-    /// #36 (shrink device routing): lets generic orchestration code
+    /// Shrink device routing: lets generic orchestration code
     /// (e.g. the shrink stage in `zkm-prover`) hand
     /// `prove_shard_to_basefold` a [`crate::shard_level::DeviceTraceProvider`]
     /// without naming GPU crate types, exactly like the GPU compress
@@ -393,17 +393,17 @@ where
         // KoalaBear/JaggedChallenger stack takes BaseFold for MIPS and
         // recursion shards alike.
         //
-        // === Step 5 Phase 3e (May 19 2026): BaseFold for recursion is default ===
+        // === BaseFold for recursion is the default (May 19 2026) ===
         // The env-gated `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` switch retired
         // (commit e3569c6b on lib.rs side, this commit on prover.rs side).
-        // Dispatch is now TypeId-based per the Phase 3d HYBRID memo
-        // (the related design memo):
+        // Dispatch is now TypeId-based: inner rings take BaseFold for all
+        // shards, the OuterSC wrap stays on FRI:
         //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
         //     + Challenger=JaggedChallenger)  → basefold path for ALL shards,
         //     including recursion shards (compose/shrink).
         //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
         //     → fall through to the FRI body below.  Wrap stays on FRI
-        //     permanently per Phase 3d HYBRID; the basefold path's inner
+        //     permanently; the basefold path's inner
         //     `try_prove_shard_to_basefold_boxed` has the same TypeId
         //     guard so this outer check matches its assumption.
         //
@@ -709,7 +709,7 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // #H (BaseFold-over-BN254 wrap port): gate via `BasefoldRing::use_basefold()`
+    // BaseFold-over-BN254 wrap port: gate via `BasefoldRing::use_basefold()`
     // (the trait dispatch authority) instead of the open-coded TypeId check.
     // For every config returning `true` today (the inner KoalaBear stack) the
     // Val/Challenge/Challenger identities below hold, which keeps the
@@ -747,7 +747,7 @@ where
             "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
              basefold path (commit_basefold_path always sets it under the same TypeId gate)",
         );
-    // #H (BaseFold-over-BN254 wrap port): recover the precomputed commit from
+    // BaseFold-over-BN254 wrap port: recover the precomputed commit from
     // the type-erased box as PrecomputedJaggedCommitGeneric<SC::BfMmcs> — works
     // for BOTH rings (inner BfMmcs=JaggedMmcs, outer BfMmcs=OuterValMmcs). The
     // shard prover threads it generically; emit_jagged_pcs_bytes dispatches the
@@ -813,7 +813,7 @@ where
         &mut shard_challenger,
         // CPU prover path; no device traces.
         None,
-        // Gap #10: CpuProver path always emits MSB-folded proofs
+        // CpuProver path always emits MSB-folded proofs
         // (the GPU LSB packed-pool path is unreachable here).
         crate::shard_level::shard_proof::FoldOrientation::Msb,
         Some(precomputed),
@@ -877,7 +877,7 @@ where
         )
     };
 
-    // #H (BaseFold-over-BN254): build the commit over the ring's BfMmcs
+    // BaseFold-over-BN254: build the commit over the ring's BfMmcs
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
     let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
         <SC as BasefoldRing>::BfMmcs,
@@ -900,7 +900,7 @@ where
             )
         });
 
-    // s9-DR5 (#51 Phase A) — commit-ROOT byte-equality canary.  The
+    // Commit-ROOT byte-equality canary.  The
     // `main_commit` (BN254 Merkle root for the wrap) is the transcript-
     // critical value the prologue + verifier observe.  Unlike the full
     // wrap proof (whose query phase rides the nondeterministic device FRI
