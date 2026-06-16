@@ -157,7 +157,7 @@ pub struct BasefoldShardProofVariable<
     pub zerocheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>>,
     /// Jagged-PCS opening proof.  The inner BaseFold proof's digests +
     /// the per-round original commitments are `HV::DigestVariable`-typed
-    /// (P2c STEP 3: digests are witnessed/const-promoted to circuit
+    /// (digests are witnessed/const-promoted to circuit
     /// variables, not raw host `FieldHasher::Digest`).
     pub evaluation_proof: JaggedPcsProofVariable<
         RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, HV::DigestVariable>,
@@ -382,7 +382,7 @@ impl<P> BasefoldShardVerifier<P> {
                 C,
                 FC,
                 Commitment = HV::DigestVariable,
-                // P2c STEP 3: the BaseFold proof's digests are now circuit
+                // The BaseFold proof's digests are now circuit
                 // variables (witnessed/const-promoted), matching the verifier's
                 // re-typed `type Proof` (basefold_verifier.rs).
                 Proof = RecursiveBasefoldProof<
@@ -750,7 +750,7 @@ where
     // Jagged PCS proof — has the most nested structure.
     let evaluation_proof = {
         // Inner BaseFold proof.
-        // P2c STEP 3: variable-typed proof (Ext/Felt const-built); digests are
+        // Variable-typed proof (Ext/Felt const-built); digests are
         // now circuit variables ([Felt;8] = inner DigestVariable).
         let basefold_proof = RecursiveBasefoldProof::<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]> {
             rounds: (0..shape.basefold_num_variables)
