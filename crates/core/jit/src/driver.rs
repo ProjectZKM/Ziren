@@ -318,7 +318,7 @@ fn lower_one<T: MipsTranspiler>(
         JitOpcode::Xor => t.xor(rd, op_b, op_c),
         JitOpcode::Nor => {
             // NOR's raw signature takes two registers; honour imm
-            // by constant-folding (mirrors the SLL/SRL/.. fix in #73).
+            // by constant-folding (mirrors the SLL/SRL/.. immediate fix).
             if ins.imm_b || ins.imm_c {
                 let b = if ins.imm_b { ins.op_b } else { 0 };
                 let c = if ins.imm_c { ins.op_c } else { 0 };
@@ -403,7 +403,7 @@ fn lower_one<T: MipsTranspiler>(
         // but the JIT lowerings only accept registers — so when imm
         // is set we constant-fold to the result and synthesize a
         // single-operand register write.  Same pattern as the
-        // SLL/SRL/SRA/ROR/CLZ/CLO fix in #73.
+        // SLL/SRL/SRA/ROR/CLZ/CLO immediate fix.
         JitOpcode::Mul => {
             if ins.imm_b || ins.imm_c {
                 let b = if ins.imm_b { ins.op_b } else { 0 };
@@ -415,7 +415,7 @@ fn lower_one<T: MipsTranspiler>(
             }
         }
         // Dual-source ops: when imm_b/imm_c is set, the lowerings
-        // would silently use $zero (#73 root cause).  Real compilers
+        // would silently use $zero.  Real compilers
         // never emit "MULT $rs, imm", but Ziren's instruction format
         // allows it.  Return UnsupportedOpcode so try_run_fast_jit
         // falls back to the interpreter for that program.
@@ -673,7 +673,7 @@ fn lower_one<T: MipsTranspiler>(
             // UNIMPL = compiler-emitted unreachable sentinel.  Lower
             // as a trap stub so the JIT can be built; the host-level
             // pre-screen `first_unsupported_opcode` still gates real
-            // ELFs to the interpreter until #73's `$sp`-corruption
+            // ELFs to the interpreter until the `$sp`-corruption
             // root cause is fixed.  This combo lets the jit_probe
             // example exercise the full path with PC trace + halt-
             // after-N bisection on.
