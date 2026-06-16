@@ -71,7 +71,7 @@ where
 
     let next_num_row_variables = layer.num_row_variables - 1;
 
-    // Phase 4 perf fix (Apr 25 2026 v2): NESTED parallelism. The
+    // Performance optimization: NESTED parallelism. The
     // outer chip loop is parallel (each chip is independent), AND
     // within each chip, the per-row work is parallel (rows are
     // independent). Mirrors SP1's
