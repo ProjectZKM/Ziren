@@ -1,7 +1,7 @@
 mod complete;
 mod compress;
 pub mod compress_basefold;
-// Step 5 Phase 3b (May 19 2026): recursion-AIR-shaped basefold compose
+// Recursion-AIR-shaped basefold compose
 // + deferred program builders.  See module docs for the
 // architectural rationale + what's wired vs stubbed.
 pub mod compress_basefold_recursion;
