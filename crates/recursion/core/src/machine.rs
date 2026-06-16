@@ -307,7 +307,7 @@ impl From<RecursionShape> for OrderedShape {
     }
 }
 
-/// Task #382 Phase 3a sub-sprint A: compile-time proof that every
+/// Compile-time proof that every
 /// `RecursionAir` chip implements
 /// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
 ///
