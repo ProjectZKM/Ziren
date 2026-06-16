@@ -153,7 +153,7 @@ where
     evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
 }
 
-/// #108 phase-3: materialize a device-only chip's full main trace from the
+/// Materialize a device-only chip's full main trace from the
 /// per-shard provider (host row-major). Returns `None` when the hook is
 /// unregistered, the chip is absent, or F != KoalaBear.
 pub fn materialize_chip_main_trace_via_provider<F>(
@@ -180,7 +180,7 @@ where
     Some((vals, width))
 }
 
-/// #32 (commit-traces D2H removal): cumulative-sum tail (last `k`
+/// Commit-traces D2H removal: cumulative-sum tail (last `k`
 /// row-major values of the chip's main trace) via the per-shard
 /// provider — a ~`4k`-byte D2H gather instead of the full-trace
 /// materialize.  Returns `None` when the provider can't serve the
@@ -209,7 +209,7 @@ where
     Some(vals)
 }
 
-/// #108: per-chip eval_at via the per-shard device-trace provider, for
+/// Per-chip eval_at via the per-shard device-trace provider, for
 /// device-only chips with NO host main trace. `eval_point` is the trailing
 /// log(chip_height) coords. Returns `None` (caller emits the legacy zero
 /// vector) when the provider hook is unregistered, the chip is absent, or
@@ -242,7 +242,7 @@ where
     }
 }
 
-/// #49: BATCHED eval_at via the per-shard device-trace provider. Evaluates
+/// BATCHED eval_at via the per-shard device-trace provider. Evaluates
 /// EVERY device-only chip in `names` at its `eval_points[i]` (trailing
 /// log(chip_height) coords) in ONE call that builds one eq-table per distinct
 /// eval-point. Returns `results[i] = Some(per-column EF)` for resolved chips,
