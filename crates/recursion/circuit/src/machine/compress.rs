@@ -1,7 +1,7 @@
 //! Compose-stage compress witness/value/shape **data-type carriers** + the
 //! basefold-shaped `dummy()` factory used by the shape enumerator pipeline.
 //!
-//! ## Task #397 (May 19 2026) — FRI compose-body deletion
+//! ## FRI compose-body deletion (May 19 2026)
 //!
 //! The legacy in-circuit `ZKMCompressVerifier::verify` body (the FRI-shaped
 //! compose verifier originally inherited from SP1) has been retired. The
@@ -26,7 +26,7 @@
 //!   bn254 backend) still takes a [`ZKMCompressWitnessVariable`] input.
 //! - `ZKMCompressWitnessValues::dummy` — wires the shape-enumerator pipeline
 //!   to `dummy_recursion_basefold_vk_and_shard_proof` (the only dummy still
-//!   alive post-Phase-3e).
+//!   alive after the FRI compose-body deletion).
 
 use p3_air::Air;
 use p3_koala_bear::KoalaBear;
@@ -92,8 +92,8 @@ impl<SC: KoalaBearFriParameters> ZKMCompressWitnessValues<SC> {
 }
 
 impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
-    /// Step 5 Phase 3e (May 19 2026): the env-gated dispatcher seam
-    /// was retired with the rest of Phase 3e.  Basefold is the only
+    /// The env-gated dispatcher seam was retired (May 19 2026)
+    /// along with the FRI compose body.  Basefold is the only
     /// recursion-shard shape now, so this calls
     /// `dummy_recursion_basefold_vk_and_shard_proof` directly.
     /// The trait bound `A: Air<VerifierConstraintFolder>` propagates
