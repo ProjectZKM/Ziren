@@ -100,7 +100,7 @@ pub struct JitContext {
     /// sentinel) once `instr_count_executed >= halt_after_n_instrs`.
     /// Lets the host bisect through a real ELF's startup to find
     /// the specific lowering that breaks register state — see
-    /// `crates/core/executor/examples/jit_probe.rs` and #73.
+    /// `crates/core/executor/examples/jit_probe.rs`.
     pub instr_count_executed: u64,
     /// Halt-after-N target (0 = disabled).  Set by the host before
     /// invoking the JIT.
