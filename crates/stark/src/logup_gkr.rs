@@ -31,8 +31,8 @@
 //!    the lookup fingerprints opened against the main trace.
 //!
 //! This module implements primitive (1) and (2) for the **grand-product**
-//! case (single-column denominator = 1).  Phase 2b Step 1 only: the full
-//! fraction-sum extension and challenger-driven reduction are added in
+//! case (single-column denominator = 1).  This is the initial slice only: the
+//! full fraction-sum extension and challenger-driven reduction are added in
 //! subsequent steps so we can unit-test the layer math in isolation.
 
 use alloc::vec::Vec;
@@ -81,7 +81,7 @@ where
         if TypeId::of::<F>() == TypeId::of::<crate::InnerVal>() {
             if let Some(c) = (self as &mut dyn Any).downcast_mut::<crate::InnerChallenger>() {
                 // `InnerChallenger: GrindingChallenger<Witness = InnerVal>`.
-                // s9-H36 (#231 extension): use the DETERMINISTIC grind
+                // Use the DETERMINISTIC grind
                 // (smallest-index witness via find_first) instead of plonky3's
                 // nondeterministic `grind` (find_any) so the GKR pow witness —
                 // observed into the challenger — is reproducible.  Otherwise
@@ -1089,8 +1089,8 @@ mod tests {
         assert!(out.is_none(), "tampered final_evals must be rejected");
     }
 
-    /// Regression test for the bug found during Phase 2b: a folding-only
-    /// reduction accepted "honest" proofs only when denominators
+    /// Regression test for a bug in the earlier folding-only reduction: it
+    /// accepted "honest" proofs only when denominators
     /// repeated (making the degree-2 cross terms vanish).  With the
     /// sumcheck-based reduction this must verify for arbitrary
     /// denominators.
