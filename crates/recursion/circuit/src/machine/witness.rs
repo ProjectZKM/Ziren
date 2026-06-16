@@ -115,7 +115,7 @@ where
         let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
             (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
         }).collect();
-        // VERIFY_VK=true Site-3 fix: WITNESS the per-domain vk.hash inputs
+        // VERIFY_VK=true: WITNESS the per-domain vk.hash inputs
         // [log_n, 2^log_n, shift, two_adic_generator(log_n)] so vk.hash is
         // value-independent.  Read order MUST mirror `write` below.
         let prep_domain_hash_inputs: Vec<[Felt<C::F>; 4]> = self
@@ -150,7 +150,7 @@ where
         self.commit.write(witness);
         self.pc_start.write(witness);
         self.initial_global_cumulative_sum.write(witness);
-        // VERIFY_VK=true Site-3: write the per-domain vk.hash inputs in the
+        // VERIFY_VK=true: write the per-domain vk.hash inputs in the
         // same order `read` consumes them.
         for (_, ser_domain, _) in self.chip_information.iter() {
             let log_size = ser_domain.log_size;
@@ -314,8 +314,8 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Witnessable impls for SP1-style shard-level basefold recursion stages
-// (the task / #19).  Each one follows the pattern of the legacy equivalent
+// Witnessable impls for SP1-style shard-level basefold recursion stages.
+// Each one follows the pattern of the legacy equivalent
 // above, with `ShardProof<SC>::read` replaced by `BasefoldShardProof::read`
 // (which produces a 5-tuple variable, see shard_level_witness.rs:198-241).
 // ---------------------------------------------------------------------------
