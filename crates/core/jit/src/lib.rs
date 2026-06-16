@@ -1,6 +1,6 @@
 //! JIT compiler for the Ziren MIPS guest executor (Linux x86_64).
 //!
-//! Phase 1 (P1) — skeleton.  This crate compiles on every platform but
+//! Skeleton implementation.  This crate compiles on every platform but
 //! only exposes a working JIT on Linux x86_64.  Other platforms get a
 //! `JitUnavailable` error from the entry points so callers can
 //! transparently fall back to the interpreter.
