@@ -356,11 +356,12 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    // P2c STEP 1 (behavior-preserving re-type): the variable now carries
-    // `Ext` circuit variables for `uni_poly` (the const-promotion moves
-    // here from the verifier body).  `commitment` stays the raw `Dig`
-    // (digest witnessing is STEP 3).  STEP 2 swaps `builder.constant`
-    // for `.read(builder)` + a real `write`.
+    // Behavior-preserving re-type: the variable now carries `Ext`
+    // circuit variables for `uni_poly` (the const-promotion moves here
+    // from the verifier body).  `commitment` stays the raw `Dig`
+    // (digest witnessing happens at the stream read/write pair below).
+    // The stream-based variant swaps `builder.constant` for
+    // `.read(builder)` + a real `write`.
     type WitnessVariable = RecursiveBasefoldRound<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -375,7 +376,7 @@ where
     }
 
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // STEP 1: still const-constructed in `read`; no stream writes.
+        // Still const-constructed in `read`; no stream writes.
     }
 }
 
@@ -417,7 +418,7 @@ where
                 .map(|row| row.iter().map(|v| builder.constant(*v)).collect())
                 .collect(),
             merkle_path_bytes: self.merkle_path_bytes.clone(),
-            // GAP-2: raw digests pass through (promotion happens at the
+            // Raw digests pass through (promotion happens at the
             // binding site / stream pair, mirroring merkle_path_digests
             // handling on the query openings).
             merkle_path_digests: self.merkle_path_digests.clone(),
@@ -500,20 +501,20 @@ where
     }
 
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // STEP 1: const-constructed in `read`; no witness-stream writes.
+        // Const-constructed in `read`; no witness-stream writes.
     }
 }
 
-// ── P2c STEP 2: value-independent (witness-stream) basefold proof ─────
+// Value-independent (witness-stream) basefold proof.
 //
-// The Step-1 `Witnessable::read` above CONST-builds the proof (used by the
+// The `Witnessable::read` above CONST-builds the proof (used by the
 // OUTER wrap lift, which never writes the bundle to the felt stream).  For
 // the INNER recursion path we instead read the felt/ext values FROM the
 // witness stream so the recursion program is value-INDEPENDENT (the program
 // emits `read` ops, not value-specific `const` ops).  These two free fns are
 // the read/write pair — they MUST emit/consume the stream in the SAME field
 // order.  Digests (`commitment`, `merkle_path_digests`) stay raw here and are
-// witnessed in STEP 3.  `component_openings` are dropped (verifier discards).
+// witnessed as 8 felts each.  `component_openings` are dropped (verifier discards).
 pub fn read_basefold_proof_from_stream<C>(
     host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [InnerVal; 8]>,
     builder: &mut Builder<C>,
@@ -526,7 +527,7 @@ where
         .iter()
         .map(|r| RecursiveBasefoldRound {
             uni_poly: [r.uni_poly[0].read(builder), r.uni_poly[1].read(builder)],
-            // STEP 3: witness the round commitment (8 felts = inner DigestVariable).
+            // Witness the round commitment (8 felts = inner DigestVariable).
             commitment: core::array::from_fn(|i| r.commitment[i].read(builder)),
             _phantom_f: core::marker::PhantomData,
         })
@@ -534,7 +535,7 @@ where
     let final_poly = host.final_poly.read(builder);
     let pow_witness = host.pow_witness.read(builder);
     let batch_grinding_witness = host.batch_grinding_witness.read(builder);
-    // GAP-2a/2b: component openings are now CONSUMED by the verifier
+    // Component openings are now CONSUMED by the verifier
     // (batched initial_eval + Merkle binding vs the original
     // commitments) — witness the leaf values and path digests.
     // Element counts are shape-determined (stripe widths x queries x
@@ -575,7 +576,7 @@ where
                         op.sibling_pair[1].read(builder),
                     ],
                     merkle_path_bytes: op.merkle_path_bytes.clone(),
-                    // STEP 3: witness each path sibling digest (8 felts).
+                    // Witness each path sibling digest (8 felts).
                     merkle_path_digests: op
                         .merkle_path_digests
                         .iter()
@@ -611,7 +612,7 @@ pub fn write_basefold_proof_to_stream<C>(
     for r in host.rounds.iter() {
         r.uni_poly[0].write(witness);
         r.uni_poly[1].write(witness);
-        // STEP 3: write the round commitment (8 felts), same order as read.
+        // Write the round commitment (8 felts), same order as read.
         for f in r.commitment.iter() {
             f.write(witness);
         }
@@ -619,7 +620,7 @@ pub fn write_basefold_proof_to_stream<C>(
     host.final_poly.write(witness);
     host.pow_witness.write(witness);
     host.batch_grinding_witness.write(witness);
-    // GAP-2a/2b: component openings — SAME order as the read pair.
+    // Component openings — SAME order as the read pair.
     for round in host.component_openings.iter() {
         for c in round.iter() {
             for row in c.leaf_values.iter() {
@@ -638,7 +639,7 @@ pub fn write_basefold_proof_to_stream<C>(
         for op in round.iter() {
             op.sibling_pair[0].write(witness);
             op.sibling_pair[1].write(witness);
-            // STEP 3: write each path sibling digest (8 felts).
+            // Write each path sibling digest (8 felts).
             for d in op.merkle_path_digests.iter() {
                 for f in d.iter() {
                     f.write(witness);
