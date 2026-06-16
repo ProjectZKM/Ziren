@@ -160,7 +160,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // MemoryConst→16, MemoryVar→14 (rounded up to legacy
             // minimum of 18 to share with smaller shapes).  This entry
             // lets `fix_shape` succeed for basefold programs once
-            // the task / #59 enable that path; today the basefold
+            // that path is enabled; today the basefold
             // builder skips fix_shape entirely.
             [
                 (mem_var.clone(), 18),
@@ -173,8 +173,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=0. After #249 lifted
-            // the stacked-PCS contract block, tendermint bundle-lift's
+            // Bundle-lift compose level h=0. After the stacked-PCS
+            // contract block was lifted, tendermint bundle-lift's
             // first compose level (lift outputs → arity-4 compose)
             // panics shape.rs:91 with chip heights none of the above
             // shapes fit. Observed:
@@ -214,7 +214,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // GAP-2a/2b band: the component-opening witnessing (bound
+            // Component-opening band: the component-opening witnessing (bound
             // initial_eval + Merkle binding) grew compose programs past
             // the older caps (observed fib compose: MemoryVar 663k -> 20,
             // ExtAlu 865k -> 20).  One-bit headroom on the binding dims.
