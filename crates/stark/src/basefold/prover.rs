@@ -34,7 +34,7 @@ use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 
 /// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`.
 ///
-/// Issue #231 — plonky3's [`p3_challenger::DuplexChallenger::grind`] is
+/// plonky3's [`p3_challenger::DuplexChallenger::grind`] is
 /// implemented with `(0..num_batches).into_par_iter().find_map_any(...)`,
 /// which returns the witness from whichever rayon worker finishes first.
 /// On multi-GPU runs the result is therefore non-deterministic across
@@ -170,7 +170,7 @@ where
     ///
     /// Mirrors [`Self::commit_mles`] but skips the host
     /// [`DftEncoder::encode_batch`] step — used by the GPU dispatch
-    /// path (`#76 / D2 — `) where codewords are produced on
+    /// path where codewords are produced on
     /// device by `FriCudaProver::encode_and_commit` and pulled back to
     /// host before this step.
     ///
@@ -330,7 +330,7 @@ where
 
         // (1) Batch grinding witness (forces verifier-prover to share
         // a transcript prefix before sampling batching coefficients).
-        // Issue #231: use deterministic_grind to keep the witness
+        // Use deterministic_grind to keep the witness
         // value reproducible across runs (plonky3's parallel grind
         // uses `find_any` which is non-deterministic).
         let batch_grinding_witness = deterministic_grind(challenger, BATCH_GRINDING_BITS);
@@ -419,7 +419,7 @@ where
         challenger.observe_algebra_element(fp);
 
         let pow_bits = self.config().proof_of_work_bits;
-        // Issue #231: see `deterministic_grind` for why this call must
+        // See `deterministic_grind` for why this call must
         // not delegate to plonky3's parallel `challenger.grind`.
         let pow_witness = deterministic_grind(challenger, pow_bits);
 
