@@ -69,7 +69,7 @@ where
 
     // Host path already supplied a precompute, or this config does not prove
     // via BaseFold (`use_basefold() == false`, e.g. the OuterSC wrap on FRI):
-    // pass through untouched. #H (BaseFold-over-BN254 wrap port): the dispatch
+    // pass through untouched. BaseFold-over-BN254 wrap port: the dispatch
     // boolean is the `BasefoldRing` trait; the Val/Challenge/Challenger
     // identities (which keep the KoalaBear transmutes below sound) are then
     // asserted in debug builds.
@@ -105,7 +105,7 @@ where
         })
         .collect();
 
-    // #A (single shard-wide commit buffer): when a per-shard device
+    // Single shard-wide commit buffer: when a per-shard device
     // provider is present and ziren-gpu registered the device
     // precompute-commit hook, build the dense pack + BaseFold commit
     // device-side (resident chips D2D, host chips H2D once; dense
@@ -127,7 +127,7 @@ where
         });
         match device_precompute {
             Some(pre) => pre,
-            // #32: host fallback for the #A device commit hook — must be
+            // Host fallback for the device commit hook — must be
             // provider-aware so empty (device-resident) chip traces are
             // re-materialized before the host commit body (otherwise their
             // cells would be silently dropped → wrong commitment).
@@ -161,7 +161,7 @@ where
     let main_commitment: [Val<SC>; 8] =
         unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
 
-    // #H: this build path only runs for the inner ring (use_basefold + no
+    // This build path only runs for the inner ring (use_basefold + no
     // host precompute); SC::BfMmcs == JaggedMmcs there, so the concrete
     // precompute IS PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
     let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
@@ -282,7 +282,7 @@ where
     // `main_commitment` with its 8-felt digest, and thread the result into
     // Phase 4 so the in-band observe is skipped.  Matrices move in/out of
     // the named-tuple Vec with zero data copy.
-    // #108 device residency, PCS-binding correctness: the jagged BaseFold
+    // Device residency, PCS-binding correctness: the jagged BaseFold
     // commit must cover EVERY chip's real cells. Device-resident chips carry
     // an EMPTY host main trace (the GKR / zerocheck phases read them through
     // the per-shard provider), so the commit would silently DROP their cells
@@ -291,8 +291,8 @@ where
     // chips' traces from the provider into a commit-only trace set; the
     // empty `main_traces` continue to drive the device GKR/zerocheck paths.
     // Host-path behaviour is unchanged (no empty+provider chips there).
-    // #32 (commit-traces D2H removal): on the GPU happy path the dense
-    // commit is built by the device #A hook (resident chips D2D, dims
+    // Commit-traces D2H removal: on the GPU happy path the dense
+    // commit is built by the device hook (resident chips D2D, dims
     // resolved from the provider) and the jagged reduction consumes the
     // registered device dense handle — so the per-chip FULL-trace D2H here
     // is pure waste for device-resident chips (their host values are never
@@ -305,7 +305,7 @@ where
     // for log_dense >= the GPU min; mirror its env+default here).  If any
     // condition fails the device handle is NOT registered and the jagged
     // reduction falls back to a HOST materialize — but the per-shard
-    // provider uses drain-on-lookup (#367), so by reduction time the
+    // provider uses drain-on-lookup, so by reduction time the
     // device traces are GONE and a late re-materialize cannot recover
     // them.  In that case we MUST keep the eager early D2H (captured here,
     // pre-drain) for a correct dense_q.  Kill-switch
@@ -366,7 +366,7 @@ where
                     if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
                         // Device-resident chip with an empty host trace and
                         // the handle path guaranteed: skip the D2H, keep it
-                        // empty.  The #A hook packs it D2D.
+                        // empty.  The device commit hook packs it D2D.
                         commit_d2h_skipped += 1;
                         return t.clone();
                     }
@@ -400,11 +400,11 @@ where
             );
         });
     }
-    // #32 (commit-traces D2H removal, step 1): capture the
-    // cumulative-sum TAILS (last 14 row-major values) for
-    // device-resident chips via a ~56-byte provider gather, EARLY —
-    // before the zerocheck prepare's release_by_name (#367 drain) can
-    // drop the provider entry.  Host-trace chips stay `None` (Phase 5
+    // Commit-traces D2H removal: capture the cumulative-sum TAILS
+    // (last 14 row-major values) for device-resident chips via a
+    // ~56-byte provider gather, EARLY — before the zerocheck prepare's
+    // release_by_name (drain-on-lookup) can drop the provider entry.
+    // Host-trace chips stay `None` (Phase 5
     // reads their host cells as before); `None` for a device chip
     // falls back to its materialized commit trace.  Once step-3
     // y_per_chip is device-served too, this gather replaces the
@@ -463,8 +463,8 @@ where
     // commit challenges to the shard's chip-set identity AND each
     // chip's row count.
     //
-    // The per-chip height felt observe is gap #2 from
-    // `project_sp1_parity_three_tracks.md`: SP1 binds
+    // The per-chip height felt observe is an SP1-parity transcript
+    // binding: SP1 binds
     // `num_real_entries` here (`/tmp/sp1/crates/hypercube/src/prover/
     // shard.rs:687-694`); SP1 GPU mirror binds `poly_size`
     // (`/tmp/sp1/sp1-gpu/crates/shard_prover/src/prover.rs:665-672`).
@@ -491,10 +491,10 @@ where
         let num_chips = Val::<SC>::from_u64(chips.len() as u64);
         challenger.observe(num_chips);
         for (chip, trace) in chips.iter().zip(main_traces.iter()) {
-            // Per-chip log-height observe (gap #2). Source matches
+            // Per-chip log-height observe. Source matches
             // the `chip_log_heights` BTreeMap populated below.
             //
-            // #108 device residency: an empty host trace (width == 0)
+            // Device residency: an empty host trace (width == 0)
             // means the chip's real trace lives device-side in the
             // per-shard provider. Resolve the REAL height there so the
             // observed transcript value is identical to the host-trace
@@ -612,7 +612,7 @@ where
         "shard phase done"
     );
 
-    // ── #33 S1 (openings-for-free): reuse the zerocheck residual as the
+    // ── Openings-for-free: reuse the zerocheck residual as the
     // jagged step-3 y_per_chip ────────────────────────────────────────────
     // `trace_at_z[name]` is the zerocheck reduction's component_poly_evals
     // (prep-then-main per chip, = padded-MLE_BE(bitrev(trace)) @ z) — exactly
@@ -642,7 +642,7 @@ where
                 .zip(preprocessed_traces.iter())
             {
                 let name = MachineAir::<Val<SC>>::name(*chip);
-                // #32: a device-resident chip now carries an EMPTY commit
+                // A device-resident chip now carries an EMPTY commit
                 // trace (its full cells were never D2H'd).  Resolve its REAL
                 // dims so the residual openings still cover it: height from
                 // the provider, width from the residual itself
@@ -695,7 +695,7 @@ where
         }
     };
 
-    // #33 S0 validation: ZIREN_ZC_RESIDUAL_XCHECK=1 recomputes the legacy
+    // Residual cross-check: ZIREN_ZC_RESIDUAL_XCHECK=1 recomputes the legacy
     // jagged step-3 y values from the commit traces (the exact formula at
     // jagged_pcs.rs step 3: eq table over rev(z), bit-reversed row source)
     // and asserts they equal the zerocheck residual per chip per column.
@@ -715,7 +715,7 @@ where
                     chips.iter().zip(commit_traces.iter()).zip(resid.iter())
                 {
                     let name = MachineAir::<Val<SC>>::name(*chip);
-                    // #32: this DIAGNOSTIC recomputes the legacy step-3 y
+                    // This DIAGNOSTIC recomputes the legacy step-3 y
                     // from raw cells.  When the commit trace is empty
                     // (device-resident under the default D2H skip), pull the
                     // chip's full cells from the provider so the xcheck can
@@ -784,7 +784,7 @@ where
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
         emit_jagged_pcs_bytes::<SC, A>(
             chips,
-            // #108: commit-coverage trace set (device-resident chips
+            // Commit-coverage trace set (device-resident chips
             // materialized) — MUST be the same traces the precompute
             // committed, or the openings won't bind.
             commit_traces,
@@ -815,7 +815,7 @@ where
     // decomposition — NOT bits of log_h.  Carry it per chip by name.
     let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, trace) in chips.iter().zip(main_traces.iter()) {
-        // #108 device residency: resolve empty host traces' REAL height
+        // Device residency: resolve empty host traces' REAL height
         // from the per-shard device provider (host parity with the
         // host-trace path). Mirrors the Phase-1 prologue observe above —
         // both MUST agree with what the verifier re-observes from
@@ -922,11 +922,11 @@ where
         crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
     > = chips
         .iter()
-        // #108 device residency: cumulative sums must read the REAL trace
+        // Device residency: cumulative sums must read the REAL trace
         // cells — `commit_traces` carries provider-materialized traces for
         // device-resident chips (host-empty); identical to `main_traces`
         // on the host path.
-        // #32: device-resident chips prefer the early-captured provider
+        // Device-resident chips prefer the early-captured provider
         // TAIL (chip_cum_tails) — same 14 values, no dependence on the
         // full materialize.  Validated identical via the bf-digest
         // cumulative_sums section canary.
@@ -996,7 +996,7 @@ fn emit_jagged_pcs_bytes<SC, A>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    // #33 S1 (openings-for-free): per-chip main-column openings at z from
+    // Openings-for-free: per-chip main-column openings at z from
     // the zerocheck residual (trace_at_z main slice), parallel to `chips`;
     // empty Vec per empty chip.  `Some` skips the jagged step-3 host
     // recompute (identical values, identical bytes); `None` = legacy.
@@ -1017,7 +1017,7 @@ where
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // #H (BaseFold-over-BN254 wrap port): dispatch via `BasefoldRing`. Configs
+    // BaseFold-over-BN254 wrap port: dispatch via `BasefoldRing`. Configs
     // that don't prove via BaseFold (OuterSC wrap on FRI) emit `Empty`. The
     // KoalaBear identities that make the transmute + challenger downcast below
     // sound are asserted in debug builds (they hold for every config that
@@ -1058,8 +1058,8 @@ where
 
     // Per-chip `r_row` = trailing log(chip_height) coords of the
     // shared eval_point.
-    // #32: width-0 (device-resident, un-materialized) chips resolve
-    // their REAL height via the per-shard provider.  As of the #32 D2H
+    // Width-0 (device-resident, un-materialized) chips resolve
+    // their REAL height via the per-shard provider.  As of the D2H
     // removal, `commit_traces` no longer eagerly materializes device
     // chips, so width-0 here is the NORMAL device-resident case — the
     // dense commit packed them D2D and the reduction reads the device
@@ -1104,7 +1104,7 @@ where
         )
     };
 
-    // #H (BaseFold-over-BN254 wrap port): OUTER ring dispatch. When the
+    // BaseFold-over-BN254 wrap port: OUTER ring dispatch. When the
     // config's challenger is NOT the inner JaggedChallenger (i.e.
     // OuterChallenger), the jagged BaseFold open runs over the outer MMCS
     // (OuterValMmcs) via a hook registered by recursion-core (zkm-stark
@@ -1138,7 +1138,7 @@ where
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
-    // #33 S1: reinterpret the residual openings to InnerChallenge
+    // Openings-for-free: reinterpret the residual openings to InnerChallenge
     // (Challenge<SC> == InnerChallenge under the TypeId gate above; the
     // outer-ring hook path above keeps its own legacy step-3 recompute —
     // identical values either way).
@@ -1183,10 +1183,10 @@ where
             &r_row_per_chip,
             z_row,
             precomputed_inner,
-            // #33 S1: zerocheck-residual openings (skips host step 3).
+            // Zerocheck-residual openings (skips host step 3).
             pre_y_inner,
             lb_challenger,
-            // #32: provider arms the host-fallback re-materialize for empty
+            // Provider arms the host-fallback re-materialize for empty
             // (device-resident) chip traces — no-op on the happy path.
             _device_traces,
         );
@@ -1253,8 +1253,8 @@ where
         return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
     }
 
-    // #33 S1: thread the zerocheck-residual openings into the legacy
-    // (no-precompute) flow too — `None` keeps the host step-3 recompute.
+    // Openings-for-free: thread the zerocheck-residual openings into the
+    // legacy (no-precompute) flow too — `None` keeps the host step-3 recompute.
     let bundle = prove_jagged_basefold_with_y_per_chip(
         &chip_traces,
         &r_row_per_chip,
