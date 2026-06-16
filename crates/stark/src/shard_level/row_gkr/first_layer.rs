@@ -72,7 +72,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
     let mut numer_evals: Vec<F> = vec![F::ZERO; total];
     let mut denom_evals: Vec<EF> = vec![EF::ZERO; total];
 
-    // Phase 4 perf fix (Apr 25 2026): parallelize per-row interaction
+    // Performance optimization: parallelize per-row interaction
     // computation. Mirrors SP1's `numer_evals.par_chunks_exact_mut(num_interactions)`
     // pattern at `crates/hypercube/src/logup_gkr/execution.rs:144-217`.
     // For chips with hundreds of thousands of rows (Cpu at 131K, Program
