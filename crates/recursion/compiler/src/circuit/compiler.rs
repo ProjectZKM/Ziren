@@ -598,8 +598,8 @@ where
         // In debug mode, we perform cycle tracking and keep track of backtraces.
         // Otherwise, we ignore cycle tracking instructions and pass around an empty Vec of traces.
         let debug_mode = zkm_debug_mode();
-        // Compile each IR instruction into a SeqBlock structure (#259
-        //). Most ops accumulate into the current Basic block;
+        // Compile each IR instruction into a SeqBlock structure.
+        // Most ops accumulate into the current Basic block;
         // a `DslIr::Parallel` op flushes the current Basic block and
         // pushes a `SeqBlock::Parallel(per_subprogram_RawProgram)`.
         // This step also counts the number of times each address is
@@ -741,7 +741,7 @@ where
         // Reset the other fields.
         self.next_addr = Default::default();
         self.virtual_to_physical.clear();
-        // #259 Phase C: assemble the final SeqBlock structure. Constants
+        // Assemble the final SeqBlock structure. Constants
         // are prepended as a Basic block; the user's compiled SeqBlocks
         // (which may contain SeqBlock::Parallel) follow. Traces are
         // prepended with `None`s for the const init prefix.
