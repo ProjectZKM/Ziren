@@ -321,8 +321,8 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // After porting to SP1-style consecutive-integer enumeration
-        // (#75 fix): MAX_AREA_MULTIPLE=12 → 13 clusters × 12 × 12 ×
+        // After porting to SP1-style consecutive-integer enumeration:
+        // MAX_AREA_MULTIPLE=12 → 13 clusters × 12 × 12 ×
         // 5 × 5 = 46,800 shapes. Bumped from the old 20K cap which
         // assumed power-of-2 area multiples [1,2,4,8,16,32].
         assert!(
@@ -350,7 +350,7 @@ mod tests {
         }
     }
 
-    /// Regression for #75: hello_world produced an
+    /// Regression test: hello_world produced an
     /// (preprocessed_multiple, main_multiple) combination not on
     /// powers-of-2, so the old `area_multiples = [1,2,4,8,16,32]`
     /// enumeration missed its shape and "Invalid verification key"
