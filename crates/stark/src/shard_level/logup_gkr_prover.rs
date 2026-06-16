@@ -317,7 +317,7 @@ where
     let eq = eq_mle_table::<EF>(eval_point);
     debug_assert_eq!(eq.len(), height);
 
-    // Phase 4 perf fix (Apr 25 2026): parallelize the per-column
+    // Performance optimization: parallelize the per-column
     // MLE evaluation. Each column is an independent dot product
     // over the eq-table; collect-into-Vec is rayon-friendly.
     use p3_maybe_rayon::prelude::*;
