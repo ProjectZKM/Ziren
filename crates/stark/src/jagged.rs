@@ -208,7 +208,7 @@ pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
     log_dense_size: usize,
 ) -> Vec<F> {
-    // Phase 4 perf fix (Apr 25 2026): pre-allocate the full output
+    // Performance optimization: pre-allocate the full output
     // and write into per-chip slices in parallel. The serial
     // implementation pushed 134M elements one-at-a-time (called twice
     // per shard for commit + reduction), totaling ~150ms × 2 calls.
