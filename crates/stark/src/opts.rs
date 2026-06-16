@@ -83,7 +83,7 @@ impl ZKMProverOpts {
 
     /// Get the default prover options for a prover on GPU given the amount of CPU and GPU memory.
     ///
-    /// **Small-card adaptation (SP1 `local_gpu_opts` port — #376)**:
+    /// **Small-card adaptation (SP1 `local_gpu_opts` port)**:
     /// When `gpu_ram_gb <= 30` (e.g. RTX 4090 24 GB or A10 24 GB) we
     /// halve the per-shard cycle budget (`log2_shard_size -= 1`) as the
     /// analogue of SP1's `shard_threshold -= (1<<26) + (1<<25)`
@@ -170,17 +170,17 @@ impl ZKMProverOpts {
             .map(|s| s.split(',').filter(|x| !x.trim().is_empty()).count())
             .filter(|&n| n > 0)
             .unwrap_or(1);
-        // #45 small-card concurrency bound: the default lower clamp of 4
+        // Small-card concurrency bound: the default lower clamp of 4
         // forces FOUR concurrent recursion-compress workers even with a
         // SINGLE GPU (`(1*2).clamp(4,8) == 4`).  Under default-on device
         // residency each worker pins a recursion device tracegen buffer
         // (recursion.cuh:429 poseidon2_wide) AND a full BaseFold commit
         // codeword stack (commit_dispatch.rs, ~4 GiB at log_dense≈29);
-        // four of those on one 32 GB card overruns VRAM (s8-L: TM
+        // four of those on one 32 GB card overruns VRAM (observed TM
         // compress-from-dump OOM at recursion.cuh:429 / encode_batch).
         // On small cards (`gpu_ram_gb <= 36`, the 32 GB 5090 with SP1's
         // `ceil()+4` pad) cap the *lower* clamp at 2 so a single GPU runs
-        // 2 workers (≈ s6's safe profile) instead of 4 — per-GPU
+        // 2 workers (the safe profile) instead of 4 — per-GPU
         // concurrency stays ≤ 2 at every device count
         // (1 GPU → 2, 2 GPU → 4, 4 GPU → 8: unchanged for ≥2 GPUs).
         // RECURSION_SHARD_BATCH_SIZE always overrides; restore the legacy
