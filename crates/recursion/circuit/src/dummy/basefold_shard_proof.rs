@@ -222,7 +222,7 @@ where
     let zerocheck_proof =
         dummy_partial_sumcheck_proof::<EF>(max_log_row_count, 4);
 
-    // Review item 12: the real prover (`shard_level/prover.rs:438-498`)
+    // The real prover (`shard_level/prover.rs:438-498`)
     // now populates one `ChipOpenedValues` per chip (name-sorted) with
     // the per-chip trace@z openings — `main.local` of `width` Exts,
     // `preprocessed.local` of `preprocessed_width` Exts, and `quotient`
@@ -247,7 +247,7 @@ where
                 let main_w = <_ as BaseAir<F>>::width(&chip.air);
                 let name = MachineAir::<F>::name(**chip);
                 let log_h = heights_map.get(&name).copied().unwrap_or(0) as usize;
-                // Review item 12 / P2b: quotient[0] carries the big-endian bits
+                // quotient[0] carries the big-endian bits
                 // of the chip HEIGHT (2^log_h, the VirtualGeq threshold), MSB at
                 // index 0 — the SAME encoding the real prover emits
                 // (shard_level/prover.rs:486-507).  Zeroing it (the old dummy)
@@ -325,7 +325,7 @@ where
             })
             .collect();
 
-    // P2b: build a shape-faithful jagged-basefold Bundle (zero values) so the
+    // Build a shape-faithful jagged-basefold Bundle (zero values) so the
     // dummy's witness stream matches the real prover's byte-for-byte.  Chip
     // dims in NAME-SORTED order (matches the lift's name-sorted
     // `column_counts_by_round`); width = main trace width, height = 2^log_h.
@@ -359,13 +359,13 @@ where
         chip_log_heights,
         chip_cumulative_sums,
         evaluation_proof,
-        // Gap #10: verifier-simulation dummy emits MSB-folded proofs
+        // The verifier-simulation dummy emits MSB-folded proofs
         // (host-CPU convention — matches the CpuProver call site).
         fold_orientation: FoldOrientation::Msb,
     }
 }
 
-/// P2b: build a SHAPE-FAITHFUL (zero-VALUE) [`JaggedBasefoldBundle`] for the
+/// Build a SHAPE-FAITHFUL (zero-VALUE) [`JaggedBasefoldBundle`] for the
 /// dummy shard proof, so the witness stream the recursion program reads from a
 /// dummy matches the real prover's byte-for-byte (the recursion program is now
 /// value-independent — only field LENGTHS matter).  Replaces the prior
@@ -476,7 +476,7 @@ pub fn dummy_jagged_basefold_bundle(
             MerkleOpening { leaves }
         })
         .collect();
-    // GAP-2a/2b: component openings are now WITNESSED + consumed (the
+    // Component openings are now WITNESSED + consumed (the
     // bound initial_eval + the component Merkle binding), so the dummy
     // must carry the shape-correct zero-filled structure: ONE round (the
     // single stacked commit), `num_queries` leaves, each leaf = one
