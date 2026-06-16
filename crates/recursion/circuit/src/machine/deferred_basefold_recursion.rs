@@ -1,4 +1,4 @@
-//! Step 5 Phase 3b — Deferred recursion-side basefold verifier program (May 19 2026).
+//! Deferred recursion-side basefold verifier program (May 19 2026).
 //!
 //! Counterpart to [`super::deferred_basefold`] that targets the
 //! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
