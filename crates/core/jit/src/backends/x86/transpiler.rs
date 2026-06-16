@@ -169,7 +169,7 @@ impl TranspilerBackend {
             // backing host address; without this load MEMORY_PTR
             // holds whatever R10 the caller had (caller-saved
             // scratch in SysV) and every memory op SEGVs at a wild
-            // pointer.  Bug found via #73's PC-trace probe on
+            // pointer.  Bug found via the PC-trace probe on
             // fibonacci's first SW.
             ; mov  Rq(super::MEMORY_PTR), [Rq(super::CONTEXT) + super::MEMORY_OFFSET]
         );
