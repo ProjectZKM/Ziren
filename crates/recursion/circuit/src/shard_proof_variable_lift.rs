@@ -217,12 +217,11 @@ pub fn build_basefold_shard_verifier<HV>(
 
 /// Variant that accepts an explicit `num_variables` for the inner
 /// BasefoldVerifierParams, decoupled from `max_log_row_count`.  Used
-/// by the #241 Phase 4e bundle path: when bundle is present, the
+/// by the jagged-bundle path: when a bundle is present, the
 /// verifier's num_variables must match `bundle.basefold_proof
 /// .basefold_proof.fri_commitments.len()` (the prover-emitted FRI
-/// round count) rather than `max_log_row_count`.  See #244 for the
-/// chain of pre-existing prover/verifier param mismatches this
-/// closes.
+/// round count) rather than `max_log_row_count`.  This closes a
+/// chain of prover/verifier param mismatches.
 pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
@@ -386,7 +385,7 @@ where
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
-/// Review item 12: finalize the per-chip opened values carried from
+/// Finalize the per-chip opened values carried from
 /// the host proof.
 ///
 /// The host `BasefoldShardProof.opened_values` carries each chip's
@@ -434,9 +433,9 @@ where
         .map(|(idx, mut chip_opening)| {
             let name = chip_names.get(idx);
 
-            // Review item 12: KEEP the carried degree — the REAL big-endian
+            // KEEP the carried degree — the REAL big-endian
             // height bits, carried host-side via the proof's `quotient[0]`
-            // (prover.rs E1d) and lifted in
+            // and lifted in
             // `basefold_opened_values_from_host`.  This is the VirtualGeq
             // threshold (zerocheck_prover.rs:487 `VirtualGeq::new(main_height)`)
             // the recursion `full_geq` (zerocheck.rs:517) compares against.
@@ -531,8 +530,8 @@ where
     // previous `Reverse(log_h), name` sort reordered the per-chip observe
     // (Poseidon2WideDeg9 is tall but 5th alphabetically) → the prologue
     // sponge diverged from the prover at the per-chip stage → every
-    // post-prologue GKR/zerocheck/jagged squeeze was wrong (gnark wrap
-    // #7898240 first surfaced at gkr-r0-claimed-sum). Name order also
+    // post-prologue GKR/zerocheck/jagged squeeze was wrong (in the gnark
+    // wrap this first surfaced at the GKR round-0 claimed sum). Name order also
     // aligns the height bits positionally with the name-ordered
     // `chip_openings`/`opened_values` (both BTreeMap).
     entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -603,7 +602,7 @@ pub fn chip_height_bits_from_opened_degrees<C>(
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
-    // Site-2 (#25): bound relaxed from `Bit = Felt<InnerVal>` so the
+    // Bound relaxed from `Bit = Felt<InnerVal>` so the
     // SC-generic compose/deferred/wrap verifiers can call this too —
     // the body uses `num2bits_v2_f` directly (what both InnerConfig's
     // and WrapConfig's `C::num2bits` delegate to), so no `C::Bit`.
@@ -663,9 +662,9 @@ where
 /// chip height `2^log_h`).  Used by the jagged-bundle lift to reconstruct
 /// `col_prefix_sums` (the cumulative column offsets) and `row_counts`
 /// value-independently instead of baking them from the compile-time
-/// `bundle.packing.offsets` / `bundle.commit.chip_dims` (the VERIFY_VK=true
-/// Site-2 fix).  Name-sorted to align with `column_counts_by_round` /
-/// `opened_values.chips`.
+/// `bundle.packing.offsets` / `bundle.commit.chip_dims` (so the lifted
+/// proof stays value-independent under VK enforcement).  Name-sorted to
+/// align with `column_counts_by_round` / `opened_values.chips`.
 ///
 /// `height = Horner(degree) = Σ_i degree[i] * 2^(d-1-i)` (degree IS the
 /// big-endian bit-decomposition of the height), then projected to the base
@@ -676,7 +675,7 @@ pub fn chip_height_felts_from_opened_degrees<C>(
     opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
-    // Site-2 (#25): bound relaxed (no `C::Bit` use in the body) so the
+    // Bound relaxed (no `C::Bit` use in the body) so the
     // SC-generic compose/deferred/wrap verifiers can call this too.
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
