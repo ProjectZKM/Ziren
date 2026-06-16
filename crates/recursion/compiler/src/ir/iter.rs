@@ -2,7 +2,7 @@
 //!
 //! Ported from SP1 (`/tmp/sp1/crates/recursion/compiler/src/ir/iter.rs`).
 //!
-//! Phase C of #259. The trait collects an iterator into N sub-blocks,
+//! The trait collects an iterator into N sub-blocks,
 //! each containing the DSL IR ops emitted by a single invocation of the
 //! map closure. The resulting blocks are wrapped in a `DslIr::Parallel`
 //! op pushed to the parent builder. The runtime dispatches sub-blocks
