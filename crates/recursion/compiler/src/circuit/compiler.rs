@@ -202,7 +202,7 @@ where
     /// `divisor * out = numerator` becomes `0 * out = (lhs - rhs)`,
     /// which has no solution unless `lhs == rhs`.
     ///
-    /// **LANDED: `DivFAssert` (workstream F / #7 soundness flip).**  The
+    /// **`DivFAssert` — the recursion-assert soundness flip.**  The
     /// four assert lowerings below emit `DivFAssert`/`DivEAssert`,
     /// validated end-to-end: honest fib core→compress→shrink→wrap green
     /// with enforcement ON, tampered-PV negative test rejects.  (The two

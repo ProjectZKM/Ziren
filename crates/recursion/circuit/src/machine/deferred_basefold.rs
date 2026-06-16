@@ -316,8 +316,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 chip_height_bits,
             );
         // consume real per-chip cumulative_sums.
-        // #7 enforcement fix: use the CARRIED trace@z openings with REAL
-        // degree bits (mirror of core_basefold.rs:417 / the compose Step-5d
+        // Assert-enforcement fix: use the CARRIED trace@z openings with REAL
+        // degree bits (mirror of core_basefold.rs:417 and the analogous
         // fix in compress_basefold.rs) — the chip_openings rebuild emitted
         // all-zero `degree`, breaking the zerocheck embedding factor.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();

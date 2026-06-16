@@ -485,8 +485,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // `assert_root_public_values_valid` demanded
             // `digest == root_digest(pv)` of an honest compress output —
             // honestly UNSATISFIABLE, masked while recursion asserts were
-            // vacuous (#7), and tripping the armed DivFAssert at the
-            // shrink program tail.
+            // vacuous (before the DivFAssert flip), and tripping the armed
+            // DivFAssert at the shrink program tail.
             let expected = recursion_public_values_digest::<C, SC>(builder, &inner);
             for (value, recomputed) in inner.digest.iter().copied().zip(expected) {
                 builder.assert_felt_eq(value, recomputed);

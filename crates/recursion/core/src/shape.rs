@@ -181,7 +181,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             //   MemoryConst≈149290 (log≈18), Select≈157920 (log≈18),
             //   BaseAlu≈91431 (log≈17), ExtAlu≈93619 (log≈17).
             // Caps with 1-bit headroom on binding dimensions for reth/
-            // geth headroom. Placed before the larger #6 below so h=0
+            // geth headroom. Placed before the larger cap below so h=0
             // compose programs prefer this smaller cap and pay less
             // padding.
             [

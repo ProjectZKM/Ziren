@@ -202,7 +202,7 @@ pub fn verify_core_basefold<C, SC, A>(
 
     assert!(!shard_proof_tuples.is_empty());
 
-    // #2 E remaining (May 14): per-shard loop split into a parallel
+    // Per-shard loop split into a parallel
     // VERIFY pass (via ir_par_map_collect, mirrors compress_basefold and
     // deferred_basefold) and a sequential AGGREGATE pass for first-shard
     // init + cross-shard consistency + state mutations.
@@ -218,7 +218,7 @@ pub fn verify_core_basefold<C, SC, A>(
         .iter()
         .map(|names| {
             let cc = |n: &str| names.iter().any(|s| s.as_str() == n);
-            // #7 enforcement fix: the memory chips are named
+            // Assert-enforcement fix: the memory chips are named
             // "MemoryGlobalInit"/"MemoryGlobalFinalize" (Option-2 State-bus
             // rename) — matching the host's
             // `ShardProof::contains_global_memory_init/finalize`
@@ -227,7 +227,7 @@ pub fn verify_core_basefold<C, SC, A>(
             // `contains_memory_init` was always FALSE and the
             // "no-init ⇒ prev_bits == last_bits" constraint was emitted on
             // EVERY shard — honestly violated on any shard that initializes
-            // memory.  Vacuous pre-DivFAssert; armed enforcement caught it.
+            // memory.  Vacuous before the DivFAssert flip; armed enforcement caught it.
             (cc("Cpu"), cc("MemoryGlobalInit"), cc("MemoryGlobalFinalize"))
         })
         .collect();

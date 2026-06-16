@@ -201,7 +201,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             .flat_map(|round| round.iter().copied())
             .collect();
 
-        // #7 HOST parity: Ziren's host packing has NO artificial zero
+        // Host parity: Ziren's host packing has NO artificial zero
         // columns — `packing.offsets.len()-1 == Σ chip widths` always
         // (the dense vector's stripe-alignment padding extends the LAST
         // column's tail entries, it does not add columns), and the host
@@ -212,7 +212,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // `next_pow2(flat+added) != next_pow2(flat)` (e.g. the keccak
         // 415-column shard: 1024 vs 512) the circuit sampled a different
         // number of z_col challenges than the host → transcript desync →
-        // the claim assert below trips under #7 enforcement.  Zeros now
+        // the claim assert below trips once assert enforcement is armed.  Zeros now
         // appear only as the power-of-two tail padding (weight-orthogonal
         // to the real claims, matching the host's missing-column tail).
         let _ = insertion_points;

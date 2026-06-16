@@ -174,7 +174,7 @@ where
     //   column_claims.len() = Σ_r (sum(cc[r]))  // flattened claims
     // then resize-to-next_power_of_two.
     //
-    // #7 HOST parity: no artificial-zero column insertions — the host
+    // Host parity: no artificial-zero column insertions — the host
     // packing has no pad columns (`offsets.len()-1 == Σ widths`); see
     // recursive_jagged_pcs.rs / shard_level_witness.rs for the full
     // rationale (the old `cc[len-2]+1` heuristic desynced z_col counts).
@@ -404,7 +404,7 @@ mod tests {
     fn lift_metadata_scales_with_max_log_row_count() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         // 2 rounds × 2 chips each with 3 cols.  Per-round formula
-        // (#7 host parity — flat only, no artificial-zero columns):
+        // (host parity — flat only, no artificial-zero columns):
         // flattened = 3+3 = 6 per round, 2 rounds = 12 → padded to 16
         // → col_prefix_sums.len() = 17.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];

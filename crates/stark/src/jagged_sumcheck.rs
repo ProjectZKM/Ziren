@@ -666,8 +666,8 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
 /// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
 /// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
 /// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
-/// of re-deriving the (retired) gamma-mixing weights — the s4-R4
-/// invalid-proof root cause.  Keep in lockstep with the host body; any
+/// of re-deriving the (retired) gamma-mixing weights, which were the
+/// original invalid-proof root cause.  Keep in lockstep with the host body; any
 /// weight-table change MUST update both.
 pub fn build_weight_table_sp1(
     packing: &JaggedPacking<InnerVal>,
