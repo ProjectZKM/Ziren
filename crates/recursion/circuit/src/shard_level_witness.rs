@@ -750,7 +750,7 @@ pub fn host_stacked_basefold_to_recursive(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// #H (BaseFold-over-BN254 wrap port): OUTER-ring bundle lift.
+// BaseFold-over-BN254 wrap port: OUTER-ring bundle lift.
 //
 // The OUTER wrap proof's `EvaluationProof::Bytes` carries a
 // `JaggedBasefoldBundleGeneric<OuterValMmcs>` whose commitments are
@@ -906,7 +906,7 @@ fn host_stacked_basefold_to_recursive_outer(
     )
 }
 
-/// #H (BaseFold-over-BN254 wrap port): lift the OUTER-ring jagged BaseFold
+/// BaseFold-over-BN254 wrap port: lift the OUTER-ring jagged BaseFold
 /// bundle into the in-circuit `JaggedPcsProofVariable`.
 ///
 /// Structural mirror of [`lift_jagged_basefold_bundle`] but:
@@ -1359,7 +1359,7 @@ fn write_sumcheck_to_stream<C>(
 ///
 /// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// so downstream callers can swap with no shape change.
-/// #H (BaseFold-over-BN254 wrap port): re-key a host BaseFold proof's
+/// BaseFold-over-BN254 wrap port: re-key a host BaseFold proof's
 /// raw digests (read as inner KoalaBear `[InnerVal; 8]` roots) onto the
 /// generic `HV::Digest` digest type.  Inner (`HV = KoalaBearPoseidon2`):
 /// identity (`Digest = [KoalaBear; 8]`).  Outer (`HV =
@@ -1727,7 +1727,7 @@ where
     // For empty bundles all decompositions reduce to zero-felts,
     // preserving byte-for-byte compat with the prior placeholder.
     //
-    // #H (BaseFold-over-BN254 wrap port) — CRITICAL: the per-entry bit
+    // BaseFold-over-BN254 wrap port — CRITICAL: the per-entry bit
     // width must equal the branching program's `half = proof_point.len()/2`
     // (jagged_eval.rs:223 + compress_basefold.rs:998), which the HOST
     // jagged-eval prover sets to `log_m + 1` = z_trace.len()
