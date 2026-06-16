@@ -80,7 +80,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         // hypercube points and cols = polys, so transposing is the
         // same conversion: walk `(poly, hypercube)` in raster order.
         //
-        // Phase 4 perf fix (Apr 25 2026): parallelize the column-major
+        // Performance optimization: parallelize the column-major
         // transpose. For a 2^27-cell jagged dense polynomial this
         // single inner loop dominates the BaseFold commit path
         // (~30s/40s pre-fix). Each output column is independent, so
@@ -102,7 +102,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             });
         }
 
-        // Phase 4 perf fix (Apr 25 2026): the SP1-port `data.split_off(needed)`
+        // Performance optimization: the SP1-port `data.split_off(needed)`
         // pattern has O(N²) cost when N = 134M and needed = 16384 (each
         // split_off COPIES the entire remaining suffix, ~134M elements,
         // and we do that 8192 times — measured ~30s on hello_world).
@@ -155,7 +155,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
 /// transposed into a `RowMajorMatrix` with shape
 /// `[height = stack_height, width = batch_size]`.
 ///
-/// Phase 4 perf fix (Apr 25 2026): parallelize the transpose. For
+/// Performance optimization: parallelize the transpose. For
 /// stripe sizes of 2^14 = 16384 elements per stripe and 8K stripes
 /// (134M total cells across the jagged dense polynomial), the serial
 /// transpose was a hot loop in the BaseFold commit path. Parallelizing
@@ -244,7 +244,7 @@ where
     }
 
     /// Convenience accessor for the underlying [`BasefoldProver`].
-    /// Used by the GPU dispatch hook (#76 / D2 — ) so the
+    /// Used by the GPU dispatch hook so the
     /// device-encoded codewords can be committed via
     /// [`BasefoldProver::commit_codewords`] without re-routing through
     /// `interleave_multilinears_with_fixed_rate` twice.
@@ -315,7 +315,7 @@ where
         // is wired in `jagged_pcs::commit_jagged_pcs`
         // (see `register_gpu_basefold_commit_hook`).  The OPEN side is
         // wired one level up at `jagged_pcs::open_jagged_pcs`
-        // (see `register_gpu_basefold_open_hook`, #191/H3) — the
+        // (see `register_gpu_basefold_open_hook`) — the
         // sister hook intercepts at the jagged-PCS entry so it can
         // see the full `BasefoldLateBindingProverData` (including the
         // commit-time metadata it needs to drive the device prove).
