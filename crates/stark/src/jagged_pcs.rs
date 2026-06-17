@@ -910,6 +910,54 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
     GPU_LAYER_INIT_HOOK.get().copied()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// PIECE3: row-GKR device-fold FIT PREFLIGHT hook.
+//
+// `gpu_layer_init_hook` / `gpu_layer_transition_hook` allocate the
+// device-resident GKR fold layers but have NO error channel (they return
+// a bare `u64` handle) — an OOM inside a transition `panic!`s mid-loop
+// (layer_transition_dispatch.rs ~2282) and CANNOT cleanly fall back
+// (earlier layers are already device-resident, host layers interleaved).
+// On a log_dense=30 shard the first EF layer's footprint can exceed the
+// free VRAM left after a big commit, aborting the whole core proof.
+//
+// The fix is an UP-FRONT host preflight: BEFORE `init_hook` is called,
+// ask the GPU side (which can call `cuda_mem_get_info`) whether this
+// layer set fits.  When it returns `false`, `try_run_device_path_basefold`
+// returns `None` so the GKR fold runs entirely on host — byte-identical
+// (the device path is a perf optimization; the layer cells are the same)
+// and transcript-neutral.  Mirrors TMFIT's commit/open pre-fire
+// preflights.  Opaque to the stark crate; the GPU side owns the VRAM math.
+// ─────────────────────────────────────────────────────────────────────
+
+/// Signature of the GPU row-GKR device-fold FIT PREFLIGHT hook.
+///
+/// Receives the same borrowed `HostLayerView` the init hook would upload,
+/// so the GPU side can size the first-layer device footprint, add a
+/// transition headroom factor, and compare against free VRAM.  Returns
+/// `true` when the device fold is expected to fit (proceed to `init_hook`)
+/// and `false` to DECLINE to the host fold path.  Conservative: when the
+/// hook is unregistered the device path proceeds as before (no decline).
+pub type GpuLayerFitPreflightFn =
+    for<'a> fn(view: &HostLayerView<'a>) -> bool;
+
+static GPU_LAYER_FIT_PREFLIGHT_HOOK: std::sync::OnceLock<GpuLayerFitPreflightFn> =
+    std::sync::OnceLock::new();
+
+/// Register the GPU row-GKR device-fold fit preflight hook.  Idempotent;
+/// returns `Err(existing_hook)` when one was already registered.
+pub fn register_gpu_layer_fit_preflight_hook(
+    f: GpuLayerFitPreflightFn,
+) -> Result<(), GpuLayerFitPreflightFn> {
+    GPU_LAYER_FIT_PREFLIGHT_HOOK.set(f)
+}
+
+/// Read the registered GPU row-GKR device-fold fit preflight hook, if any.
+#[must_use]
+pub fn get_gpu_layer_fit_preflight_hook() -> Option<GpuLayerFitPreflightFn> {
+    GPU_LAYER_FIT_PREFLIGHT_HOOK.get().copied()
+}
+
 /// Signature of the GPU row-GKR layer-pull driver.  Materializes a
 /// device-resident layer back to host as a
 /// `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` so the terminal
@@ -2595,6 +2643,39 @@ pub mod jagged {
             sub_phase = "sumcheck_reduce",
             "jagged sub-phase done"
         );
+
+        // ── PIECE2: free the device-resident main traces BEFORE the
+        // BaseFold open.  The reduce is the LAST phase that reads the raw
+        // per-chip traces (commit + GKR first-layer + reduce all done);
+        // the jagged-eval sub-protocol below operates on `packing.offsets`
+        // (column geometry, not cells) and the open reads only the
+        // committed stripe MLEs / codewords / Merkle tree (see
+        // `open_jagged_pcs`).  Dropping the provider's retained trace +
+        // dense/commit-jagged strong refs here lets the underlying device
+        // buffers free (~10.5 GiB at log_dense=30) so the device open's
+        // ~21.78 GiB footprint fits a 32 GB card instead of pre-firing a
+        // host decline (and the host open's device NTT no longer OOMs).
+        //
+        // Pure LIFETIME change — transcript-neutral (no challenger touch,
+        // no proof bytes affected).  Gated on a provider being present
+        // (i.e. the GPU device path); host-only proving never passes one,
+        // so the host test/verify path is unaffected.  Kill-switch:
+        // ZIREN_GPU_FREE_TRACES_PRE_OPEN=0.
+        if let Some(p) = provider {
+            let free_pre_open = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_OPEN")
+                .map(|v| v != "0")
+                .unwrap_or(true);
+            if free_pre_open {
+                let _rel_span =
+                    tracing::info_span!("piece2_free_traces_pre_open").entered();
+                p.release_all();
+                tracing::info!(
+                    chips = n_chips,
+                    sub_phase = "free_traces_pre_open",
+                    "PIECE2: released device-trace provider refs before open"
+                );
+            }
+        }
 
         // (4b) Jagged-eval sub-protocol — SP1's branching-program proof
         // that the per-column geometry (prefix sums) is consistent with

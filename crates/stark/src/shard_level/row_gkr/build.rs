@@ -192,8 +192,9 @@ where
     use core::any::TypeId;
 
     use crate::jagged_pcs::{
-        allocate_gpu_layer_circuit_id, get_gpu_layer_init_hook, get_gpu_layer_pull_hook,
-        get_gpu_layer_transition_hook, HostLayerView, JaggedChallenge, JaggedVal,
+        allocate_gpu_layer_circuit_id, get_gpu_layer_fit_preflight_hook, get_gpu_layer_init_hook,
+        get_gpu_layer_pull_hook, get_gpu_layer_transition_hook, HostLayerView, JaggedChallenge,
+        JaggedVal,
     };
 
     // Need 'static bound on F/EF to use TypeId; the build_gkr_circuit
@@ -244,6 +245,31 @@ where
         num_row_variables: layer_as_lb.num_row_variables,
         num_interaction_variables: layer_as_lb.num_interaction_variables,
     };
+
+    // PIECE3: device-fold FIT PREFLIGHT.  The init/transition hooks have no
+    // error channel — an OOM inside a transition panics mid-loop and cannot
+    // cleanly fall back (earlier layers already device-resident).  Ask the
+    // GPU side (which can read free VRAM) whether this layer set fits BEFORE
+    // any device alloc.  When it declines, DROP `view`, restore the taken
+    // `first_ef_layer` into `last_ef_layer`, and return `None` so the GKR
+    // fold runs entirely on host — byte-identical (device fold is a perf
+    // optimization; the layer cells are the same) and transcript-neutral.
+    // Unregistered hook => proceed as before (no decline).
+    if let Some(preflight) = get_gpu_layer_fit_preflight_hook() {
+        if !preflight(&view) {
+            drop(view);
+            // Put the layer back so the host fall-through loop in
+            // `build_gkr_circuit` (`while let Some(curr) = last_ef_layer.take()`)
+            // picks it up — the `None` contract requires `last_ef_layer`
+            // un-consumed.
+            *last_ef_layer = Some(first_ef_layer);
+            tracing::info!(
+                sub_phase = "row_gkr_fold_fit_preflight",
+                "PIECE3: device-fold fit preflight DECLINED — running GKR fold on host"
+            );
+            return None;
+        }
+    }
 
     // multi-GPU fix: allocate a fresh circuit_id for this
     // build_gkr_circuit call.  The GPU side keys its registry by
