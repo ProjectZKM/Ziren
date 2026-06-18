@@ -19,6 +19,60 @@ pub mod types;
 pub mod utils;
 pub mod verify;
 
+/// Value-independence probe for the INNER compose recursion programs.
+///
+/// When `ZIREN_COMPOSE_VK_CAPTURE=1`, every compose program's verifying-key
+/// digest is recorded (deduplicated) into a process-global set as it is set
+/// up in [`ZKMProver::compress`].  A test can `clear()` between two distinct
+/// inputs and assert the captured SET is identical — proving the compose
+/// program VK is chip-set-determined (input-INDEPENDENT) rather than baked
+/// from the children's vks/proof values.  Unset env ⇒ zero overhead, no
+/// recording.
+pub mod compose_vk_capture {
+    use crate::types::HashableKey;
+    use crate::InnerSC;
+    use p3_koala_bear::KoalaBear;
+    use std::sync::{Mutex, OnceLock};
+    use zkm_pcs::StarkVerifyingKey;
+
+    type Digest = [KoalaBear; 8];
+
+    fn store() -> &'static Mutex<Vec<Digest>> {
+        static STORE: OnceLock<Mutex<Vec<Digest>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    fn enabled() -> bool {
+        std::env::var("ZIREN_COMPOSE_VK_CAPTURE").is_ok()
+    }
+
+    /// Record a compose program vk (deduplicated). No-op unless the
+    /// `ZIREN_COMPOSE_VK_CAPTURE` env is set.
+    pub fn record(vk: &StarkVerifyingKey<InnerSC>) {
+        if !enabled() {
+            return;
+        }
+        let d = vk.hash_koalabear();
+        let mut g = store().lock().unwrap();
+        if !g.contains(&d) {
+            g.push(d);
+        }
+    }
+
+    /// Snapshot the captured (deduplicated) compose vk digests, sorted for
+    /// order-independent comparison.
+    pub fn snapshot() -> Vec<Digest> {
+        let mut v = store().lock().unwrap().clone();
+        v.sort();
+        v
+    }
+
+    /// Reset the captured set (call between two inputs).
+    pub fn clear() {
+        store().lock().unwrap().clear();
+    }
+}
+
 use std::{
     borrow::Borrow,
     collections::BTreeMap,
@@ -1367,6 +1421,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")
                                     .in_scope(|| self.compress_prover.setup(&program));
+
+                                // Value-independence probe (ZIREN_COMPOSE_VK_CAPTURE=1):
+                                // record this compose program's vk digest into a
+                                // process-global set so a two-input test can assert the
+                                // SET of distinct compose VKs is input-INDEPENDENT
+                                // (chip-set-determined).  No effect when the env is unset.
+                                crate::compose_vk_capture::record(&vk);
 
                                 // Observe the proving key.
                                 let mut challenger = self.compress_prover.config().challenger();
@@ -2906,6 +2967,100 @@ pub mod tests {
             opts,
             Test::CircuitTest,
         )
+    }
+
+    /// INNER COMPOSE VALUE-INDEPENDENCE GATE (the inner analogue of
+    /// `test_outer_value_independence`): prove + compress FIBONACCI twice with
+    /// two DISTINCT stdin values that each produce multiple core shards (so the
+    /// tree-reduce fires real ComposeBasefold reductions).  Each compress run
+    /// captures the SET of distinct compose-program vk digests (via the
+    /// `ZIREN_COMPOSE_VK_CAPTURE` hook at the `compress` setup site).
+    ///
+    /// If the compose program is value-INDEPENDENT (chip-set-determined), the
+    /// two runs produce the SAME set of compose vks even though the proof
+    /// VALUES differ — exactly what makes the finite vk_map cover every input
+    /// and keeps the gnark `vk_root` stable.  A value-DEPENDENT compose program
+    /// (children-vk/proof scalars baked as `builder.constant`) would emit a
+    /// different vk per input, so the two sets would differ.
+    ///
+    /// Runs with VERIFY_VK=false (set on the prover): the point is input-stable
+    /// compose VKs + a verifying proof, not vk_map membership (the map regen is
+    /// the downstream step once value-independence holds).
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_inner_compose_value_independence() -> Result<()> {
+        setup_logger();
+        std::env::set_var("ZIREN_COMPOSE_VK_CAPTURE", "1");
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        // VERIFY_VK=false so the compose-VK-not-in-map panic can't pre-empt the
+        // measurement; we are testing input-stability of the compose VK SET.
+        let mut prover = ZKMProver::<DefaultProverComponents>::new();
+        prover.vk_verification = false;
+        let (_, pk_d, program, vk) = prover.setup(elf);
+
+        // Capture the deduped set of compose vks produced while compressing a
+        // fib proof for stdin `n`.  Distinct `n` → genuinely different proof
+        // VALUES at the same chip-set/arity SHAPE (the fresh-proof scenario).
+        let compose_vks_for = |n: u32| -> Result<Vec<[KoalaBear; 8]>> {
+            crate::compose_vk_capture::clear();
+            let mut stdin = ZKMStdin::new();
+            stdin.write(&n);
+            let core = prover.prove_core(
+                &pk_d,
+                program.clone(),
+                &stdin,
+                opts,
+                ZKMContext::default(),
+            )?;
+            let n_core_shards = core.proof.0.len();
+            let _compressed = prover.compress(&vk, core, vec![], opts)?;
+            let set = crate::compose_vk_capture::snapshot();
+            tracing::info!(
+                "[ICVI] n={n}: {} core shards → {} distinct compose vks",
+                n_core_shards,
+                set.len(),
+            );
+            Ok(set)
+        };
+
+        // Two distinct inputs.  Large fib indices so the trace spans multiple
+        // core shards → the tree-reduce performs ComposeBasefold reductions.
+        let a = compose_vks_for(120_000)?;
+        let b = compose_vks_for(200_000)?;
+
+        let fmt = |s: &[[KoalaBear; 8]]| -> Vec<Vec<u32>> {
+            s.iter()
+                .map(|d| d.iter().map(|x| x.as_canonical_u32()).collect())
+                .collect()
+        };
+        tracing::info!("[ICVI] compose vks A ({} distinct) = {:?}", a.len(), fmt(&a));
+        tracing::info!("[ICVI] compose vks B ({} distinct) = {:?}", b.len(), fmt(&b));
+
+        // Non-vacuous: both runs must have actually produced a compose VK.
+        assert!(
+            !a.is_empty() && !b.is_empty(),
+            "[ICVI] no compose vks captured — inputs did not trigger a tree-reduce \
+             (raise the fib indices so the trace spans >1 core shard)"
+        );
+
+        // The value-independence assertion: the SET of distinct compose vks is
+        // identical across two inputs that carry different proof VALUES.
+        assert_eq!(
+            a, b,
+            "[ICVI] compose VK sets DIFFER across two inputs — the compose \
+             program is still VALUE-DEPENDENT (children vk / proof scalar baked \
+             as a constant). A={:?} B={:?}",
+            fmt(&a),
+            fmt(&b),
+        );
+        tracing::info!(
+            "[ICVI] PASS — compose VK set is IDENTICAL across two distinct inputs: \
+             inner compose is VALUE-INDEPENDENT (chip-set-determined)"
+        );
+        std::env::remove_var("ZIREN_COMPOSE_VK_CAPTURE");
+        Ok(())
     }
 
     /// P2c-for-outer VALUE-INDEPENDENCE GATE: build the gnark outer circuit

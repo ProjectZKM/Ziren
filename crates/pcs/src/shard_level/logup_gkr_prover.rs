@@ -294,13 +294,30 @@ where
         return Vec::new();
     }
     let height = trace.len() / width;
-    debug_assert_eq!(height, 1usize << eval_point.len(), "height must be 2^|eval_point|");
+    // Phase 1 (height-agnostic): evaluate the trace MLE over the
+    // 2^|eval_point| cube treating rows `[height, domain)` as implicit
+    // zero padding.  The previous pow2-only `height == 1 << eval_point.len()`
+    // debug_assert rejected the (legitimate) case where a real trace's
+    // height is < the cube the verifier opens it over — exactly what the
+    // SP1-style height-agnostic jagged recursion needs (1 program / cluster,
+    // any heights).  Correctness guard: the trace cannot be TALLER than the
+    // cube (that would silently drop rows), so require `height <= domain`.
+    // For `height == domain` (the old pow2 case) this is byte-identical:
+    // every eq-table entry is consumed, no rows are padded.
+    let domain = 1usize << eval_point.len();
+    debug_assert!(
+        height <= domain,
+        "trace height ({height}) must be <= 2^|eval_point| ({domain})"
+    );
     let eq = eq_mle_table::<EF>(eval_point);
-    debug_assert_eq!(eq.len(), height);
+    debug_assert_eq!(eq.len(), domain);
 
     // Performance optimization: parallelize the per-column
     // MLE evaluation. Each column is an independent dot product
     // over the eq-table; collect-into-Vec is rayon-friendly.
+    // Rows `[height, domain)` contribute zero (implicit zero padding),
+    // so we sum only over the real `height` rows — the eq-table is
+    // indexed at `row < height <= domain` so the indices are in bounds.
     use p3_maybe_rayon::prelude::*;
     (0..width)
         .into_par_iter()
@@ -401,14 +418,33 @@ mod tests {
     /// debug_assert catches caller bugs before they propagate.
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "height must be 2^|eval_point|")]
-    fn evaluate_trace_columns_panics_on_mismatched_point() {
+    #[should_panic(expected = "must be <= 2^|eval_point|")]
+    fn evaluate_trace_columns_panics_on_too_small_point() {
         use p3_field::PrimeCharacteristicRing;
-        // 4-row trace at width 1 needs a 2-d point, but we
-        // give a 1-d point — should panic.
+        // 4-row trace at width 1 with a 1-d point (domain=2 < height=4):
+        // a too-small cube would silently drop rows, so the height-agnostic
+        // guard `height <= domain` must trip.
         let trace = vec![F::from_u64(1), F::from_u64(2), F::from_u64(3), F::from_u64(4)];
-        let r = vec![EF::from(F::from_u64(5))]; // wrong dimension
+        let r = vec![EF::from(F::from_u64(5))]; // domain = 2 < height = 4
         let _evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 1, &r);
+    }
+
+    /// Phase 1 height-agnostic parity: evaluating a height-2 trace over a
+    /// 2-d cube (domain=4) treating rows [2,4) as implicit zero padding
+    /// must equal evaluating the EXPLICITLY zero-padded height-4 trace.
+    #[test]
+    fn evaluate_trace_columns_height_agnostic_padding_parity() {
+        use p3_field::PrimeCharacteristicRing;
+        // Real height-2, width-1 trace.
+        let real = vec![F::from_u64(10), F::from_u64(20)];
+        // Same data explicitly zero-padded to height 4.
+        let padded = vec![F::from_u64(10), F::from_u64(20), F::ZERO, F::ZERO];
+        // A 2-d point => domain = 4 (taller cube than the real height).
+        let r = vec![EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
+
+        let evals_real = evaluate_trace_columns_at_point::<F, EF>(&real, 1, &r);
+        let evals_padded = evaluate_trace_columns_at_point::<F, EF>(&padded, 1, &r);
+        assert_eq!(evals_real, evals_padded);
     }
 
     /// Width-0 (no preprocessed trace) returns empty vector.
