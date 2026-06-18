@@ -8103,6 +8103,7 @@ name = "zkm-recursion-core"
 version = "1.2.5"
 dependencies = [
  "backtrace",
+ "bincode",
  "cbindgen",
  "cc",
  "ff 0.13.1",
@@ -8223,6 +8224,7 @@ name = "zkm-stark"
 version = "1.2.5"
 dependencies = [
  "arrayref",
+ "bincode",
  "hashbrown 0.14.5",
  "itertools 0.13.0",
  "num-bigint 0.4.6",

@@ -1690,6 +1690,25 @@ pub mod jagged {
         /// (no host re-materialize, no H2D re-upload).  `None` on the
         /// host build path — behaviour unchanged.
         pub dense_device_handle: Option<u64>,
+        /// #77 (H53 D2H-skip hole fix): the CORRECT host-built dense_q that
+        /// the commit was committed over, carried forward to the step-4
+        /// reduction.  Populated ONLY by the provider-aware HOST fallback
+        /// commit body (`precompute_jagged_basefold_commit_provider`), which
+        /// runs when the #A device commit hook DECLINES (e.g. the H53/TMFIT
+        /// commit-NTT OOM preflight) and re-materializes the device-resident
+        /// chips from the still-live (not-yet-drained) provider.  Without
+        /// this, the reduction would re-materialize the dense_q from the
+        /// per-shard provider — which the zerocheck-prepare `release_by_name`
+        /// (#367 drain-on-lookup) has ALREADY DRAINED by reduction time →
+        /// WRONG dense_q → the jagged sumcheck reduction proof is built over
+        /// the wrong data → the verifier REJECTS the bundle (#76 H53INV).
+        /// Carrying the already-correct dense_q makes the decline path
+        /// byte-identical to the golden host/device commit.  `None` on the
+        /// happy path (the device commit fired → `dense_device_handle` is
+        /// `Some` → the reduction takes the device buffer, never this) and on
+        /// the plain non-provider host build (its reduction re-materialize is
+        /// sound — no drain involved).
+        pub host_dense_q: Option<alloc::vec::Vec<crate::jagged_pcs::JaggedVal>>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
@@ -1841,7 +1860,7 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None }
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -1865,8 +1884,25 @@ pub mod jagged {
         if !needs_remat {
             return precompute_jagged_basefold_commit(chip_traces);
         }
+        // #77 (H53 D2H-skip hole fix): this is the DECLINE path — the #A
+        // device commit hook returned `None` (e.g. the H53/TMFIT commit-NTT
+        // OOM preflight) so we re-materialize the device-resident chips from
+        // the per-shard provider HERE, while the provider is still LIVE (the
+        // zerocheck-prepare `release_by_name` #367 drain has NOT run yet at
+        // commit time).  Capture the CORRECT dense_q the commit is built
+        // over and carry it forward to the step-4 reduction via
+        // `host_dense_q`, so the reduction does NOT re-materialize from the
+        // (by-then DRAINED) provider → no wrong dense_q → no #76 H53INV
+        // reject.  Byte-identical to the golden host/device commit by
+        // construction (same `materialize_dense_jagged` over the same
+        // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        precompute_jagged_basefold_commit(&full)
+        let mut pre = precompute_jagged_basefold_commit(&full);
+        let dense_q =
+            materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size);
+        debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
+        pre.host_dense_q = Some(dense_q);
+        pre
     }
 
     /// BaseFold-over-BN254 generic precompute: build the BaseFold commit
@@ -1940,7 +1976,7 @@ pub mod jagged {
                 )
             }
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -2108,14 +2144,19 @@ pub mod jagged {
         // shard-level Phase 1 prologue.  Skip the in-band commit
         // observe in that case to keep transcripts aligned with the
         // verifier (which uses `verify_jagged_basefold_no_observe`).
-        let (packing, commit, prover_data, precomputed_dense_handle) = if let Some(pre) =
+        let (packing, commit, prover_data, precomputed_dense_handle, precomputed_host_dense_q) = if let Some(pre) =
             precomputed
         {
             tracing::debug!(
                 chips = n_chips,
                 "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
             );
-            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle)
+            // #77: `pre.host_dense_q` is `Some` ONLY on the H53/TMFIT
+            // device-commit DECLINE path (the provider-aware host fallback
+            // body captured the correct dense_q while the provider was live).
+            // It carries the dense_q forward so the reduction below does not
+            // re-materialize from the (drained) provider.
+            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle, pre.host_dense_q)
         } else {
             // No precompute → this path materializes the dense commit on
             // host.  Re-materialize empty device-resident chips from the
@@ -2164,7 +2205,7 @@ pub mod jagged {
                 sub_phase = "dense_commit",
                 "jagged sub-phase done"
             );
-            (packing, commit, prover_data, None)
+            (packing, commit, prover_data, None, None)
         };
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
@@ -2366,8 +2407,40 @@ pub mod jagged {
             let skip_host_dense = precomputed_dense_handle.is_some()
                 && try_gpu
                 && hook_v2.is_some();
+            // #77: true when `dense_q` below is the CARRIED host dense_q from
+            // the device-commit-decline fallback — the provider is DRAINED by
+            // reduction time so this is the ONLY correct source; the V2/V1
+            // hook None-fallback edges below must reuse it (not the drained
+            // provider re-materialize).
+            let mut dense_q_is_carried = false;
             let dense_q = if skip_host_dense {
                 Vec::new()
+            } else if let Some(carried) = precomputed_host_dense_q {
+                dense_q_is_carried = true;
+                // #77 (H53 D2H-skip hole fix): the device commit DECLINED
+                // (e.g. H53/TMFIT OOM preflight) and the provider-aware host
+                // fallback body carried forward the CORRECT dense_q it
+                // committed over (captured while the provider was still
+                // live, BEFORE the zerocheck-prepare #367 drain).  Use it
+                // directly instead of re-materializing from the now-DRAINED
+                // provider (which would yield a WRONG dense_q → the jagged
+                // sumcheck reduction proof would be built over wrong data →
+                // the verifier REJECTS — the #76 H53INV bug).  Byte-identical
+                // to the golden commit by construction.
+                debug_assert_eq!(carried.len(), 1usize << packing.log_dense_size);
+                use std::sync::OnceLock;
+                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
+                FIRED_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        chips = n_chips,
+                        log_dense_size = packing.log_dense_size as u64,
+                        "#77 jagged reduction using CARRIED host dense_q from \
+                         the device-commit-decline fallback (H53 D2H-skip hole \
+                         fix) — avoids the drained-provider re-materialize that \
+                         would reject (#76 H53INV)",
+                    );
+                });
+                carried
             } else {
                 // When device-resident chips carry empty host traces,
                 // re-materialize them from the provider before the host
@@ -2484,7 +2557,13 @@ pub mod jagged {
                     // #A: with the device-handle skip, `dense_q` is an
                     // empty placeholder — never save it as a fallback
                     // source (the None edge below re-materializes).
-                    let saved_dense = if !dense_q.is_empty()
+                    // #77: when `dense_q` is the CARRIED host dense_q (device
+                    // commit declined), ALWAYS save it — the provider is
+                    // drained so the None-fallback's re-materialize would be
+                    // wrong; the carried buffer is the only correct source.
+                    let saved_dense = if dense_q_is_carried {
+                        Some(dense_q.clone())
+                    } else if !dense_q.is_empty()
                         && std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
                             .map(|v| v == "1").unwrap_or(false)
                     {
@@ -2575,7 +2654,11 @@ pub mod jagged {
                     // that case, mirroring the pre-G1 behaviour.
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
-                    let saved_dense = if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
+                    // #77: see the V2 twin — always save the carried dense_q
+                    // (drained provider can't be re-materialized correctly).
+                    let saved_dense = if dense_q_is_carried {
+                        Some(dense_q.clone())
+                    } else if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
                         .map(|v| v == "1").unwrap_or(false)
                     {
                         Some(dense_q.clone())
@@ -2784,7 +2867,7 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _ } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _ } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the ITEM-12 embedding factor + empty-chip skip).
