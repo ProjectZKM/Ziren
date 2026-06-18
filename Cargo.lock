@@ -4835,8 +4835,8 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.5.0",
- "itertools 0.14.0",
+ "heck 0.4.1",
+ "itertools 0.10.5",
  "log",
  "multimap 0.10.1",
  "once_cell",
@@ -4869,7 +4869,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -6175,7 +6175,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.2",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.4",
  "windows-sys 0.61.2",
@@ -6194,7 +6194,7 @@ dependencies = [
 
 [[package]]
 name = "test-artifacts"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "zkm-build",
 ]
@@ -7766,7 +7766,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-build"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -7776,7 +7776,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-cli"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -7789,7 +7789,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-executor"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -7833,7 +7833,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-jit"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "dynasmrt",
  "hashbrown 0.14.5",
@@ -7849,7 +7849,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-core-machine"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "cbindgen",
@@ -7906,7 +7906,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-cuda"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "ctrlc",
@@ -7923,7 +7923,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-curves"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "cfg-if",
  "curve25519-dalek",
@@ -7948,7 +7948,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-derive"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7957,14 +7957,14 @@ dependencies = [
 
 [[package]]
 name = "zkm-instruction-test-defs"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "zkm-core-executor",
 ]
 
 [[package]]
 name = "zkm-lib"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "cfg-if",
@@ -7976,7 +7976,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-poly"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "itertools 0.13.0",
  "p3-field",
@@ -7984,7 +7984,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-primitives"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "hex",
@@ -8001,7 +8001,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-prover"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -8039,7 +8039,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-circuit"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "ff 0.13.1",
  "hashbrown 0.14.5",
@@ -8076,7 +8076,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-compiler"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "backtrace",
  "itertools 0.13.0",
@@ -8100,7 +8100,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-core"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "backtrace",
  "bincode",
@@ -8143,7 +8143,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-derive"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "quote",
  "syn 1.0.109",
@@ -8151,7 +8151,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-recursion-gnark-ffi"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -8174,7 +8174,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-sdk"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "alloy-primitives",
  "alloy-signer",
@@ -8221,7 +8221,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-stark"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "arrayref",
  "bincode",
@@ -8267,7 +8267,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-verifier"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "ark-bn254",
@@ -8306,7 +8306,7 @@ dependencies = [
 
 [[package]]
 name = "zkm-zkvm"
-version = "1.2.5"
+version = "2.0.0"
 dependencies = [
  "bincode",
  "cfg-if",

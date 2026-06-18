@@ -1,6 +1,6 @@
 [package]
 name = "zkm-core-jit"
-version = "1.2.5"
+version = "2.0.0"
 edition = "2021"
 description = "JIT compiler for the Ziren MIPS guest executor (Linux x86_64)."
 license = "MIT OR Apache-2.0"
