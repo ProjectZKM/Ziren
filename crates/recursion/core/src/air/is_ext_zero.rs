@@ -11,7 +11,7 @@ use p3_field::{
     Field, PrimeCharacteristicRing,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BinomialExtension, ZKMAirBuilder};
+use zkm_pcs::air::{BinomialExtension, ZKMAirBuilder};
 
 use crate::air::extension::BinomialExtensionUtils;
 

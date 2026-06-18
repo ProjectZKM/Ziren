@@ -50,7 +50,7 @@ jobs:
           source ~/.zkm-toolchain/env
           for pkg in zkm-core-executor zkm-curves zkm-derive zkm-primitives zkm-prover \
             zkm-recursion-circuit zkm-recursion-compiler zkm-recursion-core \
-            zkm-recursion-gnark-ffi zkm-stark zkm-zkvm zkm-lib; do
+            zkm-recursion-gnark-ffi zkm-pcs zkm-zkvm zkm-lib; do
               cargo test -r -p $pkg
           done
         env:

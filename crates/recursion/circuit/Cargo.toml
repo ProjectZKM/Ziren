@@ -24,7 +24,7 @@ p3-koala-bear = { workspace = true }
 
 zkm-core-machine = { workspace = true }
 zkm-core-executor = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-derive = { workspace = true }
 zkm-recursion-core = { workspace = true }
 zkm-recursion-compiler = { workspace = true }

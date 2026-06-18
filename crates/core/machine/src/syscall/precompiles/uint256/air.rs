@@ -33,7 +33,7 @@ use zkm_curves::{
     uint256::U256Field,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{
+use zkm_pcs::{
     air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder},
     MachineRecord,
 };

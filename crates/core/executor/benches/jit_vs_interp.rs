@@ -30,7 +30,7 @@
 use std::time::Instant;
 
 use zkm_core_executor::{ExecutionError, Executor, Instruction, Opcode, Program, Register};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 const NUM_INSTRS: usize = 100_000;
 const REPEATS: usize = 5;

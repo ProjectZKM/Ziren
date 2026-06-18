@@ -3,7 +3,7 @@ use core::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Register};
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, ZKMAirBuilder},
     Word,
 };
@@ -17,7 +17,7 @@ use crate::{
     memory::MemoryCols,
     operations::{AddOperation, GtColsBytes, IsZeroOperation},
 };
-use zkm_stark::air::BaseAirBuilder;
+use zkm_pcs::air::BaseAirBuilder;
 
 impl<F> BaseAir<F> for SysLinuxChip {
     fn width(&self) -> usize {

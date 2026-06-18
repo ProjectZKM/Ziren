@@ -3,7 +3,7 @@ use std::iter::once;
 use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope},
     LookupKind,
 };

@@ -2,7 +2,7 @@ use crate::memory::MemoryReadWriteCols;
 use crate::operations::AddDoubleOperation;
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 pub const NUM_MADDSUB_COLS: usize = size_of::<MaddsubCols<u8>>();
 

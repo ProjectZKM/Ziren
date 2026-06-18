@@ -99,14 +99,14 @@ mod sys {
             .with_parse_deps(true)
             .with_parse_include(&[
                 "zkm-core-executor",
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "zkm-core-machine",
                 "p3-koala-bear",
                 "p3-monty-31",
             ])
             .with_parse_extra_bindings(&[
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "p3-koala-bear",
                 "p3-monty-31",

@@ -1,5 +1,5 @@
 use zkm_core_executor::events::ByteRecord;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 use p3_air::AirBuilder;
 use p3_field::{Field, PrimeCharacteristicRing};

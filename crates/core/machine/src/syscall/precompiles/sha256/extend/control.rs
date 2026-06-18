@@ -25,7 +25,7 @@ use zkm_core_executor::{
     events::PrecompileEvent, syscalls::SyscallCode, ExecutionRecord, Program,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},
     LookupKind, ZKMAirBuilder,
 };

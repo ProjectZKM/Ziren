@@ -121,7 +121,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         P: RecursiveMultilinearPcsVerifier<C, FC>,
     {
         // #H (BaseFold-over-BN254 wrap port): the HOST stacked verifier
-        // (crates/stark/src/basefold/stacked.rs verify_trusted_evaluation)
+        // (crates/pcs/src/basefold/stacked.rs verify_trusted_evaluation)
         // does NOT observe the evaluation claim into the transcript — it
         // only checks `evaluation_claim == eval_multilinear_padded(...)`.
         // The previous in-circuit observe of claim_ext was a spurious
@@ -139,7 +139,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // sumcheck emits a point of length `log_dense_size`, which is
         // < the full commit-area dimension `log2(area)`.  The HOST
         // verifier (`verify_jagged_basefold_inner_generic`,
-        // crates/stark/src/jagged_pcs.rs:2702-2707) extends z_star up
+        // crates/pcs/src/jagged_pcs.rs:2702-2707) extends z_star up
         // to `target_dim = log2(area)` by *sampling* Fiat-Shamir coords
         // from the challenger:
         //     while extended_z_star.len() < target_dim {
@@ -181,7 +181,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         let total_dim = padded_point.len();
         let batch_dim = total_dim - stack_dim;
         // Align with Ziren prover convention.  The prover at
-        // `crates/stark/src/basefold/stacked.rs` uses
+        // `crates/pcs/src/basefold/stacked.rs` uses
         // `eval_point[..stack_dim]` (LSB-first) as stack_point because
         // Ziren's dense_q layout puts row (= stack) bits at the LSBs of
         // the flat index and column (= batch) bits at the MSBs.  SP1
@@ -250,7 +250,7 @@ mod tests {
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::{Ext, Felt};
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

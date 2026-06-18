@@ -35,7 +35,7 @@ use zkm_core_executor::{
     ExecutionRecord, Program,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},
     LookupKind, Word, ZKMAirBuilder,
 };

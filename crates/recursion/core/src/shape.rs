@@ -6,7 +6,7 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
 use serde::{Deserialize, Serialize};
-use zkm_stark::{air::MachineAir, shape::OrderedShape};
+use zkm_pcs::{air::MachineAir, shape::OrderedShape};
 
 use crate::{
     chips::{

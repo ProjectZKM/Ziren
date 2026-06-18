@@ -53,7 +53,7 @@ pub mod witness;
 pub mod zerocheck;
 
 pub use types::*;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::{KoalaBearPoseidon2, ValMmcs},
     StarkGenericConfig,
 };
@@ -233,7 +233,7 @@ pub trait CircuitConfig: Config {
     /// [`Self::write_outer_eval_bundle`] produces them.
     fn read_outer_eval_bundle(
         _builder: &mut Builder<Self>,
-        _host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        _host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
     ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>>
     where
         Self: Sized,
@@ -247,7 +247,7 @@ pub trait CircuitConfig: Config {
     /// (outer config + outer bundle bytes), so `BasefoldShardProof::write` can
     /// skip the default Bytes/Bundle write.  Default (inner) = `false`.
     fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
-        _host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        _host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
         _witness: &mut W,
     ) -> bool
     where
@@ -662,13 +662,13 @@ impl CircuitConfig for OuterConfig {
     // value-independent (delegates to the shard_level_witness helpers).
     fn read_outer_eval_bundle(
         builder: &mut Builder<Self>,
-        host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
     ) -> Option<crate::shard_level_witness::LiftedEvalProof<Self>> {
         crate::shard_level_witness::read_outer_eval_bundle_impl(builder, host)
     }
 
     fn write_outer_eval_bundle<W: crate::witness::WitnessWriter<Self>>(
-        host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+        host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
         witness: &mut W,
     ) -> bool {
         crate::shard_level_witness::write_outer_eval_bundle_impl(host, witness)

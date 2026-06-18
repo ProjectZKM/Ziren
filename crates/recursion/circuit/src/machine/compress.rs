@@ -34,7 +34,7 @@ use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_recursion_compiler::ir::Felt;
 
-use zkm_stark::{
+use zkm_pcs::{
     air::MachineAir,
     koala_bear_poseidon2::KoalaBearPoseidon2,
     shape::OrderedShape,
@@ -107,7 +107,7 @@ impl ZKMCompressWitnessValues<KoalaBearPoseidon2> {
     ) -> Self
     where
         A: MachineAir<KoalaBear>
-            + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+            + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
     {
         let vks_and_proofs = shape
             .proof_shapes

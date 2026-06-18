@@ -6,7 +6,7 @@ use zkm_core_executor::{
     ByteOpcode,
 };
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 /// A set of columns needed to compute the and of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

@@ -14,7 +14,7 @@
 //! # Shape contract
 //!
 //! Allocator outputs must match the wire format that
-//! [`zkm_stark::shard_level::prover::prove_shard_to_basefold`]
+//! [`zkm_pcs::shard_level::prover::prove_shard_to_basefold`]
 //! produces, so downstream consumers (witness reader, recursion
 //! program builder) walk identical felt counts:
 //!

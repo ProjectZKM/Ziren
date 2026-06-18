@@ -6,7 +6,7 @@ use p3_field::PrimeField32;
 use zkm_core_executor::events::ByteRecord;
 use zkm_curves::params::{FieldParameters, Limbs};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
 use super::{
     util::{compute_root_quotient_and_shift, split_u16_limbs_to_u8_limbs},
@@ -147,7 +147,7 @@ mod tests {
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::FieldParameters;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::{MachineAir, ZKMAirBuilder},
         koala_bear_poseidon2::KoalaBearPoseidon2,
         StarkGenericConfig,

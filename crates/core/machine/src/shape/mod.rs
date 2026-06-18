@@ -10,7 +10,7 @@ use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
 use zkm_core_executor::{ExecutionRecord, MipsAirId, Program};
-use zkm_stark::{
+use zkm_pcs::{
     air::MachineAir,
     shape::{OrderedShape, Shape, ShapeCluster},
     MachineRecord,
@@ -322,7 +322,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
 
     /// Legacy per-chip cartesian enumeration of all possible shard
     /// shapes.  Produces ~1.25M shapes for MIPS.  **Superseded** by
-    /// `zkm_stark::stacked_shapes::create_all_input_shapes` (≤ 5,000
+    /// `zkm_pcs::stacked_shapes::create_all_input_shapes` (≤ 5,000
     /// shapes, size-class quantization) which is now the sole path
     /// used by `ZKMProofShape::generate` for VK generation.
     ///
@@ -636,7 +636,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use hashbrown::HashSet;
-    use zkm_stark::{Dom, MachineProver, StarkGenericConfig};
+    use zkm_pcs::{Dom, MachineProver, StarkGenericConfig};
 
     use super::*;
 
@@ -695,7 +695,7 @@ pub mod tests {
     fn test_dummy_record() {
         use crate::utils::setup_logger;
         use p3_koala_bear::KoalaBear;
-        use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver};
+        use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver};
 
         type SC = KoalaBearPoseidon2;
         type A = MipsAir<KoalaBear>;
@@ -807,7 +807,7 @@ pub fn canonicalize_shape_to_cluster(record: &mut ExecutionRecord) {
     use std::str::FromStr;
     let Some(shape) = record.shape.as_mut() else { return };
     let present: BTreeSet<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
-    let clusters = zkm_stark::stacked_shapes::build_mips_machine_shape().chip_clusters;
+    let clusters = zkm_pcs::stacked_shapes::build_mips_machine_shape().chip_clusters;
     // Parse each cluster's names into MipsAirIds (skip names without a
     // live machine id) and pick the smallest superset cluster.
     let mut best: Option<BTreeSet<MipsAirId>> = None;

@@ -17,16 +17,16 @@ use zkm_core_machine::{
 };
 
 use zkm_recursion_core::air::PV_DIGEST_NUM_WORDS;
-use zkm_stark::air::LookupScope;
-use zkm_stark::air::MachineAir;
-use zkm_stark::{
+use zkm_pcs::air::LookupScope;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
     shape::OrderedShape,
     Dom, StarkMachine, Word,
 };
 
-use zkm_stark::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
+use zkm_pcs::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,

@@ -7,7 +7,7 @@ use zkm_core_executor::ZKMReduceProof;
 use zkm_primitives::io::ZKMPublicValues;
 
 use zkm_prover::{CoreSC, DvSnarkBn254Proof, Groth16Bn254Proof, InnerSC, PlonkBn254Proof};
-use zkm_stark::{MachineVerificationError, ShardProof};
+use zkm_pcs::{MachineVerificationError, ShardProof};
 
 /// A proof generated with Ziren of a particular proof mode.
 /// Consistent with the definition in file crates/verifier/src/stark/mod.rs

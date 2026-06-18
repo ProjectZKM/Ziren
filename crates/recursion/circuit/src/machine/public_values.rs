@@ -5,7 +5,7 @@ use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     DIGEST_SIZE,
 };
-use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm_pcs::{air::PV_DIGEST_NUM_WORDS, Word};
 
 use crate::{hash::Poseidon2KoalaBearHasherVariable, CircuitConfig};
 

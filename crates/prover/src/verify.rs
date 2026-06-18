@@ -16,7 +16,7 @@ use zkm_recursion_core::{
 use zkm_recursion_gnark_ffi::{
     Groth16Bn254Proof, Groth16Bn254Prover, PlonkBn254Proof, PlonkBn254Prover,
 };
-use zkm_stark::{
+use zkm_pcs::{
     air::{PublicValues, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     koala_bear_poseidon2::KoalaBearPoseidon2,
     MachineProof, MachineProver, MachineVerificationError, PartStarkVerifyingKey,
@@ -513,7 +513,7 @@ impl<C: ZKMProverComponents> SubproofVerifier for ZKMProver<C> {
     fn verify_deferred_proof(
         &self,
         proof: &zkm_core_machine::reduce::ZKMReduceProof<KoalaBearPoseidon2>,
-        vk: &zkm_stark::StarkVerifyingKey<KoalaBearPoseidon2>,
+        vk: &zkm_pcs::StarkVerifyingKey<KoalaBearPoseidon2>,
         vk_hash: [u32; 8],
         committed_value_digest: [u32; 8],
     ) -> Result<(), MachineVerificationError<KoalaBearPoseidon2>> {

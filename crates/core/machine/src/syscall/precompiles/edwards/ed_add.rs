@@ -24,7 +24,7 @@ use zkm_curves::{
     AffinePoint, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},
@@ -334,7 +334,7 @@ mod tests {
     use test_artifacts::{ED25519_ELF, ED_ADD_ELF};
     use zkm_core_executor::Executor;
     use zkm_core_executor::Program;
-    use zkm_stark::{CpuProver, ZKMCoreOpts};
+    use zkm_pcs::{CpuProver, ZKMCoreOpts};
 
     #[test]
     pub fn test_ed_add_program_execute() {

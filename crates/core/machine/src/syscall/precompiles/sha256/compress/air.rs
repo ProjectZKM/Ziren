@@ -3,7 +3,7 @@ use core::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, ZKMAirBuilder},
     LookupKind, Word,
 };
@@ -20,7 +20,7 @@ use crate::{
         XorOperation,
     },
 };
-use zkm_stark::air::BaseAirBuilder;
+use zkm_pcs::air::BaseAirBuilder;
 
 impl<F> BaseAir<F> for ShaCompressChip {
     fn width(&self) -> usize {

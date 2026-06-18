@@ -27,7 +27,7 @@ use zkm_recursion_core::{
     shape::{RecursionShape, RecursionShapeConfig},
     RecursionProgram,
 };
-use zkm_stark::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
+use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
 use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir, ZKMProver};
 
@@ -350,7 +350,7 @@ impl ZKMProofShape {
     /// need VK setup.
     ///
     /// Recursion shapes come from the size-class quantized
-    /// `zkm_stark::stacked_shapes::create_all_input_shapes` — ≤ 5,000
+    /// `zkm_pcs::stacked_shapes::create_all_input_shapes` — ≤ 5,000
     /// `CoreProofShape`s that, after `to_ordered_shape`'s
     /// uniform-area projection + dedup, collapse to a much smaller
     /// per-chip `OrderedShape` set (~13-30 unique).  This
@@ -366,8 +366,8 @@ impl ZKMProofShape {
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
         use zkm_core_machine::mips::MipsAir;
-        use zkm_stark::stacked_shapes::{build_mips_machine_shape, types::consts};
-        use zkm_stark::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use zkm_pcs::air::MachineAir;
         use crate::CoreSC;
 
         // Real chips from the live MIPS machine — needed for two

@@ -432,5 +432,5 @@ impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
 // and the per-KB jagged-jagged-PCS helper retired alongside the legacy
 // MIPS verify path.  BaseFold MIPS verification now lives in
 // `BasefoldShardVerifier::verify_shard`
-// (`crates/stark/src/shard_level/verifier.rs`), dispatched from
+// (`crates/pcs/src/shard_level/verifier.rs`), dispatched from
 // `Verifier::verify_shard` when `basefold_shard_proof.is_some()`.

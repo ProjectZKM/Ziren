@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
 use zkm_core_executor::ZKMReduceProof;
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
-use zkm_stark::ShardProof;
-use zkm_stark::{
+use zkm_pcs::ShardProof;
+use zkm_pcs::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2,
     StarkVerifyingKey, Word, DIGEST_SIZE,
 };

@@ -7,7 +7,7 @@ use zkm_core_executor::{
     ByteOpcode::{self, U16Range},
     ExecutionRecord, Instruction, Opcode, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 use p3_field::{PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
@@ -275,7 +275,7 @@ mod tests {
     use zkm_core_executor::ExecutionRecord;
     use zkm_core_executor::Instruction;
     use zkm_core_executor::Opcode;
-    use zkm_stark::air::MachineAir;
+    use zkm_pcs::air::MachineAir;
 
     use crate::columns::NUM_CPU_COLS;
     use crate::cpu::columns::CpuCols;

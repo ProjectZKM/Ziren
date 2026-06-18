@@ -4,7 +4,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord},
     ByteOpcode,
 };
-use zkm_stark::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, Polynomial, ZKMAirBuilder};
 
 use num::BigUint;
 

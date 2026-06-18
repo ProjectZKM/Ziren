@@ -10,7 +10,7 @@ use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use zkm_curves::CurveError;
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
@@ -3165,7 +3165,7 @@ mod tests {
         secp256r1_double_program, simple_memory_program, simple_program, ssz_withdrawals_program,
         u256xu2048_mul_program,
     };
-    use zkm_stark::ZKMCoreOpts;
+    use zkm_pcs::ZKMCoreOpts;
 
     use crate::{Instruction, Opcode, Register};
 

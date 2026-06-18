@@ -14,13 +14,13 @@ use zkm_recursion_compiler::{
     ir::{Builder, Config, DslIr, Ext, ExtConst, SymbolicExt},
     prelude::Felt,
 };
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::{
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::{
     air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
     AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge,
     ShardCommitment, ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
 };
-use zkm_stark::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
+use zkm_pcs::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
 use crate::{
     challenger::CanObserveVariable,
@@ -78,7 +78,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 ///     basefold shard proof from `dummy_basefold_vk_and_shard_proof`.
 ///
 /// This mirrors the real prover output shape at
-/// `crates/stark/src/prover.rs:600-610` (the `use_basefold_path`
+/// `crates/pcs/src/prover.rs:600-610` (the `use_basefold_path`
 /// return branch).  RecursionAir-parameterised because the inner
 /// `dummy_basefold_vk_and_shard_proof` already drives the
 /// `prove_shard_to_basefold` host path with the chip set from
@@ -110,7 +110,7 @@ pub fn dummy_recursion_basefold_vk_and_shard_proof<A>(
 ) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
 where
     A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
 {
     // Produce the basefold shard proof + matching VK using the
     // existing infrastructure.  The chip set and per-chip shapes
@@ -233,13 +233,13 @@ pub fn dummy_basefold_vk_and_shard_proof<A>(
     shape: &OrderedShape,
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
-    zkm_stark::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
+    zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
 )
 where
     A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
 {
-    use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
+    use zkm_pcs::shard_level::verifier::BasefoldShardVerifier;
 
     // Build the dummy shard proof by directly zero-filling every
     // field (chip log heights, cumulative sums, logup-GKR round
@@ -326,7 +326,7 @@ where
     // program-keyed chips on the shapes we enumerate (Program / Byte etc.).
     let chip_information: Vec<(
         String,
-        zkm_stark::SerializableDomain<KoalaBear>,
+        zkm_pcs::SerializableDomain<KoalaBear>,
         (usize, usize),
     )> = {
         let mut prep: Vec<(String, usize, usize)> = chip_log_heights_pairs
@@ -348,7 +348,7 @@ where
             .map(|(name, pw, log_h)| {
                 (
                     name,
-                    zkm_stark::SerializableDomain {
+                    zkm_pcs::SerializableDomain {
                         shift: KoalaBear::ONE,
                         log_size: log_h,
                     },
@@ -437,7 +437,7 @@ pub mod tests {
 
     use test_artifacts::FIBONACCI_ELF;
     use zkm_recursion_core::{air::Block, machine::RecursionAir, stark::KoalaBearPoseidon2Outer};
-    use zkm_stark::{
+    use zkm_pcs::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerVal, MachineProver, ShardProof,
         ZKMCoreOpts,
     };

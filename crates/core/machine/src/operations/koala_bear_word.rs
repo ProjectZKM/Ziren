@@ -3,7 +3,7 @@ use std::array;
 use p3_air::AirBuilder;
 use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 /// A set of columns needed to compute the add of two words.
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]

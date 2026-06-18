@@ -71,9 +71,9 @@ check inside `try_prove_shard_to_basefold_boxed`.
 ## Usage
 
 ```rust
-use zkm_stark::shard_level::prover::prove_shard_to_basefold;
-use zkm_stark::shard_level::shard_proof::FoldOrientation;
-use zkm_stark::shard_level::verifier::BasefoldShardVerifier;
+use zkm_pcs::shard_level::prover::prove_shard_to_basefold;
+use zkm_pcs::shard_level::shard_proof::FoldOrientation;
+use zkm_pcs::shard_level::verifier::BasefoldShardVerifier;
 
 // Prove
 let proof = prove_shard_to_basefold::<SC, A>(

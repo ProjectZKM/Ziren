@@ -40,7 +40,7 @@ zkm-core-executor.workspace = true
 zkm-core-machine.workspace = true
 zkm-primitives.workspace = true
 zkm-recursion-core.workspace = true
-zkm-stark.workspace = true
+zkm-pcs.workspace = true
 zkm-sdk = { workspace = true, optional = true }
 
 [dev-dependencies]

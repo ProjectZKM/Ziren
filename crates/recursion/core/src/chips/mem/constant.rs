@@ -6,7 +6,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use std::{borrow::BorrowMut, iter::zip, marker::PhantomData};
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 use crate::{builder::ZKMRecursionAirBuilder, *};
 
@@ -170,7 +170,7 @@ mod tests {
 
     use crate::stark::KoalaBearPoseidon2Outer;
     use zkm_core_machine::utils::run_test_machine;
-    use zkm_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_pcs::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use super::*;
 

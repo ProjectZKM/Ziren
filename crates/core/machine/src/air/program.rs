@@ -1,7 +1,7 @@
 use std::iter::once;
 
 use p3_air::AirBuilder;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, LookupScope},
     LookupKind,
 };

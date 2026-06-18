@@ -5,7 +5,7 @@ use p3_matrix::Dimensions;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::septic_digest::SepticDigest;
 
 use crate::{
     challenger::CanObserveVariable, hash::FieldHasherVariable, CircuitConfig,

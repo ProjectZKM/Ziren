@@ -6,7 +6,7 @@
 
 use std::time::Instant;
 use zkm_core_executor::{Executor, Program};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 #[derive(Copy, Clone)]
 enum Mode {

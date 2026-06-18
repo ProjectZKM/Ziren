@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use zkm_stark::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
+use zkm_pcs::{ShardProof, StarkGenericConfig, StarkVerifyingKey};
 /// An intermediate proof which proves the execution.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound(serialize = ""))]

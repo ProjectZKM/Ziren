@@ -20,7 +20,7 @@ use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnes
 use zkm_recursion_gnark_ffi::proof::{Groth16Bn254Proof, PlonkBn254Proof};
 
 use thiserror::Error;
-use zkm_stark::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
+use zkm_pcs::{ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, DIGEST_SIZE};
 
 use crate::{
     utils::{koalabears_to_bn254, words_to_bytes_be},

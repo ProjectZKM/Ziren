@@ -13,7 +13,7 @@ use zkm_core_executor::jit_runner::{
     JitBridgeState, JitMemoryBridge, JitSyscallHandler,
 };
 use zkm_core_executor::{Executor, ExecutorMode, Program, Register};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 fn snapshot_interp(rt: &mut Executor) -> [u32; 32] {
     let mut out = [0u32; 32];

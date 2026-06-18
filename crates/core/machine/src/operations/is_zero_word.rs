@@ -6,7 +6,7 @@ use p3_air::AirBuilder;
 use p3_field::Field;
 use zkm_derive::AlignedBorrow;
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 use super::IsZeroOperation;
 

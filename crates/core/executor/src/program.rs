@@ -14,12 +14,12 @@ use p3_maybe_rayon::prelude::IntoParallelIterator;
 use p3_maybe_rayon::prelude::IntoParallelRefIterator;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use serde::{Deserialize, Serialize};
-use zkm_stark::air::{MachineAir, MachineProgram};
-use zkm_stark::septic_curve::{SepticCurve, SepticCurveComplete};
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::septic_extension::SepticExtension;
-use zkm_stark::shape::Shape;
-use zkm_stark::LookupKind;
+use zkm_pcs::air::{MachineAir, MachineProgram};
+use zkm_pcs::septic_curve::{SepticCurve, SepticCurveComplete};
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::septic_extension::SepticExtension;
+use zkm_pcs::shape::Shape;
+use zkm_pcs::LookupKind;
 
 use crate::{Instruction, MipsAirId, Register};
 

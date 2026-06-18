@@ -20,7 +20,7 @@ pub mod jagged_sumcheck;
 pub mod logup_gkr;
 pub mod shard_level;
 // Top-level re-export for `ziren-gpu` callers (basefold/src/device_first_layer.rs)
-// that use the `zkm_stark::device_first_layer_context::*` path.
+// that use the `zkm_pcs::device_first_layer_context::*` path.
 pub use shard_level::device_first_layer_context;
 pub mod stacked_shapes;
 mod lookup;

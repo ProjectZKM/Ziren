@@ -35,8 +35,8 @@ use std::marker::PhantomData;
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{Algebra, ExtensionField, Field};
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
-use zkm_stark::folder::PairWindow;
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::folder::PairWindow;
+use zkm_pcs::septic_digest::SepticDigest;
 
 /// In-circuit chip-constraint folder for the BaseFold pipeline.
 ///
@@ -61,7 +61,7 @@ pub struct BasefoldConstraintFolder<'a, C: Config> {
     /// Shard public values.
     pub public_values: &'a [Felt<C::F>],
     /// Local cumulative sum reference required by
-    /// [`zkm_stark::air::MultiTableAirBuilder`].  In the BaseFold
+    /// [`zkm_pcs::air::MultiTableAirBuilder`].  In the BaseFold
     /// pipeline the per-chip cumulative sums live in the LogUp-GKR
     /// sumcheck output rather than as Air-side fields, so this
     /// reference can point at a placeholder / zero value when the
@@ -71,7 +71,7 @@ pub struct BasefoldConstraintFolder<'a, C: Config> {
     /// dummy-row constraint evaluation).
     pub local_cumulative_sum: &'a Ext<C::F, C::EF>,
     /// Global cumulative sum reference required by
-    /// [`zkm_stark::air::MultiTableAirBuilder`].  Same placeholder
+    /// [`zkm_pcs::air::MultiTableAirBuilder`].  Same placeholder
     /// convention as `local_cumulative_sum`.
     pub global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
     /// Phantom for the circuit-config parameter.
@@ -149,7 +149,7 @@ where
     }
 }
 
-impl<C: Config> zkm_stark::air::EmptyMessageBuilder for BasefoldConstraintFolder<'_, C>
+impl<C: Config> zkm_pcs::air::EmptyMessageBuilder for BasefoldConstraintFolder<'_, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -186,7 +186,7 @@ where
     }
 }
 
-impl<'a, C: Config> zkm_stark::air::MultiTableAirBuilder<'a> for BasefoldConstraintFolder<'a, C>
+impl<'a, C: Config> zkm_pcs::air::MultiTableAirBuilder<'a> for BasefoldConstraintFolder<'a, C>
 where
     C::F: Field,
     C::EF: ExtensionField<C::F>,
@@ -210,7 +210,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -236,8 +236,8 @@ mod tests {
         // pipeline exercises, so the placeholder values are
         // structurally inert.
         let zero_felt: Felt<F> = builder.constant(F::ZERO);
-        use zkm_stark::septic_curve::SepticCurve;
-        use zkm_stark::septic_extension::SepticExtension;
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
         let global_sum: SepticDigest<Felt<F>> = SepticDigest(SepticCurve {
             x: SepticExtension::<Felt<F>>([
                 zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt, zero_felt,
@@ -272,7 +272,7 @@ mod tests {
 /// The in-circuit `BasefoldConstraintFolder<'a, C: Config>` (above)
 /// is `AirBuilder + EmptyMessageBuilder + ExtensionBuilder +
 /// PermutationAirBuilder + MultiTableAirBuilder`, which through the
-/// blanket impls in `crates/stark/src/air/builder.rs:581-586`
+/// blanket impls in `crates/pcs/src/air/builder.rs:581-586`
 /// automatically becomes a `BaseAirBuilder + ExtensionAirBuilder +
 /// SepticExtensionAirBuilder` → `MachineAirBuilder`, and via
 /// `crates/recursion/core/src/builder.rs:14-15` becomes a
@@ -297,7 +297,7 @@ mod basefold_air_assertions_circuit {
         public_values::PublicValuesChip, select::SelectChip,
     };
     use zkm_recursion_core::machine::RecursionAir;
-    use zkm_stark::InnerVal;
+    use zkm_pcs::InnerVal;
 
     type C = InnerConfig;
 

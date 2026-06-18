@@ -18,7 +18,7 @@ use zkm_primitives::poseidon2_init;
 
 // KoalaBear is a 31-bit prime; clamp to 30 bits to keep modular
 // reduction trivial.  Same pattern as
-// `crates/stark/src/jagged_late_binding.rs` test helpers.
+// `crates/pcs/src/jagged_late_binding.rs` test helpers.
 fn rand_kb<R: Rng>(rng: &mut R) -> InnerVal {
     InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
 }

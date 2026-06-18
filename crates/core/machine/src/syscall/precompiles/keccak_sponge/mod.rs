@@ -31,7 +31,7 @@ pub mod sponge_tests {
     use crate::utils::{self, run_test};
     use test_artifacts::KECCAK_SPONGE_ELF;
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
     #[test]
     fn test_keccak_sponge_program_prove() {
         utils::setup_logger();

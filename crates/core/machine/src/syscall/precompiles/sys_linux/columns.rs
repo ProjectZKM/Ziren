@@ -1,7 +1,7 @@
 use std::mem::size_of;
 
 use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 use crate::{
     memory::MemoryReadWriteCols,

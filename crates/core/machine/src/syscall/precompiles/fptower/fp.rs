@@ -21,7 +21,7 @@ use zkm_curves::{
     weierstrass::{FieldType, FpOpField},
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{value_as_limbs, MemoryReadCols, MemoryWriteCols},

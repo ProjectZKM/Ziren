@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::PV_DIGEST_NUM_WORDS, Word};
+use zkm_pcs::{air::PV_DIGEST_NUM_WORDS, Word};
 
 use crate::operations::{IsZeroOperation, KoalaBearWordRangeChecker};
 

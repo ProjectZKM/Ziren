@@ -5,7 +5,7 @@ use p3_koala_bear::KoalaBear;
 use zkm_recursion_compiler::ir::{Builder, Config, Felt, Var};
 use zkm_recursion_core::DIGEST_SIZE;
 
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 /// Convert 8 KoalaBear words into a Bn254 field element by shifting by 31 bits each time. The last
 /// word becomes the least significant bits.
@@ -97,7 +97,7 @@ pub(crate) mod tests {
 
     use zkm_recursion_compiler::ir::TracedVec;
     use zkm_recursion_core::{machine::RecursionAir, Runtime};
-    use zkm_stark::{
+    use zkm_pcs::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerChallenge, InnerVal,
         MachineProver,
     };

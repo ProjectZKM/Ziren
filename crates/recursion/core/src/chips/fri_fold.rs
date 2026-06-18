@@ -7,14 +7,14 @@ use p3_koala_bear::KoalaBear;
 use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
-use zkm_stark::air::{BinomialExtension, MachineAir};
+use zkm_pcs::air::{BinomialExtension, MachineAir};
 
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 #[cfg(feature = "sys")]
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, ExtensionAirBuilder};
 
 use zkm_derive::AlignedBorrow;
 
@@ -499,7 +499,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::mem::size_of;
     use zkm_core_machine::utils::setup_logger;
-    use zkm_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm_pcs::{air::MachineAir, StarkGenericConfig};
 
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;

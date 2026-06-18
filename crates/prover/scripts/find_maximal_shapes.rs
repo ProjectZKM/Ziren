@@ -4,7 +4,7 @@ use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{Executor, MipsAirId, Program, ZKMContext};
 use zkm_core_machine::{io::ZKMStdin, mips::MipsAir, utils::setup_logger};
-use zkm_stark::{shape::Shape, ZKMCoreOpts};
+use zkm_pcs::{shape::Shape, ZKMCoreOpts};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

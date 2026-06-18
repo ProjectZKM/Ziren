@@ -2,7 +2,7 @@ use p3_field::PrimeField;
 use std::{iter::once, mem::size_of, vec::IntoIter};
 use zkm_core_executor::{Instruction, Register};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 pub const NUM_INSTRUCTION_COLS: usize = size_of::<InstructionCols<u8>>();
 

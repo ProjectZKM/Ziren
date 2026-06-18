@@ -4,7 +4,7 @@ pub use instruction::*;
 use p3_util::indices_arr;
 use std::mem::{size_of, transmute};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 use crate::memory::{MemoryCols, MemoryReadCols, MemoryReadWriteCols};
 

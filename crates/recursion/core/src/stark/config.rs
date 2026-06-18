@@ -10,7 +10,7 @@ use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{Hash, MultiField32PaddingFreeSponge, TruncatedPermutation};
 use serde::{Deserialize, Serialize};
-use zkm_stark::{BasefoldRing, Com, StarkGenericConfig, ZeroCommitment};
+use zkm_pcs::{BasefoldRing, Com, StarkGenericConfig, ZeroCommitment};
 
 use super::{poseidon2::bn254_poseidon2_rc3, zkm_dev_mode};
 
@@ -198,7 +198,7 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 }
 
 // #H (BaseFold-over-BN254 wrap port): the OUTER (wrap) impl of `BasefoldRing`.
-// Lives here — not in zkm-stark — because zkm-stark cannot import OuterSC
+// Lives here — not in zkm-pcs — because zkm-pcs cannot import OuterSC
 // (recursion-core depends on stark, not vice versa). `Val<OuterSC> = KoalaBear`
 // and `Challenge<OuterSC> = KoalaBear⁴` (same as inner; mirrors SP1's
 // `BNGC<KoalaBear, KoalaBear⁴>`), so the BaseFold jagged-PCS over the
@@ -240,19 +240,19 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn fri_config(
-    ) -> zkm_stark::basefold::config::FriConfig<zkm_stark::jagged_pcs::JaggedVal> {
+    ) -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
         // WRAP-stage params: SP1-faithful (log_blowup=3, num_queries=94,
         // pow_bits=22) for full 100-bit query-phase soundness on the on-chain
         // wrap proof.  The inner env-default (1,94,16) here would be only
         // ~55-bit.  Two-adicity: codeword = log_stacking(≤21) + 3 ≤ 24 = OK.
         // See `FriConfig::wrap_fri_config`.
-        zkm_stark::basefold::config::FriConfig::<zkm_stark::jagged_pcs::JaggedVal>::wrap_fri_config()
+        zkm_pcs::basefold::config::FriConfig::<zkm_pcs::jagged_pcs::JaggedVal>::wrap_fri_config()
     }
 
 
     fn digest_felts(
-        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_stark::jagged_pcs::JaggedVal>>::Commitment,
-    ) -> [zkm_stark::jagged_pcs::JaggedVal; 8] {
+        commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
+    ) -> [zkm_pcs::jagged_pcs::JaggedVal; 8] {
         // #H (BaseFold-over-BN254 wrap port): `commit: Hash<KoalaBear, Bn254, 1>`
         // is the BN254 wrap commitment. Project it to 8 KoalaBear felts via
         // `split_32` (the same BN254->base primitive the MultiField32 challenger
@@ -286,7 +286,7 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 
 
 // #H (BaseFold-over-BN254 wrap port) — compile-time proof that the genericized
-// BaseFold jagged-PCS digest path (`zkm_stark::jagged_pcs::*_generic`) is
+// BaseFold jagged-PCS digest path (`zkm_pcs::jagged_pcs::*_generic`) is
 // instantiable over the OUTER ring's BN254 commitment family, i.e. that the
 // BN254 commitment (`OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`)
 // "flows" through commit/open/verify exactly where the inner ring uses the
@@ -295,7 +295,7 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 // Merkle-commitment hash + challenger vary.
 //
 // No runtime body: these functions are never *called* here (the OuterSC wrap
-// orchestration that drives them lives in `zkm-stark`'s `prover.rs`
+// orchestration that drives them lives in `zkm-pcs`'s `prover.rs`
 // `commit()/open()` + gnark `build_outer_circuit`, which are the remaining
 // wrap-port work). The point is purely to monomorphize the generic cores at
 // `MT = OuterValMmcs` + `Challenger = OuterChallenger` so the trait bounds
@@ -308,14 +308,14 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 mod basefold_over_bn254_generic_typecheck {
     use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
     use std::sync::Arc;
-    use zkm_stark::jagged_pcs::{
+    use zkm_pcs::jagged_pcs::{
         commit_jagged_pcs_host_generic, commit_jagged_pcs_no_observe_generic,
         open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
         BasefoldLateBindingCommitGeneric, BasefoldLateBindingProverDataGeneric,
         JaggedChallenge, JaggedMmcs, JaggedVal,
     };
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_stark::basefold::{StackedBasefoldProof, StackedVerifierError};
+    use zkm_pcs::basefold::{StackedBasefoldProof, StackedVerifierError};
 
     // Sanity: `JaggedVal == OuterVal == KoalaBear`, so the OUTER MMCS is an
     // `Mmcs<JaggedVal>` exactly as the generic cores require. (Inner alias is
@@ -332,7 +332,7 @@ mod basefold_over_bn254_generic_typecheck {
         BasefoldLateBindingCommitGeneric<OuterValMmcs>,
         BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
     ) {
-        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
     }
 
@@ -348,7 +348,7 @@ mod basefold_over_bn254_generic_typecheck {
         BasefoldLateBindingCommitGeneric<OuterValMmcs>,
         BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
     ) {
-        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             traces, ch, mmcs, dft, fri,
         )
@@ -362,7 +362,7 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
-        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             pd, eval_point, ch, mmcs, dft, fri,
         )
@@ -383,7 +383,7 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> Result<(), StackedVerifierError> {
-        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             commitment,
             area,
@@ -401,7 +401,7 @@ mod basefold_over_bn254_generic_typecheck {
 
 
 // #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify hook
-// bodies. Registered into zkm-stark's process-global hook slots so the generic
+// bodies. Registered into zkm-pcs's process-global hook slots so the generic
 // shard prover (`emit_jagged_pcs_bytes`) / verifier (`verify_jagged_pcs_host`),
 // which cannot name `OuterValMmcs`/`OuterChallenger`, route the wrap-ring open /
 // verify here. `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so
@@ -411,13 +411,13 @@ pub mod outer_jagged_hooks {
     use core::any::Any;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
-    use zkm_stark::jagged_pcs::jagged::{
+    use zkm_pcs::jagged_pcs::jagged::{
         build_jagged_verify_inputs, prove_jagged_basefold_inner_generic,
         verify_jagged_basefold_inner_generic, JaggedBasefoldBundleGeneric,
         PrecomputedJaggedCommitGeneric,
     };
-    use zkm_stark::jagged_pcs::{JaggedChallenge, JaggedVal};
-    use zkm_stark::BasefoldRing;
+    use zkm_pcs::jagged_pcs::{JaggedChallenge, JaggedVal};
+    use zkm_pcs::BasefoldRing;
 
     fn outer_open(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
@@ -487,16 +487,16 @@ pub mod outer_jagged_hooks {
         )
     }
 
-    /// Register the outer-ring jagged BaseFold open/verify hooks into zkm-stark.
+    /// Register the outer-ring jagged BaseFold open/verify hooks into zkm-pcs.
     /// Idempotent (OnceLock-backed); safe to call repeatedly. Must run before the
     /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
     /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
     pub fn register_outer_jagged_hooks() {
         let _ =
-            zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_open_hook(outer_open);
+            zkm_pcs::shard_level::sumcheck_poly::register_outer_jagged_open_hook(outer_open);
         let _ =
-            zkm_stark::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
-        let _ = zkm_stark::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
+            zkm_pcs::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
+        let _ = zkm_pcs::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
             outer_prep_commit,
         );
     }
@@ -509,10 +509,10 @@ pub mod outer_jagged_hooks {
     fn outer_prep_commit(
         chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     ) -> Vec<u8> {
-        use zkm_stark::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
-        use zkm_stark::BasefoldRing as _;
-        let mmcs = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::bf_mmcs();
-        let fri = <KoalaBearPoseidon2Outer as zkm_stark::BasefoldRing>::fri_config();
+        use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
+        use zkm_pcs::BasefoldRing as _;
+        let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
+        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
             &chip_traces, mmcs, fri,
         );
@@ -531,8 +531,8 @@ mod basefold_over_bn254_roundtrip_test {
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
-    use zkm_stark::jagged_pcs::{roundtrip_jagged_pcs_generic, JaggedVal};
-    use zkm_stark::BasefoldRing;
+    use zkm_pcs::jagged_pcs::{roundtrip_jagged_pcs_generic, JaggedVal};
+    use zkm_pcs::BasefoldRing;
 
     fn make_challenger() -> OuterChallenger {
         OuterChallenger::new(outer_perm()).unwrap()
@@ -572,11 +572,11 @@ mod basefold_over_bn254_roundtrip_test {
     #[test]
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
-        use zkm_stark::jagged_pcs::jagged::{
+        use zkm_pcs::jagged_pcs::jagged::{
             precompute_jagged_basefold_commit_generic, prove_jagged_basefold_inner_generic,
             verify_jagged_basefold_inner_generic,
         };
-        use zkm_stark::jagged_pcs::JaggedChallenge;
+        use zkm_pcs::jagged_pcs::JaggedChallenge;
 
         let mk = |w: usize, h: usize, seed: u64| -> RowMajorMatrix<JaggedVal> {
             let v: Vec<JaggedVal> = (0..(w * h))
@@ -636,7 +636,7 @@ mod basefold_over_bn254_roundtrip_test {
         );
 
         let chip_infos =
-            zkm_stark::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
         let mut v_chal = make_challenger();
         v_chal.observe(commitment);
         let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(

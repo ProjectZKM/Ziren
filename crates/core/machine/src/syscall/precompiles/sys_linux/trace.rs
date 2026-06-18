@@ -10,7 +10,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::{air::MachineAir, Word};
+use zkm_pcs::{air::MachineAir, Word};
 
 use super::{
     columns::{SysLinuxCols, NUM_SYS_LINUX_COLS},

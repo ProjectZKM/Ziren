@@ -14,7 +14,7 @@ use zkm_core_executor::{
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{
+use zkm_pcs::{
     air::{BaseAirBuilder, MachineAir, ZKMAirBuilder},
     {PicusInfo, Word},
 };
@@ -263,7 +263,7 @@ mod tests {
 
     use zkm_core_executor::{Instruction, Opcode, Program};
 
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     #[test]
     fn test_mov_cond_prove() {

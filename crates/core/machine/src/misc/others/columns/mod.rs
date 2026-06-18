@@ -12,7 +12,7 @@ pub use sext::*;
 
 use std::mem::size_of;
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{PicusInfo, Word};
+use zkm_pcs::{PicusInfo, Word};
 
 pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 

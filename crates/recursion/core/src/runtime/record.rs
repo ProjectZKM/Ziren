@@ -3,7 +3,7 @@ use std::{array, cell::UnsafeCell, mem::MaybeUninit, sync::Arc};
 use hashbrown::HashMap;
 use p3_field::{Field, PrimeCharacteristicRing, PrimeField32};
 use serde::{Deserialize, Serialize};
-use zkm_stark::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
+use zkm_pcs::{air::MachineAir, MachineRecord, ZKMCoreOpts, PROOF_MAX_NUM_PVS};
 
 use crate::machine::RecursionAirEventCount;
 

@@ -99,7 +99,7 @@ mod sys {
             .with_sys_include("cstddef")
             .with_parse_deps(true)
             .with_parse_include(&[
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "zkm-core-machine",
                 "p3-koala-bear",
@@ -107,7 +107,7 @@ mod sys {
                 "zkm-core-executor",
             ])
             .with_parse_extra_bindings(&[
-                "zkm-stark",
+                "zkm-pcs",
                 "zkm-primitives",
                 "p3-koala-bear",
                 "p3-monty-31",

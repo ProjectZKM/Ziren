@@ -15,7 +15,7 @@ use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{MachineAir, ZKMAirBuilder};
 
 use crate::cpu::columns::InstructionCols;
 
@@ -194,7 +194,7 @@ mod tests {
 
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Instruction, Opcode, Program};
-    use zkm_stark::air::MachineAir;
+    use zkm_pcs::air::MachineAir;
 
     use crate::program::ProgramChip;
 

@@ -103,7 +103,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///   (Poseidon2-BN254 Merkle, `Commitment = Hash<KoalaBear, Bn254, 1>`).
 ///   `bf_mmcs()` builds that MMCS so the generic BaseFold cores
 ///   (`commit/open/verify_jagged_pcs_generic`) can run over it.  See the impl
-///   in `crates/recursion/core/src/stark/config.rs` (zkm-stark cannot import
+///   in `crates/recursion/core/src/stark/config.rs` (zkm-pcs cannot import
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
 /// `use_basefold()` returns the *same boolean* the legacy TypeId gate computed

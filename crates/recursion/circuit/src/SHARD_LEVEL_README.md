@@ -2,7 +2,7 @@
 
 Parallel-codebase modules under the `shard-level-proof` feature
 flag.  Bridge the host-side `BasefoldShardProof` (from
-`zkm_stark::shard_level`) into the in-circuit
+`zkm_pcs::shard_level`) into the in-circuit
 `BasefoldShardProofVariable` and dispatch to
 `BasefoldShardVerifier::verify_shard`.
 

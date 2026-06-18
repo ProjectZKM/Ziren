@@ -51,7 +51,7 @@ use crate::{
     ExecutionError, ExecutionRecord, Executor, ExecutionState, Program,
 };
 use std::sync::Arc;
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 /// A per-shard re-executor that consumes a [`TraceChunk`] and produces
 /// the events needed for proving.
@@ -195,7 +195,7 @@ impl<'a> TracingVM<'a> {
         // point. Merge everything from `sub.records` into `self.record`
         // so the caller gets a single combined ExecutionRecord per
         // chunk. a future revision will skip the intermediate Vec entirely.
-        use zkm_stark::MachineRecord;
+        use zkm_pcs::MachineRecord;
         for mut other in sub.records.drain(..) {
             self.record.append(&mut other);
         }

@@ -24,7 +24,7 @@ backtrace = "0.3.71"
 tracing = { workspace = true }
 vec_map = "0.8.2"
 
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-primitives = { workspace = true }
 

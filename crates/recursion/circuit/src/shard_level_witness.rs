@@ -1,5 +1,5 @@
 //! Witnessable impls for the SP1-style shard-level proof types
-//! that live in [`zkm_stark::shard_level`].
+//! that live in [`zkm_pcs::shard_level`].
 //!
 //! Bridges the host-side types (raw `F`/`EF`) into recursion
 //! circuit variables (`Felt<F>` / `Ext<F, EF>`).  Mirrors the
@@ -14,15 +14,15 @@
 use std::collections::BTreeMap;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
-use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::septic_extension::SepticExtension;
-use zkm_stark::shard_level::shard_proof::ChipCumulativeSums;
-use zkm_stark::shard_level::types as st;
+use zkm_pcs::septic_curve::SepticCurve;
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::septic_extension::SepticExtension;
+use zkm_pcs::shard_level::shard_proof::ChipCumulativeSums;
+use zkm_pcs::shard_level::types as st;
 
 use crate::witness::{Witnessable, WitnessWriter};
 use crate::CircuitConfig;
-use zkm_stark::{InnerChallenge, InnerVal};
+use zkm_pcs::{InnerChallenge, InnerVal};
 
 // ── Per-chip cumulative sums (swap 1+2) ────────────────
 
@@ -254,7 +254,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
     // for inner configs the field types still resolve (`Var<C::N>` is generic)
     // but the variant is never constructed.
     OuterBundle {
-        host: zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
+        host: zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<
             zkm_recursion_core::stark::OuterValMmcs,
         >,
         basefold_proof: RecursiveBasefoldProof<
@@ -272,7 +272,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 
 // ── Top-level: BasefoldShardProof ────────────────────────────────
 //
-// Bridges `zkm_stark::shard_level::shard_proof::BasefoldShardProof`
+// Bridges `zkm_pcs::shard_level::shard_proof::BasefoldShardProof`
 // (host) to a tuple of recursion-variable pieces.  The full
 // `BasefoldShardProofVariable` mapping (which includes
 // chip_height_bits and the jagged-PCS evaluation_proof) lands
@@ -292,7 +292,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // directly (Bundle → bundle lift; Bytes → bytes lift; Empty →
 // placeholder).
 impl<C> Witnessable<C>
-    for zkm_stark::shard_level::shard_proof::BasefoldShardProof<InnerVal, InnerChallenge>
+    for zkm_pcs::shard_level::shard_proof::BasefoldShardProof<InnerVal, InnerChallenge>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -322,7 +322,7 @@ where
         // batched per-shard read order) — this is what makes the recursion
         // program value-independent.  Digests stay raw (rekeyed in the lift;
         // witnessed separately).  Must mirror `write` exactly.
-        use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+        use zkm_pcs::shard_level::shard_proof::EvaluationProof as HostEvalProof;
         // P2c-for-outer: for the gnark wrap (OuterConfig), WITNESS the outer
         // BN254 bundle from the stream HERE (at the eval-proof position) via the
         // config dispatch — value-independent gnark R1CS.  Inner configs return
@@ -397,7 +397,7 @@ where
         // P2c STEP 2: write the Bundle's basefold-proof felt/ext values in
         // the SAME position `read` consumes them (between zerocheck and
         // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
-        if let zkm_stark::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
+        if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
             &self.evaluation_proof
         {
             let host_proof = host_stacked_basefold_to_recursive(&bundle.basefold_proof);
@@ -430,7 +430,7 @@ where
 /// is irrelevant to the felt-witness stream since `Ext` reads are
 /// length-prefixed by the `Vec<_>` Witnessable.
 fn basefold_opened_values_from_host(
-    opened: &zkm_stark::ShardOpenedValues<InnerVal, InnerChallenge>,
+    opened: &zkm_pcs::ShardOpenedValues<InnerVal, InnerChallenge>,
 ) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<InnerVal, InnerChallenge> {
     use p3_field::PrimeCharacteristicRing;
     let chips = opened
@@ -476,11 +476,11 @@ fn basefold_opened_values_from_host(
 // eval→coeff conversion lives at the bundle assembly site,
 // not in these per-piece witness reads.
 
-use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
-use zkm_stark::basefold::stacked::StackedBasefoldProof;
-use zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle;
-use zkm_stark::jagged_pcs::JaggedMmcs;
-use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
+use zkm_pcs::basefold::stacked::StackedBasefoldProof;
+use zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle;
+use zkm_pcs::jagged_pcs::JaggedMmcs;
+use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
 
 use crate::basefold_verifier::{
     RecursiveBasefoldComponentOpening, RecursiveBasefoldOpening, RecursiveBasefoldProof,
@@ -529,7 +529,7 @@ where
     }
 }
 
-/// In-circuit companion to [`zkm_stark::basefold::proof::LeafOpening`].
+/// In-circuit companion to [`zkm_pcs::basefold::proof::LeafOpening`].
 ///
 /// `values` is the matrix-of-leaves grid that comes through the witness
 /// stream as `Felt` cells; `proof` (Merkle path siblings) is treated as
@@ -541,7 +541,7 @@ pub struct LeafOpeningVar<F> {
     pub proof: Vec<[F; 8]>,
 }
 
-/// In-circuit companion to [`zkm_stark::basefold::proof::MerkleOpening`].
+/// In-circuit companion to [`zkm_pcs::basefold::proof::MerkleOpening`].
 pub struct MerkleOpeningVar<F> {
     pub leaves: Vec<LeafOpeningVar<F>>,
 }
@@ -659,7 +659,7 @@ fn host_component_opening_to_recursive(
 /// [`RecursiveBasefoldOpening`] vector.
 ///
 /// Per FRI commit-phase shape (see
-/// [`zkm_stark::basefold::fri::commit_phase_round`]), each leaf
+/// [`zkm_pcs::basefold::fri::commit_phase_round`]), each leaf
 /// bundles `2 * EF::DIMENSION` base-field elements representing two
 /// adjacent EF codeword values (the sibling pair).  This converter
 /// parses those into the in-circuit `[EF; 2]` shape and copies the
@@ -966,17 +966,17 @@ fn host_stacked_basefold_to_recursive_outer(
 /// the lift as compile-time constants (shape-derived, value-independent).
 pub fn read_outer_eval_bundle_impl<C>(
     builder: &mut Builder<C>,
-    host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+    host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
 ) -> Option<LiftedEvalProof<C>>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254>,
 {
-    use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof as HostEvalProof;
     let bytes = match host {
         HostEvalProof::Bytes(b) => b,
         _ => return None,
     };
-    let bundle = zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+    let bundle = zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
         OuterValMmcs,
     >::from_bytes(bytes)?;
 
@@ -1017,19 +1017,19 @@ where
 /// read consumes them.  Returns `true` when handled (outer bundle bytes), so
 /// `BasefoldShardProof::write` skips its default Bytes/Bundle write.
 pub fn write_outer_eval_bundle_impl<C, W>(
-    host: &zkm_stark::shard_level::shard_proof::EvaluationProof,
+    host: &zkm_pcs::shard_level::shard_proof::EvaluationProof,
     witness: &mut W,
 ) -> bool
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge, N = Bn254>,
     W: crate::witness::WitnessWriter<C>,
 {
-    use zkm_stark::shard_level::shard_proof::EvaluationProof as HostEvalProof;
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof as HostEvalProof;
     let bytes = match host {
         HostEvalProof::Bytes(b) => b,
         _ => return false,
     };
-    let bundle = match zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+    let bundle = match zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
         OuterValMmcs,
     >::from_bytes(bytes)
     {
@@ -1087,7 +1087,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
-    bundle: &zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
+    bundle: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
     // P2c-for-outer: witnessed proof-specific values (replace the const-builds).
     preread_basefold_proof: RecursiveBasefoldProof<
         Felt<C::F>,
@@ -1120,7 +1120,7 @@ where
 
     // ── REAL per-chip shaping from the OUTER bundle's packing ──
     // Mirror the host outer verify hook `build_jagged_verify_inputs`
-    // (crates/stark/src/jagged_pcs.rs): the per-chip column_count comes
+    // (crates/pcs/src/jagged_pcs.rs): the per-chip column_count comes
     // from `bundle.packing.column_counts`, and the per-chip row_count
     // (column height) is the offsets sentinel-walk difference at each
     // chip's first column.  The caller-supplied `column_counts_by_round`
@@ -2086,7 +2086,7 @@ where
 ///
 /// **Why this exists**: the two structs are *structurally identical*
 /// (`Vec<UnivariatePolynomial<K>>` + `K` + `(Vec<K>, K)`) but live in
-/// different crates (`zkm_stark::shard_level::types` vs
+/// different crates (`zkm_pcs::shard_level::types` vs
 /// `crate::partial_sumcheck`), with each carrying its own local
 /// `UnivariatePolynomial` — so the compiler treats them as distinct
 /// types (E0308 at call sites that cross the boundary).  The
@@ -2181,7 +2181,7 @@ mod tests {
     #[test]
     fn shard_proof_witness_compiles() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
-        let proof = zkm_stark::shard_level::shard_proof::BasefoldShardProof::<
+        let proof = zkm_pcs::shard_level::shard_proof::BasefoldShardProof::<
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
@@ -2520,7 +2520,7 @@ mod tests {
     fn lift_evaluation_proof_via_bundle_empty_bytes_falls_back() {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_via_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 21, &cols);
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
     }
@@ -2532,8 +2532,8 @@ mod tests {
     fn lift_evaluation_proof_via_bundle_real_bundle_bytes() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::jagged_pcs::jagged::PackingMeta;
-        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::jagged::PackingMeta;
+        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2570,11 +2570,11 @@ mod tests {
                 log_dense_size: 0,
                 column_counts: vec![],
             },
-            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
-        let var = lift_evaluation_proof_via_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_via_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
         assert_eq!(var.column_counts, cols);
         // sumcheck_proof has the real reduction round (1 univariate poly).
         assert_eq!(var.sumcheck_proof.univariate_polys.len(), 1);
@@ -2590,8 +2590,8 @@ mod tests {
     fn lift_jagged_basefold_bundle_with_row_counts() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::jagged_pcs::jagged::PackingMeta;
-        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::jagged::PackingMeta;
+        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2628,11 +2628,11 @@ mod tests {
                 log_dense_size: 6,
                 column_counts: vec![1, 1, 1],
             },
-            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
-        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, Some(&rows));
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, Some(&rows));
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         // col_prefix_sums has padded_cols+1 entries.  With cc=[1,1,1]
@@ -2655,8 +2655,8 @@ mod tests {
     fn lift_jagged_basefold_bundle_none_path_derives_from_chip_dims() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::jagged_pcs::jagged::PackingMeta;
-        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::jagged::PackingMeta;
+        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2692,11 +2692,11 @@ mod tests {
                 log_dense_size: 6,
                 column_counts: vec![1, 1, 1],
             },
-            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         // None -> derive row_counts from bundle.commit.chip_dims.
-        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 8, &cols, None);
         assert_eq!(var.row_counts.len(), 1);
         assert_eq!(var.row_counts[0].len(), 3);
         assert_eq!(var.params.col_prefix_sums.len(), 9);
@@ -2762,8 +2762,8 @@ mod tests {
     fn lift_jagged_basefold_bundle_smoke() {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
-        use zkm_stark::jagged_pcs::jagged::PackingMeta;
-        use zkm_stark::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::jagged::PackingMeta;
+        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         // Minimal-but-valid bundle: one reduction round, empty
@@ -2802,10 +2802,10 @@ mod tests {
                 log_dense_size: 0,
                 column_counts: vec![],
             },
-            jagged_eval: zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_jagged_basefold_bundle::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 21, &cols, None);
+        let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 21, &cols, None);
         // column_counts pass through verbatim.
         assert_eq!(var.column_counts, cols);
         // num_rounds == 2 → 2 commitment slots, first from bundle,

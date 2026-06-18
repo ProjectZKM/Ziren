@@ -10,7 +10,7 @@ use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::ZKMProver;
-use zkm_stark::ZKMProverOpts;
+use zkm_pcs::ZKMProverOpts;
 
 fn main() {
     // Setup tracer.

@@ -88,7 +88,7 @@ pub fn observe_ext_slice<C, FC>(
 /// vertex `i`.
 ///
 /// Uses the LSB-first hypercube indexing convention (matches
-/// [`zkm_stark::basefold::mle::Mle::eval_at`]): `point[0]`
+/// [`zkm_pcs::basefold::mle::Mle::eval_at`]): `point[0]`
 /// controls the LSB of the index, `point[n-1]` the MSB.
 ///
 /// Mirrors the upstream `evaluate_mle_ext`
@@ -236,7 +236,7 @@ where
 }
 
 /// Number of grinding bits for the LogUp-GKR challenge — must stay in
-/// lockstep with the host prover's `zkm_stark::logup_gkr::GKR_GRINDING_BITS`
+/// lockstep with the host prover's `zkm_pcs::logup_gkr::GKR_GRINDING_BITS`
 /// (= 12); the in-circuit verifier re-checks the same witness the host
 /// ground, so a mismatch would reject honest proofs.
 pub const GKR_GRINDING_BITS: usize = 12;
@@ -520,7 +520,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::ir::Ext;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type F = InnerVal;
     type EF = InnerChallenge;

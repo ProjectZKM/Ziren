@@ -8,7 +8,7 @@ pub use fp2_mul::*;
 
 #[cfg(test)]
 mod tests {
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use test_artifacts::{
         BLS12381_FP2_ADDSUB_ELF, BLS12381_FP2_MUL_ELF, BLS12381_FP_ELF, BN254_FP2_ADDSUB_ELF,

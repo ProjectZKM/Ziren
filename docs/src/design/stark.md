@@ -201,4 +201,4 @@ The `whir_parameters()` function automatically selects the soundness assumption:
 
 ### Integration Status
 
-WHIR implements the `MultilinearPcs` trait, not the univariate `Pcs` trait used by the current STARK pipeline. Full integration requires either an adapter from `MultilinearPcs` to `Pcs`, or a new STARK pipeline built on `MultilinearPcs` (as done in [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion)). The parameter configuration and type aliases are available in `zkm_stark::whir_config` (feature-gated).
+WHIR implements the `MultilinearPcs` trait, not the univariate `Pcs` trait used by the current STARK pipeline. Full integration requires either an adapter from `MultilinearPcs` to `Pcs`, or a new STARK pipeline built on `MultilinearPcs` (as done in [Plonky3-recursion](https://github.com/Plonky3/Plonky3-recursion)). The parameter configuration and type aliases are available in `zkm_pcs::whir_config` (feature-gated).

@@ -5,7 +5,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
 
 pub use outer::*;
 pub use stark::*;
-use zkm_stark::{
+use zkm_pcs::{
     septic_curve::SepticCurve, septic_digest::SepticDigest, septic_extension::SepticExtension,
     ChipOpenedValues, Com, InnerChallenge, InnerVal, OpeningProof, ShardCommitment,
     ShardOpenedValues, ShardProof,

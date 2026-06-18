@@ -1,6 +1,6 @@
 use thiserror::Error;
 // use zkm_prover::{CoreSC, InnerSC};
-use zkm_stark::MachineVerificationError;
+use zkm_pcs::MachineVerificationError;
 
 use super::{CoreSC, InnerSC};
 

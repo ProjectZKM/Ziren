@@ -17,7 +17,7 @@ use zkm_recursion_core::{
     air::{RecursionPublicValues, NUM_PV_ELMS_TO_HASH},
     stark::KoalaBearPoseidon2Outer,
 };
-use zkm_stark::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
+use zkm_pcs::{koala_bear_poseidon2::MyHash as InnerHash, Word, ZKMCoreOpts};
 
 use crate::{InnerSC, ZKMCoreProofData};
 

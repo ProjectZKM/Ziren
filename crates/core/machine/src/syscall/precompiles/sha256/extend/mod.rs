@@ -37,7 +37,7 @@ pub mod extend_tests {
     use zkm_core_executor::{
         events::AluEvent, syscalls::SyscallCode, ExecutionRecord, Instruction, Opcode, Program,
     };
-    use zkm_stark::{air::MachineAir, CpuProver};
+    use zkm_pcs::{air::MachineAir, CpuProver};
 
     use crate::utils::{self, run_test};
 

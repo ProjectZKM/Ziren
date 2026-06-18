@@ -14,9 +14,9 @@ use p3_maybe_rayon::prelude::ParallelIterator;
 use zkm_core_executor::events::{ByteRecord, GlobalLookupEvent, PrecompileEvent};
 use zkm_core_executor::{events::SyscallEvent, ByteOpcode, ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::AirLookup;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
-use zkm_stark::LookupKind;
+use zkm_pcs::air::AirLookup;
+use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::LookupKind;
 
 use crate::{utils::next_power_of_two, CoreChipError};
 
@@ -65,7 +65,7 @@ impl SyscallChip {
 /// reduced field element available for local `send_syscall`/`receive_syscall`.
 ///
 /// **Soundness**: `arg1_lo/hi` and `arg2_lo/hi` are U16Range-checked inside
-/// `send_syscall_result_packed` (see `crates/stark/src/air/builder.rs`).
+/// `send_syscall_result_packed` (see `crates/pcs/src/air/builder.rs`).
 /// Any chip using this interaction gets range-checked half-words automatically.
 #[derive(AlignedBorrow, Clone, Copy)]
 #[repr(C)]

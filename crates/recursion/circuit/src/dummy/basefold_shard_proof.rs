@@ -8,7 +8,7 @@
 //! # Shape mirror
 //!
 //! Outputs match what
-//! [`zkm_stark::shard_level::prover::prove_shard_to_basefold`]
+//! [`zkm_pcs::shard_level::prover::prove_shard_to_basefold`]
 //! produces at the same `(shape, max_log_row_count)` input pair,
 //! so downstream consumers walk identical felt counts.
 
@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use p3_air::BaseAir;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, MachineAir},
     septic_digest::SepticDigest,
     shard_level::{
@@ -81,7 +81,7 @@ where
     A: MachineAir<F>,
 {
     // Ziren's per-chip "interaction count" = sends + receives, exposed
-    // as `Chip::num_lookups()` (see `crates/stark/src/chip.rs:99`).
+    // as `Chip::num_lookups()` (see `crates/pcs/src/chip.rs:99`).
     //
     // **Sizing convention** (matches host prover + in-circuit verifier):
     //
@@ -344,7 +344,7 @@ where
                 (w, log_h)
             })
             .collect();
-        zkm_stark::shard_level::shard_proof::EvaluationProof::Bundle(
+        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(
             dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count),
         )
     };
@@ -390,20 +390,20 @@ where
 pub fn dummy_jagged_basefold_bundle(
     chip_dims: &[(usize, u32)],
     max_log_row_count: usize,
-) -> zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle {
+) -> zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
-    use zkm_stark::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
-    use zkm_stark::basefold::stacked::StackedBasefoldProof;
-    use zkm_stark::jagged::pack_traces_jagged;
-    use zkm_stark::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
-    use zkm_stark::jagged_pcs::jagged::{JaggedBasefoldBundle, PackingMeta};
-    use zkm_stark::jagged_pcs::{
+    use zkm_pcs::basefold::proof::{BasefoldProof, LeafOpening, MerkleOpening};
+    use zkm_pcs::basefold::stacked::StackedBasefoldProof;
+    use zkm_pcs::jagged::pack_traces_jagged;
+    use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
+    use zkm_pcs::jagged_pcs::jagged::{JaggedBasefoldBundle, PackingMeta};
+    use zkm_pcs::jagged_pcs::{
         lb_fri_config, pick_log_stacking_height, BasefoldLateBindingCommit, JaggedMmcs,
     };
-    use zkm_stark::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
-    use zkm_stark::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+    use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type F = InnerVal;
     type EF = InnerChallenge;

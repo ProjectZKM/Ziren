@@ -7,7 +7,7 @@ use p3_matrix::Matrix;
 use zkm_core_executor::events::PrecompileEvent;
 use zkm_core_executor::syscalls::SyscallCode;
 use zkm_core_executor::{ExecutionRecord, Program};
-use zkm_stark::MachineAir;
+use zkm_pcs::MachineAir;
 
 use crate::syscall::precompiles::keccak_sponge::columns::{
     KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS,

@@ -142,7 +142,7 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
 ///
 /// Used to bridge Ziren's eval-form jagged-sumcheck rounds (host
 /// emits `[p(0), p(1), p(2)]` from
-/// [`zkm_stark::jagged_sumcheck::JaggedReductionRound`], where
+/// [`zkm_pcs::jagged_sumcheck::JaggedReductionRound`], where
 /// `p(2)` comes from linear extrapolation `q1.double() - q0`) to the
 /// coefficient-form [`UnivariatePolynomial`] consumed by the
 /// in-circuit jagged-PCS verifier.  Mirrors the SP1 bundle format

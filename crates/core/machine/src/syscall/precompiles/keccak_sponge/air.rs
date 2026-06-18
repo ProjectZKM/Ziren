@@ -16,7 +16,7 @@ use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use p3_keccak_air::{NUM_ROUNDS, U64_LIMBS};
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{air::AirLookup, LookupKind, LookupScope, ZKMAirBuilder};
+use zkm_pcs::{air::AirLookup, LookupKind, LookupScope, ZKMAirBuilder};
 
 use super::{
     columns::{KeccakSpongeCols, NUM_KECCAK_SPONGE_COLS},

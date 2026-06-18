@@ -6,7 +6,7 @@ use p3_symmetric::{Hash, MerkleCap};
 
 use p3_field::{PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::Builder;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
     OpeningProof, StarkVerifyingKey, Word,
 };
@@ -381,7 +381,7 @@ mod basefold_witness {
     impl<C, SC> Witnessable<C> for ZKMCompressBasefoldWitnessValues<SC>
     where
         C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
-        SC: zkm_stark::StarkGenericConfig
+        SC: zkm_pcs::StarkGenericConfig
             + KoalaBearFriParametersVariable<C>
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         Com<SC>:

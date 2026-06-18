@@ -14,7 +14,7 @@ use zkm_core_executor::{
     ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, PicusInfo, ZKMAirBuilder},
     Word,
 };
@@ -267,7 +267,7 @@ mod tests {
     use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
     use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
+    use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
@@ -288,7 +288,7 @@ mod tests {
 
     #[test]
     fn measure_addsub_degree() {
-        let chip = zkm_stark::Chip::<KoalaBear, _>::new(AddSubChip::default());
+        let chip = zkm_pcs::Chip::<KoalaBear, _>::new(AddSubChip::default());
         // log_quotient_degree = log2_ceil(max_constraint_degree - 1):
         //   1 => degree 3 ; 2 => degree 4 or 5.
         println!("ADDSUB_LOG_QUOTIENT_DEGREE={}", chip.log_quotient_degree());

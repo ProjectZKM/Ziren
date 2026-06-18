@@ -10,7 +10,7 @@ use zkm_picus::{
     },
     picus_builder::{PicusBuilder, ShrCarrySummaryMode, SubmoduleMode},
 };
-use zkm_stark::{Chip, MachineAir, PicusInfo};
+use zkm_pcs::{Chip, MachineAir, PicusInfo};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

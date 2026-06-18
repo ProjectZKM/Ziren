@@ -2,7 +2,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use itertools::{EitherOrBoth, Itertools};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, PublicValues},
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,

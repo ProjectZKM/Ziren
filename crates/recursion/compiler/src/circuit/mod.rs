@@ -15,7 +15,7 @@ mod tests {
 
     use zkm_core_machine::utils::run_test_machine;
     use zkm_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
-    use zkm_stark::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_pcs::{KoalaBearPoseidon2Inner, StarkGenericConfig};
 
     use crate::{
         circuit::{AsmBuilder, AsmCompiler, CircuitV2Builder},

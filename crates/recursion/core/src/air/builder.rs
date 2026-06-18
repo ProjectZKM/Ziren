@@ -1,7 +1,7 @@
 use core::iter::once;
 use p3_air::{WindowAccess, AirBuilder};
 use p3_field::PrimeCharacteristicRing;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, LookupScope, MachineAirBuilder},
     LookupKind,
 };

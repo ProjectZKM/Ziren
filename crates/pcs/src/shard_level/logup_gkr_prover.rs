@@ -61,7 +61,7 @@ use crate::zerocheck_prover::eq_mle_table;
 ///
 /// This stub exists so the host-side dispatch site
 /// (`prove_shard_logup_gkr_rows` step 6 in
-/// `crates/stark/src/shard_level/row_gkr/top_level.rs:239-289`)
+/// `crates/pcs/src/shard_level/row_gkr/top_level.rs:239-289`)
 /// can be migrated to a single named entry point in a future
 /// follow-up without touching call sites again.
 ///

@@ -7827,8 +7827,8 @@ dependencies = [
  "zkm-core-jit",
  "zkm-curves",
  "zkm-instruction-test-defs",
+ "zkm-pcs",
  "zkm-primitives",
- "zkm-stark",
 ]
 
 [[package]]
@@ -7900,8 +7900,8 @@ dependencies = [
  "zkm-curves",
  "zkm-derive",
  "zkm-instruction-test-defs",
+ "zkm-pcs",
  "zkm-primitives",
- "zkm-stark",
 ]
 
 [[package]]
@@ -7975,6 +7975,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-pcs"
+version = "2.0.0"
+dependencies = [
+ "arrayref",
+ "bincode",
+ "hashbrown 0.14.5",
+ "itertools 0.13.0",
+ "num-bigint 0.4.6",
+ "num-traits",
+ "p3-air",
+ "p3-challenger",
+ "p3-circle",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-fri",
+ "p3-keccak",
+ "p3-koala-bear",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-mds",
+ "p3-merkle-tree",
+ "p3-mersenne-31",
+ "p3-multilinear-util",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-uni-stark",
+ "p3-util",
+ "rand 0.8.5",
+ "rayon",
+ "rayon-scan",
+ "rmp-serde",
+ "serde",
+ "strum",
+ "strum_macros",
+ "sysinfo",
+ "tracing",
+ "tracing-forest",
+ "tracing-subscriber 0.3.23",
+ "zkm-derive",
+ "zkm-poly",
+ "zkm-primitives",
+ "zkm-zkvm",
+]
+
+[[package]]
 name = "zkm-poly"
 version = "2.0.0"
 dependencies = [
@@ -8029,12 +8075,12 @@ dependencies = [
  "tracing-subscriber 0.3.23",
  "zkm-core-executor",
  "zkm-core-machine",
+ "zkm-pcs",
  "zkm-primitives",
  "zkm-recursion-circuit",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
- "zkm-stark",
 ]
 
 [[package]]
@@ -8067,11 +8113,11 @@ dependencies = [
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-derive",
+ "zkm-pcs",
  "zkm-primitives",
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
- "zkm-stark",
 ]
 
 [[package]]
@@ -8092,10 +8138,10 @@ dependencies = [
  "tracing",
  "vec_map",
  "zkm-core-machine",
+ "zkm-pcs",
  "zkm-primitives",
  "zkm-recursion-core",
  "zkm-recursion-derive",
- "zkm-stark",
 ]
 
 [[package]]
@@ -8137,8 +8183,8 @@ dependencies = [
  "zkhash",
  "zkm-core-machine",
  "zkm-derive",
+ "zkm-pcs",
  "zkm-primitives",
- "zkm-stark",
 ]
 
 [[package]]
@@ -8168,8 +8214,8 @@ dependencies = [
  "sha2",
  "tempfile",
  "zkm-core-machine",
+ "zkm-pcs",
  "zkm-recursion-compiler",
- "zkm-stark",
 ]
 
 [[package]]
@@ -8214,55 +8260,9 @@ dependencies = [
  "zkm-core-executor",
  "zkm-core-machine",
  "zkm-cuda",
+ "zkm-pcs",
  "zkm-primitives",
  "zkm-prover",
- "zkm-stark",
-]
-
-[[package]]
-name = "zkm-stark"
-version = "2.0.0"
-dependencies = [
- "arrayref",
- "bincode",
- "hashbrown 0.14.5",
- "itertools 0.13.0",
- "num-bigint 0.4.6",
- "num-traits",
- "p3-air",
- "p3-challenger",
- "p3-circle",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-fri",
- "p3-keccak",
- "p3-koala-bear",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-mds",
- "p3-merkle-tree",
- "p3-mersenne-31",
- "p3-multilinear-util",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-uni-stark",
- "p3-util",
- "rand 0.8.5",
- "rayon",
- "rayon-scan",
- "rmp-serde",
- "serde",
- "strum",
- "strum_macros",
- "sysinfo",
- "tracing",
- "tracing-forest",
- "tracing-subscriber 0.3.23",
- "zkm-derive",
- "zkm-poly",
- "zkm-primitives",
- "zkm-zkvm",
 ]
 
 [[package]]
@@ -8297,11 +8297,11 @@ dependencies = [
  "thiserror 2.0.18",
  "zkm-core-executor",
  "zkm-core-machine",
+ "zkm-pcs",
  "zkm-primitives",
  "zkm-prover",
  "zkm-recursion-core",
  "zkm-sdk",
- "zkm-stark",
 ]
 
 [[package]]

@@ -5,8 +5,8 @@ use p3_field::BasedVectorSpace;
 use p3_field::PrimeField32;
 use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::ZKMAirBuilder;
-use zkm_stark::{
+use zkm_pcs::ZKMAirBuilder;
+use zkm_pcs::{
     septic_curve::{SepticCurve, CURVE_WITNESS_DUMMY_POINT_X, CURVE_WITNESS_DUMMY_POINT_Y},
     septic_extension::{SepticBlock, SepticExtension},
 };

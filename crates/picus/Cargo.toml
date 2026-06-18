@@ -10,7 +10,7 @@ categories = { workspace = true }
 [dependencies]
 zkm-core-machine = { workspace = true }
 zkm-core-executor = {workspace = true}
-zkm-stark = {workspace = true}
+zkm-pcs = {workspace = true}
 p3-air = { workspace = true  }
 p3-matrix = { workspace = true  }
 p3-field = {workspace = true}

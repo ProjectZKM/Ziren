@@ -153,56 +153,56 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             let name_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::name(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::name(x)
                 }
             });
 
             let preprocessed_width_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::preprocessed_width(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::preprocessed_width(x)
                 }
             });
 
             let generate_preprocessed_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_preprocessed_trace(x, program)
                 }
             });
 
             let generate_trace_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_trace(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_trace(x, input, output)
                 }
             });
 
             let generate_dependencies_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::generate_dependencies(x, input, output)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::generate_dependencies(x, input, output)
                 }
             });
 
             let included_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::included(x, shard)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::included(x, shard)
                 }
             });
 
             let commit_scope_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::commit_scope(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::commit_scope(x)
                 }
             });
 
             let local_only_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::local_only(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::local_only(x)
                 }
             });
 
@@ -210,12 +210,12 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
             let picus_info_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
                 quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_stark::air::MachineAir<F>>::picus_info(x)
+                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::picus_info(x)
                 }
             });
 
             let machine_air = quote! {
-                impl #impl_generics zkm_stark::air::MachineAir<F> for #name #ty_generics #where_clause {
+                impl #impl_generics zkm_pcs::air::MachineAir<F> for #name #ty_generics #where_clause {
                     type Record = #execution_record_path;
 
                     type Program = #program_path;

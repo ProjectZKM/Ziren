@@ -1,7 +1,7 @@
 //! SP1-style parallel call site for the final wrap recursion stage.
 //!
 //! Mirror of [`super::wrap`] but consumes
-//! [`zkm_stark::shard_level::shard_proof::BasefoldShardProof`]
+//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
@@ -19,8 +19,8 @@ use p3_field::PrimeCharacteristicRing;
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::stark::zkm_imm_wrap_vk_mode;
-use zkm_stark::air::MachineAir;
-use zkm_stark::{
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::{
     shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
 };
 
@@ -42,7 +42,7 @@ use crate::{
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
 pub struct ZKMWrapBasefoldWitnessValues<
-    SC: zkm_stark::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
+    SC: zkm_pcs::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
 > {
     /// Single `(vk, root-proof)` pair to wrap.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
@@ -62,11 +62,11 @@ pub struct ZKMWrapBasefoldWitnessVariable<
         (
             [Felt<C::F>; 8],
             Vec<Felt<C::F>>,
-            zkm_stark::shard_level::types::LogupGkrProof<
+            zkm_pcs::shard_level::types::LogupGkrProof<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
-            zkm_stark::shard_level::types::PartialSumcheckProof<
+            zkm_pcs::shard_level::types::PartialSumcheckProof<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
@@ -77,7 +77,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
     pub chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
-            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
@@ -103,7 +103,7 @@ pub struct ZKMWrapBasefoldVerifier<C, SC, A> {
 pub fn verify_wrap_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMWrapBasefoldWitnessVariable<C, SC>,
-    machine: &zkm_stark::StarkMachine<SC, A>,
+    machine: &zkm_pcs::StarkMachine<SC, A>,
     value_assertions: bool,
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
@@ -164,11 +164,11 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     proof_tuple: (
         [Felt<C::F>; 8],
         Vec<Felt<C::F>>,
-        zkm_stark::shard_level::types::LogupGkrProof<
+        zkm_pcs::shard_level::types::LogupGkrProof<
             Felt<C::F>,
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
-        zkm_stark::shard_level::types::PartialSumcheckProof<
+        zkm_pcs::shard_level::types::PartialSumcheckProof<
             zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
@@ -177,14 +177,14 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
-            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
         >,
     >,
     chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
-    machine: &zkm_stark::StarkMachine<SC, A>,
+    machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
 ) where
@@ -217,24 +217,24 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // evaluate_mle_ext panic at logup_gkr.rs:105 with column_claims
     // sized to the real ~1024-entry padded width. Same fix as
     // deferred_basefold.rs.
-    let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+    let mut shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
         .chips()
         .iter()
         .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
         .collect();
     // Sort by name to match BTreeMap-ordered opened_values.
     shard_chips.sort_by(|a, b| {
-        MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-            .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+        MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
+            .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
     });
     use p3_air::BaseAir;
     let preprocessed_widths: Vec<usize> = shard_chips
         .iter()
-        .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+        .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
         .collect();
     let main_widths: Vec<usize> = shard_chips
         .iter()
-        .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+        .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
         .collect();
     let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
@@ -452,7 +452,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         // cleanly falls through to the default verifier.
         LiftedEvalProof::Bytes(bytes) => {
             if let Some(outer_bundle) =
-                zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
+                zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric::<
                     zkm_recursion_core::stark::OuterValMmcs,
                 >::from_bytes(bytes)
             {
@@ -548,23 +548,23 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     let _zero: Felt<_> = builder.eval(C::F::ZERO);
 }
 
-impl ZKMWrapBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy wrap witness for a given compress shape.
     /// Wrap takes a single `(vk, root-proof)` pair, so the input
     /// shape's first proof_shape drives the dummy proof construction.
     pub fn dummy<A>(
-        machine: &zkm_stark::StarkMachine<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             A,
         >,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
-        A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
+        A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
             + for<'b> p3_air::Air<
-                zkm_stark::folder::VerifierConstraintFolder<
+                zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >,
             >,
     {

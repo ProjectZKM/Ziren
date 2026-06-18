@@ -5,7 +5,7 @@ use p3_air::{WindowAccess, Air, AirBuilder};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{events::MemoryAccessPosition, ByteOpcode, Opcode};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},

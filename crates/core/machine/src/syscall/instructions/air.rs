@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::{syscalls::SyscallCode, Opcode};
-use zkm_stark::{
+use zkm_pcs::{
     air::{
         BaseAirBuilder, LookupScope, PublicValues, ZKMAirBuilder, POSEIDON_NUM_WORDS,
         PV_DIGEST_NUM_WORDS, ZKM_PROOF_NUM_PV_ELTS,

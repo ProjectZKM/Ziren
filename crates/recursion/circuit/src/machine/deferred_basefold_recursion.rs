@@ -38,9 +38,9 @@ use zkm_recursion_compiler::circuit::AsmCompiler;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_recursion_core::RecursionProgram;
-use zkm_stark::air::MachineAir;
-use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
-use zkm_stark::StarkMachine;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::StarkMachine;
 
 use crate::witness::Witnessable;
 

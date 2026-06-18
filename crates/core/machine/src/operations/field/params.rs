@@ -5,7 +5,7 @@ use std::slice::Iter;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-use zkm_stark::air::Polynomial;
+use zkm_pcs::air::Polynomial;
 use typenum::Unsigned;
 use typenum::{U2, U4};
 

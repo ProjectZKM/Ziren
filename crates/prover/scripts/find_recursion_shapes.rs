@@ -9,7 +9,7 @@ use zkm_prover::{
     ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
 };
 use zkm_recursion_core::shape::RecursionShapeConfig;
-use zkm_stark::{shape::OrderedShape, MachineProver};
+use zkm_pcs::{shape::OrderedShape, MachineProver};
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

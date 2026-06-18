@@ -22,9 +22,9 @@ use zkm_recursion_compiler::circuit::AsmCompiler;
 use zkm_recursion_compiler::config::InnerConfig;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_recursion_core::RecursionProgram;
-use zkm_stark::air::MachineAir;
-use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
-use zkm_stark::StarkMachine;
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+use zkm_pcs::StarkMachine;
 
 use crate::witness::Witnessable;
 
@@ -56,7 +56,7 @@ where
     // `chip_height_bits_from_log_heights` at the lift site (real
     // Horner-recomposed heights — same value the prover prologue
     // observes via host transcript at
-    // `crates/stark/src/shard_level/prover.rs:260-269`).
+    // `crates/pcs/src/shard_level/prover.rs:260-269`).
     //
     // NOTE the warning in the previous comment about breaking the
     // padded-row mask constraint applies to
@@ -263,26 +263,26 @@ mod tests {
     /// expect.
     #[allow(clippy::type_complexity)]
     fn produce_real_basefold_shard_proof(
-        machine: &zkm_stark::StarkMachine<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
-    ) -> zkm_stark::shard_level::shard_proof::BasefoldShardProof<
-        zkm_stark::InnerVal,
-        zkm_stark::InnerChallenge,
+    ) -> zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
+        zkm_pcs::InnerVal,
+        zkm_pcs::InnerChallenge,
     > {
         use p3_air::BaseAir;
         use p3_field::PrimeCharacteristicRing;
         use p3_matrix::dense::RowMajorMatrix;
-        use zkm_stark::air::MachineAir;
-        use zkm_stark::shard_level::prove_shard_to_basefold;
-        use zkm_stark::StarkGenericConfig;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shard_level::prove_shard_to_basefold;
+        use zkm_pcs::StarkGenericConfig;
 
         // Pick one small, non-precompile chip with deterministic
         // preprocessed/main widths: AddSub.  The actual trace
         // content doesn't need to be AIR-valid — prove_shard_to_basefold
         // just threads it through LogUp-GKR + zerocheck.
-        let chip: &zkm_stark::Chip<
+        let chip: &zkm_pcs::Chip<
             p3_koala_bear::KoalaBear,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         > = machine
@@ -310,11 +310,11 @@ mod tests {
         );
 
         let main_commit = std::array::from_fn(|_| p3_koala_bear::KoalaBear::ZERO);
-        let public_values = vec![p3_koala_bear::KoalaBear::ZERO; zkm_stark::PROOF_MAX_NUM_PVS];
+        let public_values = vec![p3_koala_bear::KoalaBear::ZERO; zkm_pcs::PROOF_MAX_NUM_PVS];
         let mut challenger = machine.config().challenger();
 
         prove_shard_to_basefold::<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >(
             &chips,
@@ -322,13 +322,13 @@ mod tests {
             &[main_trace],
             main_commit,
             public_values,
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count,
             &mut challenger,
             // Host-only synthetic-witness builder; no device traces.
             None,
             // CpuProver-equivalent orientation.
-            zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
+            zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
             // Option B precomputed-commit not used for synthetic
             // witness builder — legacy in-band commit flow.
             None,
@@ -342,24 +342,24 @@ mod tests {
     /// match by construction — the recursion verifier's shape asserts
     /// pass, even though cryptographic soundness wouldn't.
     fn dummy_core_basefold_witness(
-        machine: &zkm_stark::StarkMachine<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
         >,
     ) -> super::ZKMCoreBasefoldWitnessValues<
-        zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
     > {
         use p3_field::PrimeCharacteristicRing;
         use p3_koala_bear::KoalaBear;
         use zkm_recursion_core::DIGEST_SIZE;
-        use zkm_stark::StarkVerifyingKey;
+        use zkm_pcs::StarkVerifyingKey;
 
         // Minimal VK — empty preprocessed traces, dummy commit.
         let vk = StarkVerifyingKey {
             commit: crate::fri::dummy_commit(),
             pc_start: KoalaBear::ZERO,
             initial_global_cumulative_sum:
-                zkm_stark::septic_digest::SepticDigest::<KoalaBear>::zero(),
+                zkm_pcs::septic_digest::SepticDigest::<KoalaBear>::zero(),
             chip_information: Vec::new(),
             chip_ordering: Default::default(),
         };
@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn build_normalize_basefold_program_compiles_dummy_witness() {
         use zkm_core_machine::mips::MipsAir;
-        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+        use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 
         let config = KoalaBearPoseidon2::default();
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
@@ -422,7 +422,7 @@ mod tests {
         // `zerocheck_proof.point.dim == pcs_max_log_row_count`, so
         // both sides must agree on this number.
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
             &machine,
@@ -442,8 +442,8 @@ mod tests {
     #[test]
     fn dummy_core_basefold_witness_shape_stable() {
         use zkm_core_machine::mips::MipsAir;
-        use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
-        use zkm_stark::shape::OrderedShape;
+        use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+        use zkm_pcs::shape::OrderedShape;
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
         // Two-shard shape — first shard has 2 chips, second has 1.
@@ -476,24 +476,24 @@ mod tests {
         use p3_koala_bear::KoalaBear;
 
         let _normalize: fn(
-            &zkm_stark::StarkMachine<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            &zkm_pcs::StarkMachine<
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 MipsAir<KoalaBear>,
             >,
             &super::ZKMCoreBasefoldWitnessValues<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             >,
             usize,
         ) -> zkm_recursion_core::RecursionProgram<KoalaBear> =
             build_normalize_basefold_program::<MipsAir<KoalaBear>>;
 
         let _deferred: fn(
-            &zkm_stark::StarkMachine<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            &zkm_pcs::StarkMachine<
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 MipsAir<KoalaBear>,
             >,
             &super::ZKMDeferredBasefoldWitnessValues<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             >,
             usize,
             bool,
@@ -501,12 +501,12 @@ mod tests {
             build_deferred_basefold_program::<MipsAir<KoalaBear>>;
 
         let _wrap: fn(
-            &zkm_stark::StarkMachine<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            &zkm_pcs::StarkMachine<
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 MipsAir<KoalaBear>,
             >,
             &super::ZKMWrapBasefoldWitnessValues<
-                zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             >,
             usize,
             // `build_wrap_basefold_program` takes `value_assertions: bool`

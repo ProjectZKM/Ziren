@@ -10,7 +10,7 @@ use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, ExtensionAirBuilder, MachineAir, ZKMAirBuilder};
 
 #[cfg(feature = "sys")]
 use crate::ExpReverseBitsEvent;
@@ -458,7 +458,7 @@ mod tests {
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use std::iter::once;
     use zkm_core_machine::utils::setup_logger;
-    use zkm_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm_pcs::{air::MachineAir, StarkGenericConfig};
 
     use p3_field::{PrimeCharacteristicRing, PrimeField32};
     use p3_koala_bear::KoalaBear;

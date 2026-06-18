@@ -26,7 +26,7 @@ use zkm_recursion_core::{air::RecursionPublicValues, hash_vkey_with_part_vk};
 pub use zkm_recursion_circuit::witness::{OuterWitness, Witnessable};
 
 use zkm_recursion_gnark_ffi::{DvSnarkBn254Prover, Groth16Bn254Prover, PlonkBn254Prover};
-use zkm_stark::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
+use zkm_pcs::{ShardProof, StarkVerifyingKey, ZKMProverOpts};
 
 use crate::{
     utils::{koalabear_bytes_to_bn254, koalabears_to_bn254, words_to_bytes},
@@ -250,7 +250,7 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
 fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
     let max_log_row_count =
-        zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+        zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
             .max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();

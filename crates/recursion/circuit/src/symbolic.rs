@@ -72,7 +72,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

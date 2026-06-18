@@ -20,7 +20,7 @@ use zkm_core_executor::{
     events::PrecompileLocalMemory, syscalls::SyscallCode, ExecutionRecord, MipsAirId, Program,
 };
 use zkm_curves::weierstrass::{bls12_381::Bls12381BaseField, bn254::Bn254BaseField};
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, MachineAir, PicusInfo, ZKM_PROOF_NUM_PV_ELTS},
     Chip, LookupKind, StarkGenericConfig, StarkMachine,
 };
@@ -831,8 +831,8 @@ pub mod tests {
     use strum::IntoEnumIterator;
 
     use zkm_core_executor::{Instruction, MipsAirId, Opcode, Program};
-    use zkm_stark::air::MachineAir;
-    use zkm_stark::{
+    use zkm_pcs::air::MachineAir;
+    use zkm_pcs::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkProvingKey, StarkVerifyingKey,
         ZKMCoreOpts,
     };

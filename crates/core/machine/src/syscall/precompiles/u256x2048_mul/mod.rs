@@ -17,7 +17,7 @@ mod tests {
         ExecutionRecord, Program,
     };
     use zkm_primitives::consts::bytes_to_words_le;
-    use zkm_stark::{
+    use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, StarkGenericConfig,
     };
 
@@ -164,7 +164,7 @@ mod tests {
     }
 
     use zkm_core_executor::Executor;
-    use zkm_stark::ZKMCoreOpts;
+    use zkm_pcs::ZKMCoreOpts;
     #[test]
     pub fn test_uint256_mul_program_execute() {
         utils::setup_logger();

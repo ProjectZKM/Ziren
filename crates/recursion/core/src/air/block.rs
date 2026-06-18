@@ -2,7 +2,7 @@ use p3_air::AirBuilder;
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use serde::{Deserialize, Serialize};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BinomialExtension, ExtensionAirBuilder, ZKMAirBuilder};
+use zkm_pcs::air::{BinomialExtension, ExtensionAirBuilder, ZKMAirBuilder};
 
 use std::ops::{Index, IndexMut};
 

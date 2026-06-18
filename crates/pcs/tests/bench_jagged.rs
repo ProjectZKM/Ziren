@@ -2,7 +2,7 @@ use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use std::time::Instant;
-use zkm_stark::jagged::{
+use zkm_pcs::jagged::{
     pack_traces_jagged, hierarchical_jagged_pack, jagged_stats,
 };
 

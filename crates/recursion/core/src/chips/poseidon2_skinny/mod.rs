@@ -102,7 +102,7 @@ pub(crate) mod tests {
     use crate::stark::KoalaBearPoseidon2Outer;
     use zkhash::ark_ff::UniformRand;
     use zkm_core_machine::utils::{run_test_machine, setup_logger};
-    use zkm_stark::{inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_pcs::{inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::WIDTH;
 

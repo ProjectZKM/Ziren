@@ -51,7 +51,7 @@ pub trait FieldChallengerVariable<C: Config, Bit>:
     fn check_witness(&mut self, builder: &mut Builder<C>, nb_bits: usize, witness: Felt<C::F>);
 
     /// LogUp-GKR grinding check.  Mirrors the HOST `gkr_check_witness`
-    /// (crates/stark/src/logup_gkr.rs), which is hard-gated to the INNER
+    /// (crates/pcs/src/logup_gkr.rs), which is hard-gated to the INNER
     /// challenger: the inner ring performs the real grind check (= the
     /// default, which delegates to [`Self::check_witness`]), while the
     /// OUTER/wrap (MultiField32) ring treats GKR grinding as a no-op
@@ -501,7 +501,7 @@ pub(crate) mod tests {
         outer_perm, KoalaBearPoseidon2Outer, OuterCompress, OuterHash,
     };
     use zkm_recursion_gnark_ffi::PlonkBn254Prover;
-    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         challenger::{DuplexChallengerVariable, FieldChallengerVariable},

@@ -9,7 +9,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemoryRecordEnum, MiscEvent},
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
-use zkm_stark::{air::MachineAir, Word};
+use zkm_pcs::{air::MachineAir, Word};
 
 use crate::{
     utils::{next_power_of_two, zeroed_f_vec},
@@ -32,7 +32,7 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
         "MiscInstrs".to_string()
     }
 
-    fn picus_info(&self) -> zkm_stark::PicusInfo {
+    fn picus_info(&self) -> zkm_pcs::PicusInfo {
         MiscInstrColumns::<u8>::picus_info()
     }
 

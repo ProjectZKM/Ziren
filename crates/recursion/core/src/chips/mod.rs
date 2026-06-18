@@ -16,7 +16,7 @@ pub mod test_fixtures {
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
     use rand::{rngs::StdRng, Rng, SeedableRng};
-    use zkm_stark::inner_perm;
+    use zkm_pcs::inner_perm;
 
     use crate::*;
 

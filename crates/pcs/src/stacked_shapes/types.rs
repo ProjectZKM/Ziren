@@ -180,7 +180,7 @@ pub mod consts {
     pub const LOG_STACKING_HEIGHT: u32 = 21;
 
     /// Log2 of the FRI blowup factor used by the core commit.  Must
-    /// match the prover's FriParameters (`zkm_stark::zkm_fri_config`).
+    /// match the prover's FriParameters (`zkm_pcs::zkm_fri_config`).
     pub const LOG_BLOWUP: usize = 1;
 
     /// Max log-height allowed for any single chip in a shard (the

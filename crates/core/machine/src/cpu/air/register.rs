@@ -1,5 +1,5 @@
 use p3_field::PrimeCharacteristicRing;
-use zkm_stark::air::ZKMAirBuilder;
+use zkm_pcs::air::ZKMAirBuilder;
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},

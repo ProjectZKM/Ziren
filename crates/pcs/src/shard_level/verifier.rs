@@ -349,7 +349,7 @@ where
     // BaseFold-over-BN254 wrap port: OUTER ring dispatch. Val/Challenge are
     // KoalaBear / KoalaBear^4 here, but the challenger is OuterChallenger (not
     // JaggedChallenger). Verify via the recursion-core-registered hook over
-    // OuterValMmcs / OuterChallenger (zkm-stark cannot name those types); the
+    // OuterValMmcs / OuterChallenger (zkm-pcs cannot name those types); the
     // prover emitted the bundle as EvaluationProof::Bytes.
     if TypeId::of::<SC::Challenger>()
         != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()

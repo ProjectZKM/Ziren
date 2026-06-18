@@ -13,7 +13,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, FieldOperation},
     ByteOpcode,
 };
-use zkm_stark::air::ZKMAirBuilder;
+use zkm_pcs::air::ZKMAirBuilder;
 
 use super::{field_op::FieldOpCols, range::FieldLtCols};
 use crate::air::WordAirBuilder;
@@ -150,7 +150,7 @@ mod tests {
     use p3_field::{Field, PrimeField32};
     use zkm_core_executor::{ExecutionRecord, Program};
     use zkm_curves::params::{FieldParameters, Limbs};
-    use zkm_stark::air::{MachineAir, ZKMAirBuilder};
+    use zkm_pcs::air::{MachineAir, ZKMAirBuilder};
 
     use crate::utils::{pad_to_power_of_two, uni_stark_prove as prove, uni_stark_verify as verify};
     use core::{
@@ -166,7 +166,7 @@ mod tests {
     use zkm_core_executor::events::ByteRecord;
     use zkm_curves::edwards::ed25519::{ed25519_sqrt, Ed25519BaseField};
     use zkm_derive::AlignedBorrow;
-    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::FieldSqrtCols;
     use crate::CoreChipError;

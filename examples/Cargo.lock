@@ -8826,7 +8826,7 @@ dependencies = [
  "zkm-core-jit",
  "zkm-curves",
  "zkm-primitives 1.2.5",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -8893,7 +8893,7 @@ dependencies = [
  "zkm-curves",
  "zkm-derive",
  "zkm-primitives 1.2.5",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -8933,7 +8933,7 @@ dependencies = [
  "tracing",
  "typenum",
  "zkm-primitives 1.2.5",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9038,7 +9038,7 @@ dependencies = [
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9070,7 +9070,7 @@ dependencies = [
  "zkm-recursion-compiler",
  "zkm-recursion-core",
  "zkm-recursion-gnark-ffi",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9090,7 +9090,7 @@ dependencies = [
  "zkm-primitives 1.2.5",
  "zkm-recursion-core",
  "zkm-recursion-derive",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9126,7 +9126,7 @@ dependencies = [
  "zkm-core-machine",
  "zkm-derive",
  "zkm-primitives 1.2.5",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9157,7 +9157,7 @@ dependencies = [
  "tempfile",
  "zkm-core-machine",
  "zkm-recursion-compiler",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
@@ -9203,11 +9203,11 @@ dependencies = [
  "zkm-cuda",
  "zkm-primitives 1.2.5",
  "zkm-prover",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]
-name = "zkm-stark"
+name = "zkm-pcs"
 version = "1.2.5"
 dependencies = [
  "arrayref",
@@ -9275,7 +9275,7 @@ dependencies = [
  "zkm-core-machine",
  "zkm-primitives 1.2.5",
  "zkm-recursion-core",
- "zkm-stark",
+ "zkm-pcs",
 ]
 
 [[package]]

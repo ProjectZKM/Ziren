@@ -25,7 +25,7 @@ use zkm_curves::{
     AffinePoint, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryCols, MemoryWriteCols},
@@ -468,7 +468,7 @@ pub mod tests {
         BLS12381_DOUBLE_ELF, BN254_DOUBLE_ELF, SECP256K1_DOUBLE_ELF, SECP256R1_DOUBLE_ELF,
     };
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

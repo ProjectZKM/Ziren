@@ -3,7 +3,7 @@ use std::array;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use zkm_primitives::RC_16_30_U32;
-use zkm_stark::air::MachineAirBuilder;
+use zkm_pcs::air::MachineAirBuilder;
 
 use super::{permutation::Poseidon2Cols, NUM_EXTERNAL_ROUNDS, NUM_INTERNAL_ROUNDS, WIDTH};
 

@@ -680,7 +680,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 // dereferences the handle, that's entirely GPU-side bookkeeping.  This
 // is the simpler newtype-wrapper approach (passing
 // a real `&DeviceBuffer<JaggedVal>` would require pulling
-// `zkm-gpu-core` into `zkm-stark`'s public API — a backend
+// `zkm-gpu-core` into `zkm-pcs`'s public API — a backend
 // abstraction that is explicitly out of scope here).
 //
 // **Backward compatible** — V1 hook remains.  Dispatch site prefers
@@ -699,7 +699,7 @@ pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
 /// `dense_q_device_handle` is `None`, V2 falls back to V1 semantics
 /// using `dense_q_host`.
 ///
-/// The handle is opaque — `zkm-stark` never dereferences it.  The
+/// The handle is opaque — `zkm-pcs` never dereferences it.  The
 /// GPU side owns allocation / deallocation.
 pub type GpuJaggedReductionFnV2 = fn(
     dense_q_host: alloc::vec::Vec<JaggedVal>,
@@ -1802,7 +1802,7 @@ pub mod jagged {
     // prover_data drives the unchanged host BaseFold open.  Output is
     // byte-identical to the host precompute -> same wrap proof bytes.
     //
-    // Type erasure: zkm-stark cannot name OuterValMmcs, so the hook takes
+    // Type erasure: zkm-pcs cannot name OuterValMmcs, so the hook takes
     // the `MT` TypeId and returns the concrete-typed
     // `(commit, prover_data)` boxed as `dyn Any`.  The hook returns `None`
     // (host fallback) when the TypeId is not the BN254 OuterValMmcs, the

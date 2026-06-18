@@ -1107,7 +1107,7 @@ where
     // BaseFold-over-BN254 wrap port: OUTER ring dispatch. When the
     // config's challenger is NOT the inner JaggedChallenger (i.e.
     // OuterChallenger), the jagged BaseFold open runs over the outer MMCS
-    // (OuterValMmcs) via a hook registered by recursion-core (zkm-stark
+    // (OuterValMmcs) via a hook registered by recursion-core (zkm-pcs
     // cannot name those types). The hook rmp-serializes a
     // JaggedBasefoldBundleGeneric<OuterValMmcs> -> EvaluationProof::Bytes.
     if TypeId::of::<SC::Challenger>()

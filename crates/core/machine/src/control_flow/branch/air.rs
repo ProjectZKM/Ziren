@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::Opcode;
-use zkm_stark::{
+use zkm_pcs::{
     air::{BaseAirBuilder, ZKMAirBuilder},
     Word,
 };

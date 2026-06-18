@@ -10,7 +10,7 @@ use crate::{
 use p3_air::{AirBuilder, AirBuilderWithPublicValues, PairBuilder};
 use p3_matrix::dense::{DenseMatrix, RowMajorMatrix};
 use zkm_core_executor::{ByteOpcode, Opcode};
-use zkm_stark::{AirLookup, Chip, LookupKind, MachineAir, MessageBuilder, ZKM_PROOF_NUM_PV_ELTS};
+use zkm_pcs::{AirLookup, Chip, LookupKind, MachineAir, MessageBuilder, ZKM_PROOF_NUM_PV_ELTS};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SubmoduleMode {
@@ -577,7 +577,7 @@ impl<'chips, A: MachineAir<Felt>> AirBuilderWithPublicValues for PicusBuilder<'c
 }
 
 impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for PicusBuilder<'chips, A> {
-    fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
+    fn send(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_pcs::LookupScope) {
         // Apply specialization first so opcode routing can see concrete values whenever
         // selector assignments make them decidable.
         let specialized_values: Vec<PicusExpr> =
@@ -624,7 +624,7 @@ impl<'chips, A: MachineAir<Felt>> MessageBuilder<AirLookup<PicusExpr>> for Picus
         }
     }
 
-    fn receive(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_stark::LookupScope) {
+    fn receive(&mut self, message: AirLookup<PicusExpr>, _scope: zkm_pcs::LookupScope) {
         // initialize another chip
         // call eval with builder?
         let specialized_values: Vec<PicusExpr> =

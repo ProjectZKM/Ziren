@@ -13,7 +13,7 @@ use crate::syscall::precompiles::poseidon2::{
 };
 use crate::{air::MemoryAirBuilder, memory::MemoryCols};
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::air::{LookupScope, ZKMAirBuilder};
+use zkm_pcs::air::{LookupScope, ZKMAirBuilder};
 
 impl<F> BaseAir<F> for Poseidon2PermuteChip {
     fn width(&self) -> usize {

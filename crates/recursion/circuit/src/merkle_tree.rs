@@ -178,7 +178,7 @@ mod tests {
         ir::{Builder, Felt},
     };
     use zkm_recursion_core::DIGEST_SIZE;
-    use zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2;
+    use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
 
     use crate::{
         merkle_tree::{verify, MerkleTree},

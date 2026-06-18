@@ -14,8 +14,8 @@ use std::borrow::BorrowMut;
 use tracing::instrument;
 use zkm_core_machine::utils::{next_power_of_two, pad_rows_fixed};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::ExtensionAirBuilder;
-use zkm_stark::air::{BaseAirBuilder, BinomialExtension, MachineAir};
+use zkm_pcs::air::ExtensionAirBuilder;
+use zkm_pcs::air::{BaseAirBuilder, BinomialExtension, MachineAir};
 
 #[cfg(feature = "sys")]
 use crate::BatchFRIEvent;

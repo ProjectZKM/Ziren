@@ -1,6 +1,6 @@
 //! Per-chip opening data for the BaseFold-pipeline shard verifier.
 //!
-//! The legacy [`zkm_stark::ChipOpenedValues`] was designed for the
+//! The legacy [`zkm_pcs::ChipOpenedValues`] was designed for the
 //! 4-batch FRI shape (preprocessed + main + permutation + quotient,
 //! each with `local` + `next` rows).  The BaseFold pipeline:
 //!
@@ -28,9 +28,9 @@
 
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Ext, Felt};
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::septic_digest::SepticDigest;
 
-/// Single-row variant of [`zkm_stark::AirOpenedValues`] for the
+/// Single-row variant of [`zkm_pcs::AirOpenedValues`] for the
 /// BaseFold pipeline.
 ///
 /// Holds only `local` because the BaseFold reduction collapses
@@ -46,7 +46,7 @@ pub struct BasefoldAirOpenedValues<T> {
 
 /// Per-chip opening bundle for the BaseFold pipeline.
 ///
-/// Replaces the legacy [`zkm_stark::ChipOpenedValues`] for the
+/// Replaces the legacy [`zkm_pcs::ChipOpenedValues`] for the
 /// in-circuit verifier; the legacy type stays in place for the
 /// 4-batch FRI verifier path until shim retirement deletes it.
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -115,8 +115,8 @@ mod tests {
     /// host-side base/extension types.
     #[test]
     fn opening_bundle_constructs() {
-        use zkm_stark::septic_curve::SepticCurve;
-        use zkm_stark::septic_extension::SepticExtension;
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
         let chip_opening: BasefoldChipOpenedValues<F, EF> = BasefoldChipOpenedValues {
             preprocessed: BasefoldAirOpenedValues { local: vec![EF::ZERO; 2] },
             main: BasefoldAirOpenedValues { local: vec![EF::ZERO; 4] },

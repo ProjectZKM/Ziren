@@ -32,7 +32,7 @@
 use std::collections::BTreeMap;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::septic_digest::SepticDigest;
 
 use crate::basefold_chip_opened_values::{
     BasefoldAirOpenedValues, BasefoldChipOpenedValues, BasefoldShardOpenedValues,
@@ -52,7 +52,7 @@ use crate::univariate::UnivariatePolynomial;
 use crate::witness::Witnessable;
 use crate::witness::WitnessWriter;
 use crate::CircuitConfig;
-use zkm_stark::{InnerChallenge, InnerVal};
+use zkm_pcs::{InnerChallenge, InnerVal};
 
 // ── Univariate + sumcheck types ──────────────────────────────────
 
@@ -248,8 +248,8 @@ where
         // `main.local[0]` then read what `write` placed at
         // `main.local[14]`, breaking `rlc_eval == point_and_eval.1`
         // (zerocheck.rs:585).
-        use zkm_stark::septic_curve::SepticCurve;
-        use zkm_stark::septic_extension::SepticExtension;
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
         let preprocessed = self.preprocessed.read(builder);
         let main = self.main.read(builder);
         let degree = self.degree.read(builder);

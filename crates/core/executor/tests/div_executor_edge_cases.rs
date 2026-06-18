@@ -1,7 +1,7 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use zkm_core_executor::{ExecutionError, Executor};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 /// DIV-by-zero trap is an *interpreter* contract — the JIT lowers
 /// via x86 IDIV which would SIGFPE the host process.  Real Ziren

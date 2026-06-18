@@ -12,7 +12,7 @@ use clap::Parser;
 use zkm_core_executor::ZKMContext;
 use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::{components::DefaultProverComponents, ZKMProver};
-use zkm_stark::ZKMProverOpts;
+use zkm_pcs::ZKMProverOpts;
 
 #[derive(Parser, Debug)]
 struct Args {

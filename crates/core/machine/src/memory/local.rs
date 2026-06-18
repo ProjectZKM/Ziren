@@ -13,7 +13,7 @@ use p3_maybe_rayon::prelude::{
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryLocalEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir, ZKMAirBuilder},
     LookupKind, Word,
 };
@@ -280,7 +280,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Executor};
-    use zkm_stark::{
+    use zkm_pcs::{
         air::{LookupScope, MachineAir},
         debug_lookups_with_all_chips,
         koala_bear_poseidon2::KoalaBearPoseidon2,

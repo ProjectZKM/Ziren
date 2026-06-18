@@ -1,7 +1,7 @@
 use p3_bn254_fr::Bn254Fr;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_symmetric::Permutation;
-use zkm_stark::PartStarkVerifyingKey;
+use zkm_pcs::PartStarkVerifyingKey;
 
 use super::config::{outer_perm, KoalaBearPoseidon2Outer};
 

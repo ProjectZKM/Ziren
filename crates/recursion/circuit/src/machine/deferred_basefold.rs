@@ -1,7 +1,7 @@
 //! SP1-style parallel call site for the deferred recursion stage.
 //!
 //! Mirror of [`super::deferred`] but consumes
-//! [`zkm_stark::shard_level::shard_proof::BasefoldShardProof`]
+//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
@@ -26,11 +26,11 @@ use zkm_recursion_core::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     DIGEST_SIZE,
 };
-use zkm_stark::air::MachineAir;
-use zkm_stark::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
-use zkm_stark::septic_curve::SepticCurve;
-use zkm_stark::septic_digest::SepticDigest;
-use zkm_stark::{
+use zkm_pcs::air::MachineAir;
+use zkm_pcs::air::{POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS};
+use zkm_pcs::septic_curve::SepticCurve;
+use zkm_pcs::septic_digest::SepticDigest;
+use zkm_pcs::{
     shard_level::shard_proof::BasefoldShardProof, InnerChallenge, InnerVal, StarkVerifyingKey,
     Word,
 };
@@ -52,7 +52,7 @@ use crate::{
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
 pub struct ZKMDeferredBasefoldWitnessValues<
-    SC: zkm_stark::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
+    SC: zkm_pcs::StarkGenericConfig + FieldHasher<p3_koala_bear::KoalaBear>,
 > {
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
@@ -77,11 +77,11 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
         (
             [Felt<C::F>; 8],
             Vec<Felt<C::F>>,
-            zkm_stark::shard_level::types::LogupGkrProof<
+            zkm_pcs::shard_level::types::LogupGkrProof<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
-            zkm_stark::shard_level::types::PartialSumcheckProof<
+            zkm_pcs::shard_level::types::PartialSumcheckProof<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
@@ -92,7 +92,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     pub chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
-            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
@@ -136,7 +136,7 @@ pub struct ZKMDeferredBasefoldVerifier<C, SC, A> {
 pub fn verify_deferred_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMDeferredBasefoldWitnessVariable<C, SC>,
-    machine: &zkm_stark::StarkMachine<SC, A>,
+    machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
     value_assertions: bool,
 ) where
@@ -214,24 +214,24 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // evaluation `evaluate_mle_ext(column_claims, z_col)` panicked
         // on `column_claims.len() != 2^z_col.len()` (1024 vs 1).
         // Mirrors the compress_basefold flow at compress_basefold.rs:268-275.
-        let mut shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+        let mut shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
         // Sort by name to match BTreeMap-ordered opened_values.
         shard_chips.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+            MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
         });
         use p3_air::BaseAir;
         let preprocessed_widths: Vec<usize> = shard_chips
             .iter()
-            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
         let main_widths: Vec<usize> = shard_chips
             .iter()
-            .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+            .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
 
@@ -351,7 +351,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // core_basefold.rs:443-468 / wrap_basefold.rs:370-390 /
         // compress_basefold.rs: the host machine verifier seeds
         // the challenger with vk.observe_into + public_values[0..num_pv]
-        // BEFORE the shard prologue (crates/stark/src/machine.rs:693-707).
+        // BEFORE the shard prologue (crates/pcs/src/machine.rs:693-707).
         // The deferred path created a fresh challenger and did neither —
         // same desync class as the compose path, masked before the
         // VK-enforcement fix landed.
@@ -450,24 +450,24 @@ pub fn verify_deferred_basefold<C, SC, A>(
     SC::commit_recursion_public_values(builder, *deferred_public_values);
 }
 
-impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy deferred witness for a given deferred shape.
     /// Mirror of [`super::deferred::ZKMDeferredWitnessValues::dummy`]
     /// for the basefold pipeline. Wraps a basefold compress dummy +
     /// the existing legacy `ZKMMerkleProofWitnessValues::dummy`.
     pub fn dummy<A>(
-        machine: &zkm_stark::StarkMachine<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             A,
         >,
         shape: &super::deferred::ZKMDeferredShape,
     ) -> Self
     where
-        A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
+        A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
             + for<'b> p3_air::Air<
-                zkm_stark::folder::VerifierConstraintFolder<
+                zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >,
             >,
     {
@@ -480,7 +480,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             merkle_tree_height: shape.height,
         };
         let inner = super::compress_basefold::ZKMCompressBasefoldWitnessValues::<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
         >::dummy::<A>(machine, &inner_shape);
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(
             inner.vks_and_proofs.len(),
@@ -493,15 +493,15 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
             zkm_vk_digest: [p3_koala_bear::KoalaBear::ZERO; zkm_recursion_core::DIGEST_SIZE],
             start_reconstruct_deferred_digest: [
                 p3_koala_bear::KoalaBear::ZERO;
-                zkm_stark::air::POSEIDON_NUM_WORDS
+                zkm_pcs::air::POSEIDON_NUM_WORDS
             ],
             committed_value_digest: [
-                zkm_stark::Word::default();
-                zkm_stark::air::PV_DIGEST_NUM_WORDS
+                zkm_pcs::Word::default();
+                zkm_pcs::air::PV_DIGEST_NUM_WORDS
             ],
             deferred_proofs_digest: [
                 p3_koala_bear::KoalaBear::ZERO;
-                zkm_stark::air::POSEIDON_NUM_WORDS
+                zkm_pcs::air::POSEIDON_NUM_WORDS
             ],
             end_pc: p3_koala_bear::KoalaBear::ZERO,
             end_shard: p3_koala_bear::KoalaBear::ZERO,

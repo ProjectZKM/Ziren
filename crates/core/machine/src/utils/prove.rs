@@ -10,7 +10,7 @@ use std::{
 };
 use thiserror::Error;
 use web_time::Instant;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey, MachineVerificationError,
 };
 
@@ -30,7 +30,7 @@ use zkm_core_executor::{
 };
 use zkm_primitives::io::ZKMPublicValues;
 
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, PublicValues},
     Com, CpuProver, DebugConstraintBuilder, LookupBuilder, MachineProof, MachineProver,
     MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
@@ -807,14 +807,14 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+        + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
             'b,
             Val<SC>,
             <SC as StarkGenericConfig>::Challenge,
         >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + zkm_stark::BasefoldRing,
+    SC: StarkGenericConfig + zkm_pcs::BasefoldRing,
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,
@@ -854,14 +854,14 @@ where
         + Air<LookupBuilder<Val<SC>>>
         + for<'a> Air<VerifierConstraintFolder<'a, SC>>
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + for<'b> Air<zkm_stark::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+        + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
             'b,
             Val<SC>,
             <SC as StarkGenericConfig>::Challenge,
         >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + zkm_stark::BasefoldRing,
+    SC: StarkGenericConfig + zkm_pcs::BasefoldRing,
     SC::Val: p3_field::PrimeField32,
     SC::Challenger: Clone,
     Com<SC>: Send + Sync,

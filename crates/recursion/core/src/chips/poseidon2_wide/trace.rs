@@ -14,7 +14,7 @@ use zkm_core_machine::utils::next_power_of_two;
 
 #[cfg(not(feature = "sys"))]
 use zkm_primitives::RC_16_30_U32;
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 #[cfg(not(feature = "sys"))]
 use crate::chips::mem::MemoryAccessColsChips;
@@ -436,7 +436,7 @@ mod tests {
     use rand::Rng;
     use zkhash::ark_ff::UniformRand;
     use zkm_core_machine::operations::poseidon2::trace::populate_perm;
-    use zkm_stark::{air::MachineAir, inner_perm};
+    use zkm_pcs::{air::MachineAir, inner_perm};
 
     use crate::{
         chips::poseidon2_wide::{Poseidon2WideChip, WIDTH},

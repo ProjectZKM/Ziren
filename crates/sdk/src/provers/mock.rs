@@ -2,7 +2,7 @@
 use hashbrown::HashMap;
 use zkm_core_executor::{ZKMContext, ZKMReduceProof};
 use zkm_core_machine::io::ZKMStdin;
-use zkm_stark::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
+use zkm_pcs::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
@@ -17,7 +17,7 @@ use zkm_prover::{
     verify::{verify_groth16_bn254_public_inputs, verify_plonk_bn254_public_inputs},
     DvSnarkBn254Proof, Groth16Bn254Proof, HashableKey, PlonkBn254Proof, ZKMProver,
 };
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::septic_digest::SepticDigest;
 
 use super::{ProofOpts, ProverType};
 

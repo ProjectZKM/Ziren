@@ -9,7 +9,7 @@ use p3_koala_bear::KoalaBear;
 use p3_matrix::dense::RowMajorMatrix;
 use zkm_core_machine::utils::pad_rows_fixed;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 use crate::{
     air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
@@ -317,7 +317,7 @@ mod tests {
     use zkm_core_machine::utils::setup_logger;
 
     use std::{array, borrow::Borrow};
-    use zkm_stark::{air::MachineAir, StarkGenericConfig};
+    use zkm_pcs::{air::MachineAir, StarkGenericConfig};
 
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;

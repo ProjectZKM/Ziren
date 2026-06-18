@@ -2,7 +2,7 @@ use p3_field::{
     extension::{BinomialExtensionField, BinomiallyExtendable},
     BasedVectorSpace, Field,
 };
-use zkm_stark::air::BinomialExtension;
+use zkm_pcs::air::BinomialExtension;
 
 use super::Block;
 

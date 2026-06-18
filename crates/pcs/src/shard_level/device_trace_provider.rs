@@ -6,7 +6,7 @@
 //! `(height, width)` check unable to disambiguate same-shape chips
 //! across shards — silent cryptographic corruption.
 //!
-//! Trait is erased over the device-handle type so `zkm-stark` stays
+//! Trait is erased over the device-handle type so `zkm-pcs` stays
 //! CUDA-agnostic; concrete impls live in `ziren-gpu`.
 
 use alloc::sync::Arc;

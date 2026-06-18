@@ -29,11 +29,11 @@ use std::marker::PhantomData;
 use p3_air::{Air, BaseAir};
 use p3_field::{Algebra, PrimeCharacteristicRing, TwoAdicField};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
-use zkm_stark::{
+use zkm_pcs::{
     air::MachineAir, ChipOpenedValues, MachineChip, OpeningShapeError,
 };
-use zkm_stark::folder::PairWindow;
-use zkm_stark::septic_digest::SepticDigest;
+use zkm_pcs::folder::PairWindow;
+use zkm_pcs::septic_digest::SepticDigest;
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
@@ -273,8 +273,8 @@ where
     fn zero_cumulative_sums(
         builder: &mut Builder<C>,
     ) -> (Ext<C::F, C::EF>, SepticDigest<Felt<C::F>>) {
-        use zkm_stark::septic_curve::SepticCurve;
-        use zkm_stark::septic_extension::SepticExtension;
+        use zkm_pcs::septic_curve::SepticCurve;
+        use zkm_pcs::septic_extension::SepticExtension;
         let zero_lcs: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
         let zero_felt: Felt<C::F> = builder.constant(C::F::ZERO);
         let zero_gcs: SepticDigest<Felt<C::F>> = SepticDigest(SepticCurve {
@@ -732,7 +732,7 @@ mod tests {
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::Ext;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

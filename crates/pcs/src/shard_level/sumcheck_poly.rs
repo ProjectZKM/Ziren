@@ -297,7 +297,7 @@ fn rlc_eval<EF: Field>(vals: &[EF], lambda: EF) -> EF {
 // GPU sumcheck hooks: ziren-gpu registers concrete-typed
 // implementations at startup; host call sites dispatch through the
 // OnceLock<fn> pointers. Pattern avoids a cyclic Cargo dep between
-// zkm-stark and the GPU crate.
+// zkm-pcs and the GPU crate.
 type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
 
 /// Signature of the GPU sumcheck round-poly evaluator.  Returns the
@@ -1032,7 +1032,7 @@ gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
 //
 // The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
-// types live in recursion-core, which depends on zkm-stark, so zkm-stark cannot
+// types live in recursion-core, which depends on zkm-pcs, so zkm-pcs cannot
 // name them. recursion-core registers these hooks; the generic shard
 // prover (`emit_jagged_pcs_bytes`) / verifier consult them when the config's
 // challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical

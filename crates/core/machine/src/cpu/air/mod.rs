@@ -4,7 +4,7 @@ use core::borrow::Borrow;
 use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::ByteOpcode;
-use zkm_stark::{
+use zkm_pcs::{
     air::{BaseAirBuilder, PublicValues, ZKMAirBuilder, ZKM_PROOF_NUM_PV_ELTS},
     Word,
 };

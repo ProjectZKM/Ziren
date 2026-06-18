@@ -14,7 +14,7 @@ use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, GlobalLookupEvent},
     ExecutionRecord, Program,
 };
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, MachineAir},
     septic_curve::{SepticCurve, SepticCurveComplete},
     septic_digest::SepticDigest,
@@ -329,7 +329,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{ExecutionRecord, Executor};
-    use zkm_stark::{air::MachineAir, ZKMCoreOpts};
+    use zkm_pcs::{air::MachineAir, ZKMCoreOpts};
 
     #[test]
     fn test_global_generate_trace() {

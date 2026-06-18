@@ -1,7 +1,7 @@
 use p3_bn254_fr::Bn254;
 use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
 use p3_koala_bear::KoalaBear;
-use zkm_stark::{Inner128Challenge, InnerChallenge, InnerVal};
+use zkm_pcs::{Inner128Challenge, InnerChallenge, InnerVal};
 
 use crate::{circuit::AsmConfig, prelude::Config};
 

@@ -9,7 +9,7 @@ use p3_matrix::stack::VerticalPair;
 use zkm_recursion_compiler::ir::{
     Builder, Config, Ext, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
 };
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, MultiTableAirBuilder, EmptyMessageBuilder},
     AirOpenedValues, ChipOpenedValues, MachineChip, OpeningShapeError,
     folder::PairWindow,

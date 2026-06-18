@@ -30,7 +30,7 @@ use zkm_curves::{
     CurveError, CurveType, EllipticCurve,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, Polynomial, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryReadWriteCols},
@@ -540,7 +540,7 @@ mod tests {
         BLS12381_DECOMPRESS_ELF, SECP256K1_DECOMPRESS_ELF, SECP256R1_DECOMPRESS_ELF,
     };
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
     //
     use crate::utils::run_test_io;
     //

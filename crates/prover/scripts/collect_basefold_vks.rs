@@ -24,7 +24,7 @@ use zkm_core_machine::io::ZKMStdin;
 use zkm_prover::components::DefaultProverComponents;
 use zkm_prover::{HashableKey, ZKMProver};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::{Val, ZKMProverOpts};
+use zkm_pcs::{Val, ZKMProverOpts};
 
 type KB = p3_koala_bear::KoalaBear;
 
@@ -193,5 +193,5 @@ fn main() {
     bincode::serialize_into(&mut out_file, &hashes).unwrap();
     eprintln!("wrote vk_map to {:?}", args.output);
 
-    let _: Val<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> = KB::default();
+    let _: Val<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> = KB::default();
 }

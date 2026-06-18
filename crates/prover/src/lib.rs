@@ -84,12 +84,12 @@ pub use zkm_recursion_gnark_ffi::proof::{DvSnarkBn254Proof, Groth16Bn254Proof, P
 use zkm_recursion_gnark_ffi::{
     groth16_bn254::Groth16Bn254Prover, plonk_bn254::PlonkBn254Prover, DvSnarkBn254Prover,
 };
-use zkm_stark::{
+use zkm_pcs::{
     air::PublicValues, koala_bear_poseidon2::KoalaBearPoseidon2, Challenge, MachineProver,
     ShardProof, StarkGenericConfig, StarkProvingKey, StarkVerifyingKey, Val, Word, ZKMCoreOpts,
     ZKMProverOpts, DIGEST_SIZE,
 };
-use zkm_stark::{shape::OrderedShape, MachineProvingKey};
+use zkm_pcs::{shape::OrderedShape, MachineProvingKey};
 
 pub use types::*;
 use utils::{words_to_bytes, zkm_committed_values_digest_bn254, zkm_vkey_digest_bn254};
@@ -645,7 +645,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         let mut program = build_normalize_basefold_program(
             self.core_prover.machine(),
@@ -727,7 +727,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         // basefold-for-recursion is now the default. The
         // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env toggle and the legacy
@@ -753,7 +753,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMDeferredBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         // basefold-for-recursion is now the default. Mirrors the
         // cutover on `build_compose_program_basefold_uncached`.
@@ -778,7 +778,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_wrap_basefold_program(
             self.compress_prover.machine(),
@@ -819,7 +819,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
 
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
 
         let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
@@ -1396,7 +1396,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     .machine()
                                     .verify(
                                         &vk,
-                                        &zkm_stark::MachineProof {
+                                        &zkm_pcs::MachineProof {
                                             shard_proofs: vec![proof.clone()],
                                         },
                                         &mut self.compress_prover.config().challenger(),
@@ -1688,7 +1688,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         //
         // The CPU `StarkMachine::open` populates `basefold_shard_proof`
         // inline via `try_prove_shard_to_basefold_boxed`
-        // (crates/stark/src/prover.rs:564), so on CPU this guard is a
+        // (crates/pcs/src/prover.rs:564), so on CPU this guard is a
         // no-op.  Under `StarkGpuProver<InnerSC, ShrinkAir>` with
         // `ZIREN_GPU_DROP_FRI` (default), the GPU `open()` returns
         // `basefold_shard_proof: None`, and `wrap_bn254` `.expect()`s
@@ -1704,7 +1704,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             use core::any::Any;
             use p3_challenger::CanObserve;
             use p3_symmetric::MerkleCap;
-            use zkm_stark::air::MachineAir;
+            use zkm_pcs::air::MachineAir;
 
             // Re-run generate_dependencies + generate_traces on a fresh
             // clone of the record (mirrors the GPU orchestrator + host
@@ -1748,7 +1748,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // pipeline dispatch does before driving the basefold prove.
             let _shrink_gpu_guard = device_provider
                 .as_ref()
-                .map(|(_, dev)| zkm_stark::gpu_worker_context::GpuPoolWorkerGuard::new(*dev));
+                .map(|(_, dev)| zkm_pcs::gpu_worker_context::GpuPoolWorkerGuard::new(*dev));
             // Escape hatch: ZIREN_GPU_SHRINK_DEVICE_REHYDRATE=1 keeps the
             // host rehydrate even with a provider attached (provider-
             // preferred paths still fire; host fallbacks stay covered).
@@ -1805,7 +1805,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // chips iteration order (shard_chips_ordered). Empty matrix
             // when a chip has no preprocessed / main columns.
             let machine = self.shrink_prover.machine();
-            let chips: Vec<&zkm_stark::Chip<Val<InnerSC>, _>> =
+            let chips: Vec<&zkm_pcs::Chip<Val<InnerSC>, _>> =
                 machine.shard_chips_ordered(&data.chip_ordering).collect();
 
             let preprocessed_traces: Vec<RowMajorMatrix<Val<InnerSC>>> = chips
@@ -1851,10 +1851,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // (prover.rs:1165) and the compress orchestrator
             // (compress_multi_gpu.rs:1613).
             let max_log_row_count =
-                zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+                zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                     .max_log_row_count;
 
-            let bf_proof = zkm_stark::shard_level::prover::prove_shard_to_basefold::<
+            let bf_proof = zkm_pcs::shard_level::prover::prove_shard_to_basefold::<
                 InnerSC,
                 ShrinkAir<Val<InnerSC>>,
             >(
@@ -1869,10 +1869,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // device-resident; None on the CPU prover (legacy host path).
                 device_provider
                     .as_ref()
-                    .map(|(p, _)| p.as_ref() as &dyn zkm_stark::shard_level::DeviceTraceProvider),
+                    .map(|(p, _)| p.as_ref() as &dyn zkm_pcs::shard_level::DeviceTraceProvider),
                 // Both the CPU/host prover and the GPU device path emit
                 // MSB-folded proofs (resolve_gpu_fold_orientation() default).
-                zkm_stark::shard_level::shard_proof::FoldOrientation::Msb,
+                zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,
@@ -2409,8 +2409,8 @@ pub mod tests {
             ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape,
             PublicValuesOutputDigest, ZKMCompressShape,
         };
-        use zkm_stark::air::MachineAir;
-        use zkm_stark::shape::OrderedShape;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
 
         // Build the production compress machine (RecursionAir, COMPRESS_DEGREE).
         let compress_machine = CompressAir::compress_machine(InnerSC::default());
@@ -2458,7 +2458,7 @@ pub mod tests {
         // → ir_par_map_collect → DslIr::Parallel → compile_block →
         // SeqBlock::Parallel).
         let max_log_row_count =
-            zkm_stark::shard_level::verifier::BasefoldShardVerifier::production_default()
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count;
         let program = build_compose_basefold_program::<CompressAir<KoalaBear>>(
             &compress_machine,
@@ -3027,7 +3027,7 @@ pub mod tests {
             zkm_recursion_core::stark::outer_jagged_hooks::register_outer_jagged_hooks();
             let prover = ZKMProver::<DefaultProverComponents>::new();
             let mut challenger = prover.wrap_prover.config().challenger();
-            let machine_proof = zkm_stark::MachineProof {
+            let machine_proof = zkm_pcs::MachineProof {
                 shard_proofs: vec![wrapped.proof.clone()],
             };
             match prover.wrap_prover.machine().verify(&wrapped.vk, &machine_proof, &mut challenger) {
@@ -3140,10 +3140,10 @@ pub mod tests {
                     if let Some(d) = dummy.shard_proofs.get_mut(di) {
                         let mut ep = sp_real.evaluation_proof.clone();
                         if zero_vals {
-                            use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                            use zkm_pcs::shard_level::shard_proof::EvaluationProof;
                             if let EvaluationProof::Bundle(bd) = &mut ep {
                                 use p3_field::PrimeCharacteristicRing;
-                                type EF = zkm_stark::InnerChallenge;
+                                type EF = zkm_pcs::InnerChallenge;
                                 // Zero every EF/F scalar value in place, keeping
                                 // all vec lengths. If the resulting program is
                                 // byte-identical to the real-value clone → the
@@ -3157,12 +3157,12 @@ pub mod tests {
                                 bf.final_poly = EF::ZERO;
                                 for mo in bf.component_polynomials_query_openings_and_proofs.iter_mut() {
                                     for l in mo.leaves.iter_mut() {
-                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_stark::InnerVal::ZERO); }
+                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_pcs::InnerVal::ZERO); }
                                     }
                                 }
                                 for mo in bf.query_phase_openings_and_proofs.iter_mut() {
                                     for l in mo.leaves.iter_mut() {
-                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_stark::InnerVal::ZERO); }
+                                        for v in l.values.iter_mut() { v.iter_mut().for_each(|x| *x = zkm_pcs::InnerVal::ZERO); }
                                     }
                                 }
                                 for r in bd.basefold_proof.batch_evaluations.iter_mut() { r.iter_mut().for_each(|x| *x = EF::ZERO); }
@@ -3360,7 +3360,7 @@ pub mod tests {
                 eprintln!("[VKEQ-OV] {tag} (quot_outer,quot_inner0,log_deg) per chip={:?}", qd);
             }
             {
-                use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                use zkm_pcs::shard_level::shard_proof::EvaluationProof;
                 if let (EvaluationProof::Bundle(rbd), EvaluationProof::Bundle(dbd)) = (
                     &input.shard_proofs[0].evaluation_proof,
                     &dummy.shard_proofs[0].evaluation_proof,
@@ -3391,7 +3391,7 @@ pub mod tests {
             }
             eprintln!("[VKEQ] input {i} real shape={:?}", shape);
             {
-                use zkm_stark::shard_level::shard_proof::EvaluationProof;
+                use zkm_pcs::shard_level::shard_proof::EvaluationProof;
                 for (tag, sp) in
                     [("REAL", &input.shard_proofs[0]), ("DUMMY", &dummy.shard_proofs[0])]
                 {
@@ -3482,7 +3482,7 @@ pub mod tests {
             // vk can never be in the map regardless of value-independence.
             {
                 use crate::shapes::ZKMProofShape;
-                use zkm_stark::shape::OrderedShape;
+                use zkm_pcs::shape::OrderedShape;
                 let core_cfg = prover.core_shape_config.as_ref().unwrap();
                 let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
                 let enum_rec: std::collections::BTreeSet<OrderedShape> =
@@ -3558,7 +3558,7 @@ pub mod tests {
         // BasefoldShardVerifier::verify_shard -> verify_zerocheck_host ->
         // (S8J_RLC) recompute_and_report_rlc_eval_host.
         let mut challenger = prover.core_prover.config().challenger();
-        let machine_proof = zkm_stark::MachineProof {
+        let machine_proof = zkm_pcs::MachineProof {
             shard_proofs: core_proof.proof.0.to_vec(),
         };
         let res = prover.core_prover.machine().verify(&vk.vk, &machine_proof, &mut challenger);
@@ -3591,7 +3591,7 @@ pub mod tests {
         use zkm_recursion_circuit::machine::{
             ZKMCompressWithVkeyShape, ZKMWrapBasefoldWitnessValues,
         };
-        use zkm_stark::shape::OrderedShape;
+        use zkm_pcs::shape::OrderedShape;
         setup_logger();
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let bytes = std::fs::read("/tmp/fib_compress.bin").expect(
@@ -3672,7 +3672,7 @@ pub mod tests {
         // (which may carry retired chip names) whose machine-filtered
         // heights match the real proof.  This is the true map-membership
         // predicate: vk_enum is what `build_compress_vks` would store.
-        use zkm_stark::air::MachineAir;
+        use zkm_pcs::air::MachineAir;
         let machine_names: std::collections::BTreeSet<String> = prover
             .compress_prover
             .machine()
@@ -3739,7 +3739,7 @@ pub mod tests {
     #[ignore]
     fn vkroot_enforce_probe() {
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-        use zkm_stark::shape::OrderedShape;
+        use zkm_pcs::shape::OrderedShape;
         std::env::set_var("ZKM_DEBUG", "true");
         let trap_pc: usize = std::env::var("TRAP_PC")
             .ok()
@@ -4138,8 +4138,8 @@ pub mod tests {
         // geometry (name-sorted machine widths + added-zero heuristic)
         // against the host bundle's actual packing.
         {
-            use zkm_stark::air::MachineAir;
-            use zkm_stark::shard_level::shard_proof::EvaluationProof;
+            use zkm_pcs::air::MachineAir;
+            use zkm_pcs::shard_level::shard_proof::EvaluationProof;
             for (si, sp) in input.shard_proofs.iter().enumerate() {
                 let names: Vec<String> = sp.chip_log_heights.keys().cloned().collect();
                 eprintln!(
@@ -4356,8 +4356,8 @@ pub mod tests {
     #[ignore]
     fn vkroot_enforce_negtest() {
         use std::borrow::BorrowMut as _;
-        use zkm_stark::air::PublicValues;
-        use zkm_stark::Word;
+        use zkm_pcs::air::PublicValues;
+        use zkm_pcs::Word;
         setup_logger();
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let bytes = std::fs::read("/tmp/fib_core.bin").expect("need /tmp/fib_core.bin");
@@ -4414,7 +4414,7 @@ pub mod tests {
     #[ignore]
     fn vkroot_check_fib_in_map() {
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-        use zkm_stark::shape::OrderedShape;
+        use zkm_pcs::shape::OrderedShape;
         let fib: Vec<(&str, usize)> = vec![
             ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
             ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
@@ -4473,9 +4473,9 @@ pub mod tests {
     #[ignore]
     fn vkroot_site5_construct() {
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-        use zkm_stark::shape::OrderedShape;
-        use zkm_stark::shard_level::shard_proof::EvaluationProof;
-        use zkm_stark::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+        use zkm_pcs::air::MachineAir;
 
         let fib_vk = [
             1995641422u32, 1126409227, 1338345684, 1611704093, 650337242, 439362553,
@@ -4545,8 +4545,8 @@ pub mod tests {
     #[ignore]
     fn vkroot_normalize_vk_equivalence_class() {
         use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
-        use zkm_stark::shape::OrderedShape;
-        use zkm_stark::shard_level::shard_proof::EvaluationProof;
+        use zkm_pcs::shape::OrderedShape;
+        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
 
         // fib's exact real core shape (from test_vk_equality_normalize_fib dump).
         let fib: Vec<(&str, usize)> = vec![

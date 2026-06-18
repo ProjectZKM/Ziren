@@ -12,7 +12,7 @@ use std::{
 };
 use zkm_core_machine::utils::indices_arr;
 use zkm_derive::AlignedBorrow;
-use zkm_stark::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
+use zkm_pcs::{air::POSEIDON_NUM_WORDS, septic_digest::SepticDigest, Word, PROOF_MAX_NUM_PVS};
 
 pub const PV_DIGEST_NUM_WORDS: usize = 8;
 

@@ -23,7 +23,7 @@ use zkm_core_executor::{
     ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_stark::{air::MachineAir, PicusInfo, Word};
+use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
@@ -287,7 +287,7 @@ mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
-    use zkm_stark::{
+    use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 

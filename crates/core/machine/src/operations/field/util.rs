@@ -1,6 +1,6 @@
 use num::BigUint;
 use p3_field::PrimeField32;
-use zkm_stark::air::Polynomial;
+use zkm_pcs::air::Polynomial;
 
 // Converts a BigUint into a field element regardless of its size.
 fn biguint_to_field<F: PrimeField32>(num: BigUint) -> F {

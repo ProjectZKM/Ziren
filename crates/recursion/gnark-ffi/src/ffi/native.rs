@@ -307,7 +307,7 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
     use p3_symmetric::Permutation;
-    use zkm_stark::inner_perm;
+    use zkm_pcs::inner_perm;
 
     #[test]
     pub fn test_koalabear_poseidon2() {

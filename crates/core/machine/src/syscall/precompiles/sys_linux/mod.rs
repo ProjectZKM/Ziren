@@ -15,7 +15,7 @@ impl SysLinuxChip {
 pub mod sys_linux_tests {
 
     use zkm_core_executor::{syscalls::SyscallCode, Instruction, Opcode, Program};
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils::{run_test, setup_logger};
 

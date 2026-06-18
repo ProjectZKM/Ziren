@@ -1,7 +1,7 @@
 use std::ops::{Add, AddAssign};
 
 use p3_field::{extension::BinomiallyExtendable, PrimeField32};
-use zkm_stark::{
+use zkm_pcs::{
     air::{LookupScope, MachineAir, PicusInfo},
     shape::OrderedShape,
     Chip, StarkGenericConfig, StarkMachine, PROOF_MAX_NUM_PVS,
@@ -312,10 +312,10 @@ impl From<RecursionShape> for OrderedShape {
 /// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
 ///
 /// The host-side `BasefoldConstraintFolder` (defined at
-/// `zkm-stark::shard_level::basefold_constraint_folder`) is
+/// `zkm-pcs::shard_level::basefold_constraint_folder`) is
 /// `AirBuilder + EmptyMessageBuilder`, which by way of the blanket impls
 /// `AB: AirBuilder<F: Field> + MessageBuilder<AirLookup<...>> => BaseAirBuilder`
-/// (`crates/stark/src/air/builder.rs:581`) and
+/// (`crates/pcs/src/air/builder.rs:581`) and
 /// `AB: BaseAirBuilder => RecursionAirBuilder` (`crates/recursion/core/src/builder.rs:15`)
 /// and `AB: RecursionAirBuilder => ZKMRecursionAirBuilder` (`crates/recursion/core/src/builder.rs:14`)
 /// automatically becomes a `ZKMRecursionAirBuilder` — so the existing
@@ -340,7 +340,7 @@ mod basefold_air_assertions {
     };
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
-    use zkm_stark::{
+    use zkm_pcs::{
         shard_level::basefold_constraint_folder::BasefoldConstraintFolder, InnerChallenge,
     };
 
@@ -401,7 +401,7 @@ pub mod tests {
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
     use zkm_core_machine::utils::run_test_machine;
-    use zkm_stark::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         runtime::{

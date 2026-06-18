@@ -1,6 +1,6 @@
 //! Lift adapter — bridges the host-side
 //! `evaluation_proof: Vec<u8>` bytes (carried by
-//! [`zkm_stark::shard_level::shard_proof::BasefoldShardProof`])
+//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`])
 //! into a recursion-circuit
 //! [`crate::jagged_circuit::JaggedPcsProofVariable`].
 //!
@@ -18,7 +18,7 @@
 //! Deserialization (pipeline step 1) is wired (rmp-serde is one call).
 //! The Witnessable mapping and assembly (steps 2 and 3) are
 //! deferred — the mapping requires Witnessable impls for
-//! [`zkm_stark::jagged_pcs::jagged::JaggedReductionProof`]
+//! [`zkm_pcs::jagged_pcs::jagged::JaggedReductionProof`]
 //! and `StackedBasefoldProof`, which are stark-side internal
 //! types not currently exposed to the recursion-circuit
 //! Witnessable surface.  Until those are added, this adapter
@@ -49,7 +49,7 @@ use crate::jagged_circuit::{
 use crate::partial_sumcheck::PartialSumcheckProof;
 use crate::univariate::UnivariatePolynomial;
 use crate::CircuitConfig;
-use zkm_stark::{InnerChallenge, InnerVal};
+use zkm_pcs::{InnerChallenge, InnerVal};
 
 /// Lift a host-side jagged-PCS evaluation proof (raw bytes) into
 /// an in-circuit [`JaggedPcsProofVariable`].
@@ -105,7 +105,7 @@ where
     // byte-for-byte.
     if !bytes.is_empty() {
         if let Some(bundle) =
-            zkm_stark::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
+            zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle::from_bytes(bytes)
         {
             let (cp, sc, je, ee, cr) =
                 crate::shard_level_witness::const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
@@ -380,7 +380,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = Vec::new();
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 21, &cols);
         // column_counts lifted through verbatim.
         assert_eq!(var.column_counts, cols);
         assert_eq!(var.original_commitments.len(), 2);
@@ -394,7 +394,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let bytes = vec![0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let cols: Vec<Vec<usize>> = vec![vec![1, 2]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 16, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bytes, 16, &cols);
         assert_eq!(var.column_counts, cols);
     }
 
@@ -408,7 +408,7 @@ mod tests {
         // flattened = 3+3 = 6 per round, 2 rounds = 12 → padded to 16
         // → col_prefix_sums.len() = 17.
         let cols: Vec<Vec<usize>> = vec![vec![3, 3], vec![3, 3]];
-        let var = lift_evaluation_proof_bytes::<C, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 8, &cols);
+        let var = lift_evaluation_proof_bytes::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &[], 8, &cols);
         assert_eq!(var.params.col_prefix_sums.len(), 17);
         assert_eq!(var.params.col_prefix_sums[0].len(), 9); // max_log_row_count + 1
     }

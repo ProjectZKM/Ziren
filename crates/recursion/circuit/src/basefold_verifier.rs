@@ -20,7 +20,7 @@
 //!    two EF coefficients), check `(1 - x_r) g(0) + x_r g(1) == claim_r`
 //! 3. **Sample beta_r** — shared between sumcheck and FRI fold (the
 //!    BaseFold key invariant — see
-//!    [`crates/stark/src/basefold`](crate::basefold))
+//!    [`crates/pcs/src/basefold`](crate::basefold))
 //! 4. **Update claim** — `claim_{r+1} = g(0) + beta_r * g(1)`
 //!
 //! After all rounds:
@@ -71,7 +71,7 @@ pub struct BasefoldVerifierParams {
 
 impl BasefoldVerifierParams {
     /// Inner-stage production default — the in-circuit twin of
-    /// `zkm_stark::basefold::config::FriConfig::default_fri_config`:
+    /// `zkm_pcs::basefold::config::FriConfig::default_fri_config`:
     /// `(log_blowup=2, num_queries=124, pow_bits=16)` (#57).  This is the
     /// verifier the recursion programs use for EVERY inner KoalaBear child:
     /// compress→core, shrink→compress, AND wrap→shrink (the shrink proof is
@@ -98,7 +98,7 @@ impl BasefoldVerifierParams {
     }
 
     /// **WRAP-stage in-circuit params** — the in-circuit twin of
-    /// `zkm_stark::basefold::config::FriConfig::wrap_fri_config`:
+    /// `zkm_pcs::basefold::config::FriConfig::wrap_fri_config`:
     /// `(log_blowup=3, num_queries=94, pow_bits=22)`.  Used by the gnark
     /// OUTER circuit that verifies the on-chain WRAP STARK proof, so the
     /// in-circuit verifier reads the codeword at the SAME rate the wrap
@@ -273,7 +273,7 @@ pub struct RecursiveBasefoldProof<F, EF, Dig = [F; 8]> {
 /// keeps compiling unchanged. The OUTER ring instantiates
 /// `RecursiveBasefoldVerifier<KoalaBearPoseidon2Outer>`
 /// (DigestVariable = `[Var<Bn254>;1]`).
-pub struct RecursiveBasefoldVerifier<HV = zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+pub struct RecursiveBasefoldVerifier<HV = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     pub params: BasefoldVerifierParams,
     pub _phantom_hv: core::marker::PhantomData<HV>,
 }
@@ -630,7 +630,7 @@ where
         // The fold point depends on the query index's per-round bit
         // (which sibling is at +x vs -x).  Mirror SP1
         // (crates/recursion/circuit/src/basefold/mod.rs:347-406) and the
-        // host (crates/stark/src/basefold/verifier.rs:378-387):
+        // host (crates/pcs/src/basefold/verifier.rs:378-387):
         //   xs = [x, -x]   if bit == 0   (current at +x)
         //   xs = [-x, x]   if bit == 1   (current at -x)
         //   folded' = eval0 + (beta - xs[0]) * (eval1 - eval0) / (xs[1] - xs[0])
@@ -749,7 +749,7 @@ where
 
         // #H (BaseFold-over-BN254 wrap port): the in-circuit transcript
         // is now a byte-for-byte mirror of the HOST basefold open
-        // verifier `verify_mle_evaluations` (crates/stark/src/basefold/
+        // verifier `verify_mle_evaluations` (crates/pcs/src/basefold/
         // verifier.rs:91+).  The original per-round commitments are
         // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
         // host verify_jagged_basefold_inner_generic's leading
@@ -779,7 +779,7 @@ where
         // KEEP the sampled batching point — the per-query batched
         // initial_eval below recombines the component-opening leaf values
         // with partial_lagrange(batching_point) coefficients, mirroring the
-        // host (crates/stark/src/basefold/verifier.rs:110-125, 208-246).
+        // host (crates/pcs/src/basefold/verifier.rs:110-125, 208-246).
         let batching_coefficients: Vec<zkm_recursion_compiler::prelude::Ext<C::F, C::EF>> = {
             let total_polys: usize =
                 batch_evaluations.iter().map(|r| r.len()).sum();
@@ -826,7 +826,7 @@ where
         );
 
         // (4) Commit-phase transcript replay — byte-for-byte the
-        // BaseFold PROVER cadence (crates/stark/src/basefold/prover.rs
+        // BaseFold PROVER cadence (crates/pcs/src/basefold/prover.rs
         // open_jagged_pcs step 4/5):
         //   observe(num_variables);
         //   per round: observe(uni_poly[0]); observe(uni_poly[1]);
@@ -1013,7 +1013,7 @@ where
                 // carries the structured digest path.
                 //
                 // Mirrors the HOST commit-phase Merkle verify (p3
-                // MerkleTreeMmcs::verify_batch, crates/stark/src/basefold/
+                // MerkleTreeMmcs::verify_batch, crates/pcs/src/basefold/
                 // verifier.rs:389-404) and SP1's recursion `verify`
                 // (basefold/merkle_tree.rs):
                 //   * leaf = H(full row = [eval0(4 KB), eval1(4 KB)] = 8 felts)
@@ -1060,7 +1060,7 @@ where
                     // `original_commitments` passed in `commitments` (those bind
                     // the *component* openings, a different opening set).  The
                     // host `verify_queries` checks each commit-phase leaf against
-                    // `&proof.fri_commitments` (crates/stark/src/basefold/
+                    // `&proof.fri_commitments` (crates/pcs/src/basefold/
                     // verifier.rs:280, 394).
                     if round_idx < proof.rounds.len() {
                         // commitment is a witnessed DigestVariable.
@@ -1109,7 +1109,7 @@ mod tests {
         // Iter 1: r=2, pairs (12,20) → [12 + 2*(20-12)] = [28]
         // So the test result = 28.
         // (This is testing the algorithm, not arithmetic semantics — Mle::eval_at uses the same.)
-        let result = RecursiveBasefoldVerifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>::evaluate_multilinear_padded_host_shape::<EF, F>(
+        let result = RecursiveBasefoldVerifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>::evaluate_multilinear_padded_host_shape::<EF, F>(
             &coeffs, &point,
         );
         assert_eq!(result, 28);

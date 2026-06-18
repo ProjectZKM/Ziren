@@ -1,6 +1,6 @@
 use p3_field::PrimeCharacteristicRing;
 use zkm_curves::params::FieldParameters;
-use zkm_stark::air::{Polynomial, ZKMAirBuilder};
+use zkm_pcs::air::{Polynomial, ZKMAirBuilder};
 
 pub fn eval_field_operation<AB: ZKMAirBuilder, P: FieldParameters>(
     builder: &mut AB,

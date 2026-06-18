@@ -6,7 +6,7 @@ use p3_koala_bear::KoalaBear;
 
 use zkm_recursion_compiler::ir::{Builder, Config, Ext, Felt};
 use zkm_recursion_core::air::Block;
-use zkm_stark::{
+use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, AirOpenedValues, InnerBatchOpening, InnerChallenge,
     InnerChallengeMmcs, InnerDigest, InnerFriProof, InnerInputProof, InnerVal,
 };

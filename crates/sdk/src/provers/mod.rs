@@ -22,7 +22,7 @@ use zkm_prover::{
     components::{DefaultProverComponents, ZKMProverComponents},
     CoreSC, InnerSC, ZKMCoreProofData, ZKMProver, ZKMProvingKey, ZKMVerifyingKey,
 };
-use zkm_stark::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
+use zkm_pcs::{air::PublicValues, MachineVerificationError, Word, ZKMProverOpts};
 
 use crate::install::try_install_circuit_artifacts;
 use crate::ProverClient;

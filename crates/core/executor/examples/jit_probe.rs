@@ -18,7 +18,7 @@ use zkm_core_executor::jit_runner::{
     JitBridgeState, JitMemoryBridge, JitSyscallHandler,
 };
 use zkm_core_executor::{Executor, Program, Register};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 // Stash the live JitContext pointer so the SIGSEGV handler can
 // recover `last_executed_pc` post-mortem.

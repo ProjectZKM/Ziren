@@ -18,7 +18,7 @@ use zkm_core_executor::jit_runner::{
     build_context, build_jit_function, first_unsupported_opcode, run_jit, BuildParams,
 };
 use zkm_core_executor::{ExecutionError, Executor, Instruction, Opcode, Program, Register};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 /// End-to-end parity check on the real fibonacci ELF.
 ///

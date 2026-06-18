@@ -3,7 +3,7 @@
 //! [`crate::shard_basefold::BasefoldShardProofVariable`].
 //!
 //! Bridges the stark-side proof types
-//! (`zkm_stark::shard_level::types::*`) into the recursion-circuit's
+//! (`zkm_pcs::shard_level::types::*`) into the recursion-circuit's
 //! own copies (`crate::logup_proof::*`, `crate::partial_sumcheck::*`)
 //! that [`crate::shard_basefold::BasefoldShardProofVariable`] consumes.
 //!
@@ -16,7 +16,7 @@
 use std::collections::BTreeMap;
 
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt};
-use zkm_stark::shard_level::types as st;
+use zkm_pcs::shard_level::types as st;
 
 use crate::basefold_verifier::RecursiveBasefoldProof;
 use crate::jagged_circuit::JaggedPcsProofVariable;
@@ -25,7 +25,7 @@ use crate::partial_sumcheck::PartialSumcheckProof as RcPartialSumcheckProof;
 use crate::shard_basefold::BasefoldShardProofVariable;
 use crate::univariate::UnivariatePolynomial as RcUnivariatePolynomial;
 use crate::CircuitConfig;
-use zkm_stark::{InnerChallenge, InnerVal};
+use zkm_pcs::{InnerChallenge, InnerVal};
 
 /// Convert a stark-side [`st::UnivariatePolynomial`] into the
 /// recursion-circuit's own [`RcUnivariatePolynomial`].
@@ -293,7 +293,7 @@ pub fn build_opened_values_from_chip_openings<C>(
     builder: &mut Builder<C>,
     chip_openings: &std::collections::BTreeMap<
         String,
-        zkm_stark::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
+        zkm_pcs::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
 ) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
@@ -301,9 +301,9 @@ where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
-    use zkm_stark::septic_curve::SepticCurve;
-    use zkm_stark::septic_digest::SepticDigest;
-    use zkm_stark::septic_extension::SepticExtension;
+    use zkm_pcs::septic_curve::SepticCurve;
+    use zkm_pcs::septic_digest::SepticDigest;
+    use zkm_pcs::septic_extension::SepticExtension;
 
     let chips = chip_openings
         .values()
@@ -356,11 +356,11 @@ pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
     builder: &mut Builder<C>,
     chip_openings: &std::collections::BTreeMap<
         String,
-        zkm_stark::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
+        zkm_pcs::shard_level::types::ChipEvaluation<Ext<C::F, C::EF>>,
     >,
     chip_cumulative_sums: &std::collections::BTreeMap<
         String,
-        zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+        zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
             Felt<C::F>,
             Ext<C::F, C::EF>,
         >,
@@ -371,9 +371,9 @@ where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
     use p3_field::PrimeCharacteristicRing;
-    use zkm_stark::septic_curve::SepticCurve;
-    use zkm_stark::septic_digest::SepticDigest;
-    use zkm_stark::septic_extension::SepticExtension;
+    use zkm_pcs::septic_curve::SepticCurve;
+    use zkm_pcs::septic_digest::SepticDigest;
+    use zkm_pcs::septic_extension::SepticExtension;
 
     let chips = chip_openings
         .iter()
@@ -452,7 +452,7 @@ pub fn finalize_carried_opened_values<C>(
     chip_log_heights: &BTreeMap<String, u8>,
     chip_cumulative_sums: &BTreeMap<
         String,
-        zkm_stark::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
+        zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
     >,
     max_log_row_count: usize,
 ) -> crate::basefold_chip_opened_values::BasefoldShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>
@@ -776,11 +776,11 @@ mod tests {
         let zero = builder.constant(InnerChallenge::ZERO);
         let mut chip_openings: BTreeMap<
             String,
-            zkm_stark::shard_level::types::ChipEvaluation<_>,
+            zkm_pcs::shard_level::types::ChipEvaluation<_>,
         > = BTreeMap::new();
         chip_openings.insert(
             "Cpu".to_string(),
-            zkm_stark::shard_level::types::ChipEvaluation {
+            zkm_pcs::shard_level::types::ChipEvaluation {
                 main_trace_evaluations: vec![zero, zero, zero],
                 preprocessed_trace_evaluations: Some(vec![zero]),
                 log_degree: 0,
@@ -788,7 +788,7 @@ mod tests {
         );
         chip_openings.insert(
             "Memory".to_string(),
-            zkm_stark::shard_level::types::ChipEvaluation {
+            zkm_pcs::shard_level::types::ChipEvaluation {
                 main_trace_evaluations: vec![zero, zero],
                 preprocessed_trace_evaluations: None,
                 log_degree: 0,
@@ -820,20 +820,20 @@ mod tests {
         let v = |n: u64| InnerChallenge::from(InnerVal::from_u64(n));
         let f = |n: u64| InnerVal::from_u64(n);
 
-        let src = zkm_stark::shard_level::types::LogupGkrProof::<InnerVal, InnerChallenge> {
-            circuit_output: zkm_stark::shard_level::types::LogUpGkrOutput {
+        let src = zkm_pcs::shard_level::types::LogupGkrProof::<InnerVal, InnerChallenge> {
+            circuit_output: zkm_pcs::shard_level::types::LogUpGkrOutput {
                 numerator: vec![v(10), v(20)],
                 denominator: vec![v(30), v(40)],
             },
             round_proofs: vec![
-                zkm_stark::shard_level::types::LogupGkrRoundProof {
+                zkm_pcs::shard_level::types::LogupGkrRoundProof {
                     numerator_0: v(1),
                     numerator_1: v(2),
                     denominator_0: v(3),
                     denominator_1: v(4),
-                    sumcheck_proof: zkm_stark::shard_level::types::PartialSumcheckProof {
+                    sumcheck_proof: zkm_pcs::shard_level::types::PartialSumcheckProof {
                         univariate_polys: vec![
-                            zkm_stark::shard_level::types::UnivariatePolynomial {
+                            zkm_pcs::shard_level::types::UnivariatePolynomial {
                                 coefficients: vec![v(5), v(6)],
                             },
                         ],
@@ -842,11 +842,11 @@ mod tests {
                     },
                 },
             ],
-            logup_evaluations: zkm_stark::shard_level::types::LogUpEvaluations {
+            logup_evaluations: zkm_pcs::shard_level::types::LogUpEvaluations {
                 point: vec![v(100), v(101)],
                 chip_openings: BTreeMap::from([(
                     "Alpha".to_string(),
-                    zkm_stark::shard_level::types::ChipEvaluation {
+                    zkm_pcs::shard_level::types::ChipEvaluation {
                         main_trace_evaluations: vec![v(200), v(201)],
                         preprocessed_trace_evaluations: Some(vec![v(202)]),
                         log_degree: 0,
@@ -879,12 +879,12 @@ mod tests {
     fn partial_sumcheck_proof_lift_preserves_values() {
         use p3_field::PrimeCharacteristicRing;
         let v = |n: u64| InnerChallenge::from(InnerVal::from_u64(n));
-        let src = zkm_stark::shard_level::types::PartialSumcheckProof {
+        let src = zkm_pcs::shard_level::types::PartialSumcheckProof {
             univariate_polys: vec![
-                zkm_stark::shard_level::types::UnivariatePolynomial {
+                zkm_pcs::shard_level::types::UnivariatePolynomial {
                     coefficients: vec![v(1), v(2), v(3)],
                 },
-                zkm_stark::shard_level::types::UnivariatePolynomial {
+                zkm_pcs::shard_level::types::UnivariatePolynomial {
                     coefficients: vec![v(4), v(5)],
                 },
             ],
@@ -910,7 +910,7 @@ mod tests {
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let chip_openings: BTreeMap<
             String,
-            zkm_stark::shard_level::types::ChipEvaluation<_>,
+            zkm_pcs::shard_level::types::ChipEvaluation<_>,
         > = BTreeMap::new();
         let opened = build_opened_values_from_chip_openings::<InnerConfig>(
             &mut builder,
@@ -936,31 +936,31 @@ mod tests {
             std::array::from_fn(|_| builder.constant(InnerVal::ZERO));
         let public_values: Vec<Felt<InnerVal>> =
             (0..16).map(|_| builder.constant(InnerVal::ZERO)).collect();
-        let logup_gkr_proof: zkm_stark::shard_level::types::LogupGkrProof<
+        let logup_gkr_proof: zkm_pcs::shard_level::types::LogupGkrProof<
             Felt<InnerVal>,
             Ext<InnerVal, InnerChallenge>,
-        > = zkm_stark::shard_level::types::LogupGkrProof {
-            circuit_output: zkm_stark::shard_level::types::LogUpGkrOutput {
+        > = zkm_pcs::shard_level::types::LogupGkrProof {
+            circuit_output: zkm_pcs::shard_level::types::LogUpGkrOutput {
                 numerator: Vec::new(),
                 denominator: Vec::new(),
             },
             round_proofs: Vec::new(),
-            logup_evaluations: zkm_stark::shard_level::types::LogUpEvaluations {
+            logup_evaluations: zkm_pcs::shard_level::types::LogUpEvaluations {
                 point: Vec::new(),
                 chip_openings: std::collections::BTreeMap::new(),
             },
             witness: builder.constant(InnerVal::ZERO),
         };
-        let zerocheck_proof: zkm_stark::shard_level::types::PartialSumcheckProof<
+        let zerocheck_proof: zkm_pcs::shard_level::types::PartialSumcheckProof<
             Ext<InnerVal, InnerChallenge>,
-        > = zkm_stark::shard_level::types::PartialSumcheckProof {
+        > = zkm_pcs::shard_level::types::PartialSumcheckProof {
             univariate_polys: Vec::new(),
             claimed_sum: builder.constant(InnerChallenge::ZERO),
             point_and_eval: (Vec::new(), builder.constant(InnerChallenge::ZERO)),
         };
         let empty_cols: Vec<Vec<usize>> = Vec::new();
         let evaluation_proof =
-            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(
+            crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<InnerConfig, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
                 &mut builder,
                 &[],
                 21,
@@ -968,7 +968,7 @@ mod tests {
             );
         let chip_height_bits = empty_chip_height_bits::<InnerConfig>(&mut builder, &[], 21);
 
-        let assembled = assemble_basefold_shard_proof_variable::<InnerConfig, zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(
+        let assembled = assemble_basefold_shard_proof_variable::<InnerConfig, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(
             main_commit,
             public_values,
             &logup_gkr_proof,
@@ -987,7 +987,7 @@ mod tests {
     /// production defaults yields a correctly-shaped verifier.
     #[test]
     fn build_basefold_shard_verifier_production_default() {
-        let v = build_basefold_shard_verifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(21, 21);
+        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(21, 21);
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
@@ -1002,7 +1002,7 @@ mod tests {
     /// configuration — verifier still constructs).
     #[test]
     fn build_basefold_shard_verifier_with_mismatched_heights() {
-        let v = build_basefold_shard_verifier::<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2>(15, 12);
+        let v = build_basefold_shard_verifier::<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(15, 12);
         assert_eq!(v.max_log_row_count, 15);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 12);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 15);

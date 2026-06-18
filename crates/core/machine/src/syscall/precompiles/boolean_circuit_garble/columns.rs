@@ -1,7 +1,7 @@
 use crate::memory::MemoryReadCols;
 use crate::operations::{IsEqualWordOperation, XorOperation};
 use zkm_derive::AlignedBorrow;
-use zkm_stark::Word;
+use zkm_pcs::Word;
 
 /// `BooleanCircuitGarbleCols` is the worker column layout for the Boolean Circuit
 /// Garble precompile.  One row per gate; the per-row sequencing (`gate_id`,

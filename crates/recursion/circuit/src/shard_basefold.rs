@@ -72,7 +72,7 @@ use p3_air::Air;
 use p3_field::{Algebra, TwoAdicField};
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
-use zkm_stark::{air::MachineAir, MachineChip};
+use zkm_pcs::{air::MachineAir, MachineChip};
 
 use crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable;
 use crate::basefold_constraint_folder::BasefoldConstraintFolder;
@@ -138,7 +138,7 @@ pub struct BasefoldShardProof<F, EF> {
 /// Mirrors `ShardProofVariable` (crates/recursion/circuit/src/shard.rs).
 pub struct BasefoldShardProofVariable<
     C: CircuitConfig,
-    HV: crate::hash::FieldHasherVariable<C> = zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+    HV: crate::hash::FieldHasherVariable<C> = zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
 > {
     /// Commitment digest to the main trace.  The main trace is
     /// committed with the INNER KoalaBear MMCS on EVERY ring (only the
@@ -234,8 +234,8 @@ impl<P> BasefoldShardVerifier<P> {
         chips: &[&MachineChip<SC, A>],
     ) -> LogupGkrShardChipMetadata
     where
-        SC: zkm_stark::StarkGenericConfig,
-        A: MachineAir<zkm_stark::Val<SC>>,
+        SC: zkm_pcs::StarkGenericConfig,
+        A: MachineAir<zkm_pcs::Val<SC>>,
     {
         let max_arity = chips
             .iter()
@@ -842,7 +842,7 @@ mod tests {
     use std::marker::PhantomData;
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

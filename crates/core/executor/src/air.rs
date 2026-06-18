@@ -7,7 +7,7 @@ use enum_map::Enum;
 use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
-use zkm_stark::shape::Shape;
+use zkm_pcs::shape::Shape;
 
 /// MIPS AIR Identifiers.
 ///

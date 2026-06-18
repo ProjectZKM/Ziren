@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 use clap::Parser;
 use zkm_core_executor::MipsAirId;
 use zkm_core_machine::utils::setup_logger;
-use zkm_stark::shape::Shape;
+use zkm_pcs::shape::Shape;
 
 #[derive(Parser, Debug)]
 #[clap(author, version, about, long_about = None)]

@@ -10,7 +10,7 @@ use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::PrimeCharacteristicRing;
 use std::borrow::Borrow;
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{air::AirLookup, LookupKind, LookupScope, ZKMAirBuilder};
+use zkm_pcs::{air::AirLookup, LookupKind, LookupScope, ZKMAirBuilder};
 
 impl<F> BaseAir<F> for BooleanCircuitGarbleChip {
     fn width(&self) -> usize {

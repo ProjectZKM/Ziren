@@ -7,7 +7,7 @@
 //!
 //! # `emit_branching_program_eval`
 //!
-//! Mirrors [`zkm_stark::jagged_pcs::jagged::BranchingProgram::eval`]
+//! Mirrors [`zkm_pcs::jagged_pcs::jagged::BranchingProgram::eval`]
 //! (host).  The branching program is a DP over `num_vars + 1`
 //! layers.  At each layer we fetch 4 bits (one each from `z_row`,
 //! `z_index`, `prefix_sum`, `next_prefix_sum`), expand their
@@ -67,7 +67,7 @@ const fn build_transition_table() -> [[Option<u8>; 16]; 4] {
             let next_bit = (bs_idx & 8) != 0;
 
             // EXACT mirror of the host `transition_function`
-            // (zkm_stark::jagged_branching_program): the prior hand-rolled
+            // (zkm_pcs::jagged_branching_program): the prior hand-rolled
             // logic computed a DIFFERENT DP (added next_bit into the carry,
             // compared against row) → the in-circuit BP disagreed with the
             // host BP, which only surfaced in gnark (AsmCompiler asserts are
@@ -234,7 +234,7 @@ mod tests {
     use super::*;
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;
@@ -270,12 +270,12 @@ mod tests {
     }
 
     /// PHASE-2: the compile-time TRANSITIONS table MUST be byte-identical to
-    /// the host BranchingProgram DP (zkm_stark `transition_function`).  A
+    /// the host BranchingProgram DP (zkm_pcs `transition_function`).  A
     /// divergence makes the in-circuit BP compute a different function than
     /// the host, surfacing only in gnark (where asserts are real).
     #[test]
     fn transition_table_matches_host_dp() {
-        use zkm_stark::jagged_branching_program::{
+        use zkm_pcs::jagged_branching_program::{
             transition_function, BitState, MemoryState, StateOrFail,
         };
         for ms_idx in 0..4usize {

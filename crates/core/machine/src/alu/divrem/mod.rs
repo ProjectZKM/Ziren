@@ -78,7 +78,7 @@ use zkm_core_executor::{
 use crate::{memory::MemoryReadWriteCols, CoreChipError};
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, PicusInfo},
     Word,
 };
@@ -779,7 +779,7 @@ mod tests {
     use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
 
     use super::DivRemChip;
-    use zkm_stark::MachineAir;
+    use zkm_pcs::MachineAir;
 
     #[test]
     fn generate_trace() {

@@ -31,7 +31,7 @@ use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Builder, Felt};
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::{
+use zkm_pcs::{
     air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
     StarkGenericConfig, StarkMachine,
 };
@@ -162,7 +162,7 @@ impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
     ) -> Self
     where
         A: MachineAir<KoalaBear>
-            + for<'b> p3_air::Air<zkm_stark::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
+            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
     {
         let compress_val =
             ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.compress_shape);

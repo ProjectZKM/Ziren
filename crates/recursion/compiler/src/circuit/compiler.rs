@@ -14,7 +14,7 @@ use zkm_recursion_core::{
     air::{Block, RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS},
     BaseAluInstr, BaseAluOpcode,
 };
-use zkm_stark::septic_curve::SepticCurve;
+use zkm_pcs::septic_curve::SepticCurve;
 
 use zkm_recursion_core::*;
 
@@ -1052,7 +1052,7 @@ mod tests {
 
     use zkm_core_machine::utils::{run_test_machine, setup_logger};
     use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
-    use zkm_stark::{
+    use zkm_pcs::{
         inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash, KoalaBearPoseidon2Inner,
         StarkGenericConfig,
     };

@@ -32,8 +32,8 @@ use std::marker::PhantomData;
 use p3_air::{AirBuilder, ExtensionBuilder};
 use p3_field::{Algebra, Field, ExtensionField, PrimeCharacteristicRing};
 use zkm_recursion_compiler::ir::{Config, Ext, Felt, SymbolicExt};
-use zkm_stark::air::{AirLookup, LookupScope, MessageBuilder};
-use zkm_stark::folder::PairWindow;
+use zkm_pcs::air::{AirLookup, LookupScope, MessageBuilder};
+use zkm_pcs::folder::PairWindow;
 
 /// In-circuit folder for record-level public-values constraints.
 pub struct RecursivePublicValuesConstraintFolder<'a, C: Config> {
@@ -130,7 +130,7 @@ where
 {
     /// In-circuit LogUp fraction `multiplicity / (alpha + beta_0*kind +
     /// sum beta_i*value_i)` — mirrors the host
-    /// [`zkm_stark::air::PublicValuesConstraintFolder`] and
+    /// [`zkm_pcs::air::PublicValuesConstraintFolder`] and
     /// `permutation.rs:50-57`.
     fn interaction_fraction(
         &self,
@@ -173,7 +173,7 @@ mod tests {
     use zkm_recursion_compiler::circuit::AsmBuilder;
     use zkm_recursion_compiler::config::InnerConfig;
     use zkm_recursion_compiler::ir::Felt;
-    use zkm_stark::{InnerChallenge, InnerVal};
+    use zkm_pcs::{InnerChallenge, InnerVal};
 
     type C = InnerConfig;
     type F = InnerVal;

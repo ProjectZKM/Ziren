@@ -49,7 +49,7 @@ smallvec = { version = "1.13.2", features = [
 ], optional = true }
 
 zkm-derive = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-core-machine = { workspace = true }
 zkm-primitives = { workspace = true }
 
@@ -64,7 +64,7 @@ smallvec = { version = "1.13.2", features = [
 ] }
 
 [build-dependencies]
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-primitives = { workspace = true }
 p3-koala-bear = { workspace = true }
 cbindgen = { version = "0.29.2", optional = true }

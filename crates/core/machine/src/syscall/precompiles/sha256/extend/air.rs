@@ -1,7 +1,7 @@
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::syscalls::SyscallCode;
-use zkm_stark::{
+use zkm_pcs::{
     air::{AirLookup, LookupScope, ZKMAirBuilder},
     LookupKind,
 };

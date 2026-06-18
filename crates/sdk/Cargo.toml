@@ -43,7 +43,7 @@ strum_macros = "0.26.4"
 thiserror = "1.0.63"
 hashbrown = { workspace = true }
 zkm-core-executor = { workspace = true }
-zkm-stark = { workspace = true }
+zkm-pcs = { workspace = true }
 zkm-primitives = { workspace = true }
 zkm-cuda = { workspace = true }
 itertools = { workspace = true }

@@ -25,7 +25,7 @@ use zkm_curves::{
     CurveError,
 };
 use zkm_derive::AlignedBorrow;
-use zkm_stark::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
+use zkm_pcs::air::{BaseAirBuilder, LookupScope, MachineAir, ZKMAirBuilder};
 
 use crate::{
     memory::{MemoryReadCols, MemoryWriteCols},
@@ -288,7 +288,7 @@ where
 pub mod tests {
     use test_artifacts::ED_DECOMPRESS_ELF;
     use zkm_core_executor::Program;
-    use zkm_stark::CpuProver;
+    use zkm_pcs::CpuProver;
 
     use crate::utils;
 

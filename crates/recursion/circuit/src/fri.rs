@@ -10,7 +10,7 @@ use p3_fri::{CommitPhaseProofStep, FriProof, QueryProof};
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::Hash;
 use zkm_recursion_core::DIGEST_SIZE;
-use zkm_stark::{InnerChallenge, InnerChallengeMmcs, InnerInputProof, InnerPcsProof, InnerVal};
+use zkm_pcs::{InnerChallenge, InnerChallengeMmcs, InnerInputProof, InnerPcsProof, InnerVal};
 
 #[derive(Debug, Clone, Copy)]
 pub struct PolynomialShape {

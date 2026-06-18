@@ -1,5 +1,5 @@
 [package]
-name = "zkm-stark"
+name = "zkm-pcs"
 version = { workspace = true }
 edition = { workspace = true }
 license = { workspace = true }

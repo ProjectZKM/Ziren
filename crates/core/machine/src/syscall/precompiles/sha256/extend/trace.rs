@@ -9,7 +9,7 @@ use zkm_core_executor::{
     syscalls::SyscallCode,
     ExecutionRecord, Program,
 };
-use zkm_stark::air::MachineAir;
+use zkm_pcs::air::MachineAir;
 
 use crate::CoreChipError;
 

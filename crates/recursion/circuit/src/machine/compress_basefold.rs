@@ -1,8 +1,8 @@
 //! SP1-style parallel call site for the compress recursion stage.
 //!
 //! Mirrors [`super::compress::ZKMCompressVerifier`] but consumes
-//! the new SP1-style [`zkm_stark::shard_level::shard_proof::BasefoldShardProof`]
-//! instead of the legacy [`zkm_stark::ShardProof`], and dispatches
+//! the new SP1-style [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
+//! instead of the legacy [`zkm_pcs::ShardProof`], and dispatches
 //! to [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
 //! instead of [`crate::stark::StarkVerifier::verify_shard`].
 //!
@@ -49,7 +49,7 @@ use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, IrIter};
 use zkm_recursion_core::air::{RecursionPublicValues, RECURSIVE_PROOF_NUM_PV_ELTS};
-use zkm_stark::{
+use zkm_pcs::{
     air::{MachineAir, POSEIDON_NUM_WORDS, PV_DIGEST_NUM_WORDS},
     shard_level::shard_proof::BasefoldShardProof,
     InnerChallenge, InnerVal, StarkVerifyingKey, Word, DIGEST_SIZE,
@@ -75,7 +75,7 @@ use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
     deserialize = "StarkVerifyingKey<SC>: for<'d> Deserialize<'d>, ZKMMerkleProofWitnessValues<SC>: for<'d> Deserialize<'d>"
 ))]
 pub struct ZKMCompressBasefoldWitnessValues<
-    SC: zkm_stark::StarkGenericConfig + FieldHasher<KoalaBear>,
+    SC: zkm_pcs::StarkGenericConfig + FieldHasher<KoalaBear>,
 > {
     /// Per-input (vk, basefold-proof) pairs to aggregate.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
@@ -109,11 +109,11 @@ pub struct ZKMCompressBasefoldWitnessVariable<
         (
             [Felt<C::F>; 8],
             Vec<Felt<C::F>>,
-            zkm_stark::shard_level::types::LogupGkrProof<
+            zkm_pcs::shard_level::types::LogupGkrProof<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
-            zkm_stark::shard_level::types::PartialSumcheckProof<
+            zkm_pcs::shard_level::types::PartialSumcheckProof<
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
@@ -126,7 +126,7 @@ pub struct ZKMCompressBasefoldWitnessVariable<
     pub chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
             String,
-            zkm_stark::shard_level::shard_proof::ChipCumulativeSums<
+            zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<
                 Felt<C::F>,
                 zkm_recursion_compiler::ir::Ext<C::F, C::EF>,
             >,
@@ -186,17 +186,17 @@ pub struct ZKMCompressBasefoldVerifier<C, SC, A> {
 pub fn verify_compress_basefold<C, SC, A>(
     builder: &mut zkm_recursion_compiler::ir::Builder<C>,
     input: ZKMCompressBasefoldWitnessVariable<C, SC>,
-    machine: &zkm_stark::StarkMachine<SC, A>,
+    machine: &zkm_pcs::StarkMachine<SC, A>,
     value_assertions: bool,
     kind: super::compress::PublicValuesOutputDigest,
     max_log_row_count: usize,
 ) where
     SC: KoalaBearFriParametersVariable<
             C,
-            Val = zkm_stark::InnerVal,
-            DigestVariable = [Felt<zkm_stark::InnerVal>; 8],
+            Val = zkm_pcs::InnerVal,
+            DigestVariable = [Felt<zkm_pcs::InnerVal>; 8],
         > + FieldHasherVariable<C>,
-    C: CircuitConfig<F = zkm_stark::InnerVal, EF = zkm_stark::InnerChallenge>,
+    C: CircuitConfig<F = zkm_pcs::InnerVal, EF = zkm_pcs::InnerChallenge>,
     A: MachineAir<SC::Val>
         + for<'b> p3_air::Air<crate::basefold_constraint_folder::BasefoldConstraintFolder<'b, C>>,
 {
@@ -245,7 +245,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
     let mut _reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS] =
         array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
-    let mut _global_cumulative_sums: Vec<zkm_stark::septic_digest::SepticDigest<Felt<C::F>>> =
+    let mut _global_cumulative_sums: Vec<zkm_pcs::septic_digest::SepticDigest<Felt<C::F>>> =
         Vec::new();
     let mut _init_addr_bits: [Felt<C::F>; 32] =
         array::from_fn(|_| unsafe { MaybeUninit::zeroed().assume_init() });
@@ -298,23 +298,23 @@ pub fn verify_compress_basefold<C, SC, A>(
         // the "Main width mismatch" motivation.
         let chip_names: Vec<String> =
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
-        let mut shard_chips_pre: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+        let mut shard_chips_pre: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
         shard_chips_pre.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+            MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
         });
         use p3_air::BaseAir as _Base1;
         let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
             .iter()
-            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
         let main_widths_pre: Vec<usize> = shard_chips_pre
             .iter()
-            .map(|c| _Base1::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+            .map(|c| _Base1::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let column_counts_by_round_pre: Vec<Vec<usize>> =
             vec![main_widths_pre];
@@ -405,14 +405,14 @@ pub fn verify_compress_basefold<C, SC, A>(
         // in this shard (per logup_gkr_proof.chip_openings names).
         // SP1's `chip_metadata_from_chips` consumes this slice to
         // compute beta_seed_dim + log_num_interactions.
-        let mut _shard_chips: Vec<&zkm_stark::MachineChip<SC, A>> = machine
+        let mut _shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
             .chips()
             .iter()
             .filter(|c| chip_names.iter().any(|n| n.as_str() == c.name()))
             .collect();
         _shard_chips.sort_by(|a, b| {
-            MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*a)
-                .cmp(&MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::name(*b))
+            MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
+                .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
         });
         let _chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
@@ -426,11 +426,11 @@ pub fn verify_compress_basefold<C, SC, A>(
         use p3_air::BaseAir;
         let preprocessed_widths: Vec<usize> = _shard_chips
             .iter()
-            .map(|c| MachineAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::preprocessed_width(*c))
+            .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
         let main_widths: Vec<usize> = _shard_chips
             .iter()
-            .map(|c| BaseAir::<<SC as zkm_stark::StarkGenericConfig>::Val>::width(*c))
+            .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
         let _column_counts_by_round: Vec<Vec<usize>> =
             vec![main_widths];
@@ -521,7 +521,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // core_basefold.rs:443-468 / wrap_basefold.rs:370-390: the host
         // machine verifier seeds the challenger with (1) vk.observe_into
         // and (2) public_values[0..num_pv] BEFORE the shard prologue
-        // (crates/stark/src/machine.rs:693-707; the prover bakes both
+        // (crates/pcs/src/machine.rs:693-707; the prover bakes both
         // into basefold_challenger_snapshot).  The compose path created a
         // FRESH challenger and did NEITHER, so every post-prologue squeeze
         // (first visibly the 12-bit GKR grind check) diverged from the
@@ -971,7 +971,7 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///
 /// Runs the jagged-eval sub-sumcheck verification entirely in-circuit,
 /// mirroring the host-side verifier at
-/// [`zkm_stark::jagged_sumcheck::verify_jagged_reduction`] and SP1's
+/// [`zkm_pcs::jagged_sumcheck::verify_jagged_reduction`] and SP1's
 /// `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
 /// (`/tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:97-170`).
 ///
@@ -1157,7 +1157,7 @@ where
     }
 }
 
-impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2> {
+impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy compress witness for a given compress shape.
     /// Counterpart to [`super::compress::ZKMCompressWitnessValues::dummy`]
     /// for the basefold pipeline. Drives the multi-chip basefold dummy
@@ -1169,18 +1169,18 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
     /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (vk-root from
     /// witness, not a baked constant).
     pub fn dummy<A>(
-        machine: &zkm_stark::StarkMachine<
-            zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+        machine: &zkm_pcs::StarkMachine<
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             A,
         >,
         shape: &super::ZKMCompressWithVkeyShape,
     ) -> Self
     where
-        A: zkm_stark::air::MachineAir<p3_koala_bear::KoalaBear>
+        A: zkm_pcs::air::MachineAir<p3_koala_bear::KoalaBear>
             + for<'b> p3_air::Air<
-                zkm_stark::folder::VerifierConstraintFolder<
+                zkm_pcs::folder::VerifierConstraintFolder<
                     'b,
-                    zkm_stark::koala_bear_poseidon2::KoalaBearPoseidon2,
+                    zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
                 >,
             >,
     {
@@ -1237,7 +1237,7 @@ impl ZKMCompressBasefoldWitnessValues<zkm_stark::koala_bear_poseidon2::KoalaBear
         // follow.
         self.vks_and_proofs.len().hash(&mut h);
         for (_vk, sp) in self.vks_and_proofs.iter() {
-            // BasefoldShardProof (zkm_stark::shard_level::shard_proof)
+            // BasefoldShardProof (zkm_pcs::shard_level::shard_proof)
             // — Witnessable::write order:
             //   main_commitment (fixed [F; 8])
             //   public_values   (Vec<F>)

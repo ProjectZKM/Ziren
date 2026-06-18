@@ -21,7 +21,7 @@
 
 use std::time::Instant;
 use zkm_core_executor::{Executor, ExecutorMode, Program};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 fn parse_stdin_buffer_prefix(b: &[u8]) -> Vec<Vec<u8>> {
     let read_u64 = |off: usize| -> Option<u64> {

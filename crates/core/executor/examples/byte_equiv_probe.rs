@@ -17,7 +17,7 @@ use std::sync::Arc;
 use zkm_core_executor::minimal_trace::MinimalTrace;
 use zkm_core_executor::tracing_vm::drive_tracing_vm_parallel;
 use zkm_core_executor::{Executor, Program};
-use zkm_stark::ZKMCoreOpts;
+use zkm_pcs::ZKMCoreOpts;
 
 fn main() {
     let elf_path = std::env::var("ELF_PATH").unwrap_or_else(|_| {
