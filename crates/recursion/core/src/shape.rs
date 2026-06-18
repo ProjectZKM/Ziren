@@ -229,6 +229,36 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
+            // DR28 soundness compose band (TM + goat).  The 100-bit
+            // BaseFold params (inner blowup 1->2, 94->124 queries, +1
+            // Merkle level) grew the compose-tree verify circuit past the
+            // component-opening band: every compose level (height 1..n)
+            // converges to the SAME maxima for both tendermint and goat
+            // (47-shard TM and 10-shard goat produce identical compose
+            // vectors once inputs are fixed-shape).  Observed (max over
+            // all levels, FROM_DUMP probe):
+            //   Select=1091552 (log21 -- THE binding overflow, was capped
+            //   at 20), MemoryVar=689763 (log20), ExtAlu=345152 (log19),
+            //   BaseAlu=344339 (log19), MemoryConst=252755 (log18),
+            //   Poseidon2WideDeg3=158830 (log18).  Only Select overflowed
+            //   the component-opening band; this clone bumps Select 20->21
+            //   (next power of two above 1.09M = 2.10M, ~1.9x headroom)
+            //   and keeps every other chip at the component-opening caps
+            //   (which already cover the observed heights with headroom).
+            // Placed LAST so smaller programs (fib/first-layer/reth/geth
+            // shallow compose) still prefer the smaller bands above and
+            // pay less padding; only Select>2^20 compose programs reach it.
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 21),
+                (mem_const.clone(), 20),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 20),
+                (ext_alu.clone(), 21),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 19),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
         ]
         .map(HashMap::from)
         .to_vec();
