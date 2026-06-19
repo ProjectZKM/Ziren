@@ -844,7 +844,17 @@ mod phase1_acceptance_gate {
             })
             .collect();
 
-        // y_per_chip = current host column claims (eq_c@trailing * embed).
+        // y_per_chip = host column claims.  MUST mirror the PRODUCTION
+        // column-claim formula (jagged_pcs.rs `prove_jagged_basefold_inner`,
+        // sub_phase "y_per_chip"): the full row_eq over z_row indexed by the
+        // BIT-REVERSED trace row, because `materialize_dense_jagged` writes the
+        // dense column in bit-reversed row order (`y_per_chip == opened_values
+        // == MLE of bitrev(trace)`), and `build_weight_table` weights that same
+        // bit-reversed dense layout with `eq_c[row]`.  Using the NATURAL row
+        // index here (the previous stale form) makes the verifier's claimed
+        // sum `t = Σ z_col_lagrange·y` diverge from the true sumcheck sum
+        // `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity fails even
+        // for equal heights.
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())
@@ -853,11 +863,18 @@ mod phase1_acceptance_gate {
                 let h = trace.values.len() / w.max(1);
                 let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                 let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+                let is_pow2 = h.is_power_of_two();
+                let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                 (0..w)
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
                         for row in 0..h {
-                            acc += eq_c[row] * InnerChallenge::from(trace.values[row * w + col]);
+                            let src = if is_pow2 {
+                                ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                            } else {
+                                row
+                            };
+                            acc += eq_c[row] * InnerChallenge::from(trace.values[src * w + col]);
                         }
                         acc
                     })

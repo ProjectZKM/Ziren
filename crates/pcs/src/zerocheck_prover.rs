@@ -716,15 +716,20 @@ mod tests {
             verify_zerocheck_rounds::<EF>(&proof, &r, initial_claim).expect("verify");
 
         // Verify that final_claim == eq(r, r') · C(r').
-        // The sumcheck folds the last variable first, so eval_point is
-        // ordered [r_m, r_{m-1}, …, r_1]. MultilinearExt::evaluate also
-        // folds the last variable first, so it accepts that same ordering.
-        // eq_eval pairs element-wise, so we must reverse eval_point for it
-        // to line up with r = [r_1, r_2, …, r_m].
-        let rev_eval_point: Vec<EF> = eval_point.iter().rev().copied().collect();
+        //
+        // Both factors consume the SAME `eval_point` (no reversal):
+        // `prove_zerocheck_multilinear` folds eq(r, -) and C(-) IN LOCKSTEP
+        // (same `fold_table_first` order), one challenge per round into
+        // `eval_point`, so the closing claim is the product of the two
+        // co-folded MLEs evaluated at that one point.  `MultilinearExt::
+        // evaluate` reproduces C's fold and `eq_eval(&r, &eval_point)`
+        // reproduces eq(r, -)'s fold (eq_eval is the symmetric element-wise
+        // product, so it needs the point in the SAME order C does).  The
+        // previous code reversed `eval_point` only for the eq factor, which
+        // is a stale over-correction that broke the identity.
         let c_mle = MultilinearExt::new(c_evals);
         let c_at_rp = c_mle.evaluate(&eval_point);
-        let eq_at_rp = eq_eval(&r, &rev_eval_point);
+        let eq_at_rp = eq_eval(&r, &eval_point);
         assert_eq!(
             final_claim,
             eq_at_rp * c_at_rp,
