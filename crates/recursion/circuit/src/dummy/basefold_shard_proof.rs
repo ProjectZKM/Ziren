@@ -467,12 +467,27 @@ pub fn dummy_jagged_basefold_bundle(
     let univariate_messages: Vec<[EF; 2]> = vec![[EF::ZERO; 2]; log_stacking];
     let fri_commitments: Vec<_> = (0..log_stacking).map(|_| zero_cap()).collect();
     // query_phase_openings_and_proofs: log_stacking rounds, each Q leaves; round
-    // r leaf has a (log_stacking - r)-length Merkle path (FRI commit-phase
-    // folding).  Each leaf carries one matrix row of 2*D=8 base elements
-    // (parsed to [lo,hi]).
+    // r leaf has its Merkle path against the commit-phase round-r codeword.
+    //
+    // FAITHFUL PATH LENGTH (validated against the real prover by digest match —
+    // `zkm_prover::tests::multishard_normalize_arity_faithful`): the real
+    // BaseFold prover (crates/pcs/src/basefold/prover.rs:455-470) folds the
+    // codeword once per round; commit-phase round `r` (0-indexed) opens at a
+    // codeword of height 2^(num_variables + log_blowup - 1 - r), so its Merkle
+    // path length is `num_variables + log_blowup - 1 - r` where
+    // `num_variables == log_stacking`.  The previous `log_stacking - r` assumed
+    // `log_blowup == 1`; the SP1-faithful inner default is `log_blowup == 2`
+    // (#57 soundness), so each path was ONE level too short.  In-circuit the
+    // path Select-loop count = `leaf.proof.len()`
+    // (basefold_verifier.rs:555-561 via the lift's
+    // `merkle_path_digests = leaf.proof.clone()`), so this under-count emitted
+    // `log_stacking * (log_blowup-1) * num_queries` fewer Merkle Select+Poseidon2
+    // ops than the real program (measured 46872-instr deficit at log_blowup=2,
+    // log_stacking=21, num_queries=124 → the normalize VK diverged from the real
+    // proof's VK).  Tracking `inner_log_blowup` makes the dummy faithful.
     let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = (0..log_stacking)
         .map(|r| {
-            let path_len = log_stacking - r;
+            let path_len = log_stacking + inner_log_blowup - 1 - r;
             let leaves: Vec<LeafOpening<F, JaggedMmcs>> = (0..num_queries)
                 .map(|_| LeafOpening {
                     values: vec![vec![F::ZERO; 2 * D]],

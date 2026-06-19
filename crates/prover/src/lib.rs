@@ -3913,6 +3913,335 @@ pub mod tests {
         Ok(())
     }
 
+    /// MULTISHARD NORMALIZE arity harness.  Proves a small program at a
+    /// reduced SHARD_SIZE so it splits into >=2 core shards, then for each
+    /// REDUCE_BATCH_SIZE batch:
+    ///   (1) builds the REAL normalize VK from the batch's basefold inputs,
+    ///   (2) builds the DUMMY normalize VK from `ZKMCoreBasefoldWitnessValues::dummy`
+    ///       fed the FULL batch shape (proof_shapes = batch.map(shape)),
+    ///   (3) asserts vk_real == vk_dummy (proves the dummy is FAITHFUL at the
+    ///       batch's arity — the per-shard bundle reconstruction is correct;
+    ///       any gap is purely enumeration coverage of the ARITY dimension).
+    /// Also probes whether two arity-N normalize programs with DIFFERENT
+    /// per-shard shape mixes collapse to the SAME vk after fix_shape — which
+    /// decides whether the enumeration fix needs per-arity combinations or just
+    /// one canonical shape per arity.
+    ///
+    /// Run: SHARD_SIZE=<small> cargo test -p zkm-prover --release \
+    ///   multishard_normalize_arity_faithful -- --ignored --nocapture
+    #[test]
+    #[serial]
+    #[ignore]
+    fn multishard_normalize_arity_faithful() -> Result<()> {
+        use crate::shapes::ZKMProofShape;
+        use zkm_pcs::shape::OrderedShape;
+        setup_logger();
+        // Default: small SHA2_ELF (SHARD_SIZE env forces a split if large enough).
+        // Override SHA2_PROGRAM_BIN=<elf> + SHA2_STDIN_BIN=<stdin> to reproduce the
+        // real 18-shard sha2-1mb workload (the decisive multishard case).
+        let elf_owned: Vec<u8> = match std::env::var("SHA2_PROGRAM_BIN") {
+            Ok(p) => std::fs::read(&p).expect("read SHA2_PROGRAM_BIN"),
+            Err(_) => test_artifacts::SHA2_ELF.to_vec(),
+        };
+        let elf: &[u8] = &elf_owned;
+        let stdin: ZKMStdin = match std::env::var("SHA2_STDIN_BIN") {
+            Ok(p) => {
+                let bytes = std::fs::read(&p).expect("read SHA2_STDIN_BIN");
+                // Try ZKMStdin bincode first; fall back to a single raw input vec.
+                match bincode::deserialize::<ZKMStdin>(&bytes) {
+                    Ok(s) => {
+                        eprintln!("[MSNORM] loaded stdin as bincode ZKMStdin ({} bufs)", s.buffer.len());
+                        s
+                    }
+                    Err(_) => {
+                        eprintln!("[MSNORM] loaded stdin as raw {} bytes -> write_vec", bytes.len());
+                        let mut s = ZKMStdin::new();
+                        s.write_vec(bytes);
+                        s
+                    }
+                }
+            }
+            Err(_) => ZKMStdin::default(),
+        };
+        let opts = ZKMProverOpts::default();
+        eprintln!(
+            "[MSNORM] shard_size={} REDUCE_BATCH_SIZE={} elf_bytes={}",
+            opts.core_opts.shard_size, REDUCE_BATCH_SIZE, elf.len()
+        );
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = prover.prove_core(&pk_d, program, &stdin, opts, context)?;
+        let n_shards = core_proof.proof.0.len();
+        eprintln!("[MSNORM] core shard count = {n_shards}");
+        let inputs = prover
+            .get_recursion_core_inputs_basefold(&vk.vk, &core_proof.proof.0, REDUCE_BATCH_SIZE, true)
+            .expect("basefold core inputs");
+        let machine = prover.core_prover.machine();
+
+        // Enumerated normalize shapes (whole ZKMRecursionShape, so we can
+        // inspect arity) — what build_compress_vks walks today.
+        let core_cfg = prover.core_shape_config.as_ref().unwrap();
+        let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
+        // NOTE: ZKMProofShape::Recursion carries a SINGLE OrderedShape — the
+        // enumeration only ever emits ARITY-1 normalize shapes (From<OrderedShape>
+        // for ZKMRecursionShape = proof_shapes: vec![one]).  So the enumerated
+        // normalize-program arity is always {1}.
+        let enum_norm: std::collections::BTreeSet<OrderedShape> =
+            ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
+                .filter_map(|s| match s {
+                    ZKMProofShape::Recursion(os) => Some(os),
+                    _ => None,
+                })
+                .collect();
+        // Arities the enumeration covers for normalize: always {1} today.
+        let enum_arities: std::collections::BTreeSet<usize> =
+            if enum_norm.is_empty() { Default::default() } else { [1usize].into_iter().collect() };
+        eprintln!(
+            "[MSNORM] enumerated normalize single-shard shapes={} (normalize arity ALWAYS=1 in enum) arities present={:?}",
+            enum_norm.len(),
+            enum_arities
+        );
+
+        let mut all_faithful = true;
+        // Collect (arity -> first vk) to detect arity-N vk collapse across mixes.
+        let mut per_arity_vks: std::collections::BTreeMap<usize, Vec<[KoalaBear; 8]>> =
+            std::collections::BTreeMap::new();
+        for (i, (input, batch)) in inputs
+            .iter()
+            .zip(core_proof.proof.0.chunks(REDUCE_BATCH_SIZE))
+            .enumerate()
+        {
+            let arity = input.shard_proofs.len();
+            let prog_real = prover.recursion_program_basefold(input);
+            let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
+
+            let real_shape = ZKMRecursionShape {
+                proof_shapes: batch.iter().map(|sp| sp.shape()).collect(),
+                is_complete: input.is_complete,
+            };
+            let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &real_shape);
+
+            // ── BUNDLE-STRUCTURE COMPARE: real input bundle vs dummy bundle
+            //    (per-shard, shard 0).  Prints every length the in-circuit
+            //    verifier loops over, to localize the 46872-instr divergence. ──
+            {
+                use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+                let describe = |tag: &str, ep: &EvaluationProof| {
+                    if let EvaluationProof::Bundle(b) = ep {
+                        let bf = &b.basefold_proof.basefold_proof;
+                        let qph: Vec<usize> = bf
+                            .query_phase_openings_and_proofs
+                            .iter()
+                            .map(|mo| mo.leaves.first().map(|l| l.proof.len()).unwrap_or(0))
+                            .collect();
+                        let qph_leaves: Vec<usize> = bf
+                            .query_phase_openings_and_proofs
+                            .iter()
+                            .map(|mo| mo.leaves.len())
+                            .collect();
+                        let comp_rounds = bf.component_polynomials_query_openings_and_proofs.len();
+                        let comp_paths: Vec<usize> = bf
+                            .component_polynomials_query_openings_and_proofs
+                            .iter()
+                            .map(|mo| mo.leaves.first().map(|l| l.proof.len()).unwrap_or(0))
+                            .collect();
+                        let comp_vals: Vec<usize> = bf
+                            .component_polynomials_query_openings_and_proofs
+                            .iter()
+                            .map(|mo| mo.leaves.first().map(|l| l.values.first().map(|v| v.len()).unwrap_or(0)).unwrap_or(0))
+                            .collect();
+                        let batch_ev: Vec<usize> = b.basefold_proof.batch_evaluations.iter().map(|r| r.len()).collect();
+                        eprintln!(
+                            "[MSNORM-BUNDLE] {tag}: fri_commits={} uni_msgs={} qph_rounds={} qph_pathlens={:?} \
+                             qph_leaves={:?} comp_rounds={comp_rounds} comp_pathlens={:?} comp_vallens={:?} \
+                             batch_ev={:?} | log_stacking_height={} | reduction.rounds={} eval_point={} \
+                             jagged_eval_pt={} | packing.total_values={} log_dense={} offsets={} col_counts.len={}",
+                            bf.fri_commitments.len(),
+                            bf.univariate_messages.len(),
+                            bf.query_phase_openings_and_proofs.len(),
+                            qph, qph_leaves, comp_paths, comp_vals, batch_ev,
+                            b.commit.log_stacking_height,
+                            b.reduction.rounds.len(),
+                            b.reduction.eval_point.len(),
+                            b.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len(),
+                            b.packing.total_values,
+                            b.packing.log_dense_size,
+                            b.packing.offsets.len(),
+                            b.packing.column_counts.len(),
+                        );
+                    } else {
+                        eprintln!("[MSNORM-BUNDLE] {tag}: NOT a Bundle ({:?} variant)", std::mem::discriminant(ep));
+                    }
+                };
+                describe("REAL ", &input.shard_proofs[0].evaluation_proof);
+                describe("DUMMY", &dummy.shard_proofs[0].evaluation_proof);
+            }
+
+            let prog_dummy = prover.recursion_program_basefold(&dummy);
+            let vk_dummy = prover.compress_prover.setup(&prog_dummy).1.hash_koalabear();
+
+            let eq = vk_real == vk_dummy;
+            all_faithful &= eq;
+            let in_map = prover.recursion_vk_map.contains_key(&vk_real);
+            let arity_enumerated = enum_arities.contains(&arity);
+            let vk_real_u32 = vk_real.map(|x| {
+                use p3_field::PrimeField32;
+                x.as_canonical_u32()
+            });
+            eprintln!(
+                "[MSNORM] batch {i}: arity={arity} dummy_faithful={eq} real_in_map={in_map} \
+                 arity_enumerated={arity_enumerated} vk_real={vk_real_u32:?}"
+            );
+
+            // ── DIVERGENCE PROBE (arity-1 only): why does the real-shape dummy
+            //    diverge from the synthetic-enumeration dummy (which DID build the
+            //    map vk, real_in_map=true)?  Build a dummy from the matching
+            //    SYNTHETIC enumerated shape (same chip SET) and diff its program
+            //    against the real prover's and the real-shape dummy's. ──
+            if arity == 1 && std::env::var("MSNORM_DIAG").is_ok() {
+                let real_os = batch[0].shape();
+                let real_chipset: std::collections::BTreeSet<String> =
+                    real_os.inner.iter().map(|(n, _)| n.clone()).collect();
+                let mut real_heights: Vec<(String, usize)> = real_os.inner.iter().cloned().collect();
+                real_heights.sort();
+                eprintln!("[MSNORM-DIAG] real shard log-heights = {real_heights:?}");
+
+                // Synthetic enumerated shapes with the same chip SET.
+                let mut matches_set: Vec<&OrderedShape> = enum_norm
+                    .iter()
+                    .filter(|os| {
+                        let cs: std::collections::BTreeSet<String> =
+                            os.inner.iter().map(|(n, _)| n.clone()).collect();
+                        cs == real_chipset
+                    })
+                    .collect();
+                eprintln!(
+                    "[MSNORM-DIAG] synthetic enumerated shapes with SAME chip-set = {}",
+                    matches_set.len()
+                );
+                let prog_real_bytes = bincode::serialize(&*prog_real).unwrap();
+                let prog_realdummy_bytes = bincode::serialize(&*prog_dummy).unwrap();
+                matches_set.sort_by_key(|os| os.inner.iter().map(|(_, h)| *h).sum::<usize>());
+                let mut found_match = false;
+                for os in matches_set.iter() {
+                    let syn_shape = ZKMRecursionShape {
+                        proof_shapes: vec![(*os).clone()],
+                        is_complete: input.is_complete,
+                    };
+                    // Over-enumeration: some synthetic shapes exceed log_dense>30
+                    // and panic num2bits — build_compress_vks catch_unwinds these.
+                    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let syn_dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &syn_shape);
+                        let prog_syn = prover.recursion_program_basefold(&syn_dummy);
+                        let vk_syn = prover.compress_prover.setup(&prog_syn).1.hash_koalabear();
+                        (prog_syn, vk_syn)
+                    }));
+                    let (prog_syn, vk_syn) = match built {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    if vk_syn == vk_real && !found_match {
+                        found_match = true;
+                        let prog_syn_bytes = bincode::serialize(&*prog_syn).unwrap();
+                        let fd_rs = prog_real_bytes.iter().zip(prog_syn_bytes.iter()).position(|(a, b)| a != b);
+                        let fd_rd = prog_realdummy_bytes.iter().zip(prog_syn_bytes.iter()).position(|(a, b)| a != b);
+                        let mut syn_h: Vec<(String, usize)> = os.inner.iter().cloned().collect();
+                        syn_h.sort();
+                        eprintln!(
+                            "[MSNORM-DIAG] *** SYNTHETIC MATCH heights={syn_h:?} | prog_real_vs_syn first_diff={fd_rs:?} \
+                             (real_len={} syn_len={}) | realdummy_vs_syn first_diff={fd_rd:?} (realdummy_len={})",
+                            prog_real_bytes.len(), prog_syn_bytes.len(), prog_realdummy_bytes.len(),
+                        );
+                        // instr-level diff: realdummy (WRONG) vs syn (RIGHT)
+                        let di: Vec<_> = prog_dummy.iter_instructions().collect();
+                        let si: Vec<_> = prog_syn.iter_instructions().collect();
+                        eprintln!(
+                            "[MSNORM-DIAG] realdummy_instrs={} syn_instrs={} (delta={})",
+                            di.len(), si.len(), di.len() as i64 - si.len() as i64
+                        );
+                        let n = di.len().min(si.len());
+                        let mut shown = 0;
+                        for k in 0..n {
+                            if format!("{:?}", di[k]) != format!("{:?}", si[k]) {
+                                eprintln!("[MSNORM-DIAG] realdummy_vs_syn diff@{k}: realdummy={:?} | syn={:?}", di[k], si[k]);
+                                shown += 1;
+                                if shown >= 8 { break; }
+                            }
+                        }
+                    }
+                }
+                if !found_match {
+                    eprintln!("[MSNORM-DIAG] no synthetic same-chipset shape produced vk_real (real_in_map={in_map})");
+                }
+
+                // ── PRIMARY DIFF: real `input` program vs real-SHAPE dummy program.
+                //    SAME shape, real-values vs zero-dummy.  If value-independent +
+                //    shape-faithful these MUST match; they don't (dummy_faithful=false),
+                //    so the divergence here is the residual structural field. ──
+                let ri: Vec<_> = prog_real.iter_instructions().collect();
+                let di: Vec<_> = prog_dummy.iter_instructions().collect();
+                eprintln!(
+                    "[MSNORM-DIAG] PRIMARY real_input_instrs={} realdummy_instrs={} (delta={}) \
+                     real_mem={} dummy_mem={}",
+                    ri.len(), di.len(), ri.len() as i64 - di.len() as i64,
+                    prog_real.total_memory, prog_dummy.total_memory,
+                );
+                let rb = bincode::serialize(&*prog_real).unwrap();
+                let db = bincode::serialize(&*prog_dummy).unwrap();
+                let fd = rb.iter().zip(db.iter()).position(|(a, b)| a != b);
+                eprintln!("[MSNORM-DIAG] PRIMARY prog bytes real={} dummy={} first_diff={fd:?}", rb.len(), db.len());
+                let n = ri.len().min(di.len());
+                let mut shown = 0;
+                let mut first_idx = None;
+                for k in 0..n {
+                    if format!("{:?}", ri[k]) != format!("{:?}", di[k]) {
+                        if first_idx.is_none() { first_idx = Some(k); }
+                        eprintln!("[MSNORM-DIAG] PRIMARY diff@{k}: real={:?} | dummy={:?}", ri[k], di[k]);
+                        shown += 1;
+                        if shown >= 12 { break; }
+                    }
+                }
+                eprintln!("[MSNORM-DIAG] PRIMARY first_instr_diff_idx={first_idx:?}");
+                // tail of the longer program (the extra instrs)
+                if ri.len() != di.len() {
+                    let (longer, lbl, start) = if ri.len() > di.len() {
+                        (&ri, "real", di.len())
+                    } else {
+                        (&di, "dummy", ri.len())
+                    };
+                    for k in start..longer.len().min(start + 10) {
+                        eprintln!("[MSNORM-DIAG] PRIMARY {lbl}-only tail@{k}: {:?}", longer[k]);
+                    }
+                }
+            }
+            per_arity_vks.entry(arity).or_default().push(vk_real);
+        }
+
+        // Arity-collapse probe: for each arity seen, do all real batches of that
+        // arity (different per-shard mixes) share ONE vk?
+        for (arity, vks) in per_arity_vks.iter() {
+            let distinct: std::collections::BTreeSet<_> = vks.iter().collect();
+            eprintln!(
+                "[MSNORM] arity={arity}: {} real batches, {} DISTINCT vks (collapse={})",
+                vks.len(),
+                distinct.len(),
+                distinct.len() == 1
+            );
+        }
+
+        eprintln!("[MSNORM] SUMMARY: all_dummy_faithful={all_faithful}");
+        if std::env::var("MSNORM_ASSERT").is_ok() {
+            assert!(
+                all_faithful,
+                "[MSNORM] dummy normalize VK diverged from real at some arity — the per-shard \
+                 dummy bundle reconstruction is NOT faithful (this is the deep bug). See \
+                 per-batch lines above."
+            );
+        }
+        Ok(())
+    }
+
     /// DISCRIMINATOR harness: prove a real fib CORE proof and run
     /// the HOST `verify_shard` on each shard (a host-VALID / GREEN child).
     /// With `S8J_RLC=1` set, `verify_zerocheck_host` independently recomputes
