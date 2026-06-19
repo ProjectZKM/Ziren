@@ -244,6 +244,41 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             challenger,
         );
 
+        // (6.5) HEIGHT-BINDING SOUNDNESS GUARD (in-circuit analog of the
+        // host `evaluate_trace_columns_at_point` `assert!(height <= domain)`,
+        // logup_gkr_prover.rs).
+        //
+        // Once the recursion is height-agnostic (heights witnessed via
+        // `row_counts` / `col_prefix_sums` rather than pinned by `fix_shape`),
+        // a malicious prover could WITNESS A PER-CHIP ROW COUNT LARGER THAN THE
+        // OPENED CUBE DOMAIN (`2^point.len()`, where `point` = z_row is the
+        // shared zerocheck-reduced point the dense trace is opened over).  The
+        // step-(7) prefix-sum check below only ties the row counts to
+        // `col_prefix_sums` (an INTERNAL consistency check); it does NOT bound
+        // any individual row count against the cube, so an over-claimed height
+        // (compensated by a smaller height elsewhere to keep the total area
+        // consistent) would pass step (7) while making the per-chip trace MLE
+        // evaluate over a cube SMALLER than the claimed height — silently
+        // dropping real rows ⇒ soundness break.
+        //
+        // Bind each DISTINCT witnessed `row_count` to `row_count <= 2^L`,
+        // L = point.len(), via a sound in-circuit bit-decomposition:
+        //   * `num2bits(row_count, L+1)` sound-binds row_count = Σ b_i 2^i with
+        //     each b_i boolean ⇒ row_count < 2^{L+1};
+        //   * `low = bits2num(low L bits) = row_count - b_L·2^L`;
+        //   * assert `(row_count - low) · low == 0`  ( = b_L·2^L·low ), which
+        //     forces `b_L = 1 ⇒ low = 0`, i.e. row_count ∈ {0,…,2^L}.
+        // The tallest honest chip fills the cube exactly (row_count == 2^L), so
+        // the bound is INCLUSIVE; honest power-of-two heights ≤ 2^L are a
+        // no-op.  Any over-claim 2^L < row_count < 2^{L+1} trips the product
+        // assert; row_count ≥ 2^{L+1} fails `num2bits`.
+        let cube_log = z_row.len();
+        for round in row_counts.iter() {
+            for &row_count in round.iter() {
+                Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
+            }
+        }
+
         // (7) Check prefix-sum consistency: accumulating the
         // per-chip row counts must match the per-column prefix
         // sums the jagged-eval protocol emitted.
@@ -299,6 +334,49 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         );
 
         prefix_sum_felts
+    }
+
+    /// In-circuit height-binding guard: assert `row_count <= 2^cube_log`.
+    ///
+    /// `cube_log = point.len()` is the number of variables in the opened
+    /// cube (z_row).  This is the in-circuit analog of the host's
+    /// `assert!(height <= domain)` in `evaluate_trace_columns_at_point`
+    /// (crates/pcs/src/shard_level/logup_gkr_prover.rs) — it prevents a
+    /// height-agnostic prover from witnessing a `row_count` larger than the
+    /// cube the trace MLE is actually opened over.
+    ///
+    /// Soundness of the decomposition: [`CircuitConfig::num2bits`] emits the
+    /// bits as a hint and (for every production config) re-binds them by
+    /// asserting each bit boolean and the weighted sum equals `row_count`, so
+    /// the prover cannot supply a lying decomposition.  Requesting
+    /// `cube_log + 1` bits proves `row_count < 2^{cube_log+1}`; the
+    /// `(row_count - low)·low == 0` product then forbids the open interval
+    /// `(2^cube_log, 2^{cube_log+1})`, leaving exactly `row_count ∈
+    /// [0, 2^cube_log]` (inclusive — the tallest chip fills the cube).
+    ///
+    /// Config-generic: `row_count` and `low` are `Felt<C::F>`, so the closing
+    /// `assert_felt_eq` works for both the inner (KoalaBear) and outer
+    /// (BN254) recursion configs.
+    fn assert_row_count_le_cube<C>(
+        builder: &mut Builder<C>,
+        row_count: Felt<C::F>,
+        cube_log: usize,
+    ) where
+        C: CircuitConfig,
+    {
+        use p3_field::PrimeCharacteristicRing;
+        // L+1-bit sound decomposition of row_count (boolean + sum-binding
+        // happen inside num2bits for production configs).
+        let bits = C::num2bits(builder, row_count, cube_log + 1);
+        // low = value of the low `cube_log` bits = row_count - b_{cube_log}·2^L.
+        let low: Felt<C::F> =
+            C::bits2num(builder, bits.iter().take(cube_log).copied());
+        // (row_count - low) is b_{cube_log}·2^L ∈ {0, 2^L}; multiplying by
+        // `low` and asserting zero forces low == 0 whenever the high bit is
+        // set, i.e. row_count ≤ 2^L.
+        let high_part: Felt<C::F> = builder.eval(row_count - low);
+        let prod: Felt<C::F> = builder.eval(high_part * low);
+        builder.assert_felt_eq(prod, C::F::ZERO);
     }
 }
 
@@ -406,5 +484,59 @@ mod tests {
         let machine_jagged =
             RecursiveMachineJaggedPcsVerifier::new(&jagged, vec![vec![3, 4, 5], vec![2, 6]]);
         assert_eq!(machine_jagged.column_counts_by_round.len(), 2);
+    }
+
+    // ── HEIGHT-BINDING GUARD (Deliverable 2) executed-circuit tests ──
+    //
+    // These compile + RUN the DSL through the recursion runtime
+    // (`run_test_recursion`), so the in-circuit `assert_felt_eq` in
+    // `assert_row_count_le_cube` actually fires.  An over-claimed height
+    // makes the runtime panic (the asserted product is non-zero), which the
+    // negative test captures via `#[should_panic]`; honest heights run clean.
+
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_recursion_compiler::ir::{Builder, Felt};
+    use zkm_pcs::InnerVal;
+
+    /// Run the height guard against a single `row_count` over a cube of
+    /// `2^cube_log` rows, executing the resulting circuit end-to-end.
+    fn run_guard(row_count: u64, cube_log: usize) {
+        use crate::utils::tests::run_test_recursion;
+        let mut builder = Builder::<InnerConfig>::default();
+        let rc: Felt<InnerVal> = builder.constant(InnerVal::from_u64(row_count));
+        RecursiveJaggedPcsVerifier::<()>::assert_row_count_le_cube::<InnerConfig>(
+            &mut builder,
+            rc,
+            cube_log,
+        );
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE: honest heights `<= 2^cube_log` (including 0, a sub-cube
+    /// power of two, and the full cube `== 2^cube_log`) all verify.
+    #[test]
+    fn height_guard_accepts_valid_row_counts() {
+        let cube_log = 4; // domain = 16
+        run_guard(0, cube_log);
+        run_guard(1, cube_log);
+        run_guard(8, cube_log); // sub-cube power of two
+        run_guard(16, cube_log); // full cube: row_count == 2^cube_log (inclusive)
+    }
+
+    /// NEGATIVE: an over-claimed height just past the cube
+    /// (`row_count = 2^cube_log + 1 = 17 > 16`) is REJECTED — the runtime
+    /// trips the `(row_count - low)*low == 0` assert.
+    #[test]
+    #[should_panic]
+    fn height_guard_rejects_overclaimed_row_count_just_above_cube() {
+        run_guard(17, 4);
+    }
+
+    /// NEGATIVE: a grossly over-claimed height (`row_count = 2*2^cube_log =
+    /// 32 > 16`) is also REJECTED.
+    #[test]
+    #[should_panic]
+    fn height_guard_rejects_overclaimed_row_count_double_cube() {
+        run_guard(32, 4);
     }
 }
