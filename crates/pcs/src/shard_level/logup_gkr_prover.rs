@@ -115,11 +115,6 @@ where
                         s.len(),
                     )
                 }
-                use std::sync::OnceLock;
-                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!("eval_at hook FIRED");
-                });
                 unsafe {
                     let result_ef4: Vec<Ef4> = gpu_hook(
                         slice_cast::<F, Kb>(trace),
@@ -133,21 +128,7 @@ where
                         .as_mut_ptr() as *mut EF;
                     return Vec::from_raw_parts(ptr, len, cap);
                 }
-            } else {
-                use std::sync::OnceLock;
-                static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
-                MISMATCH_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "eval_at hook FELL THROUGH ((F,EF) != (Kb,Ef4))"
-                    );
-                });
             }
-        } else {
-            use std::sync::OnceLock;
-            static WARN_ONCE: OnceLock<()> = OnceLock::new();
-            WARN_ONCE.get_or_init(|| {
-                tracing::warn!("eval_at hook FELL THROUGH (hook=None)");
-            });
         }
     }
     evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)

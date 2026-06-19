@@ -316,14 +316,6 @@ where
                     };
                     let main_padded_width = if main_trace.width == 0 { 0 } else { chip_main_width };
                     let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
-                    use std::sync::OnceLock;
-                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "interaction_eval hook FIRED (chip={})",
-                            chip.name()
-                        );
-                    });
                     // SAFETY: TypeId equality guarantees F == Kb and
                     // EF == Ef4; slice/value reinterp is sound.
                     let r = unsafe {
@@ -374,25 +366,8 @@ where
                             (numer_f, denom_ef)
                         })
                     };
-                    if r.is_none() {
-                        static REJECT_ONCE: OnceLock<()> = OnceLock::new();
-                        REJECT_ONCE.get_or_init(|| {
-                            tracing::warn!(
-                                "interaction_eval hook FELL THROUGH \
-                                 (chip={}, GPU returned None)",
-                                chip.name()
-                            );
-                        });
-                    }
                     r
                 } else {
-                    use std::sync::OnceLock;
-                    static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
-                    MISMATCH_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "interaction_eval hook FELL THROUGH ((F,EF) != (Kb,Ef4))"
-                        );
-                    });
                     None
                 }
             } else {

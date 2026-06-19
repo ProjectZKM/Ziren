@@ -128,24 +128,11 @@ fn legacy_bool(var: &str) -> Option<bool> {
     Some(v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
-fn warn_once(slot: &OnceLock<()>, msg: &str) {
-    slot.get_or_init(|| {
-        tracing::warn!("{msg}");
-    });
-}
-
 /// Compose host-pk cache — ON when `ZIREN_COMPOSE_PK_CACHE=1` (legacy)
 /// or when the profile allows it (default = `Hybrid` → OFF; only
 /// `Full` enables it).  Hybrid keeps audited-HEAD default behavior.
 pub fn compose_pk_cache_enabled() -> bool {
-    static WARN: OnceLock<()> = OnceLock::new();
     if let Some(v) = legacy_bool("ZIREN_COMPOSE_PK_CACHE") {
-        warn_once(
-            &WARN,
-            "ZIREN_COMPOSE_PK_CACHE is deprecated; use \
-             ZIREN_GPU_RESIDENCY=full|hybrid|host (set to full to \
-             opt into the compose-pk cache)",
-        );
         return v;
     }
     resolve_gpu_residency_profile().allows_compose_pk_cache()
@@ -154,14 +141,7 @@ pub fn compose_pk_cache_enabled() -> bool {
 /// Compose recursion program cache — ON when `ZIREN_PROGRAM_CACHE=1`
 /// (legacy) or when the profile allows it (default = `Hybrid` → OFF).
 pub fn program_cache_enabled() -> bool {
-    static WARN: OnceLock<()> = OnceLock::new();
     if let Some(v) = legacy_bool("ZIREN_PROGRAM_CACHE") {
-        warn_once(
-            &WARN,
-            "ZIREN_PROGRAM_CACHE is deprecated; use \
-             ZIREN_GPU_RESIDENCY=full to opt into per-arity compose \
-             program caching",
-        );
         return v;
     }
     resolve_gpu_residency_profile().allows_program_cache()
@@ -181,14 +161,7 @@ pub fn program_cache_audit_enabled() -> bool {
 /// `ZIREN_ENABLE_COMPOSE_PREWARM=1` (legacy) or when the profile
 /// allows it (default = `Hybrid` → OFF).
 pub fn compose_prewarm_enabled() -> bool {
-    static WARN: OnceLock<()> = OnceLock::new();
     if let Some(v) = legacy_bool("ZIREN_ENABLE_COMPOSE_PREWARM") {
-        warn_once(
-            &WARN,
-            "ZIREN_ENABLE_COMPOSE_PREWARM is deprecated; use \
-             ZIREN_GPU_RESIDENCY=full to opt into compose-program \
-             pre-warm at process startup",
-        );
         return v;
     }
     resolve_gpu_residency_profile().allows_compose_prewarm()

@@ -356,7 +356,6 @@ where
         && jagged_on
         && prospective_log_dense >= gpu_min_log_dense;
     let skip_device_d2h = !eager_kill && handle_path_guaranteed;
-    let mut commit_d2h_skipped = 0usize;
     let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
         .iter()
         .zip(main_traces.iter())
@@ -367,7 +366,6 @@ where
                         // Device-resident chip with an empty host trace and
                         // the handle path guaranteed: skip the D2H, keep it
                         // empty.  The device commit hook packs it D2D.
-                        commit_d2h_skipped += 1;
                         return t.clone();
                     }
                     // Otherwise (handle path NOT guaranteed, or kill-switch):
@@ -386,20 +384,6 @@ where
             t.clone()
         })
         .collect();
-    if commit_d2h_skipped > 0 {
-        use std::sync::OnceLock;
-        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-        FIRED_ONCE.get_or_init(|| {
-            tracing::info!(
-                chips = chips.len(),
-                skipped = commit_d2h_skipped,
-                "#32 commit-traces D2H SKIPPED (first shard) — device-resident \
-                 chips left empty; dense commit packs them D2D and fallbacks \
-                 re-materialize via provider (kill-switch \
-                 ZIREN_GPU_COMMIT_TRACES_D2H=1 to restore eager materialize)",
-            );
-        });
-    }
     // Commit-traces D2H removal: capture the cumulative-sum TAILS
     // (last 14 row-major values) for device-resident chips via a
     // ~56-byte provider gather, EARLY — before the zerocheck prepare's
@@ -424,22 +408,6 @@ where
             )
         })
         .collect();
-    {
-        let n_tails = chip_cum_tails.iter().filter(|t| t.is_some()).count();
-        if n_tails > 0 {
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            FIRED_ONCE.get_or_init(|| {
-                tracing::info!(
-                    chips = chips.len(),
-                    tails = n_tails,
-                    "#32 cumsum provider-tail gather FIRED (first shard) — \
-                     device-resident chips' cumulative sums read 14-felt \
-                     tails, not the full materialize",
-                );
-            });
-        }
-    }
     let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A>(
             chips,
@@ -1162,14 +1130,6 @@ where
     // avoid double-committing — the GPU-driven Option B path is a
     // separate (future) concern.
     if let Some(precomputed) = precomputed_commit {
-        use std::sync::OnceLock;
-        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-        FIRED_ONCE.get_or_init(|| {
-            tracing::warn!(
-                "jagged_pcs Option B precomputed-commit path FIRED (n_chips={})",
-                chip_traces.len()
-            );
-        });
         let precomputed_inner: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
             let any: Box<dyn core::any::Any> = Box::new(precomputed);
             *any.downcast().expect(
@@ -1201,14 +1161,6 @@ where
         if let Some(hook) =
             crate::shard_level::sumcheck_poly::get_gpu_jagged_pcs_device_hook()
         {
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            FIRED_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "jagged_pcs_device hook FIRED (n_chips={})",
-                    chip_traces.len()
-                );
-            });
             let chip_names: Vec<alloc::string::String> =
                 chip_traces.iter().map(|(name, _)| name.clone()).collect();
             // Pass the already-materialized host `chip_traces` so the
@@ -1242,14 +1194,6 @@ where
     if let Some(hook) =
         crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
     {
-        use std::sync::OnceLock;
-        static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-        FIRED_ONCE.get_or_init(|| {
-            tracing::warn!(
-                "jagged_orchestration hook FIRED (n_chips={})",
-                chip_traces.len()
-            );
-        });
         return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
     }
 

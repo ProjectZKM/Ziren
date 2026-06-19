@@ -271,9 +271,6 @@ pub fn commit_jagged_pcs(
             // / runtime errors (we then run the host path with the
             // returned input — no double-allocation, no challenger
             // double-observe).
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
             // Transcript safety: snapshot + restore around the
             // fallible device hook so an Err after any challenger
             // interaction cannot double-advance the transcript (see
@@ -281,40 +278,13 @@ pub fn commit_jagged_pcs(
             let challenger_snapshot = challenger.clone();
             match hook(chip_traces, challenger) {
                 Ok(out) => {
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold commit FIRED \
-                             (#76/D2 ZIREN_GPU_BASEFOLD=1, gpu_hook dispatched, \
-                             area={}, log_stacking_height={})",
-                            out.0.area, out.0.log_stacking_height,
-                        );
-                    });
                     return out;
                 }
                 Err(returned_traces) => {
-                    FELLBACK_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold commit hook returned Err — falling \
-                             back to host commit_jagged_pcs. The \
-                             device side could not handle this shape; the \
-                             host commit is the source of truth."
-                        );
-                    });
                     *challenger = challenger_snapshot;
                     return commit_jagged_pcs_host(returned_traces, challenger);
                 }
             }
-        } else {
-            use std::sync::OnceLock;
-            static WARN_ONCE: OnceLock<()> = OnceLock::new();
-            WARN_ONCE.get_or_init(|| {
-                tracing::warn!(
-                    "ZIREN_GPU_BASEFOLD=1 set but no GPU commit hook \
-                     registered; ziren-gpu's compress_multi_gpu must call \
-                     register_gpu_basefold_commit_hook at startup. \
-                     Falling back to host BaseFold commit. See #76/D2."
-                );
-            });
         }
     }
     commit_jagged_pcs_host(chip_traces, challenger)
@@ -384,30 +354,13 @@ pub fn commit_jagged_pcs_no_observe(
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = get_gpu_basefold_commit_hook() {
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
             let mut throwaway: JaggedChallenger =
                 JaggedChallenger::new(zkm_primitives::poseidon2_init());
             match hook(chip_traces, &mut throwaway) {
                 Ok(out) => {
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold commit FIRED (no-observe variant, \
-                             Option B precompute, area={}, log_stacking_height={})",
-                            out.0.area,
-                            out.0.log_stacking_height,
-                        );
-                    });
                     return out;
                 }
                 Err(returned_traces) => {
-                    FELLBACK_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold commit hook returned Err on no-observe \
-                             variant — falling back to host."
-                        );
-                    });
                     return commit_jagged_pcs_host_no_observe(returned_traces);
                 }
             }
@@ -1264,9 +1217,6 @@ pub fn open_jagged_pcs(
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = get_gpu_basefold_open_hook() {
-            use std::sync::OnceLock;
-            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-            static FELLBACK_ONCE: OnceLock<()> = OnceLock::new();
             // Transcript safety: the device open ADVANCES the
             // challenger (pre-prove grind, per-round digest observes,
             // FRI PoW, query sampling) before it can fail —
@@ -1279,24 +1229,9 @@ pub fn open_jagged_pcs(
             let challenger_snapshot = challenger.clone();
             match hook(prover_data, eval_point, challenger) {
                 Ok(proof) => {
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold open FIRED \
-                             (#191/H3 ZIREN_GPU_BASEFOLD=1, gpu_hook dispatched)"
-                        );
-                    });
                     return proof;
                 }
                 Err((returned_prover_data, returned_eval_point)) => {
-                    FELLBACK_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            "GPU BaseFold open hook returned Err — falling \
-                             back to host open_jagged_pcs on the RESTORED \
-                             challenger state. The device side could not \
-                             handle this shape; the host open is the \
-                             source of truth."
-                        );
-                    });
                     *challenger = challenger_snapshot;
                     return open_jagged_pcs_host(
                         returned_prover_data,
@@ -2456,18 +2391,6 @@ pub mod jagged {
                 // the verifier REJECTS — the #76 H53INV bug).  Byte-identical
                 // to the golden commit by construction.
                 debug_assert_eq!(carried.len(), 1usize << packing.log_dense_size);
-                use std::sync::OnceLock;
-                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        chips = n_chips,
-                        log_dense_size = packing.log_dense_size as u64,
-                        "#77 jagged reduction using CARRIED host dense_q from \
-                         the device-commit-decline fallback (H53 D2H-skip hole \
-                         fix) — avoids the drained-provider re-materialize that \
-                         would reject (#76 H53INV)",
-                    );
-                });
                 carried
             } else {
                 // When device-resident chips carry empty host traces,
@@ -2478,51 +2401,21 @@ pub mod jagged {
                 materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size)
             };
 
-            // Diagnostic (1): env=1 but no hook → warn once, count.
+            // Diagnostic (1): env=1 but no hook → bump the counter.
             if try_gpu && !any_hook_registered {
-                use std::sync::OnceLock;
-                static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                let n = super::jagged_dispatch_diag::bump(
+                let _ = super::jagged_dispatch_diag::bump(
                     &super::jagged_dispatch_diag::ENV_SET_BUT_UNREGISTERED,
                 );
-                WARN_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        chips = n_chips,
-                        log_dense_size = packing.log_dense_size as u64,
-                        env_set_but_unregistered_count = n,
-                        "jagged_pcs: ZIREN_GPU_JAGGED_PCS=1 set but no GPU \
-                         jagged-reduction hook registered. ziren-gpu's \
-                         compress_multi_gpu must call \
-                         register_gpu_jagged_reduction_hook or \
-                         register_gpu_jagged_reduction_hook_v2 at startup. \
-                         Falling back to host prove_jagged_reduction_owned. \
-                         See jagged_pcs.rs Win A."
-                    );
-                });
             }
 
-            // Diagnostic (2): hook registered but env=0 → warn once,
-            // count.  This is normally fine (caller explicitly opted
+            // Diagnostic (2): hook registered but env=0 → bump the
+            // counter.  This is normally fine (caller explicitly opted
             // out) but on a perf-experiment run it can mask intended
             // GPU acceleration.
             if !try_gpu && any_hook_registered {
-                use std::sync::OnceLock;
-                static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                let n = super::jagged_dispatch_diag::bump(
+                let _ = super::jagged_dispatch_diag::bump(
                     &super::jagged_dispatch_diag::HOOK_REGISTERED_BUT_ENV_UNSET,
                 );
-                WARN_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        chips = n_chips,
-                        log_dense_size = packing.log_dense_size as u64,
-                        hook_registered_but_env_unset_count = n,
-                        "jagged_pcs: GPU jagged-reduction hook is \
-                         registered but ZIREN_GPU_JAGGED_PCS=1 is not \
-                         set in the env. Running host fallback. To \
-                         enable the GPU path, set ZIREN_GPU_JAGGED_PCS=1. \
-                         See jagged_pcs.rs Win A."
-                    );
-                });
             }
 
             // Pick the active hook: V2 preferred if available, else
@@ -2557,8 +2450,6 @@ pub mod jagged {
 
             match active {
                 ActiveHook::V2(f) => {
-                    use std::sync::OnceLock;
-                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                     let _ = super::jagged_dispatch_diag::bump(
                         &super::jagged_dispatch_diag::HOOK_FIRED,
                     );
@@ -2570,16 +2461,6 @@ pub mod jagged {
                             &super::jagged_dispatch_diag::V2_WITH_DEVICE_HANDLE_FIRED,
                         );
                     }
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            chips = n_chips,
-                            log_dense_size = packing.log_dense_size as u64,
-                            device_handle = ?dense_q_device_handle,
-                            "#107 jagged_pcs FIRED — GPU jagged-reduction V2 \
-                             hook driving sumcheck reduce ({} chips, device_handle={:?})",
-                            n_chips, dense_q_device_handle,
-                        );
-                    });
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
                     // #A: with the device-handle skip, `dense_q` is an
@@ -2660,20 +2541,9 @@ pub mod jagged {
                     }
                 }
                 ActiveHook::V1(f) => {
-                    use std::sync::OnceLock;
-                    static FIRED_ONCE: OnceLock<()> = OnceLock::new();
                     let _ = super::jagged_dispatch_diag::bump(
                         &super::jagged_dispatch_diag::HOOK_FIRED,
                     );
-                    FIRED_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            chips = n_chips,
-                            log_dense_size = packing.log_dense_size as u64,
-                            "#107 jagged_pcs FIRED — GPU jagged-reduction V1 \
-                             hook driving sumcheck reduce ({} chips)",
-                            n_chips,
-                        );
-                    });
                     // Move dense_q into the hook.  Move-not-clone:
                     // avoids holding a 4N base-field duplicate live
                     // across the call.  On a hard fall-through (None

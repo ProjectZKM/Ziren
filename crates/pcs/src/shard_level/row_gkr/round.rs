@@ -765,12 +765,6 @@ where
     if TypeId::of::<F>() != TypeId::of::<ProdF>()
         || TypeId::of::<EF>() != TypeId::of::<ProdEF>()
     {
-        static WARN_ONCE: OnceLock<()> = OnceLock::new();
-        WARN_ONCE.get_or_init(|| {
-            tracing::warn!(
-                "first_round_dispatch GPU first-round dispatch FELL THROUGH                  (env=set, but F/EF != KoalaBear/Ef4)"
-            );
-        });
         return None;
     }
 
@@ -803,15 +797,6 @@ where
             None
         }
     };
-    if _device_first_layer_guard.is_some() {
-        static DRAIN_FIRED: OnceLock<()> = OnceLock::new();
-        DRAIN_FIRED.get_or_init(|| {
-            tracing::info!(
-                "Phase 2 device-first-layer stash drained + TLS installed (first dispatch)"
-            );
-        });
-    }
-
     static SYN_TEST: OnceLock<()> = OnceLock::new();
     SYN_TEST.get_or_init(|| synthetic_diff_test_step7z());
 
@@ -826,16 +811,6 @@ where
     let hook = match crate::shard_level::sumcheck_poly::get_gpu_first_round_hook() {
         Some(h) => h,
         None => {
-            static HOOK_MISSING_WARN: OnceLock<()> = OnceLock::new();
-            HOOK_MISSING_WARN.get_or_init(|| {
-                // Demoted from warn to debug: shard-server does not
-                // register the first-round device hook (only
-                // compress_multi_gpu does), so the host orchestrator
-                // is the correct behavior on shard-server.
-                tracing::debug!(
-                    "first_round_dispatch GPU first-round dispatch FELL THROUGH                      (env=set, but register_gpu_first_round_hook was                      never called)"
-                );
-            });
             return None;
         }
     };
@@ -1035,10 +1010,6 @@ where
     // marshal_dump removed (per_chip_n0 no longer exists).
 
     if quadrant_mismatch {
-        static QUAD_WARN: OnceLock<()> = OnceLock::new();
-        QUAD_WARN.get_or_init(|| {
-            tracing::warn!("first_round_dispatch marshal bailed: quadrant shape mismatch");
-        });
         return None;
     }
 
@@ -1103,10 +1074,6 @@ where
 
     let expected_concat = 4 * total_pairs;
     if numerator_concat.len() != expected_concat {
-        static SHAPE_WARN: OnceLock<()> = OnceLock::new();
-        SHAPE_WARN.get_or_init(|| {
-            tracing::warn!("first_round_dispatch concat shape mismatch");
-        });
         return None;
     }
 
@@ -1230,13 +1197,6 @@ where
             tracing::warn!("Diag-PROBE phase4 gate read env_on={v} (default ON )");
             v
         });
-        static REACHED: OnceLock<()> = OnceLock::new();
-        REACHED.get_or_init(|| {
-            use crate::shard_level::device_first_layer_context as dfl;
-            let tls_present = dfl::current_device_first_layer().is_some();
-            let hook_present = dfl::get_first_round_device_hook().is_some();
-            tracing::warn!("Diag-PROBE phase4 reached env_on={env_on} tls={tls_present} hook={hook_present} n_chips={}", first_layer.numerator_0.len());
-        });
         // Threshold gate: skip device dispatch when first_layer.num_row_variables
         // is below `ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS` (default 0 = no
         // threshold).  Mirrors the V3 LogUp-GKR threshold scaffold (threshold /
@@ -1283,12 +1243,6 @@ where
                     total_one_quadrant_cells += cols * (target_rows as u32);
                 }
                 let total_pair_tasks = so_far;
-                static FIRED: OnceLock<()> = OnceLock::new();
-                FIRED.get_or_init(|| {
-                    tracing::info!(
-                        "Phase 4 device dispatch FIRED (n_chips={n_chips}, total_pairs={total_pair_tasks})",
-                    );
-                });
                 // ProdEF and the hook's Ef4 are the SAME underlying type
                 // (BinomialExtensionField<KoalaBear, 4>); pass directly.
                 device_hook(
@@ -1332,10 +1286,6 @@ where
     let (gpu_partials, post_fix) = match result {
         Some(t) => t,
         None => {
-            static GPU_NONE_WARN: OnceLock<()> = OnceLock::new();
-            GPU_NONE_WARN.get_or_init(|| {
-                tracing::warn!("first_round_dispatch GPU hook returned None");
-            });
             return None;
         }
     };
@@ -1349,12 +1299,6 @@ where
         _lambda,
         claimed_sum,
     );
-
-    // SP1-style reconstruction (best guess — see SP1
-    // /tmp/sp1/sp1-gpu/crates/logup_gkr/src/sumcheck.rs:51-93).
-    // Assumes padding_adjustment = pad_eq_int_sum and
-    // eq_adjustment = ONE (Ziren collapses both into pad_eq_int_sum).
-    let host_coeffs = poly_coefficients_from_evals(host_evals);
 
     // Cast partials EF -> ProdEF.
     let mut sum_zero_ef: EF = if let Some(v) = gpu_partials.get(0) {
@@ -1441,55 +1385,6 @@ where
     let sp1_vals: [EF; 4] = [eval_zero_sp1, eval_one_sp1, eval_half_sp1, EF::ZERO];
     let sp1_coeffs = lagrange_interp_4(sp1_pts, sp1_vals);
 
-    // SP1 -> Ziren conversion: divide degree-3 poly by linear eq factor
-    // ((1-c) + (2c-1)*x) where c = point_last.  Should yield Zirens
-    // degree-2 representation if hypothesis is correct.
-    let two_c_m1 = alpha_as_ef.double() - one;
-    let one_m_c = one - alpha_as_ef;
-    let sp1_div_q: [EF; 3] = poly_div_linear(sp1_coeffs, one_m_c, two_c_m1);
-    let div_match = host_coeffs[0] == sp1_div_q[0]
-        && host_coeffs[1] == sp1_div_q[1]
-        && host_coeffs[2] == sp1_div_q[2]
-        && host_coeffs[3] == EF::ZERO;
-    static DIV_LOG: OnceLock<()> = OnceLock::new();
-    DIV_LOG.get_or_init(|| {
-        tracing::warn!(
-            "first_round_dispatch DIV: DIV_MATCH={} host_c3_is_zero={}              host_c0={:?} sp1_div_q0={:?}              host_c1={:?} sp1_div_q1={:?}              host_c2={:?} sp1_div_q2={:?}",
-            div_match,
-            host_coeffs[3] == EF::ZERO,
-            host_coeffs[0], sp1_div_q[0],
-            host_coeffs[1], sp1_div_q[1],
-            host_coeffs[2], sp1_div_q[2],
-        );
-    });
-
-    // One-shot side-by-side log (per process — first dispatch only).
-    // Diagnostic: check sum_zero vs host_evals[0] directly.
-    // If kernel correct, GPU sum_zero should equal host_evals[0] (= true p(0))
-    // since host derives p(0) = claim - p(1) and sumcheck identity gives same value.
-    static DIFF_LOG: OnceLock<()> = OnceLock::new();
-    DIFF_LOG.get_or_init(|| {
-        let fp_diff = if denominator_concat.is_empty() { format!("empty") } else { format!("{:?}", denominator_concat[0]) };
-        tracing::warn!("Diag-FINGERPRINT diff probe: fp={}", fp_diff);
-        let coeffs_match = host_coeffs == sp1_coeffs;
-        tracing::warn!(
-            "first_round_dispatch DIFF (one-shot, first dispatch):              n_chips={} total_pairs={}              COEFFS_MATCH={}              host_coeffs[0..4]=[{:?}, {:?}, {:?}, {:?}]              sp1_coeffs[0..4]=[{:?}, {:?}, {:?}, {:?}]              host_evals=[{:?}, {:?}, {:?}, {:?}]              gpu_partials=[sum_zero={:?}, sum_half={:?}, eq_sum={:?}]              eval_zero_sp1={:?} eval_half_sp1={:?} eval_one_sp1={:?} b_const={:?}              post_fix.len()={}              claim={:?} alpha={:?} pad_eq_int_sum={:?}              eq_row.len()={} eq_int.len()={}",
-            n_chips, total_pairs,
-            coeffs_match,
-            host_coeffs[0], host_coeffs[1], host_coeffs[2], host_coeffs[3],
-            sp1_coeffs[0], sp1_coeffs[1], sp1_coeffs[2], sp1_coeffs[3],
-            host_evals[0], host_evals[1], host_evals[2], host_evals[3],
-            sum_zero_ef, sum_half_ef, eq_sum_ef,
-            eval_zero_sp1, eval_half_sp1, eval_one_sp1, b_const,
-            post_fix.len(),
-            claimed_sum,
-            alpha_ef,
-            pad_eq_int_sum,
-            eq_row.len(),
-            eq_int.len(),
-        );
-    });
-
     // SP1 port: decode the full packed header from
     // post_fix when SP1 mode emits the packed payload, then build the
     // post-fix ChipLayerState via the strided-post-fix constructor.  When the build
@@ -1530,14 +1425,6 @@ where
                             .map(|(co, &ph)| (co[1] - co[0]) * ph * 4)
                             .sum();
                         let valid = data_len as u32 == expected_data;
-                        static B4_PROBE: OnceLock<()> = OnceLock::new();
-                        B4_PROBE.get_or_init(|| {
-                            tracing::warn!(
-                                "Sprint B4 PROBE: header validated chip_offsets={:?} \
-                                 per_int_h={:?} data_len={} expected_data={} valid={}",
-                                chip_offsets, per_int_h, data_len, expected_data, valid,
-                            );
-                        });
                         if valid {
                             // chip_rows_post_fix = layer chip_rows / 2.
                             // Caller's eq_row.len() = layer chip_rows.
@@ -1558,16 +1445,6 @@ where
                                 &per_int_h,
                                 chip_rows_post_fix,
                             ) {
-                                static B4_BUILT: OnceLock<()> = OnceLock::new();
-                                B4_BUILT.get_or_init(|| {
-                                    tracing::warn!(
-                                        "Sprint B4 BUILT: ChipLayerState n_chips={} \
-                                         chip_rows_post_fix={} chip_cols={:?} \
-                                         num_real_rows={:?}",
-                                        state.n0.len(), state.chip_rows,
-                                        state.chip_cols, state.num_real_rows,
-                                    );
-                                });
                                 post_fix_chip_state = Some(Box::new(state));
                             }
                         }
@@ -1783,16 +1660,6 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
                 let claim_v: Ef4 = unsafe {
                     core::mem::transmute_copy::<EF, Ef4>(&current_claim)
                 };
-                use std::sync::OnceLock;
-                static FIRED_336: OnceLock<()> = OnceLock::new();
-                FIRED_336.get_or_init(|| {
-                    tracing::warn!(
-                        "chip_structured sumcheck GPU hook FIRED \
-                         (chip_rows={}, n_chips={}, total_cells_est={})",
-                        state.chip_rows, state.n0.len(),
-                        state.chip_cols.iter().sum::<usize>() * state.chip_rows,
-                    );
-                });
                 let evals_ef4 = gpu_hook(
                     &n0_views, &d0_views, &n1_views, &d1_views,
                     &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
@@ -2739,16 +2606,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                             let alpha_prev_v: Option<Ef4> = self.last_chip_alpha
                                 .as_ref()
                                 .map(|a| unsafe { core::mem::transmute_copy::<EF, Ef4>(a) });
-                            use std::sync::OnceLock;
-                            static FIRED_343C: OnceLock<()> = OnceLock::new();
-                            FIRED_343C.get_or_init(|| {
-                                tracing::warn!(
-                                    "Device-resident device-resident chip-sumcheck hook FIRED \
-                                     (chip_rows={}, n_chips={}, round_idx={}, id={})",
-                                    state.chip_rows, state.n0.len(),
-                                    self.chip_sumcheck_round, self.chip_sumcheck_id,
-                                );
-                            });
                             if let Some(evals_ef4) = dev_hook(
                                 &n0v, &d0v, &n1v, &d1v,
                                 &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
@@ -2821,18 +2678,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                                     s.len(),
                                 )
                             }
-                            // Debug instrumentation: one-shot warn on
-                            // first successful GPU dispatch so perf
-                            // runs can confirm the hook FIRED (vs
-                            // silently fell through to host).
-                            use std::sync::OnceLock;
-                            static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                            FIRED_ONCE.get_or_init(|| {
-                                tracing::warn!(
-                                    "sumcheck hook FIRED (ZIREN_GPU_SUMCHECK=1, \
-                                     EF=Ef4, gpu_hook dispatched)"
-                                );
-                            });
                             unsafe {
                                 let evals_ef4: [Ef4; 4] = gpu_hook(
                                     slice_cast::<EF, Ef4>(self.eq_int.as_slice()),
@@ -2854,34 +2699,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                                     poly_coefficients_from_evals(evals_ef).to_vec(),
                                 );
                             }
-                        } else {
-                            // Debug instrumentation: TypeId guard
-                            // failed (EF != Ef4 at runtime).  Hook is
-                            // registered, env is set, but generic-EF
-                            // caller forces host fallback.
-                            use std::sync::OnceLock;
-                            static MISMATCH_ONCE: OnceLock<()> = OnceLock::new();
-                            MISMATCH_ONCE.get_or_init(|| {
-                                tracing::warn!(
-                                    "sumcheck hook FELL THROUGH \
-                                     (TypeId mismatch: EF != Ef4); \
-                                     generic-EF caller, host fallback used"
-                                );
-                            });
                         }
-                    } else {
-                        // Debug instrumentation: env=set, hook=None.
-                        use std::sync::OnceLock;
-                        static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                        WARN_ONCE.get_or_init(|| {
-                            tracing::debug!(
-                                "sumcheck hook FELL THROUGH \
-                                 (env=set, hook=None); ziren-gpu's \
-                                 compress_multi_gpu must call \
-                                 register_gpu_sumcheck_hook at startup. \
-                                 Host round_poly_evaluations used."
-                            );
-                        });
                     }
                 }
                 round_poly_evaluations(
@@ -3027,15 +2845,6 @@ where
                     if let Some(gpu_hook_v3) =
                         crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
                     {
-                        use std::sync::OnceLock;
-                        static LAZY_V3_FIRED: OnceLock<()> = OnceLock::new();
-                        LAZY_V3_FIRED.get_or_init(|| {
-                            tracing::warn!(
-                                "V3 logup-round LAZY device-resident path FIRED \
-                                 (cache published device layer to TLS, host pull \
-                                 skipped — SP1 full residency)"
-                            );
-                        });
                         lazy_v3_attempted = true;
                         if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
                             dims,
@@ -3175,15 +2984,6 @@ where
                 lazy_v3_attempted,
                 crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3(),
             ) {
-                use std::sync::OnceLock;
-                static V3_FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                V3_FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "V3 logup-round hook FIRED \
-                         (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
-                         Challenger=InnerChallenger, V3 registered)"
-                    );
-                });
                 if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
                     dims,
                     Some(circuit),
@@ -3202,15 +3002,6 @@ where
             if let Some(gpu_hook_v2) =
                 crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v2()
             {
-                use std::sync::OnceLock;
-                static V2_FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                V2_FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "V2 logup-round hook FIRED \
-                         (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
-                         Challenger=InnerChallenger, V2 registered)"
-                    );
-                });
                 if let Some(proof) = try_logup_round_gpu_v2::<F, EF, _>(
                     circuit,
                     eval_point,
@@ -3230,16 +3021,6 @@ where
             crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook()
         {
             if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
-                use std::sync::OnceLock;
-                static FIRED_ONCE: OnceLock<()> = OnceLock::new();
-                FIRED_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        "C-full H2 logup-round hook FIRED \
-                         (ZIREN_GPU_LOGUP_GKR_DEVICE=1, EF=Ef4, \
-                         gpu_hook present); attempting device-resident \
-                         per-layer sumcheck"
-                    );
-                });
                 if let Some(proof) = try_logup_round_gpu::<F, EF, _>(
                     circuit,
                     eval_point,
