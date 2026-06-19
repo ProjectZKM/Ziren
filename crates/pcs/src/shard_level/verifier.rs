@@ -54,7 +54,11 @@ impl core::fmt::Display for BasefoldVerifyError {
             Self::Zerocheck(msg) => write!(f, "zerocheck: {msg}"),
             Self::JaggedPcs(msg) => write!(f, "jagged-PCS: {msg}"),
             Self::Unimplemented(phase) => {
-                write!(f, "host-side BasefoldShardVerifier: {phase} not yet implemented")
+                // The trailing "(#28)" is the grep-able staged-verifier-port
+                // tracking hint (`unimplemented_error_displays_phase_hint`
+                // asserts on it) so users who hit an unimplemented sub-flow
+                // can find the umbrella tracking issue.
+                write!(f, "host-side BasefoldShardVerifier: {phase} not yet implemented (#28)")
             }
         }
     }
