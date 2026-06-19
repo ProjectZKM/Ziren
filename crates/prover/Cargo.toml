@@ -86,6 +86,14 @@ name = "post_trusted_setup"
 path = "scripts/post_trusted_setup.rs"
 
 [[bin]]
+name = "check_vk_coverage"
+path = "scripts/check_vk_coverage.rs"
+
+[[bin]]
+name = "enum_build_coverage"
+path = "scripts/enum_build_coverage.rs"
+
+[[bin]]
 name = "find_maximal_shapes"
 path = "scripts/find_maximal_shapes.rs"
 
