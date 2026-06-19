@@ -1185,9 +1185,12 @@ mod tests {
         let p = BasefoldVerifierParams::production_default(20);
         assert_eq!(p.total_sumcheck_rounds(), 20);
         assert_eq!(p.total_merkle_commits(), 21);
-        // log_codeword_size = num_variables + log_blowup = 20 + 1
-        // (log_blowup aligned to 1 with the stark prover).
-        assert_eq!(p.log_codeword_size(), 21);
+        // log_codeword_size = num_variables + log_blowup = 20 + 2 = 22.
+        // `production_default` uses log_blowup = 2 (rate 1/4) for the
+        // provable-100-bit inner query-phase soundness posture (see
+        // `BasefoldVerifierParams::production_default` and the soundness
+        // memo); the old "aligned to 1 -> 21" comment was stale.
+        assert_eq!(p.log_codeword_size(), 22);
         assert!(p.estimated_recursion_constraints() > 0);
     }
 
