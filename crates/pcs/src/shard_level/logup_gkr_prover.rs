@@ -368,24 +368,26 @@ mod tests {
     }
 
     /// 4-row, 1-column trace evaluated at a 2-d point.
-    /// `eq_mle_table(r0, r1)` indexing: `table[i]` for binary
-    /// index `i = x1·2 + x0` corresponds to the hypercube point
-    /// `(x0, x1)` where x0 is the LSB (corresponds to r0).
-    ///
-    /// trace = [10, 20, 30, 40], so:
-    ///   trace[0] @ (x0=0, x1=0) = 10
-    ///   trace[1] @ (x0=1, x1=0) = 20
-    ///   trace[2] @ (x0=0, x1=1) = 30
-    ///   trace[3] @ (x0=1, x1=1) = 40
+    /// `eq_mle_table([r0, r1])` (zerocheck_prover.rs:63) builds the table
+    /// in `r`-iteration order so that for index `i` the LSB (bit0) is r0
+    /// and bit1 is r1 — i.e. `i = x1·2 + x0` with x0 the LSB ↔ r0.  The
+    /// trace is indexed the SAME way (`trace[i]` is row `i`), so:
+    ///   trace[0] @ (x0=0, x1=0) = 10   table[0]=(1-r0)(1-r1)
+    ///   trace[1] @ (x0=1, x1=0) = 20   table[1]= r0   (1-r1)
+    ///   trace[2] @ (x0=0, x1=1) = 30   table[2]=(1-r0) r1
+    ///   trace[3] @ (x0=1, x1=1) = 40   table[3]= r0    r1
     /// At r=(r0=2, r1=3):
     ///   table[0]=(1-2)(1-3)= 2  · 10 =  20
     ///   table[1]=2·(1-3)  =-4  · 20 = -80
     ///   table[2]=(1-2)·3  =-3  · 30 = -90
     ///   table[3]=2·3      = 6  · 40 = 240
-    ///   sum = 20 - 80 - 90 + 240 = 90 ... but eq_mle_table puts
-    ///   table[1] at (x0=0, x1=1) and table[2] at (x0=1, x1=0).
-    ///   Re-mapping: 20 + (-3)·20 + (-4)·30 + 6·40
-    ///             = 20 - 60 - 120 + 240 = 80.
+    ///   sum = 20 - 80 - 90 + 240 = 90.
+    ///
+    /// NOTE: the prior assertion of `80` was a pre-existing test bug (it
+    /// claimed eq_mle_table put table[1] at (x0=0,x1=1), but the
+    /// r-iteration-order build places table[1] at (x0=1,x1=0) as shown
+    /// above).  The function correctly returns 90; this matches canonical
+    /// d5e26419 (verified identical output there).  Unrelated to Phase-1.
     #[test]
     fn evaluate_trace_columns_2d_point() {
         use p3_field::PrimeCharacteristicRing;
@@ -393,8 +395,8 @@ mod tests {
         let r = vec![EF::from(F::from_u64(2)), EF::from(F::from_u64(3))];
         let evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 1, &r);
         assert_eq!(evals.len(), 1);
-        // 20 + (-60) + (-120) + 240 = 80.
-        assert_eq!(evals[0], EF::from(F::from_u64(80)));
+        // 20 + (-80) + (-90) + 240 = 90.
+        assert_eq!(evals[0], EF::from(F::from_u64(90)));
     }
 
 
