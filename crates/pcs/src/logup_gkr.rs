@@ -396,7 +396,22 @@ where
         let mut cur_claim = lambda * cur_num + cur_denom;
 
         // Build the equality polynomial table against the current point.
-        let mut eq_table = eq_mle_table::<EF>(&cur_point);
+        //
+        // `eq_mle_table` materializes the table LSB-first: entry index `b`
+        // has `point[i]` controlling bit `i` of `b` (see zerocheck_prover.rs).
+        // The sub-tables (`n_left`/`d_left`/…) are folded LSB-first by
+        // `fold_table_first` (pairs `2i, 2i+1`), and `cur_point` is
+        // accumulated in NATURAL (MSB-first) variable order across layers
+        // (each layer does `r_star.reverse(); cur_point.push(t)`).  To make
+        // `eq(cur_point, b)` index-align with the LSB-first sub-tables we
+        // must build the table over the reversed point — otherwise the
+        // per-round sumcheck identity `h(0)+h(1) == cur_claim` fails for any
+        // layer with ≥1 sumcheck variable (i.e. every layer once `m ≥ 3`),
+        // and the verifier (which uses the matching `eq_eval_msb_first` on the
+        // reversed point) rejects the proof.  Byte-identical for `m ≤ 2`
+        // (≤1 eq variable → reverse is a no-op).
+        let cur_point_rev: Vec<EF> = cur_point.iter().rev().copied().collect();
+        let mut eq_table = eq_mle_table::<EF>(&cur_point_rev);
         debug_assert_eq!(eq_table.len(), half);
 
         let sumcheck_vars = cur_point.len();
