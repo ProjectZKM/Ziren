@@ -2862,7 +2862,7 @@ pub mod tests {
         if env::var("COLLECT_SHAPES").is_ok() {
             let mut shapes = BTreeSet::new();
             for proof in core_proof.proof.0.iter() {
-                let shape = ZKMProofShape::Recursion(proof.shape());
+                let shape = ZKMProofShape::Recursion(vec![proof.shape()]);
                 tracing::info!("shape: {:?}", shape);
                 shapes.insert(shape);
             }
@@ -3490,6 +3490,141 @@ pub mod tests {
         )
     }
 
+    /// ARITY-ENUM DECISIVE (fast, single fib core prove): for a real
+    /// core shard, the ENUMERATED REPRESENTATIVE arity-N normalize batch
+    /// (uniform `vec![enum_shape; N]` at the shard's (chip_set, log_dense)
+    /// class — exactly what `ZKMProofShape::generate` emits) must produce
+    /// the SAME VK as a REAL arity-N batch of that shard (replicated N
+    /// times).  This proves the enumeration covers the multishard
+    /// first-compose-layer normalize VKs WITHOUT needing an 18-shard
+    /// workload.  Faithful-dummy (59aa8eb3) makes real==dummy per shard,
+    /// so the dummy-built representative VK == the real arity-N VK.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn arity_enum_representative_reproduces_real_vk() -> Result<()> {
+        use crate::shapes::ZKMProofShape;
+        use zkm_pcs::shape::OrderedShape;
+        setup_logger();
+        let elf = test_artifacts::FIBONACCI_ELF;
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(elf);
+        let core_proof = prover.prove_core(&pk_d, program, &ZKMStdin::default(), opts, context)?;
+        let machine = prover.core_prover.machine();
+        let core_cfg = prover.core_shape_config.as_ref().unwrap();
+        let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
+
+        // Enumerated per-shard normalize shapes (flattened across batches).
+        let enum_norm: std::collections::BTreeSet<OrderedShape> =
+            ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
+                .filter_map(|s| match s {
+                    ZKMProofShape::Recursion(b) => Some(b),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+        // Cheap log_dense (matches generate()'s dedup key).
+        let chips_by_name: std::collections::BTreeMap<String, _> = {
+            use zkm_pcs::air::MachineAir;
+            machine
+                .chips()
+                .iter()
+                .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c))
+                .collect()
+        };
+        let log_dense_of = |os: &OrderedShape| -> usize {
+            let total: usize = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| {
+                    let w = chips_by_name
+                        .get(name)
+                        .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
+                        .unwrap_or(1);
+                    w * (1usize << *log_h)
+                })
+                .sum();
+            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+        };
+
+        // Use the first real core shard.
+        let real_sp = &core_proof.proof.0[0];
+        let real_os = real_sp.shape();
+        let mut real_names: Vec<String> = real_os.inner.iter().map(|(n, _)| n.clone()).collect();
+        real_names.sort();
+        let real_ld = log_dense_of(&real_os);
+
+        // Find the enumerated per-shard shape of the SAME (chip_set, log_dense) class.
+        let enum_os = enum_norm
+            .iter()
+            .find(|e| {
+                let mut en: Vec<String> = e.inner.iter().map(|(n, _)| n.clone()).collect();
+                en.sort();
+                en == real_names && log_dense_of(e) == real_ld
+            })
+            .cloned();
+        let enum_os = match enum_os {
+            Some(e) => e,
+            None => {
+                panic!(
+                    "[ARITY-REPR] real shard (chip_set, log_dense={real_ld}) class NOT enumerated \
+                     — enumeration gap"
+                );
+            }
+        };
+        eprintln!(
+            "[ARITY-REPR] real_ld={real_ld} real_chips={} enum_ld={} enum_matched=true",
+            real_names.len(),
+            log_dense_of(&enum_os),
+        );
+
+        // For each arity 1..=REDUCE_BATCH_SIZE: real-replicated vs enumerated-rep.
+        let real_bf = *real_sp
+            .basefold_shard_proof
+            .as_ref()
+            .expect("real shard carries basefold side channel")
+            .clone();
+        for arity in 1..=REDUCE_BATCH_SIZE {
+            // REAL arity-N witness: replicate the real shard's bundle N times
+            // (a real arity-N batch of identical shards).
+            let real_witness = ZKMCoreBasefoldWitnessValues {
+                vk: vk.vk.clone(),
+                shard_proofs: vec![real_bf.clone(); arity],
+                is_complete: true,
+                is_first_shard: true,
+                vk_root: prover.recursion_vk_root,
+            };
+            let prog_real = prover.recursion_program_basefold(&real_witness);
+            let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
+
+            // ENUMERATED REPRESENTATIVE: uniform dummy batch at the enum class.
+            let enum_shape = ZKMRecursionShape {
+                proof_shapes: vec![enum_os.clone(); arity],
+                is_complete: true,
+            };
+            let enum_dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &enum_shape);
+            let prog_enum = prover.recursion_program_basefold(&enum_dummy);
+            let vk_enum = prover.compress_prover.setup(&prog_enum).1.hash_koalabear();
+
+            let eq = vk_real == vk_enum;
+            eprintln!(
+                "[ARITY-REPR] arity={arity}: enum_repr_reproduces_real={eq} \
+                 vk_real={:?} vk_enum={:?}",
+                vk_real.map(|x| { use p3_field::PrimeField32; x.as_canonical_u32() }),
+                vk_enum.map(|x| { use p3_field::PrimeField32; x.as_canonical_u32() }),
+            );
+            assert!(
+                eq,
+                "[ARITY-REPR] arity={arity}: the enumerated representative normalize VK does NOT \
+                 reproduce the real arity-{arity} normalize VK — the arity enumeration is wrong \
+                 for this class (the failure mode: wrong-but-different enumerated VK)."
+            );
+        }
+        Ok(())
+    }
+
     /// VK-equality check: does the ENUMERATION dummy normalize program
     /// (built from `dummy(machine, shape)`) reproduce the PROVE-PATH normalize
     /// VK (built from the real fib core proof)?  If equal → the only gap is
@@ -3882,12 +4017,14 @@ pub mod tests {
                 let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
                 let enum_rec: std::collections::BTreeSet<OrderedShape> =
                     ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
-                        .filter_map(|s| match s {
-                            ZKMProofShape::Recursion(os) => Some(os),
-                            _ => None,
+                        .flat_map(|s| match s {
+                            // Flatten the per-shard shapes of each arity batch
+                            // (per-shard membership semantics for this probe).
+                            ZKMProofShape::Recursion(batch) => batch,
+                            _ => Vec::new(),
                         })
                         .collect();
-                eprintln!("[VKROOT] enumerated Recursion shapes: {}", enum_rec.len());
+                eprintln!("[VKROOT] enumerated Recursion per-shard shapes: {}", enum_rec.len());
                 for (j, sp) in batch.iter().enumerate() {
                     let real_shape = sp.shape();
                     let member = enum_rec.contains(&real_shape);
@@ -3979,31 +4116,78 @@ pub mod tests {
             .expect("basefold core inputs");
         let machine = prover.core_prover.machine();
 
-        // Enumerated normalize shapes (whole ZKMRecursionShape, so we can
-        // inspect arity) — what build_compress_vks walks today.
+        // Enumerated normalize shapes (whole batch, so we can inspect
+        // arity) — what build_compress_vks walks.  After feat/machineshape-
+        // arity-enum, ZKMProofShape::Recursion carries Vec<OrderedShape>
+        // (the batch); generate() emits arity 1..=REDUCE_BATCH_SIZE.
         let core_cfg = prover.core_shape_config.as_ref().unwrap();
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
-        // NOTE: ZKMProofShape::Recursion carries a SINGLE OrderedShape — the
-        // enumeration only ever emits ARITY-1 normalize shapes (From<OrderedShape>
-        // for ZKMRecursionShape = proof_shapes: vec![one]).  So the enumerated
-        // normalize-program arity is always {1}.
-        let enum_norm: std::collections::BTreeSet<OrderedShape> =
+        let enum_batches: Vec<Vec<OrderedShape>> =
             ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
                 .filter_map(|s| match s {
-                    ZKMProofShape::Recursion(os) => Some(os),
+                    ZKMProofShape::Recursion(batch) => Some(batch),
                     _ => None,
                 })
                 .collect();
-        // Arities the enumeration covers for normalize: always {1} today.
+        // All per-shard shapes that appear in ANY enumerated batch.
+        let enum_norm: std::collections::BTreeSet<OrderedShape> =
+            enum_batches.iter().flat_map(|b| b.iter().cloned()).collect();
+        // Arities the enumeration covers for normalize (now {1,2,3,4}).
         let enum_arities: std::collections::BTreeSet<usize> =
-            if enum_norm.is_empty() { Default::default() } else { [1usize].into_iter().collect() };
+            enum_batches.iter().map(|b| b.len()).collect();
         eprintln!(
-            "[MSNORM] enumerated normalize single-shard shapes={} (normalize arity ALWAYS=1 in enum) arities present={:?}",
+            "[MSNORM] enumerated normalize: {} batches, {} distinct per-shard shapes, arities present={:?}",
+            enum_batches.len(),
             enum_norm.len(),
             enum_arities
         );
 
+        // Cheap log_dense (matches generate()'s dedup key) so we can
+        // construct the ENUMERATED REPRESENTATIVE batch for a real batch
+        // and assert its VK == the real VK.
+        let chips_by_name: std::collections::BTreeMap<String, _> = {
+            use zkm_pcs::air::MachineAir;
+            machine
+                .chips()
+                .iter()
+                .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c))
+                .collect()
+        };
+        let log_dense_of = |os: &OrderedShape| -> usize {
+            let total: usize = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| {
+                    let w = chips_by_name
+                        .get(name)
+                        .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
+                        .unwrap_or(1);
+                    w * (1usize << *log_h)
+                })
+                .sum();
+            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+        };
+        // Index enumerated batches by their (per-shard (chip_set, log_dense)) key
+        // so we can look up the representative for any real batch.
+        let batch_class_key = |batch: &[OrderedShape]| -> Vec<(Vec<String>, usize)> {
+            batch
+                .iter()
+                .map(|os| {
+                    let mut names: Vec<String> = os.inner.iter().map(|(n, _)| n.clone()).collect();
+                    names.sort();
+                    (names, log_dense_of(os))
+                })
+                .collect()
+        };
+        let enum_class_keys: std::collections::BTreeSet<Vec<(Vec<String>, usize)>> =
+            enum_batches.iter().map(|b| batch_class_key(b)).collect();
+
         let mut all_faithful = true;
+        // DECISIVE arity-enum tracking: does the enumerated representative
+        // batch reproduce each real batch's normalize VK?  None = the class
+        // overflowed (log_dense>30, catch_unwound by build_compress_vks).
+        let mut all_enum_repr_eq = true;
+        let mut any_multishard_checked = false;
         // Collect (arity -> first vk) to detect arity-N vk collapse across mixes.
         let mut per_arity_vks: std::collections::BTreeMap<usize, Vec<[KoalaBear; 8]>> =
             std::collections::BTreeMap::new();
@@ -4085,13 +4269,66 @@ pub mod tests {
             all_faithful &= eq;
             let in_map = prover.recursion_vk_map.contains_key(&vk_real);
             let arity_enumerated = enum_arities.contains(&arity);
+
+            // ── DECISIVE: reconstruct the ENUMERATED REPRESENTATIVE batch
+            //    (the exact uniform batch generate() emits for this real
+            //    batch's per-shard (chip_set, log_dense) classes) and assert
+            //    its dummy-built normalize VK == the real VK.  This proves
+            //    the enumeration PRODUCES the real arity-N normalize VK. ──
+            let real_key = batch_class_key(
+                &real_shape.proof_shapes,
+            );
+            let class_in_enum = enum_class_keys.contains(&real_key);
+            // Build the enumerated representative: for each real per-shard
+            // shape, find an enumerated per-shard shape of the SAME
+            // (chip_set, log_dense) class, then form that batch.
+            let enum_repr_batch: Option<Vec<OrderedShape>> = real_shape
+                .proof_shapes
+                .iter()
+                .map(|os| {
+                    let mut names: Vec<String> = os.inner.iter().map(|(n, _)| n.clone()).collect();
+                    names.sort();
+                    let ld = log_dense_of(os);
+                    enum_norm
+                        .iter()
+                        .find(|e| {
+                            let mut en: Vec<String> = e.inner.iter().map(|(n, _)| n.clone()).collect();
+                            en.sort();
+                            en == names && log_dense_of(e) == ld
+                        })
+                        .cloned()
+                })
+                .collect();
+            let (enum_repr_eq, enum_repr_vk_u32) = match &enum_repr_batch {
+                Some(b) if b.len() == real_shape.proof_shapes.len() => {
+                    let shape = ZKMRecursionShape {
+                        proof_shapes: b.clone(),
+                        is_complete: input.is_complete,
+                    };
+                    let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+                        let p = prover.recursion_program_basefold(&d);
+                        prover.compress_prover.setup(&p).1.hash_koalabear()
+                    }));
+                    match built {
+                        Ok(vk) => {
+                            use p3_field::PrimeField32;
+                            (Some(vk == vk_real), Some(vk.map(|x| x.as_canonical_u32())))
+                        }
+                        Err(_) => (None, None),
+                    }
+                }
+                _ => (None, None),
+            };
+
             let vk_real_u32 = vk_real.map(|x| {
                 use p3_field::PrimeField32;
                 x.as_canonical_u32()
             });
             eprintln!(
                 "[MSNORM] batch {i}: arity={arity} dummy_faithful={eq} real_in_map={in_map} \
-                 arity_enumerated={arity_enumerated} vk_real={vk_real_u32:?}"
+                 arity_enumerated={arity_enumerated} class_in_enum={class_in_enum} \
+                 enum_repr_eq={enum_repr_eq:?} vk_real={vk_real_u32:?} enum_repr_vk={enum_repr_vk_u32:?}"
             );
 
             // ── DIVERGENCE PROBE (arity-1 only): why does the real-shape dummy
@@ -4215,6 +4452,14 @@ pub mod tests {
                     }
                 }
             }
+            if arity >= 2 {
+                any_multishard_checked = true;
+                // A multishard batch must have its class enumerated AND its
+                // representative VK reproduce the real VK.
+                if !(class_in_enum && enum_repr_eq == Some(true)) {
+                    all_enum_repr_eq = false;
+                }
+            }
             per_arity_vks.entry(arity).or_default().push(vk_real);
         }
 
@@ -4230,7 +4475,10 @@ pub mod tests {
             );
         }
 
-        eprintln!("[MSNORM] SUMMARY: all_dummy_faithful={all_faithful}");
+        eprintln!(
+            "[MSNORM] SUMMARY: all_dummy_faithful={all_faithful} \
+             all_multishard_enum_repr_eq={all_enum_repr_eq} multishard_batches_present={any_multishard_checked}"
+        );
         if std::env::var("MSNORM_ASSERT").is_ok() {
             assert!(
                 all_faithful,
@@ -4238,6 +4486,19 @@ pub mod tests {
                  dummy bundle reconstruction is NOT faithful (this is the deep bug). See \
                  per-batch lines above."
             );
+            // DECISIVE arity-enum assertion: every multishard (arity>=2)
+            // batch's class must be enumerated and its representative VK
+            // must reproduce the real VK.  Only fires if the workload
+            // actually produced multishard batches.
+            if any_multishard_checked {
+                assert!(
+                    all_enum_repr_eq,
+                    "[MSNORM] a multishard (arity>=2) normalize VK is NOT reproduced by the \
+                     enumerated representative batch — the arity enumeration does not cover this \
+                     real batch's (arity, per-shard (chip_set, log_dense)) class. See per-batch \
+                     lines above (class_in_enum / enum_repr_eq)."
+                );
+            }
         }
         Ok(())
     }

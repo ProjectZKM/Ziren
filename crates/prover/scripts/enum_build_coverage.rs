@@ -48,9 +48,13 @@ fn main() {
             ZKMProofShape::Deferred(_) => "Deferred",
             ZKMProofShape::Shrink(_) => "Shrink",
         };
-        let marker: Option<String> = if let ZKMProofShape::Recursion(os) = &shape {
-            let names: std::collections::BTreeSet<&str> =
-                os.inner.iter().map(|(n, _)| n.as_str()).collect();
+        let marker: Option<String> = if let ZKMProofShape::Recursion(batch) = &shape {
+            // Recursion now carries a batch (Vec<OrderedShape>); the chip
+            // set is uniform across the batch, so inspect the first shard.
+            let names: std::collections::BTreeSet<&str> = batch
+                .first()
+                .map(|os| os.inner.iter().map(|(n, _)| n.as_str()).collect())
+                .unwrap_or_default();
             markers
                 .iter()
                 .find(|m| names.contains(**m))

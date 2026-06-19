@@ -33,7 +33,15 @@ use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
-    Recursion(OrderedShape),
+    /// A normalize/recursion batch.  Carries the per-shard shapes for an
+    /// arity-`proof_shapes.len()` first-compose-layer normalize program
+    /// (`build_normalize_basefold_program` verifies a BATCH of shard
+    /// proofs — arity = number of shards in the batch).  Real multishard
+    /// proofs batch core shards in `chunks(REDUCE_BATCH_SIZE)`
+    /// (`get_recursion_core_inputs_basefold`), so the enumeration emits
+    /// arity 1..=REDUCE_BATCH_SIZE.  Arity-1 (`vec![one]`) is the legacy
+    /// single-shard shape, byte-identical to the prior `Recursion(OrderedShape)`.
+    Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
     Deferred(OrderedShape),
     Shrink(OrderedShape),
@@ -419,8 +427,42 @@ impl ZKMProofShape {
         // shapes produce exactly the real proofs' normalize vks.  We over-emit;
         // `build_compress_vks` catch_unwinds the few overflow shapes
         // (log_dense>30) and the vk_set dedups equal-log_dense shapes.
+        // Cheap log_dense (= jagged `packing.log_dense_size`) for an
+        // OrderedShape WITHOUT building a full dummy bundle.  The jagged
+        // packing's total_values = Σ_chips width·2^log_h and
+        // log_dense_size = log2(np2(total_values)) — see
+        // `zkm_pcs::jagged::pack_traces_jagged` (uses only height/width).
+        // BaseAir::width(chip) gives the dense width the dummy bundle uses.
+        let chip_width = |name: &str| -> usize {
+            chips_by_name
+                .get(name)
+                .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
+                .unwrap_or(1)
+        };
+        let log_dense_of = |os: &OrderedShape| -> usize {
+            let total: usize = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| chip_width(name) * (1usize << *log_h))
+                .sum();
+            if total == 0 {
+                0
+            } else {
+                total.next_power_of_two().trailing_zeros() as usize
+            }
+        };
+
+        // Per-shard normalize shapes (one representative per
+        // (chip_set, log_dense) class).  The normalize program — hence
+        // its VK — is (chip_set, log_dense)-determined (validated in
+        // `tests::vkroot_normalize_vk_equivalence_class`), so collapsing
+        // equal-log_dense shapes keeps the produced VK set IDENTICAL while
+        // shrinking the shape count.  This is what lets arity replication
+        // (below) fit the fixed VK_MERKLE_TREE_HEIGHT budget.
         let small_shapes: Vec<OrderedShape> = {
-            let mut set: BTreeSet<OrderedShape> = BTreeSet::new();
+            // Keyed by (sorted chip names, log_dense) so we emit exactly
+            // one shape per distinct normalize equivalence class.
+            let mut by_class: BTreeMap<(Vec<String>, usize), OrderedShape> = BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
                 let names: Vec<String> = cluster
                     .iter()
@@ -430,6 +472,8 @@ impl ZKMProofShape {
                 if names.is_empty() {
                     continue;
                 }
+                let mut chipset = names.clone();
+                chipset.sort();
                 let fillers: std::collections::HashSet<&String> = names
                     .iter()
                     .filter(|n| {
@@ -451,15 +495,38 @@ impl ZKMProofShape {
                             (n.clone(), height)
                         })
                         .collect();
-                    set.insert(OrderedShape::from_log2_heights(&inner));
+                    let os = OrderedShape::from_log2_heights(&inner);
+                    let ld = log_dense_of(&os);
+                    // Keep the FIRST shape seen for each class (smallest
+                    // sweep height h that reaches this log_dense) — its
+                    // distribution is irrelevant to the VK, only the class
+                    // matters.
+                    by_class.entry((chipset.clone(), ld)).or_insert(os);
                 }
             }
-            set.into_iter().collect()
+            by_class.into_values().collect()
         };
 
-        small_shapes
+        // Emit arity 1..=reduce_batch_size normalize batches.  Real
+        // multishard proofs batch core shards in chunks(REDUCE_BATCH_SIZE)
+        // (`get_recursion_core_inputs_basefold`); within a chunk every
+        // shard shares the program's chip cluster, so the dominant batch
+        // is UNIFORM (all shards at the same band).  We emit the uniform
+        // arity-N batch (`vec![shape; arity]`) per per-shard class.
+        // Arity-1 reproduces today's single-shard normalize VK set
+        // exactly (same distinct (chip_set, log_dense) classes).
+        let arity_recursion_shapes: Vec<Self> = {
+            let mut out = Vec::with_capacity(small_shapes.len() * reduce_batch_size);
+            for arity in 1..=reduce_batch_size {
+                for os in &small_shapes {
+                    out.push(Self::Recursion(vec![os.clone(); arity]));
+                }
+            }
+            out
+        };
+
+        arity_recursion_shapes
             .into_iter()
-            .map(Self::Recursion)
             .chain((1..=reduce_batch_size).flat_map(move |batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
             }))
@@ -486,11 +553,15 @@ impl ZKMProofShape {
         } else {
             core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
         };
+        // Emit arity 1..=reduce_batch_size uniform normalize batches per
+        // maximal core shape (so the program-build check exercises the
+        // multishard normalize program too — matches `generate`).
         core_shape_iter
-            .map(|core_shape| {
-                Self::Recursion(OrderedShape {
+            .flat_map(move |core_shape| {
+                let os = OrderedShape {
                     inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
-                })
+                };
+                (1..=reduce_batch_size).map(move |arity| Self::Recursion(vec![os.clone(); arity]))
             })
             .chain((1..=reduce_batch_size).flat_map(|batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
@@ -522,7 +593,11 @@ impl ZKMProofShape {
 impl ZKMCompressProgramShape {
     pub fn from_proof_shape(shape: ZKMProofShape, height: usize) -> Self {
         match shape {
-            ZKMProofShape::Recursion(proof_shape) => Self::Recursion(proof_shape.into()),
+            ZKMProofShape::Recursion(proof_shapes) => {
+                // Arity = proof_shapes.len(); the per-shard shapes become
+                // the batch verified by build_normalize_basefold_program.
+                Self::Recursion(ZKMRecursionShape { proof_shapes, is_complete: false })
+            }
             ZKMProofShape::Deferred(proof_shape) => {
                 Self::Deferred(ZKMDeferredShape::new(vec![proof_shape].into(), height))
             }
@@ -603,6 +678,477 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 mod tests {
     use super::*;
 
+    /// TEMP analysis: measure the per-shard normalize band structure
+    /// (distinct OrderedShapes per cluster) to size the arity
+    /// enumeration against the 2^11 budget.
+    #[test]
+    #[ignore]
+    fn analyze_recursion_band_structure() {
+        use crate::CoreSC;
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let core_machine = MipsAir::machine(CoreSC::default());
+        let chips_by_name: BTreeMap<String, _> =
+            core_machine.chips().iter().map(|c| (c.name(), c)).collect();
+        let machine_shape = build_mips_machine_shape();
+        eprintln!("[BAND] clusters = {}", machine_shape.chip_clusters.len());
+
+        let mut total_per_shard_shapes = 0usize;
+        let mut per_cluster_shape_counts: Vec<usize> = Vec::new();
+        for (ci, cluster) in machine_shape.chip_clusters.iter().enumerate() {
+            let names: Vec<String> = cluster
+                .iter()
+                .filter(|n| chips_by_name.contains_key(*n))
+                .cloned()
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            let fillers: std::collections::HashSet<&String> = names
+                .iter()
+                .filter(|n| {
+                    n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+                })
+                .collect();
+            let mut set: BTreeSet<OrderedShape> = BTreeSet::new();
+            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                let inner: Vec<(String, usize)> = names
+                    .iter()
+                    .map(|n| {
+                        let height = if fillers.contains(n) {
+                            h
+                        } else if n == "Byte" {
+                            16
+                        } else {
+                            1
+                        };
+                        (n.clone(), height)
+                    })
+                    .collect();
+                set.insert(OrderedShape::from_log2_heights(&inner));
+            }
+            total_per_shard_shapes += set.len();
+            per_cluster_shape_counts.push(set.len());
+            eprintln!(
+                "[BAND] cluster {ci}: chips={} fillers={} distinct_OrderedShapes={}",
+                names.len(),
+                fillers.len(),
+                set.len()
+            );
+        }
+        eprintln!("[BAND] TOTAL per-shard OrderedShapes = {total_per_shard_shapes}");
+        let s = total_per_shard_shapes;
+        eprintln!(
+            "[BAND] uniform-replication arity 1..=4: {} (= {} per-shard x 4)",
+            s * 4,
+            s
+        );
+        let per_cluster_uniform: usize = per_cluster_shape_counts.iter().map(|c| c * 4).sum();
+        eprintln!("[BAND] per-cluster uniform arity 1..=4 = {per_cluster_uniform}");
+        eprintln!("[BAND] nonempty clusters = {}", per_cluster_shape_counts.len());
+    }
+
+    /// TEMP analysis: dedup the per-shard OrderedShapes by their
+    /// normalize equivalence class — (chip-set, log_dense) — by building
+    /// the dummy bundle for each shape and reading packing.log_dense_size.
+    /// Tells us the true distinct per-shard normalize class count, which
+    /// bounds the arity-replication enumeration.
+    #[test]
+    #[ignore]
+    #[serial_test::serial]
+    fn analyze_recursion_logdense_classes() {
+        use crate::components::DefaultProverComponents;
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let chips_by_name: BTreeMap<String, _> =
+            machine.chips().iter().map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c)).collect();
+        let machine_shape = build_mips_machine_shape();
+
+        // (cluster_chip_set, log_dense) classes across all per-shard shapes.
+        let mut classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
+        let mut total_built = 0usize;
+        let mut total_failed = 0usize;
+        for (ci, cluster) in machine_shape.chip_clusters.iter().enumerate() {
+            let names: Vec<String> = cluster
+                .iter()
+                .filter(|n| chips_by_name.contains_key(*n))
+                .cloned()
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            let chipset: Vec<String> = {
+                let mut v = names.clone();
+                v.sort();
+                v
+            };
+            let fillers: std::collections::HashSet<&String> = names
+                .iter()
+                .filter(|n| {
+                    n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+                })
+                .collect();
+            let mut cluster_classes: BTreeSet<usize> = BTreeSet::new();
+            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                let inner: Vec<(String, usize)> = names
+                    .iter()
+                    .map(|n| {
+                        let height = if fillers.contains(n) {
+                            h
+                        } else if n == "Byte" {
+                            16
+                        } else {
+                            1
+                        };
+                        (n.clone(), height)
+                    })
+                    .collect();
+                let os = OrderedShape::from_log2_heights(&inner);
+                let shape = zkm_recursion_circuit::machine::ZKMRecursionShape {
+                    proof_shapes: vec![os],
+                    is_complete: false,
+                };
+                let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+                    match &dummy.shard_proofs[0].evaluation_proof {
+                        EvaluationProof::Bundle(b) => b.packing.log_dense_size,
+                        _ => 0usize,
+                    }
+                }));
+                match built {
+                    Ok(ld) => {
+                        total_built += 1;
+                        classes.insert((chipset.clone(), ld));
+                        cluster_classes.insert(ld);
+                    }
+                    Err(_) => total_failed += 1,
+                }
+            }
+            eprintln!(
+                "[LD] cluster {ci}: chips={} distinct_log_dense={} bands={:?}",
+                names.len(),
+                cluster_classes.len(),
+                cluster_classes
+            );
+        }
+        eprintln!(
+            "[LD] TOTAL distinct (chip_set, log_dense) classes = {} (built={total_built} failed={total_failed})",
+            classes.len()
+        );
+        eprintln!(
+            "[LD] uniform-replication arity 1..=4 on classes = {}",
+            classes.len() * 4
+        );
+    }
+
+    /// ARITY-ENUM no-regression: the deduped arity-1 Recursion shapes
+    /// must cover EXACTLY the same (chip_set, log_dense) classes as the
+    /// full un-deduped per-cluster height sweep.  Since the normalize VK
+    /// is (chip_set, log_dense)-determined, equal class coverage ⇒ the
+    /// arity-1 normalize VK SET is unchanged from the pre-arity sweep
+    /// (only redundant equal-VK shapes were dropped). Cheap (no proving):
+    /// uses the same log_dense formula generate() uses.
+    #[test]
+    fn arity1_classes_cover_full_sweep() {
+        use crate::CoreSC;
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let core_machine = MipsAir::machine(CoreSC::default());
+        let chips_by_name: BTreeMap<String, _> =
+            core_machine.chips().iter().map(|c| (c.name(), c)).collect();
+        let machine_shape = build_mips_machine_shape();
+        let log_dense_of = |os: &OrderedShape| -> usize {
+            let total: usize = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| {
+                    let w = chips_by_name
+                        .get(name)
+                        .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
+                        .unwrap_or(1);
+                    w * (1usize << *log_h)
+                })
+                .sum();
+            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+        };
+
+        // Full un-deduped sweep -> set of (chip_set, log_dense) classes.
+        let mut full_classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
+        for cluster in &machine_shape.chip_clusters {
+            let names: Vec<String> = cluster
+                .iter()
+                .filter(|n| chips_by_name.contains_key(*n))
+                .cloned()
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            let mut chipset = names.clone();
+            chipset.sort();
+            let fillers: std::collections::HashSet<&String> = names
+                .iter()
+                .filter(|n| {
+                    n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+                })
+                .collect();
+            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                let inner: Vec<(String, usize)> = names
+                    .iter()
+                    .map(|n| {
+                        let height = if fillers.contains(n) {
+                            h
+                        } else if n == "Byte" {
+                            16
+                        } else {
+                            1
+                        };
+                        (n.clone(), height)
+                    })
+                    .collect();
+                let os = OrderedShape::from_log2_heights(&inner);
+                full_classes.insert((chipset.clone(), log_dense_of(&os)));
+            }
+        }
+
+        // generate()'s arity-1 Recursion shapes -> their classes.
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config = RecursionShapeConfig::default();
+        let mut gen_classes: BTreeSet<(Vec<String>, usize)> = BTreeSet::new();
+        let mut arity1_count = 0usize;
+        for s in ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, 4) {
+            if let ZKMProofShape::Recursion(batch) = s {
+                if batch.len() == 1 {
+                    arity1_count += 1;
+                    let os = &batch[0];
+                    let mut names: Vec<String> =
+                        os.inner.iter().map(|(n, _)| n.clone()).collect();
+                    names.sort();
+                    gen_classes.insert((names, log_dense_of(os)));
+                }
+            }
+        }
+
+        assert_eq!(
+            gen_classes, full_classes,
+            "arity-1 deduped class coverage diverges from the full sweep — \
+             the dedup dropped or added a (chip_set, log_dense) class (would \
+             change the arity-1 normalize VK set)"
+        );
+        // Each class appears exactly once after dedup.
+        assert_eq!(
+            arity1_count,
+            gen_classes.len(),
+            "arity-1 shape count must equal distinct class count (one shape per class)"
+        );
+        eprintln!(
+            "[ARITY1] full_sweep_classes={} gen_arity1_classes={} (EQUAL) arity1_shapes={}",
+            full_classes.len(),
+            gen_classes.len(),
+            arity1_count
+        );
+    }
+
+    /// ARITY-ENUM coverage: generate() emits arity 1..=REDUCE_BATCH_SIZE
+    /// uniform normalize batches, and the per-arity counts are equal
+    /// (uniform replication of the deduped per-shard class set).
+    #[test]
+    fn generate_emits_arity_1_to_reduce_batch_size() {
+        use crate::REDUCE_BATCH_SIZE;
+        let core_shape_config = CoreShapeConfig::default();
+        let recursion_shape_config = RecursionShapeConfig::default();
+        let mut per_arity: BTreeMap<usize, usize> = BTreeMap::new();
+        for s in
+            ZKMProofShape::generate(&core_shape_config, &recursion_shape_config, REDUCE_BATCH_SIZE)
+        {
+            if let ZKMProofShape::Recursion(batch) = s {
+                *per_arity.entry(batch.len()).or_default() += 1;
+                // Uniform batch: all shards identical.
+                assert!(
+                    batch.windows(2).all(|w| w[0] == w[1]),
+                    "generate() should emit UNIFORM arity batches"
+                );
+            }
+        }
+        let arities: BTreeSet<usize> = per_arity.keys().cloned().collect();
+        let expected: BTreeSet<usize> = (1..=REDUCE_BATCH_SIZE).collect();
+        assert_eq!(arities, expected, "must emit exactly arities 1..=REDUCE_BATCH_SIZE");
+        // Each arity has the same count (uniform replication of one class set).
+        let counts: BTreeSet<usize> = per_arity.values().cloned().collect();
+        assert_eq!(
+            counts.len(),
+            1,
+            "per-arity counts should be equal (uniform replication): {per_arity:?}"
+        );
+        eprintln!("[ARITY] per_arity_recursion_counts = {per_arity:?}");
+    }
+
+    /// ARITY-ENUM GAP PROBE: does a HETEROGENEOUS batch (two shards of the
+    /// SAME cluster at DIFFERENT log_dense bands — e.g. a full shard + a
+    /// partial tail shard) have a VK that the UNIFORM enumeration covers?
+    /// Builds dummy VKs (faithful dummy ⇒ dummy VK == real VK), so this
+    /// measures whether real heterogeneous tail batches are enumerated.
+    /// Reports the count of MISSED heterogeneous batch VKs.  #[ignore]
+    /// (builds VKs — slow; run manually to quantify the gap).
+    #[test]
+    #[ignore]
+    #[serial_test::serial]
+    fn arity_hetero_batch_coverage_probe() {
+        use crate::components::DefaultProverComponents;
+        use zkm_recursion_circuit::machine::{ZKMCoreBasefoldWitnessValues, ZKMRecursionShape};
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let chips_by_name: BTreeMap<String, _> = machine
+            .chips()
+            .iter()
+            .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c))
+            .collect();
+        let machine_shape = build_mips_machine_shape();
+        let log_dense_of = |os: &OrderedShape| -> usize {
+            let total: usize = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| {
+                    let w = chips_by_name
+                        .get(name)
+                        .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
+                        .unwrap_or(1);
+                    w * (1usize << *log_h)
+                })
+                .sum();
+            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+        };
+
+        // Pick the main_exec cluster (core chips + Global, NO precompiles,
+        // NO MemoryGlobalInit/Finalize) — the realistic multishard sha2/fib
+        // cluster.  Identified by: contains Cpu + Global, NOT a precompile
+        // family chip, NOT MemoryGlobalInit.  Falls back to the cluster with
+        // Cpu and the most core chips.
+        let precompile_marker = |n: &str| -> bool {
+            n.contains("Keccak")
+                || n.contains("Sha")
+                || n.contains("Bls")
+                || n.contains("Bn254")
+                || n.contains("Secp")
+                || n.contains("EdAdd")
+                || n.contains("EdDecompress")
+                || n.contains("Uint")
+                || n.contains("Poseidon2")
+        };
+        let is_main_exec = |c: &BTreeSet<String>| -> bool {
+            c.contains("Cpu")
+                && c.contains("Global")
+                && !c.contains("MemoryGlobalInit")
+                && !c.contains("MemoryGlobalFinalize")
+                && c.iter().all(|n| !precompile_marker(n))
+        };
+        let cluster = machine_shape
+            .chip_clusters
+            .iter()
+            .filter(|c| is_main_exec(c))
+            .min_by_key(|c| c.iter().filter(|n| chips_by_name.contains_key(*n)).count())
+            .or_else(|| {
+                machine_shape
+                    .chip_clusters
+                    .iter()
+                    .filter(|c| c.contains("Cpu"))
+                    .min_by_key(|c| c.iter().filter(|n| chips_by_name.contains_key(*n)).count())
+            })
+            .expect("a Cpu-bearing cluster");
+        let names: Vec<String> = cluster
+            .iter()
+            .filter(|n| chips_by_name.contains_key(*n))
+            .cloned()
+            .collect();
+        let fillers: std::collections::HashSet<&String> = names
+            .iter()
+            .filter(|n| n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0)
+            .collect();
+        let mut band_reps: BTreeMap<usize, OrderedShape> = BTreeMap::new();
+        for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+            let inner: Vec<(String, usize)> = names
+                .iter()
+                .map(|n| {
+                    let height = if fillers.contains(n) { h } else if n == "Byte" { 16 } else { 1 };
+                    (n.clone(), height)
+                })
+                .collect();
+            let os = OrderedShape::from_log2_heights(&inner);
+            band_reps.entry(log_dense_of(&os)).or_insert(os);
+        }
+        let bands: Vec<usize> = band_reps.keys().cloned().collect();
+        eprintln!("[HETERO] cluster chips={} bands={:?}", names.len(), bands);
+
+        // Build the UNIFORM enumerated VK set for this cluster (arity 2).
+        let setup_vk = |shape: &ZKMRecursionShape| -> Option<[KoalaBear; DIGEST_SIZE]> {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let d = ZKMCoreBasefoldWitnessValues::dummy(machine, shape);
+                let p = prover.recursion_program_basefold(&d);
+                prover.compress_prover.setup(&p).1.hash_koalabear()
+            }))
+            .ok()
+        };
+        let mut uniform_vks: BTreeSet<[KoalaBear; DIGEST_SIZE]> = BTreeSet::new();
+        for (b, os) in band_reps.iter() {
+            if *b > 30 {
+                continue; // log_dense>30 over-emit (caught by build_compress_vks)
+            }
+            if let Some(vk) = setup_vk(&ZKMRecursionShape {
+                proof_shapes: vec![os.clone(); 2],
+                is_complete: true,
+            }) {
+                uniform_vks.insert(vk);
+            }
+        }
+        eprintln!("[HETERO] uniform arity-2 VKs (this cluster) = {}", uniform_vks.len());
+
+        // Now build HETEROGENEOUS arity-2 batches: [band_i, band_j] for i<j
+        // (full + partial tail). Check how many are NOT in the uniform set.
+        let buildable: Vec<usize> = bands.iter().cloned().filter(|b| *b <= 30).collect();
+        let mut hetero_total = 0usize;
+        let mut hetero_missed = 0usize;
+        for (a, &bi) in buildable.iter().enumerate() {
+            for &bj in buildable.iter().skip(a + 1) {
+                let shape = ZKMRecursionShape {
+                    proof_shapes: vec![band_reps[&bi].clone(), band_reps[&bj].clone()],
+                    is_complete: true,
+                };
+                if let Some(vk) = setup_vk(&shape) {
+                    hetero_total += 1;
+                    if !uniform_vks.contains(&vk) {
+                        hetero_missed += 1;
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "[HETERO] heterogeneous arity-2 batches built={hetero_total} MISSED_by_uniform_enum={hetero_missed}"
+        );
+        eprintln!(
+            "[HETERO] VERDICT: {}",
+            if hetero_missed == 0 {
+                "uniform enum COVERS heterogeneous batches (order/mix-independent VK)"
+            } else {
+                "uniform enum MISSES heterogeneous batches => gap for partial-tail mixed batches"
+            }
+        );
+    }
+
     #[test]
     #[ignore]
     fn test_generate_all_shapes() {
@@ -661,12 +1207,12 @@ mod tests {
         );
     }
 
-    /// The Recursion shape count is now strictly bounded
-    /// by stacked_shapes' size-class quantization.  Before this change,
-    /// `ZKMProofShape::generate` sourced ~1.25M shapes from the
-    /// per-chip cartesian `CoreShapeConfig::all_shapes`; now it
-    /// sources from `create_all_input_shapes` followed by
-    /// `to_ordered_shape` dedup, yielding a much smaller set.
+    /// The Recursion shape count is bounded by the per-cluster
+    /// (chip_set, log_dense) class dedup × the arity range
+    /// (1..=reduce_batch_size).  Each arity contributes the same deduped
+    /// per-shard class set (uniform batches), so the total recursion
+    /// count = distinct_classes × reduce_batch_size, and is divisible by
+    /// reduce_batch_size.
     #[test]
     fn generate_uses_stacked_shapes_for_recursion() {
         let core_shape_config = CoreShapeConfig::default();
@@ -679,17 +1225,22 @@ mod tests {
         let recursion_count =
             all.iter().filter(|s| matches!(s, ZKMProofShape::Recursion(_))).count();
 
-        // stacked_shapes → to_ordered_shape with uniform-area projection
-        // and dedup collapses to ≤ ~30 unique OrderedShapes (one per
-        // chip cluster × band that maps to a distinct log_height).
+        // Recursion = distinct (chip_set, log_dense) classes × arities.
+        // Deduped class count is in the few-hundreds (26 clusters × ~12
+        // distinct log_dense each), so reduce_batch_size=2 stays well under
+        // the 2^11 budget shared with Compress/Deferred/Shrink.
         assert!(
-            recursion_count <= 100,
-            "Recursion shape count {} should be ≤ 100 (stacked_shapes path)",
-            recursion_count
+            recursion_count % reduce_batch_size == 0,
+            "recursion_count {recursion_count} must be divisible by reduce_batch_size \
+             {reduce_batch_size} (uniform arity replication of one class set)"
         );
         assert!(
-            recursion_count >= 1,
-            "generate should produce at least 1 Recursion shape"
+            recursion_count >= reduce_batch_size,
+            "generate should produce at least one class × every arity"
+        );
+        assert!(
+            recursion_count <= 1024,
+            "Recursion shape count {recursion_count} unexpectedly large for reduce_batch_size=2"
         );
     }
 }
