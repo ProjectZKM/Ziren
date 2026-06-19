@@ -296,8 +296,26 @@ mod tests {
     #[test]
     fn machine_shape_has_expected_cluster_count() {
         let ms = build_mips_machine_shape();
-        // 2 base (core-only, core+memory) + 11 precompile families.
-        assert_eq!(ms.chip_clusters.len(), 13);
+        // Cluster structure (see `build_mips_machine_shape`):
+        //   4 BASE clusters:
+        //     core_base, main_exec (=core+Global), memory (=core+memory
+        //     extras), memory_min (=preprocessed+memory extras, NO core)
+        //   2 per precompile family:
+        //     core-union (=memory ∪ family) + minimal precompile shard
+        //     (=precompile_base ∪ family).
+        // Derive the expectation from the live family list so adding a
+        // precompile family updates the bound automatically.
+        let expected = 4 + 2 * precompile_families().len();
+        assert_eq!(
+            ms.chip_clusters.len(),
+            expected,
+            "cluster count drifted from 4 base + 2×{} families",
+            precompile_families().len(),
+        );
+        // Sanity-pin the current value so an accidental base-cluster
+        // change is caught even if a family is added/removed at the
+        // same time.
+        assert_eq!(ms.chip_clusters.len(), 26);
     }
 
     #[test]
@@ -309,11 +327,47 @@ mod tests {
         }
     }
 
+    /// The 26-cluster model includes MINIMAL multi-shard cluster types
+    /// (the `memory_min` and `precompile_base`-derived clusters) that are
+    /// intentionally CPU-FREE — a memory shard or precompile shard carries
+    /// no core/CPU chips.  So the old "every cluster has Cpu" invariant is
+    /// false by design; the correct invariants are:
+    ///   1. EVERY cluster carries the preprocessed chips (checked above).
+    ///   2. At least the four base clusters exist, and exactly the
+    ///      minimal memory/precompile shard types are Cpu-free.
+    ///   3. Every cluster that DOES carry Cpu also carries the full core
+    ///      ALU set (Cpu never appears without its core plumbing).
     #[test]
-    fn all_clusters_contain_core_cpu() {
+    fn cluster_cpu_membership_matches_shard_types() {
         let ms = build_mips_machine_shape();
+        let core_alu = ["AddSub", "Mul", "Lt", "DivRem"];
+
+        let cpu_clusters =
+            ms.chip_clusters.iter().filter(|c| c.contains("Cpu")).count();
+        let cpu_free =
+            ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
+
+        // Cpu-free = memory_min (1) + one minimal precompile shard per
+        // family (precompile_base ∪ family).
+        let expected_cpu_free = 1 + precompile_families().len();
+        assert_eq!(
+            cpu_free, expected_cpu_free,
+            "Cpu-free clusters (minimal memory/precompile shard types) drifted"
+        );
+        assert_eq!(cpu_clusters, ms.chip_clusters.len() - expected_cpu_free);
+
+        // Cpu never appears without its full core ALU plumbing — guards
+        // against a cluster that has Cpu but is missing a core chip the
+        // recursion verifier would expect in that chip-set.
         for cluster in &ms.chip_clusters {
-            assert!(cluster.contains("Cpu"), "cluster missing Cpu: {:?}", cluster);
+            if cluster.contains("Cpu") {
+                for chip in core_alu {
+                    assert!(
+                        cluster.contains(chip),
+                        "Cpu cluster missing core chip {chip}: {cluster:?}",
+                    );
+                }
+            }
         }
     }
 
@@ -321,15 +375,26 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // After porting to SP1-style consecutive-integer enumeration:
-        // MAX_AREA_MULTIPLE=12 → 13 clusters × 12 × 12 ×
-        // 5 × 5 = 46,800 shapes. Bumped from the old 20K cap which
-        // assumed power-of-2 area multiples [1,2,4,8,16,32].
+        // SP1-style consecutive-integer enumeration over the 26-cluster
+        // model: per cluster the inner loops are
+        //   prep_mult(1..=MAX_AREA_MULTIPLE) ×
+        //   main_mult(1..=MAX_AREA_MULTIPLE) ×
+        //   prep_pad(|paddings|) × main_pad(|paddings|).
+        // = 26 × 12 × 12 × 5 × 5 = 93,600 shapes.  Derive the exact
+        // upper bound from the same constants the producer uses so the
+        // bound tracks any tuning of MAX_AREA_MULTIPLE / paddings.
+        let per_cluster =
+            MAX_AREA_MULTIPLE * MAX_AREA_MULTIPLE * padding_col_variants().len().pow(2);
+        let upper = ms.chip_clusters.len() * per_cluster;
         assert!(
-            shapes.len() <= 50_000,
-            "shape count {} exceeds 50000 — tune MAX_AREA_MULTIPLE/paddings",
-            shapes.len()
+            shapes.len() <= upper,
+            "shape count {} exceeds derived upper bound {} — producer changed?",
+            shapes.len(),
+            upper,
         );
+        // Pin the concrete current value so a silent cluster/area regression
+        // (e.g. a cluster dropped, or a max-main cap re-introduced) is caught.
+        assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
 
