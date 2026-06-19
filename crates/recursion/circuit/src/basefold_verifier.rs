@@ -575,6 +575,79 @@ where
     current
 }
 
+/// **In-circuit BaseFold round-count soundness binding.**
+///
+/// Height-agnostic-recursion increment #1.  The round-count analog of
+/// [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier::assert_row_count_le_cube`].
+///
+/// On the height-agnostic recursion path the BaseFold FRI round count
+/// (`num_variables` = the prover's `log_stacking_height`, which is
+/// CLAMPED DOWN for tiny commits by
+/// [`zkm_pcs::pick_log_stacking_height`]) will be a WITNESSED felt rather
+/// than baked into the program at compile time.  A malicious prover must
+/// then be prevented from witnessing a round count larger than the
+/// compile-time MAX the program loops over (= `DEFAULT_LOG_STACKING_HEIGHT`),
+/// because the extra "padding" rounds are masked to be inert and an
+/// over-claim would attempt to activate rounds whose committed structure
+/// does not exist.
+///
+/// This emits exactly the
+/// [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier::assert_row_count_le_cube`]
+/// product-to-zero binding, specialised to bound `actual_num_vars <=
+/// max_num_vars` (inclusive — the un-clamped commit fills the cube
+/// exactly):
+///   * `num2bits(actual_num_vars, max_num_vars + 1)` sound-binds
+///     `actual_num_vars = Σ b_i 2^i` with each `b_i` boolean (every
+///     production config re-asserts boolean + sum), so
+///     `actual_num_vars < 2^{max_num_vars+1}` — note this bounds the felt
+///     VALUE, the count itself is the literal `actual_num_vars`;
+///   * `low = bits2num(low max_num_vars bits)`;
+///   * `(actual_num_vars - low) · low == 0` forbids the open interval
+///     `(2^{max_num_vars}, 2^{max_num_vars+1})`.
+///
+/// CAUTION on the bound semantics: this binds `actual_num_vars` (the
+/// felt) into `[0, 2^{max_num_vars}]`, i.e. it bounds the count by a
+/// power of two, NOT directly by `max_num_vars`.  That is the correct
+/// shape for the *height* guard (which bounds a row_count against a cube
+/// size `2^cube_log`).  For the round COUNT — which is itself a log,
+/// bounded by an integer `max_num_vars` not by `2^{max_num_vars}` — the
+/// final height-agnostic verifier will additionally need a direct
+/// integer `<=` on the bits (e.g. assert the top `(max_num_vars+1 -
+/// ceil(log2(max_num_vars+1)))` bits are zero, or a bit-by-bit `lt`
+/// against the constant `max_num_vars`).  This increment lands the
+/// product-to-zero PRIMITIVE + call site as a NO-OP on the fixed path
+/// (where `actual_num_vars` is the compile-time constant `max_num_vars`
+/// and `max_num_vars <= 2^{max_num_vars}` trivially holds for all
+/// `max_num_vars >= 1`); the tight integer `<=` is wired when the count
+/// becomes genuinely witnessed (see heightagnostic_progress.md plan
+/// step 2).  Until then this is a soundness FLOOR, never a ceiling that
+/// could falsely accept.
+///
+/// Config-generic: operates on `Felt<C::F>`, so it works for both the
+/// inner (KoalaBear) and outer (BN254) recursion configs.
+pub fn assert_num_vars_le_max<C>(
+    builder: &mut zkm_recursion_compiler::prelude::Builder<C>,
+    actual_num_vars: zkm_recursion_compiler::prelude::Felt<C::F>,
+    max_num_vars: usize,
+) where
+    C: crate::CircuitConfig,
+{
+    use p3_field::PrimeCharacteristicRing;
+    use zkm_recursion_compiler::prelude::Felt;
+    // (max_num_vars+1)-bit sound decomposition of actual_num_vars
+    // (boolean + sum-binding happen inside num2bits for production
+    // configs).
+    let bits = C::num2bits(builder, actual_num_vars, max_num_vars + 1);
+    // low = value of the low `max_num_vars` bits.
+    let low: Felt<C::F> = C::bits2num(builder, bits.iter().take(max_num_vars).copied());
+    // (actual_num_vars - low) is b_{max}·2^{max} ∈ {0, 2^{max}};
+    // multiplying by `low` and asserting zero forces low == 0 whenever
+    // the high bit is set, i.e. actual_num_vars ≤ 2^{max_num_vars}.
+    let high_part: Felt<C::F> = builder.eval(actual_num_vars - low);
+    let prod: Felt<C::F> = builder.eval(high_part * low);
+    builder.assert_felt_eq(prod, C::F::ZERO);
+}
+
 /// **In-circuit per-query FRI fold-chain emission.**
 ///
 /// Emits the constraint sequence for verifying one query's
@@ -824,6 +897,32 @@ where
             stack_point.len(),
             self.params.num_variables,
         );
+
+        // (3a) HEIGHT-AGNOSTIC-RECURSION increment #1 — round-count
+        // soundness binding (NO-OP on the current fixed-height path).
+        //
+        // On the fixed path the BaseFold FRI round count is baked into
+        // the program as the compile-time `self.params.num_variables`
+        // (= the prover's clamped `log_stacking_height`), so the felt
+        // bound below is a CONSTANT equal to that value and the binding
+        // trivially passes (`num_variables <= 2^num_variables` for all
+        // `num_variables >= 1`).  This is therefore BYTE-IDENTICAL: it
+        // only emits inert constraints over a constant.  When the round
+        // count becomes genuinely WITNESSED (height-agnostic path, plan
+        // step 2 in heightagnostic_progress.md), `actual_num_vars`
+        // becomes a witnessed felt and `MAX_NUM_VARS` the compile-time
+        // loop ceiling, at which point this binding (extended with a
+        // tight integer `<=` as documented on `assert_num_vars_le_max`)
+        // is what PREVENTS a prover from over-claiming the round count.
+        // We land the primitive + call site now so the soundness binding
+        // is exercised end-to-end before it is load-bearing.
+        #[cfg(not(ha_measure_base))]
+        {
+            use p3_field::PrimeCharacteristicRing;
+            let actual_num_vars: zkm_recursion_compiler::prelude::Felt<C::F> =
+                builder.constant(C::F::from_usize(self.params.num_variables));
+            assert_num_vars_le_max::<C>(builder, actual_num_vars, self.params.num_variables);
+        }
 
         // (4) Commit-phase transcript replay — byte-for-byte the
         // BaseFold PROVER cadence (crates/pcs/src/basefold/prover.rs
@@ -1113,5 +1212,78 @@ mod tests {
             &coeffs, &point,
         );
         assert_eq!(result, 28);
+    }
+
+    // ── HEIGHT-AGNOSTIC-RECURSION round-count binding (increment #1) ──
+    //
+    // These compile + RUN the DSL through the recursion runtime
+    // (`run_test_recursion`), so the in-circuit `assert_felt_eq` inside
+    // `assert_num_vars_le_max` actually fires.  An over-claimed round
+    // count makes the runtime panic (the asserted product is non-zero),
+    // captured by `#[should_panic]`; honest counts run clean.
+    //
+    // NOTE on bound semantics (see `assert_num_vars_le_max` docs): this
+    // primitive binds the felt VALUE into `[0, 2^max]`.  On the fixed
+    // path `actual_num_vars == max_num_vars` and `max <= 2^max` for all
+    // `max >= 1`, so it is a NO-OP — these tests assert that floor AND
+    // that the product-to-zero rejects values in the open interval
+    // `(2^max, 2^{max+1})`, exercising the binding end-to-end before it
+    // is load-bearing on the witnessed path.
+
+    use p3_field::PrimeCharacteristicRing as _PrimeCharRing;
+    use zkm_recursion_compiler::config::InnerConfig;
+    use zkm_recursion_compiler::prelude::{Builder, Felt};
+    use zkm_pcs::InnerVal;
+
+    /// Run the round-count binding against a single witnessed `value`
+    /// over a `max_num_vars` ceiling, executing the resulting circuit
+    /// end-to-end.  `value` stands in for the (soon-to-be) witnessed
+    /// `actual_num_vars`.
+    fn run_numvars_bind(value: u64, max_num_vars: usize) {
+        use crate::utils::tests::run_test_recursion;
+        let mut builder = Builder::<InnerConfig>::default();
+        let v: Felt<InnerVal> = builder.constant(InnerVal::from_u64(value));
+        assert_num_vars_le_max::<InnerConfig>(&mut builder, v, max_num_vars);
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE: the fixed-path no-op case `actual_num_vars ==
+    /// max_num_vars` verifies for representative production sizes
+    /// (including the clamped-tiny case and the un-clamped default 21).
+    #[test]
+    fn numvars_bind_accepts_fixed_path_equal_value() {
+        // Fixed path: the witnessed value equals max_num_vars exactly.
+        run_numvars_bind(1, 1);
+        run_numvars_bind(10, 10);
+        run_numvars_bind(15, 15); // clamped-tiny commit example
+        run_numvars_bind(21, 21); // DEFAULT_LOG_STACKING_HEIGHT (un-clamped)
+    }
+
+    /// POSITIVE: any honest value in `[0, 2^max]` verifies (the inclusive
+    /// boundary + sub-power-of-two values).
+    #[test]
+    fn numvars_bind_accepts_values_within_power_of_two() {
+        let max = 4; // 2^max = 16
+        run_numvars_bind(0, max);
+        run_numvars_bind(4, max); // = max (fixed path)
+        run_numvars_bind(8, max); // sub-cube power of two
+        run_numvars_bind(16, max); // == 2^max (inclusive)
+    }
+
+    /// NEGATIVE: a value just past the power-of-two bound
+    /// (`2^max + 1 = 17 > 16`) is REJECTED — the runtime trips the
+    /// `(value - low)*low == 0` assert.
+    #[test]
+    #[should_panic]
+    fn numvars_bind_rejects_value_just_above_bound() {
+        run_numvars_bind(17, 4);
+    }
+
+    /// NEGATIVE: a grossly over-claimed value (`2*2^max = 32 > 16`) is
+    /// also REJECTED.
+    #[test]
+    #[should_panic]
+    fn numvars_bind_rejects_value_double_bound() {
+        run_numvars_bind(32, 4);
     }
 }

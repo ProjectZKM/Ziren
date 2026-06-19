@@ -9,6 +9,14 @@ repository = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+# `ha_measure_base` is a NON-PRODUCTION measurement cfg: build with
+# `RUSTFLAGS="--cfg ha_measure_base"` to compile out the height-agnostic
+# round-count soundness binding (assert_num_vars_le_max call site in
+# basefold_verifier.rs) so the base instruction count can be measured for
+# the byte-identical delta.  Default builds DO include the binding.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(ha_measure_base)'] }
+
 [dependencies]
 p3-air = { workspace = true }
 p3-field = { workspace = true }

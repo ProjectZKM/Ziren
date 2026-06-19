@@ -435,6 +435,28 @@ mod tests {
         let _ = program;
     }
 
+    /// MEASUREMENT (height-agnostic increment #1): print the normalize
+    /// program's instruction count so the delta introduced by the
+    /// round-count soundness binding can be quantified vs the base.
+    #[test]
+    fn measure_normalize_program_instruction_count() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+
+        let config = KoalaBearPoseidon2::default();
+        let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(config);
+        let witness = dummy_core_basefold_witness(&machine);
+        let max_log_row_count =
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
+            &machine,
+            &witness,
+            max_log_row_count,
+        );
+        println!("NORMALIZE_PROGRAM_INSTRUCTION_COUNT={}", program.instruction_count());
+    }
+
     /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
     /// witness whose per-shard `chip_cumulative_sums` cardinality
     /// matches a real shard's chip count — the shape-stability
