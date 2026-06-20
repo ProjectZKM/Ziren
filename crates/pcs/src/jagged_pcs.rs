@@ -95,28 +95,32 @@ pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 /// SP1-parity; no soundness implication (purely a packing constant).
 pub const DEFAULT_BATCH_SIZE: usize = 32;
 
-/// Choose the largest `log_stacking_height ≤ DEFAULT` that still
-/// leaves at least one batch_point variable.  Required for tiny
-/// commits where total entries < `1 << DEFAULT_LOG_STACKING_HEIGHT`.
+/// SP1-faithful FIXED stacking height: ALWAYS `DEFAULT_LOG_STACKING_HEIGHT`
+/// (21), never clamped down for small commits.
 ///
-/// Caution: this clamping creates a prover/verifier param
-/// divergence — the prover scales the stacking height down for small
-/// commits, but the in-circuit verifier (built once per shard with
-/// max_log_row_count) does not.  The bundle-lift path in
-/// `crates/recursion/circuit/src/machine/core_basefold.rs` rebuilds
-/// the verifier per-proof using `bundle.commit.log_stacking_height`
-/// (the value the prover actually used), so the clamping is
-/// preserved for memory efficiency on small commits AND the bundle
-/// path's verifier matches the prover.  The default (bytes) path's
-/// verifier still uses max_log_row_count but the all-zero placeholder
-/// lift's shape doesn't depend on the prover-emitted shape, so the
-/// mismatch is invisible.
-pub fn pick_log_stacking_height(total_entries: usize) -> u32 {
-    let log_total = total_entries.next_power_of_two().trailing_zeros();
-    // Reserve at least 1 var for the batching point (= 2 stripes
-    // minimum).
-    let max_for_data = log_total.saturating_sub(1).max(1);
-    DEFAULT_LOG_STACKING_HEIGHT.min(max_for_data)
+/// HEIGHT-AGNOSTIC RECURSION (step 3 — prover de-clamp).  Previously this
+/// clamped to `min(21, log2(np2(total))-1)` for tiny commits, making the
+/// prover's `log_stacking_height` depend on the trace AREA.  Because the
+/// recursion normalize/compress program is rebuilt per-proof from
+/// `bundle.commit.log_stacking_height` (the value the prover used), that
+/// clamp made the program — hence its VK — CLAMP-DEPENDENT (the VK varied
+/// with chip heights), which is exactly what forces FIX_CORE_SHAPES + a
+/// height-quantized vk_map.
+///
+/// SP1's `JaggedPcsProver::commit_multilinears` instead FIXES the stacking
+/// height and rounds the trace AREA up to a multiple of `2^21` (each call
+/// site does `area = total_entries.next_multiple_of(1 << 21)`), so every
+/// commit is honestly 21-round → the per-proof verifier rebuild
+/// constant-folds to `num_variables = 21` → clamp-INDEPENDENCE, with no
+/// transcript masking and no Fiat-Shamir risk (the unsound verifier-side
+/// alternative; see the step-2b report).  The normalize VK then depends on
+/// the chip-SET only — the precondition for retiring FIX_CORE_SHAPES while
+/// keeping VERIFY_VK=true.
+///
+/// `total_entries` is retained for call-site/API symmetry but no longer
+/// affects the height (the call-site area padding absorbs it).
+pub fn pick_log_stacking_height(_total_entries: usize) -> u32 {
+    DEFAULT_LOG_STACKING_HEIGHT
 }
 
 // BaseFold-over-BN254 port: GC-generic PCS core. Val/Challenge stay

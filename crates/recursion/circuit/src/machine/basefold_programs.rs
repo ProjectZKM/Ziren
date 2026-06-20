@@ -477,15 +477,16 @@ mod tests {
     /// It then compares `instruction_count()` of the two normalize
     /// programs.
     ///
-    /// CURRENT STATE (step 2b, prover de-clamp NOT landed): the two
-    /// counts DIFFER — the build-time-unrolled BaseFold FRI loops
-    /// (basefold_verifier.rs rounds/query/merkle) are driven by the
-    /// CLAMPED witness Vec lengths
-    /// (`fri_commitments.len() == log_stacking`), so the program — and
-    /// therefore the VK — is CLAMP-DEPENDENT.  This test ASSERTS that
-    /// difference so the dependence is pinned + reproducible, and is the
-    /// regression target that FLIPS (counts must become EQUAL) once the
-    /// host commit stops clamping (`log_stacking_height` fixed at 21,
+    /// STATE (step 3, prover de-clamp LANDED): the two counts are now
+    /// EQUAL — `pick_log_stacking_height` returns a FIXED 21 regardless of
+    /// area, so the build-time-unrolled BaseFold FRI loops
+    /// (basefold_verifier.rs rounds/query/merkle), driven by the witness
+    /// Vec lengths (`fri_commitments.len() == log_stacking`), build the
+    /// SAME 21-round program at every height ⇒ the program — and therefore
+    /// the VK — is CLAMP-INDEPENDENT (a function of the chip-SET only).
+    /// This test now ASSERTS that equality (flipped from the step-2b
+    /// assert_ne!), now that the host commit stopped clamping
+    /// (`log_stacking_height` fixed at 21,
     /// SP1-faithful — see `jagged/src/prover.rs:commit_multilinears` in
     /// the SP1 ref, which pads area UP to a FIXED stacking height and
     /// never clamps).  The verifier-side masking-to-MAX alternative is
@@ -497,7 +498,7 @@ mod tests {
     /// the sponge states equal).  See the step-2b report for the full
     /// argument.
     #[test]
-    fn normalize_program_is_clamp_dependent_for_fixed_chipset() {
+    fn normalize_program_is_clamp_independent_for_fixed_chipset() {
         use zkm_core_machine::mips::MipsAir;
         use zkm_pcs::jagged_pcs::pick_log_stacking_height;
         use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
@@ -556,24 +557,28 @@ mod tests {
              LARGE(log_h={large_log_h} log_stacking={large_stk} instr={large_count})"
         );
 
-        // Boundary sanity: the two heights must actually straddle the
-        // clamp (otherwise the probe proves nothing).
-        assert!(
-            small_stk < 21,
-            "SMALL height did not clamp (log_stacking={small_stk}); test mis-sized"
+        // POST-DE-CLAMP (step 3): the stacking height is FIXED at 21 for
+        // BOTH heights — the prover no longer clamps small commits down
+        // (`pick_log_stacking_height` ignores area; the call site pads the
+        // area up to 2^21, SP1-faithful).
+        assert_eq!(
+            small_stk, 21,
+            "SMALL commit must now use the FIXED stacking height (got {small_stk}); de-clamp regressed"
         );
         assert_eq!(
             large_stk, 21,
-            "LARGE height did not reach the cap (log_stacking={large_stk}); test mis-sized"
+            "LARGE height must use the FIXED stacking height (got {large_stk})"
         );
 
-        // ★ HEADLINE (current state): clamp-DEPENDENT — the program shape
-        // (instruction count) differs across the clamp for one chip-set.
-        // FLIP this to assert_eq! once the prover de-clamp lands.
-        assert_ne!(
+        // ★ HEADLINE (step-3 regression target, FLIPPED to assert_eq!):
+        // clamp-INDEPENDENT — for one chip-set the normalize program (hence
+        // its VK) is now IDENTICAL across heights, since both build at
+        // num_variables=21.  This is the precondition for a chip-set-keyed
+        // vk_map and retiring FIX_CORE_SHAPES.
+        assert_eq!(
             small_count, large_count,
-            "EXPECTED clamp-dependence (counts differ) in the current pre-de-clamp state; \
-             if these are EQUAL the prover de-clamp may already be in effect — flip to assert_eq!"
+            "EXPECTED clamp-INDEPENDENCE (equal instr counts) after the prover de-clamp; \
+             if these DIFFER the normalize program still depends on height"
         );
     }
 
