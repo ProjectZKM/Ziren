@@ -1040,8 +1040,13 @@ mod tests {
         assert_eq!(bits[2].0, "M");
     }
 
-    /// chip_height_bits_from_log_heights: sort by (Reverse(log_h), name)
-    /// and emit big-endian bit decomposition.
+    /// chip_height_bits_from_log_heights: sort by NAME (ascending) and
+    /// emit big-endian bit decomposition.  (The sort was changed from the
+    /// old `Reverse(log_h), name` height-descending order to name-ascending
+    /// as a transcript-ordering soundness fix — see the doc on
+    /// `chip_height_bits_from_log_heights`; this test asserted the stale
+    /// height-descending order and was a PRE-EXISTING failure on the base
+    /// commit, independent of the height-agnostic increments.)
     #[test]
     fn chip_height_bits_from_log_heights_sort_and_decompose() {
         use std::collections::BTreeMap;
@@ -1050,7 +1055,7 @@ mod tests {
         let mut map: BTreeMap<String, u8> = BTreeMap::new();
         map.insert("A".to_string(), 3);
         map.insert("B".to_string(), 5);
-        map.insert("C".to_string(), 5); // tie with B → broken by name
+        map.insert("C".to_string(), 5); // tie broken by name
         let max_log_row_count = 5; // bit_len = 6
         let result = chip_height_bits_from_log_heights::<C>(
             &mut builder,
@@ -1058,11 +1063,11 @@ mod tests {
             &map,
             max_log_row_count,
         );
-        // Sort order: B(5) < C(5) by name, then A(3).
+        // Name-ascending sort order: A, B, C (height is NOT a sort key).
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].0, "B");
-        assert_eq!(result[1].0, "C");
-        assert_eq!(result[2].0, "A");
+        assert_eq!(result[0].0, "A");
+        assert_eq!(result[1].0, "B");
+        assert_eq!(result[2].0, "C");
         // Each bit vec has max_log_row_count + 1 = 6 slots.
         assert_eq!(result[0].1.len(), 6);
         assert_eq!(result[1].1.len(), 6);
