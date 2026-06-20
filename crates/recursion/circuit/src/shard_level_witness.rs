@@ -1993,6 +1993,15 @@ where
         };
     let chip_height_felts: Option<&[Felt<C::F>]> =
         band_heights_override.as_deref().or(chip_height_felts);
+    if std::env::var("ZIREN_HA_LIFT_DBG").is_ok() {
+        eprintln!(
+            "[HA-LIFT] chip_height_felts.is_some()={} rounds={} round_lens={:?} bits_per_entry={} total_values={} col_prefix_sums_len={}",
+            chip_height_felts.is_some(),
+            column_counts_by_round.len(),
+            column_counts_by_round.iter().map(|r| r.len()).collect::<Vec<_>>(),
+            bits_per_entry, bundle.packing.total_values, col_prefix_sums_len,
+        );
+    }
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
         // reconstruct col_prefix_sums IN-CIRCUIT
         // from the WITNESSED per-chip heights instead of baking

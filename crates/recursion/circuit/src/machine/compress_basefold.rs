@@ -322,19 +322,20 @@ pub fn verify_compress_basefold<C, SC, A>(
         // VERIFY_VK=true height-binding site: per-chip WITNESSED heights
         // (2^log_h) from the opened `degree`, name-sorted to align with
         // column_counts_by_round_pre — same pattern as core_basefold.rs.
-        let chip_height_felts_pre =
-            crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+        // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, SKIP the opened-degree
+        // height recompose entirely — unused (cps=None ⇒ baked path) and its
+        // ext2felt assert was the 680M failure. Default: compute ⇒ legacy path.
+        let ha_gated = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok();
+        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = if ha_gated {
+            None
+        } else {
+            Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                 builder,
                 &chip_names,
                 &proof_opened_values,
-            );
-        // HEIGHT-AGNOSTIC (low-placement) FIX: ZIREN_HA_BAKED_COLPS=1 ⇒ None ⇒
-        // the lift's BAKED path builds col_prefix_sums from bundle.packing.offsets
-        // (BAND) + row_counts from offset DIFFS (BAND, gated) — self-consistent
-        // and matching the low-placement commit.  Default: Some(raw) (legacy,
-        // FIX-on byte-identical).
-        let cps_heights: Option<&[Felt<C::F>]> =
-            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() { None } else { Some(&chip_height_felts_pre) };
+            ))
+        };
+        let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
 
         // Bundle lift is the production path post multi-GPU determinism
         // cascade closure.  ZIREN_LEGACY_NONBUNDLE_LIFT (set to any
