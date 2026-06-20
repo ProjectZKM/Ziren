@@ -1146,11 +1146,40 @@ where
                 &first_half_symbolic,
                 &second_half_symbolic,
             );
+        // [JE-INCIRCUIT-DBG] capture bp before it is consumed by the multiply.
+        let je_dbg = std::env::var("ZIREN_JE_INCIRCUIT_DBG").is_ok();
+        let bp_dbg: Option<Ext<C::F, C::EF>> =
+            if je_dbg { Some(builder.eval(bp_eval.clone())) } else { None };
         expected_eval = expected_eval * bp_eval;
 
         // (7) Close the identity: accumulated expected_eval must equal
         //     the sumcheck's final point-eval claim.
         let expected_ext: Ext<C::F, C::EF> = builder.eval(expected_eval);
+        // [JE-INCIRCUIT-DBG] dump expected_ext / target / bp / sample z-points
+        // to localize the FIX-off :1154 divergence (printed before the assert,
+        // so they appear even when the assert div-by-zeros).  Gated.
+        if let Some(bp_ext) = bp_dbg {
+            eprintln!(
+                "[JE-IC] real_num_cols={} z_col.len={} col_prefix_sums.len={} z_row.len={} z_eval.len={} proof_point.len={}",
+                real_num_cols, z_col.len(), meta.col_prefix_sums.len(),
+                z_row.len(), z_eval.len(), proof_point.len()
+            );
+            builder.print_e(expected_ext);
+            builder.print_e(partial_sumcheck_proof.point_and_eval.1);
+            builder.print_e(bp_ext);
+            if !z_eval.is_empty() {
+                builder.print_e(z_eval[0]);
+            }
+            if !z_row.is_empty() {
+                builder.print_e(z_row[0]);
+            }
+            if !proof_point.is_empty() {
+                builder.print_e(proof_point[0]);
+            }
+            if !z_col.is_empty() {
+                builder.print_e(z_col[0]);
+            }
+        }
         builder.assert_ext_eq(expected_ext, partial_sumcheck_proof.point_and_eval.1);
 
         (jagged_eval, prefix_sum_felts)

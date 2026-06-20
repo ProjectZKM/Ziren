@@ -685,6 +685,16 @@ pub(crate) fn debug_jagged_eval_closing(
         "[JE-SELFCHECK] prefix_sums.len={} half={} pp.len={} (h={}, ==2*half? {}) | claimed_sum==closed:{} | CLOSING point_and_eval.1==F*BP : {}",
         prefix_sums.len(), half, pp.len(), h, pp.len() == 2 * half, cs_ok, closing_ok
     );
+    // [JE-HOSTVALS] raw values to compare against the recursion's in-circuit
+    // PRINTEF dump (ZIREN_JE_INCIRCUIT_DBG).  The recursion's z_eval = the
+    // reduction reduced point = rev(z_trace), so z_eval[0] = z_trace.last().
+    eprintln!("[JE-HOSTVALS] expected(mle_f*mle_bp)={:?}", mle_f * mle_bp);
+    eprintln!("[JE-HOSTVALS] target(point_and_eval.1)={:?}", target);
+    eprintln!("[JE-HOSTVALS] mle_bp={:?}", mle_bp);
+    eprintln!("[JE-HOSTVALS] z_row[0]={:?}", z_row.first());
+    eprintln!("[JE-HOSTVALS] z_eval[0]=z_trace.last()={:?}", z_trace.last());
+    eprintln!("[JE-HOSTVALS] proof_point[0]=pp[0]={:?}", pp.first());
+    eprintln!("[JE-HOSTVALS] num_cols={} z_col.len={} z_col[0]={:?}", num_cols, z_col.len(), z_col.first());
 }
 
 /// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]
