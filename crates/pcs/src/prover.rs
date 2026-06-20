@@ -906,18 +906,40 @@ where
     // `sp.shape()` (= opened_values).  Present-chip COMMIT heights are then
     // lifted in `commit_named_inner`; the injected chips already arrive at
     // their band-cap height.
+    //
+    // ROLLOUT 1b: the injected missing-chip traces are now the CONSTRAINT-VALID
+    // traces the core prove site generated FIX-on-faithfully (each chip's own
+    // `MachineAir::generate_trace` over the canonical-shaped record, so the
+    // padding rows satisfy that chip's AIR sanity constraints — e.g. CloClz's
+    // `padded_row_template` sets `a=32, is_bb_zero=1` so its SRL send has zero
+    // multiplicity).  All-zero injection (rollout 1) made the VK match but a
+    // real FIX-off proof's injected chips FAILED their constraints / lookups.
+    // We pull those generated traces from the same thread-local the band-cap
+    // arrives on, and only synthesize a zero matrix as a defensive fallback for
+    // a missing chip whose generated trace is (unexpectedly) absent.
     if let Some(band_cap) = crate::shard_level::band_cap::current_band_cap() {
         use std::collections::BTreeSet;
+        let missing_traces =
+            crate::shard_level::band_cap::current_missing_chip_traces().unwrap_or_default();
         let present: BTreeSet<String> =
             named_traces_inner.iter().map(|(n, _)| n.clone()).collect();
         for (name, (width, log_h)) in band_cap.iter() {
             if !present.contains(name) {
-                let w = (*width).max(1);
-                let h = 1usize << *log_h;
-                named_traces_inner.push((
-                    name.clone(),
-                    RowMajorMatrix::new(vec![crate::InnerVal::ZERO; w * h], w),
-                ));
+                if let Some(t) = missing_traces.get(name) {
+                    // Constraint-valid generated trace (FIX-on-faithful).
+                    named_traces_inner.push((name.clone(), t.clone()));
+                } else {
+                    // Defensive fallback: a canonical chip with no generated
+                    // trace — synthesize a zero matrix at the band height (this
+                    // is the rollout-1 behaviour; if it ever fires, that chip's
+                    // constraints may not hold, which `verify_shard` will catch).
+                    let w = (*width).max(1);
+                    let h = 1usize << *log_h;
+                    named_traces_inner.push((
+                        name.clone(),
+                        RowMajorMatrix::new(vec![crate::InnerVal::ZERO; w * h], w),
+                    ));
+                }
             }
         }
         // Keep name order stable (matches the name-order sort the commit and

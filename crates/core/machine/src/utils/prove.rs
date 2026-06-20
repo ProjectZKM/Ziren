@@ -669,7 +669,7 @@ where
                                         // missing event-driven chips at log-height 1).
                                         // The map carries (width, log_height) so the
                                         // PCS commit can both PAD present chips and ADD
-                                        // a zero trace for each MISSING canonical chip,
+                                        // a trace for each MISSING canonical chip,
                                         // so the FIX-off normalize VK = the FIX-on
                                         // canonical cluster VK (production vk_map).
                                         band_cap_shape_config
@@ -689,8 +689,108 @@ where
                                                         (name, (width, *log_h))
                                                     })
                                                     .collect();
+
+                                                // ROLLOUT 1b: generate the
+                                                // CONSTRAINT-VALID traces of the
+                                                // canonical-cluster chips this raw
+                                                // shard is MISSING, the FIX-on way:
+                                                // set the canonical shape on a CLONE
+                                                // of the record and run the machine's
+                                                // normal tracegen, so each chip's own
+                                                // `MachineAir::generate_trace` lays
+                                                // down its padding rows (dummy_row /
+                                                // padded_row_template) that satisfy
+                                                // that chip's AIR sanity constraints
+                                                // (e.g. CloClz `a=32, is_bb_zero=1`).
+                                                // The STARK keeps the PRESENT chips at
+                                                // ACTUAL heights (`main_traces`); only
+                                                // the MISSING chips (absent from
+                                                // `main_traces`) are taken from this
+                                                // canonical-shaped tracegen, then
+                                                // injected by `commit_basefold_path`
+                                                // for both `chip_ordering` and the
+                                                // commit.  All-zero injection
+                                                // (rollout 1) matched the VK but
+                                                // tripped the injected chips'
+                                                // constraints in `verify_shard`.
+                                                let missing_traces: std::collections::BTreeMap<
+                                                    String,
+                                                    p3_matrix::dense::RowMajorMatrix<
+                                                        zkm_pcs::InnerVal,
+                                                    >,
+                                                > = {
+                                                    use core::any::TypeId;
+                                                    // Only the KoalaBear inner ring
+                                                    // takes the BaseFold band-cap path
+                                                    // (the gate the injection itself
+                                                    // assumes); on any other ring keep
+                                                    // the rollout-1 fallback (empty =>
+                                                    // zero injection) rather than an
+                                                    // unsound transmute.
+                                                    if TypeId::of::<SC::Val>()
+                                                        == TypeId::of::<zkm_pcs::InnerVal>()
+                                                    {
+                                                        let present: std::collections::BTreeSet<
+                                                            String,
+                                                        > = main_traces
+                                                            .iter()
+                                                            .map(|(n, _)| n.clone())
+                                                            .collect();
+                                                        // Canonical-shaped clone (shares
+                                                        // the program Arc); FIX-on path.
+                                                        let mut gen_record = record.clone();
+                                                        gen_record.shape = Some(shape.clone());
+                                                        match prover.generate_traces(&gen_record) {
+                                                            Ok(all_canonical) => {
+                                                                // SC::Val == InnerVal here
+                                                                // (TypeId-gated): reinterpret
+                                                                // Vec<(String,
+                                                                // RowMajorMatrix<SC::Val>)> as
+                                                                // Vec<(String,
+                                                                // RowMajorMatrix<InnerVal>)>,
+                                                                // the same gate the commit
+                                                                // injection relies on.
+                                                                let inner: Vec<(
+                                                                    String,
+                                                                    p3_matrix::dense::RowMajorMatrix<
+                                                                        zkm_pcs::InnerVal,
+                                                                    >,
+                                                                )> = unsafe {
+                                                                    let mut v =
+                                                                        core::mem::ManuallyDrop::new(
+                                                                            all_canonical,
+                                                                        );
+                                                                    let ptr = v.as_mut_ptr();
+                                                                    let len = v.len();
+                                                                    let cap = v.capacity();
+                                                                    Vec::from_raw_parts(
+                                                                        ptr as *mut (
+                                                                            String,
+                                                                            p3_matrix::dense::RowMajorMatrix<
+                                                                                zkm_pcs::InnerVal,
+                                                                            >,
+                                                                        ),
+                                                                        len,
+                                                                        cap,
+                                                                    )
+                                                                };
+                                                                inner
+                                                                    .into_iter()
+                                                                    .filter(|(n, _)| {
+                                                                        !present.contains(n)
+                                                                    })
+                                                                    .collect()
+                                                            }
+                                                            Err(_) => Default::default(),
+                                                        }
+                                                    } else {
+                                                        Default::default()
+                                                    }
+                                                };
+
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
                                                     map,
+                                                    missing_traces,
                                                 )
                                             })
                                     };

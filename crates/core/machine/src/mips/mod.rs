@@ -1239,6 +1239,83 @@ pub mod tests {
         .unwrap();
     }
 
+    // HEIGHT-AGNOSTIC RECURSION (rollout 1b): the unfakeable gate — a
+    // FIX_CORE_SHAPES=false core proof of a PARTIALLY-FILLED shard must VERIFY
+    // end-to-end.  With FIX-off the records keep RAW heights
+    // (`shape_config = None`), so the per-shard canonical-cluster band-cap path
+    // INJECTS the missing canonical chips (DivRem / MiscInstrs / SyscallCore
+    // for this fibonacci shard) into the commit + chip_ordering.  Rollout 1b
+    // injects each chip's REAL constraint-valid generated trace (FIX-on-faithful
+    // `MachineAir::generate_trace` over the canonical-shaped record) instead of
+    // rollout-1's all-zero matrices.
+    //
+    // STATUS: #[ignore]d — currently FAILS at the jagged-PCS reduction with
+    //   "BasefoldShardVerifier: jagged-PCS: verify_jagged_basefold_no_observe
+    //    rejected the bundle".
+    //
+    // ROOT CAUSE (proven by the two siblings below + a probe — NOT the injected
+    // chips' content): the all-zero baseline AND the rollout-1b real-trace
+    // injection FAIL IDENTICALLY, while (a) the FIX-ON control verifies and
+    // (b) a pure-raw FIX-off run (band-cap disabled, no canonicalization/pad/
+    // injection) verifies.  The blocker is the STEP-5B band-cap design itself:
+    // it pads the PRESENT chips' COMMIT traces up to the cluster band heights
+    // (`shard_level::prover.rs` ~431) while the zerocheck / LogUp-GKR / openings
+    // stay at the RAW heights (`shard_level::prover.rs` ~833 sources
+    // `chip_log_heights` from `main_traces`).  The jagged-PCS then commits
+    // band-height column MLEs but the evaluation claims are raw-height MLEs, so
+    // the reduction correctly rejects the inconsistency — independent of the
+    // missing-chip injection.  Making FIX-off verify needs the deeper
+    // height-agnostic recursion port (jagged-native variable heights, the SP1
+    // hypercube approach), not a 1b injection change.  Rollout-1b's
+    // constraint-valid injection is necessary (all-zero is definitely wrong:
+    // e.g. CloClz's padding-row template `a=32, is_bb_zero=1` zeroes its SRL
+    // send; an all-zero row leaves that send at multiplicity 1 -> unbalanced
+    // lookup) but insufficient on its own.
+    #[test]
+    #[ignore = "rollout-1b: FIX-off jagged reduction rejects due to the step-5b                 present-chip raw-STARK vs band-commit height divergence (needs the                 height-agnostic recursion port); injection content is constraint-valid"]
+    fn test_fix_off_core_verify_injected_chips_rollout1b() {
+        use zkm_core_executor::Executor;
+        setup_logger();
+        // A partially-filled single shard so the canonical cluster has chips the
+        // raw record is MISSING (the injected chips this test gates).
+        let program = fibonacci_program();
+        let mut opts = ZKMCoreOpts::default();
+        // 262144 cycles/shard (the task's SHARD_SIZE) -> the small fibonacci run
+        // is a single partially-filled shard.
+        opts.shard_size = 262_144;
+        let mut runtime = Executor::new(program, opts);
+        runtime.run().unwrap();
+        // FIX_CORE_SHAPES=false == `shape_config = None`: records stay at raw
+        // heights, the STARK proves at those heights, the canonical-cluster
+        // band-cap injects the missing chips.  `run_test_core` then runs
+        // `machine.verify`, which checks every chip's constraints + the LogUp
+        // lookups, including the injected chips.
+        utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
+    }
+
+    // FIX-ON control for the rollout-1b gate (PASSES): the SAME fibonacci /
+    // shard-size run, but FIX_CORE_SHAPES=true (`Some(shape_config)`).  Here ALL
+    // chips (present + injected) are generated at the canonical band heights, so
+    // the zerocheck / commit / reduction all agree on heights and the proof
+    // verifies.  This passing while the FIX-off sibling fails localizes the
+    // blocker to FIX-off's raw-STARK-vs-band-commit height divergence (step 5b),
+    // NOT the injected chips' content (which is identical to FIX-on's here).
+    #[test]
+    fn test_fix_on_core_verify_control_rollout1b() {
+        use zkm_core_executor::Executor;
+        use crate::shape::CoreShapeConfig;
+        setup_logger();
+        let mut program = fibonacci_program();
+        let shape_config = CoreShapeConfig::default();
+        shape_config.fix_preprocessed_shape(&mut program).unwrap();
+        let mut opts = ZKMCoreOpts::default();
+        opts.shard_size = 262_144;
+        let mut runtime = Executor::new(program, opts);
+        runtime.run().unwrap();
+        utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), Some(&shape_config))
+            .unwrap();
+    }
+
     #[test]
     fn test_simple_memory_program_prove() {
         setup_logger();
