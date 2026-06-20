@@ -292,12 +292,14 @@ pub fn verify_core_basefold<C, SC, A>(
                     &chip_names,
                     &proof_opened_values,
                 );
-            // HEIGHT-AGNOSTIC (low-placement) FIX: always pass the (raw)
-            // per-chip heights; the lift internally OVERRIDES them with the
-            // BAND committed heights (offset diffs) when ZIREN_HA_BAKED_COLPS is
-            // set, keeping col_prefix_sums AND row_counts self-consistent and
-            // matching the low-placement band commit.
-            let cps_heights: Option<&[Felt<C::F>]> = Some(&chip_height_felts_pre);
+            // HEIGHT-AGNOSTIC (low-placement) FIX: ZIREN_HA_BAKED_COLPS=1 ⇒ None
+            // ⇒ the lift's BAKED path builds col_prefix_sums from
+            // bundle.packing.offsets (BAND) + row_counts from offset DIFFS
+            // (BAND, gated) — self-consistent and matching the low-placement
+            // commit, clearing both the F closing and step-7.  Default (unset):
+            // Some(raw) ⇒ legacy height-felts path (FIX-on byte-identical).
+            let cps_heights: Option<&[Felt<C::F>]> =
+                if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() { None } else { Some(&chip_height_felts_pre) };
 
             // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
             // (set to any value) falls back to the bytes lift; preserved
