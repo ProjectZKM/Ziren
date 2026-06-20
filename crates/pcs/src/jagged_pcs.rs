@@ -2688,6 +2688,19 @@ pub mod jagged {
             challenger,
         );
 
+        // DIAGNOSTIC (gated): host replica of the recursion's jagged-eval
+        // closing (compress_basefold.rs:1154) to localize the FIX-off compress
+        // div-by-zero — see jagged_eval_sumcheck::debug_jagged_eval_closing.
+        if std::env::var("ZIREN_JE_SELFCHECK").is_ok() {
+            crate::jagged_eval_sumcheck::debug_jagged_eval_closing(
+                &packing.offsets,
+                z_row,
+                &z_col,
+                &z_trace_be,
+                &jagged_eval,
+            );
+        }
+
         // (5) Open the BaseFold commit at z*.
         //
         // SP1-port: the jagged sumcheck reduces over `dense_q`

@@ -624,6 +624,69 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     JaggedSumcheckEvalProof { partial_sumcheck_proof }
 }
 
+/// DIAGNOSTIC (height-agnostic debug): replicate, on the host, the recursion's
+/// jagged-eval closing (the in-circuit `real_jagged_evaluator_fn` assert at
+/// compress_basefold.rs:1154) — does `point_and_eval.1 == F·BP(reduced_point)`?
+/// PASS ⇒ the prover's jagged-eval sub-sumcheck is self-consistent, so a
+/// recursion-1154 failure is an in-circuit/lift reconstruction or transcript-
+/// replay bug; FAIL ⇒ the prover's sub-sumcheck is itself inconsistent with the
+/// (low-placement) inputs.  Side-effect-free; prints results.  Gated by caller.
+pub(crate) fn debug_jagged_eval_closing(
+    prefix_sums: &[usize],
+    z_row: &[InnerChallenge],
+    z_col: &[InnerChallenge],
+    z_trace: &[InnerChallenge],
+    proof: &JaggedSumcheckEvalProof<InnerChallenge>,
+) {
+    use crate::jagged_branching_program::partial_lagrange;
+    use p3_field::PrimeCharacteristicRing;
+    let psp = &proof.partial_sumcheck_proof;
+    if psp.univariate_polys.is_empty() {
+        eprintln!("[JE-SELFCHECK] degenerate/dummy proof — skip");
+        return;
+    }
+    use crate::jagged_branching_program::bits_big_endian;
+    let last = prefix_sums.last().copied().unwrap_or(0);
+    let log_m = if last <= 1 {
+        0
+    } else {
+        (last - 1).next_power_of_two().trailing_zeros() as usize
+    };
+    let half = log_m + 1;
+    // (a) claimed_sum == closed-form jagged eval (should always hold — the
+    //     prover defines it so; printed as a sanity anchor).
+    let cs_closed = full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
+    let cs_ok = psp.claimed_sum == cs_closed;
+    // (b) THE decisive check: closing `point_and_eval.1 == F(pp)·BP(pp)`,
+    //     computed NON-MATERIALIZING (the test's mle over a 2^(2·half) array is
+    //     infeasible for real half≈28).  bp.eval (BP DP) == materialized mle_bp
+    //     and the per-column lagrange loop == materialized mle_f are both pinned
+    //     equal by `prove_jagged_evaluation_claimed_sum_matches_closed_form`.
+    let pp = &psp.point_and_eval.0;
+    let h = pp.len() / 2;
+    let bp = BranchingProgram::new(z_row.to_vec(), z_trace.to_vec());
+    let mle_bp = bp.eval(&pp[..h], &pp[h..]);
+    let z_col_lag = partial_lagrange(z_col);
+    let num_cols = prefix_sums.len() - 1;
+    let mut mle_f = InnerChallenge::ZERO;
+    for k in 0..num_cols {
+        let mut merged = bits_big_endian::<InnerChallenge>(prefix_sums[k], h);
+        merged.extend(bits_big_endian::<InnerChallenge>(prefix_sums[k + 1], h));
+        let mut e = InnerChallenge::ONE;
+        for (mb, p) in merged.iter().zip(pp.iter()) {
+            // eq(bit, point) for bit in {0,1}: bit*p + (1-bit)*(1-p).
+            e *= *mb * *p + (InnerChallenge::ONE - *mb) * (InnerChallenge::ONE - *p);
+        }
+        mle_f += z_col_lag[k] * e;
+    }
+    let target = psp.point_and_eval.1;
+    let closing_ok = target == mle_f * mle_bp;
+    eprintln!(
+        "[JE-SELFCHECK] prefix_sums.len={} half={} pp.len={} (h={}, ==2*half? {}) | claimed_sum==closed:{} | CLOSING point_and_eval.1==F*BP : {}",
+        prefix_sums.len(), half, pp.len(), h, pp.len() == 2 * half, cs_ok, closing_ok
+    );
+}
+
 /// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]
 /// writes, without re-deriving the polynomial.  Host verifiers (e.g.
 /// `verify_jagged_basefold`) call this to keep the challenger in sync
