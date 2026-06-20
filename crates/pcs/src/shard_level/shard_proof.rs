@@ -93,6 +93,22 @@ pub struct BasefoldShardProof<F, EF> {
     /// env-var the CpuProver binary cannot see.
     #[serde(default)]
     pub fold_orientation: FoldOrientation,
+    /// Height-agnostic jagged-verifier groundwork (Stages 1-3):
+    /// witnessed per-round, per-chip **actual row counts** (column
+    /// heights, pre-padding) -- the NUMERIC counterpart SP1 carries in
+    /// `row_counts_and_column_counts`.  Ziren still derives the same
+    /// values from `evaluation_proof`'s packing offsets at lift time;
+    /// these are PURE DATA carried alongside (no verifier reads them
+    /// yet -- Stage 4 wires the checks).  Empty on older proof bytes.
+    #[serde(default)]
+    pub row_counts: Vec<Vec<usize>>,
+    /// Height-agnostic groundwork: witnessed per-round
+    /// **padding-column count** -- the number of artificial columns the
+    /// BaseFold stacking quantization rounds the real total column
+    /// count up to the next power of two.  PURE DATA; empty on older
+    /// proof bytes.
+    #[serde(default)]
+    pub padding_column_counts: Vec<usize>,
 }
 
 impl<F, EF> BasefoldShardProof<F, EF>
@@ -112,6 +128,10 @@ where
             chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: EvaluationProof::Empty,
             fold_orientation: FoldOrientation::Msb,
+            // Height-agnostic groundwork: empty placeholders for the
+            // empty/dummy-inner proof (no packing to derive from).
+            row_counts: Vec::new(),
+            padding_column_counts: Vec::new(),
         }
     }
 }
@@ -137,6 +157,56 @@ mod tests {
         assert_eq!(back.main_commitment.len(), proof.main_commitment.len());
         assert!(matches!(back.evaluation_proof, EvaluationProof::Empty));
         assert_eq!(back.opened_values.chips.len(), 0);
+    }
+
+    /// Height-agnostic groundwork (Stage 1) BACKWARD-COMPAT: an
+    /// OLD-format proof serialized WITHOUT the new `row_counts` /
+    /// `padding_column_counts` fields must still deserialize into the
+    /// NEW struct, with those fields defaulting to empty (the
+    /// `#[serde(default)]` contract).  We model the old wire format
+    /// with a mirror struct carrying exactly the pre-change fields in
+    /// the same order (rmp-serde encodes structs positionally as a
+    /// compact array, so a SHORTER old array fills the new trailing
+    /// fields from their defaults).
+    #[derive(Serialize)]
+    #[serde(bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
+    struct OldBasefoldShardProof<F, EF> {
+        public_values: Vec<F>,
+        main_commitment: [F; 8],
+        logup_gkr_proof: LogupGkrProof<F, EF>,
+        zerocheck_proof: PartialSumcheckProof<EF>,
+        opened_values: ShardOpenedValues<F, EF>,
+        chip_log_heights: std::collections::BTreeMap<String, u8>,
+        chip_cumulative_sums:
+            std::collections::BTreeMap<String, ChipCumulativeSums<F, EF>>,
+        evaluation_proof: EvaluationProof,
+        fold_orientation: FoldOrientation,
+    }
+
+    #[test]
+    fn basefold_shard_proof_old_format_deserializes() {
+        let old: OldBasefoldShardProof<F, EF> = OldBasefoldShardProof {
+            public_values: vec![F::ZERO; 7],
+            main_commitment: std::array::from_fn(|_| F::ZERO),
+            logup_gkr_proof: LogupGkrProof::dummy(),
+            zerocheck_proof: PartialSumcheckProof::dummy(),
+            opened_values: ShardOpenedValues { chips: Default::default() },
+            chip_log_heights: std::collections::BTreeMap::new(),
+            chip_cumulative_sums: std::collections::BTreeMap::new(),
+            evaluation_proof: EvaluationProof::Empty,
+            fold_orientation: FoldOrientation::Msb,
+        };
+        let old_bytes = rmp_serde::to_vec(&old).expect("old serializes");
+        // Decode old (shorter) bytes into the NEW struct.
+        let back: BasefoldShardProof<F, EF> = rmp_serde::from_slice(&old_bytes)
+            .expect("old-format proof deserializes into new struct");
+        assert_eq!(back.public_values.len(), 7);
+        // The new fields default to empty (serde(default)).
+        assert!(back.row_counts.is_empty(), "row_counts must default empty");
+        assert!(
+            back.padding_column_counts.is_empty(),
+            "padding_column_counts must default empty"
+        );
     }
 
     #[test]

@@ -1173,6 +1173,22 @@ where
     let col_prefix_sums_len = padded_cols + 1;
     let num_rounds = column_counts_by_round.len().max(1);
 
+    // ── Height-agnostic groundwork (Stage 3): witnessed NUMERIC
+    // row_counts + padding_column_count, derived from the SAME bundle
+    // packing the real prover / dummy use (single stacked main commit
+    // == one round).  PURE DATA carried alongside the bit-form below.
+    let (row_counts_usize, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
+        if bundle.packing.column_counts.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let (rc, pcc) = zkm_pcs::jagged::derive_row_and_padding_counts(
+                &bundle.packing.column_counts,
+                &bundle.packing.offsets,
+                bundle.packing.total_values,
+            );
+            (vec![rc], vec![pcc])
+        };
+
     // ── P2c-for-outer: sumcheck_proof = the WITNESSED reduction sumcheck ──
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
@@ -1320,6 +1336,8 @@ where
         pcs_proof: stacked_pcs_proof,
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
+        row_counts_usize,
+        padding_column_counts,
         original_commitments,
         expected_eval,
     }
@@ -1807,6 +1825,23 @@ where
     let num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
+    // ── Height-agnostic groundwork (Stage 3): witnessed NUMERIC
+    // row_counts + padding_column_count, derived from the SAME bundle
+    // packing the real prover / dummy use (single stacked main commit
+    // == one round).  Carried ALONGSIDE the bit-decomposed `row_counts`
+    // below; PURE DATA (Stage 4 wires the verifier checks).
+    let (row_counts_usize, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
+        if bundle.packing.column_counts.is_empty() {
+            (Vec::new(), Vec::new())
+        } else {
+            let (rc, pcc) = zkm_pcs::jagged::derive_row_and_padding_counts(
+                &bundle.packing.column_counts,
+                &bundle.packing.offsets,
+                bundle.packing.total_values,
+            );
+            (vec![rc], vec![pcc])
+        };
+
     // ── sumcheck_proof = the PRE-READ (witnessed) reduction
     // sumcheck (read in BasefoldShardProof::read), not a host const. ──
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
@@ -2074,6 +2109,8 @@ where
         pcs_proof: stacked_pcs_proof,
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
+        row_counts_usize,
+        padding_column_counts,
         original_commitments,
         expected_eval,
     }

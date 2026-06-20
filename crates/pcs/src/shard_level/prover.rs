@@ -967,6 +967,28 @@ where
         })
         .collect();
 
+    // ── Height-agnostic jagged-verifier groundwork (Stage 2) ──
+    // Emit the witnessed per-round per-chip row_counts + the per-round
+    // padding_column_count, derived from the host jagged packing the
+    // commit already produced.  Ziren's single-stacked main commit is
+    // exactly ONE round, so both outer vecs have length 1 (or 0 when
+    // there is no host bundle to derive from -- GPU `Bytes` / `Empty`
+    // paths, where the lift derives the same values from the witnessed
+    // packing).  PURE DATA: nothing branches on these (Stage 4 wires
+    // the verifier checks).
+    let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
+        match &evaluation_proof {
+            crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+                let (rc, pcc) = crate::jagged::derive_row_and_padding_counts(
+                    &bundle.packing.column_counts,
+                    &bundle.packing.offsets,
+                    bundle.packing.total_values,
+                );
+                (vec![rc], vec![pcc])
+            }
+            _ => (Vec::new(), Vec::new()),
+        };
+
     let proof = BasefoldShardProof {
         public_values,
         main_commitment,
@@ -977,6 +999,8 @@ where
         chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: orientation,
+        row_counts,
+        padding_column_counts,
     };
     drop(_phase5_span);
     tracing::info!(

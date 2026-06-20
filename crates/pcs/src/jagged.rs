@@ -376,6 +376,65 @@ pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
     cumulative
 }
 
+/// Derive the witnessed per-chip **row counts** (column heights) and the
+/// **padding-column count** from a single round's jagged packing.
+///
+/// Height-agnostic jagged-verifier groundwork (Stages 1-3): SP1 witnesses
+/// `(row_count, column_count)` pairs plus a `padding_column_count` per round in
+/// the proof; Ziren today derives the same quantities from `offsets` /
+/// `column_counts` / `total_values` at lift time.  This helper hoists that
+/// derivation into one place so the real prover, the dummy, and the recursion
+/// lift all agree on the numbers (dummy == real on the new fields by
+/// construction).  PURE DATA -- nothing reads these in the verifier yet.
+///
+/// * `column_counts[i]` = number of columns chip `i` contributes (already on
+///   the wire as `PackingMeta::column_counts`).
+/// * `offsets` = per-column cumulative start offset in the dense vector, with a
+///   final sentinel `offsets.last() == total_values` (see
+///   [`compute_jagged_metadata_from_dims`]).
+/// * returns `row_counts[i]` = chip `i`'s column height (real rows), recovered
+///   by the offsets sentinel-walk (identical to the lift's `packing_row_counts`
+///   in `recursion/circuit/src/shard_level_witness.rs`).
+/// * returns `padding_column_count` = how many artificial columns the BaseFold
+///   stacking quantization rounds the real total column count up to the next
+///   power of two (`padded_cols - total_real_cols`), mirroring the lift's
+///   `padded_cols = total_cols_before_pad.next_power_of_two()`.
+///
+/// For Ziren's single-stacked main commit there is exactly **one round**, so
+/// callers wrap the row-count result in a one-element outer `Vec` and the
+/// padding count in a one-element `Vec`.
+pub fn derive_row_and_padding_counts(
+    column_counts: &[usize],
+    offsets: &[usize],
+    total_values: usize,
+) -> (Vec<usize>, usize) {
+    // Per-chip row counts = the offsets sentinel-walk difference at each chip's
+    // first column (mirrors shard_level_witness.rs `packing_row_counts`).
+    let mut row_counts: Vec<usize> = Vec::with_capacity(column_counts.len());
+    let mut col_idx: usize = 0;
+    for &cc in column_counts.iter() {
+        if cc == 0 {
+            row_counts.push(0);
+            continue;
+        }
+        let h = if col_idx + 1 < offsets.len() {
+            offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+        } else if col_idx < offsets.len() {
+            total_values.saturating_sub(offsets[col_idx])
+        } else {
+            0
+        };
+        row_counts.push(h);
+        col_idx += cc;
+    }
+    // Padding-column count = next-power-of-two round-up of the real total column
+    // count (mirrors the lift's `total_cols_before_pad.next_power_of_two()`).
+    let total_real_cols: usize = column_counts.iter().sum();
+    let padded_cols = total_real_cols.max(1).next_power_of_two();
+    let padding_column_count = padded_cols.saturating_sub(total_real_cols);
+    (row_counts, padding_column_count)
+}
+
 /// Statistics about the Jagged packing efficiency.
 #[derive(Debug)]
 pub struct JaggedStats {

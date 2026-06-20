@@ -181,6 +181,11 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             row_counts,
             original_commitments,
             expected_eval,
+            // Height-agnostic groundwork (Stages 1-3): the witnessed
+            // numeric `row_counts_usize` / `padding_column_counts` are
+            // carried but DELIBERATELY ignored here — the verify path
+            // stays byte-identical (Stage 4 wires the checks).
+            ..
         } = proof;
 
         // (1) Sample column-index challenges `z_col` of dimension

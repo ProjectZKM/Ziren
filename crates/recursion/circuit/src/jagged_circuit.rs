@@ -105,6 +105,18 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// Per-round per-chip row-count bit-decomposition list
     /// (Felt-typed for in-circuit prefix-sum computation).
     pub row_counts: Vec<Vec<Felt<F>>>,
+    /// Height-agnostic jagged-verifier groundwork (Stages 1-3):
+    /// witnessed per-round per-chip row counts as PLAIN NUMBERS
+    /// (SP1's `row_counts_and_column_counts` numeric form), carried
+    /// ALONGSIDE the bit-decomposed `row_counts` above — the two
+    /// coexist (Stage 4 wires the verifier check that the bits
+    /// decode to these numbers).  PURE DATA today; nothing reads it.
+    pub row_counts_usize: Vec<Vec<usize>>,
+    /// Height-agnostic groundwork: witnessed per-round
+    /// padding-column count (artificial columns the BaseFold
+    /// stacking rounds the real total up to a power of two).
+    /// PURE DATA; nothing reads it yet.
+    pub padding_column_counts: Vec<usize>,
     /// Per-round original commitment digests (before any
     /// chip-info-hash mix-in).
     pub original_commitments: Vec<Digest>,

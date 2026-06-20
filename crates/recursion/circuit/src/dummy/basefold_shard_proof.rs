@@ -349,6 +349,26 @@ where
         )
     };
 
+    // ── Height-agnostic groundwork (Stage 3): dummy emits the SAME
+    // numeric row_counts / padding_column_counts the real prover does
+    // for this shape, derived from the SAME jagged packing
+    // (`dummy_jagged_basefold_bundle` builds it via `pack_traces_jagged`
+    // on zero matrices -> exact offsets/column_counts/total_values), so
+    // dummy == real on the new fields by construction.  PURE DATA.
+    let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
+        match &evaluation_proof {
+            zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+                let (rc, pcc) =
+                    zkm_pcs::jagged::derive_row_and_padding_counts(
+                        &bundle.packing.column_counts,
+                        &bundle.packing.offsets,
+                        bundle.packing.total_values,
+                    );
+                (vec![rc], vec![pcc])
+            }
+            _ => (Vec::new(), Vec::new()),
+        };
+
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
         public_values,
@@ -362,6 +382,8 @@ where
         // The verifier-simulation dummy emits MSB-folded proofs
         // (host-CPU convention — matches the CpuProver call site).
         fold_orientation: FoldOrientation::Msb,
+        row_counts,
+        padding_column_counts,
     }
 }
 
@@ -649,5 +671,73 @@ mod tests {
             dummy_partial_sumcheck_proof(0, 4);
         assert_eq!(proof.univariate_polys.len(), 0);
         assert_eq!(proof.point_and_eval.0.len(), 0);
+    }
+
+    /// Height-agnostic groundwork (Stages 1-3) ROUND-TRIP: the dummy's
+    /// witnessed `row_counts` / `padding_column_counts` must EQUAL the
+    /// real prover's for the same chip-set shape.  Both derive from the
+    /// SAME `pack_traces_jagged` packing via
+    /// `derive_row_and_padding_counts`, so dummy == real by construction.
+    /// The dummy packs ZERO matrices at the given dims; the "real"
+    /// reference packs full-VALUE matrices at the SAME dims — the
+    /// derivation is value-independent (offsets/column_counts only), so
+    /// the numeric counts must match exactly.
+    #[test]
+    fn dummy_row_padding_counts_equal_real_prover() {
+        use p3_field::PrimeCharacteristicRing;
+        use p3_matrix::dense::RowMajorMatrix;
+        use zkm_pcs::jagged::{derive_row_and_padding_counts, pack_traces_jagged};
+        use zkm_pcs::InnerVal;
+
+        // A representative mixed-height, mixed-width chip set
+        // (name-sorted, as the packer / lift see it).
+        let chip_dims: Vec<(usize, u32)> =
+            vec![(3, 4), (7, 2), (1, 6), (12, 5)];
+        let max_log_row_count = 6usize;
+
+        // ── DUMMY side: derive from the dummy bundle's packing. ──
+        let dummy_bundle =
+            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count);
+        let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
+            &dummy_bundle.packing.column_counts,
+            &dummy_bundle.packing.offsets,
+            dummy_bundle.packing.total_values,
+        );
+
+        // ── REAL side: pack full-VALUE matrices at the SAME dims (what
+        // the real prover's host commit does), then derive identically. ──
+        let real_traces: Vec<(String, RowMajorMatrix<InnerVal>)> = chip_dims
+            .iter()
+            .enumerate()
+            .map(|(i, (w, log_h))| {
+                let h = 1usize << *log_h;
+                // Non-zero values: ((r*w+c) mod p) — proves value-independence.
+                let vals: Vec<InnerVal> = (0..(*w * h))
+                    .map(|k| InnerVal::from_u32((k as u32) % 17 + 1))
+                    .collect();
+                (format!("chip{i}"), RowMajorMatrix::new(vals, *w))
+            })
+            .collect();
+        let real_packing = pack_traces_jagged::<InnerVal>(&real_traces);
+        let real_column_counts: Vec<usize> = real_packing
+            .chip_infos
+            .iter()
+            .map(|ci| ci.column_count)
+            .collect();
+        let (real_rc, real_pcc) = derive_row_and_padding_counts(
+            &real_column_counts,
+            &real_packing.offsets,
+            real_packing.total_values,
+        );
+
+        // ── dummy == real on the new fields. ──
+        assert_eq!(dummy_rc, real_rc, "row_counts dummy != real");
+        assert_eq!(dummy_pcc, real_pcc, "padding_column_count dummy != real");
+        // Sanity: row_counts ARE the chip heights, in dim order.
+        let expected_heights: Vec<usize> =
+            chip_dims.iter().map(|(_w, log_h)| 1usize << *log_h).collect();
+        assert_eq!(dummy_rc, expected_heights, "row_counts != chip heights");
+        // Sanity: padding rounds total real cols (3+7+1+12=23) up to 32 -> 9.
+        assert_eq!(dummy_pcc, 32 - 23, "padding_column_count value");
     }
 }
