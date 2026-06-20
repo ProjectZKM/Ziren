@@ -575,53 +575,68 @@ where
     current
 }
 
-/// **In-circuit BaseFold round-count soundness binding.**
+/// **In-circuit BaseFold round-count soundness binding — TIGHT integer `<=`.**
 ///
-/// Height-agnostic-recursion increment #1.  The round-count analog of
-/// [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier::assert_row_count_le_cube`].
+/// Height-agnostic-recursion (step 2).  Binds a (soon-to-be) WITNESSED
+/// `actual_num_vars` to the closed integer interval `[0, max_num_vars]`,
+/// where `max_num_vars` is the compile-time loop ceiling
+/// (`DEFAULT_LOG_STACKING_HEIGHT`).
 ///
-/// On the height-agnostic recursion path the BaseFold FRI round count
-/// (`num_variables` = the prover's `log_stacking_height`, which is
-/// CLAMPED DOWN for tiny commits by
-/// [`zkm_pcs::pick_log_stacking_height`]) will be a WITNESSED felt rather
-/// than baked into the program at compile time.  A malicious prover must
-/// then be prevented from witnessing a round count larger than the
-/// compile-time MAX the program loops over (= `DEFAULT_LOG_STACKING_HEIGHT`),
-/// because the extra "padding" rounds are masked to be inert and an
-/// over-claim would attempt to activate rounds whose committed structure
-/// does not exist.
+/// # Why this exists
 ///
-/// This emits exactly the
-/// [`crate::recursive_jagged_pcs::RecursiveJaggedPcsVerifier::assert_row_count_le_cube`]
-/// product-to-zero binding, specialised to bound `actual_num_vars <=
-/// max_num_vars` (inclusive — the un-clamped commit fills the cube
-/// exactly):
-///   * `num2bits(actual_num_vars, max_num_vars + 1)` sound-binds
-///     `actual_num_vars = Σ b_i 2^i` with each `b_i` boolean (every
-///     production config re-asserts boolean + sum), so
-///     `actual_num_vars < 2^{max_num_vars+1}` — note this bounds the felt
-///     VALUE, the count itself is the literal `actual_num_vars`;
-///   * `low = bits2num(low max_num_vars bits)`;
-///   * `(actual_num_vars - low) · low == 0` forbids the open interval
-///     `(2^{max_num_vars}, 2^{max_num_vars+1})`.
+/// On the height-agnostic path the BaseFold FRI round count
+/// (`num_variables` = the prover's `log_stacking_height`, CLAMPED DOWN
+/// for tiny commits by [`zkm_pcs::pick_log_stacking_height`]) becomes a
+/// WITNESSED felt rather than a compile-time constant.  The program then
+/// loops over a fixed `max_num_vars` and the extra `max - actual` rounds
+/// are masked inert.  A malicious prover must be prevented from claiming
+/// a round count OUTSIDE `[0, max_num_vars]`:
+///   * over-claim (`actual > max_num_vars`) would activate rounds whose
+///     committed codeword does not exist;
+///   * the mask logic only makes sense for a count in range.
 ///
-/// CAUTION on the bound semantics: this binds `actual_num_vars` (the
-/// felt) into `[0, 2^{max_num_vars}]`, i.e. it bounds the count by a
-/// power of two, NOT directly by `max_num_vars`.  That is the correct
-/// shape for the *height* guard (which bounds a row_count against a cube
-/// size `2^cube_log`).  For the round COUNT — which is itself a log,
-/// bounded by an integer `max_num_vars` not by `2^{max_num_vars}` — the
-/// final height-agnostic verifier will additionally need a direct
-/// integer `<=` on the bits (e.g. assert the top `(max_num_vars+1 -
-/// ceil(log2(max_num_vars+1)))` bits are zero, or a bit-by-bit `lt`
-/// against the constant `max_num_vars`).  This increment lands the
-/// product-to-zero PRIMITIVE + call site as a NO-OP on the fixed path
-/// (where `actual_num_vars` is the compile-time constant `max_num_vars`
-/// and `max_num_vars <= 2^{max_num_vars}` trivially holds for all
-/// `max_num_vars >= 1`); the tight integer `<=` is wired when the count
-/// becomes genuinely witnessed (see heightagnostic_progress.md plan
-/// step 2).  Until then this is a soundness FLOOR, never a ceiling that
-/// could falsely accept.
+/// # The tight integer `<=` (replaces step-1's power-of-two FLOOR)
+///
+/// Step 1 left a documented FLOOR: it bound the felt VALUE into
+/// `[0, 2^{max_num_vars}]` (a power-of-two bound, not a direct
+/// `<= max_num_vars`), which over-accepts every value in
+/// `(max_num_vars, 2^{max_num_vars}]`.  This is now a TIGHT
+/// `actual_num_vars <= max_num_vars` via two sound bit-decompositions:
+///
+/// Let `nbits = ceil(log2(max_num_vars + 1))` be the number of bits to
+/// represent `max_num_vars` (e.g. `max=21 -> nbits=5`, `2^5=32 > 21`).
+///   1. `num2bits(actual_num_vars, nbits)` — sound-binds
+///      `actual_num_vars ∈ [0, 2^nbits)` (each bit boolean + recomposition
+///      `Σ b_i 2^i == actual_num_vars`, enforced inside `num2bits_v2_f`).
+///   2. `diff = max_num_vars - actual_num_vars` (a felt subtraction).
+///   3. `num2bits(diff, nbits)` — sound-binds `diff ∈ [0, 2^nbits)`.
+///
+/// Both decompositions binding ⟹ `actual_num_vars ∈ [0, 2^nbits)` AND
+/// `max_num_vars - actual_num_vars ∈ [0, 2^nbits)`.  Over the KoalaBear
+/// field (`p = 2^31 - 2^24 + 1`), if `actual_num_vars > max_num_vars`
+/// then `diff = max_num_vars - actual_num_vars` wraps to
+/// `p - (actual_num_vars - max_num_vars) >= p - (2^nbits - 1) ≈ 2^31`,
+/// which is FAR above `2^nbits` (`nbits ≈ 5` for production), so its
+/// `nbits`-bit recomposition CANNOT equal `diff` and `num2bits` trips its
+/// `assert_felt_eq(x, num)` → the proof is REJECTED.  Hence the binding
+/// accepts EXACTLY `actual_num_vars ∈ [0, max_num_vars]` — a tight
+/// integer `<=`, no power-of-two slack.
+///
+/// # Byte-identical on the honest / fixed path
+///
+/// On the current fixed path `actual_num_vars` is the compile-time
+/// constant `max_num_vars`, so `diff == 0` and both decompositions
+/// trivially bind.  The emitted constraints are inert (the asserts never
+/// trip), exactly like step-1 and the row-count guard — it only ADDS
+/// soundness constraints, never changes a verification outcome on an
+/// honest proof.
+///
+/// # Soundness
+///
+/// Soundness rests entirely on `num2bits_v2_f` enforcing both per-bit
+/// booleanity and the sum-recomposition `Σ b_i 2^i == input`
+/// (compiler/src/circuit/builder.rs:73-117).  No floating ceiling: the
+/// only accepted values are `[0, max_num_vars]`.
 ///
 /// Config-generic: operates on `Felt<C::F>`, so it works for both the
 /// inner (KoalaBear) and outer (BN254) recursion configs.
@@ -634,18 +649,38 @@ pub fn assert_num_vars_le_max<C>(
 {
     use p3_field::PrimeCharacteristicRing;
     use zkm_recursion_compiler::prelude::Felt;
-    // (max_num_vars+1)-bit sound decomposition of actual_num_vars
-    // (boolean + sum-binding happen inside num2bits for production
-    // configs).
-    let bits = C::num2bits(builder, actual_num_vars, max_num_vars + 1);
-    // low = value of the low `max_num_vars` bits.
-    let low: Felt<C::F> = C::bits2num(builder, bits.iter().take(max_num_vars).copied());
-    // (actual_num_vars - low) is b_{max}·2^{max} ∈ {0, 2^{max}};
-    // multiplying by `low` and asserting zero forces low == 0 whenever
-    // the high bit is set, i.e. actual_num_vars ≤ 2^{max_num_vars}.
-    let high_part: Felt<C::F> = builder.eval(actual_num_vars - low);
-    let prod: Felt<C::F> = builder.eval(high_part * low);
-    builder.assert_felt_eq(prod, C::F::ZERO);
+    // nbits = number of bits to represent `max_num_vars` (so 2^nbits >
+    // max_num_vars).  `(max+1).next_power_of_two().trailing_zeros()`
+    // == ceil(log2(max+1)).  Guard the degenerate max==0 case (nbits=0
+    // would let no value through; max==0 means "only 0 allowed").
+    let nbits = if max_num_vars == 0 {
+        1
+    } else {
+        (max_num_vars + 1).next_power_of_two().trailing_zeros() as usize
+    };
+    // Tightness depends on the wrapped negative `diff` (≈ p - small) being
+    // OUTSIDE [0, 2^nbits): requires 2^{nbits+1} <= field modulus.  Over
+    // KoalaBear (p ≈ 2^31) this holds for nbits <= 29; production
+    // max_num_vars <= 21 -> nbits <= 5 (huge margin).  Guard so a future
+    // caller with an oversized max fails loudly rather than silently
+    // admitting a non-tight (potentially unsound) bound.
+    debug_assert!(
+        nbits + 1 < 31,
+        "assert_num_vars_le_max: nbits ({nbits}) too large for a tight \
+         field-wrap `<=` over KoalaBear (need 2^(nbits+1) <= p)"
+    );
+    // (1) Sound-bind actual_num_vars ∈ [0, 2^nbits).
+    let _actual_bits = C::num2bits(builder, actual_num_vars, nbits);
+    // (2) diff = max_num_vars - actual_num_vars (felt subtraction; wraps
+    //     to ≈ p if actual > max).
+    let max_felt: Felt<C::F> = builder.constant(C::F::from_usize(max_num_vars));
+    let diff: Felt<C::F> = builder.eval(max_felt - actual_num_vars);
+    // (3) Sound-bind diff ∈ [0, 2^nbits).  If actual_num_vars > max_num_vars
+    //     the wrapped diff is ≈ p >> 2^nbits and this num2bits' internal
+    //     recomposition assert (assert_felt_eq(Σ b_i 2^i, diff)) FAILS,
+    //     rejecting the proof.  Together (1)+(3) ⟹ actual_num_vars ≤
+    //     max_num_vars (tight integer ≤, no power-of-two slack).
+    let _diff_bits = C::num2bits(builder, diff, nbits);
 }
 
 /// **In-circuit per-query FRI fold-chain emission.**
@@ -898,24 +933,24 @@ where
             self.params.num_variables,
         );
 
-        // (3a) HEIGHT-AGNOSTIC-RECURSION increment #1 — round-count
-        // soundness binding (NO-OP on the current fixed-height path).
+        // (3a) HEIGHT-AGNOSTIC-RECURSION (step 2) — round-count soundness
+        // binding, TIGHT integer `<=` (NO-OP on the current fixed-height
+        // path).
         //
-        // On the fixed path the BaseFold FRI round count is baked into
-        // the program as the compile-time `self.params.num_variables`
-        // (= the prover's clamped `log_stacking_height`), so the felt
-        // bound below is a CONSTANT equal to that value and the binding
-        // trivially passes (`num_variables <= 2^num_variables` for all
-        // `num_variables >= 1`).  This is therefore BYTE-IDENTICAL: it
-        // only emits inert constraints over a constant.  When the round
-        // count becomes genuinely WITNESSED (height-agnostic path, plan
-        // step 2 in heightagnostic_progress.md), `actual_num_vars`
-        // becomes a witnessed felt and `MAX_NUM_VARS` the compile-time
-        // loop ceiling, at which point this binding (extended with a
-        // tight integer `<=` as documented on `assert_num_vars_le_max`)
-        // is what PREVENTS a prover from over-claiming the round count.
-        // We land the primitive + call site now so the soundness binding
-        // is exercised end-to-end before it is load-bearing.
+        // On the fixed path the BaseFold FRI round count is baked into the
+        // program as the compile-time `self.params.num_variables` (= the
+        // prover's clamped `log_stacking_height`), so the felt below is a
+        // CONSTANT equal to that value and `diff == 0`, so both `num2bits`
+        // recompositions inside `assert_num_vars_le_max` trivially bind.
+        // This is therefore BYTE-IDENTICAL: it only emits inert
+        // constraints over a constant.  When the round count becomes
+        // genuinely WITNESSED (height-agnostic path: a witnessed
+        // `actual_num_vars` against the compile-time loop ceiling
+        // `MAX_NUM_VARS = DEFAULT_LOG_STACKING_HEIGHT`), this binding is
+        // what PREVENTS a prover from claiming a round count OUTSIDE
+        // `[0, MAX_NUM_VARS]` — now a TIGHT integer `<=` (no power-of-two
+        // slack; see `assert_num_vars_le_max`).  Exercised end-to-end now
+        // so it is sound before it is load-bearing.
         #[cfg(not(ha_measure_base))]
         {
             use p3_field::PrimeCharacteristicRing;
@@ -1051,6 +1086,7 @@ where
                                 op.leaf_values.iter().flatten().copied().collect();
                             let mut leaf_digest: HV::DigestVariable =
                                 HV::hash(builder, &leaf_felts);
+                            let path_len = op.merkle_path_digests.len();
                             for (level, sibling_digest) in
                                 op.merkle_path_digests.iter().enumerate()
                             {
@@ -1067,6 +1103,31 @@ where
                                 leaf_digest,
                                 commitments[round_idx],
                             );
+                            // HEIGHT-AGNOSTIC-RECURSION (step 2) binding (2),
+                            // Ziren-faithful — SP1's `index == 0` RESIDUAL
+                            // assert (slop merkle tcs.rs:165): after walking
+                            // `path_len` Merkle levels, EVERY remaining (higher)
+                            // query-index bit must be ZERO, i.e. the consumed
+                            // index `index >> path_len == 0`.  Without it a
+                            // malicious prover could WITNESS a shorter
+                            // `merkle_path_digests` (under-claimed tree height)
+                            // and silently leave the high query-index bits
+                            // unconsumed — a wrong/short path that the
+                            // raw-root compare alone would not catch (Ziren's
+                            // commit is a bare Merkle root, NOT SP1's
+                            // compress([root, hash([h,w])]), so the path
+                            // length is otherwise unbound to the commitment).
+                            // The component leaf is a FULL-height tree leaf, so
+                            // the honest path consumes ALL `log_codeword_size`
+                            // index bits and the residual slice below is EMPTY
+                            // — BYTE-IDENTICAL on honest proofs (no constraint
+                            // emitted), load-bearing only on an under-claimed
+                            // path.
+                            for residual_bit in
+                                query_indices[query_idx][path_len..].iter().cloned()
+                            {
+                                C::assert_bit_zero(builder, residual_bit);
+                            }
                         }
                     }
                     // Materialize the accumulated inner product ONCE per query.
@@ -1142,6 +1203,7 @@ where
                     // LSB-first.  `query_indices[query_idx]` is LSB-first over
                     // log_codeword_size bits, so slice from `round_idx + 1`.
                     let path_bits = &query_indices[query_idx][round_idx + 1..];
+                    let path_len = op.merkle_path_digests.len();
                     for (level, sibling_digest) in op.merkle_path_digests.iter().enumerate() {
                         // Witnessed DigestVariable, no const promotion.
                         let sibling_variable: HV::DigestVariable = *sibling_digest;
@@ -1152,6 +1214,27 @@ where
                             [leaf_digest, sibling_variable],
                         );
                         leaf_digest = HV::compress(builder, pair);
+                    }
+                    // HEIGHT-AGNOSTIC-RECURSION (step 2) binding (2),
+                    // Ziren-faithful — SP1's `index == 0` RESIDUAL assert
+                    // (slop merkle tcs.rs:165), applied to the commit-phase
+                    // codeword walk.  After walking `path_len` levels every
+                    // remaining (higher) bit of `path_bits` (= the pair index
+                    // `orig_query >> (round_idx+1)` past the consumed levels)
+                    // must be ZERO.  The honest round-r codeword has height
+                    // `2^(num_variables + log_blowup - 1 - r)`, so
+                    // `path_len(r) == num_variables + log_blowup - 1 - r` and
+                    // `(round_idx + 1) + path_len == log_codeword_size`:
+                    // `path_bits[path_len..]` is EMPTY on honest proofs ⇒
+                    // BYTE-IDENTICAL (no constraint emitted).  Load-bearing
+                    // only if a prover WITNESSES a shorter `merkle_path_digests`
+                    // (under-claimed codeword height): the bare-root compare
+                    // alone would accept it (Ziren has no SP1
+                    // compress([root, hash([h,w])]) height binding), but the
+                    // unconsumed high index bits would be free — this assert
+                    // forbids that.
+                    for residual_bit in path_bits[path_len..].iter().cloned() {
+                        C::assert_bit_zero(builder, residual_bit);
                     }
                     // Bind the reconstructed root to the FRI COMMIT-PHASE round
                     // commitment `proof.rounds[round_idx].commitment` (=
@@ -1217,21 +1300,19 @@ mod tests {
         assert_eq!(result, 28);
     }
 
-    // ── HEIGHT-AGNOSTIC-RECURSION round-count binding (increment #1) ──
+    // ── HEIGHT-AGNOSTIC-RECURSION round-count binding (step 2) ──
     //
     // These compile + RUN the DSL through the recursion runtime
     // (`run_test_recursion`), so the in-circuit `assert_felt_eq` inside
-    // `assert_num_vars_le_max` actually fires.  An over-claimed round
-    // count makes the runtime panic (the asserted product is non-zero),
-    // captured by `#[should_panic]`; honest counts run clean.
+    // `assert_num_vars_le_max` (the `num2bits` recomposition asserts)
+    // actually fire.  An out-of-range round count makes the runtime panic
+    // (the wrapped `diff`'s recomposition can't match), captured by
+    // `#[should_panic]`; honest counts run clean.
     //
-    // NOTE on bound semantics (see `assert_num_vars_le_max` docs): this
-    // primitive binds the felt VALUE into `[0, 2^max]`.  On the fixed
-    // path `actual_num_vars == max_num_vars` and `max <= 2^max` for all
-    // `max >= 1`, so it is a NO-OP — these tests assert that floor AND
-    // that the product-to-zero rejects values in the open interval
-    // `(2^max, 2^{max+1})`, exercising the binding end-to-end before it
-    // is load-bearing on the witnessed path.
+    // Step 2 TIGHTENED the bound from step-1's power-of-two FLOOR to a
+    // TIGHT integer `actual <= max`: the accepted set is EXACTLY
+    // `[0, max_num_vars]`.  These tests pin the tight boundary — values
+    // in `(max, 2^nbits)` (which step-1 over-accepted) are now REJECTED.
 
     use p3_field::PrimeCharacteristicRing as _PrimeCharRing;
     use zkm_recursion_compiler::config::InnerConfig;
@@ -1255,38 +1336,146 @@ mod tests {
     /// (including the clamped-tiny case and the un-clamped default 21).
     #[test]
     fn numvars_bind_accepts_fixed_path_equal_value() {
-        // Fixed path: the witnessed value equals max_num_vars exactly.
+        // Fixed path: the witnessed value equals max_num_vars exactly
+        // (diff == 0, both num2bits trivially bind).
         run_numvars_bind(1, 1);
         run_numvars_bind(10, 10);
         run_numvars_bind(15, 15); // clamped-tiny commit example
         run_numvars_bind(21, 21); // DEFAULT_LOG_STACKING_HEIGHT (un-clamped)
     }
 
-    /// POSITIVE: any honest value in `[0, 2^max]` verifies (the inclusive
-    /// boundary + sub-power-of-two values).
+    /// POSITIVE (tight `<=`): every honest value in `[0, max]` verifies —
+    /// the inclusive boundaries `0` and `max`, plus interior values.  Note
+    /// `max` here is 21 (the production ceiling), so this also exercises a
+    /// clamped commit (actual=15) against the un-clamped MAX=21 — the
+    /// CLAMP-INDEPENDENCE case: a clamped count is ACCEPTED by the
+    /// fixed-MAX binding.
     #[test]
-    fn numvars_bind_accepts_values_within_power_of_two() {
-        let max = 4; // 2^max = 16
-        run_numvars_bind(0, max);
-        run_numvars_bind(4, max); // = max (fixed path)
-        run_numvars_bind(8, max); // sub-cube power of two
-        run_numvars_bind(16, max); // == 2^max (inclusive)
+    fn numvars_bind_accepts_clamped_below_max() {
+        let max = 21; // DEFAULT_LOG_STACKING_HEIGHT
+        run_numvars_bind(0, max); // empty commit (inclusive low)
+        run_numvars_bind(1, max);
+        run_numvars_bind(14, max); // typical clamp (pick_log_stacking_height cap)
+        run_numvars_bind(15, max); // clamped-tiny
+        run_numvars_bind(20, max);
+        run_numvars_bind(21, max); // == max (inclusive high, fixed path)
     }
 
-    /// NEGATIVE: a value just past the power-of-two bound
-    /// (`2^max + 1 = 17 > 16`) is REJECTED — the runtime trips the
-    /// `(value - low)*low == 0` assert.
+    /// NEGATIVE (tightness): a value in `(max, 2^nbits)` that step-1's
+    /// power-of-two FLOOR would have ACCEPTED is now REJECTED.  For
+    /// max=21, nbits=5 (2^5=32); step-1 accepted everything in `[0, 32]`,
+    /// the tight bound rejects `22..=31`.
+    #[test]
+    #[should_panic]
+    fn numvars_bind_rejects_value_in_old_floor_slack_22() {
+        run_numvars_bind(22, 21); // 22 > 21: was accepted by the floor, now rejected
+    }
+
+    /// NEGATIVE (tightness): top of the old power-of-two slack
+    /// (`2^nbits - 1 = 31 > 21`) is REJECTED.
+    #[test]
+    #[should_panic]
+    fn numvars_bind_rejects_value_at_top_of_old_slack_31() {
+        run_numvars_bind(31, 21);
+    }
+
+    /// NEGATIVE: `max + 1` (`= 17 > 16` with a power-of-two max) is
+    /// REJECTED — the immediate over-claim.
+    #[test]
+    #[should_panic]
+    fn numvars_bind_rejects_max_plus_one() {
+        run_numvars_bind(5, 4); // 5 > 4
+    }
+
+    /// NEGATIVE: a value just past a power-of-two bound (`2^max + 1 = 17
+    /// > 4`) is REJECTED.
     #[test]
     #[should_panic]
     fn numvars_bind_rejects_value_just_above_bound() {
         run_numvars_bind(17, 4);
     }
 
-    /// NEGATIVE: a grossly over-claimed value (`2*2^max = 32 > 16`) is
-    /// also REJECTED.
+    /// NEGATIVE: a grossly over-claimed value (`32 > 4`) is REJECTED.
     #[test]
     #[should_panic]
     fn numvars_bind_rejects_value_double_bound() {
         run_numvars_bind(32, 4);
+    }
+
+    // ── HEIGHT-AGNOSTIC-RECURSION binding (2): Merkle-walk `index == 0`
+    //    RESIDUAL assert (Ziren-faithful port of SP1 slop tcs.rs:165) ──
+    //
+    // The production residual binding lives inside
+    // `verify_untrusted_evaluations` after each in-circuit Merkle walk:
+    // for `index_bits` spanning the full `log_codeword_size` query index,
+    // after consuming `path_len` levels EVERY remaining bit
+    // (`index_bits[path_len..]`) must be ZERO.  These tests reproduce that
+    // exact constraint over a controllable bit-slice (the Merkle walk
+    // itself is covered by the merkle_tree.rs tests; here we pin the
+    // residual-zero rule end-to-end through the runtime, where the
+    // in-circuit `assert_bit_zero` actually fires).
+
+    /// Emit the residual rule: given a full `index` over `log_codeword`
+    /// bits and a consumed `path_len`, assert `index >> path_len == 0`
+    /// (every bit at `path_len..` is zero) — exactly the production loop
+    /// `for residual_bit in index_bits[path_len..] { assert_bit_zero }`.
+    fn run_merkle_residual(index: u64, log_codeword: usize, path_len: usize) {
+        use crate::utils::tests::run_test_recursion;
+        let mut builder = Builder::<InnerConfig>::default();
+        let idx_felt: Felt<InnerVal> = builder.constant(InnerVal::from_u64(index));
+        // index_bits = LSB-first decomposition over the full codeword span
+        // (mirrors `query_indices[..]` = sample_bits(log_codeword_size)).
+        let index_bits =
+            <InnerConfig as crate::CircuitConfig>::num2bits(&mut builder, idx_felt, log_codeword);
+        for residual_bit in index_bits[path_len..].iter().cloned() {
+            <InnerConfig as crate::CircuitConfig>::assert_bit_zero(&mut builder, residual_bit);
+        }
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE (honest full-height path): when the consumed `path_len`
+    /// equals the full index span the residual slice is EMPTY — no
+    /// constraint, trivially accepts (the byte-identical honest case).
+    #[test]
+    fn merkle_residual_accepts_full_length_path() {
+        // path_len == log_codeword: residual slice empty.
+        run_merkle_residual(0b10110, 5, 5);
+        run_merkle_residual(0, 5, 5);
+        run_merkle_residual(0b1111111111, 10, 10);
+    }
+
+    /// POSITIVE (honest short index): an index that genuinely fits in
+    /// `path_len` bits (high bits already zero) is ACCEPTED even though
+    /// `path_len < log_codeword` — the residual is zero by construction.
+    #[test]
+    fn merkle_residual_accepts_when_high_bits_zero() {
+        // index = 5 = 0b00101 in a 5-bit span; consumed path_len=3 leaves
+        // bits[3..5] = {0,0} -> accepted.
+        run_merkle_residual(0b00101, 5, 3);
+        // index = 0 trivially accepted for any path_len.
+        run_merkle_residual(0, 8, 2);
+    }
+
+    /// NEGATIVE (under-claimed path attack): an index whose bit at a level
+    /// BEYOND the (short) `path_len` is SET leaves an unconsumed high
+    /// index bit — REJECTED by the residual assert.  This is the attack
+    /// binding (2) defends: a malicious prover witnessing a shorter
+    /// `merkle_path_digests` than the codeword height.
+    #[test]
+    #[should_panic]
+    fn merkle_residual_rejects_unconsumed_high_bit() {
+        // index = 0b10000 (bit 4 set); consumed path_len=3 leaves bit 4 in
+        // the residual slice [3..5] -> assert_bit_zero on a 1 -> reject.
+        run_merkle_residual(0b10000, 5, 3);
+    }
+
+    /// NEGATIVE: an under-claim that drops MULTIPLE set high bits is
+    /// REJECTED (the first non-zero residual bit trips).
+    #[test]
+    #[should_panic]
+    fn merkle_residual_rejects_multiple_unconsumed_bits() {
+        // index = 0b11000000 (bits 6,7 set) in an 8-bit span; path_len=4
+        // leaves bits[4..8] = {0,0,1,1} -> reject.
+        run_merkle_residual(0b11000000, 8, 4);
     }
 }
