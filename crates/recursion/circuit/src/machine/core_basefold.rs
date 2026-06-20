@@ -286,21 +286,18 @@ pub fn verify_core_basefold<C, SC, A>(
             // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
             // / row_counts are reconstructed value-independently instead of
             // baked from the compile-time bundle offsets/chip_dims.
-            // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, SKIP the
-            // opened-degree height recompose entirely — it's unused (cps=None ⇒
-            // baked path) and its ext2felt assert was the 680M failure. Default
-            // (unset): compute it ⇒ legacy height-felts path (FIX-on identical).
-            let ha_gated = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok();
-            let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = if ha_gated {
-                None
-            } else {
-                Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+            // HEIGHT-AGNOSTIC (low-placement) FIX: ALWAYS compute the recompose
+            // (keep witness/hint alignment identical to the default path), but
+            // when gated pass None to the lift ⇒ baked col_prefix_sums (offsets,
+            // band) + offset-diff row_counts (band).  Default: Some(raw) (legacy).
+            let chip_height_felts_pre =
+                crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
                     builder,
                     &chip_names,
                     &proof_opened_values,
-                ))
-            };
-            let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
+                );
+            let cps_heights: Option<&[Felt<C::F>]> =
+                if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() { None } else { Some(&chip_height_felts_pre) };
 
             // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
             // (set to any value) falls back to the bytes lift; preserved
