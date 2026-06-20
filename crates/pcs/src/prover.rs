@@ -877,15 +877,52 @@ where
         )
     };
 
+    // HEIGHT-AGNOSTIC RECURSION (step 5b): the CPU host path precomputes the
+    // jagged commit HERE (inside `commit()`), so the per-chip CLUSTER band-cap
+    // pad must be applied to the traces THIS commit packs -- NOT only later in
+    // `prove_shard_to_basefold_with_loader` (which would be ignored on this
+    // path because `maybe_auto_precompute_basefold` returns early when a commit
+    // is already precomputed).  Build a band-cap-padded CLONE for the commit
+    // ONLY; the original `named_traces` (returned as `data.traces`) stays at
+    // ACTUAL heights so the zerocheck / LogUp-GKR STARK proves at the real
+    // heights (the `FIX_CORE_SHAPES=false` perf win).  The matching pad in
+    // `prove_shard_to_basefold_with_loader` re-pads the per-chip traces the
+    // jagged REDUCTION reads (y_per_chip / r_row), so the reduction's per-chip
+    // heights agree with this commit's `packing` (both keyed off the SAME
+    // thread-local band-cap installed by the core prove site).  `None` (no
+    // guard) => unchanged own-height commit (recursion / shrink / wrap).
+    let commit_named_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> =
+        match crate::shard_level::band_cap::current_band_cap() {
+            None => named_traces_inner.clone(),
+            Some(band_cap) => named_traces_inner
+                .iter()
+                .map(|(name, t)| {
+                    if t.width == 0 {
+                        return (name.clone(), t.clone());
+                    }
+                    let mut values = t.values.clone();
+                    if let Some(&cap_log) = band_cap.get(name) {
+                        let cap_rows = 1usize << cap_log;
+                        let cur_rows = values.len() / t.width.max(1);
+                        if cap_rows > cur_rows {
+                            values.resize(cap_rows * t.width, crate::InnerVal::ZERO);
+                        }
+                    }
+                    (name.clone(), RowMajorMatrix::new(values, t.width))
+                })
+                .collect(),
+        };
+
     // BaseFold-over-BN254: build the commit over the ring's BfMmcs
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
     let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
         <SC as BasefoldRing>::BfMmcs,
     >(
-        &named_traces_inner,
+        &commit_named_inner,
         <SC as BasefoldRing>::bf_mmcs(),
         <SC as BasefoldRing>::fri_config(),
     );
+    drop(commit_named_inner);
 
     // Com<SC> == BfMmcs::Commitment for both rings (FRI commits via the
     // val-mmcs root), so the BaseFold commitment IS Com<SC>. Carry it directly.

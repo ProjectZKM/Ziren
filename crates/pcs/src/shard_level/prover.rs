@@ -408,6 +408,54 @@ where
             )
         })
         .collect();
+    // -- HEIGHT-AGNOSTIC RECURSION (step 5b): pad the per-chip COMMIT
+    // traces UP to the per-shard CLUSTER band-cap before packing.  The
+    // band-cap (chip name -> log_height) is installed by the CORE prove
+    // site (`zkm_core_machine::utils::prove::prove_with_context` phase-2
+    // worker) via `band_cap::BandCapGuard`, carried across the generic
+    // `MachineProver::open` boundary in a per-thread stash.  Padding only
+    // the COMMIT traces (NOT `main_traces`) keeps the zerocheck / LogUp-GKR
+    // STARK at the ACTUAL heights (the `FIX_CORE_SHAPES=false` perf win)
+    // while the jagged commit / reduction / BaseFold open emit the bounded
+    // cluster-max shape, so the recursion normalize VK = f(chip-SET).
+    //
+    // `None` (recursion / shrink / wrap stages, or FIX_RECURSION-padded
+    // callers) => unchanged own-height packing.  Resize is UP-ONLY (a
+    // chip already at/above its band-cap is left untouched -- the cap is a
+    // ceiling the cluster guarantees fits).  Device-resident chips
+    // (width==0) are NOT host-padded here (their dense cells live
+    // device-side); the GPU commit-dense hook owns their packing, so the
+    // band-cap device pad is a separate (out-of-scope) GPU concern -- this
+    // host pad is the CPU `FIX_CORE_SHAPES=false` correctness path.
+    let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = {
+        match crate::shard_level::band_cap::current_band_cap() {
+            None => commit_traces,
+            Some(band_cap) => chips
+                .iter()
+                .zip(commit_traces.into_iter())
+                .map(|(chip, mut t)| {
+                    if t.width == 0 {
+                        // Device placeholder: leave for the GPU dense hook.
+                        return t;
+                    }
+                    let name = MachineAir::<Val<SC>>::name(*chip);
+                    if let Some(&cap_log) = band_cap.get(&name) {
+                        let cap_rows = 1usize << cap_log;
+                        let cur_rows = t.values.len() / t.width.max(1);
+                        if cap_rows > cur_rows {
+                            // Resize UP: append zero rows (RowMajor, so the
+                            // tail `(cap_rows - cur_rows) * width` cells are
+                            // zero -- the jagged packing pads the dense tail
+                            // with zeros either way, byte-identical to a
+                            // record that fix_shape'd to this height).
+                            t.values.resize(cap_rows * t.width, Val::<SC>::ZERO);
+                        }
+                    }
+                    t
+                })
+                .collect(),
+        }
+    };
     let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A>(
             chips,

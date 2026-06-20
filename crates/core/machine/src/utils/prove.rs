@@ -606,6 +606,16 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
+        // HEIGHT-AGNOSTIC RECURSION (step 5b): a CoreShapeConfig used ONLY to
+        // compute the per-shard CLUSTER band-cap for the jagged commit
+        // (`find_core_shape`), INDEPENDENT of `FIX_CORE_SHAPES` (`shape_config`).
+        // With `FIX_CORE_SHAPES=false` the records stay at RAW heights and the
+        // core STARK proves at those heights, but the jagged commit must still
+        // pad to the bounded chip-set cluster-max so the recursion normalize VK
+        // = f(chip-SET).  Built once per prove call (the same default config the
+        // prover constructs at `ZKMProver::new`).
+        let band_cap_shape_config = CoreShapeConfig::<SC::Val>::default();
+
         // Spawn the phase 2 prover thread.
         let p2_prover_span = tracing::Span::current().clone();
         let p2_prover_handle = s.spawn(move || {
@@ -620,6 +630,38 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
+                                    // HEIGHT-AGNOSTIC RECURSION (step 5b):
+                                    // compute this shard's per-chip CLUSTER
+                                    // band-cap from its RAW core heights and
+                                    // install it for the scope of commit+open
+                                    // (which run on THIS rayon task).  The PCS
+                                    // commit (`prove_shard_to_basefold_with_loader`)
+                                    // reads it via `band_cap::current_band_cap`
+                                    // and pads the jagged commit traces to it,
+                                    // while the STARK stays at raw heights.
+                                    // Keyed by chip NAME (the PCS layer cannot
+                                    // depend on `MipsAirId`).  Only core chips
+                                    // present in `find_core_shape` are capped;
+                                    // a shard whose heights overflow every
+                                    // cluster yields `None` (no pad, legacy).
+                                    let _band_cap_guard = {
+                                        let heights = MipsAir::<SC::Val>::core_heights(&record);
+                                        band_cap_shape_config
+                                            .find_core_shape(&heights)
+                                            .map(|shape| {
+                                                let map: std::collections::BTreeMap<String, usize> =
+                                                    shape
+                                                        .iter()
+                                                        .map(|(air, log_h)| {
+                                                            (air.to_string(), *log_h)
+                                                        })
+                                                        .collect();
+                                                zkm_pcs::shard_level::band_cap::BandCapGuard::new(
+                                                    map,
+                                                )
+                                            })
+                                    };
+
                                     let t_commit = std::time::Instant::now();
                                     let main_data = prover.commit(&record, main_traces);
                                     let commit_ms = t_commit.elapsed().as_millis();
@@ -631,6 +673,7 @@ where
                                         .unwrap();
                                     let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
+                                    drop(_band_cap_guard);
 
                                     tracing::info!(
                                         "PCS timing: commit={}ms open={}ms total={}ms",

@@ -4120,8 +4120,70 @@ pub mod tests {
         // arity) — what build_compress_vks walks.  After feat/machineshape-
         // arity-enum, ZKMProofShape::Recursion carries Vec<OrderedShape>
         // (the batch); generate() emits arity 1..=REDUCE_BATCH_SIZE.
-        let core_cfg = prover.core_shape_config.as_ref().unwrap();
-        let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
+        // HEIGHT-AGNOSTIC RECURSION (step 5b): with FIX_CORE_SHAPES=false the
+        // prover's `core_shape_config` is None, so build a local default for
+        // the enumeration probe AND the band-cap lift.  The band-cap config is
+        // the SAME `CoreShapeConfig::default()` the prover uses at step 5b to
+        // pad the real jagged commit, so the dummy built at this band-cap must
+        // reproduce the real proof's jagged shape (= the gate).
+        let core_cfg_owned = CoreShapeConfig::<KoalaBear>::default();
+        let rec_cfg_owned = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
+        let core_cfg = prover.core_shape_config.as_ref().unwrap_or(&core_cfg_owned);
+        let rec_cfg = prover.compress_shape_config.as_ref().unwrap_or(&rec_cfg_owned);
+        let band_cap_cfg = CoreShapeConfig::<KoalaBear>::default();
+        // Lift a single per-shard OrderedShape (raw heights) to its cluster
+        // band-cap: reconstruct each chip's height as 2^log_degree, run
+        // `find_core_shape` over the CORE chips, and replace each core chip's
+        // log_height with the band-cap (non-core chips keep their raw height).
+        // `2^log_degree` >= the real raw row count, but maps to the SAME power-
+        // of-two band cap (caps are powers of two), so this reproduces the
+        // prover's per-chip pad exactly.
+        // Mirror the prover's `find_core_shape(MipsAir::core_heights(record))`:
+        // pass the FULL core-chip height vector (chips absent from the proof at
+        // height 0) so `find_core_shape` selects the SAME min-area cluster the
+        // prover did, then apply that cluster's per-chip band-cap to the core
+        // chips present in the shape.  NON-core chips (Byte / Program /
+        // MemoryGlobalInit / MemoryGlobalFinalize) are not in `core_heights`
+        // and are not padded by the prover, so they keep their raw height.
+        let lift_to_band_cap = |os: &OrderedShape| -> OrderedShape {
+            use std::collections::BTreeMap;
+            // Map present chip name -> raw row count (2^log_degree).
+            let present: BTreeMap<String, usize> = os
+                .inner
+                .iter()
+                .map(|(name, log_h)| (name.clone(), 1usize << *log_h))
+                .collect();
+            // Full core-chip height vector (same MipsAirIds as
+            // MipsAir::core_heights), height 0 when the chip is absent.
+            let core_heights: Vec<(zkm_core_executor::MipsAirId, usize)> = {
+                use zkm_core_executor::MipsAirId::*;
+                [
+                    Cpu, Branch, Jump, MovCond, MiscInstrs, MemoryInstrs, SyscallInstrs,
+                    DivRem, AddSub, Bitwise, Mul, ShiftRight, ShiftLeft, Lt, MemoryLocal,
+                    CloClz, Global, SyscallCore,
+                ]
+                .into_iter()
+                .map(|id| {
+                    let h = present.get(&id.to_string()).copied().unwrap_or(0);
+                    (id, h)
+                })
+                .collect()
+            };
+            let band = band_cap_cfg.find_core_shape(&core_heights);
+            OrderedShape {
+                inner: os
+                    .inner
+                    .iter()
+                    .map(|(name, raw_log_h)| {
+                        use std::str::FromStr;
+                        let cap = zkm_core_executor::MipsAirId::from_str(name)
+                            .ok()
+                            .and_then(|id| band.as_ref().and_then(|b| b.log2_height(&id)));
+                        (name.clone(), cap.unwrap_or(*raw_log_h).max(*raw_log_h))
+                    })
+                    .collect(),
+            }
+        };
         let enum_batches: Vec<Vec<OrderedShape>> =
             ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
                 .filter_map(|s| match s {
@@ -4200,8 +4262,27 @@ pub mod tests {
             let prog_real = prover.recursion_program_basefold(input);
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
 
+            // The real proof's jagged commit is padded to the per-chip
+            // CLUSTER band-cap (step 5b), so the dummy must be built at the
+            // SAME band-cap shape (NOT the raw sp.shape()) for vk_real ==
+            // vk_dummy.  This is the unfakeable gate: an own-height/next_pow2
+            // dummy (raw sp.shape()) would FAIL under FIX_CORE_SHAPES=false.
+            // ANTI-SHORTCUT PROBE: MSNORM_NO_LIFT=1 builds the dummy at the
+            // RAW sp.shape() (own-height) instead of the band-cap.  Under
+            // FIX_CORE_SHAPES=false this MUST FAIL (real bundle is padded to
+            // band-cap, raw dummy is not) — proving the gate detects the pad.
+            let no_lift = std::env::var("MSNORM_NO_LIFT").is_ok();
             let real_shape = ZKMRecursionShape {
-                proof_shapes: batch.iter().map(|sp| sp.shape()).collect(),
+                proof_shapes: batch
+                    .iter()
+                    .map(|sp| {
+                        if no_lift {
+                            sp.shape()
+                        } else {
+                            lift_to_band_cap(&sp.shape())
+                        }
+                    })
+                    .collect(),
                 is_complete: input.is_complete,
             };
             let dummy = ZKMCoreBasefoldWitnessValues::dummy(machine, &real_shape);
