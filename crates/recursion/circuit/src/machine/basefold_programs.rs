@@ -498,6 +498,11 @@ mod tests {
     /// the sponge states equal).  See the step-2b report for the full
     /// argument.
     #[test]
+    #[ignore = "step 5a: dummy now builds at the PASSED per-chip heights (cluster-max \
+                in the enum), not a blanket internal max, so building directly at two RAW \
+                heights here legitimately yields different shapes. The real height-\
+                independence gate is multishard_normalize_arity_faithful (vk_real==vk_dummy) \
+                once step-5b pads the real jagged commit to the cluster band-cap."]
     fn normalize_program_is_clamp_independent_for_fixed_chipset() {
         use zkm_core_machine::mips::MipsAir;
         use zkm_pcs::jagged_pcs::pick_log_stacking_height;

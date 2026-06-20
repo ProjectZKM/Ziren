@@ -409,31 +409,27 @@ pub fn dummy_jagged_basefold_bundle(
     type EF = InnerChallenge;
     const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
 
-    // ── HEIGHT-AGNOSTIC RECURSION (step 4): build the JAGGED shape at the
-    // per-chip-set MAX, not the actual heights.  The jagged reduction round
-    // count (= log_dense_size), the jagged-eval sumcheck length (= 2*(log_m+1)),
-    // and num_stripes (= 2^(log_dense_size - log_stacking)) are all build-time-
-    // unrolled, so keying them off the ACTUAL chip heights makes the normalize
-    // program (hence its VK) height-DEPENDENT — the residual the step-3
-    // de-clamp left behind (it fixed only log_stacking / the BaseFold side).
-    // Forcing every chip to `max_log_row_count` makes total_values /
-    // log_dense_size / log_m / num_stripes a function of the chip-SET (widths)
-    // only, so the program is IDENTICAL at every height → clamp-INDEPENDENT VK.
-    // This is SP1's "build the recursion program from the cluster's maximal
-    // shape" model (slop jagged verifier builds log_trace / log_m from the
-    // maxed prefix sums).  The real prover must then AREA-PAD its emitted proof
-    // up to this MAX so the witness stream matches the program (step 5 / Stage
-    // C — the host commit pad, SP1 JaggedPcsProver::commit_multilinears).
+    // ── HEIGHT-AGNOSTIC RECURSION (step 5a): build the JAGGED shape at the
+    // PASSED per-chip heights.  In the VK enumeration these are the cluster
+    // MAXIMAL-shape heights (normalize via `maximal_core_shapes`, compress via
+    // `RecursionShapeConfig::allowed_shapes`), so the dummy is already built at
+    // the per-chip-set cluster-max — the correct, BOUNDED max (caps ≤21, never
+    // overflows num2bits).  Step 4's blanket `1 << max_log_row_count` for EVERY
+    // chip was WRONG: it over-padded the wide COMPRESS chip-set to
+    // total_values > 2^31 → the `num2bits` 31-bit panic in `ZKMProver::new()`.
+    // The real prover pads its jagged commit to the SAME cluster-max via
+    // `CoreShapeConfig::find_core_shape` (step 5b), so vk_real == vk_dummy with
+    // the core STARK still proving at the ACTUAL heights.
     //
-    // pack_traces_jagged uses only height/width, so zero data at the MAX height
-    // gives the exact MAX offsets / total_values / log_dense_size /
-    // column_counts.
+    // pack_traces_jagged uses only height/width, so zero data gives the exact
+    // offsets / total_values / log_dense_size / column_counts.
+    let _ = max_log_row_count;
     let traces: Vec<(String, RowMajorMatrix<F>)> = chip_dims
         .iter()
         .enumerate()
-        .map(|(i, (width, _log_h))| {
+        .map(|(i, (width, log_h))| {
             let w = (*width).max(1);
-            let h = 1usize << max_log_row_count; // MAX height (not the actual *_log_h)
+            let h = 1usize << *log_h;
             (
                 format!("chip{i}"),
                 RowMajorMatrix::new(vec![F::ZERO; w * h], w),
