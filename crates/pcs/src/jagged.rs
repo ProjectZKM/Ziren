@@ -260,10 +260,18 @@ pub fn materialize_dense_jagged<F: Field>(
             remaining = tail;
         }
 
+        // HEIGHT-AGNOSTIC RECURSION (low-placement): per-shard RAW log-heights
+        // installed by the core prover's band-pad loop (None on every other
+        // path).  When a chip's raw log-height is strictly below its band slot
+        // height, we place its data in the LOW rows of the band-length slot
+        // bit-reversed over the RAW log height (high rows stay zero), so the
+        // reduction's column value equals the zerocheck's raw opening exactly
+        // (band_y == raw_y).  See `stage5_gate_lowplace_band_equals_raw`.
+        let raw_logs = crate::shard_level::band_cap::current_raw_log_heights();
         chip_slots
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
-            .for_each(|(slot, ((_name, trace), _))| {
+            .for_each(|(slot, ((name, trace), _))| {
                 let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
                 let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
                 if width == 0 || height == 0 {
@@ -277,14 +285,47 @@ pub fn materialize_dense_jagged<F: Field>(
                 // consistent with the in-circuit step-4 evaluation_claims.
                 let is_pow2 = height.is_power_of_two();
                 let log_h = if is_pow2 { (height as u32).trailing_zeros() } else { 0 };
+                // Low-placement raw log-height: present (and < band log_h) only
+                // on the FIX-off band-cap path for chips padded above their raw
+                // height.  `dense_values` is fully zero-initialized over
+                // `[0, total)`, so the unwritten high rows stay zero.
+                let lp_raw_log: Option<u32> = if is_pow2 {
+                    raw_logs
+                        .as_ref()
+                        .and_then(|m| m.get(name.as_str()).copied())
+                        .map(|rl| rl as u32)
+                        .filter(|&rl| rl < log_h)
+                } else {
+                    None
+                };
                 slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
-                    for row in 0..height {
-                        let src = if is_pow2 {
-                            ((row as u32).reverse_bits() >> (32 - log_h)) as usize
-                        } else {
-                            row
-                        };
-                        dst[row] = trace.values[src * width + col];
+                    match lp_raw_log {
+                        Some(raw_log) => {
+                            // LOW-PLACEMENT: write only the low 2^raw_log data
+                            // rows, bit-reversed over the RAW log height; the
+                            // high rows of the band slot stay zero (pre-init).
+                            let h_raw = 1usize << raw_log;
+                            for r in 0..h_raw {
+                                let pos = if raw_log == 0 {
+                                    0
+                                } else {
+                                    ((r as u32).reverse_bits() >> (32 - raw_log)) as usize
+                                };
+                                dst[pos] = trace.values[r * width + col];
+                            }
+                        }
+                        None => {
+                            // Legacy own-height packing (FIX-on / recursion /
+                            // shrink / wrap; byte-identical).
+                            for row in 0..height {
+                                let src = if is_pow2 {
+                                    ((row as u32).reverse_bits() >> (32 - log_h)) as usize
+                                } else {
+                                    row
+                                };
+                                dst[row] = trace.values[src * width + col];
+                            }
+                        }
                     }
                 });
             });

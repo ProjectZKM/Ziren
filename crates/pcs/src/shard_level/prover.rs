@@ -443,11 +443,16 @@ where
                         let cap_rows = 1usize << cap_log;
                         let cur_rows = t.values.len() / t.width.max(1);
                         if cap_rows > cur_rows {
-                            // Resize UP: append zero rows (RowMajor, so the
-                            // tail `(cap_rows - cur_rows) * width` cells are
-                            // zero -- the jagged packing pads the dense tail
-                            // with zeros either way, byte-identical to a
-                            // record that fix_shape'd to this height).
+                            // Resize UP: append zero rows.  This sizes the
+                            // column SLOT to the band height (chip-set-keyed
+                            // offsets / log_dense / VK).  The LOW-PLACEMENT
+                            // materialize (keyed by the raw-log map installed by
+                            // the BandCapGuard for the whole commit+open scope)
+                            // writes only the low `cur_rows` data rows into the
+                            // slot, bit-reversed over the RAW log height, so the
+                            // reduction's column value equals the zerocheck's
+                            // raw opening (band_y == raw_y) and the recursion
+                            // accepts the raw claims with no embed_factor.
                             t.values.resize(cap_rows * t.width, Val::<SC>::ZERO);
                         }
                     }
@@ -644,37 +649,32 @@ where
     // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
     // natural-row conventions diverge.
     let residual_y: Option<Vec<Vec<Challenge<SC>>>> = {
-        // HEIGHT-AGNOSTIC RECURSION (Stage 4 — the embed_factor's prover side).
+        // HEIGHT-AGNOSTIC RECURSION (LOW-PLACEMENT commit — supersedes the
+        // Stage-4a band-y recompute, which is now unnecessary).
         //
-        // When a band-cap is installed (FIX_CORE_SHAPES=false height-agnostic
-        // core path) the jagged commit / packing / dense are built at the
-        // per-chip-set CLUSTER BAND heights (`commit_traces` padded above), so
-        // the jagged reduction's per-chip column claim `y_per_chip` MUST be the
-        // BAND-height column MLE @ z, NOT the raw-height zerocheck residual
-        // (`trace_at_z`).  The raw residual embeds chip c at its RAW log_h
-        // (VirtualGeq(raw)), while the band column MLE embeds at the band
-        // log_h; the two differ by the embedding factor
-        //   Π_{log_raw <= k < log_band}(1 - z[k])
-        // over the EXTRA padding bits — exactly the #48/#49 mixed-height
-        // `embed_factor` (Π_high(1-zeta)), now extended to EVERY chip whose
-        // band height exceeds its raw height.  Feeding the raw residual into a
-        // band-height reduction trips the round-0 identity `p0+p1 == Σ z_col·y`
-        // (the prover's band-dense round-0 sum is the band-embedded value).
+        // The band-cap path commits at the per-chip-set CLUSTER BAND heights
+        // (so the recursion VK is keyed by the chip-SET), but the LOW-PLACEMENT
+        // materialize (`materialize_dense_jagged`, keyed by the raw-log map set
+        // in the band-pad loop above) places each chip's data in the LOW rows
+        // of its band-length slot, bit-reversed over the RAW log height, with
+        // the high rows zero.  By construction the reduction's per-chip column
+        // value `band_y` then EQUALS the raw-height zerocheck residual `raw_y`
+        // EXACTLY (proven: `stage5_gate_lowplace_band_equals_raw`):
+        //   band_y = Σ_{row} eq_c[row]·dense[off+row]
+        //          = Σ_{r<2^raw} eq_c[bitrev_raw(r)... in low rows]·trace[r] = raw_y
+        // (the high zero rows contribute nothing).  So the fast raw residual
+        // (`trace_at_z`) IS reduction-consistent — the round-0 identity
+        // `p0+p1 == Σ z_col·y` holds — and we DO NOT decline it under a
+        // band-cap.  Stage 4b proved no scalar embed_factor could reconcile
+        // the OLD band layout (bitrev over log_band permutes the data); the
+        // low-placement layout removes the mismatch at the source, so the
+        // recursion verifier needs no embed_factor at all.
         //
-        // The host triple-loop recompute (the `None` branch below) reads the
-        // BAND-padded `commit_traces` cells directly and produces the
-        // band-embedded `y` by construction (the zero padding rows raw..band
-        // contribute the `Π_high(1-z)` factor), so DECLINING the raw residual
-        // under a band-cap yields the correct, reduction-consistent `y`.  This
-        // is the byte-honest mechanism (no check weakened): the reduction's
-        // commit-vs-claim heights now AGREE (both band).  Validated: with this
-        // decline a FIX-off band-cap core proof's jagged reduction VERIFIES
-        // (round-0 identity holds), where the raw residual REJECTED it.
-        let band_cap_active = crate::shard_level::band_cap::current_band_cap().is_some();
+        // Kill-switch unchanged: ZIREN_ZC_RESIDUAL_Y=0 → legacy host recompute
+        // (which, with low-placement materialize, also yields raw_y).
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(true)
-            && !band_cap_active;
+            .unwrap_or(true);
         if !on {
             None
         } else {

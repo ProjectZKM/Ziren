@@ -788,9 +788,36 @@ where
                                                     }
                                                 };
 
+                                                // Low-placement raw log-heights: each PRESENT
+                                                // chip's actual (raw) trace height.  Installed
+                                                // for the whole guard scope so the jagged commit
+                                                // (prover.commit) and the reduce (prover.open)
+                                                // BOTH materialize with low-placement (raw data
+                                                // in the low rows of each band slot).  Missing
+                                                // (injected) chips are absent here => they pack at
+                                                // their band height (raw==band, legacy no-op).
+                                                let raw_log_heights: std::collections::BTreeMap<
+                                                    String,
+                                                    usize,
+                                                > = {
+                                                    let mut m = std::collections::BTreeMap::new();
+                                                    for (n, t) in main_traces.iter() {
+                                                        let w = t.width.max(1);
+                                                        let h = t.values.len() / w;
+                                                        if h.is_power_of_two() && h > 0 {
+                                                            m.insert(
+                                                                n.clone(),
+                                                                h.trailing_zeros() as usize,
+                                                            );
+                                                        }
+                                                    }
+                                                    m
+                                                };
+
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
                                                     map,
                                                     missing_traces,
+                                                    raw_log_heights,
                                                 )
                                             })
                                     };

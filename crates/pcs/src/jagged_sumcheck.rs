@@ -1112,4 +1112,96 @@ mod phase1_acceptance_gate {
         assert!(band_eval == claimed_sum, "band claims must satisfy the step-4 assert");
     }
 
+    // Stage 5 POSITIVE gate (the bitrev-preserving / low-placement commit).
+    // The 4b finding: band_y (bitrev over log_band) != raw_y * scalar because
+    // bitrev_lb(s) = bitrev_lr(s) << (lb-lr) puts the data bits on DIFFERENT
+    // coordinates than raw.  The fix: store each chip's RAW-bitrev'd data (bitrev
+    // over the RAW log height) in the LOW rows of a BAND-length column slot,
+    // zero-pad the high rows, and weight with eq_c[row] (literal) over the band
+    // slot.  Then the high (zero) rows contribute nothing and the low rows carry
+    // exactly the raw eq weights => band_y_new == raw_y EXACTLY, so the recursion
+    // accepts the RAW column_claims with NO embed_factor, while the offsets/total
+    // stay band-length (chip-set-keyed VK).  This gate proves that algebraically.
+    fn s5_y_lowplace(
+        trace_cols: &[Vec<InnerVal>], // [col][raw_row]
+        lr: usize,                    // raw log height (real data)
+        lb: usize,                    // band log height (committed slot length)
+        z_row: &[InnerChallenge],     // zerocheck-reduced point (max_log_row dims)
+    ) -> Vec<InnerChallenge> {
+        use p3_field::PrimeCharacteristicRing;
+        let w = trace_cols.len();
+        let h_raw = 1usize << lr;
+        let h_band = 1usize << lb;
+        let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+        let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+        (0..w)
+            .map(|col| {
+                // Materialize the band-length dense column: raw data bitrev'd over
+                // the RAW width placed in the LOW rows, zeros in the high rows.
+                let mut dense = vec![InnerVal::ZERO; h_band];
+                for r in 0..h_raw {
+                    let pos = if lr == 0 { 0 } else { ((r as u32).reverse_bits() >> (32 - lr as u32)) as usize };
+                    dense[pos] = trace_cols[col][r];
+                }
+                // Weight ALL band rows with eq_c[row] (the high zero rows add 0):
+                // proves the slot length is immaterial to the value.
+                let mut acc = InnerChallenge::ZERO;
+                for row in 0..h_band {
+                    acc += eq_c[row] * InnerChallenge::from(dense[row]);
+                }
+                acc
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stage5_gate_lowplace_band_equals_raw() {
+        use p3_field::PrimeCharacteristicRing;
+        let mut rng = StdRng::seed_from_u64(5151);
+        let max_log_row = 6usize;
+        let z_row: Vec<InnerChallenge> = {
+            let mut c = challenger();
+            (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
+        };
+        // mixed-height shape incl. band>raw, band==raw, and a log_raw=0 chip.
+        let chips: &[(usize, usize, usize)] = &[(2, 5, 2), (4, 6, 1), (5, 5, 1), (0, 3, 2)];
+        let mut raw_flat: Vec<InnerChallenge> = Vec::new();
+        let mut band_old_flat: Vec<InnerChallenge> = Vec::new();
+        let mut band_new_flat: Vec<InnerChallenge> = Vec::new();
+        for &(lr, lb, w) in chips {
+            let raw_h = 1usize << lr;
+            let trace: Vec<Vec<InnerVal>> =
+                (0..w).map(|_| (0..raw_h).map(|_| rand_kb(&mut rng)).collect()).collect();
+            let y_raw = s4b_y_for_height(&trace, lr, &z_row); // opened_values (zerocheck open)
+            let y_band_old = s4b_y_for_height(&trace, lb, &z_row); // current FIX-off commit (bitrev_lb) — the bug
+            let y_band_new = s5_y_lowplace(&trace, lr, lb, &z_row); // proposed low-placement commit
+            raw_flat.extend_from_slice(&y_raw);
+            band_old_flat.extend_from_slice(&y_band_old);
+            band_new_flat.extend_from_slice(&y_band_new);
+        }
+        // (1) per-column: low-placement band_y == raw_y EXACTLY.
+        assert_eq!(raw_flat, band_new_flat, "low-placement band_y must equal raw_y per column");
+        // (2) the current bitrev_lb commit genuinely differs (the bug being fixed).
+        assert_ne!(raw_flat, band_old_flat, "current bitrev_lb band_y must differ from raw_y (the 4b bug)");
+
+        // (3) recursion-level: claimed_sum(new) == evaluate_mle_ext(raw_claims, z_col),
+        // i.e. the in-circuit step-4 assert holds with RAW column_claims and NO embed_factor.
+        let padded = raw_flat.len().next_power_of_two();
+        let mut raw_p = raw_flat.clone();
+        raw_p.resize(padded, InnerChallenge::ZERO);
+        let mut new_p = band_new_flat.clone();
+        new_p.resize(padded, InnerChallenge::ZERO);
+        let z_col: Vec<InnerChallenge> = {
+            let mut c = challenger();
+            (0..padded.trailing_zeros() as usize).map(|_| c.sample_algebra_element()).collect()
+        };
+        let claimed_sum_new = s4b_evaluate_mle(&new_p, &z_col);
+        let recursion_lhs = s4b_evaluate_mle(&raw_p, &z_col);
+        assert_eq!(
+            claimed_sum_new, recursion_lhs,
+            "low-placement: in-circuit step-4 assert holds with raw claims + no embed_factor"
+        );
+        eprintln!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
+    }
+
 }
