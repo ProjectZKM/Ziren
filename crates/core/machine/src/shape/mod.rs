@@ -67,6 +67,44 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         Ok(())
     }
 
+    /// HEIGHT-AGNOSTIC RECURSION: return the per-chip CLUSTER-MAXIMAL shape (the
+    /// band-cap) that a core record with these `heights` lifts to — WITHOUT
+    /// mutating any record or padding any trace.
+    ///
+    /// This is the read-only sibling of [`Self::fix_shape`]'s core-record cluster
+    /// search: it returns the same minimal-LDE cluster shape (each chip at its
+    /// cluster band height ≥ its actual height) that `fix_shape` would extend the
+    /// record to, but returns it instead of applying it. The jagged PCS commit
+    /// pads to THIS shape's per-chip heights so the recursion normalize program
+    /// (built from the cluster's maximal shape) — and hence its VK — depends on
+    /// the chip-SET only, allowing FIX_CORE_SHAPES to be retired (the core STARK
+    /// still proves at the ACTUAL heights; only the jagged commit pads).
+    ///
+    /// Iterates ALL bands: `ShapeCluster::find_shape` already returns `None` for a
+    /// band whose caps a chip exceeds, so the min-area fitting shape across all
+    /// bands equals `fix_shape`'s `range(log2_shard_size..)` result (the skipped
+    /// smaller bands never fit the CPU chip). Returns `None` if no band fits
+    /// (the over-large case `fix_shape` also rejects).
+    pub fn find_core_shape(
+        &self,
+        heights: &[(MipsAirId, usize)],
+    ) -> Option<Shape<MipsAirId>> {
+        let mut minimal_shape = None;
+        let mut minimal_area = usize::MAX;
+        for clusters in self.partial_core_shapes.values() {
+            for cluster in clusters.iter() {
+                if let Some(shape) = cluster.find_shape(heights) {
+                    let area = self.estimate_lde_size(&shape);
+                    if area < minimal_area {
+                        minimal_area = area;
+                        minimal_shape = Some(shape);
+                    }
+                }
+            }
+        }
+        minimal_shape
+    }
+
     /// Fix the shape of the proof.
     pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
         if record.program.preprocessed_shape.is_none() {
