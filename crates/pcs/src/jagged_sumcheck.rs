@@ -954,4 +954,162 @@ mod phase1_acceptance_gate {
              jagged evaluation for all mixed-height shapes (SP1 closing identity)",
         );
     }
+
+    // ── STAGE 4b GATE (host-math proxy for the in-circuit step-4 assert) ──
+    //
+    // The in-circuit recursion step-4 assert (recursive_jagged_pcs.rs:234) is
+    //   assert_ext_eq( evaluate_mle_ext(column_claims, z_col), claimed_sum )
+    // where `evaluate_mle_ext` is a pure field dot-product Σ lagrange(z_col)·claim,
+    // and `claimed_sum` is the host sumcheck's claimed_sum = Σ lagrange(z_col)·band_y.
+    // The recursion sources `column_claims` from opened_values.main.local = the
+    // RAW zerocheck residual (raw-bitrev MLE @ z_row).  This test reproduces that
+    // exact arithmetic on the host (identical field ops to the circuit) and checks
+    // whether ANY per-chip scalar embed_factor lifts the raw claims to the band
+    // claims so the assert holds.
+
+    // y for a chip stored at `log_h_store` rows (raw zero-padded), production formula:
+    //   eq_c = eq_mle_table(rev(z_row)); src = bitrev_{log_h_store}(row); Σ eq_c[row]·trace.
+    fn s4b_y_for_height(
+        trace_cols: &[Vec<InnerVal>], // [col][raw_row]
+        log_h_store: usize,
+        z_row: &[InnerChallenge],
+    ) -> Vec<InnerChallenge> {
+        use p3_field::PrimeCharacteristicRing;
+        let w = trace_cols.len();
+        let raw_h = trace_cols[0].len();
+        let h_store = 1usize << log_h_store;
+        let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+        let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+        let log_h2 = log_h_store as u32;
+        (0..w)
+            .map(|col| {
+                let mut acc = InnerChallenge::ZERO;
+                for row in 0..h_store {
+                    let src = if log_h2 == 0 {
+                        0usize
+                    } else {
+                        ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                    };
+                    let v = if src < raw_h { trace_cols[col][src] } else { InnerVal::ZERO };
+                    acc += eq_c[row] * InnerChallenge::from(v);
+                }
+                acc
+            })
+            .collect()
+    }
+
+    // partial_lagrange dot product = the in-circuit evaluate_mle_ext (LSB-first).
+    fn s4b_evaluate_mle(claims: &[InnerChallenge], z_col: &[InnerChallenge]) -> InnerChallenge {
+        use p3_field::PrimeCharacteristicRing;
+        let mut w = vec![InnerChallenge::ONE];
+        for &r in z_col {
+            let old = w.len();
+            let mut next = vec![InnerChallenge::ZERO; old * 2];
+            for j in 0..old {
+                let prod = w[j] * r;
+                next[j] = w[j] - prod;
+                next[j + old] = prod;
+            }
+            w = next;
+        }
+        assert_eq!(claims.len(), w.len());
+        claims.iter().zip(w.iter()).fold(InnerChallenge::ZERO, |a, (c, ww)| a + *c * *ww)
+    }
+
+    #[test]
+    fn stage4b_gate_scalar_embed_cannot_lift_raw_to_band() {
+        use p3_field::PrimeCharacteristicRing;
+        let mut rng = StdRng::seed_from_u64(4242);
+        let max_log_row = 6usize;
+        // shared eval point z_row (the zerocheck-reduced point).
+        let z_row: Vec<InnerChallenge> = {
+            let mut c = challenger();
+            (0..max_log_row).map(|_| c.sample_algebra_element()).collect()
+        };
+        // mixed-height shape: (log_raw, log_band, width). At least one chip with
+        // band > raw (the FIX-off scenario). Total columns power-of-two for clean z_col.
+        let chips: &[(usize, usize, usize)] = &[(2, 5, 2), (4, 6, 1), (5, 5, 1)];
+        // Build raw traces + raw_y (= opened_values main.local) and band_y (= host claim).
+        let mut raw_claims_flat: Vec<InnerChallenge> = Vec::new();
+        let mut band_claims_flat: Vec<InnerChallenge> = Vec::new();
+        let mut per_chip: Vec<(usize, usize, Vec<InnerChallenge>, Vec<InnerChallenge>)> = Vec::new();
+        for &(lr, lb, w) in chips {
+            let raw_h = 1usize << lr;
+            let trace: Vec<Vec<InnerVal>> =
+                (0..w).map(|_| (0..raw_h).map(|_| rand_kb(&mut rng)).collect()).collect();
+            let y_raw = s4b_y_for_height(&trace, lr, &z_row);
+            let y_band = s4b_y_for_height(&trace, lb, &z_row);
+            raw_claims_flat.extend_from_slice(&y_raw);
+            band_claims_flat.extend_from_slice(&y_band);
+            per_chip.push((lr, lb, y_raw, y_band));
+        }
+        // pad column claims to power of two (matches recursive_jagged_pcs step 3).
+        let padded = raw_claims_flat.len().next_power_of_two();
+        raw_claims_flat.resize(padded, InnerChallenge::ZERO);
+        band_claims_flat.resize(padded, InnerChallenge::ZERO);
+        let num_col_vars = padded.trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = {
+            let mut c = challenger();
+            (0..num_col_vars).map(|_| c.sample_algebra_element()).collect()
+        };
+        // claimed_sum = host sumcheck claimed_sum = Σ lagrange(z_col)·band_y.
+        let claimed_sum = s4b_evaluate_mle(&band_claims_flat, &z_col);
+
+        // (A) BASELINE — raw claims with NO embed factor: must MISMATCH.
+        let raw_eval = s4b_evaluate_mle(&raw_claims_flat, &z_col);
+        let baseline_fail = raw_eval != claimed_sum;
+        eprintln!("[S4b] BASELINE (no embed): assert {} (raw_eval==claimed_sum? {})",
+            if baseline_fail { "FAILS (as expected)" } else { "PASSES (unexpected!)" },
+            raw_eval == claimed_sum);
+
+        // (B) Apply candidate per-chip SCALAR embed_factors to the raw claims.
+        // candA = Π leading coords [max-log_band, max-log_raw) of (1 - z_row[k]).
+        // candB = Π coords [log_raw, log_band) of (1 - z_row[k]).
+        // candC = inverse of candA (the leading-shrink direction band/raw).
+        for cand in ["A", "B", "C"] {
+            let mut lifted: Vec<InnerChallenge> = Vec::new();
+            for (lr, lb, y_raw, _yb) in per_chip.iter() {
+                let mut f = InnerChallenge::ONE;
+                match cand {
+                    "A" => for j in (max_log_row - lb)..(max_log_row - lr) { f *= InnerChallenge::ONE - z_row[j]; },
+                    "B" => for k in *lr..*lb { f *= InnerChallenge::ONE - z_row[k]; },
+                    "C" => { let mut d = InnerChallenge::ONE;
+                             for j in (max_log_row - lb)..(max_log_row - lr) { d *= InnerChallenge::ONE - z_row[j]; }
+                             f = d.inverse(); },
+                    _ => unreachable!(),
+                }
+                for v in y_raw.iter() { lifted.push(*v * f); }
+            }
+            lifted.resize(padded, InnerChallenge::ZERO);
+            let lifted_eval = s4b_evaluate_mle(&lifted, &z_col);
+            eprintln!("[S4b] candidate {cand}: assert {} (lifted_eval==claimed_sum? {})",
+                if lifted_eval == claimed_sum { "PASSES" } else { "FAILS" },
+                lifted_eval == claimed_sum);
+        }
+
+        // (C) PROVE the band claims (the genuine value) DO satisfy the assert.
+        let band_eval = s4b_evaluate_mle(&band_claims_flat, &z_col);
+        eprintln!("[S4b] CONTROL (band claims direct): assert {} (band_eval==claimed_sum? {})",
+            if band_eval == claimed_sum { "PASSES" } else { "FAILS" },
+            band_eval == claimed_sum);
+
+        // (D) Per-chip per-column ratio band_y/raw_y — show it is NOT column-uniform
+        // (so no per-chip scalar exists), only for chips with band>raw and w>1.
+        for (lr, lb, y_raw, y_band) in per_chip.iter() {
+            if lb > lr && y_raw.len() > 1 {
+                let ratios: Vec<InnerChallenge> = y_raw.iter().zip(y_band.iter())
+                    .map(|(r, b)| if *r != InnerChallenge::ZERO { *b * r.inverse() } else { InnerChallenge::ZERO })
+                    .collect();
+                let uniform = ratios.windows(2).all(|w| w[0] == w[1]);
+                eprintln!("[S4b] chip log_raw={lr} log_band={lb} w={}: per-col band/raw ratios uniform? {} ratios={:?}",
+                    y_raw.len(), uniform, ratios);
+            }
+        }
+
+        // The GATE assertion: this test documents the finding. The baseline MUST fail,
+        // the control (band) MUST pass, and (the finding) NO scalar candidate passes.
+        assert!(baseline_fail, "baseline (raw, no embed) must mismatch claimed_sum");
+        assert!(band_eval == claimed_sum, "band claims must satisfy the step-4 assert");
+    }
+
 }

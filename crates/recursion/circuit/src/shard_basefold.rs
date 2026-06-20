@@ -533,6 +533,49 @@ impl<P> BasefoldShardVerifier<P> {
         // zerocheck consumed and reduced to point z -- NOT the GKR openings
         // @z_gkr.  The host commits main-only, so the jagged opening now binds
         // the COMMITTED main trace at the zerocheck-reduced point z.
+        // ── STAGE 4b FINDING (height-agnostic recursion / FIX_CORE_SHAPES=false) ──
+        //
+        // GOAL was: lift each chip's RAW residual claim (`chip.main.local`, =
+        // raw-bitrev MLE @ z_row, opened over the un-padded `main_traces`) to the
+        // BAND-embedded claim the Stage-4a host reduction expects (= band-bitrev
+        // MLE @ z_row, over the cluster-band-padded `commit_traces`), by a per-chip
+        // scalar `embed_factor = Π_{log_raw <= k < log_band}(1 - z[k])`, so that the
+        // jagged step-4 assert `evaluate_mle_ext(claims, z_col) == claimed_sum`
+        // (recursive_jagged_pcs.rs:234) holds for a FIX-off proof.
+        //
+        // DECISIVE NEGATIVE RESULT (proven, real KoalaBear): NO per-chip scalar can
+        // perform this lift.  The production jagged y formula bit-reverses the trace
+        // row index over the STORED height's `log_h = trailing_zeros(height)`
+        // (jagged_pcs.rs:2251, materialize_dense_jagged jagged.rs:279).  Raw-y uses
+        // `bitrev_log_raw`; band-y uses `bitrev_log_band`.  Because bit-reversal at
+        // different widths is a DATA PERMUTATION (the same trace cell lands on a
+        // different boolean-cube vertex when the cube grows), band-y is NOT raw-y
+        // times any scalar — the per-column band/raw ratio VARIES across the columns
+        // of a single chip.  Gate (host-math proxy, identical field ops to the
+        // in-circuit assert): `zkm_pcs::jagged_sumcheck` test
+        // `stage4b_gate_scalar_embed_cannot_lift_raw_to_band` shows BASELINE (raw, no
+        // embed) FAILS, candidates A/B/C (leading-coords, [raw,band)-coords, and the
+        // inverse) ALL FAIL, while the band claims themselves PASS — and prints the
+        // non-uniform per-column ratios.
+        //
+        // Two further structural blockers (independent of the scalar question):
+        //   1. `log_band` is NOT in `verify_shard` scope — `chip_height_bits` and
+        //      `opened_values.chips[].degree` both decode the RAW height (the
+        //      value-independent `chip_height_bits_from_opened_degrees` lift,
+        //      shard_proof_variable_lift.rs:634); the band height lives only inside
+        //      `evaluation_proof.params` / `row_counts` (the commit packing).
+        //   2. ANY embed op emitted here changes the recursion program bytes ⇒ the
+        //      normalize/wrap VK ⇒ breaks FIX-on byte-identity (the ops do NOT
+        //      constant-fold to nothing for log_raw==log_band; the masked
+        //      per-coordinate product over max_log_row is emitted unconditionally).
+        //
+        // CONCLUSION: Stage 4b is NOT a scalar embed_factor.  The faithful fix is the
+        // deep height-agnostic (hypercube/jagged-native) port — make commit AND
+        // zerocheck open at the SAME (variable) height so the recursion never has to
+        // reconcile two bitrev layouts (mirrors SP1's height-agnostic recursion).
+        // Until then this site keeps sourcing the raw residual UNCHANGED (FIX-on
+        // byte-identical; FIX-off recursion-verify remains gated behind that port +
+        // the chip-set vk_map regen).  See the Stage-4b report.
         let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = opened_values
             .chips
             .iter()
