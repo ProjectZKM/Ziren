@@ -457,6 +457,126 @@ mod tests {
         println!("NORMALIZE_PROGRAM_INSTRUCTION_COUNT={}", program.instruction_count());
     }
 
+    /// ★ HEIGHT-AGNOSTIC-RECURSION (step 2b) — CLAMP-(IN)DEPENDENCE PROBE.
+    ///
+    /// THE headline diagnostic step 2b set out to resolve: for a FIXED
+    /// chip-set, does the normalize program (hence its VK) depend on the
+    /// per-proof `log_stacking_height` *clamp*
+    /// (`pick_log_stacking_height(total_values)`,
+    /// `crates/pcs/src/jagged_pcs.rs:114`)?
+    ///
+    /// `total_values = Σ_chip (width × height)`, so a single chip-set
+    /// produces DIFFERENT `total_values` (hence different clamped
+    /// `log_stacking` ∈ [1, 21]) at different heights.  This test builds
+    /// the normalize program for the SAME single-chip cluster (`AddSub`)
+    /// at two heights chosen to straddle the clamp boundary
+    /// (`log_stacking = min(21, log2(np2(total)) − 1)`):
+    ///   - SMALL height  → total ≪ 2^22 → log_stacking clamped well below 21,
+    ///   - LARGE height  → total ≥ 2^22 → log_stacking == 21 (the cap).
+    ///
+    /// It then compares `instruction_count()` of the two normalize
+    /// programs.
+    ///
+    /// CURRENT STATE (step 2b, prover de-clamp NOT landed): the two
+    /// counts DIFFER — the build-time-unrolled BaseFold FRI loops
+    /// (basefold_verifier.rs rounds/query/merkle) are driven by the
+    /// CLAMPED witness Vec lengths
+    /// (`fri_commitments.len() == log_stacking`), so the program — and
+    /// therefore the VK — is CLAMP-DEPENDENT.  This test ASSERTS that
+    /// difference so the dependence is pinned + reproducible, and is the
+    /// regression target that FLIPS (counts must become EQUAL) once the
+    /// host commit stops clamping (`log_stacking_height` fixed at 21,
+    /// SP1-faithful — see `jagged/src/prover.rs:commit_multilinears` in
+    /// the SP1 ref, which pads area UP to a FIXED stacking height and
+    /// never clamps).  The verifier-side masking-to-MAX alternative is
+    /// UNSOUND in isolation: the recursion challenger sponge is stateful
+    /// at program-build time (each `observe` may trigger a Poseidon2
+    /// `duplexing`), so a 21-round masked path absorbs a structurally
+    /// different number of permutes than an honest k<21-round proof ⇒
+    /// Fiat-Shamir desync (no field assignment to padded rounds can make
+    /// the sponge states equal).  See the step-2b report for the full
+    /// argument.
+    #[test]
+    fn normalize_program_is_clamp_dependent_for_fixed_chipset() {
+        use zkm_core_machine::mips::MipsAir;
+        use zkm_pcs::jagged_pcs::pick_log_stacking_height;
+        use zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2;
+        use zkm_pcs::shape::OrderedShape;
+
+        let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
+        let max_log_row_count =
+            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+
+        // Resolve AddSub's real trace width so we can size heights that
+        // straddle the clamp boundary precisely.
+        let addsub_width = {
+            use p3_air::BaseAir;
+            let c = machine
+                .chips()
+                .iter()
+                .find(|c| c.name() == "AddSub")
+                .expect("AddSub chip present in MIPS machine");
+            BaseAir::<p3_koala_bear::KoalaBear>::width(c).max(1)
+        };
+
+        // Helper: build the normalize program for AddSub at one height and
+        // return (instruction_count, clamped log_stacking).
+        let build_at = |log_h: usize| -> (usize, u32) {
+            let shape = super::super::core::ZKMRecursionShape {
+                proof_shapes: vec![OrderedShape::from_log2_heights(&[(
+                    "AddSub".to_string(),
+                    log_h,
+                )])],
+                is_complete: false,
+            };
+            let witness =
+                super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
+            let total_values = addsub_width * (1usize << log_h);
+            let log_stacking = pick_log_stacking_height(total_values);
+            let program = build_normalize_basefold_program::<MipsAir<p3_koala_bear::KoalaBear>>(
+                &machine,
+                &witness,
+                max_log_row_count,
+            );
+            (program.instruction_count(), log_stacking)
+        };
+
+        // SMALL: log_h = 4 → total = width·16 ≪ 2^22 → clamp well below 21.
+        let (small_count, small_stk) = build_at(4);
+        // LARGE: pick a height so total ≥ 2^22 → log_stacking == 21.
+        // need width·2^log_h ≥ 2^22  ⇒  log_h ≥ 22 − log2(width).
+        let log_width = addsub_width.next_power_of_two().trailing_zeros() as usize;
+        let large_log_h = 22usize.saturating_sub(log_width).max(4);
+        let (large_count, large_stk) = build_at(large_log_h);
+
+        println!(
+            "CLAMP_PROBE addsub_width={addsub_width} \
+             SMALL(log_h=4 log_stacking={small_stk} instr={small_count}) \
+             LARGE(log_h={large_log_h} log_stacking={large_stk} instr={large_count})"
+        );
+
+        // Boundary sanity: the two heights must actually straddle the
+        // clamp (otherwise the probe proves nothing).
+        assert!(
+            small_stk < 21,
+            "SMALL height did not clamp (log_stacking={small_stk}); test mis-sized"
+        );
+        assert_eq!(
+            large_stk, 21,
+            "LARGE height did not reach the cap (log_stacking={large_stk}); test mis-sized"
+        );
+
+        // ★ HEADLINE (current state): clamp-DEPENDENT — the program shape
+        // (instruction count) differs across the clamp for one chip-set.
+        // FLIP this to assert_eq! once the prover de-clamp lands.
+        assert_ne!(
+            small_count, large_count,
+            "EXPECTED clamp-dependence (counts differ) in the current pre-de-clamp state; \
+             if these are EQUAL the prover de-clamp may already be in effect — flip to assert_eq!"
+        );
+    }
+
     /// Verifies `ZKMCoreBasefoldWitnessValues::dummy` produces a
     /// witness whose per-shard `chip_cumulative_sums` cardinality
     /// matches a real shard's chip count — the shape-stability

@@ -472,6 +472,55 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             }
 
+            // ★ HEIGHT-AGNOSTIC-RECURSION (step 2b) — THE clamp-dependence site.
+            //
+            // The per-proof verifier is rebuilt with `bundle_num_vars` (=
+            // `fri_commitments.len()` = the prover's CLAMPED
+            // `log_stacking_height`) and `host.commit.log_stacking_height`.
+            // Both are clamped by `pick_log_stacking_height(total_values)`
+            // (jagged_pcs.rs:114) for small commits, so `params.num_variables`
+            // = the clamp.  The downstream BaseFold FRI loops in
+            // `basefold_verifier.rs::verify_untrusted_evaluations` are
+            // build-time-unrolled over the witness Vec lengths (rounds,
+            // query_phase_openings, merkle paths — all of length
+            // `num_variables`), so the COMPILED PROGRAM (hence its VK) is
+            // CLAMP-DEPENDENT: two proofs of the SAME chip-set at different
+            // heights yield different `total_values` → different clamped
+            // `num_variables` → different programs/VKs.  Proven empirically by
+            // `basefold_programs.rs::normalize_program_is_clamp_dependent_for_fixed_chipset`
+            // (AddSub: log_stacking 8 → 331_763 instr vs log_stacking 21 →
+            // 1_006_225 instr).
+            //
+            // FIXING THIS to `num_variables = DEFAULT_LOG_STACKING_HEIGHT` (21)
+            // here is UNSOUND in isolation: the recursion challenger is a
+            // STATEFUL Poseidon2 sponge at program-build time (each
+            // challenger.observe may trigger a `duplexing` permute, see
+            // challenger.rs:298-305), and the commit-phase transcript absorbs
+            // `~num_variables × (2 ext + 1 commit)` felts plus samples
+            // `num_variables + log_blowup`-bit query indices.  A 21-round
+            // masked program absorbs a structurally different number of
+            // permutes than an honest k<21-round proof, so NO field assignment
+            // to "padded" rounds can make the two sponge states equal ⇒
+            // Fiat-Shamir DESYNC (a silent soundness break + honest-path
+            // verify failure).  There is no runtime-conditional `observe` in
+            // the fixed program to skip the padded tail.
+            //
+            // The SP1-faithful fix is PROVER-SIDE: stop clamping
+            // `log_stacking_height` (always commit at the fixed
+            // DEFAULT_LOG_STACKING_HEIGHT = 21, padding tiny commits' area UP —
+            // exactly what SP1's `JaggedPcsProver::commit_multilinears` does:
+            // it asserts every padded MLE is at `max_log_row_count` and pads
+            // area to the next multiple of a FIXED stacking height, never
+            // clamping).  Then every commit is honestly 21-round, this rebuild
+            // becomes a constant `num_variables = 21`, and clamp-independence
+            // (VK = f(chip-set)) follows with NO masking and NO FS risk.  That
+            // prover change is NON-byte-identical (it changes proof shapes +
+            // transcripts for all small commits) and cross-cutting (commit /
+            // open / GPU commit hooks / every stage) — OUT OF SCOPE for the
+            // byte-identical step-2b; tracked as the de-clamp follow-up.  The
+            // step-2 Binding(1) `assert_num_vars_le_max` below already binds
+            // the (then-witnessed) round count to `[0, MAX]`, so the soundness
+            // primitive is in place ahead of the de-clamp.
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
                 LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {

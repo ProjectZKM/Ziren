@@ -444,7 +444,20 @@ pub fn dummy_jagged_basefold_bundle(
     let l = log_dense_size;
     // The BaseFold is over the STACKED poly: its rounds / query path lengths /
     // batch width all key off log_stacking_height (the prover's clamped value),
-    // NOT max_log_row_count.  pick_log_stacking_height = min(14, log2(np2(total))-1).
+    // NOT max_log_row_count.  pick_log_stacking_height = min(21, log2(np2(total))-1).
+    //
+    // ★ HEIGHT-AGNOSTIC-RECURSION (step 2b): this CLAMP is THE source of the
+    // recursion program's clamp-dependence — `log_stacking` (hence the
+    // BaseFold round count = `fri_commitments` len, the query/Merkle path
+    // lengths, and `num_stripes`) varies with `total_values`, which varies
+    // with chip HEIGHTS for a FIXED chip-set.  The dummy faithfully mirrors
+    // the prover's clamp (it MUST, to match a real proof's shape), so the
+    // program built from this dummy is clamp-shaped.  Making the recursion
+    // program clamp-INDEPENDENT requires removing the clamp at the host commit
+    // (`pick_log_stacking_height` → fixed `DEFAULT_LOG_STACKING_HEIGHT`),
+    // which this dummy would then track automatically.  See the scoping note
+    // at `machine/core_basefold.rs` (the per-proof verifier rebuild) for why
+    // masking-to-MAX in the verifier alone is unsound (Fiat-Shamir desync).
     let log_stacking = pick_log_stacking_height(total_values) as usize;
     let num_stripes = 1usize << l.saturating_sub(log_stacking); // batch_evaluations width
     let inner_fri = lb_fri_config();
