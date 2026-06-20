@@ -865,7 +865,7 @@ where
     // reinterprets a Vec<(String, RowMajorMatrix<Val<SC>>)> as
     // Vec<(String, RowMajorMatrix<InnerVal>)>.  Both element types
     // have the same layout under the gate.
-    let named_traces_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> = unsafe {
+    let mut named_traces_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> = unsafe {
         let mut v = core::mem::ManuallyDrop::new(named_traces);
         let ptr = v.as_mut_ptr();
         let len = v.len();
@@ -891,6 +891,39 @@ where
     // heights agree with this commit's `packing` (both keyed off the SAME
     // thread-local band-cap installed by the core prove site).  `None` (no
     // guard) => unchanged own-height commit (recursion / shrink / wrap).
+    //
+    // HEIGHT-AGNOSTIC RECURSION (step 5c): the band-cap is now the FULL
+    // canonical CLUSTER (chip name -> (width, log_height)), so besides padding
+    // PRESENT chips it must ADD a zero trace for each canonical chip that this
+    // raw (event-driven) shard is MISSING — exactly as FIX_CORE_SHAPES=true
+    // does (where `canonicalize_shape_to_cluster` extends `record.shape` so
+    // tracegen emits the missing chips at log-height 1).  The missing chips are
+    // injected into `named_traces_inner` ITSELF (NOT only the commit clone) so
+    // they propagate to `data.traces` -> `chip_ordering` -> `open`'s
+    // `opened_values`: the recursion normalize verifier iterates
+    // `opened_values.chips`, so the proof's chip-SET (and hence its VK) MUST be
+    // the canonical cluster, matching the enum/vk_map dummy built from
+    // `sp.shape()` (= opened_values).  Present-chip COMMIT heights are then
+    // lifted in `commit_named_inner`; the injected chips already arrive at
+    // their band-cap height.
+    if let Some(band_cap) = crate::shard_level::band_cap::current_band_cap() {
+        use std::collections::BTreeSet;
+        let present: BTreeSet<String> =
+            named_traces_inner.iter().map(|(n, _)| n.clone()).collect();
+        for (name, (width, log_h)) in band_cap.iter() {
+            if !present.contains(name) {
+                let w = (*width).max(1);
+                let h = 1usize << *log_h;
+                named_traces_inner.push((
+                    name.clone(),
+                    RowMajorMatrix::new(vec![crate::InnerVal::ZERO; w * h], w),
+                ));
+            }
+        }
+        // Keep name order stable (matches the name-order sort the commit and
+        // the recursion `opened_values.chips` BTreeMap expect).
+        named_traces_inner.sort_by(|(a, _), (b, _)| a.cmp(b));
+    }
     let commit_named_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> =
         match crate::shard_level::band_cap::current_band_cap() {
             None => named_traces_inner.clone(),
@@ -901,7 +934,7 @@ where
                         return (name.clone(), t.clone());
                     }
                     let mut values = t.values.clone();
-                    if let Some(&cap_log) = band_cap.get(name) {
+                    if let Some(&(_w, cap_log)) = band_cap.get(name) {
                         let cap_rows = 1usize << cap_log;
                         let cur_rows = values.len() / t.width.max(1);
                         if cap_rows > cur_rows {

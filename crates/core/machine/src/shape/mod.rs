@@ -105,6 +105,153 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         minimal_shape
     }
 
+    /// HEIGHT-AGNOSTIC RECURSION (step 5c): read-only computation of the FULL
+    /// canonical CLUSTER shape a core record lifts to — the exact same shape
+    /// `fix_shape` + [`canonicalize_shape_to_cluster`] would produce under
+    /// `FIX_CORE_SHAPES=true`, but WITHOUT mutating the record or padding any
+    /// trace.  Mirrors every `fix_shape` branch (packed-small / plain-core)
+    /// plus the preprocessed (Byte/Program) shape and the stacked-cluster
+    /// canonicalization, returning the per-chip cluster band-cap `log_height`
+    /// map (incl. the missing canonical-cluster chips at log-height 1).
+    ///
+    /// Why a separate function from [`Self::find_core_shape`]: `find_core_shape`
+    /// only searches `partial_core_shapes` over the present CORE chips, so it
+    /// (a) selects a DIFFERENT cluster than `fix_shape`'s packed-small branch
+    /// for a CPU+memory shard, and (b) never covers the non-core chips
+    /// (Byte/Program/MemoryGlobal*/Global) nor the missing event-driven chips.
+    /// The jagged COMMIT must pad to THIS shape (chip-SET + heights) so the
+    /// FIX-off normalize VK equals the FIX-on canonical cluster VK in the
+    /// production vk_map.
+    ///
+    /// Returns `None` when no cluster fits (the over-large case `fix_shape`
+    /// also rejects) — the caller then keeps legacy own-height packing.
+    pub fn find_canonical_cluster_shape(
+        &self,
+        record: &ExecutionRecord,
+    ) -> Option<Shape<MipsAirId>> {
+        // Preprocessed (Byte / Program) shape — either already fixed on the
+        // program (FIX-on) or computed read-only here (FIX-off, None).
+        let prep: Shape<MipsAirId> = match record.program.preprocessed_shape.as_ref() {
+            Some(s) => s.clone(),
+            None => {
+                let prep_heights = MipsAir::<F>::preprocessed_heights(&record.program);
+                self.partial_preprocessed_shapes.find_shape(&prep_heights)?
+            }
+        };
+        let has_cpu = record.contains_cpu();
+        let is_packed = has_cpu
+            && (!record.global_memory_finalize_events.is_empty()
+                || !record.global_memory_initialize_events.is_empty());
+        let mut heights = MipsAir::<F>::core_heights(record);
+        if is_packed {
+            heights.extend(MipsAir::<F>::memory_heights(record));
+        }
+        let log2_shard_size = record.cpu_events.len().next_power_of_two().ilog2() as usize;
+        self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
+    }
+
+    /// `OrderedShape` (chip NAME -> raw log_height) sibling of
+    /// [`Self::find_canonical_cluster_shape`], for the VK-enumeration / gate
+    /// side (which holds a proof's `sp.shape()`, not a record).  Reconstructs
+    /// the per-chip event-height vectors from the raw heights (2^log_h, which
+    /// maps to the SAME pow-2 band cap as the real row count) and runs the
+    /// IDENTICAL branch + canonicalize logic, so the dummy bundle is packed at
+    /// the exact heights the real FIX-off commit used.
+    pub fn find_canonical_cluster_shape_from_ordered(
+        &self,
+        os: &zkm_pcs::shape::OrderedShape,
+    ) -> Option<Shape<MipsAirId>> {
+        use std::collections::BTreeMap;
+        // Raw row count per present chip NAME (2^log_h).
+        let raw: BTreeMap<String, usize> =
+            os.inner.iter().map(|(n, h)| (n.clone(), 1usize << *h)).collect();
+        let get = |id: &MipsAirId| -> usize { raw.get(&id.to_string()).copied().unwrap_or(0) };
+        let has_cpu = get(&MipsAirId::Cpu) > 0;
+        let is_packed = has_cpu
+            && (get(&MipsAirId::MemoryGlobalInit) > 0
+                || get(&MipsAirId::MemoryGlobalFinalize) > 0);
+        // Preprocessed (Byte / Program) shape from their raw heights.
+        let prep_heights: Vec<(MipsAirId, usize)> = [MipsAirId::Program, MipsAirId::Byte]
+            .into_iter()
+            .map(|id| (id, get(&id)))
+            .collect();
+        let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
+        // Core heights (same MipsAirIds + order as MipsAir::core_heights), then
+        // memory heights for the packed branch (same as MipsAir::memory_heights).
+        let core_ids = [
+            MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
+            MipsAirId::MiscInstrs, MipsAirId::MemoryInstrs, MipsAirId::SyscallInstrs,
+            MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
+            MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
+        ];
+        let mut heights: Vec<(MipsAirId, usize)> =
+            core_ids.iter().map(|id| (*id, get(id))).collect();
+        if is_packed {
+            heights.push((MipsAirId::MemoryGlobalInit, get(&MipsAirId::MemoryGlobalInit)));
+            heights.push((MipsAirId::MemoryGlobalFinalize, get(&MipsAirId::MemoryGlobalFinalize)));
+            heights.push((
+                MipsAirId::Global,
+                get(&MipsAirId::MemoryGlobalInit) + get(&MipsAirId::MemoryGlobalFinalize),
+            ));
+        }
+        let log2_shard_size = get(&MipsAirId::Cpu).next_power_of_two().ilog2() as usize;
+        self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
+    }
+
+    /// Shared core of [`Self::find_canonical_cluster_shape`] and its
+    /// `_from_ordered` sibling: run the `fix_shape` branch (packed-small /
+    /// plain-core) over `heights`, union the preprocessed shape, then apply the
+    /// stacked-cluster canonicalization.
+    fn canonical_cluster_from_parts(
+        &self,
+        prep: Shape<MipsAirId>,
+        has_cpu: bool,
+        is_packed: bool,
+        heights: &[(MipsAirId, usize)],
+        log2_shard_size: usize,
+    ) -> Option<Shape<MipsAirId>> {
+        let mut shape = prep;
+        if is_packed {
+            // Packed-small branch: min-area shape over partial_small_shapes.
+            let mut minimal_shape = None;
+            let mut minimal_area = usize::MAX;
+            for cluster in self.partial_small_shapes.iter() {
+                if let Some(s) = cluster.find_shape(heights) {
+                    let area = self.estimate_lde_size(&s);
+                    if area < minimal_area {
+                        minimal_area = area;
+                        minimal_shape = Some(s);
+                    }
+                }
+            }
+            shape.extend(minimal_shape?);
+        } else if has_cpu {
+            // Plain-core branch: min-area shape over partial_core_shapes range.
+            let mut minimal_shape = None;
+            let mut minimal_area = usize::MAX;
+            for (_, clusters) in self.partial_core_shapes.range(log2_shard_size..) {
+                for cluster in clusters.iter() {
+                    if let Some(s) = cluster.find_shape(heights) {
+                        let area = self.estimate_lde_size(&s);
+                        if area < minimal_area {
+                            minimal_area = area;
+                            minimal_shape = Some(s.clone());
+                        }
+                    }
+                }
+            }
+            shape.extend(minimal_shape?);
+        } else {
+            // No-CPU records are not produced on the FIX-off core band-cap path.
+            return None;
+        }
+        // Stacked-cluster canonicalization: extend with the missing chips of the
+        // smallest superset cluster at log-height 1.
+        canonicalize_shape(&mut shape);
+        Some(shape)
+    }
+
     /// Fix the shape of the proof.
     pub fn fix_shape(&self, record: &mut ExecutionRecord) -> Result<(), CoreShapeError> {
         if record.program.preprocessed_shape.is_none() {
@@ -841,9 +988,17 @@ pub mod tests {
 /// No-op when the record has no shape or no cluster contains its set
 /// (the recursion vk lookup will then fail loudly with the digest).
 pub fn canonicalize_shape_to_cluster(record: &mut ExecutionRecord) {
+    let Some(shape) = record.shape.as_mut() else { return };
+    canonicalize_shape(shape);
+}
+
+/// `Shape`-level core of [`canonicalize_shape_to_cluster`]: extend `shape`
+/// with the missing chips of the smallest superset stacked-shapes cluster at
+/// log-height 1.  Shared by the record post-pass (FIX-on) and the read-only
+/// [`CoreShapeConfig::find_canonical_cluster_shape`] (FIX-off band-cap).
+pub fn canonicalize_shape(shape: &mut Shape<MipsAirId>) {
     use std::collections::BTreeSet;
     use std::str::FromStr;
-    let Some(shape) = record.shape.as_mut() else { return };
     let present: BTreeSet<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
     let clusters = zkm_pcs::stacked_shapes::build_mips_machine_shape().chip_clusters;
     // Parse each cluster's names into MipsAirIds (skip names without a

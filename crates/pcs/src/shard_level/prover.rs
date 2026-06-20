@@ -439,7 +439,7 @@ where
                         return t;
                     }
                     let name = MachineAir::<Val<SC>>::name(*chip);
-                    if let Some(&cap_log) = band_cap.get(&name) {
+                    if let Some(&(_w, cap_log)) = band_cap.get(&name) {
                         let cap_rows = 1usize << cap_log;
                         let cur_rows = t.values.len() / t.width.max(1);
                         if cap_rows > cur_rows {

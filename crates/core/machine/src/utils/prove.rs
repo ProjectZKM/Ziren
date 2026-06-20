@@ -606,15 +606,32 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
-        // HEIGHT-AGNOSTIC RECURSION (step 5b): a CoreShapeConfig used ONLY to
-        // compute the per-shard CLUSTER band-cap for the jagged commit
-        // (`find_core_shape`), INDEPENDENT of `FIX_CORE_SHAPES` (`shape_config`).
-        // With `FIX_CORE_SHAPES=false` the records stay at RAW heights and the
-        // core STARK proves at those heights, but the jagged commit must still
-        // pad to the bounded chip-set cluster-max so the recursion normalize VK
-        // = f(chip-SET).  Built once per prove call (the same default config the
-        // prover constructs at `ZKMProver::new`).
+        // HEIGHT-AGNOSTIC RECURSION (step 5c): a CoreShapeConfig used ONLY to
+        // compute the per-shard FULL canonical CLUSTER shape for the jagged
+        // commit (`find_canonical_cluster_shape`), INDEPENDENT of
+        // `FIX_CORE_SHAPES` (`shape_config`).  With `FIX_CORE_SHAPES=false` the
+        // records stay at RAW heights and the core STARK proves at those
+        // heights, but the jagged commit must still pad/extend to the SAME
+        // canonical cluster shape `fix_shape` + `canonicalize_shape_to_cluster`
+        // produce under FIX-on, so the recursion normalize VK = f(chip-SET) and
+        // matches the production vk_map.  Built once per prove call (the same
+        // default config the prover constructs at `ZKMProver::new`).
         let band_cap_shape_config = CoreShapeConfig::<SC::Val>::default();
+
+        // HEIGHT-AGNOSTIC RECURSION (step 5c): chip NAME -> trace WIDTH, so the
+        // band-cap can ADD a missing canonical-cluster chip's zero COMMIT trace
+        // (width is required to size it).  Machine-static, built once.
+        let band_cap_chip_widths: std::collections::BTreeMap<String, usize> = prover
+            .machine()
+            .chips()
+            .iter()
+            .map(|c| {
+                (
+                    MachineAir::<SC::Val>::name(c),
+                    p3_air::BaseAir::<SC::Val>::width(c).max(1),
+                )
+            })
+            .collect();
 
         // Spawn the phase 2 prover thread.
         let p2_prover_span = tracing::Span::current().clone();
@@ -640,22 +657,38 @@ where
                                     // and pads the jagged commit traces to it,
                                     // while the STARK stays at raw heights.
                                     // Keyed by chip NAME (the PCS layer cannot
-                                    // depend on `MipsAirId`).  Only core chips
-                                    // present in `find_core_shape` are capped;
-                                    // a shard whose heights overflow every
-                                    // cluster yields `None` (no pad, legacy).
+                                    // depend on `MipsAirId`).  A shard whose
+                                    // heights overflow every cluster yields
+                                    // `None` (no pad/add, legacy own-height).
                                     let _band_cap_guard = {
-                                        let heights = MipsAir::<SC::Val>::core_heights(&record);
+                                        // Compute the FULL canonical CLUSTER shape
+                                        // this raw record lifts to — the SAME shape
+                                        // `fix_shape` + `canonicalize_shape_to_cluster`
+                                        // produce under FIX_CORE_SHAPES=true (chip-SET
+                                        // AND per-chip band-cap heights, incl. the
+                                        // missing event-driven chips at log-height 1).
+                                        // The map carries (width, log_height) so the
+                                        // PCS commit can both PAD present chips and ADD
+                                        // a zero trace for each MISSING canonical chip,
+                                        // so the FIX-off normalize VK = the FIX-on
+                                        // canonical cluster VK (production vk_map).
                                         band_cap_shape_config
-                                            .find_core_shape(&heights)
+                                            .find_canonical_cluster_shape(&record)
                                             .map(|shape| {
-                                                let map: std::collections::BTreeMap<String, usize> =
-                                                    shape
-                                                        .iter()
-                                                        .map(|(air, log_h)| {
-                                                            (air.to_string(), *log_h)
-                                                        })
-                                                        .collect();
+                                                let map: std::collections::BTreeMap<
+                                                    String,
+                                                    (usize, usize),
+                                                > = shape
+                                                    .iter()
+                                                    .map(|(air, log_h)| {
+                                                        let name = air.to_string();
+                                                        let width = band_cap_chip_widths
+                                                            .get(&name)
+                                                            .copied()
+                                                            .unwrap_or(1);
+                                                        (name, (width, *log_h))
+                                                    })
+                                                    .collect();
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
                                                     map,
                                                 )

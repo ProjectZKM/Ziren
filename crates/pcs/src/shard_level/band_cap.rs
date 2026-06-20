@@ -6,7 +6,7 @@
 //! verifier-maskable under Fiat-Shamir — so its shape MUST be the per-chip-set
 //! CLUSTER band-cap for the recursion normalize VK to be a function of the
 //! chip-SET only.  This module carries that band-cap (chip name ->
-//! band-cap `log_height`) from the core prove site
+//! `(width, band-cap log_height)`, over the FULL canonical cluster) from the core prove site
 //! (`zkm_core_machine::utils::prove::prove_with_context`, which has the
 //! `CoreShapeConfig` + per-shard heights) ACROSS the generic
 //! `MachineProver::open` trait boundary down to
@@ -32,7 +32,7 @@ thread_local! {
     /// Chip name -> band-cap `log_height` for the shard currently being
     /// committed on this thread.  `None` when no [`BandCapGuard`] is
     /// installed (every non-core path).
-    static CURRENT_BAND_CAP: std::cell::RefCell<Option<(u64, BTreeMap<String, usize>)>> =
+    static CURRENT_BAND_CAP: std::cell::RefCell<Option<(u64, BTreeMap<String, (usize, usize)>)>> =
         const { std::cell::RefCell::new(None) };
 }
 
@@ -49,7 +49,7 @@ impl BandCapGuard {
     /// Install `band_cap` (chip name -> band-cap log_height) for the
     /// calling thread and return a guard that clears it on drop.
     #[must_use]
-    pub fn new(band_cap: BTreeMap<String, usize>) -> Self {
+    pub fn new(band_cap: BTreeMap<String, (usize, usize)>) -> Self {
         let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         CURRENT_BAND_CAP.with(|c| {
             *c.borrow_mut() = Some((gen, band_cap));
@@ -74,6 +74,6 @@ impl Drop for BandCapGuard {
 /// Clone of the currently-stashed band-cap map for the calling thread,
 /// or `None` when no guard is installed (legacy own-height packing).
 #[must_use]
-pub fn current_band_cap() -> Option<BTreeMap<String, usize>> {
+pub fn current_band_cap() -> Option<BTreeMap<String, (usize, usize)>> {
     CURRENT_BAND_CAP.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
 }
