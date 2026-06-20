@@ -695,6 +695,33 @@ pub(crate) fn debug_jagged_eval_closing(
     eprintln!("[JE-HOSTVALS] z_eval[0]=z_trace.last()={:?}", z_trace.last());
     eprintln!("[JE-HOSTVALS] proof_point[0]=pp[0]={:?}", pp.first());
     eprintln!("[JE-HOSTVALS] num_cols={} z_col.len={} z_col[0]={:?}", num_cols, z_col.len(), z_col.first());
+
+    // [JE-VARIANT] Probe the in-circuit F convention: compare these *·mle_bp to
+    // the recursion's in-circuit expected_ext (ZIREN_JE_INCIRCUIT_DBG, =
+    // [245704461, 2110862135, 481888097, 362049825] on FIX-off fib).  V1 bit-
+    // reverses the z_col_lagrange index (partial_lagrange_symbolic vs
+    // partial_lagrange endianness suspect).  V2 reverses the per-column merged
+    // prefix-sum bit order.  Whichever product matches the in-circuit value
+    // pins the convention bug.
+    let zcl = z_col.len();
+    let bitrev = |k: usize, w: usize| -> usize {
+        if w == 0 { 0 } else { ((k as u32).reverse_bits() >> (32 - w as u32)) as usize }
+    };
+    let eqf = |mb: InnerChallenge, p: InnerChallenge| mb * p + (InnerChallenge::ONE - mb) * (InnerChallenge::ONE - p);
+    let mut v1 = InnerChallenge::ZERO; // revlag
+    let mut v2 = InnerChallenge::ZERO; // rev merged bits
+    for k in 0..num_cols {
+        let mut merged = bits_big_endian::<InnerChallenge>(prefix_sums[k], h);
+        merged.extend(bits_big_endian::<InnerChallenge>(prefix_sums[k + 1], h));
+        let mut e_fwd = InnerChallenge::ONE;
+        for (mb, p) in merged.iter().zip(pp.iter()) { e_fwd *= eqf(*mb, *p); }
+        let mut e_rev = InnerChallenge::ONE;
+        for (mb, p) in merged.iter().rev().zip(pp.iter()) { e_rev *= eqf(*mb, *p); }
+        v1 += z_col_lag[bitrev(k, zcl)] * e_fwd;
+        v2 += z_col_lag[k] * e_rev;
+    }
+    eprintln!("[JE-VARIANT] V1 revlag *mle_bp = {:?}", v1 * mle_bp);
+    eprintln!("[JE-VARIANT] V2 revmerged *mle_bp = {:?}", v2 * mle_bp);
 }
 
 /// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]

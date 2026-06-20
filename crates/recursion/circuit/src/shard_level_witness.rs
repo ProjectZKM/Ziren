@@ -1944,6 +1944,55 @@ where
             v
         }
     };
+    // HEIGHT-AGNOSTIC (low-placement) FIX: the passed chip_height_felts are the
+    // RAW opened-degree heights, but the low-placement commit packs at BAND
+    // offsets.  When ZIREN_HA_BAKED_COLPS is set, OVERRIDE them with the BAND
+    // committed per-chip heights (offset diffs from bundle.packing) so the
+    // self-consistent height-felts path builds col_prefix_sums (Σ band) ==
+    // bundle.packing.offsets AND row_counts (band) consistently — matching the
+    // commit so BOTH the jagged-eval F closing AND the step-7 prefix-sum check
+    // pass.  (FIX-on: offset diffs == raw heights ⇒ byte-identical.)  Single-
+    // round commit (every caller passes vec![main_widths]) ⇒ per-chip heights
+    // index by the round's chip position.
+    let ha_baked_band = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok();
+    let band_heights_override: Option<Vec<Felt<C::F>>> =
+        if ha_baked_band && chip_height_felts.is_some() {
+            let offs = &bundle.packing.offsets;
+            let mut hs: Vec<Felt<C::F>> = Vec::new();
+            let mut hs_dbg: Vec<usize> = Vec::new();
+            let mut col = 0usize;
+            if let Some(round0) = column_counts_by_round.first() {
+                for &w in round0.iter() {
+                    let h = if w > 0 && col + 1 < offs.len() {
+                        offs[col + 1].saturating_sub(offs[col])
+                    } else {
+                        0
+                    };
+                    hs.push(builder.constant(C::F::from_u64(h as u64)));
+                    hs_dbg.push(h);
+                    col += w;
+                }
+            }
+            if std::env::var("ZIREN_HA_BAND_DBG").is_ok() {
+                let sum_wh: usize = column_counts_by_round
+                    .first()
+                    .map(|r| r.iter().zip(hs_dbg.iter()).map(|(&w, &h)| w * h).sum())
+                    .unwrap_or(0);
+                eprintln!(
+                    "[HA-BAND] n_chips={} round0.len={} offs.len={} total_values={} sum_wh={} heights={:?} offs.head={:?} offs.tail={:?}",
+                    hs_dbg.len(),
+                    column_counts_by_round.first().map(|r| r.len()).unwrap_or(0),
+                    offs.len(), bundle.packing.total_values, sum_wh, hs_dbg,
+                    &offs[..offs.len().min(6)],
+                    &offs[offs.len().saturating_sub(4)..],
+                );
+            }
+            Some(hs)
+        } else {
+            None
+        };
+    let chip_height_felts: Option<&[Felt<C::F>]> =
+        band_heights_override.as_deref().or(chip_height_felts);
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
         // reconstruct col_prefix_sums IN-CIRCUIT
         // from the WITNESSED per-chip heights instead of baking

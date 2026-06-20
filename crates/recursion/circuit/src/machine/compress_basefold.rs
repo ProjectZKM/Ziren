@@ -328,6 +328,12 @@ pub fn verify_compress_basefold<C, SC, A>(
                 &chip_names,
                 &proof_opened_values,
             );
+        // HEIGHT-AGNOSTIC (low-placement) FIX: always pass the (raw) per-chip
+        // heights; the lift internally OVERRIDES them with the BAND committed
+        // heights (offset diffs) when ZIREN_HA_BAKED_COLPS is set, keeping
+        // col_prefix_sums AND row_counts self-consistent and matching the
+        // low-placement band commit.
+        let cps_heights: Option<&[Felt<C::F>]> = Some(&chip_height_felts_pre);
 
         // Bundle lift is the production path post multi-GPU determinism
         // cascade closure.  ZIREN_LEGACY_NONBUNDLE_LIFT (set to any
@@ -349,7 +355,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
-                    Some(&chip_height_felts_pre),
+                    cps_heights,
                 )
             }
             LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
