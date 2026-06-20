@@ -644,9 +644,37 @@ where
     // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
     // natural-row conventions diverge.
     let residual_y: Option<Vec<Vec<Challenge<SC>>>> = {
+        // HEIGHT-AGNOSTIC RECURSION (Stage 4 — the embed_factor's prover side).
+        //
+        // When a band-cap is installed (FIX_CORE_SHAPES=false height-agnostic
+        // core path) the jagged commit / packing / dense are built at the
+        // per-chip-set CLUSTER BAND heights (`commit_traces` padded above), so
+        // the jagged reduction's per-chip column claim `y_per_chip` MUST be the
+        // BAND-height column MLE @ z, NOT the raw-height zerocheck residual
+        // (`trace_at_z`).  The raw residual embeds chip c at its RAW log_h
+        // (VirtualGeq(raw)), while the band column MLE embeds at the band
+        // log_h; the two differ by the embedding factor
+        //   Π_{log_raw <= k < log_band}(1 - z[k])
+        // over the EXTRA padding bits — exactly the #48/#49 mixed-height
+        // `embed_factor` (Π_high(1-zeta)), now extended to EVERY chip whose
+        // band height exceeds its raw height.  Feeding the raw residual into a
+        // band-height reduction trips the round-0 identity `p0+p1 == Σ z_col·y`
+        // (the prover's band-dense round-0 sum is the band-embedded value).
+        //
+        // The host triple-loop recompute (the `None` branch below) reads the
+        // BAND-padded `commit_traces` cells directly and produces the
+        // band-embedded `y` by construction (the zero padding rows raw..band
+        // contribute the `Π_high(1-z)` factor), so DECLINING the raw residual
+        // under a band-cap yields the correct, reduction-consistent `y`.  This
+        // is the byte-honest mechanism (no check weakened): the reduction's
+        // commit-vs-claim heights now AGREE (both band).  Validated: with this
+        // decline a FIX-off band-cap core proof's jagged reduction VERIFIES
+        // (round-0 identity holds), where the raw residual REJECTED it.
+        let band_cap_active = crate::shard_level::band_cap::current_band_cap().is_some();
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(true);
+            .unwrap_or(true)
+            && !band_cap_active;
         if !on {
             None
         } else {

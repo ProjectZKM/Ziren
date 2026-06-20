@@ -1271,8 +1271,24 @@ pub mod tests {
     // e.g. CloClz's padding-row template `a=32, is_bb_zero=1` zeroes its SRL
     // send; an all-zero row leaves that send at multiplicity 1 -> unbalanced
     // lookup) but insufficient on its own.
+    // STAGE 4 UPDATE (height-agnostic embed_factor, prover side): the round-0
+    // jagged reduction REJECTION is now FIXED. Root cause was that the band-cap
+    // path fed the RAW zerocheck residual (`trace_at_z`, embedded at raw log_h)
+    // into a BAND-height jagged reduction, while the prover's band-dense round-0
+    // sum is the BAND-embedded value — a mismatch by the embed_factor
+    // Π_{log_raw<=k<log_band}(1-z[k]). Fix (shard_level/prover.rs): decline the
+    // raw residual whenever a band-cap is installed so the prover RECOMPUTES
+    // `y_per_chip` from the band-padded commit traces (band-embedded by
+    // construction). This core prove + HOST verify_shard now PASSES end-to-end.
+    //
+    // REMAINING (next increment, recursion verify only): the in-circuit
+    // recursion verifier derives the jagged claim from `opened_values` (RAW,
+    // shard_basefold.rs:536) rather than `bundle.y_per_chip` (BAND), so its
+    // step-4 assert (sumcheck_claim == claimed_sum) needs the SAME embed_factor
+    // applied to the evaluation_claims to lift RAW->BAND. The host verify
+    // (this test) uses bundle.y_per_chip directly and so does not exercise that
+    // linkage. Un-ignored now that the host-verify half is green.
     #[test]
-    #[ignore = "rollout-1b: FIX-off jagged reduction rejects due to the step-5b                 present-chip raw-STARK vs band-commit height divergence (needs the                 height-agnostic recursion port); injection content is constraint-valid"]
     fn test_fix_off_core_verify_injected_chips_rollout1b() {
         use zkm_core_executor::Executor;
         setup_logger();
