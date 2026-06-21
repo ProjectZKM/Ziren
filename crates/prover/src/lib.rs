@@ -3168,6 +3168,28 @@ pub mod tests {
         )
     }
 
+    /// FIX-off robustness: compress a KECCAK (precompile + multi-shard)
+    /// workload, exercising non-core chips (KeccakPermute/precompile/memory)
+    /// and the multi-shard global cumulative-sum chain through the recursion
+    /// `assert_complete` — the path the raw-`main_traces` cumsum fix targets
+    /// beyond single-shard pure-core fibonacci.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn test_e2e_compress_keccak() -> Result<()> {
+        let elf = test_artifacts::KECCAK_SPONGE_ELF;
+        setup_logger();
+        let opts = ZKMProverOpts::default();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        test_e2e_prover::<DefaultProverComponents>(
+            &prover,
+            elf,
+            ZKMStdin::default(),
+            opts,
+            Test::Compress,
+        )
+    }
+
     /// Validates the wrap path end-to-end: compress + shrink +
     /// wrap_bn254 + verify_wrap_bn254 — without the heavy PLONK
     /// artifact build that follows.
