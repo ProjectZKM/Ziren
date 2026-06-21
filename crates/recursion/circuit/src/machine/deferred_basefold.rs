@@ -237,12 +237,19 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
         // VERIFY_VK=true: per-chip WITNESSED heights from the
         // opened `degree` — same pattern as core/compress.
-        let chip_height_felts_pre =
-            crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                builder,
-                &chip_names,
-                &proof_opened_values,
-            );
+        // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, SKIP the recompose
+        // (its ext2felt asserts base-field and FAILS under FIX-off; unused on
+        // the baked-band path; sound to skip — consumes no Witnessable stream).
+        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
+            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
+                None
+            } else {
+                Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                ))
+            };
 
         // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
         // (set to any value) falls back to the bytes lift; preserved
@@ -263,7 +270,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     max_log_row_count,
                     &column_counts_by_round,
                     None,
-                    Some(&chip_height_felts_pre),
+                    chip_height_felts_pre.as_deref(),
                 )
             }
             LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
