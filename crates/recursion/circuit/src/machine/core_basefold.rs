@@ -570,6 +570,17 @@ pub fn verify_core_basefold<C, SC, A>(
                 jagged_evaluator_fn,
             );
 
+            // HA DIAG (gated): sentinel printed AFTER verify_shard completes for
+            // this shard.  If 7000001 prints right after the real shard's step-7
+            // acc/expected output, the 680210629 panic is in the AGGREGATE pass
+            // (cross-shard pv asserts); if it does NOT, the panic is inside
+            // verify_shard AFTER step-7 (zerocheck/cumulative-sum/digest).
+            if std::env::var("ZIREN_N2B_DBG").is_ok() {
+                use p3_field::PrimeCharacteristicRing;
+                let s: Felt<C::F> = builder.constant(C::F::from_u64(7000001u64));
+                builder.print_f(s);
+            }
+
             // Extract Global-scoped per-chip cumulative sums for the
             // sequential aggregate. shard_chips is sorted to match
             // opened_values.chips order (BTreeMap key order).
