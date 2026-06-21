@@ -304,16 +304,32 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // (7) Check prefix-sum consistency: accumulating the
         // per-chip row counts must match the per-column prefix
         // sums the jagged-eval protocol emitted.
+        let s7_dbg = std::env::var("ZIREN_N2B_DBG").is_ok();
         let repeated_row_counts: Vec<Felt<C::F>> = row_counts
             .iter()
             .flatten()
             .zip(column_counts.iter().flatten())
             .flat_map(|(row, col)| core::iter::repeat(*row).take(*col))
             .collect();
+        if s7_dbg {
+            let rc_total: usize = row_counts.iter().flatten().count();
+            let cc_total: usize = column_counts.iter().flatten().count();
+            let cc_sum: usize = column_counts.iter().flatten().sum();
+            eprintln!(
+                "[S7-LEN] row_counts(flat)={} column_counts(flat)={} Σcolumn_counts={} repeated.len={} prefix_sum_felts.len={}",
+                rc_total, cc_total, cc_sum, repeated_row_counts.len(), prefix_sum_felts.len()
+            );
+        }
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
         for (row_count, expected) in
             repeated_row_counts.iter().zip(prefix_sum_felts.iter())
         {
+            if s7_dbg {
+                // PRINTF pairs: ...,acc_k,expected_k,...  the LAST pair before
+                // any panic is the first divergent column (acc != expected).
+                builder.print_f(acc);
+                builder.print_f(*expected);
+            }
             builder.assert_felt_eq(acc, *expected);
             acc = builder.eval(acc + *row_count);
         }
