@@ -2099,6 +2099,7 @@ where
         let heights: Vec<Felt<C::F>> = if ha_baked_band {
             let offs = &bundle.packing.offsets;
             let mut hs: Vec<Felt<C::F>> = Vec::new();
+            let mut hs_usize: Vec<usize> = Vec::new();
             let mut col = 0usize;
             if let Some(round0) = column_counts_by_round.first() {
                 for &w in round0.iter() {
@@ -2108,8 +2109,40 @@ where
                         0
                     };
                     hs.push(builder.constant(C::F::from_u64(h as u64)));
+                    hs_usize.push(h);
                     col += w;
                 }
+            }
+            // HA DIAG (gated): host-simulate the verifier's step-7
+            // (recursive_jagged_pcs.rs:307-336): repeat each chip's height
+            // across its width, accumulate, and compare to offsets[k]
+            // (== prefix_sum_felts).  Print the FIRST divergence — that pins
+            // whether the offset-diff heights / width alignment is wrong.
+            if std::env::var("ZIREN_N2B_DBG").is_ok() {
+                let widths: Vec<usize> =
+                    column_counts_by_round.first().cloned().unwrap_or_default();
+                eprintln!(
+                    "[HA-STEP7] n_chips={} offs.len={} total_values={} widths={:?} heights={:?}",
+                    widths.len(), offs.len(), bundle.packing.total_values, widths, hs_usize
+                );
+                let repeated: Vec<usize> = hs_usize
+                    .iter()
+                    .zip(widths.iter())
+                    .flat_map(|(h, w)| core::iter::repeat(*h).take(*w))
+                    .collect();
+                let mut acc = 0usize;
+                let mut first_div: Option<(usize, usize, usize)> = None;
+                for (k, r) in repeated.iter().enumerate() {
+                    let expected = *offs.get(k).unwrap_or(&usize::MAX);
+                    if acc != expected && first_div.is_none() {
+                        first_div = Some((k, acc, expected));
+                    }
+                    acc += *r;
+                }
+                eprintln!(
+                    "[HA-STEP7] repeated.len={} final_acc={} offs.last={:?} first_divergence(k,acc,offs[k])={:?}",
+                    repeated.len(), acc, offs.last(), first_div
+                );
             }
             hs
         } else {
