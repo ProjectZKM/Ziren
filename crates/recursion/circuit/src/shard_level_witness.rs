@@ -2068,8 +2068,17 @@ where
         // heights (2^log_h), reused for every round (a chip's prep + main
         // traces share one height).  Value-independent (vs the baked
         // chip_dims fallback below).
+        if std::env::var("ZIREN_N2B_DBG").is_ok() {
+            eprintln!(
+                "[HA-BRANCH] row_counts=chip_height_felts(Some) n_heights={} n_cols_rounds={} (UNGATED Some — gate not applied here!)",
+                heights.len(), column_counts_by_round.len()
+            );
+        }
         column_counts_by_round.iter().map(|_| heights.to_vec()).collect()
     } else if let Some(row_counts_src) = row_counts_by_round {
+        if std::env::var("ZIREN_N2B_DBG").is_ok() {
+            eprintln!("[HA-BRANCH] row_counts=row_counts_by_round(Some) n_rounds={}", row_counts_src.len());
+        }
         row_counts_src
             .iter()
             .map(|round| {
