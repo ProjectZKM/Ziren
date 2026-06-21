@@ -38,14 +38,15 @@ Default proving path is **byte-identical**, but the recursion AIR/VK changed
 **`VERIFY_VK=true` will mismatch the current vk_map until the chip-set regen**.
 If production runs `VERIFY_VK=true`, run the regen first.
 
-## In flight
+## Robustness — keccak FIX-off compress ✅ PASSED
 
-`test_e2e_compress_keccak` (added at `442cbcbc`) running FIX-off on
-`/mnt_zkm/wt_ha_step3`, log `/mnt_zkm/keccak.log`. It's the robustness check for
-**precompile + non-core chips + multi-shard cumulative-sum chains** (fibonacci is
-single-shard pure-core). If it fails, the gap is likely the band-cap source for
-non-core chips (Byte/Program/Memory/precompile) — fix it the same way (raw
-traces / `find_canonical_cluster_shape` coverage).
+`test_e2e_compress_keccak` (added at `442cbcbc`): **`1 passed; 5113s`** FIX-off.
+This exercises **precompile chips (KeccakPermute)**, **non-core chips
+(Memory/Program/Byte)**, and the **multi-shard global cumulative-sum chain**
+through `assert_complete` — none of which single-shard fibonacci touches. So the
+raw-`main_traces` cumsum fix + band-cap (`find_canonical_cluster_shape` covers the
+full canonical cluster incl. non-core chips) **generalize**; the previously-flagged
+"non-core chip band-cap source" concern is resolved on the host path.
 
 ## Remaining (task #5)
 
