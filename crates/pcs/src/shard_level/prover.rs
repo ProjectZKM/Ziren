@@ -974,7 +974,18 @@ where
         // TAIL (chip_cum_tails) — same 14 values, no dependence on the
         // full materialize.  Validated identical via the bf-digest
         // cumulative_sums section canary.
-        .zip(commit_traces.iter())
+        // HEIGHT-AGNOSTIC (low-placement) FIX: read RAW `main_traces`, NOT
+        // `commit_traces`.  Under the band-cap/low-placement commit,
+        // `commit_traces` are padded to the cluster band height with ZERO high
+        // rows; computing the per-chip global cumulative sum over those zero
+        // rows injects spurious LogUp contributions (e.g. a zero row reads as a
+        // real "address 0" send), so the GLOBAL cumulative sum is non-zero and
+        // the recursion `assert_complete`'s `assert_digest_zero` fails (FIX-off
+        // 680210629 != 0).  `main_traces` hold the real per-chip cells (raw
+        // heights); on the non-band path `commit_traces == main_traces` so this
+        // is byte-identical for FIX-on.  Device-resident chips (width==0, empty
+        // main_trace) still use the provider TAIL below, unaffected.
+        .zip(main_traces.iter())
         .zip(chip_cum_tails.iter())
         .map(|((chip, main_trace), tail)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
