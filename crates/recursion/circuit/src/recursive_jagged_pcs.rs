@@ -278,8 +278,25 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // no-op.  Any over-claim 2^L < row_count < 2^{L+1} trips the product
         // assert; row_count ≥ 2^{L+1} fails `num2bits`.
         let cube_log = z_row.len();
+        // HA DIAG (gated ZIREN_N2B_DBG): this is the sole num2bits in the
+        // FIX-off verify path once the lift's gated path uses host-const
+        // col_prefix_sums/row_counts.  num2bits(row_count, cube_log+1) panics
+        // iff row_count >= 2^(cube_log+1) — print each row_count at runtime so
+        // the LAST value before any panic pins the failing chip + value (e.g.
+        // the unexplained 680210629).  cube_log is build-time, eprintln'd once.
+        let n2b_dbg = std::env::var("ZIREN_N2B_DBG").is_ok();
+        if n2b_dbg {
+            eprintln!(
+                "[N2B] row-count bound check: cube_log={cube_log} (bound 2^{}), n_rounds={}",
+                cube_log + 1,
+                row_counts.len()
+            );
+        }
         for round in row_counts.iter() {
             for &row_count in round.iter() {
+                if n2b_dbg {
+                    builder.print_f(row_count);
+                }
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
             }
         }
