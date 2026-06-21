@@ -2323,6 +2323,59 @@ pub mod jagged {
             .map(|_| challenger.sample_algebra_element())
             .collect();
 
+        // DROPLDES (#74): free the prior-phase device residency BEFORE
+        // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
+        // model.  The reduce reads ONLY dense_q (registered in the
+        // dense_q_device_registry via precomputed_dense_handle on the
+        // device-happy path), NOT the per-chip device traces held by the
+        // provider.  Freeing the provider traces is sound ONLY on the
+        // device-happy path (precomputed_dense_handle.is_some() AND
+        // ZIREN_GPU_JAGGED_PCS!=0 AND a V2 hook present) where the reduce
+        // routes through the device hook and does NOT re-pack dense_q from
+        // the provider; off that path a later cold re-materialize from the
+        // drained provider would silently produce an INVALID proof, so we
+        // leave the traces in place.  Pure lifetime change, transcript-
+        // neutral.  Gated ZIREN_GPU_FREE_TRACES_PRE_REDUCE (default OFF).
+        if let Some(p) = provider {
+            let free_pre_reduce = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
+                .map(|v| v != "0")
+                .unwrap_or(false);
+            if free_pre_reduce {
+                let try_gpu_pr = std::env::var("ZIREN_GPU_JAGGED_PCS")
+                    .map(|v| v != "0")
+                    .unwrap_or(false);
+                let hook_v2_present = super::get_gpu_jagged_reduction_hook_v2().is_some();
+                let device_happy =
+                    precomputed_dense_handle.is_some() && try_gpu_pr && hook_v2_present;
+                if device_happy {
+                    let _rel_span =
+                        tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
+                    p.release_all();
+                    tracing::info!(
+                        chips = n_chips,
+                        log_dense_size = packing.log_dense_size as u64,
+                        sub_phase = "free_traces_pre_reduce",
+                        "DROPLDES (#74): released device-trace provider refs \
+                         BEFORE the jagged reduce (SP1 drop_ldes analog; \
+                         dense_q registry untouched)"
+                    );
+                } else {
+                    use std::sync::OnceLock;
+                    static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                    WARN_ONCE.get_or_init(|| {
+                        tracing::warn!(
+                            precomputed_dense_handle = precomputed_dense_handle.is_some(),
+                            try_gpu = try_gpu_pr,
+                            hook_v2 = hook_v2_present,
+                            "DROPLDES (#74): pre-reduce free requested but NOT on \
+                             the device-happy path -- skipping (a later cold path \
+                             could re-materialize from the provider)."
+                        );
+                    });
+                }
+            }
+        }
+
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {

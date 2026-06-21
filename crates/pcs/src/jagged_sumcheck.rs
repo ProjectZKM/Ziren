@@ -679,6 +679,32 @@ pub fn build_weight_table_sp1(
     build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row)
 }
 
+/// FOOTPRINT (#73): the two SEPARABLE factors of `build_weight_table_sp1`'s
+/// weight table, exposed `pub` so the ziren-gpu fused jagged-reduction hook
+/// can DERIVE `w[off_k + row] = z_col_lagrange[k] * row_eq[row]` on the GPU
+/// from the resident `dense_q` without ever materializing the full
+/// 2^log_dense `w` table (the weight table the non-fused path builds).
+///
+/// Returns `(z_col_lagrange, row_eq)` where:
+///   * `z_col_lagrange = partial_lagrange(z_col)`  (per packed column k)
+///   * `row_eq = eq_mle_table(rev(z_row))`         (full max-log-row eq table,
+///      indexed by the LITERAL row index 0..h_c)
+///
+/// BYTE-IDENTICAL to `build_weight_table` by construction: that fn computes
+/// exactly `w[off + row] = z_col_lagrange[k] * row_eq[row]` from these same
+/// two factors (see `build_weight_table` body).  Keep in lockstep with
+/// `build_weight_table` / `build_weight_table_sp1`; any weight-table change
+/// MUST update all three.
+pub fn build_fused_weight_inputs_sp1(
+    z_col: &[InnerChallenge],
+    z_row: &[InnerChallenge],
+) -> (Vec<InnerChallenge>, Vec<InnerChallenge>) {
+    let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
+    let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
+    let row_eq = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
+    (z_col_lagrange, row_eq)
+}
+
 pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     proof: &JaggedReductionProof<InnerChallenge>,
     packing: &JaggedPacking<InnerVal>,
