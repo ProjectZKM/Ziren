@@ -672,6 +672,11 @@ pub fn verify_core_basefold<C, SC, A>(
                 builder.assert_felt_eq(is_first_shard * *bit, C::F::ZERO);
             }
         }
+        if std::env::var("ZIREN_N2B_DBG").is_ok() {
+            use p3_field::PrimeCharacteristicRing;
+            let s: Felt<C::F> = builder.constant(C::F::from_u64(7000002u64));
+            builder.print_f(s);
+        }
 
         // ---- Shard-chain consistency assertions (legacy core.rs:290-514) ----
 
@@ -695,6 +700,11 @@ pub fn verify_core_basefold<C, SC, A>(
             current_execution_shard = builder.eval(current_execution_shard + C::F::ONE);
         }
 
+        if std::env::var("ZIREN_N2B_DBG").is_ok() {
+            use p3_field::PrimeCharacteristicRing;
+            let s: Felt<C::F> = builder.constant(C::F::from_u64(7000005u64));
+            builder.print_f(s);
+        }
         // Program counter continuity.
         builder.assert_felt_eq(current_pc, public_values.start_pc);
         if !contains_cpu {
@@ -827,6 +837,11 @@ pub fn verify_core_basefold<C, SC, A>(
         // into the running aggregator here.
         global_cumulative_sums.extend(shard_globals);
     }
+    if std::env::var("ZIREN_N2B_DBG").is_ok() {
+        use p3_field::PrimeCharacteristicRing;
+        let s: Felt<C::F> = builder.constant(C::F::from_u64(7000003u64));
+        builder.print_f(s);
+    }
 
     let global_cumulative_sum = builder.sum_digest_v2(global_cumulative_sums);
 
@@ -868,6 +883,11 @@ pub fn verify_core_basefold<C, SC, A>(
     recursion_public_values.digest =
         recursion_public_values_digest::<C, SC>(builder, recursion_public_values);
 
+    if std::env::var("ZIREN_N2B_DBG").is_ok() {
+        use p3_field::PrimeCharacteristicRing;
+        let s: Felt<C::F> = builder.constant(C::F::from_u64(7000004u64));
+        builder.print_f(s);
+    }
     assert_complete(builder, recursion_public_values, is_complete);
 
     SC::commit_recursion_public_values(builder, *recursion_public_values);
