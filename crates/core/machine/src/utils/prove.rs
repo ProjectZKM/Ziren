@@ -1019,10 +1019,12 @@ where
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
     SC: StarkGenericConfig + zkm_pcs::BasefoldRing,
     SC::Val: p3_field::PrimeField32,
-    SC::Challenger: Clone,
+    SC::Challenger: Clone + Sync,
+    SC: Sync,
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
+    zkm_pcs::ShardProof<SC>: Sync,
 {
     let mut challenger = prover.config().challenger();
     let prove_span = tracing::debug_span!("prove").entered();

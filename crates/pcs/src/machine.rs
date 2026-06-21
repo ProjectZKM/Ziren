@@ -742,8 +742,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         challenger: &mut SC::Challenger,
     ) -> Result<(), MachineVerificationError<SC>>
     where
-        SC::Challenger: Clone,
-        A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
+        SC::Challenger: Clone + Sync,
+        SC: Sync,
+        Com<SC>: Sync,
+        ShardProof<SC>: Sync,
+        A: Sync
+            + for<'a> Air<VerifierConstraintFolder<'a, SC>>
             + for<'b> Air<
                 crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                     'b,
@@ -760,14 +764,25 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             return Err(MachineVerificationError::EmptyProof);
         }
 
-        tracing::debug_span!("verify shard proofs").in_scope(|| {
-            for (i, shard_proof) in proof.shard_proofs.iter().enumerate() {
+        // Snapshot the (now observed) base challenger as an immutable, shareable value.
+        // Each shard clones this snapshot independently, exactly as the serial loop did,
+        // so the per-shard challenger state is bit-identical to the serial version.
+        let base_challenger = &*challenger;
+
+        // Verify each shard proof in parallel. Each iteration is fully independent: it clones
+        // the base challenger (read-only), observes its own shard public values, and verifies
+        // its own shard. The closure returns only the shard index on failure (a `Send` value),
+        // so we do not require the rich `MachineVerificationError<SC>` to be `Send`. To preserve
+        // the serial verdict exactly, we collect the indices of all failing shards and, if any,
+        // re-verify the lowest-index failure serially to reconstruct the original typed error —
+        // identical to what the serial `for` loop returned (it returned the first failure).
+        let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
+            let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
                     let chips =
                         self.shard_chips_ordered(&shard_proof.chip_ordering).collect::<Vec<_>>();
-                    let mut shard_challenger = challenger.clone();
-                    shard_challenger
-                        .observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
+                    let mut shard_challenger = base_challenger.clone();
+                    shard_challenger.observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
                     Verifier::verify_shard(
                         &self.config,
                         vk,
@@ -776,11 +791,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         shard_proof,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
-                })?;
-            }
+                })
+            };
 
-            Ok(())
-        })?;
+            proof
+                .shard_proofs
+                .par_iter()
+                .enumerate()
+                .filter_map(|(i, shard_proof)| verify_one(i, shard_proof).err().map(|_| i))
+                .min()
+                .map(|i| verify_one(i, &proof.shard_proofs[i]))
+        });
+
+        if let Some(result) = failed_shard {
+            // The lowest-index shard that failed in parallel; re-run serially for its typed error.
+            result?;
+        }
 
         // Verify the cumulative sum is 0.
         tracing::debug_span!("verify global cumulative sum is 0").in_scope(|| {
