@@ -349,6 +349,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         for bit in last_sum.iter() {
             final_area = *bit + two * final_area;
         }
+        if s7_dbg {
+            // FINAL-AREA probe: print acc (= Σ row_counts, should be
+            // total_values) then final_area (Horner of col_prefix_sums.last()).
+            // last_sum.len printed host-side to catch a width/cap mismatch.
+            eprintln!("[S7-FINAL] last_sum.len={}", last_sum.len());
+            let fa_felt: Felt<C::F> = builder.eval(final_area.clone());
+            builder.print_f(acc);
+            builder.print_f(fa_felt);
+        }
         builder.assert_felt_eq(acc, final_area);
 
         // (8) Close the chain: jagged_eval * expected_eval must
