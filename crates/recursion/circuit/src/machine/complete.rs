@@ -33,10 +33,6 @@ pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
 
     // Assert that `next_pc` is equal to zero (so program execution has completed)
     builder.assert_felt_eq(is_complete * *next_pc, C::F::ZERO);
-    if std::env::var("ZIREN_N2B_DBG").is_ok() {
-        let s: Felt<C::F> = builder.constant(C::F::from_u64(7000006u64));
-        builder.print_f(s);
-    }
 
     // Assert that start shard is equal to 1.
     builder.assert_felt_eq(is_complete * (*start_shard - C::F::ONE), C::F::ZERO);
@@ -65,12 +61,5 @@ pub(crate) fn assert_complete<C: Config<F = KoalaBear>>(
             .assert_felt_eq(is_complete * (*end_digest_word - *deferred_digest_word), C::F::ZERO);
     }
 
-    if std::env::var("ZIREN_N2B_DBG").is_ok() {
-        // 7000007 printed = next_pc + all shard/deferred checks passed; if the
-        // panic follows this, the failure is the GLOBAL CUMULATIVE SUM != 0
-        // (LogUp imbalance — low-placement zero-rows inject spurious lookups).
-        let s: Felt<C::F> = builder.constant(C::F::from_u64(7000007u64));
-        builder.print_f(s);
-    }
     builder.assert_digest_zero_v2(is_complete, *global_cumulative_sum);
 }

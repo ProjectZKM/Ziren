@@ -278,25 +278,8 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // no-op.  Any over-claim 2^L < row_count < 2^{L+1} trips the product
         // assert; row_count ≥ 2^{L+1} fails `num2bits`.
         let cube_log = z_row.len();
-        // HA DIAG (gated ZIREN_N2B_DBG): this is the sole num2bits in the
-        // FIX-off verify path once the lift's gated path uses host-const
-        // col_prefix_sums/row_counts.  num2bits(row_count, cube_log+1) panics
-        // iff row_count >= 2^(cube_log+1) — print each row_count at runtime so
-        // the LAST value before any panic pins the failing chip + value (e.g.
-        // the unexplained 680210629).  cube_log is build-time, eprintln'd once.
-        let n2b_dbg = std::env::var("ZIREN_N2B_DBG").is_ok();
-        if n2b_dbg {
-            eprintln!(
-                "[N2B] row-count bound check: cube_log={cube_log} (bound 2^{}), n_rounds={}",
-                cube_log + 1,
-                row_counts.len()
-            );
-        }
         for round in row_counts.iter() {
             for &row_count in round.iter() {
-                if n2b_dbg {
-                    builder.print_f(row_count);
-                }
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
             }
         }
@@ -304,32 +287,16 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // (7) Check prefix-sum consistency: accumulating the
         // per-chip row counts must match the per-column prefix
         // sums the jagged-eval protocol emitted.
-        let s7_dbg = std::env::var("ZIREN_N2B_DBG").is_ok();
         let repeated_row_counts: Vec<Felt<C::F>> = row_counts
             .iter()
             .flatten()
             .zip(column_counts.iter().flatten())
             .flat_map(|(row, col)| core::iter::repeat(*row).take(*col))
             .collect();
-        if s7_dbg {
-            let rc_total: usize = row_counts.iter().flatten().count();
-            let cc_total: usize = column_counts.iter().flatten().count();
-            let cc_sum: usize = column_counts.iter().flatten().sum();
-            eprintln!(
-                "[S7-LEN] row_counts(flat)={} column_counts(flat)={} Σcolumn_counts={} repeated.len={} prefix_sum_felts.len={}",
-                rc_total, cc_total, cc_sum, repeated_row_counts.len(), prefix_sum_felts.len()
-            );
-        }
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
         for (row_count, expected) in
             repeated_row_counts.iter().zip(prefix_sum_felts.iter())
         {
-            if s7_dbg {
-                // PRINTF pairs: ...,acc_k,expected_k,...  the LAST pair before
-                // any panic is the first divergent column (acc != expected).
-                builder.print_f(acc);
-                builder.print_f(*expected);
-            }
             builder.assert_felt_eq(acc, *expected);
             acc = builder.eval(acc + *row_count);
         }
@@ -348,15 +315,6 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             zkm_recursion_compiler::ir::SymbolicFelt::<C::F>::ZERO;
         for bit in last_sum.iter() {
             final_area = *bit + two * final_area;
-        }
-        if s7_dbg {
-            // FINAL-AREA probe: print acc (= Σ row_counts, should be
-            // total_values) then final_area (Horner of col_prefix_sums.last()).
-            // last_sum.len printed host-side to catch a width/cap mismatch.
-            eprintln!("[S7-FINAL] last_sum.len={}", last_sum.len());
-            let fa_felt: Felt<C::F> = builder.eval(final_area.clone());
-            builder.print_f(acc);
-            builder.print_f(fa_felt);
         }
         builder.assert_felt_eq(acc, final_area);
 
