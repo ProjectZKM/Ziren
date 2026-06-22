@@ -469,16 +469,33 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .unzip();
 
         // Commit to the batch of traces.
-        let (commit, data) = if SC::prep_commit_via_hook() {
+        // Height-agnostic recursion: route prep through the BaseFold hook when
+        // configured (wrap) OR when a prep trace would overflow the two-adic
+        // `pcs.commit` ceiling (FIX-off recursion prep reaches 2^24 > inner
+        // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
+        let max_prep_log = named_preprocessed_traces
+            .iter()
+            .map(|(_, _, t)| {
+                let h = t.height();
+                if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
+            })
+            .max()
+            .unwrap_or(0);
+        let use_prep_hook = SC::prep_commit_via_hook()
+            || (max_prep_log > SC::prep_two_adic_ceiling_log()
+                && SC::prep_commit_hook().is_some());
+        let (commit, data) = if use_prep_hook {
             // SP1-style prep commit (no two-adic coset LDE) — see
             // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
             // `pcs.commit` LDE caps prep heights at
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
-            let hook = crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook().expect(
-                "prep_commit_via_hook config without a registered \
-                 OuterPrepCommitFn (recursion-core::register_outer_jagged_hooks)",
-            );
+            let hook = SC::prep_commit_hook()
+                .or_else(crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook)
+                .expect(
+                    "prep commit hook required but none available \
+                     (SC::prep_commit_hook nor registered OuterPrepCommitFn)",
+                );
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
                 .map(|(name, _, trace)| (name.to_string(), trace.clone()))
@@ -619,16 +636,33 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .unzip();
 
         // Commit to the batch of traces.
-        let (commit, data) = if SC::prep_commit_via_hook() {
+        // Height-agnostic recursion: route prep through the BaseFold hook when
+        // configured (wrap) OR when a prep trace would overflow the two-adic
+        // `pcs.commit` ceiling (FIX-off recursion prep reaches 2^24 > inner
+        // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
+        let max_prep_log = named_preprocessed_traces
+            .iter()
+            .map(|(_, _, t)| {
+                let h = t.height();
+                if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
+            })
+            .max()
+            .unwrap_or(0);
+        let use_prep_hook = SC::prep_commit_via_hook()
+            || (max_prep_log > SC::prep_two_adic_ceiling_log()
+                && SC::prep_commit_hook().is_some());
+        let (commit, data) = if use_prep_hook {
             // SP1-style prep commit (no two-adic coset LDE) — see
             // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
             // `pcs.commit` LDE caps prep heights at
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
-            let hook = crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook().expect(
-                "prep_commit_via_hook config without a registered \
-                 OuterPrepCommitFn (recursion-core::register_outer_jagged_hooks)",
-            );
+            let hook = SC::prep_commit_hook()
+                .or_else(crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook)
+                .expect(
+                    "prep commit hook required but none available \
+                     (SC::prep_commit_hook nor registered OuterPrepCommitFn)",
+                );
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
                 .map(|(name, _, trace)| (name.to_string(), trace.clone()))

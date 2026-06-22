@@ -79,6 +79,29 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     fn prep_commit_via_hook() -> bool {
         false
     }
+
+    /// The BaseFold preprocessed-commit hook for this config, if any.  Commits
+    /// KoalaBear-valued preprocessed traces via stacked BaseFold (no two-adic
+    /// coset LDE) and returns the bincode of `Com<Self>`.  `StarkMachine::setup`
+    /// invokes it when `prep_commit_via_hook()` is set OR a prep trace exceeds
+    /// `prep_two_adic_ceiling_log()`.  Default None (only `pcs.commit` is used).
+    /// The inner (`KoalaBearPoseidon2`) config returns `inner_prep_commit`; the
+    /// wrap config falls back to the registered `get_outer_prep_commit_hook`.
+    fn prep_commit_hook() -> Option<crate::shard_level::sumcheck_poly::OuterPrepCommitFn> {
+        None
+    }
+
+    /// Max preprocessed LOG height committable via the two-adic `pcs.commit`
+    /// (= `TWO_ADICITY - log_blowup`).  Above this, the coset LDE
+    /// (`height << log_blowup`) would exceed `TWO_ADICITY` and panic in
+    /// `two_adic_generator`, so setup routes prep through `prep_commit_hook`
+    /// instead (height-agnostic recursion: FIX-off recursion prep reaches
+    /// 2^24 > the inner 2^23 ceiling).  Default `usize::MAX` (never
+    /// height-trigger — preserves byte-identical two-adic prep for every
+    /// config that fits, incl. core and FIX-on recursion).
+    fn prep_two_adic_ceiling_log() -> usize {
+        usize::MAX
+    }
 }
 
 pub trait ZeroCommitment<SC: StarkGenericConfig> {

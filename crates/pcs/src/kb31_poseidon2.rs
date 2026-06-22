@@ -545,6 +545,45 @@ pub mod koala_bear_poseidon2 {
         fn challenger(&self) -> Self::Challenger {
             Challenger::new(self.perm.clone())
         }
+
+        fn prep_commit_hook(
+        ) -> Option<crate::shard_level::sumcheck_poly::OuterPrepCommitFn> {
+            Some(inner_prep_commit)
+        }
+
+        fn prep_two_adic_ceiling_log() -> usize {
+            // KoalaBear TWO_ADICITY = 24; the inner prep two-adic `pcs.commit`
+            // uses log_blowup = 1, so the coset LDE caps prep at
+            // 2^(24 - 1) = 2^23.  FIX-off recursion prep reaches 2^24 → route
+            // those (and only those) through `inner_prep_commit` (BaseFold).
+            23
+        }
+    }
+
+    /// SP1-style PREPROCESSED-trace setup commit for the inner
+    /// (`KoalaBearPoseidon2`) core/compress/shrink config: stacked BaseFold
+    /// over the Poseidon2-KoalaBear `JaggedMmcs` (no two-adic coset LDE, so no
+    /// `2^(TWO_ADICITY - log_blowup)` ceiling).  Mirrors `outer_prep_commit`
+    /// (recursion-core, BN254 ring).  Returns bincode of the
+    /// `JaggedMmcs::Commitment` — equal to `Com<KoalaBearPoseidon2>` since the
+    /// inner `Pcs` is `TwoAdicFriPcs<_, _, InnerValMmcs, _>` and
+    /// `JaggedMmcs == InnerValMmcs` (same Poseidon2-KoalaBear Merkle root).
+    pub fn inner_prep_commit(
+        chip_traces: Vec<(
+            String,
+            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+        )>,
+    ) -> Vec<u8> {
+        use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
+        let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
+        let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
+        let pre = precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
+            &chip_traces,
+            mmcs,
+            fri,
+        );
+        bincode::serialize(&pre.commit.commitment)
+            .expect("inner_prep_commit: serialize commitment")
     }
 
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
