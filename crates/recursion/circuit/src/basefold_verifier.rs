@@ -956,7 +956,21 @@ where
             use p3_field::PrimeCharacteristicRing;
             let actual_num_vars: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(C::F::from_usize(self.params.num_variables));
-            assert_num_vars_le_max::<C>(builder, actual_num_vars, self.params.num_variables);
+            // #88 Phase 1 — bind against the GLOBAL ceiling
+            // `DEFAULT_LOG_STACKING_HEIGHT` (= 21) rather than the per-proof
+            // `self.params.num_variables`, so the round-count bound is
+            // height-AGNOSTIC.  Verdict-neutral on every path: the fixed
+            // stacking height clamps DOWN only (never above 21), so
+            // `actual_num_vars <= 21` always ⇒ `diff = ceiling - actual >= 0`
+            // and both `num2bits` recompositions still bind inertly (no honest
+            // proof's verdict changes; it only widens the accepted interval
+            // from `{num_variables}` to `[0, 21]`, which is the height-agnostic
+            // invariant Phase 2 relies on once `actual_num_vars` is witnessed).
+            assert_num_vars_le_max::<C>(
+                builder,
+                actual_num_vars,
+                zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+            );
         }
 
         // (4) Commit-phase transcript replay — byte-for-byte the
