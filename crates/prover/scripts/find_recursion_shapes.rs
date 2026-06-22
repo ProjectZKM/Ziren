@@ -48,7 +48,39 @@ fn main() {
     // Create the maximal shape from all of the shapes in recursion_shape_config, then add 2 to
     // all the log-heights of that shape. This is the starting candidate for the "minimal large
     // shape".
-    let candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
+    let mut candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
+
+    // #88 FIX-off discovery (ZIREN_HA_DISCOVER=1).  Under height-agnostic
+    // recursion (FIX_CORE_SHAPES=false + ZIREN_HA_BAKED_COLPS=1) the recursion
+    // programs reach much larger per-chip log-heights than the current bands
+    // (e.g. ExtAlu ~2^24, BaseAlu ~2^23), so the stock `union_config_with_extra_room`
+    // starting candidate (= current bands + 2) is TOO SMALL and the initial
+    // `check_shapes` assert below fails before the chip-by-chip reduction can run.
+    // Bump the candidate to a generous FIX-off floor (above the observed [REC-H]
+    // maxima); the reduction loop below then shrinks each chip back to the true
+    // minimal that still covers all core shapes.  Gated so non-FIX-off runs are
+    // unchanged.
+    if std::env::var("ZIREN_HA_DISCOVER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        // observed [REC-H] maxima (167 samples) + 2 headroom; reduction prunes down.
+        let fixoff_floor: [(&str, usize); 8] = [
+            ("ExtAlu", 26),
+            ("BaseAlu", 25),
+            ("MemoryConst", 24),
+            ("MemoryVar", 23),
+            ("Select", 23),
+            ("Poseidon2WideDeg3", 21),
+            ("BatchFRI", 21),
+            ("ExpReverseBitsLen", 21),
+        ];
+        for (k, floor) in fixoff_floor {
+            let e = candidate.entry(k.to_string()).or_insert(floor);
+            *e = (*e).max(floor);
+        }
+        tracing::info!("FIX-off discovery: bumped starting candidate to {:?}", candidate);
+    }
 
     prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&candidate));
 
