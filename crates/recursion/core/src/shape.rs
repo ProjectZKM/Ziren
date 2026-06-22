@@ -248,29 +248,22 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // Placed LAST so smaller programs (fib/first-layer/reth/geth
             // shallow compose) still prefer the smaller bands above and
             // pay less padding; only Select>2^20 compose programs reach it.
-            [
-                (mem_var.clone(), 20),
-                (select.clone(), 21),
-                (mem_const.clone(), 20),
-                (batch_fri.clone(), 21),
-                (base_alu.clone(), 20),
-                (ext_alu.clone(), 21),
-                (exp_reverse_bits_len.clone(), 18),
-                (poseidon2_wide.clone(), 19),
-                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
-            ],
-            // #88 / #79 height-agnostic FIX-off catch-all band. Per-chip maxima
-            // of the NATURAL recursion heights measured across all 1202 FIX-off
-            // shapes (`find_recursion_shapes --measure`, Jun22): ExtAlu->24,
-            // BaseAlu->23, MemoryConst/MemoryVar->22, Select->21,
-            // Poseidon2WideDeg3->20 (BatchFRI/ExpReverseBitsLen measured 0/unused
-            // but kept at the legacy 21/18 to avoid under-provisioning). Capped
-            // at ExtAlu 2^24 = KoalaBear two-adicity. Placed LAST so smaller
-            // programs still prefer the smaller bands and pay less padding; only
-            // FIX-off (`FIX_CORE_SHAPES=false`) programs — whose recursion
-            // heights reach ExtAlu ~2^24 — fall through here. This is what lets
-            // `fix_shape` accept FIX-off proofs (the old max band ExtAlu 2^21
-            // rejected them at shape.rs:91 "no shape found").
+            // #88 / #79 height-agnostic FIX-off band. REPLACES the prior
+            // component-opening band (it is a strict superset: ExtAlu 24>=21,
+            // Select 21=21, MemoryVar/MemoryConst 22>=20, BaseAlu 23>=20,
+            // Poseidon2WideDeg3 20>=19) so we keep FIVE bands total — adding a
+            // 6th blew the Compress cartesian product (bands^REDUCE_BATCH = 6^4
+            // = 1296) past the VK_MERKLE_TREE_HEIGHT 2^11 pre-flight at
+            // shapes.rs:197 (2762 > 2048); 5 bands -> 5^4 -> 1986 < 2048 fits.
+            // Per-chip maxima of the NATURAL recursion heights measured across
+            // all 1202 FIX-off shapes (`find_recursion_shapes --measure`, Jun22):
+            // ExtAlu 24, BaseAlu 23, MemoryConst/MemoryVar 22, Select 21,
+            // Poseidon2WideDeg3 20 (BatchFRI/ExpReverseBitsLen measured 0/unused,
+            // kept at legacy 21/18). Capped at ExtAlu 2^24 = KoalaBear
+            // two-adicity. This band is what lets `fix_shape` accept FIX-off
+            // (`FIX_CORE_SHAPES=false`) proofs, whose recursion heights reach
+            // ExtAlu ~2^24 (the old max band ExtAlu 2^21 rejected them at
+            // shape.rs:91 "no shape found").
             [
                 (mem_var.clone(), 22),
                 (select.clone(), 21),
