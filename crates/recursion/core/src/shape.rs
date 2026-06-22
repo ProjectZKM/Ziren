@@ -259,6 +259,29 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
+            // #88 / #79 height-agnostic FIX-off catch-all band. Per-chip maxima
+            // of the NATURAL recursion heights measured across all 1202 FIX-off
+            // shapes (`find_recursion_shapes --measure`, Jun22): ExtAlu->24,
+            // BaseAlu->23, MemoryConst/MemoryVar->22, Select->21,
+            // Poseidon2WideDeg3->20 (BatchFRI/ExpReverseBitsLen measured 0/unused
+            // but kept at the legacy 21/18 to avoid under-provisioning). Capped
+            // at ExtAlu 2^24 = KoalaBear two-adicity. Placed LAST so smaller
+            // programs still prefer the smaller bands and pay less padding; only
+            // FIX-off (`FIX_CORE_SHAPES=false`) programs — whose recursion
+            // heights reach ExtAlu ~2^24 — fall through here. This is what lets
+            // `fix_shape` accept FIX-off proofs (the old max band ExtAlu 2^21
+            // rejected them at shape.rs:91 "no shape found").
+            [
+                (mem_var.clone(), 22),
+                (select.clone(), 21),
+                (mem_const.clone(), 22),
+                (batch_fri.clone(), 21),
+                (base_alu.clone(), 23),
+                (ext_alu.clone(), 24),
+                (exp_reverse_bits_len.clone(), 18),
+                (poseidon2_wide.clone(), 20),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
         ]
         .map(HashMap::from)
         .to_vec();
