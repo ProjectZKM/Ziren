@@ -154,7 +154,19 @@ fn main() {
                 let maxima = Arc::clone(&maxima);
                 let skipped = Arc::clone(&skipped);
                 s.spawn(move || {
-                    while let Ok(shape) = shape_rx.lock().unwrap().recv() {
+                    loop {
+                        // Hold the channel lock ONLY for the recv, then release it
+                        // before the (long) program build — otherwise the guard from
+                        // `while let Ok(_) = shape_rx.lock().recv()` lives for the whole
+                        // loop body, serializing all workers onto one core.
+                        let recvd = {
+                            let rx = shape_rx.lock().unwrap();
+                            rx.recv()
+                        };
+                        let shape = match recvd {
+                            Ok(s) => s,
+                            Err(_) => break,
+                        };
                         let compress_shape =
                             ZKMCompressProgramShape::from_proof_shape(shape.clone(), height);
                         let measured = catch_unwind(AssertUnwindSafe(|| {
