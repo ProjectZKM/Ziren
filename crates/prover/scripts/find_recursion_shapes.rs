@@ -1,12 +1,14 @@
+use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::{Arc, Mutex};
 
 use clap::Parser;
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::utils::setup_logger;
 use zkm_prover::{
     components::DefaultProverComponents,
-    shapes::{check_shapes, ZKMProofShape},
-    ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
+    shapes::{check_shapes, ZKMCompressProgramShape, ZKMProofShape},
+    CompressAir, ShrinkAir, ZKMProver, REDUCE_BATCH_SIZE,
 };
 use zkm_recursion_core::shape::RecursionShapeConfig;
 use zkm_pcs::{shape::OrderedShape, MachineProver};
@@ -26,6 +28,12 @@ struct Args {
     start: Option<usize>,
     #[clap(short, long)]
     end: Option<usize>,
+    /// #88 height-agnostic FIX-off discovery: instead of the slow chip-by-chip
+    /// reduction, measure the per-chip MAXIMAL *natural* (pre-`fix_shape`)
+    /// recursion heights across all enumerated shapes in ONE pass and print the
+    /// resulting maximal band.
+    #[clap(long, default_value_t = false)]
+    measure: bool,
 }
 
 fn main() {
@@ -80,6 +88,115 @@ fn main() {
             *e = (*e).max(floor);
         }
         tracing::info!("FIX-off discovery: bumped starting candidate to {:?}", candidate);
+    }
+
+    // #88 --measure: one-pass measurement of the per-chip MAXIMAL *natural*
+    // (pre-`fix_shape`) recursion heights across all enumerated shapes.
+    //
+    // The slow chip-by-chip reduction below recompiles the huge recursion
+    // programs many times (~weeks).  For the height-agnostic FIX-off regen we
+    // only need the maximal band = per-chip max of the NATURAL heights each
+    // shape's recursion program reaches.  We get that in a SINGLE pass:
+    //   * build with `compress_shape_config = None` so `program_from_shape`
+    //     does NOT apply `fix_shape` -> the program keeps its natural heights;
+    //   * for each enumerated shape, `CompressAir::heights(&program)` reports
+    //     the per-chip row counts; we log2-ceil them and accumulate per-chip max.
+    // Enumeration uses the (bumped) candidate as the recursion config so all
+    // shapes enumerate, but that config is ONLY used for `ZKMProofShape::generate`
+    // -- the program is built with the None-config prover (natural heights).
+    if args.measure {
+        // Enumeration config: the bumped FIX-off candidate so every core shape
+        // enumerates.  Borrow it from a temporary prover-config; the actual
+        // program build uses `prover` (compress_shape_config = None) below.
+        let enum_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::from_hash_map(
+            &candidate,
+        );
+
+        // Build with NO compress_shape_config -> natural (pre-fix_shape) heights.
+        prover.compress_shape_config = None;
+
+        let core_shape_config =
+            prover.core_shape_config.as_ref().expect("core shape config not found");
+
+        // Core-derived enumeration (like build_compress_vks), NOT the
+        // band-shaped generate_maximal_shapes.
+        let all_shapes = ZKMProofShape::generate(
+            core_shape_config,
+            &enum_cfg,
+            args.recursion_batch_size,
+        )
+        .collect::<Vec<_>>();
+        let num_shapes = all_shapes.len();
+        tracing::info!("measure: number of enumerated shapes: {}", num_shapes);
+
+        // Fixed merkle-tree height ceiling (see check_shapes shapes.rs:~98).
+        let height = zkm_prover::VK_MERKLE_TREE_HEIGHT;
+
+        let maxima: Arc<Mutex<HashMap<String, usize>>> = Arc::new(Mutex::new(HashMap::new()));
+        let skipped = Arc::new(Mutex::new(0usize));
+
+        let (shape_tx, shape_rx) =
+            std::sync::mpsc::sync_channel::<ZKMProofShape>(args.num_compiler_workers);
+        let shape_rx = Mutex::new(shape_rx);
+
+        let ceil_log2 = |rows: usize| -> usize {
+            if rows <= 1 {
+                0
+            } else {
+                (usize::BITS - (rows - 1).leading_zeros()) as usize
+            }
+        };
+
+        std::thread::scope(|s| {
+            for _ in 0..args.num_compiler_workers {
+                let shape_rx = &shape_rx;
+                let prover = &prover;
+                let maxima = Arc::clone(&maxima);
+                let skipped = Arc::clone(&skipped);
+                s.spawn(move || {
+                    while let Ok(shape) = shape_rx.lock().unwrap().recv() {
+                        let compress_shape =
+                            ZKMCompressProgramShape::from_proof_shape(shape.clone(), height);
+                        let measured = catch_unwind(AssertUnwindSafe(|| {
+                            let program = prover.program_from_shape(compress_shape, None);
+                            CompressAir::<KoalaBear>::heights(&program)
+                        }));
+                        match measured {
+                            Ok(per_chip) => {
+                                let mut guard = maxima.lock().unwrap();
+                                for (chip, rows) in per_chip {
+                                    let log = ceil_log2(rows);
+                                    let e = guard.entry(chip).or_insert(0);
+                                    *e = (*e).max(log);
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    "measure: skipping shape {:?} (panic: {:?})",
+                                    shape,
+                                    e
+                                );
+                                *skipped.lock().unwrap() += 1;
+                            }
+                        }
+                    }
+                });
+            }
+
+            for shape in all_shapes {
+                shape_tx.send(shape).unwrap();
+            }
+            drop(shape_tx);
+        });
+
+        let maxima = Arc::try_unwrap(maxima).unwrap().into_inner().unwrap();
+        let skipped = Arc::try_unwrap(skipped).unwrap().into_inner().unwrap();
+        let mut sorted: Vec<(String, usize)> = maxima.into_iter().collect();
+        sorted.sort();
+
+        println!("MEASURED MAXIMAL BAND (log2): {:?}", sorted);
+        println!("measure: skipped (panicked) shapes: {} / {}", skipped, num_shapes);
+        return;
     }
 
     prover.compress_shape_config = Some(RecursionShapeConfig::from_hash_map(&candidate));
