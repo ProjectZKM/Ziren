@@ -142,6 +142,12 @@ where
             .assert_eq(local.input_address, next.input_address);
         // If this is the first block, absorbed bytes should be 0
         builder.when(first_block).assert_eq(local.already_absorbed_u32s, AB::Expr::zero());
+        // If this is the first block, the sponge state must start from the
+        // fixed all-zero Keccak IV.
+        let mut first_block_builder = builder.when(first_block);
+        for i in 0..KECCAK_STATE_U32S {
+            first_block_builder.assert_word_zero(local.original_state[i]);
+        }
         // If this is the final block, absorbed bytes should be equal to the input length - KECCAK_GENERAL_RATE_U32S
         builder.when(final_block).assert_eq(
             local.already_absorbed_u32s,
