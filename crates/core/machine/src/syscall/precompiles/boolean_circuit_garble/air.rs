@@ -250,6 +250,7 @@ impl BooleanCircuitGarbleChip {
         builder.when(local.is_first_row).assert_eq(next.clk, local.clk);
         builder.when(local.is_first_row).assert_eq(next.gates_num, local.gates_num);
         builder.when(local.is_first_row).assert_zero(next.is_first_row);
+        builder.when(local.is_first_row).assert_one(next.is_first_gate);
         builder.when(local.is_first_row).assert_eq(next.is_gate, next.is_first_gate);
         builder.when(local.is_first_row).assert_eq(next.checks_acc, next.is_gate);
         // Continue with next gate row only when explicitly in same-event continuation.
