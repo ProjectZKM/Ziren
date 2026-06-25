@@ -434,6 +434,10 @@ pub enum ExecutionError {
     #[error("buffer length {1} must be greater than or equal to {0}")]
     BufferLengthTooSmall(usize, usize),
 
+    /// The execution failed because a hook received an unsupported elliptic curve identifier.
+    #[error("unsupported ecrecover curve id: {0}")]
+    UnsupportedEcrecoverCurveId(u8),
+
     /// The execution failed while converting a slice to an array due to size mismatch.
     #[error("failed to convert slice {0} to array")]
     IntoArrayError(String),

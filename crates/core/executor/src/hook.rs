@@ -130,7 +130,7 @@ pub fn hook_ecrecover(_: HookEnv, buf: &[u8]) -> Result<Vec<Vec<u8>>, ExecutionE
     match curve_id {
         1 => Ok(ecrecover::handle_secp256k1(r_bytes, alpha_bytes, r_is_y_odd)),
         2 => Ok(ecrecover::handle_secp256r1(r_bytes, alpha_bytes, r_is_y_odd)),
-        _ => unimplemented!("Unsupported curve id: {}", curve_id),
+        _ => Err(ExecutionError::UnsupportedEcrecoverCurveId(curve_id)),
     }
 }
 
