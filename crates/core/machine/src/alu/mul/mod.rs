@@ -42,7 +42,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
-    ByteOpcode, ExecutionRecord, Opcode, Program,
+    ByteOpcode, ExecutionRecord, Opcode, Program, UNUSED_PC,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
@@ -507,6 +507,12 @@ where
         // if hi_record_is_real = 0, both clk and shard should be zero.
         builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
+        // Hardware MULT/MULTU rows must write HI. Dependency-only multiply
+        // rows use UNUSED_PC and keep hi_record_is_real = 0.
+        builder.when(local.is_mult + local.is_multu).assert_zero(
+            (local.pc - AB::Expr::from_canonical_u32(UNUSED_PC))
+                * (AB::Expr::one() - local.hi_record_is_real),
+        );
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
