@@ -140,6 +140,13 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
             }),
         };
 
+        let assert_on_curve = |builder: &mut AB, point: SepticCurve<AB::Expr>| {
+            builder.assert_septic_ext_eq(
+                point.y.square(),
+                SepticCurve::<AB::Expr>::curve_formula(point.x),
+            );
+        };
+
         let ith_cumulative_sum = |idx: usize| SepticCurve::<AB::Expr> {
             x: SepticExtension::<AB::Expr>::from_base_fn(|i| {
                 local_accumulation.cumulative_sum[idx][0].0[i].into()
@@ -163,12 +170,17 @@ impl<F: Field, const N: usize> GlobalAccumulationOperation<F, N> {
         // `(0, ZERO_DIGEST)`, emitted by the public-values AIR
         // (`eval_global_sum`) and received by row 0, enforces it.
 
+        // Defense-in-depth: every witnessed running digest must stay on-curve even if the
+        // incomplete Weierstrass addition edge case is triggered.
+        assert_on_curve(builder, initial_digest.clone());
+
         // Constrain that when `is_real = 1`, addition is being carried out, and when `is_real = 0`, the sum remains the same.
         for i in 0..N {
             let current_sum =
                 if i == 0 { initial_digest.clone() } else { ith_cumulative_sum(i - 1) };
             let point_to_add = ith_point_to_add(i);
             let next_sum = ith_cumulative_sum(i);
+            assert_on_curve(builder, next_sum.clone());
             // If `local_is_real[i] == 1`, current_sum + point_to_add == next_sum must hold.
             // To do this, constrain that `sum_checker_x` and `sum_checker_y` are both zero when `is_real == 1`.
             let sum_checker_x = SepticCurve::<AB::Expr>::sum_checker_x(
