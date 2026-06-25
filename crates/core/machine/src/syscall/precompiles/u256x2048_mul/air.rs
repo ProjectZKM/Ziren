@@ -1,7 +1,7 @@
 use crate::{
     air::MemoryAirBuilder,
     memory::{value_as_limbs, MemoryCols, MemoryReadCols, MemoryWriteCols},
-    operations::field::field_op::FieldOpCols,
+    operations::{field::field_op::FieldOpCols, KoalaBearWordRangeChecker},
     utils::{limbs_from_access, pad_rows_fixed, words_to_bytes_le},
     CoreChipError,
 };
@@ -69,6 +69,9 @@ pub struct U256x2048MulCols<T> {
     pub lo_ptr_memory: MemoryReadCols<T>,
     pub hi_ptr_memory: MemoryReadCols<T>,
 
+    pub lo_ptr_range_checker: KoalaBearWordRangeChecker<T>,
+    pub hi_ptr_range_checker: KoalaBearWordRangeChecker<T>,
+
     // Memory columns.
     pub a_memory: [MemoryReadCols<T>; WORDS_FIELD_ELEMENT],
     pub b_memory: [MemoryReadCols<T>; WORDS_FIELD_ELEMENT * 8],
@@ -134,6 +137,8 @@ impl<F: PrimeField32> MachineAir<F> for U256x2048MulChip {
                             .populate(event.lo_ptr_memory, &mut new_byte_lookup_events);
                         cols.hi_ptr_memory
                             .populate(event.hi_ptr_memory, &mut new_byte_lookup_events);
+                        cols.lo_ptr_range_checker.populate(event.lo_ptr_memory.value);
+                        cols.hi_ptr_range_checker.populate(event.hi_ptr_memory.value);
 
                         // Populate memory columns.
                         for i in 0..WORDS_FIELD_ELEMENT {
@@ -385,6 +390,21 @@ where
                 ),
             );
         }
+
+        // Range-check the raw pointer words before reducing them to field
+        // addresses, so the reduction is injective for these memory values.
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
+            builder,
+            *local.lo_ptr_memory.value(),
+            local.lo_ptr_range_checker,
+            local.is_real.into(),
+        );
+        KoalaBearWordRangeChecker::<AB::F>::range_check(
+            builder,
+            *local.hi_ptr_memory.value(),
+            local.hi_ptr_range_checker,
+            local.is_real.into(),
+        );
 
         // Constrain that the lo_ptr is the value of lo_ptr_memory.
         builder
