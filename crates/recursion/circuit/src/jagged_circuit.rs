@@ -102,21 +102,19 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     pub pcs_proof: RecursiveStackedPcsProof<Pcs, F, EF>,
     /// Per-round per-chip column-count list.
     pub column_counts: Vec<Vec<usize>>,
-    /// Per-round per-chip row-count bit-decomposition list
-    /// (Felt-typed for in-circuit prefix-sum computation).
+    /// Per-round per-chip row-count list (one Felt per chip — the
+    /// WITNESSED per-chip height `2^log_h`, reconstructed in-circuit from
+    /// the opened `degree`).  Used by the step-(7) prefix-sum / area
+    /// consistency check.
+    ///
+    /// #88 increment-1: the previously-coexisting baked NUMERIC forms
+    /// `row_counts_usize` / `padding_column_counts` were REMOVED — they
+    /// were the compile-time height anchor that made the recursion VK
+    /// program-length-dependent (the old step-(6.6) pin asserted
+    /// `row_count_felt == constant(2^log_h)`).  The verifier now bounds
+    /// per-chip heights via witnessed binds (`assert_row_count_le_cube`
+    /// + the SP1 main-padding-column bit-bound) instead of baking them.
     pub row_counts: Vec<Vec<Felt<F>>>,
-    /// Height-agnostic jagged-verifier groundwork (Stages 1-3):
-    /// witnessed per-round per-chip row counts as PLAIN NUMBERS
-    /// (SP1's `row_counts_and_column_counts` numeric form), carried
-    /// ALONGSIDE the bit-decomposed `row_counts` above — the two
-    /// coexist (Stage 4 wires the verifier check that the bits
-    /// decode to these numbers).  PURE DATA today; nothing reads it.
-    pub row_counts_usize: Vec<Vec<usize>>,
-    /// Height-agnostic groundwork: witnessed per-round
-    /// padding-column count (artificial columns the BaseFold
-    /// stacking rounds the real total up to a power of two).
-    /// PURE DATA; nothing reads it yet.
-    pub padding_column_counts: Vec<usize>,
     /// Per-round original commitment digests (before any
     /// chip-info-hash mix-in).
     pub original_commitments: Vec<Digest>,

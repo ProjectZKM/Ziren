@@ -6,7 +6,6 @@ use itertools::Itertools;
 use p3_commit::Pcs;
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
-use p3_field::TwoAdicField;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use strum_macros::{EnumDiscriminants, EnumTryAs};
@@ -158,21 +157,22 @@ impl StarkVerifier {
 impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2>
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        let prep_domains = self.chip_information.iter().map(|(_, domain, _)| domain);
+        // #88 deep VK-identity port (Stage 1): VK = f(chip-SET).  The
+        // per-prep-domain HEIGHT block is DROPPED; instead fold, per prep
+        // chip in order, the chip NAME-DIGEST (`prep_chip_name_digest`) and
+        // the preprocessed WIDTH (chip_information tuple = (width, height)).
+        // MUST stay byte-identical to the host (prover/src/types.rs) and
+        // in-circuit (recursion/circuit/src/types.rs) folds — order:
+        // name_digest then width.
         let commit_elems: Vec<KoalaBear> = self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
-        let num_inputs = commit_elems.len() + 1 + 14 + (4 * prep_domains.len());
-        let mut inputs = Vec::with_capacity(num_inputs);
+        let mut inputs: Vec<KoalaBear> = Vec::new();
         inputs.extend(commit_elems);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for domain in prep_domains {
-            inputs.push(KoalaBear::from_usize(domain.log_size));
-            let size = 1 << domain.log_size;
-            inputs.push(KoalaBear::from_usize(size));
-            let g = KoalaBear::two_adic_generator(domain.log_size);
-            inputs.push(domain.shift);
-            inputs.push(g);
+        for (name, _domain, dims) in self.chip_information.iter() {
+            inputs.push(zkm_primitives::prep_chip_name_digest(name));
+            inputs.push(KoalaBear::from_usize(dims.0));
         }
 
         poseidon2_hash(inputs)

@@ -4,7 +4,7 @@ use p3_challenger::DuplexChallenger;
 use p3_koala_bear::KoalaBear;
 use p3_symmetric::{Hash, MerkleCap};
 
-use p3_field::{PrimeCharacteristicRing, TwoAdicField};
+use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::Builder;
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
@@ -115,24 +115,18 @@ where
         let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
             (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
         }).collect();
-        // VERIFY_VK=true: WITNESS the per-domain vk.hash inputs
-        // [log_n, 2^log_n, shift, two_adic_generator(log_n)] so vk.hash is
-        // value-independent.  Read order MUST mirror `write` below.
-        let prep_domain_hash_inputs: Vec<[Felt<C::F>; 4]> = self
+        // #88 deep VK-identity port (Stage 1): WITNESS the per-prep-chip
+        // [name_digest, prep_width] vk.hash inputs (replacing the dropped
+        // per-domain HEIGHT block) so the in-circuit hash is VALUE-INDEPENDENT
+        // — a FIXED 2 reads per prep chip regardless of the core vk's heights
+        // / name lengths / sort order.  Read order MUST mirror `write` below.
+        let prep_name_width_hash_inputs: Vec<[Felt<C::F>; 2]> = self
             .chip_information
             .iter()
-            .map(|(_, ser_domain, _)| {
-                let log_size = ser_domain.log_size;
-                let log_n = InnerVal::from_usize(log_size);
-                let size = InnerVal::from_usize(1usize << log_size);
-                let shift = ser_domain.shift;
-                let g = InnerVal::two_adic_generator(log_size);
-                [
-                    log_n.read(builder),
-                    size.read(builder),
-                    shift.read(builder),
-                    g.read(builder),
-                ]
+            .map(|(name, _ser_domain, dims)| {
+                let name_digest = zkm_primitives::prep_chip_name_digest(name);
+                let width = InnerVal::from_usize(dims.0);
+                [name_digest.read(builder), width.read(builder)]
             })
             .collect();
         let chip_ordering = self.chip_ordering.clone();
@@ -142,7 +136,7 @@ where
             initial_global_cumulative_sum,
             chip_information,
             chip_ordering,
-            prep_domain_hash_inputs,
+            prep_name_width_hash_inputs,
         }
     }
 
@@ -150,14 +144,12 @@ where
         self.commit.write(witness);
         self.pc_start.write(witness);
         self.initial_global_cumulative_sum.write(witness);
-        // VERIFY_VK=true: write the per-domain vk.hash inputs in the
-        // same order `read` consumes them.
-        for (_, ser_domain, _) in self.chip_information.iter() {
-            let log_size = ser_domain.log_size;
-            InnerVal::from_usize(log_size).write(witness);
-            InnerVal::from_usize(1usize << log_size).write(witness);
-            ser_domain.shift.write(witness);
-            InnerVal::two_adic_generator(log_size).write(witness);
+        // #88 deep VK-identity port (Stage 1): write the per-prep-chip
+        // [name_digest, prep_width] vk.hash inputs in the same order `read`
+        // consumes them.
+        for (name, _ser_domain, dims) in self.chip_information.iter() {
+            zkm_primitives::prep_chip_name_digest(name).write(witness);
+            InnerVal::from_usize(dims.0).write(witness);
         }
     }
 }

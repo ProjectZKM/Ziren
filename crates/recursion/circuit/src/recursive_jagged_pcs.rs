@@ -181,17 +181,24 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             row_counts,
             original_commitments,
             expected_eval,
-            // Height-agnostic groundwork (Stage 1, gap G2): the witnessed
-            // numeric `row_counts_usize` / `padding_column_counts` are now
-            // BOUND to the consumed forms below (step 6.6) so they cannot
-            // disagree — the consumed `row_counts` Felt (derived from the
-            // WITNESSED opened-degree height on the production height-agnostic
-            // path) is pinned to the compile-time-expected `row_counts_usize`,
-            // and `padding_column_counts` is pinned to the column-counts-
-            // derived padding.  Additive + no-op on honest proofs (the lift
-            // builds both forms from the same packing).
-            row_counts_usize,
-            padding_column_counts,
+            // #88 increment-1 (height-agnostic): the witnessed NUMERIC
+            // `row_counts_usize` / `padding_column_counts` fields have been
+            // REMOVED from `JaggedPcsProofVariable`.  They were a
+            // compile-time-baked height anchor: the old step-(6.6) pin asserted
+            // `row_count_felt == constant(2^log_h)`, which baked the per-chip
+            // HEIGHT VALUE into the recursion program bytes and made the VK
+            // program-length-dependent.  The soundness role of that pin is now
+            // carried entirely by WITNESSED binds:
+            //   * each per-chip `row_count` (reconstructed from the opened
+            //     `degree`, which zerocheck/GKR consume) is bounded
+            //     `<= 2^cube_log` by `assert_row_count_le_cube` (step 6.5);
+            //   * the step-(7) prefix-sum / final-area chain ties the witnessed
+            //     `row_counts` to the in-circuit-reconstructed
+            //     `col_prefix_sums` (so heights cannot be picked freely); and
+            //   * the SP1 main-padding-column bit-bound below
+            //     (step 6.6) rejects an area-preserving over-claim that inflates
+            //     one chip's height past the cube while shrinking another.
+            // `..` swallows the remaining `params`/digest bookkeeping fields.
             ..
         } = proof;
 
@@ -291,82 +298,70 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             }
         }
 
-        // (6.6) NUMERIC↔CONSUMED BINDING (Stage 1, gap G2).
+        // (6.6) MAIN-PADDING-COLUMN HEIGHT BIT-BOUND (#88 increment-1, gap G4).
         //
-        // The proof carries TWO per-(round,chip) representations of each chip's
-        // row count:
-        //   * `row_counts`        — the consumed Felt form.  On the production
-        //     height-agnostic path it is reconstructed from the WITNESSED opened
-        //     `degree` (`chip_height_felts_from_opened_degrees`), so it is a
-        //     prover-controlled value, and it is what the step-(7) prefix-sum /
-        //     area checks actually accumulate.
-        //   * `row_counts_usize`  — the witnessed NUMERIC form (SP1's
-        //     `row_counts_and_column_counts`), a compile-time-baked count the
-        //     verifier expects.
-        // Until now `row_counts_usize` was DELIBERATELY ignored, so a malicious
-        // prover could witness an opened-degree height (→ `row_counts` Felt)
-        // that disagrees with `row_counts_usize` without detection.  Bind them:
-        // assert the consumed Felt equals the numeric form lifted to the field.
-        // This is ADDITIVE (no shape change), config-generic (`assert_felt_eq`
-        // works for both the inner KoalaBear and outer BN254 rings), and a NO-OP
-        // on honest proofs — the lift derives both forms from the same packing
-        // (offset diffs == 2^log_h on the FIX-on path), so they already agree.
-        // Bound by `row_counts_usize` so degenerate/scaffolding bundles that
-        // carry no numeric form (empty `row_counts_usize`) add no asserts; the
-        // dummy mirrors the real bundle's shape, so the op count stays identical
-        // between dummy and real (value-independence preserved).
-        for (round_felt, round_usize) in row_counts.iter().zip(row_counts_usize.iter()) {
-            // Per-round shapes MUST agree (both are per-chip, name-sorted, same
-            // chip set) — `.zip()` below is a no-op truncation only on the
-            // degenerate empty-`row_counts_usize` branch handled by the outer
-            // `.zip()`.  A partial length mismatch would silently weaken the
-            // bind AND diverge dummy/real op counts, so surface it loudly in
-            // debug/test (compiled out of release construction — no production
-            // panic risk).
-            debug_assert_eq!(
-                round_felt.len(),
-                round_usize.len(),
-                "jagged-pcs (G2): row_counts / row_counts_usize per-round length \
-                 mismatch ({} vs {}) — would break the numeric↔consumed bind",
-                round_felt.len(),
-                round_usize.len(),
-            );
-            for (&row_count_felt, &row_count_num) in round_felt.iter().zip(round_usize.iter()) {
-                let expected: Felt<C::F> =
-                    builder.constant(C::F::from_canonical_usize(row_count_num));
-                builder.assert_felt_eq(row_count_felt, expected);
+        // This REPLACES the old baked numeric↔consumed pin (which asserted
+        // `row_count_felt == constant(2^log_h)` and was the height anchor that
+        // made the recursion VK program-length-dependent).  Ported from SP1's
+        // jagged shard verifier (crates/recursion/circuit/src/shard.rs:363-378):
+        // the "main padding column" is the final jagged column whose height fills
+        // the last real prefix sum up to the committed total area.  Its height
+        // equals the gap between the last two `col_prefix_sums` entries
+        // (= `total_values − offset(last real column)`), which is exactly the
+        // tallest real per-chip height when there is one round.  Bounding it to
+        // `[0, 2^max_log_row_count]` rejects an AREA-PRESERVING height forgery
+        // (inflate one chip past the cube, shrink another to keep total_values
+        // fixed) that would otherwise slip past the step-(7) prefix-sum / area
+        // consistency check — that check only ties the witnessed `row_counts` to
+        // the (self-derived) `col_prefix_sums`, it does NOT bound the per-chip
+        // height against the opened cube the trace MLE is evaluated over.
+        //
+        // SP1 idiom: `num2bits(height, L+1)` proves `height < 2^{L+1}`; then if
+        // the top bit is 1 every lower bit must be 0, excluding the open
+        // interval `(2^L, 2^{L+1})` ⇒ height ∈ `[0, 2^L]`.  Config-generic (Felt
+        // arithmetic works for both the inner KoalaBear and outer BN254 rings);
+        // value-independent (it reads only the WITNESSED `col_prefix_sums`, no
+        // baked height), so it is identical between dummy and real for a given
+        // chip-set.
+        //
+        // `L = cube_log = z_row.len()` — the SAME bound the step-(6.5)
+        // `assert_row_count_le_cube` uses for every per-chip height (SP1 uses
+        // its `max_log_row_count`, which IS its opened cube).  Using the opened
+        // cube here (not the verifier's nominal `max_log_row_count`) keeps the
+        // padding bound provably consistent with the per-chip bound that already
+        // verifies honest proofs, so this is redundant-on-honest, additive only
+        // as a forgery catch.
+        {
+            use p3_field::PrimeCharacteristicRing;
+            let cps = &params.col_prefix_sums;
+            // The main padding column height = recompose(last) − recompose(prev).
+            // Need at least the [.., prev, last] pair; a degenerate bundle with
+            // <2 entries carries no padding column → skip (no-op, dummy mirrors).
+            if cps.len() >= 2 {
+                let two_felt: Felt<C::F> = builder.constant(C::F::ONE + C::F::ONE);
+                // Forward big-endian Horner recompose (same convention as
+                // step-(7)'s final-area decode below and the jagged evaluator's
+                // `prefix_sum_felts`).
+                let recompose = |b: &mut Builder<C>, bits: &[Felt<C::F>]| -> Felt<C::F> {
+                    let mut acc: Felt<C::F> = b.constant(C::F::ZERO);
+                    for bit in bits.iter() {
+                        acc = b.eval(*bit + two_felt * acc);
+                    }
+                    acc
+                };
+                let last_ps = recompose(builder, cps[cps.len() - 1].as_slice());
+                let prev_ps = recompose(builder, cps[cps.len() - 2].as_slice());
+                let main_padding_col_height: Felt<C::F> = builder.eval(last_ps - prev_ps);
+                // L+1-bit sound decomposition (boolean + sum-binding inside
+                // num2bits for every production config).
+                let bits = C::num2bits(builder, main_padding_col_height, cube_log + 1);
+                // low = value of the low `cube_log` bits.
+                let low: Felt<C::F> =
+                    C::bits2num(builder, bits.iter().take(cube_log).copied());
+                let high_part: Felt<C::F> = builder.eval(main_padding_col_height - low);
+                let prod: Felt<C::F> = builder.eval(high_part * low);
+                builder.assert_felt_eq(prod, C::F::ZERO);
             }
-        }
-
-        // (6.6b) PADDING-COLUMN-COUNT BINDING (Stage 1, gap G2).
-        //
-        // `padding_column_counts` is the witnessed NUMERIC count of artificial
-        // columns the BaseFold stacking rounds the real total column count up to
-        // the next power of two.  Nothing in the verify path consumes it yet
-        // (the full SP1 padding bit-bounds are Stage 3 / gap G4), so there is no
-        // in-circuit witness VARIABLE to constrain — both `padding_column_counts`
-        // and the column-counts-derived padding are compile-time `usize` baked
-        // into the program (no prover-controlled dimension, hence no in-circuit
-        // soundness lever here yet).  Pin the numeric form to that deterministic
-        // value with a COMPILE-TIME `debug_assert_eq!` (NOT an in-circuit
-        // `assert_felt_eq`): it emits ZERO circuit ops — keeping the verify path
-        // EXACTLY byte-identical — and is compiled out of release recursion-
-        // program construction, so it can never spuriously break production
-        // construction, while still catching a lift bug that lets the padding
-        // count drift from the column structure it describes in debug/test
-        // builds.  (Stage 3 promotes this to the SP1 8-way padding bit-bounds
-        // once the padding columns become circuit witnesses.)
-        for (round_idx, &padding) in padding_column_counts.iter().enumerate() {
-            let total_real_cols: usize =
-                column_counts.get(round_idx).map(|cc| cc.iter().sum()).unwrap_or(0);
-            let expected_padding =
-                total_real_cols.max(1).next_power_of_two().saturating_sub(total_real_cols);
-            debug_assert_eq!(
-                padding, expected_padding,
-                "jagged-pcs (G2): witnessed padding_column_counts[{round_idx}] = {padding} \
-                 disagrees with the column-counts-derived padding {expected_padding} \
-                 (total_real_cols = {total_real_cols})",
-            );
         }
 
         // (7) Check prefix-sum consistency: accumulating the
@@ -630,44 +625,74 @@ mod tests {
         run_guard(32, 4);
     }
 
-    // ── NUMERIC↔CONSUMED BINDING (Stage 1, gap G2) executed-circuit tests ──
+    // ── MAIN-PADDING-COLUMN BIT-BOUND (#88 increment-1, gap G4) tests ──
     //
-    // Mirror the height-guard pattern: build the consumed `row_count` Felt and
-    // bind it to the witnessed numeric `row_count_usize` exactly as step (6.6)
-    // of `verify_trusted_evaluations` does, then RUN the DSL.  When the two
-    // agree the binding is a no-op; when they disagree the runtime trips the
-    // in-circuit `assert_felt_eq`, which `#[should_panic]` captures — proving
-    // the constraint is real (not vacuous).
+    // GATE 3 (FORGERY REJECTED), recursion-circuit level.  The baked
+    // step-(6.6) numeric↔consumed pin (`row_count_felt == constant(2^log_h)`)
+    // was REMOVED — it baked the per-chip height into the program bytes and
+    // made the VK program-length-dependent.  Its soundness role for the LAST
+    // (main padding) column is now carried by the SP1-ported bit-bound: decode
+    // the padding column height = `recompose(col_prefix_sums.last()) −
+    // recompose(col_prefix_sums[last-1])`, bit-decompose to `L+1` bits, and
+    // assert the high bit forces the low bits to zero ⇒ height ∈ [0, 2^L].
+    //
+    // This is the bind that catches an AREA-PRESERVING height forgery: a
+    // prover that inflates the last real column's height past the opened cube
+    // `2^L` (while shrinking another column to keep `total_values` constant —
+    // so the step-(7) prefix-sum / area consistency check still passes) trips
+    // this bit-bound.  These tests run the EXACT in-circuit logic end-to-end
+    // through the recursion runtime; `#[should_panic]` captures the rejection,
+    // proving the constraint is real (not vacuous).
 
-    /// Build `row_count` as a Felt and assert it equals
-    /// `from_canonical_usize(row_count_num)` — the exact step-(6.6) binding —
-    /// then execute the circuit.
-    fn run_numeric_binding(row_count_felt: u64, row_count_num: usize) {
+    /// Run the main-padding-column bit-bound against a single witnessed
+    /// padding-column `height` over a cube of `2^max_log` rows — mirrors the
+    /// exact step-(6.6) logic in `verify_trusted_evaluations`, executing the
+    /// resulting circuit end-to-end.
+    fn run_padding_bit_bound(height: u64, max_log: usize) {
         use crate::utils::tests::run_test_recursion;
+        use crate::CircuitConfig;
         let mut builder = Builder::<InnerConfig>::default();
-        let rc: Felt<InnerVal> = builder.constant(InnerVal::from_u64(row_count_felt));
-        let expected: Felt<InnerVal> =
-            builder.constant(InnerVal::from_canonical_usize(row_count_num));
-        builder.assert_felt_eq(rc, expected);
+        let h: Felt<InnerVal> = builder.constant(InnerVal::from_u64(height));
+        let bits = <InnerConfig as CircuitConfig>::num2bits(&mut builder, h, max_log + 1);
+        let low: Felt<InnerVal> =
+            <InnerConfig as CircuitConfig>::bits2num(&mut builder, bits.iter().take(max_log).copied());
+        let high_part: Felt<InnerVal> = builder.eval(h - low);
+        let prod: Felt<InnerVal> = builder.eval(high_part * low);
+        builder.assert_felt_eq(prod, InnerVal::ZERO);
         run_test_recursion(builder.into_operations(), std::iter::empty());
     }
 
-    /// POSITIVE: when the consumed Felt equals the witnessed numeric form the
-    /// binding is a no-op (this is the honest-prover case — the lift derives
-    /// both from the same packing).
+    /// POSITIVE: honest padding-column heights `<= 2^max_log` (including 0, a
+    /// sub-cube power of two, and the full cube `== 2^max_log`) all verify —
+    /// the bit-bound is a no-op on honest proofs.
     #[test]
-    fn numeric_binding_accepts_consistent_counts() {
-        run_numeric_binding(0, 0);
-        run_numeric_binding(1, 1);
-        run_numeric_binding(1024, 1024); // 2^10, a real chip height
+    fn padding_bit_bound_accepts_valid_heights() {
+        let max_log = 4; // cube = 16
+        run_padding_bit_bound(0, max_log);
+        run_padding_bit_bound(8, max_log); // sub-cube power of two
+        run_padding_bit_bound(16, max_log); // full cube == 2^max_log (inclusive)
     }
 
-    /// NEGATIVE: a prover that witnesses a numeric `row_count_usize` that
-    /// disagrees with the consumed `row_counts` Felt (here the Felt decodes a
-    /// height the numeric form does not) is REJECTED by the step-(6.6) bind.
+    /// NEGATIVE (GATE 3): an AREA-PRESERVING over-claim that inflates the main
+    /// padding column past the cube (`height = 2^max_log + 1 = 17 > 16`, the
+    /// open interval the bit-bound forbids) is REJECTED — the runtime trips the
+    /// `(height - low)*low == 0` assert.  Total area can be kept constant by a
+    /// compensating shrink elsewhere, so the step-(7) area check would pass;
+    /// THIS bit-bound is the catch.
     #[test]
     #[should_panic]
-    fn numeric_binding_rejects_inconsistent_counts() {
-        run_numeric_binding(1024, 512);
+    fn padding_bit_bound_rejects_area_preserving_overclaim_just_above_cube() {
+        run_padding_bit_bound(17, 4);
+    }
+
+    /// NEGATIVE (GATE 3): a doubled over-claim (`height = 2*2^max_log = 32 >
+    /// 16`) — the boundary case where the high bit is exactly set with nonzero
+    /// low bits absent — note `32 == 2^{max_log+1}` would overflow num2bits;
+    /// `24 = 16 + 8` is inside `(2^L, 2^{L+1})` with low bits set, the sharp
+    /// rejection case.
+    #[test]
+    #[should_panic]
+    fn padding_bit_bound_rejects_overclaim_mid_interval() {
+        run_padding_bit_bound(24, 4); // 11000b: high bit + a low bit set
     }
 }

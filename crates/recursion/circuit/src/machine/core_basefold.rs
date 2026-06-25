@@ -880,7 +880,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         >,
         shape: &super::core::ZKMRecursionShape,
     ) -> Self {
-        let (mut vks, shard_proofs): (Vec<_>, Vec<_>) = shape
+        let (vks, shard_proofs): (Vec<_>, Vec<_>) = shape
             .proof_shapes
             .iter()
             .map(|s| {
@@ -889,19 +889,88 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 >(machine, s)
             })
             .unzip();
-        let vk = vks.pop().unwrap_or_else(|| StarkVerifyingKey {
+        // #88/#79 (multi-shard enumerability fix): build ONE program-wide
+        // core vk whose `chip_information` matches the SINGLE vk the real
+        // input constructor (`get_recursion_core_inputs_basefold`,
+        // prover/src/lib.rs) threads into EVERY batch — i.e. the whole-program
+        // vk `StarkMachine::setup` produces (machine.rs:454-469): the SET of
+        // preprocessed chips (preprocessed_width > 0) sorted by
+        // (Reverse(height), name).
+        //
+        // The previous code did `vks.pop()`, keeping only the LAST shard's
+        // per-shape vk and discarding the rest.  A non-last shard's per-shape
+        // prep SET can differ in COUNT/ORDER from the program-wide vk (a shard
+        // whose `opened_values` omit a preprocessed chip drops it from the
+        // per-shape vk), so the popped vk's `chip_information.len()` diverged
+        // from the real program-wide vk at arity >= 2.  Because the recursion
+        // vk.hash folds ONE `[name_digest, prep_width]` pair PER prep chip
+        // (types.rs::hash, witness.rs::read emits exactly 2 witness-reads per
+        // `chip_information` entry), the recursion PROGRAM structure is keyed on
+        // the prep-chip COUNT — so the popped-shard divergence produced a
+        // SYSTEMATICALLY wrong arity-N normalize VK.
+        //
+        // Fix: UNION the per-shard prep `chip_information` by name (so any prep
+        // chip the program uses, present in at least one shard, is captured),
+        // keep the max log_size per chip for determinism, and sort by
+        // (Reverse(log_size), name) to reproduce the real setup's order.  The
+        // recursion program is VALUE-INDEPENDENT (name/width/height are
+        // witnessed at prove time, not baked), so only the chip SET / COUNT /
+        // ORDER must match — which this reconstruction guarantees regardless of
+        // which shard is last.
+        use std::collections::BTreeMap;
+        let mut prep_by_name: BTreeMap<
+            String,
+            (zkm_pcs::SerializableDomain<p3_koala_bear::KoalaBear>, (usize, usize)),
+        > = BTreeMap::new();
+        for vk in vks.iter() {
+            for (name, ser_domain, dims) in vk.chip_information.iter() {
+                prep_by_name
+                    .entry(name.clone())
+                    .and_modify(|(d, m)| {
+                        // Keep the largest representative height (deterministic);
+                        // width (dims.0) is chip-constant across shards.
+                        if ser_domain.log_size > d.log_size {
+                            *d = ser_domain.clone();
+                            *m = *dims;
+                        }
+                    })
+                    .or_insert_with(|| (ser_domain.clone(), *dims));
+            }
+        }
+        let mut chip_information: Vec<(
+            String,
+            zkm_pcs::SerializableDomain<p3_koala_bear::KoalaBear>,
+            (usize, usize),
+        )> = prep_by_name
+            .into_iter()
+            .map(|(name, (dom, dims))| (name, dom, dims))
+            .collect();
+        // (Reverse(height), name) — the prover's preprocessed trace ordering
+        // (machine.rs:454).
+        chip_information.sort_by(|a, b| b.1.log_size.cmp(&a.1.log_size).then_with(|| a.0.cmp(&b.0)));
+        let chip_ordering = chip_information
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _, _))| (name.clone(), i))
+            .collect::<hashbrown::HashMap<_, _>>();
+        let vk = StarkVerifyingKey {
             commit: crate::fri::dummy_commit(),
             pc_start: p3_koala_bear::KoalaBear::ZERO,
             initial_global_cumulative_sum:
                 zkm_pcs::septic_digest::SepticDigest::<p3_koala_bear::KoalaBear>::zero(),
-            chip_information: Vec::new(),
-            chip_ordering: Default::default(),
-        });
+            chip_information,
+            chip_ordering,
+        };
         Self {
             vk,
             shard_proofs,
             is_complete: shape.is_complete,
-            is_first_shard: false,
+            // The real first batch (batch_idx == 0) carries is_first_shard=true.
+            // This is a WITNESSED felt (not baked into the program — confirmed:
+            // all batches share one vk regardless of is_first_shard), so it does
+            // not affect the recursion VK; matched to the real batch-0 semantics
+            // for cleanliness / forgery-robustness.
+            is_first_shard: true,
             vk_root: [p3_koala_bear::KoalaBear::ZERO; DIGEST_SIZE],
         }
     }

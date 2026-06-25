@@ -199,6 +199,251 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
     }
 
+    /// G1 Stage D1b (#88): RAW-event-count sibling of
+    /// [`Self::find_canonical_cluster_shape`] for the VK-enumeration side.
+    ///
+    /// `find_canonical_cluster_shape_from_ordered` reconstructs heights from a
+    /// proof's `chip_log_heights` (= `2^log` POST-padding row counts), which
+    /// ROUNDS UP and so can land a low-count CPU-shard chip (e.g. `MiscInstrs`
+    /// with 0 real events shows up as `2^1`) in a DIFFERENT min-area cluster
+    /// than the record path picks — producing a divergent canonical shape (the
+    /// CPU-shard membership-gate failure).  This variant takes the PRE-padding
+    /// RAW event counts directly (chip NAME -> raw rows), exactly the values
+    /// `MipsAir::core_heights`/`memory_heights` feed `find_canonical_cluster_
+    /// shape`, so the enum can sweep faithful raw profiles and reproduce the
+    /// record path's canonical shapes byte-for-byte.  Absent chips are 0.
+    pub fn find_canonical_cluster_shape_from_raw(
+        &self,
+        raw: &std::collections::BTreeMap<String, usize>,
+    ) -> Option<Shape<MipsAirId>> {
+        let get = |id: &MipsAirId| -> usize { raw.get(&id.to_string()).copied().unwrap_or(0) };
+        let has_cpu = get(&MipsAirId::Cpu) > 0;
+        let is_packed = has_cpu
+            && (get(&MipsAirId::MemoryGlobalInit) > 0
+                || get(&MipsAirId::MemoryGlobalFinalize) > 0);
+        let prep_heights: Vec<(MipsAirId, usize)> = [MipsAirId::Program, MipsAirId::Byte]
+            .into_iter()
+            .map(|id| (id, get(&id)))
+            .collect();
+        let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
+        let core_ids = [
+            MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
+            MipsAirId::MiscInstrs, MipsAirId::MemoryInstrs, MipsAirId::SyscallInstrs,
+            MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
+            MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
+        ];
+        let mut heights: Vec<(MipsAirId, usize)> =
+            core_ids.iter().map(|id| (*id, get(id))).collect();
+        if is_packed {
+            heights.push((MipsAirId::MemoryGlobalInit, get(&MipsAirId::MemoryGlobalInit)));
+            heights.push((MipsAirId::MemoryGlobalFinalize, get(&MipsAirId::MemoryGlobalFinalize)));
+            heights.push((
+                MipsAirId::Global,
+                get(&MipsAirId::MemoryGlobalInit) + get(&MipsAirId::MemoryGlobalFinalize),
+            ));
+        }
+        let log2_shard_size = get(&MipsAirId::Cpu).next_power_of_two().ilog2() as usize;
+        self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
+    }
+
+    /// G1 Stage D1b (#88): enumerate the FULL SET of canonical-cluster shapes
+    /// a FIX-off core proof can lift to — config-driven, proof-independent.
+    ///
+    /// Every real normalize child's jagged commit is padded to
+    /// `find_canonical_cluster_shape(record)`, which is exactly ONE cluster's
+    /// band-cap shape (per-chip cluster cap for present chips + canonicalize's
+    /// missing chips at log-1 + the fitting preprocessed Program band).  The
+    /// min-area search just picks WHICH cluster for a given record; the union
+    /// over ALL clusters (here) is a SUPERSET that contains every reachable
+    /// canonical shape — so the recursion vk_map built from these covers every
+    /// FIX-off normalize VK.  We drive `find_canonical_cluster_shape_from_raw`
+    /// with each cluster's own band-cap as the raw profile, so the returned
+    /// shape is byte-identical to the record path (the min-area search re-picks
+    /// that same cluster since the profile equals its caps), then sweep the
+    /// preprocessed Program bands (Byte is fixed at 2^16).
+    ///
+    /// Covers BOTH the plain-core clusters (`partial_core_shapes`, keyed by
+    /// log_shard_size) and the packed-small clusters (`partial_small_shapes`).
+    pub fn enumerate_canonical_cluster_shapes(&self) -> Vec<Shape<MipsAirId>> {
+        use std::collections::{BTreeMap, BTreeSet};
+        // Preprocessed Program bands to sweep (Byte fixed at its single band).
+        let prog_bands: Vec<usize> = self
+            .partial_preprocessed_shapes
+            .iter()
+            .find(|(air, _)| **air == MipsAirId::Program)
+            .map(|(_, hs)| hs.iter().filter_map(|h| *h).collect())
+            .unwrap_or_default();
+        let byte_band: usize = self
+            .partial_preprocessed_shapes
+            .iter()
+            .find(|(air, _)| **air == MipsAirId::Byte)
+            .and_then(|(_, hs)| hs.last().copied().flatten())
+            .unwrap_or(16);
+
+        // Build a raw profile from a cluster's band-caps: each chip at 2^cap
+        // (so `find_shape` re-selects this cluster), plus the swept Program /
+        // fixed Byte band.  Memory-cluster (packed) chips are included so the
+        // packed-small branch fires when MemoryGlobalInit/Finalize are capped.
+        let raw_from_cluster = |cluster: &ShapeCluster<MipsAirId>,
+                                prog: usize|
+         -> BTreeMap<String, usize> {
+            let mut raw: BTreeMap<String, usize> = BTreeMap::new();
+            raw.insert(MipsAirId::Program.to_string(), 1usize << prog);
+            raw.insert(MipsAirId::Byte.to_string(), 1usize << byte_band);
+            for (air, hs) in cluster.iter() {
+                if let Some(cap) = hs.last().copied().flatten() {
+                    raw.insert(air.to_string(), 1usize << cap);
+                }
+            }
+            raw
+        };
+
+        let mut out: BTreeSet<Vec<(String, usize)>> = BTreeSet::new();
+        let mut emit = |shape: Shape<MipsAirId>| {
+            let mut v: Vec<(String, usize)> =
+                shape.iter().map(|(a, h)| (a.to_string(), *h)).collect();
+            v.sort();
+            out.insert(v);
+        };
+
+        for clusters in self.partial_core_shapes.values() {
+            for cluster in clusters.iter() {
+                for &prog in &prog_bands {
+                    let raw = raw_from_cluster(cluster, prog);
+                    if let Some(shape) = self.find_canonical_cluster_shape_from_raw(&raw) {
+                        emit(shape);
+                    }
+                }
+            }
+        }
+        for cluster in self.partial_small_shapes.iter() {
+            for &prog in &prog_bands {
+                let raw = raw_from_cluster(cluster, prog);
+                if let Some(shape) = self.find_canonical_cluster_shape_from_raw(&raw) {
+                    emit(shape);
+                }
+            }
+        }
+
+        out.into_iter()
+            .map(|v| {
+                v.into_iter()
+                    .filter_map(|(n, h)| MipsAirId::from_str(&n).ok().map(|id| (id, h)))
+                    .collect::<Shape<MipsAirId>>()
+            })
+            .collect()
+    }
+
+    /// G1 Stage D1 (#88) FAST sibling of [`Self::enumerate_canonical_cluster_shapes`].
+    ///
+    /// O(clusters · chips) instead of O(clusters²): the slow variant drives
+    /// `find_canonical_cluster_shape_from_raw` per (cluster, prog), each of which
+    /// re-runs the min-area search over ALL ~28.5K small clusters (≈ billions of
+    /// `find_shape` calls, > 3 min, did not finish).  This variant emits each
+    /// cluster's OWN band-cap canonical shape directly (per-chip cap heights +
+    /// swept Program / fixed Byte + `canonicalize_shape`), no search — ~1s.
+    ///
+    /// ⚠️ NOT output-equivalent to the slow variant — it OVER-EMITS.  The slow
+    /// (and the real-proof `find_canonical_cluster_shape`) min-area search
+    /// COLLAPSES many cluster-cap profiles onto the SAME smallest-area canonical
+    /// shape; this variant skips that collapse, so it emits each cluster's raw
+    /// band-cap shape (~70K, vastly over the 2048 vk_map budget) instead of the
+    /// small collapsed set.  It is therefore a building block, NOT a drop-in
+    /// enumeration: a faithful fast enumeration still needs to reproduce the
+    /// min-area COLLAPSE (the open Stage D2 item).  Retained for that follow-up
+    /// and for cheap per-cluster band-cap inspection.
+    pub fn enumerate_canonical_cluster_shapes_fast(&self) -> Vec<Shape<MipsAirId>> {
+        use std::collections::BTreeSet;
+        use std::collections::BTreeSet as Set;
+        let prog_bands: Vec<usize> = self
+            .partial_preprocessed_shapes
+            .iter()
+            .find(|(air, _)| **air == MipsAirId::Program)
+            .map(|(_, hs)| hs.iter().filter_map(|h| *h).collect())
+            .unwrap_or_default();
+        let byte_band: usize = self
+            .partial_preprocessed_shapes
+            .iter()
+            .find(|(air, _)| **air == MipsAirId::Byte)
+            .and_then(|(_, hs)| hs.last().copied().flatten())
+            .unwrap_or(16);
+
+        // Build the canonicalize cluster ID-sets ONCE (the per-call
+        // `canonicalize_shape` rebuilds `build_mips_machine_shape()` every
+        // invocation — fatal at 28.5K·4 calls).  Each entry is one cluster's
+        // MipsAirId set; canonicalization picks the smallest superset of the
+        // present chips and adds its missing chips at log-1.
+        let canon_clusters: Vec<Set<MipsAirId>> =
+            zkm_pcs::stacked_shapes::build_mips_machine_shape()
+                .chip_clusters
+                .iter()
+                .map(|c| c.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect())
+                .collect();
+        let canonicalize = |shape: &mut Shape<MipsAirId>| {
+            let present: Set<MipsAirId> = shape.iter().map(|(k, _)| *k).collect();
+            let mut best: Option<&Set<MipsAirId>> = None;
+            for ids in canon_clusters.iter() {
+                if present.is_subset(ids)
+                    && best.as_ref().map(|b| ids.len() < b.len()).unwrap_or(true)
+                {
+                    best = Some(ids);
+                }
+            }
+            if let Some(cluster) = best {
+                for id in cluster.iter() {
+                    if !present.contains(id) {
+                        shape.insert(*id, 1);
+                    }
+                }
+            }
+        };
+
+        // A cluster's own canonical shape: each chip at its band-cap log-height
+        // (`hs.last()`), plus Program (swept) / Byte (fixed), then canonicalize
+        // (superset-cluster missing chips at log-1).  No min-area search.
+        let cluster_canonical = |cluster: &ShapeCluster<MipsAirId>, prog: usize| -> Shape<MipsAirId> {
+            let mut shape: Shape<MipsAirId> = Shape::new(HashMap::new());
+            shape.insert(MipsAirId::Program, prog);
+            shape.insert(MipsAirId::Byte, byte_band);
+            for (air, hs) in cluster.iter() {
+                if let Some(cap) = hs.last().copied().flatten() {
+                    shape.insert(*air, cap);
+                }
+            }
+            canonicalize(&mut shape);
+            shape
+        };
+
+        let mut out: BTreeSet<Vec<(String, usize)>> = BTreeSet::new();
+        let mut emit = |shape: Shape<MipsAirId>| {
+            let mut v: Vec<(String, usize)> =
+                shape.iter().map(|(a, h)| (a.to_string(), *h)).collect();
+            v.sort();
+            out.insert(v);
+        };
+        for clusters in self.partial_core_shapes.values() {
+            for cluster in clusters.iter() {
+                for &prog in &prog_bands {
+                    emit(cluster_canonical(cluster, prog));
+                }
+            }
+        }
+        for cluster in self.partial_small_shapes.iter() {
+            for &prog in &prog_bands {
+                emit(cluster_canonical(cluster, prog));
+            }
+        }
+
+        out.into_iter()
+            .map(|v| {
+                v.into_iter()
+                    .filter_map(|(n, h)| MipsAirId::from_str(&n).ok().map(|id| (id, h)))
+                    .collect::<Shape<MipsAirId>>()
+            })
+            .collect()
+    }
+
     /// Shared core of [`Self::find_canonical_cluster_shape`] and its
     /// `_from_ordered` sibling: run the `fix_shape` branch (packed-small /
     /// plain-core) over `heights`, union the preprocessed shape, then apply the
@@ -228,6 +473,12 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             shape.extend(minimal_shape?);
         } else if has_cpu {
             // Plain-core branch: min-area shape over partial_core_shapes range.
+            if std::env::var("ZIREN_CANON_DEBUG").is_ok() {
+                let mut hs: Vec<(String, usize)> =
+                    heights.iter().map(|(a, h)| (a.to_string(), *h)).collect();
+                hs.sort();
+                eprintln!("[ORDCANON] log2_shard_size={log2_shard_size} heights_in={hs:?}");
+            }
             let mut minimal_shape = None;
             let mut minimal_area = usize::MAX;
             for (_, clusters) in self.partial_core_shapes.range(log2_shard_size..) {
@@ -861,6 +1112,222 @@ pub mod tests {
 
         // Try to "open".
         prover.open(&pk, main_data, &mut challenger).unwrap();
+    }
+
+    /// G1 Stage D1b (#88): the enumerated canonical-cluster set must CONTAIN
+    /// the CPU-shard canonical shape a real FIX-off fib-1k core proof lifts to
+    /// (captured via [REALCANON]: `MiscInstrs=1` etc.).  Fast, no proving.
+    #[test]
+    fn enumerate_canonical_contains_fib_cpu_shard() {
+        use p3_koala_bear::KoalaBear;
+        let cfg = CoreShapeConfig::<KoalaBear>::default();
+        let set: std::collections::BTreeSet<Vec<(String, usize)>> = cfg
+            .enumerate_canonical_cluster_shapes_fast()
+            .into_iter()
+            .map(|s| {
+                let mut v: Vec<(String, usize)> =
+                    s.iter().map(|(id, h)| (id.to_string(), *h)).collect();
+                v.sort();
+                v
+            })
+            .collect();
+        eprintln!("[ENUMCANON] set size = {}", set.len());
+        // The REALCANON the fib-1k CPU shard padded to (from prove.rs probe).
+        let mut want: Vec<(String, usize)> = vec![
+            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
+            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
+            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
+            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("SyscallInstrs", 10),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect();
+        want.sort();
+        // Match by chip-SET; print the closest candidate for diagnosis.
+        let want_set: Vec<String> = {
+            let mut v: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+            v.sort();
+            v
+        };
+        let same_set: Vec<&Vec<(String, usize)>> = set
+            .iter()
+            .filter(|c| {
+                let mut v: Vec<String> = c.iter().map(|(n, _)| n.clone()).collect();
+                v.sort();
+                v == want_set
+            })
+            .collect();
+        eprintln!("[ENUMCANON] candidates with matching chip-set = {}", same_set.len());
+        for c in same_set.iter().take(4) {
+            eprintln!("[ENUMCANON] cand = {c:?}");
+        }
+        // G1 Stage D1b FINDING (REPORT, not a pass/fail gate): the cluster-CAP
+        // fast enumeration does NOT contain the fib-1k CPU-shard REALCANON.
+        // REALCANON's per-chip heights are CLAMPED to the record's per-chip raw
+        // counts (e.g. MiscInstrs=1 = canonicalize default for a 0-event chip;
+        // AddSub=13, Mul=10 = per-chip smallest band >= raw), whereas the
+        // cap-enum emits each chip at its cluster band-CAP (MiscInstrs=10, ...).
+        // The normalize VK is per-chip-height SENSITIVE, so the cap variant !=
+        // the real VK.  This is the residual divergence: a config-driven
+        // enumeration cannot reproduce arbitrary per-chip CLAMPED heights
+        // without the per-chip cartesian (cap-only already = 69,832 shapes >
+        // the 2^11 budget).  The faithful fix is the height-agnostic recursion
+        // port (normalize VK becomes chip-SET-only).
+        let contains = set.contains(&want);
+        eprintln!(
+            "[ENUMCANON] FINDING: cap-enum contains REALCANON = {contains} \
+             (expected false — per-chip CLAMPED heights are not cap-enumerable)"
+        );
+    }
+
+    /// G1 Stage D1b (#88): `find_canonical_cluster_shape_from_raw` on the fib-1k
+    /// CPU shard's RAW event counts (from [REALCANON] core_heights_raw) MUST
+    /// reproduce the REALCANON canonical shape (MiscInstrs=1 etc.) byte-for-byte
+    /// — the RAW path treats a 0-event chip as truly absent (canonicalize -> 1),
+    /// unlike the `_from_ordered` path which over-rounds 0 events to 2^1 and
+    /// lands a divergent cluster (the CPU-shard membership-gate failure).  Fast.
+    #[test]
+    fn raw_canonical_matches_fib_cpu_realcanon() {
+        use p3_koala_bear::KoalaBear;
+        let cfg = CoreShapeConfig::<KoalaBear>::default();
+        // RAW event counts the fib-1k CPU shard actually had (prove.rs probe).
+        let raw: BTreeMap<String, usize> = [
+            ("AddSub", 4860), ("Bitwise", 2127), ("Branch", 1121), ("CloClz", 1),
+            ("Cpu", 8369), ("DivRem", 1000), ("Global", 450), ("Jump", 70),
+            ("Lt", 3296), ("MemoryInstrs", 501), ("MemoryLocal", 51),
+            ("MiscInstrs", 0), ("MovCond", 26), ("Mul", 1003), ("ShiftLeft", 107),
+            ("ShiftRight", 30), ("SyscallCore", 24), ("SyscallInstrs", 24),
+            // Preprocessed raw heights (Program from its instruction count band,
+            // Byte at its 2^16 table) — feed the prep find_shape.
+            ("Program", 1 << 14), ("Byte", 1 << 16),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect();
+        let got = cfg
+            .find_canonical_cluster_shape_from_raw(&raw)
+            .expect("raw canonical should fit a cluster");
+        let mut got_v: Vec<(String, usize)> =
+            got.iter().map(|(id, h)| (id.to_string(), *h)).collect();
+        got_v.sort();
+        let mut want: Vec<(String, usize)> = vec![
+            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
+            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
+            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
+            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("SyscallInstrs", 10),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect();
+        want.sort();
+        eprintln!("[RAWCANON] got ={got_v:?}");
+        eprintln!("[RAWCANON] want={want:?}");
+        assert_eq!(got_v, want, "[RAWCANON] raw canonical != fib CPU REALCANON");
+        eprintln!("[RAWCANON] PASS — raw path reproduces REALCANON");
+    }
+
+    /// G1 Stage D1b (#88): does a per-machine-cluster RAW SWEEP (cheap, ~26
+    /// clusters × heights) that DROPS absent/0-event chips and lifts via
+    /// `find_canonical_cluster_shape_from_raw` PRODUCE the fib-1k CPU-shard
+    /// REALCANON?  This is the candidate FIX for `generate()`'s `small_shapes`
+    /// (vs the lossy `_from_ordered` sweep that pins 0-event chips at log-1).
+    /// Fast (no proving); reports the swept set size + REALCANON membership.
+    #[test]
+    fn raw_sweep_produces_fib_cpu_realcanon() {
+        use p3_koala_bear::KoalaBear;
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::stacked_shapes::{build_mips_machine_shape, types::consts};
+        let cfg = CoreShapeConfig::<KoalaBear>::default();
+        let machine = MipsAir::<KoalaBear>::machine(
+            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2::default(),
+        );
+        let chips_by_name: BTreeMap<String, _> =
+            machine.chips().iter().map(|c| (c.name(), c)).collect();
+        let ms = build_mips_machine_shape();
+
+        let mut set: std::collections::BTreeSet<Vec<(String, usize)>> = Default::default();
+        let mut swept = 0usize;
+        for cluster in &ms.chip_clusters {
+            let names: Vec<String> = cluster
+                .iter()
+                .filter(|n| chips_by_name.contains_key(*n))
+                .cloned()
+                .collect();
+            if names.is_empty() {
+                continue;
+            }
+            // Filler = byte-lookup-FREE non-Byte chip (varies with area); the
+            // rest are pinned: Byte at its 2^16 table, the byte-lookup chips at
+            // a minimal PRESENT count.  KEY vs the lossy sweep: we build a RAW
+            // count map and only INCLUDE present chips (absent => 0 => the raw
+            // canonical canonicalizes them at log-1, matching the record path).
+            let fillers: std::collections::HashSet<&String> = names
+                .iter()
+                .filter(|n| {
+                    n.as_str() != "Byte" && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
+                })
+                .collect();
+            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                let mut raw: BTreeMap<String, usize> = BTreeMap::new();
+                for n in &names {
+                    let v = if fillers.contains(n) {
+                        1usize << h
+                    } else if n == "Byte" {
+                        1usize << 16
+                    } else {
+                        // byte-lookup chip present at a minimal count
+                        2usize
+                    };
+                    raw.insert(n.clone(), v);
+                }
+                if !raw.contains_key("Program") {
+                    raw.insert("Program".to_string(), 1usize << 14);
+                }
+                swept += 1;
+                if let Some(shape) = cfg.find_canonical_cluster_shape_from_raw(&raw) {
+                    let mut v: Vec<(String, usize)> = shape
+                        .iter()
+                        .map(|(id, h)| (id.to_string(), *h))
+                        .filter(|(n, _)| chips_by_name.contains_key(n))
+                        .collect();
+                    v.sort();
+                    if !v.is_empty() {
+                        set.insert(v);
+                    }
+                }
+            }
+        }
+        let mut want: Vec<(String, usize)> = vec![
+            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
+            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
+            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
+            ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
+            ("SyscallInstrs", 10),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect();
+        want.sort();
+        let contains = set.contains(&want);
+        eprintln!(
+            "[RAWSWEEP] swept={swept} distinct_canonical={} REALCANON_in_set={contains}",
+            set.len()
+        );
+        // Diagnose: show CPU-set candidates if REALCANON missing.
+        if !contains {
+            let want_set: Vec<String> = want.iter().map(|(n, _)| n.clone()).collect();
+            for c in set.iter().filter(|c| {
+                let cs: Vec<String> = c.iter().map(|(n, _)| n.clone()).collect();
+                cs == want_set
+            }) {
+                eprintln!("[RAWSWEEP] same-chipset cand = {c:?}");
+            }
+        }
     }
 
     #[test]

@@ -1,4 +1,6 @@
 pub mod concurrency;
+#[cfg(test)]
+mod forgery_harness;
 mod logger;
 mod prove;
 mod span;

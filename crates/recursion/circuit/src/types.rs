@@ -20,15 +20,21 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriP
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
-    /// VERIFY_VK=true: the per-preprocessed-domain `vk.hash`
-    /// inputs `[log_n, 2^log_n, shift, two_adic_generator(log_n)]`,
-    /// WITNESSED (read in the `StarkVerifyingKey` Witnessable) rather than
-    /// baked from the compile-time `chip_information` domains.  This makes
-    /// `vk.hash` value-independent so the recursion program's vk depends
-    /// only on the chip set, not on the verified core vk's preprocessed
-    /// (Program/Byte) heights.  Empty for vks constructed directly without
-    /// witnessing (their `hash()` is not on the value-independent path).
-    pub prep_domain_hash_inputs: Vec<[Felt<C::F>; 4]>,
+    /// #88 deep VK-identity port (Stage 1): the per-preprocessed-chip
+    /// `vk.hash` inputs `[name_digest, prep_width]`, WITNESSED (read in the
+    /// `StarkVerifyingKey` Witnessable) rather than baked from the
+    /// compile-time `chip_information`.  Replaces the dropped per-prep-domain
+    /// HEIGHT block (`[log_n, 2^log_n, shift, generator]`).  WITNESSING (not
+    /// baking) is load-bearing for VALUE-INDEPENDENCE: the recursion program
+    /// must emit a FIXED number of reads per prep chip (2 here) regardless of
+    /// the verified core vk's per-chip heights / name lengths / sort order,
+    /// so the recursion VK depends only on the chip SET — not on which
+    /// program produced the core vk.  `name_digest = poseidon2_hash(name
+    /// bytes as fields)[0]` (a single fixed-width felt), computed identically
+    /// on the host (prover/src/types.rs) and host-verifier
+    /// (verifier/src/stark/mod.rs).  Empty for vks constructed directly
+    /// without witnessing.
+    pub prep_name_width_hash_inputs: Vec<[Felt<C::F>; 2]>,
 }
 
 #[derive(Clone)]
@@ -111,29 +117,37 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> Verif
         challenger.observe(builder, zero);
     }
 
-    /// Hash the verifying key + prep domains into a single digest.
-    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum || prep_domains[N].{log_n, .size, .shift, .g})
+    /// Hash the verifying key into a single digest.
+    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum ||
+    ///            prep[N].{name_digest, prep_width} )
+    ///
+    /// #88 deep VK-identity port (Stage 1): VK = f(chip-SET).  The
+    /// per-prep-domain HEIGHT block (log_n / 2^log_n / shift / generator) is
+    /// DROPPED so the recursion program's vk no longer depends on the
+    /// verified core vk's preprocessed trace heights.  Instead fold, per
+    /// prep chip, the chip NAME-DIGEST and preprocessed WIDTH — read from the
+    /// WITNESSED `prep_name_width_hash_inputs` (a FIXED 2 felts per prep
+    /// chip).  WITNESSING (not baking from compile-time `chip_information`) is
+    /// what keeps the program VALUE-INDEPENDENT: the loop emits exactly 2
+    /// reads per prep chip regardless of the core vk's heights, name lengths,
+    /// or (height-driven) sort order, so the recursion VK is keyed on the
+    /// chip SET only.  MUST stay byte-identical to the host
+    /// (prover/src/types.rs) and host-verifier (verifier/src/stark/mod.rs)
+    /// folds: poseidon2 inputs (name_digest then width) and order identical.
     pub fn hash(&self, builder: &mut Builder<C>) -> SC::DigestVariable
     where
         C::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     {
-        let num_inputs = DIGEST_SIZE + 1 + 14 + (4 * self.prep_domain_hash_inputs.len());
-        let mut inputs = Vec::with_capacity(num_inputs);
+        let num_inputs = DIGEST_SIZE + 1 + 14 + (2 * self.prep_name_width_hash_inputs.len());
+        let mut inputs: Vec<Felt<C::F>> = Vec::with_capacity(num_inputs);
         inputs.extend(self.commitment);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        // VERIFY_VK=true: use the WITNESSED per-domain
-        // [log_n, 2^log_n, shift, two_adic_generator(log_n)] inputs (read in
-        // the StarkVerifyingKey Witnessable) instead of baking them from the
-        // compile-time chip_information domains.  Identical values for honest
-        // proofs (so the digest is unchanged) but value-independent program.
-        for fields in self.prep_domain_hash_inputs.iter() {
-            inputs.push(fields[0]); // log_n
-            inputs.push(fields[1]); // 2^log_n
-            inputs.push(fields[2]); // shift
-            inputs.push(fields[3]); // two_adic_generator(log_n)
+        for fields in self.prep_name_width_hash_inputs.iter() {
+            inputs.push(fields[0]); // name_digest
+            inputs.push(fields[1]); // prep_width
         }
 
         SC::hash(builder, &inputs)

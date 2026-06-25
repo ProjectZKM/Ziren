@@ -1615,17 +1615,18 @@ where
     // raw openings with no factor, exactly matching SP1 (whose padding mask
     // is carried by `full_geq`, not by an embed_factor).
     //
-    // GATING (Phase 1 status): the reconstruction is wired in and
-    // transcript-neutral, but the exact interaction-axis MLE convention that
-    // makes it numerically match Ziren's GKR leaf on HONEST proofs is still
-    // being pinned (see the module test + REPORT: the per-chip embed lift and
-    // degree mask are verified, the residual is the leaf assembly orientation).
-    // Until that lands, the assert runs ONLY under `ZIREN_LOGUP_RECONSTRUCTION=1`
-    // so it does NOT break honest production verification; the soundness gate
-    // and the Phase-2 circuit mirror are exercised via that flag.  It samples /
-    // observes nothing either way, so toggling it is transcript- and
-    // proof-byte-neutral.
-    if std::env::var("ZIREN_LOGUP_RECONSTRUCTION").as_deref() == Ok("1") {
+    // GATING (#88 deep VK-identity port, Stage 1 — UN-GATED): the degree-
+    // masked reconstruction is now ACTIVE BY DEFAULT.  It is the host
+    // substrate that binds per-chip height once heights leave `vk.hash`
+    // (Stage 1 drops the per-prep-domain height loop) — a degree-only lie
+    // (transcript honest, `degree` bits forged) is caught HERE and ONLY
+    // here on the host path, so it must run by default for soundness.
+    // Honest proofs pass (num_eq/den_eq=true, validated by the Stage-0
+    // forgery harness + the degree-only-survives-when-off baseline).  It
+    // samples / observes nothing, so toggling it is transcript- and
+    // proof-byte-neutral.  Escape hatch: `ZIREN_LOGUP_RECONSTRUCTION=0`
+    // disables it (e.g. to reproduce the pre-port baseline).
+    if std::env::var("ZIREN_LOGUP_RECONSTRUCTION").as_deref() != Ok("0") {
         let log_num_interactions = initial_num_variables - 1;
 
         // (1) Split the reduced eval_point into (interaction, trace) axes.

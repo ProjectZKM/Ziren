@@ -872,10 +872,6 @@ where
             pcs_proof: stacked_pcs_proof,
             column_counts: vec![vec![1]],
             row_counts: vec![vec![zero_felt(builder)]],
-            // Height-agnostic groundwork (Stages 1-3): placeholder
-            // numeric counts mirroring the zero bit-form above.
-            row_counts_usize: vec![vec![0usize]],
-            padding_column_counts: Vec::new(),
             original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             expected_eval: zero_ext(builder),
         }

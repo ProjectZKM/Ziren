@@ -404,7 +404,7 @@ impl ZKMProofShape {
     /// The `core_shape_config` argument is retained for API
     /// stability but is no longer consulted.
     pub fn generate<'a>(
-        _core_shape_config: &'a CoreShapeConfig<KoalaBear>,
+        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {
@@ -487,17 +487,70 @@ impl ZKMProofShape {
             }
         };
 
-        // Per-shard normalize shapes (one representative per
-        // (chip_set, log_dense) class).  The normalize program — hence
-        // its VK — is (chip_set, log_dense)-determined (validated in
-        // `tests::vkroot_normalize_vk_equivalence_class`), so collapsing
-        // equal-log_dense shapes keeps the produced VK set IDENTICAL while
-        // shrinking the shape count.  This is what lets arity replication
-        // (below) fit the fixed VK_MERKLE_TREE_HEIGHT budget.
+        // Per-shard normalize shapes — G1 Stage D1 FAITHFUL representatives.
+        //
+        // The normalize program's VK depends on the child core proof's exact
+        // PER-CHIP heights (the jagged bundle's per-chip `(width, log_height)`
+        // + the Program/Byte preprocessed-domain `log_size` that feed
+        // `vk.hash`), NOT merely the total `log_dense`.  Under FIX_CORE_SHAPES
+        // =false a real core shard's jagged commit is padded to EXACTLY
+        // `CoreShapeConfig::find_canonical_cluster_shape(record)` — one
+        // cluster's per-chip band-cap shape (present chips at the cluster cap,
+        // canonicalize's missing chips at log-1, the fitting Program band).
+        //
+        // The earlier uniform-height-by-`log_dense` sweep was NOT faithful: at
+        // a matched `(chip_set, log_dense)` its per-chip heights differ from
+        // the canonical-cluster shape, so its dummy VK differs from the real
+        // VK (pinned by `tests::test_vk_equality_normalize_fib` EQUAL=false on
+        // a uniform/raw dummy, and `tests::multishard_normalize_arity_faithful`
+        // dummy_faithful=true ONLY at the canonical lift, enum_repr_eq=false at
+        // the uniform representative).
+        //
+        // FAITHFUL construction (RIGHT DIRECTION; coverage still partial — see
+        // CAVEAT): generate candidate RAW height profiles via the cheap
+        // per-cluster uniform-height SWEEP, then LIFT each through
+        // `find_canonical_cluster_shape_from_ordered` — the min-area
+        // canonical-cluster shape a real FIX-off core commit pads to (the SAME
+        // construction `multishard_normalize_arity_faithful`'s `lift_to_band_cap`
+        // proved `dummy_faithful=true` — i.e. the dummy built at the canonical
+        // lift reproduces the real normalize VK).  Dedup the lifted shapes →
+        // a SMALL canonical set (13 here), cheap: ONE min-area search per swept
+        // profile (a few hundred), not the O(clusters²) `enumerate_canonical_
+        // cluster_shapes` (~28.5K searches, > 3 min, over-emits ~70K).
+        //
+        // ⚠️ CAVEAT (open Stage D2 item): the UNIFORM-height sweep only spans
+        // raw profiles where every filler chip shares one height, so the lifted
+        // canonical shapes have uniform-ish caps.  A real shard's per-chip event
+        // counts are NON-uniform (e.g. fib shard1 real canonical = Bitwise:12
+        // DivRem:10 MiscInstrs:1 Mul:10 …, vs this sweep's nearest = Bitwise:11
+        // DivRem:9 MiscInstrs:10 Mul:9 …), which lift to a DIFFERENT canonical
+        // shape — so the swept set MISSES some real canonical shapes and the
+        // captured real fib-1k normalize VKs are NOT yet members.  The lift is
+        // faithful; the raw-profile SOURCE is too coarse.  The fix is a fast,
+        // correctly-COLLAPSED canonical enumeration (reproduce the min-area
+        // collapse over the real reachable per-chip profiles) — neither this
+        // sweep (misses) nor `enumerate_canonical_cluster_shapes_fast`
+        // (over-emits, no collapse) is the final answer.
         let small_shapes: Vec<OrderedShape> = {
-            // Keyed by (sorted chip names, log_dense) so we emit exactly
-            // one shape per distinct normalize equivalence class.
-            let mut by_class: BTreeMap<(Vec<String>, usize), OrderedShape> = BTreeMap::new();
+            let mut by_shape: BTreeMap<Vec<(String, usize)>, OrderedShape> = BTreeMap::new();
+            // Insert one lifted+deduped canonical shape for a raw profile.
+            let mut lift_and_insert = |raw: &OrderedShape| {
+                if let Some(shape) =
+                    core_shape_config.find_canonical_cluster_shape_from_ordered(raw)
+                {
+                    let mut inner: Vec<(String, usize)> = shape
+                        .iter()
+                        .map(|(id, h)| (id.to_string(), *h))
+                        .filter(|(n, _)| chips_by_name.contains_key(n))
+                        .collect();
+                    inner.sort();
+                    if !inner.is_empty() {
+                        by_shape
+                            .entry(inner.clone())
+                            .or_insert(OrderedShape { inner });
+                    }
+                }
+            };
             for cluster in &machine_shape.chip_clusters {
                 let names: Vec<String> = cluster
                     .iter()
@@ -507,8 +560,6 @@ impl ZKMProofShape {
                 if names.is_empty() {
                     continue;
                 }
-                let mut chipset = names.clone();
-                chipset.sort();
                 let fillers: std::collections::HashSet<&String> = names
                     .iter()
                     .filter(|n| {
@@ -530,17 +581,12 @@ impl ZKMProofShape {
                             (n.clone(), height)
                         })
                         .collect();
-                    let os = OrderedShape::from_log2_heights(&inner);
-                    let ld = log_dense_of(&os);
-                    // Keep the FIRST shape seen for each class (smallest
-                    // sweep height h that reaches this log_dense) — its
-                    // distribution is irrelevant to the VK, only the class
-                    // matters.
-                    by_class.entry((chipset.clone(), ld)).or_insert(os);
+                    lift_and_insert(&OrderedShape::from_log2_heights(&inner));
                 }
             }
-            by_class.into_values().collect()
+            by_shape.into_values().collect()
         };
+        let _ = &log_dense_of;
 
         // Emit arity 1..=reduce_batch_size normalize batches.  Real
         // multishard proofs batch core shards in chunks(REDUCE_BATCH_SIZE)
@@ -560,21 +606,109 @@ impl ZKMProofShape {
             out
         };
 
+        // ───────────────────────────────────────────────────────────────
+        // G1 Stage D1 (#88): re-key Compress / Deferred / Shrink from the
+        // band-cartesian (`get_all_shape_combinations` = bands^arity) to the
+        // natural (recursion-cluster, child_log_dense) class enumeration.
+        //
+        // A compose/deferred/shrink program verifies a BATCH of CHILD proofs,
+        // each itself a RECURSION (normalize/compose) proof over the fixed
+        // 7-chip recursion machine (uniform chip-set).  The compose program —
+        // hence its VK — is determined by (recursion-chip-set, arity,
+        // child_log_dense): the child's jagged-bundle `log_dense_size` drives
+        // `num_stripes` / `batch_evaluations` / BaseFold rounds the compose
+        // circuit `read()`s (traced in `dummy_jagged_basefold_bundle`, pinned
+        // by `tests::compose_program_basefold_band_is_load_bearing` and
+        // `tests::vkroot_localize_compose_shape_keys`).  The band a child
+        // lands in is just a quantized stand-in for the child's log_dense, so
+        // the right key is the child's NATURAL log_dense — NOT an arbitrary
+        // bands^arity tuple (which over-enumerates 5^4=625 just for arity-4
+        // Compress, and whose band heights do not correspond to the natural
+        // heights a height-agnostic (FIX-off) recursion proof produces).
+        //
+        // Construction mirrors the per-shard normalize re-key above, but on
+        // the RECURSION machine: sweep a uniform height over its chips, dedup
+        // by (chip_set, log_dense) → the distinct child classes.  The
+        // recursion chips carry NO byte-lookups, so no per-chip lookup-budget
+        // pinning is needed (unlike the core normalize sweep).  We emit:
+        //   * Compress: arity 1..=reduce_batch_size uniform batches per class.
+        //   * Deferred / Shrink: one shape per class.
+        // With `ZIREN_HA_NO_FIXSHAPE` ON the program is built at the child's
+        // natural heights (no `fix_shape` band-snap), so the enumerated dummy
+        // VK == the real FIX-off proof's VK for the same (cluster, arity,
+        // child_log_dense).  Validated by the membership check (Stage D1 (b)).
+        let compress_child_classes: Vec<OrderedShape> = {
+            use p3_koala_bear::KoalaBear as KB;
+            use zkm_pcs::stacked_shapes::types::consts;
+            let compress_machine =
+                CompressAir::<KB>::compress_machine(crate::InnerSC::default());
+            let rec_chip_widths: BTreeMap<String, usize> = compress_machine
+                .chips()
+                .iter()
+                .map(|c| {
+                    (
+                        <_ as MachineAir<KB>>::name(c),
+                        p3_air::BaseAir::<KB>::width(c).max(1),
+                    )
+                })
+                .collect();
+            let rec_names: Vec<String> = rec_chip_widths.keys().cloned().collect();
+            let log_dense_rec = |os: &OrderedShape| -> usize {
+                let total: usize = os
+                    .inner
+                    .iter()
+                    .map(|(name, log_h)| {
+                        rec_chip_widths.get(name).copied().unwrap_or(1) * (1usize << *log_h)
+                    })
+                    .sum();
+                if total == 0 {
+                    0
+                } else {
+                    total.next_power_of_two().trailing_zeros() as usize
+                }
+            };
+            // Sweep a uniform height across the recursion chips; dedup by
+            // (chip_set fixed, log_dense). Keep the first (smallest sweep
+            // height) representative per class — the VK is class-determined.
+            let mut by_ld: BTreeMap<usize, OrderedShape> = BTreeMap::new();
+            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
+                let inner: Vec<(String, usize)> =
+                    rec_names.iter().map(|n| (n.clone(), h)).collect();
+                let os = OrderedShape::from_log2_heights(&inner);
+                by_ld.entry(log_dense_rec(&os)).or_insert(os);
+            }
+            by_ld.into_values().collect()
+        };
+
+        let arity_compress_shapes: Vec<Self> = {
+            let mut out =
+                Vec::with_capacity(compress_child_classes.len() * reduce_batch_size);
+            for arity in 1..=reduce_batch_size {
+                for os in &compress_child_classes {
+                    out.push(Self::Compress(vec![os.clone(); arity]));
+                }
+            }
+            out
+        };
+        let deferred_shapes: Vec<Self> = compress_child_classes
+            .iter()
+            .map(|os| Self::Deferred(os.clone()))
+            .collect();
+        let shrink_shapes: Vec<Self> = compress_child_classes
+            .iter()
+            .map(|os| Self::Shrink(os.clone()))
+            .collect();
+
+        // `recursion_shape_config` is no longer consulted for the
+        // Compress/Deferred/Shrink tail (band cartesian retired); retained in
+        // the signature for API stability and the legacy `generate_maximal_shapes`.
+        let _ = recursion_shape_config;
+
         arity_recursion_shapes
             .into_iter()
-            .chain((1..=reduce_batch_size).flat_map(move |batch_size| {
-                recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
-            }))
-            .chain(
-                recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Deferred(x.pop().unwrap())),
-            )
-            .chain(
-                recursion_shape_config
-                    .get_all_shape_combinations(1)
-                    .map(|mut x| Self::Shrink(x.pop().unwrap())),
-            )
+            .chain(arity_compress_shapes)
+            .chain(deferred_shapes)
+            .chain(shrink_shapes)
     }
 
     pub fn generate_maximal_shapes<'a>(

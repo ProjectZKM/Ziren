@@ -345,14 +345,6 @@ where
         .iter()
         .map(|cc| cc.iter().map(|_| zero_felt(builder)).collect())
         .collect();
-    // Height-agnostic groundwork (Stages 1-3): this placeholder/bytes
-    // lift has no packing to derive from, so the numeric row counts
-    // mirror the zero bit-form above and padding is empty.  PURE DATA.
-    let row_counts_usize: Vec<Vec<usize>> = column_counts_by_round
-        .iter()
-        .map(|cc| cc.iter().map(|_| 0usize).collect())
-        .collect();
-    let padding_column_counts: Vec<usize> = Vec::new();
     // Zero-placeholder original commitments as HV::DigestVariable
     // (inner [Felt;8] / outer [Var<Bn254>;1]).  Reuses the `zero_digest_var`
     // computed at the top of the fn.
@@ -369,8 +361,6 @@ where
         pcs_proof: stacked_pcs_proof,
         column_counts,
         row_counts,
-        row_counts_usize,
-        padding_column_counts,
         original_commitments,
         expected_eval: zero_ext(builder),
     }
