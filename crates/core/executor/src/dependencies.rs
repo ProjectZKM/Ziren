@@ -231,6 +231,12 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
     } else if matches!(event.opcode, Opcode::EXT) {
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;
+        // `execute_ext` rejects encodings with `lsb + msbd >= 32`, so the `31 - lsb - msbd`
+        // shift amounts below cannot underflow.
+        debug_assert!(
+            lsb + msbd < 32,
+            "EXT with lsb + msbd >= 32 must be rejected during execution"
+        );
         let sll_val = event.b << (31 - lsb - msbd);
         let sll_event = AluEvent {
             pc: UNUSED_PC,

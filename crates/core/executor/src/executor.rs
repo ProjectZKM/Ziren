@@ -1899,7 +1899,7 @@ impl<'a> Executor<'a> {
             if instruction.opcode == Opcode::WSBH {
                 (a, b, c) = self.execute_wsbh(instruction);
             } else if instruction.opcode == Opcode::EXT {
-                (a, b, c) = self.execute_ext(instruction);
+                (a, b, c) = self.execute_ext(instruction)?;
             } else if instruction.opcode == Opcode::MADDU {
                 (hi_or_prev_a, a, b, c) = self.execute_maddu(instruction);
             } else if instruction.opcode == Opcode::INS {
@@ -2169,17 +2169,26 @@ impl<'a> Executor<'a> {
         (a, b, 0)
     }
 
-    fn execute_ext(&mut self, instruction: &Instruction) -> (u32, u32, u32) {
+    fn execute_ext(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(u32, u32, u32), ExecutionError> {
         let (rd, rt, c) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr_cpu(rt, MemoryAccessPosition::B);
         let msbd = c >> 5;
         let lsb = c & 0x1f;
+        // `lsb + msbd < 32` is architecturally required (and enforced by the EXT AIR
+        // constraint). Otherwise the `31 - lsb - msbd` shift amount used here and in trace
+        // generation underflows as a `u32`. Reject the undefined encoding instead of panicking.
+        if msbd + lsb >= 32 {
+            return Err(ExecutionError::ExceptionOrTrap());
+        }
         let mask_msb =
             if msbd + lsb + 1 == 32 { 0xFFFFFFFF } else { (1u32 << (msbd + lsb + 1)) - 1 };
         let a = (b & mask_msb) >> lsb;
         self.rw_cpu(rd, a, MemoryAccessPosition::A);
-        (a, b, c)
+        Ok((a, b, c))
     }
 
     fn execute_ins(
