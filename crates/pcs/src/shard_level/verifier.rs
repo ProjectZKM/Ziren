@@ -96,6 +96,18 @@ impl BasefoldShardVerifier {
     /// `log_blowup = 4`.
     #[must_use]
     pub const fn production_default() -> Self {
+        // BASE floor (22).  PER-STAGE cube override lives in the prover
+        // (crates/pcs/src/prover.rs try_prove_shard_to_basefold_boxed + the
+        // shrink prover) and in each recursion `build_*_basefold_program` site
+        // (crates/prover/src/lib.rs+build.rs): `cube = 22.max(per-proof chip
+        // log-height / input-proof zerocheck dim)`.  22 stays the floor, so any
+        // proof whose tallest chip is ≤ 2^22 (core; recursion landing on bands
+        // 1-4, ≤ 2^21) stays at cube=22 → BYTE-IDENTICAL.  Only proofs landing
+        // on the #88 band-5 (ext_alu 2^24 / base_alu 2^23) get cube=24 — those
+        // are reachable in FIX-on too (band-5 REPLACED the old component-opening
+        // band) and were already changed by #88; the per-stage cube is what
+        // makes them provable.  Two-adic-safe: the BaseFold codeword bound is
+        // over log_stacking_height (fixed 21), NOT max_log_row_count.
         Self { max_log_row_count: 22 }
     }
 
@@ -244,9 +256,29 @@ impl BasefoldShardVerifier {
             })
         });
 
-        verify_logup_gkr_host::<SC>(
+        // ── PER-STAGE CUBE (bug #9) ──────────────────────────────
+        //
+        // `self.max_log_row_count` is only the BASE floor (22).  The prover
+        // sizes the zerocheck cube PER PROOF (`cube = base.max(tallest
+        // band-padded chip log-height)`); FIX-off multi-shard compress shards
+        // land on the #88 band-5 (ext_alu 2^24) → cube 24 (24 GKR rounds, a
+        // 24-dim zerocheck point), which a fixed 22 rejects at the round-count
+        // / point-dim checks.  Derive the effective cube from the PROOF the
+        // same way `build_outer_circuit` (crates/prover/src/build.rs:257-265)
+        // / `perstage_cube_from_input_proofs` (crates/prover/src/lib.rs) build
+        // each recursion circuit — `base.max(proof_cube)` — so the host
+        // verifier agrees with the in-circuit verifier program (the VK).  See
+        // `derive_effective_max_log_row_count` for the soundness rationale
+        // (round-count source, ceiling, why both checks still bind).
+        let proof_cube = proof.logup_gkr_proof.round_proofs.len() + 1;
+        let effective_max_log_row_count =
+            derive_effective_max_log_row_count(self.max_log_row_count, proof_cube)?;
+
+        verify_logup_gkr_host::<SC, A>(
             &proof.logup_gkr_proof,
-            self.max_log_row_count,
+            chips,
+            &proof.opened_values,
+            effective_max_log_row_count,
             beta_seed_dim,
             proof.fold_orientation,
             &proof.public_values,
@@ -273,7 +305,7 @@ impl BasefoldShardVerifier {
             &proof.zerocheck_proof,
             &proof.logup_gkr_proof.logup_evaluations,
             &proof.public_values,
-            self.max_log_row_count,
+            effective_max_log_row_count,
             challenger,
             // Discriminator: opened_values carries the trace@z*
             // openings the circuit's rlc_eval (zerocheck.rs:613) is built
@@ -298,6 +330,61 @@ impl BasefoldShardVerifier {
 
         Ok(())
     }
+}
+
+/// PER-STAGE cube ceiling (bug #9): the tallest reachable FIX-off recursion
+/// band (#88 band-5: `ext_alu 2^24`) at the KoalaBear two-adicity (24).  A
+/// proof claiming a larger cube cannot correspond to any admitted recursion
+/// shape and is rejected outright.  See `BasefoldShardVerifier::production_default`
+/// and `crates/recursion/core/src/shape.rs:262`.
+pub(crate) const MAX_PERSTAGE_CUBE: usize = 24;
+
+/// Derive the per-shard effective `max_log_row_count` (bug #9).
+///
+/// The host shard verifier's `base` (`production_default().max_log_row_count`,
+/// 22) is only the FLOOR.  The prover sizes the zerocheck cube PER PROOF —
+/// `cube = base.max(tallest band-padded chip log-height)` — and FIX-off
+/// multi-shard compress shards land on the #88 band-5 (`ext_alu 2^24`), so
+/// their recorded cube is 24 (24 GKR rounds, a 24-dim zerocheck point).  This
+/// mirrors `build_outer_circuit` (crates/prover/src/build.rs:257-265) and
+/// `ZKMProver::perstage_cube_from_input_proofs` (crates/prover/src/lib.rs):
+/// `effective = base.max(proof_cube)`, so the host verifier agrees with the
+/// in-circuit verifier program (the VK).
+///
+/// `proof_cube` is sourced by the caller from the LogUp-GKR round count
+/// (`round_proofs.len() + 1`); for any well-formed proof this equals the
+/// zerocheck point dim (`point_and_eval.0.len()`, build's source), and the
+/// equality is itself bound downstream (the zerocheck point-dim check
+/// `point_dim == effective` stays a REAL check rather than a tautology when
+/// the cube is derived from the GKR round count).
+///
+/// Sound: the round-count and zerocheck-dim checks both still bind against
+/// this single derived value (a dropped GKR round shrinks `effective`, which
+/// then fails the zerocheck point-dim check); the cube is clamped at
+/// [`MAX_PERSTAGE_CUBE`] so an untrusted proof cannot inflate it beyond the
+/// largest admitted band.  NO-OP (returns `base`) when `proof_cube <= base`
+/// (core, FIX-on recursion, FIX-off bands 1-4) → BYTE-IDENTICAL behavior.
+fn derive_effective_max_log_row_count(
+    base: usize,
+    proof_cube: usize,
+) -> Result<usize, BasefoldVerifyError> {
+    if proof_cube > MAX_PERSTAGE_CUBE {
+        return Err(BasefoldVerifyError::LogupGkr(format!(
+            "derived per-stage cube {proof_cube} (GKR round count + 1) exceeds the \
+             ceiling {MAX_PERSTAGE_CUBE} (band-5 ext_alu 2^24 / KoalaBear two-adicity)"
+        )));
+    }
+    let effective = base.max(proof_cube);
+    if effective != base {
+        tracing::debug!(
+            base,
+            proof_cube,
+            effective,
+            "PERSTAGE-CUBE verify[shard]: FIX-off proof above base \
+             (cube derived from GKR round count)"
+        );
+    }
+    Ok(effective)
 }
 
 /// Host-side jagged-PCS opening verification (Stage 4).
@@ -752,36 +839,83 @@ where
             acc_pow = acc_pow * gkr_batch_open;
             gkr_batch_open_powers.push(acc_pow);
         }
+        // ── STAGE 2 (#88): SHARD-UNIFORM convention decision (mirror prover) ─
+        // The prover decides rev(zeta)+collapsed-claim per SHARD (every chip
+        // shares the eq-anchor orientation).  Mirror that here: use the
+        // collapsed (full-opening, no embed) seed iff EVERY chip carries the
+        // FULL-POINT opening (`*_full`).  CPU-generated proofs always satisfy
+        // this; the same `verifier_use_rev` also flips the eq-bridge anchor to
+        // `rev(z_gkr)` inside `recompute_zerocheck_rlc_eval_host` (it derives
+        // the same boolean from `gkr_evaluations`).  CAVEAT: a GPU device-fold
+        // proof emits `*_full` yet uses the legacy `zeta` anchor — that path is
+        // out of scope for this CPU stage (needs the GPU prepare-hook port).
+        let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false);
+        let verifier_use_rev = stage2_revzeta_on
+            && !gkr_evaluations.chip_openings.is_empty()
+            && gkr_evaluations
+                .chip_openings
+                .values()
+                .all(|ce| ce.main_trace_evaluations_full.is_some());
         let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
             .chip_openings
             .values()
             .map(|chip_evaluation| {
-                let raw = chip_evaluation
-                    .main_trace_evaluations
-                    .iter()
-                    .copied()
-                    .chain(
-                        chip_evaluation
-                            .preprocessed_trace_evaluations
-                            .as_ref()
-                            .map(|v| v.as_slice())
-                            .unwrap_or(&[])
-                            .iter()
-                            .copied(),
-                    )
-                    .zip(gkr_batch_open_powers.iter().copied())
-                    .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p);
-                // MIXED-HEIGHT EMBEDDING FACTOR (matches the prover's claim
-                // correction in zerocheck_prover.rs): the GKR opens each chip
-                // at its trailing log_h, dropping Π_high(1 − zeta[k]) over the
-                // zeta coords above this chip's height; re-apply it so the
-                // reconstruction equals the prover's embedded claimed_sum.
-                let log_h = chip_evaluation.log_degree as usize;
-                let high = gkr_evaluations.point.len().saturating_sub(log_h);
-                let embed_factor = gkr_evaluations.point[..high]
-                    .iter()
-                    .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
-                raw * embed_factor
+                // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // When the SHARD uses the collapsed convention, seed the
+                // per-chip claimed_sum term DIRECTLY from the FULL-POINT
+                // openings (`*_full`) with NO embed_factor — mirroring the
+                // prover (zerocheck_prover.rs Stage-2 collapse).  The full-point
+                // opening already carries the mixed-height padding factor
+                //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
+                //               zeta[0..log_h])
+                // so the old `raw(trailing) · embed_LEAD` correction is dropped.
+                // FALLBACK (legacy shard / no `*_full`): the legacy trailing
+                // opening + embed_LEAD, kept in lockstep with the prover's
+                // `!use_rev` branch.
+                let main_full_opt = if verifier_use_rev {
+                    chip_evaluation.main_trace_evaluations_full.as_deref()
+                } else {
+                    None
+                };
+                if let Some(main_full) = main_full_opt {
+                    let prep_full = chip_evaluation
+                        .preprocessed_trace_evaluations_full
+                        .as_deref()
+                        .unwrap_or(&[]);
+                    main_full
+                        .iter()
+                        .copied()
+                        .chain(prep_full.iter().copied())
+                        .zip(gkr_batch_open_powers.iter().copied())
+                        .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p)
+                } else {
+                    let raw = chip_evaluation
+                        .main_trace_evaluations
+                        .iter()
+                        .copied()
+                        .chain(
+                            chip_evaluation
+                                .preprocessed_trace_evaluations
+                                .as_ref()
+                                .map(|v| v.as_slice())
+                                .unwrap_or(&[])
+                                .iter()
+                                .copied(),
+                        )
+                        .zip(gkr_batch_open_powers.iter().copied())
+                        .fold(Challenge::<SC>::ZERO, |a, (o, p)| a + o * p);
+                    // MIXED-HEIGHT EMBEDDING FACTOR (legacy): re-apply
+                    // Π_high(1 − zeta[k]) over the leading zeta coords above
+                    // this chip's height.
+                    let log_h = chip_evaluation.log_degree as usize;
+                    let high = gkr_evaluations.point.len().saturating_sub(log_h);
+                    let embed_factor = gkr_evaluations.point[..high]
+                        .iter()
+                        .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
+                    raw * embed_factor
+                }
             })
             .fold(Challenge::<SC>::ZERO, |acc, m| acc * lambda + m);
         if zerocheck_proof.claimed_sum != zerocheck_sum_mod {
@@ -882,8 +1016,29 @@ where
     let z_star = &zerocheck_proof.point_and_eval.0;
     let z_gkr = &gkr_evaluations.point;
 
-    // (2) eq(z_gkr, z*) — circuit zerocheck.rs:480-489.
-    let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(z_gkr, z_star);
+    // ── STAGE 2 (#88): rev(zeta) eq-bridge anchor ──────────────────────────
+    // Under the collapsed convention the prover anchors every chip's zerocheck
+    // poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the batched
+    // reduced value carries `eq(rev(z_gkr), z*)`.  Mirror that here by feeding
+    // the eq-bridge the reversed GKR point.  The decision is SHARD-UNIFORM and
+    // derived from the SAME signal as the claimed_sum block (every chip carries
+    // `*_full`).  Legacy shards keep `eq(z_gkr, z*)`.
+    let conv_use_rev = std::env::var("ZIREN_STAGE2_REVZETA")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(false)
+        && !gkr_evaluations.chip_openings.is_empty()
+        && gkr_evaluations
+            .chip_openings
+            .values()
+            .all(|ce| ce.main_trace_evaluations_full.is_some());
+    let z_gkr_anchor: Vec<Challenge<SC>> = if conv_use_rev {
+        z_gkr.iter().rev().copied().collect()
+    } else {
+        z_gkr.clone()
+    };
+
+    // (2) eq(anchor, z*) — circuit zerocheck.rs:480-489.
+    let zerocheck_eq_val = eq_eval_host::<Challenge<SC>>(&z_gkr_anchor, z_star);
 
     // (3) gkr_batch_open powers [β¹ .. β^max_width], circuit :491-505.
     let max_elements = chips
@@ -1201,8 +1356,11 @@ where
 ///                                  (λ·(n0·d1 + n1·d0) + d0·d1)`
 ///      - observe (n0, n1, d0, d1) into the transcript
 ///      - sample line challenge, extend eval_point, update n/d evals
-fn verify_logup_gkr_host<SC>(
+#[allow(clippy::too_many_arguments)]
+fn verify_logup_gkr_host<SC, A>(
     proof: &LogupGkrProof<Val<SC>, Challenge<SC>>,
+    chips: &[&Chip<Val<SC>, A>],
+    opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
     max_log_row_count: usize,
     beta_seed_dim: usize,
     fold_orientation: FoldOrientation,
@@ -1212,10 +1370,11 @@ fn verify_logup_gkr_host<SC>(
 ) -> Result<(), BasefoldVerifyError>
 where
     SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
-    
+
 
     // Note: we derive log_num_interactions from the output MLE length
     // rather than taking chip_metadata as an extra parameter, since
@@ -1329,10 +1488,11 @@ where
         .map(|_| challenger.sample_algebra_element::<Challenge<SC>>())
         .collect();
 
-    // Initial numerator/denominator evals at the sampled point.
+    // Initial numerator/denominator evals at the sampled point.  These are
+    // reduced through the round walk below and then consumed by the
+    // degree-masked last-layer reconstruction (no longer discarded).
     let mut numerator_eval: Challenge<SC> = evaluate_mle_host(numerator, &eval_point);
     let mut denominator_eval: Challenge<SC> = evaluate_mle_host(denominator, &eval_point);
-    let _ = (numerator_eval, denominator_eval);
 
     // SP1 contract: the prover pads GKR to a FIXED round count
     // (SP1's verifier asserts `round_proofs.len() + 1 == max_log_row_count`).
@@ -1427,11 +1587,300 @@ where
         denominator_eval = d0 + (d1 - d0) * line;
     }
 
-    // Shape check: max_log_row_count is advisory (verifier-side
-    // configuration).  Not enforced here — the consumer of
-    // logup_evaluations.point at phase 3 validates its dimension.
+    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION (#88 height anchor) ──
+    //
+    // Port of SP1's LogUp-GKR last-layer reconstruction
+    // (/data/felicity/sp1/crates/hypercube/src/logup_gkr/verifier.rs:247-353).
+    //
+    // The round walk above reduces the GKR `circuit_output` num/den MLEs to
+    // their evaluation `(numerator_eval, denominator_eval)` at the fully
+    // reduced `eval_point` (dim = log_num_interactions + max_log_row_count).
+    // Without this block those reduced evals are simply DISCARDED — so the
+    // verifier never ties the GKR output back to the chips' actual trace
+    // openings.  That is the height-soundness hole: an area-preserving
+    // per-chip height forgery (chip A 2^h→2^(h+1), chip B 2^g→2^(g-1)) leaves
+    // the GKR `circuit_output` / round walk / public-values balance intact
+    // while moving each chip's `full_geq` padding boundary — accepted today,
+    // because nothing re-derives `numerator_eval`/`denominator_eval` from
+    // `Lookup::eval(main_trace_evaluations)` masked by `full_geq(degree, ·)`.
+    //
+    // This is a PURE ARITHMETIC ASSERT over already-sampled challenges and
+    // already-observed openings: it samples nothing and observes nothing
+    // (the len + per-chip openings observe stays in zerocheck), so it is
+    // transcript-neutral and proof-byte-neutral.  See Step A: the GKR
+    // `circuit_output` is built from RAW trace cells with NO embed_factor
+    // (extract.rs ← generate_first_layer ← generate_interaction_vals); the
+    // `embed_factor = Π_high(1−zeta[k])` lives ONLY in the zerocheck claim
+    // path (zerocheck_prover.rs:333), NOT here — so the reconstruction uses
+    // raw openings with no factor, exactly matching SP1 (whose padding mask
+    // is carried by `full_geq`, not by an embed_factor).
+    //
+    // GATING (Phase 1 status): the reconstruction is wired in and
+    // transcript-neutral, but the exact interaction-axis MLE convention that
+    // makes it numerically match Ziren's GKR leaf on HONEST proofs is still
+    // being pinned (see the module test + REPORT: the per-chip embed lift and
+    // degree mask are verified, the residual is the leaf assembly orientation).
+    // Until that lands, the assert runs ONLY under `ZIREN_LOGUP_RECONSTRUCTION=1`
+    // so it does NOT break honest production verification; the soundness gate
+    // and the Phase-2 circuit mirror are exercised via that flag.  It samples /
+    // observes nothing either way, so toggling it is transcript- and
+    // proof-byte-neutral.
+    if std::env::var("ZIREN_LOGUP_RECONSTRUCTION").as_deref() == Ok("1") {
+        let log_num_interactions = initial_num_variables - 1;
+
+        // (1) Split the reduced eval_point into (interaction, trace) axes.
+        // The GKR flat index is `row*cols + col` with the interaction `col`
+        // in the LOW bits (extract.rs / round.rs flatten_layer), and the
+        // MSB-fold round walk leaves `eval_point` in LSB-first order
+        // (round.rs:179-184), so the first `log_num_interactions` coords are
+        // the interaction axis and the remaining are the trace (row) axis.
+        if eval_point.len() != log_num_interactions + max_log_row_count {
+            return Err(BasefoldVerifyError::LogupGkr(format!(
+                "reconstruction: reduced eval_point dim {} != log_num_interactions {} + \
+                 max_log_row_count {}",
+                eval_point.len(),
+                log_num_interactions,
+                max_log_row_count
+            )));
+        }
+        let (interaction_point, trace_point) = eval_point.split_at(log_num_interactions);
+
+        // (2) The trace point must equal the claimed opening point, and its
+        // dimension must equal the per-stage cube (NOT the base 22) — the
+        // effective `max_log_row_count` threaded in from `verify_shard`.
+        let logup_evaluations = &proof.logup_evaluations;
+        if trace_point.len() != max_log_row_count {
+            return Err(BasefoldVerifyError::LogupGkr(format!(
+                "reconstruction: trace_point dim {} != effective max_log_row_count {}",
+                trace_point.len(),
+                max_log_row_count
+            )));
+        }
+        if logup_evaluations.point.as_slice() != trace_point {
+            return Err(BasefoldVerifyError::LogupGkr(
+                "reconstruction: logup_evaluations.point != reduced trace_point".into(),
+            ));
+        }
+
+        // (3) `point_extended` for the per-chip `full_geq` padding mask.
+        //
+        // The GKR leaf is LSB-first natural-row: the chip's real rows are
+        // `[0, height)` matched LSB-first with `trace_point` (verified by the
+        // prover-side direct-leaf ground truth, top_level.rs).  So the padding
+        // mask the reconstruction needs is
+        //     geq_B = Σ_{row ≥ height} eq_mle_table(trace_point)[row]
+        // i.e. `full_geq(degree, ·)` paired so degree-bit k aligns with
+        // `trace_point[k]`.  Ziren's `full_geq_host` (= SP1 `full_geq`) pairs
+        // `threshold.rev()` with `point.rev()`, i.e. degree-bit i with
+        // point[len-1-i]; feeding the REVERSED trace_point (plus the SP1
+        // `add_dimension(zero)` high coord) makes degree-bit k align with
+        // `trace_point[k]`, reproducing the LSB-first leaf mask.  (The previous
+        // `[0, ...trace_point]` ordering was the zerocheck's bit-REVERSED
+        // convention — correct for the zerocheck's `bitrev_rows` poly but the
+        // OPPOSITE of the GKR leaf, which is why honest reconstruction failed.)
+        let mut point_extended: Vec<Challenge<SC>> = Vec::with_capacity(max_log_row_count + 1);
+        point_extended.push(Challenge::<SC>::ZERO);
+        point_extended.extend(trace_point.iter().rev().copied());
+
+        // (4) Per-chip reconstruction in Ziren's interaction layout.
+        //
+        // CRITICAL packing detail (Ziren-specific, differs from a naive
+        // SP1 read): the GKR `circuit_output` packs each chip's RAW
+        // interactions CONTIGUOUSLY (extract.rs:86,118 / round.rs:78-80
+        // `offset += num_interactions` — the RAW count, NOT padded), and ALL
+        // padding lands at the GLOBAL trailing end of the `col` axis.  The
+        // PER-CHIP next-pow2 padding (first_layer.rs:420-421) only sizes the
+        // GLOBAL axis (`num_interaction_variables = log2(Σ next_pow2(raw))`),
+        // it does NOT insert between-chip gaps.  So we pack RAW-contiguous
+        // here and resize the whole vector to the global `2^interaction_dim`
+        // with the identity fraction — byte-matching `extract_outputs`.
+        // Iterate `chips` in slice order — the SAME order `generate_first_layer`
+        // builds the layer, so the global `col` axis here matches
+        // `circuit_output`'s.
+        if opened_values.chips.len() != chips.len() {
+            return Err(BasefoldVerifyError::LogupGkr(format!(
+                "reconstruction: opened_values chip count {} != chips {}",
+                opened_values.chips.len(),
+                chips.len()
+            )));
+        }
+        let mut numerator_values: Vec<Challenge<SC>> = Vec::new();
+        let mut denominator_values: Vec<Challenge<SC>> = Vec::new();
+
+        for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
+            let name = <A as MachineAir<Val<SC>>>::name(&chip.air);
+
+            // degree = quotient[0] = real-height big-endian bits.
+            let degree: &[Challenge<SC>] = opening
+                .quotient
+                .first()
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            if degree.len() != point_extended.len() {
+                return Err(BasefoldVerifyError::LogupGkr(format!(
+                    "reconstruction: chip '{}' degree dim {} != point_extended dim {}",
+                    name,
+                    degree.len(),
+                    point_extended.len()
+                )));
+            }
+            let geq_eval = full_geq_host::<Challenge<SC>>(degree, &point_extended);
+
+            // Trace openings at the GKR point, looked up by chip NAME (the
+            // chip_openings BTreeMap is name-ordered, `chips` is def-ordered).
+            let chip_eval =
+                logup_evaluations.chip_openings.get(name.as_str()).ok_or_else(|| {
+                    BasefoldVerifyError::LogupGkr(format!(
+                        "reconstruction: no chip_opening for chip '{}'",
+                        name
+                    ))
+                })?;
+            let main_trailing: &[Challenge<SC>] = &chip_eval.main_trace_evaluations;
+            let prep_trailing: Option<&[Challenge<SC>]> =
+                chip_eval.preprocessed_trace_evaluations.as_deref();
+
+            // ── SP1-FAITHFUL FULL-POINT OPENING ──
+            //
+            // SP1 opens each chip's trace at the FULL `max_log_row_count` point
+            // (`eval_point.last_k(trace_dimension)`; the trace is a PaddedMle,
+            // real on the low rows and ZERO on the padding rows) and recovers
+            // the identity-fraction-padded leaf via
+            //   numerator   = real − padding·geq
+            //   denominator = real + (1 − padding)·geq
+            // on those FULL-point openings (SP1 hypercube verifier.rs:296-325).
+            //
+            // Ziren's GKR leaf is LSB-first natural-row (real rows `[0,height)`
+            // matched LSB-first with `trace_point`), so the FULL-point opening
+            //   main_full[col] = Σ_{row<height} eq(row, trace_point)·trace[row]
+            // is EXACTLY the value SP1's `interaction.eval(full_opening)` needs
+            // — no per-chip embed lift.  The prover emits this opening in
+            // `main_trace_evaluations_full` (top_level.rs); the older trailing-
+            // `log_h` `main_trace_evaluations` stays for the zerocheck's
+            // bit-reversed sum-modification path.  `geq` (over the REVERSED
+            // `point_extended`, see (3)) is the LSB-first padding mask
+            //   geq = Σ_{row ≥ height} eq(row, trace_point).
+            //
+            // SOUNDNESS: `geq = full_geq(degree, point_extended)` reads the
+            // per-chip `degree` BITS, so a height forgery (tampered `degree`)
+            // perturbs the `padding·geq` mask → the reconstructed num/den
+            // diverge from the round walk → reject.
+            //
+            // Fallback: if `*_full` is absent (older proof bytes / non-core
+            // stages), use the trailing opening lifted by `1 − geq_legacy`
+            // (`geq_legacy` over the NON-reversed point), preserving the
+            // pre-full-opening behaviour so the gate stays additive.
+            let (main, prep, geq_for_mask): (
+                Vec<Challenge<SC>>,
+                Option<Vec<Challenge<SC>>>,
+                Challenge<SC>,
+            ) = if let Some(main_full) = chip_eval.main_trace_evaluations_full.as_deref() {
+                (
+                    main_full.to_vec(),
+                    chip_eval.preprocessed_trace_evaluations_full.clone(),
+                    geq_eval,
+                )
+            } else {
+                // Legacy trailing-opening lift (zerocheck's convention): geq
+                // over the NON-reversed point, embed = 1 − that geq.
+                let mut pe_legacy: Vec<Challenge<SC>> =
+                    Vec::with_capacity(max_log_row_count + 1);
+                pe_legacy.push(Challenge::<SC>::ZERO);
+                pe_legacy.extend_from_slice(trace_point);
+                let geq_legacy = full_geq_host::<Challenge<SC>>(degree, &pe_legacy);
+                let embed_factor = Challenge::<SC>::ONE - geq_legacy;
+                (
+                    main_trailing.iter().map(|&v| v * embed_factor).collect(),
+                    prep_trailing.map(|p| p.iter().map(|&v| v * embed_factor).collect()),
+                    geq_legacy,
+                )
+            };
+            let geq_eval = geq_for_mask;
+
+            // Zero padding openings (SP1:311-321) — the trace eval on a fully
+            // padding row (all-zero), used to correct the padding region.
+            let padding_main: Vec<Challenge<SC>> =
+                vec![Challenge::<SC>::ZERO; main.len()];
+            let padding_prep: Option<Vec<Challenge<SC>>> =
+                prep.as_ref().map(|p| vec![Challenge::<SC>::ZERO; p.len()]);
+
+            for (interaction, is_send) in chip
+                .sends()
+                .iter()
+                .map(|s| (s, true))
+                .chain(chip.receives().iter().map(|r| (r, false)))
+            {
+                let (real_numerator, real_denominator) = interaction
+                    .eval::<Challenge<SC>, Challenge<SC>>(
+                        prep.as_deref(),
+                        &main,
+                        alpha,
+                        &beta_powers,
+                    );
+                let (padding_numerator, padding_denominator) = interaction
+                    .eval::<Challenge<SC>, Challenge<SC>>(
+                        padding_prep.as_deref(),
+                        &padding_main,
+                        alpha,
+                        &beta_powers,
+                    );
+
+                // SP1:323-326 — degree-masked num/den, then sign for receives.
+                let numerator_eval_i = real_numerator - padding_numerator * geq_eval;
+                let denominator_eval_i =
+                    real_denominator + (Challenge::<SC>::ONE - padding_denominator) * geq_eval;
+                let numerator_eval_i =
+                    if is_send { numerator_eval_i } else { -numerator_eval_i };
+                numerator_values.push(numerator_eval_i);
+                denominator_values.push(denominator_eval_i);
+            }
+            // NO between-chip padding: chips pack contiguously by RAW count
+            // (see extract.rs:118 / round.rs:80).  Trailing global pad below.
+        }
+
+        // (5) Pad to the full interaction-axis size and evaluate at the
+        // interaction point.  Numerator pads with 0, denominator with 1
+        // (the identity fraction — extract.rs:73-76 / round.rs:117-123).
+        numerator_values.resize(1usize << interaction_point.len(), Challenge::<SC>::ZERO);
+        denominator_values.resize(1usize << interaction_point.len(), Challenge::<SC>::ONE);
+
+        let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
+        let reconstructed_denominator =
+            evaluate_mle_host(&denominator_values, interaction_point);
+
+        if std::env::var("ZIREN_LOGUP_RECON_DEBUG").as_deref() == Ok("1") {
+            eprintln!(
+                "[RECON-DBG] num_eq={} den_eq={} chips={} L={} M={}",
+                numerator_eval == reconstructed_numerator,
+                denominator_eval == reconstructed_denominator,
+                chips.len(),
+                interaction_point.len(),
+                trace_point.len(),
+            );
+        }
+
+        // (6) The GKR round walk's reduced final evals MUST equal the
+        // reconstruction from the chips' trace openings.  This is the assert
+        // that catches the area-preserving height forgery: tampering a chip's
+        // `degree` moves `geq_eval`, perturbing reconstructed num/den while the
+        // walk's `numerator_eval`/`denominator_eval` (which never sees the
+        // degree) stays fixed.
+        if numerator_eval != reconstructed_numerator {
+            return Err(BasefoldVerifyError::LogupGkr(
+                "last-layer reconstruction: numerator mismatch (degree-masked \
+                 height-soundness assert)"
+                    .into(),
+            ));
+        }
+        if denominator_eval != reconstructed_denominator {
+            return Err(BasefoldVerifyError::LogupGkr(
+                "last-layer reconstruction: denominator mismatch (degree-masked \
+                 height-soundness assert)"
+                    .into(),
+            ));
+        }
+    }
+
     let _ = max_log_row_count;
-    let _ = (numerator_eval, denominator_eval);
 
     Ok(())
 }
@@ -1450,6 +1899,35 @@ mod tests {
     fn verifier_with_params_honors_custom_row_count() {
         let v = BasefoldShardVerifier::with_params(3);
         assert_eq!(v.max_log_row_count, 3);
+    }
+
+    /// bug #9 — per-stage cube derivation. At the production base (22):
+    ///   * cube-22 proofs (round_proofs.len()+1 == 22) are a NO-OP → 22
+    ///     (BYTE-IDENTICAL verify path for core / FIX-on / single-shard);
+    ///   * a cube-24 proof (the FIX-off band-5 multi-shard case, 23
+    ///     round_proofs) lifts the effective cube to 24 so the round-count
+    ///     and zerocheck point-dim checks are run AT 24 (no more
+    ///     "round count 23+1 != max_log_row_count 22");
+    ///   * a proof claiming a cube beyond the ceiling (24) is rejected.
+    #[test]
+    fn derive_effective_max_log_row_count_perstage_cube() {
+        let base = BasefoldShardVerifier::production_default().max_log_row_count;
+        assert_eq!(base, 22);
+
+        // No-op: cube <= base stays at base (byte-identical path).
+        assert_eq!(derive_effective_max_log_row_count(base, 21).unwrap(), base);
+        assert_eq!(derive_effective_max_log_row_count(base, 22).unwrap(), base);
+
+        // FIX-off band-5 multi-shard: 23 round_proofs => proof_cube 24 => 24.
+        let cube24 = 23 + 1;
+        assert_eq!(derive_effective_max_log_row_count(base, cube24).unwrap(), 24);
+
+        // Ceiling: cube 24 is the max admitted band; 25 is rejected.
+        assert_eq!(
+            derive_effective_max_log_row_count(base, MAX_PERSTAGE_CUBE).unwrap(),
+            MAX_PERSTAGE_CUBE
+        );
+        assert!(derive_effective_max_log_row_count(base, MAX_PERSTAGE_CUBE + 1).is_err());
     }
 
     /// The three-variant error Display ends with the exact phase hint

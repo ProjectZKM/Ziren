@@ -881,6 +881,13 @@ mod phase1_acceptance_gate {
         // sum `t = Σ z_col_lagrange·y` diverge from the true sumcheck sum
         // `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity fails even
         // for equal heights.
+        // STAGE 2.5 (#88): mirror the production y orientation off the SAME
+        // single source of truth (`current_use_rev`) as the companion
+        // `materialize_dense_jagged` above, so this test's commit and y stay
+        // consistent under either convention.  No `BandCapGuard` is installed in
+        // this unit test => `current_use_rev()` is `None` => both stay LEGACY
+        // bitrev (the test's existing convention), byte-identical.
+        let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())
@@ -895,7 +902,9 @@ mod phase1_acceptance_gate {
                     .map(|col| {
                         let mut acc = InnerChallenge::ZERO;
                         for row in 0..h {
-                            let src = if is_pow2 {
+                            let src = if use_rev_y {
+                                row
+                            } else if is_pow2 {
                                 ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
                             } else {
                                 row

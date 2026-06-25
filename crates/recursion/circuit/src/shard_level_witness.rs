@@ -143,6 +143,13 @@ where
     type WitnessVariable = st::ChipEvaluation<Ext<C::F, C::EF>>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
+        // CRITICAL: read MUST consume the felt stream in the SAME order
+        // `write` emits it — main, prep, main_full, prep_full.  The
+        // `Vec`/`Option` Witnessable impls carry no length prefix
+        // (witness/mod.rs:119), so the read here re-derives each field's
+        // PRESENCE from `self` (the host-typed proof): `Some` reads, `None`
+        // reads nothing.  Because read+write share `&self`, the Option
+        // discriminants match by construction.
         st::ChipEvaluation {
             main_trace_evaluations: self.main_trace_evaluations.read(builder),
             preprocessed_trace_evaluations: self
@@ -150,6 +157,17 @@ where
                 .as_ref()
                 .map(|v| v.read(builder)),
             log_degree: self.log_degree,
+            // #88 Stage 3b: SP1-parity FULL-POINT openings — thread the
+            // host's `*_full` Ext values into the circuit so the in-circuit
+            // LogUp last-layer degree-masked reconstruction can read them.
+            main_trace_evaluations_full: self
+                .main_trace_evaluations_full
+                .as_ref()
+                .map(|v| v.read(builder)),
+            preprocessed_trace_evaluations_full: self
+                .preprocessed_trace_evaluations_full
+                .as_ref()
+                .map(|v| v.read(builder)),
         }
     }
 
@@ -157,6 +175,14 @@ where
         self.main_trace_evaluations.write(witness);
         if let Some(prep) = self.preprocessed_trace_evaluations.as_ref() {
             prep.write(witness);
+        }
+        // #88 Stage 3b: emit the FULL-POINT openings in the SAME order
+        // `read` consumes them (after main + prep).
+        if let Some(main_full) = self.main_trace_evaluations_full.as_ref() {
+            main_full.write(witness);
+        }
+        if let Some(prep_full) = self.preprocessed_trace_evaluations_full.as_ref() {
+            prep_full.write(witness);
         }
     }
 }
@@ -1937,6 +1963,15 @@ where
         max_log_row_count + 1
     };
     let total_values = bundle.packing.total_values;
+    if bits_per_entry > 31 {
+        // FIX-off (bug #8): the 32-bit-width col_prefix_sum path is exercised.
+        eprintln!(
+            "LIFT-BUNDLE-DIAG bits_per_entry={bits_per_entry} jagged_eval_point_len={jagged_eval_point_len} \
+             total_values={total_values} max_log_row_count={max_log_row_count} \
+             col_prefix_sums_len={col_prefix_sums_len} chip_height_felts={} (width capped at 31, MSBs zero-extended)",
+            chip_height_felts.is_some()
+        );
+    }
     let cap_to_bits = |v: usize| -> usize {
         if bits_per_entry < usize::BITS as usize {
             v.min((1usize << bits_per_entry) - 1)
@@ -1957,10 +1992,35 @@ where
         // height heights[i] (mirrors pack_traces_jagged jagged.rs:304-309).
         // The artificial-zero + pad columns share the last real offset; the
         // final slot is total_values = the running accumulator.
+        // #88 band-5 (bug #8): `bits_per_entry = log2(total_area)+1` can reach
+        // 32 when the band-padded total column area lands in [2^30, 2^31)
+        // (band-5: ext_alu 2^24 etc. → total_values ≈ 1.28e9 → log_m=31 →
+        // bits=32).  This is reachable in BOTH FIX-on and FIX-off (band-5
+        // replaced the old component-opening band, so any program above band-4
+        // lands on it).  Every col_prefix_sum VALUE is < total_values < 2^31,
+        // so it genuinely fits in 31 bits — but `num2bits_v2_f` rejects a
+        // 32-bit WIDTH (a single KoalaBear felt is < 2^31; modulus
+        // 2^31-2^24+1).  Decompose only the low 31 bits (range-checked, valid
+        // because v < 2^31) and zero-extend the big-endian MSBs to the full
+        // `bits_per_entry` width.  The high bits are provably 0
+        // (total_values < 2^31).  No-op when bits_per_entry ≤ 31 (every proof
+        // landing on bands 1-4 + core) ⇒ byte-identical there.
         let num2bits_be = |b: &mut Builder<C>, v: Felt<C::F>| -> Vec<Felt<C::F>> {
-            let mut bits = b.num2bits_v2_f(v, bits_per_entry);
+            let dec_bits = bits_per_entry.min(31);
+            let mut bits = b.num2bits_v2_f(v, dec_bits);
             bits.reverse(); // big-endian (MSB first), matching the baked path
-            bits
+            if bits_per_entry > dec_bits {
+                // Prepend zero MSBs so the layout width == bits_per_entry,
+                // matching the prover's `bits_big_endian(value, half)`.
+                let mut out: Vec<Felt<C::F>> = Vec::with_capacity(bits_per_entry);
+                for _ in 0..(bits_per_entry - dec_bits) {
+                    out.push(b.constant(C::F::ZERO));
+                }
+                out.extend(bits);
+                out
+            } else {
+                bits
+            }
         };
         let mut col_prefix_sums: Vec<Vec<Felt<C::F>>> =
             Vec::with_capacity(col_prefix_sums_len);
@@ -2637,6 +2697,13 @@ mod tests {
                 column_counts: vec![],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            // CP-A per-round split: single-group (G==1) test bundle.
+            extra_reduction: vec![],
+            extra_basefold_proof: vec![],
+            extra_commit: vec![],
+            extra_packing: vec![],
+            extra_jagged_eval: vec![],
+            groups: vec![],
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
@@ -2695,6 +2762,13 @@ mod tests {
                 column_counts: vec![1, 1, 1],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            // CP-A per-round split: single-group (G==1) test bundle.
+            extra_reduction: vec![],
+            extra_basefold_proof: vec![],
+            extra_commit: vec![],
+            extra_packing: vec![],
+            extra_jagged_eval: vec![],
+            groups: vec![],
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         let rows: Vec<Vec<usize>> = vec![vec![16, 16, 16]];
@@ -2759,6 +2833,13 @@ mod tests {
                 column_counts: vec![1, 1, 1],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            // CP-A per-round split: single-group (G==1) test bundle.
+            extra_reduction: vec![],
+            extra_basefold_proof: vec![],
+            extra_commit: vec![],
+            extra_packing: vec![],
+            extra_jagged_eval: vec![],
+            groups: vec![],
         };
         let cols: Vec<Vec<usize>> = vec![vec![1, 1, 1]];
         // None -> derive row_counts from bundle.commit.chip_dims.
@@ -2869,6 +2950,13 @@ mod tests {
                 column_counts: vec![],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
+            // CP-A per-round split: single-group (G==1) test bundle.
+            extra_reduction: vec![],
+            extra_basefold_proof: vec![],
+            extra_commit: vec![],
+            extra_packing: vec![],
+            extra_jagged_eval: vec![],
+            groups: vec![],
         };
         let cols: Vec<Vec<usize>> = vec![vec![3], vec![5]];
         let var = lift_jagged_basefold_bundle::<C, zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>(&mut builder, &bundle, 21, &cols, None);

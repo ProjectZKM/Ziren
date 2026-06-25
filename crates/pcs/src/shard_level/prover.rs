@@ -672,10 +672,42 @@ where
         //
         // Kill-switch unchanged: ZIREN_ZC_RESIDUAL_Y=0 → legacy host recompute
         // (which, with low-placement materialize, also yields raw_y).
+        // ── STAGE 2 (#88): rev(zeta) convention gate (default OFF) ──────────
+        // Under the rev(zeta) convention the zerocheck residual (`trace_at_z`)
+        // is in a DIFFERENT orientation than the legacy bitrev opening, so it
+        // must NOT be reused as the jagged `y_per_chip`; force a fresh recompute
+        // (the residual fast path is a legacy-convention-only optimization).
+        // Same env gate + shard-uniform signal the zerocheck uses (see
+        // zerocheck_prover.rs).  NOTE: even fresh recompute does not reconcile
+        // the FIX-off band-cap LOW-PLACEMENT commit under rev (documented
+        // there); the gate is OFF by default so the legacy fast path + GREEN
+        // FIX-off baseline are preserved.
+        // STAGE 2.5 (#88) LOCKSTEP: read the per-shard rev(zeta) decision from
+        // the SAME single source of truth (`current_use_rev`) the commit + the
+        // zerocheck use, re-applying the local device + full-openings guard.
+        // Under rev the residual is in a different orientation than the legacy
+        // bitrev opening, so it must NOT be reused as `y_per_chip` (the fresh
+        // recompute below — also rev-gated — produces the natural column claim).
+        // `None` (no guard) => the legacy predicate (byte-identical).
+        let full_openings_ok = !logup_gkr_proof.logup_evaluations.chip_openings.is_empty()
+            && logup_gkr_proof
+                .logup_evaluations
+                .chip_openings
+                .values()
+                .all(|ce| ce.main_trace_evaluations_full.is_some());
+        let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
+            Some(carrier) => carrier && _device_traces.is_none() && full_openings_ok,
+            None => {
+                let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
+                    .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(false);
+                stage2_revzeta_on && _device_traces.is_none() && full_openings_ok
+            }
+        };
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
             .unwrap_or(true);
-        if !on {
+        if !on || shard_use_rev {
             None
         } else {
             let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());

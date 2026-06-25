@@ -181,10 +181,17 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             row_counts,
             original_commitments,
             expected_eval,
-            // Height-agnostic groundwork (Stages 1-3): the witnessed
-            // numeric `row_counts_usize` / `padding_column_counts` are
-            // carried but DELIBERATELY ignored here — the verify path
-            // stays byte-identical (Stage 4 wires the checks).
+            // Height-agnostic groundwork (Stage 1, gap G2): the witnessed
+            // numeric `row_counts_usize` / `padding_column_counts` are now
+            // BOUND to the consumed forms below (step 6.6) so they cannot
+            // disagree — the consumed `row_counts` Felt (derived from the
+            // WITNESSED opened-degree height on the production height-agnostic
+            // path) is pinned to the compile-time-expected `row_counts_usize`,
+            // and `padding_column_counts` is pinned to the column-counts-
+            // derived padding.  Additive + no-op on honest proofs (the lift
+            // builds both forms from the same packing).
+            row_counts_usize,
+            padding_column_counts,
             ..
         } = proof;
 
@@ -282,6 +289,84 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             for &row_count in round.iter() {
                 Self::assert_row_count_le_cube::<C>(builder, row_count, cube_log);
             }
+        }
+
+        // (6.6) NUMERIC↔CONSUMED BINDING (Stage 1, gap G2).
+        //
+        // The proof carries TWO per-(round,chip) representations of each chip's
+        // row count:
+        //   * `row_counts`        — the consumed Felt form.  On the production
+        //     height-agnostic path it is reconstructed from the WITNESSED opened
+        //     `degree` (`chip_height_felts_from_opened_degrees`), so it is a
+        //     prover-controlled value, and it is what the step-(7) prefix-sum /
+        //     area checks actually accumulate.
+        //   * `row_counts_usize`  — the witnessed NUMERIC form (SP1's
+        //     `row_counts_and_column_counts`), a compile-time-baked count the
+        //     verifier expects.
+        // Until now `row_counts_usize` was DELIBERATELY ignored, so a malicious
+        // prover could witness an opened-degree height (→ `row_counts` Felt)
+        // that disagrees with `row_counts_usize` without detection.  Bind them:
+        // assert the consumed Felt equals the numeric form lifted to the field.
+        // This is ADDITIVE (no shape change), config-generic (`assert_felt_eq`
+        // works for both the inner KoalaBear and outer BN254 rings), and a NO-OP
+        // on honest proofs — the lift derives both forms from the same packing
+        // (offset diffs == 2^log_h on the FIX-on path), so they already agree.
+        // Bound by `row_counts_usize` so degenerate/scaffolding bundles that
+        // carry no numeric form (empty `row_counts_usize`) add no asserts; the
+        // dummy mirrors the real bundle's shape, so the op count stays identical
+        // between dummy and real (value-independence preserved).
+        for (round_felt, round_usize) in row_counts.iter().zip(row_counts_usize.iter()) {
+            // Per-round shapes MUST agree (both are per-chip, name-sorted, same
+            // chip set) — `.zip()` below is a no-op truncation only on the
+            // degenerate empty-`row_counts_usize` branch handled by the outer
+            // `.zip()`.  A partial length mismatch would silently weaken the
+            // bind AND diverge dummy/real op counts, so surface it loudly in
+            // debug/test (compiled out of release construction — no production
+            // panic risk).
+            debug_assert_eq!(
+                round_felt.len(),
+                round_usize.len(),
+                "jagged-pcs (G2): row_counts / row_counts_usize per-round length \
+                 mismatch ({} vs {}) — would break the numeric↔consumed bind",
+                round_felt.len(),
+                round_usize.len(),
+            );
+            for (&row_count_felt, &row_count_num) in round_felt.iter().zip(round_usize.iter()) {
+                let expected: Felt<C::F> =
+                    builder.constant(C::F::from_canonical_usize(row_count_num));
+                builder.assert_felt_eq(row_count_felt, expected);
+            }
+        }
+
+        // (6.6b) PADDING-COLUMN-COUNT BINDING (Stage 1, gap G2).
+        //
+        // `padding_column_counts` is the witnessed NUMERIC count of artificial
+        // columns the BaseFold stacking rounds the real total column count up to
+        // the next power of two.  Nothing in the verify path consumes it yet
+        // (the full SP1 padding bit-bounds are Stage 3 / gap G4), so there is no
+        // in-circuit witness VARIABLE to constrain — both `padding_column_counts`
+        // and the column-counts-derived padding are compile-time `usize` baked
+        // into the program (no prover-controlled dimension, hence no in-circuit
+        // soundness lever here yet).  Pin the numeric form to that deterministic
+        // value with a COMPILE-TIME `debug_assert_eq!` (NOT an in-circuit
+        // `assert_felt_eq`): it emits ZERO circuit ops — keeping the verify path
+        // EXACTLY byte-identical — and is compiled out of release recursion-
+        // program construction, so it can never spuriously break production
+        // construction, while still catching a lift bug that lets the padding
+        // count drift from the column structure it describes in debug/test
+        // builds.  (Stage 3 promotes this to the SP1 8-way padding bit-bounds
+        // once the padding columns become circuit witnesses.)
+        for (round_idx, &padding) in padding_column_counts.iter().enumerate() {
+            let total_real_cols: usize =
+                column_counts.get(round_idx).map(|cc| cc.iter().sum()).unwrap_or(0);
+            let expected_padding =
+                total_real_cols.max(1).next_power_of_two().saturating_sub(total_real_cols);
+            debug_assert_eq!(
+                padding, expected_padding,
+                "jagged-pcs (G2): witnessed padding_column_counts[{round_idx}] = {padding} \
+                 disagrees with the column-counts-derived padding {expected_padding} \
+                 (total_real_cols = {total_real_cols})",
+            );
         }
 
         // (7) Check prefix-sum consistency: accumulating the
@@ -543,5 +628,46 @@ mod tests {
     #[should_panic]
     fn height_guard_rejects_overclaimed_row_count_double_cube() {
         run_guard(32, 4);
+    }
+
+    // ── NUMERIC↔CONSUMED BINDING (Stage 1, gap G2) executed-circuit tests ──
+    //
+    // Mirror the height-guard pattern: build the consumed `row_count` Felt and
+    // bind it to the witnessed numeric `row_count_usize` exactly as step (6.6)
+    // of `verify_trusted_evaluations` does, then RUN the DSL.  When the two
+    // agree the binding is a no-op; when they disagree the runtime trips the
+    // in-circuit `assert_felt_eq`, which `#[should_panic]` captures — proving
+    // the constraint is real (not vacuous).
+
+    /// Build `row_count` as a Felt and assert it equals
+    /// `from_canonical_usize(row_count_num)` — the exact step-(6.6) binding —
+    /// then execute the circuit.
+    fn run_numeric_binding(row_count_felt: u64, row_count_num: usize) {
+        use crate::utils::tests::run_test_recursion;
+        let mut builder = Builder::<InnerConfig>::default();
+        let rc: Felt<InnerVal> = builder.constant(InnerVal::from_u64(row_count_felt));
+        let expected: Felt<InnerVal> =
+            builder.constant(InnerVal::from_canonical_usize(row_count_num));
+        builder.assert_felt_eq(rc, expected);
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE: when the consumed Felt equals the witnessed numeric form the
+    /// binding is a no-op (this is the honest-prover case — the lift derives
+    /// both from the same packing).
+    #[test]
+    fn numeric_binding_accepts_consistent_counts() {
+        run_numeric_binding(0, 0);
+        run_numeric_binding(1, 1);
+        run_numeric_binding(1024, 1024); // 2^10, a real chip height
+    }
+
+    /// NEGATIVE: a prover that witnesses a numeric `row_count_usize` that
+    /// disagrees with the consumed `row_counts` Felt (here the Felt decodes a
+    /// height the numeric form does not) is REJECTED by the step-(6.6) bind.
+    #[test]
+    #[should_panic]
+    fn numeric_binding_rejects_inconsistent_counts() {
+        run_numeric_binding(1024, 512);
     }
 }

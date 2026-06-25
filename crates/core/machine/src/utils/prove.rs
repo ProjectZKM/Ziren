@@ -814,10 +814,41 @@ where
                                                     m
                                                 };
 
+                                                // STAGE 2.5 (#88) LOCKSTEP
+                                                // ORIENTATION: compute the per-shard
+                                                // rev(zeta) decision ONCE here (the
+                                                // single source of truth) and install
+                                                // it for the whole commit+open scope,
+                                                // so the jagged COMMIT (materialize),
+                                                // the `y_per_chip` recompute, and the
+                                                // zerocheck residual all read ONE
+                                                // boolean and can never drift.  On this
+                                                // CPU core prove path there is no device
+                                                // trace provider, so on the host every
+                                                // chip carries `main_trace_evaluations_
+                                                // full` and this equals the zerocheck's
+                                                // full predicate (`_device_traces.is_
+                                                // none()` + all-full-openings); the
+                                                // zerocheck re-applies the device-none /
+                                                // full-openings guard locally where that
+                                                // info is known, so a GPU run (out of
+                                                // scope; flag default-OFF) stays bitrev.
+                                                // Flag OFF => `false` => the legacy
+                                                // bitrev branch, byte-identical to today.
+                                                let stage2_use_rev = std::env::var(
+                                                    "ZIREN_STAGE2_REVZETA",
+                                                )
+                                                .map(|v| {
+                                                    v != "0"
+                                                        && !v.eq_ignore_ascii_case("false")
+                                                })
+                                                .unwrap_or(false);
+
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
                                                     map,
                                                     missing_traces,
                                                     raw_log_heights,
+                                                    stage2_use_rev,
                                                 )
                                             })
                                     };

@@ -479,10 +479,12 @@ impl<P> BasefoldShardVerifier<P> {
         // (alpha, beta_seed, pv_challenge), observes the GKR
         // circuit output, and replays each layer's sumcheck via
         // the transcript-bound challenger.
-        verify_logup_gkr::<C, FC, EVPV>(
+        verify_logup_gkr::<C, SC, A, FC, EVPV>(
             builder,
             chip_metadata,
             logup_gkr_proof,
+            shard_chips,
+            opened_values,
             public_values,
             self.max_log_row_count,
             challenger,
@@ -743,6 +745,13 @@ where
         let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
             main_trace_evaluations: vec![zero_ext(builder); 1],
             preprocessed_trace_evaluations: None,
+            // #88 Stage 3b: this coarse IR-side shape fixture
+            // (construction smoke test only — NOT the witness-stream
+            // VK-regen dummy, which is `dummy::basefold_shard_proof`)
+            // carries None; the production reconstruction reads the
+            // `*_full` threaded through the witness path.
+            main_trace_evaluations_full: None,
+            preprocessed_trace_evaluations_full: None,
         };
         let logup_evaluations = LogUpEvaluations::<Ext<C::F, C::EF>> {
             point: (0..shape.logup_gkr_rounds).map(|_| zero_ext(builder)).collect(),

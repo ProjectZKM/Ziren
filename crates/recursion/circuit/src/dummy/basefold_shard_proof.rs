@@ -157,6 +157,20 @@ where
                         // `BasefoldShardProof.chip_log_heights`
                         // (see [`dummy_basefold_shard_proof`]).
                         log_degree: 0,
+                        // #88 Stage 3b: SP1-parity FULL-POINT openings.  The
+                        // VK-enumeration dummy MUST carry these with the SAME
+                        // shape the real prover emits (top_level.rs:517-538) so
+                        // the recursion AIR / witness layout (and thus the
+                        // regenerated VK) matches real proofs.  The real prover
+                        // emits `main_trace_evaluations_full = Some(width)` for
+                        // every host/device chip and `preprocessed_*_full =
+                        // Some(preprocessed_width)` only when prep_width > 0.
+                        main_trace_evaluations_full: Some(vec![EF::ZERO; main_width]),
+                        preprocessed_trace_evaluations_full: if preprocessed_width > 0 {
+                            Some(vec![EF::ZERO; preprocessed_width])
+                        } else {
+                            None
+                        },
                     },
                 )
             })
@@ -607,6 +621,15 @@ pub fn dummy_jagged_basefold_bundle(
         },
         packing: packing_meta,
         jagged_eval,
+        // Per-round split (Architecture A) is single-group (G==1) for the
+        // dummy/probe path: empty extra-group Vecs + empty group map (the
+        // verifier treats an empty map as the identity single-group cover).
+        extra_reduction: Vec::new(),
+        extra_basefold_proof: Vec::new(),
+        extra_commit: Vec::new(),
+        extra_packing: Vec::new(),
+        extra_jagged_eval: Vec::new(),
+        groups: Vec::new(),
     }
 }
 

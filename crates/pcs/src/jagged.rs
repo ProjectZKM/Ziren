@@ -268,6 +268,19 @@ pub fn materialize_dense_jagged<F: Field>(
         // reduction's column value equals the zerocheck's raw opening exactly
         // (band_y == raw_y).  See `stage5_gate_lowplace_band_equals_raw`.
         let raw_logs = crate::shard_level::band_cap::current_raw_log_heights();
+        // STAGE 2.5 (#88): the per-shard rev(zeta) orientation, the single
+        // source of truth installed by `BandCapGuard` for the whole commit+open
+        // scope.  `Some(true)` => commit the dense column in NATURAL row order
+        // (matching the rev(zeta) zerocheck residual + the natural-indexed
+        // `build_weight_table`), so the jagged round-0 identity `Σ z_col·y ==
+        // Σ_b q·w` holds.  `Some(false)` (flag OFF on the core path) or `None`
+        // (every non-core path) => keep the LEGACY bit-reversed layout exactly
+        // (byte-identical).  Only the host (width>0) chips are materialized here;
+        // device chips are skipped (their cells come from the GPU dense hook,
+        // which stays bitrev — see the OUT-OF-SCOPE note — so the carrier is
+        // forced false on any device run by the zerocheck's local device guard).
+        let use_rev_commit =
+            crate::shard_level::band_cap::current_use_rev() == Some(true);
         chip_slots
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
@@ -302,11 +315,18 @@ pub fn materialize_dense_jagged<F: Field>(
                     match lp_raw_log {
                         Some(raw_log) => {
                             // LOW-PLACEMENT: write only the low 2^raw_log data
-                            // rows, bit-reversed over the RAW log height; the
-                            // high rows of the band slot stay zero (pre-init).
+                            // rows; the high rows of the band slot stay zero
+                            // (pre-init).  Under rev(zeta) (Stage 2.5) place the
+                            // data in NATURAL row order (`dst[r] = trace[r]`) so
+                            // the committed column value equals the rev(zeta)
+                            // zerocheck residual (band_y == raw_y, natural); else
+                            // keep the LEGACY bit-reversed-over-RAW-log placement
+                            // exactly (byte-identical).
                             let h_raw = 1usize << raw_log;
                             for r in 0..h_raw {
-                                let pos = if raw_log == 0 {
+                                let pos = if use_rev_commit {
+                                    r
+                                } else if raw_log == 0 {
                                     0
                                 } else {
                                     ((r as u32).reverse_bits() >> (32 - raw_log)) as usize
@@ -315,10 +335,14 @@ pub fn materialize_dense_jagged<F: Field>(
                             }
                         }
                         None => {
-                            // Legacy own-height packing (FIX-on / recursion /
-                            // shrink / wrap; byte-identical).
+                            // Own-height packing (FIX-on / recursion / shrink /
+                            // wrap).  Under rev(zeta) (Stage 2.5) NATURAL row
+                            // order (`dst[row] = trace[row]`); else LEGACY
+                            // bit-reversed (byte-identical).
                             for row in 0..height {
-                                let src = if is_pow2 {
+                                let src = if use_rev_commit {
+                                    row
+                                } else if is_pow2 {
                                     ((row as u32).reverse_bits() >> (32 - log_h)) as usize
                                 } else {
                                     row
@@ -668,6 +692,179 @@ pub fn hierarchical_jagged_pack<F: Field>(
     (folded, packing)
 }
 
+// ────────────────────────────────────────────────────────────────────────
+// <2^30 jagged round-split (SP1-faithful) — shared integer-only partition.
+//
+// SP1 reference: slop/crates/jagged/src/verifier.rs — the jagged verifier
+// asserts each round's `area < 1<<30` (verifier.rs:236-240), `log_m < 30`
+// (:281-283), and per-count BaseFieldOverflow (:200-204).  A round is ONE
+// stacked-PCS commit; SP1 uses 2 rounds (prep + main) and never sub-splits a
+// single round, because no single SP1 chip is ≥ 2^30.  Ziren has no prep/main
+// split at recursion, so the FIX-off compress dense trace (Σ all chips) can
+// itself exceed 2^30 (band-5 ≈ 1.31e9 = 2^30.29 → log_m = 31 → the in-circuit
+// prefix-sum bit-decomposition `bits_per_entry = jagged_eval_point_len/2 =
+// log_m+1 = 32` hits the KoalaBear 31-bit num2bits wall — bug #7).  We split
+// the chips into G groups, each with total area < 2^30, so every per-round
+// prefix-sum stays ≤ 31 bits.
+// ────────────────────────────────────────────────────────────────────────
+
+/// SP1's `1 << 30` per-round area ceiling (the jagged verifier's
+/// `AreaOutOfBounds` / `log_m < 30` bound).  A round must hold a STRICTLY
+/// smaller dense area so its prefix-sum bit-width (`log_m + 1`) stays ≤ 31.
+pub const MAX_ROUND_LOG_AREA: u32 = 30;
+
+#[cfg(test)]
+thread_local! {
+    /// Test-only per-thread override of the per-round area ceiling, so a
+    /// SMALL synthetic shard can exercise the G≥2 multi-round path without
+    /// materializing a real 2^30 dense.  Set via [`with_test_round_threshold`].
+    /// Both prover and verifier call [`partition_chips_into_rounds`] (the
+    /// single source of G), and a roundtrip test runs both on the SAME
+    /// thread, so the override is identically observed by both sides —
+    /// preserving the "shared partition fn" determinism invariant.
+    static TEST_ROUND_THRESHOLD: core::cell::Cell<Option<u128>> =
+        const { core::cell::Cell::new(None) };
+}
+
+/// Test-only: run `f` with the per-round area ceiling forced to `threshold`
+/// (integer area units, i.e. the same `width << log_height` scale as the
+/// real `1 << MAX_ROUND_LOG_AREA`).  Restores the prior value on return.
+#[cfg(test)]
+pub fn with_test_round_threshold<R>(threshold: u128, f: impl FnOnce() -> R) -> R {
+    let prev = TEST_ROUND_THRESHOLD.with(|c| c.replace(Some(threshold)));
+    let out = f();
+    TEST_ROUND_THRESHOLD.with(|c| c.set(prev));
+    out
+}
+
+#[inline]
+fn current_round_threshold() -> u128 {
+    #[cfg(test)]
+    {
+        if let Some(t) = TEST_ROUND_THRESHOLD.with(core::cell::Cell::get) {
+            return t;
+        }
+    }
+    1u128 << MAX_ROUND_LOG_AREA
+}
+
+/// Is the per-round jagged split enabled?  Default OFF (`ZIREN_JAGGED_GROUPS`
+/// unset or `0`/`false`) ⇒ the caller forces G==1 (today's exact single-round
+/// path; FIX-on / core byte-identical).  When ON, the prover/verifier honour
+/// the [`partition_chips_into_rounds`] grouping (still a single round whenever
+/// the grand total is below the ceiling — a true no-op there too).
+#[must_use]
+pub fn jagged_groups_enabled() -> bool {
+    #[cfg(test)]
+    {
+        // In unit tests the env var is awkward to scope; the multi-round
+        // test drives grouping via `with_test_round_threshold`, and the
+        // no-op test asserts G==1 directly.  Honour the env when present so
+        // an explicit test can still toggle it.
+        if let Ok(v) = std::env::var("ZIREN_JAGGED_GROUPS") {
+            return v != "0" && !v.eq_ignore_ascii_case("false");
+        }
+        return TEST_ROUND_THRESHOLD.with(|c| c.get().is_some());
+    }
+    #[cfg(not(test))]
+    {
+        std::env::var("ZIREN_JAGGED_GROUPS")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+    }
+}
+
+/// Derive the round partition directly from name-sorted [`JaggedChipInfo`]s
+/// (the form both the prover's packing and the verifier's `chip_infos`
+/// carry).  Each chip maps to `(column_count, log2(next_pow2(row_count)))`
+/// — the integer `width << log_height` area key the partition uses.  THE
+/// single coverage source: prover and verifier both call this on the SAME
+/// public name-sorted dims, so the resulting `groups` must match exactly.
+///
+/// When [`jagged_groups_enabled`] is `false`, returns a single group over
+/// all chips (G==1 no-op) regardless of total area — the gated default.
+#[must_use]
+pub fn partition_from_chip_infos(chip_infos: &[JaggedChipInfo]) -> Vec<Vec<usize>> {
+    if !jagged_groups_enabled() {
+        return alloc::vec![(0..chip_infos.len()).collect()];
+    }
+    let dims: Vec<(usize, u32)> = chip_infos
+        .iter()
+        .map(|ci| {
+            let log_h =
+                ci.row_count.max(1).next_power_of_two().trailing_zeros();
+            (ci.column_count, log_h)
+        })
+        .collect();
+    partition_chips_into_rounds(&dims)
+}
+
+/// Partition name-sorted chips into G commit rounds, each round's total dense
+/// area STRICTLY less than `1 << MAX_ROUND_LOG_AREA`.
+///
+/// **THE shared function** — both the host commit (`precompute_*` in
+/// `jagged_pcs.rs`) and the in-circuit verifier (`shard_level_witness.rs` lift
+/// + the machine basefold call sites) call this so they derive the IDENTICAL
+/// round partition.  Disagreement → per-round commitment-observe order desync
+/// → Fiat-Shamir break (silent until verify).  Determinism is guaranteed by
+/// keying ONLY on:
+///   * the FIXED name-sorted chip order (the caller must pass chips in the
+///     same name-sorted order the prover packs them),
+///   * compile-time `width` (size_of the chip's `Cols<u8>`),
+///   * the WITNESSED `log_height` (= the PADDED band log-height, NOT the raw
+///     row_count, NEVER float/log2) — integer `width << log_height` only,
+///   * the compile-time `MAX_ROUND_LOG_AREA` threshold.
+///
+/// Algorithm: name-sorted greedy.  `area_i = width_i << log_height_i` (integer
+/// shift, no log-space).  Maintain a running per-round sum; before adding a
+/// chip, if `running + area_i >= 1<<30` close the current round and start a
+/// new one.  No single chip is ≥ 2^30 (max ExtAlu = 48 << 24 = 2^29.585), so
+/// chip-granular partition always suffices — no column splitting.
+///
+/// NO-OP single round when the grand total `< 1<<30` (FIX-on / core), so the
+/// host + circuit stay BYTE-IDENTICAL on those paths.
+///
+/// Returns G groups; each group is a `Vec<usize>` of indices INTO the
+/// input slice (preserving the name-sorted order).  An empty input → one
+/// empty round (degenerate; callers never hit this with real chip sets).
+#[must_use]
+pub fn partition_chips_into_rounds(chips_name_sorted: &[(usize, u32)]) -> Vec<Vec<usize>> {
+    let threshold: u128 = current_round_threshold();
+    // Integer area, u128 to avoid overflow on the running sum across many
+    // chips even though each chip's area < 2^30.
+    let area = |w: usize, log_h: u32| -> u128 { (w as u128) << log_h };
+
+    // Grand total — single round when < 1<<30 (byte-identical no-op path).
+    let total: u128 = chips_name_sorted.iter().map(|&(w, lh)| area(w, lh)).sum();
+    if total < threshold {
+        return vec![(0..chips_name_sorted.len()).collect()];
+    }
+
+    let mut rounds: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+    let mut running: u128 = 0;
+    for (i, &(w, lh)) in chips_name_sorted.iter().enumerate() {
+        let a = area(w, lh);
+        // Close the current round BEFORE this chip would push it to/over the
+        // ceiling.  `>=` (not `>`) so a round whose area exactly equals 2^30
+        // is rejected — the prefix-sum width must be STRICTLY < 31 bits' worth
+        // of area to keep `log_m < 30`.
+        if !current.is_empty() && running + a >= threshold {
+            rounds.push(core::mem::take(&mut current));
+            running = 0;
+        }
+        current.push(i);
+        running += a;
+    }
+    if !current.is_empty() {
+        rounds.push(current);
+    }
+    if rounds.is_empty() {
+        rounds.push(Vec::new());
+    }
+    rounds
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -675,6 +872,81 @@ mod tests {
     use p3_koala_bear::KoalaBear;
 
     type F = KoalaBear;
+
+    /// Band-5 FIX-off compress chip set (name-sorted), with the PADDED band
+    /// log-heights from `crates/recursion/core/src/shape.rs` (the #88/#79
+    /// catch-all band) and the compile-time `Cols<u8>` widths from the plan.
+    /// `(width, log_height)` in alphabetical name order.
+    fn band5_compress_chips() -> Vec<(usize, u32)> {
+        vec![
+            (12, 23), // BaseAlu              12 << 23 = 100,663,296
+            (13, 21), // BatchFRI             13 << 21 =  27,262,976
+            (7, 18),  // ExpReverseBitsLen     7 << 18 =   1,835,008
+            (48, 24), // ExtAlu               48 << 24 = 805,306,368
+            (1, 22),  // MemoryConst           1 << 22 =   4,194,304
+            (8, 22),  // MemoryVar             8 << 22 =  33,554,432
+            (313, 20),// Poseidon2WideDeg3   313 << 20 = 328,204,288
+            (1, 4),   // PublicValues          1 << 4  =          16
+            (5, 21),  // Select                5 << 21 =  10,485,760
+        ]
+    }
+
+    #[test]
+    fn test_partition_band5_compress_two_rounds() {
+        let chips = band5_compress_chips();
+        let rounds = partition_chips_into_rounds(&chips);
+        let threshold: u128 = 1u128 << MAX_ROUND_LOG_AREA;
+
+        // Exactly 2 rounds.
+        assert_eq!(rounds.len(), 2, "band-5 compress must split into exactly 2 rounds");
+
+        // Both rounds strictly < 2^30.
+        let round_area = |round: &[usize]| -> u128 {
+            round.iter().map(|&i| (chips[i].0 as u128) << chips[i].1).sum()
+        };
+        let r0 = round_area(&rounds[0]);
+        let r1 = round_area(&rounds[1]);
+        assert!(r0 < threshold, "R0 area {r0} must be < 2^30 ({threshold})");
+        assert!(r1 < threshold, "R1 area {r1} must be < 2^30 ({threshold})");
+
+        // Exact membership (indices into the name-sorted slice):
+        // R0 = {BaseAlu(0), BatchFRI(1), ExpReverseBitsLen(2), ExtAlu(3),
+        //       MemoryConst(4), MemoryVar(5)}; R1 = {Poseidon2WideDeg3(6),
+        //       PublicValues(7), Select(8)}.
+        assert_eq!(rounds[0], vec![0, 1, 2, 3, 4, 5], "R0 membership");
+        assert_eq!(rounds[1], vec![6, 7, 8], "R1 membership");
+
+        // Exact areas from the plan.
+        assert_eq!(r0, 972_816_384u128, "R0 total area");
+        assert_eq!(r1, 338_690_064u128, "R1 total area");
+
+        // Every chip appears exactly once, in name-sorted order.
+        let flat: Vec<usize> = rounds.iter().flatten().copied().collect();
+        assert_eq!(flat, (0..chips.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_partition_single_round_when_under_threshold() {
+        // Grand total < 2^30 → exactly ONE round containing all chips, in
+        // order (the byte-identical no-op path for FIX-on / core).
+        // Use the band-5 chips but with the ExtAlu height knocked down so the
+        // grand total dips below 2^30.
+        let mut chips = band5_compress_chips();
+        chips[3].1 = 20; // ExtAlu 48 << 20 = 50,331,648 → total well under 2^30
+        let total: u128 = chips.iter().map(|&(w, lh)| (w as u128) << lh).sum();
+        assert!(total < (1u128 << MAX_ROUND_LOG_AREA), "precondition: total < 2^30");
+
+        let rounds = partition_chips_into_rounds(&chips);
+        assert_eq!(rounds.len(), 1, "under-threshold total must be ONE round");
+        assert_eq!(rounds[0], (0..chips.len()).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_partition_empty_is_single_empty_round() {
+        let rounds = partition_chips_into_rounds(&[]);
+        assert_eq!(rounds.len(), 1);
+        assert!(rounds[0].is_empty());
+    }
 
     #[test]
     fn test_pack_traces_jagged() {

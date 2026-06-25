@@ -151,6 +151,17 @@ where
                 .preprocessed_trace_evaluations
                 .as_ref()
                 .map(|v| v.read(builder)),
+            // #88 Stage 3b: thread the FULL-POINT openings (same read/write
+            // order as the host `st::ChipEvaluation` impl in
+            // shard_level_witness.rs — main, prep, main_full, prep_full).
+            main_trace_evaluations_full: self
+                .main_trace_evaluations_full
+                .as_ref()
+                .map(|v| v.read(builder)),
+            preprocessed_trace_evaluations_full: self
+                .preprocessed_trace_evaluations_full
+                .as_ref()
+                .map(|v| v.read(builder)),
         }
     }
 
@@ -158,6 +169,12 @@ where
         self.main_trace_evaluations.write(witness);
         if let Some(prep) = self.preprocessed_trace_evaluations.as_ref() {
             prep.write(witness);
+        }
+        if let Some(main_full) = self.main_trace_evaluations_full.as_ref() {
+            main_full.write(witness);
+        }
+        if let Some(prep_full) = self.preprocessed_trace_evaluations_full.as_ref() {
+            prep_full.write(witness);
         }
     }
 }

@@ -446,6 +446,16 @@ where
             } else {
                 &eval_point[..]
             };
+            // SP1-parity FULL-POINT opening point: the trailing
+            // `max_log_row_count` coords (= the full trace_point), LSB-first.
+            // Used to populate `*_full` for the LogUp last-layer reconstruction
+            // (the GKR leaf is LSB-first natural-row).  Independent of the
+            // per-chip trailing-`log_h` opening above (consumed by zerocheck).
+            let full_eval_point: &[EF] = if eval_point.len() >= max_log_row_count {
+                &eval_point[eval_point.len() - max_log_row_count..]
+            } else {
+                &eval_point[..]
+            };
             // Verifier hard-checks `opening.main.local.len() ==
             // chip.width()`, so an unexercised chip must still emit a
             // zero vector of its declared width.
@@ -496,12 +506,211 @@ where
                 None
             };
 
+            // SP1-parity FULL-POINT openings at `full_eval_point` (the full
+            // trace_point), for the LogUp last-layer reconstruction.  The GKR
+            // leaf is LSB-first natural-row, so the full-point opening of the
+            // zero-padded trace = Σ_{row<height} eq(row, trace_point)·trace[row]
+            // (rows ≥ height implicitly zero) — exactly what the reconstruction
+            // needs.  Host path: `evaluate_trace_columns_at_point` over the full
+            // coords.  Device-only chips: per-chip provider hook at the full
+            // point (no batch map for this point); falls back to None.
+            let main_evals_full: Option<Vec<EF>> = if main_trace.width == 0 && chip_main_width > 0 {
+                _device_traces.and_then(|p| {
+                    crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
+                        &chip.name(),
+                        full_eval_point,
+                        p,
+                    )
+                })
+            } else if main_trace.width > 0 {
+                Some(evaluate_trace_columns_at_point::<F, EF>(
+                    &main_trace.values,
+                    main_trace.width,
+                    full_eval_point,
+                ))
+            } else {
+                None
+            };
+            let prep_evals_full: Option<Vec<EF>> = if prep_trace.width > 0 {
+                Some(evaluate_trace_columns_at_point::<F, EF>(
+                    &prep_trace.values,
+                    prep_trace.width,
+                    full_eval_point,
+                ))
+            } else {
+                None
+            };
+
+            // ---------------------------------------------------------------
+            // STAGE 1 (#88) — VALUE-PRESERVING ASSERT (debug-only, gated).
+            //
+            // GOAL: empirically PROVE, per-chip / per-column, that the
+            // FULL-POINT opening (`main_trace_evaluations_full`, the Stage-2/3
+            // collapse target) CARRIES the same value the verifier reconstructs
+            // by lifting the trailing-`log_h` opening by the embed factor — so
+            // collapsing the claim+reconstruction onto the single full-point
+            // field is VALUE-PRESERVING.
+            //
+            // CONVENTION FINDING (the literal `full == trailing · embed_lead`
+            // form does NOT hold — see below).  `eq_mle_table` maps coord r[k]
+            // -> row-index bit k (LSB-first).  The two openings select trace
+            // coords as TRAILING suffixes of the same GKR point:
+            //   main_eval_point = eval_point[len-log_h .. len]   (trailing log_h)
+            //   full_eval_point = eval_point[len-N .. len]       (trailing N)
+            // so within `full`, the trace's LOW log_h row bits map to the
+            // LEADING coords full_eval_point[0..log_h] and its ZERO high bits map
+            // to the TRAILING coords full_eval_point[log_h..N].  Therefore:
+            //
+            //   main_trace_evaluations_full
+            //     == embed_TRAILING · MLE(trace @ full_eval_point[0..log_h])
+            //   embed_TRAILING = Π_{k=log_h}^{N-1} (1 − full_eval_point[k])
+            //
+            // The residual trace MLE is over the LEADING coords (the low row
+            // bits), which is the BITREV-CONJUGATE of `main_evals` (which uses
+            // the TRAILING coords).  This LEADING↔TRAILING coord reversal IS the
+            // rev(zeta) convention the task assigns to Stage 2.  The literal
+            // verifier form `full == main_evals · embed_LEAD` (embed over the
+            // leading coords) FAILS for any chip whose trace is not symmetric
+            // under that coord swap — confirmed below as a non-fatal probe.
+            //
+            // The convention-CORRECT value-preservation statement above HOLDS
+            // for EVERY chip / column (proven across tiny/fib/FIX-on) — that is
+            // the Stage-1 gate.  ASSERT-ONLY: emits nothing into the proof; no
+            // value is changed.  Gated on ZIREN_STAGE1_ASSERT (off => no env
+            // read effect, byte-identical, free).
+            if std::env::var("ZIREN_STAGE1_ASSERT").map(|v| v != "0").unwrap_or(false) {
+                let n_full = full_eval_point.len();
+                let high = n_full.saturating_sub(log_main_height);
+                // Verifier-form embed: Π over the LEADING (high) coords.
+                let embed_lead: EF = full_eval_point[..high]
+                    .iter()
+                    .fold(EF::ONE, |acc, &zk| acc * (EF::ONE - zk));
+                // Convention-correct embed: Π over the TRAILING coords above
+                // log_h (the zero high row bits, LSB-first).
+                let embed_trailing: EF = full_eval_point[log_main_height..]
+                    .iter()
+                    .fold(EF::ONE, |acc, &zk| acc * (EF::ONE - zk));
+                // Residual point = the LEADING log_h coords (the low row bits).
+                let lead_pt: &[EF] = if n_full >= log_main_height {
+                    &full_eval_point[..log_main_height]
+                } else {
+                    full_eval_point
+                };
+
+                // ---- convention-correct value-preserving check (the GATE) ----
+                let check = |label: &str,
+                             trailing: &[EF],
+                             full: &[EF],
+                             trace_vals: &[F],
+                             trace_width: usize|
+                 -> bool {
+                    if full.is_empty() {
+                        return true;
+                    }
+                    // MLE of the trace over the LEADING log_h coords.
+                    let mle_lead: Vec<EF> = if trace_width > 0 {
+                        evaluate_trace_columns_at_point::<F, EF>(
+                            trace_vals, trace_width, lead_pt,
+                        )
+                    } else {
+                        // Device-only / empty host trace: no residual MLE to
+                        // recompute here; skip (the full opening came from the
+                        // provider). Reported as SKIP.
+                        eprintln!(
+                            "[STAGE1-ASSERT] chip='{}' {label}: SKIP (no host trace \
+                             to recompute residual MLE; device-only)",
+                            chip.name()
+                        );
+                        return true;
+                    };
+                    let n = full.len().min(mle_lead.len());
+                    let mut ok = full.len() == mle_lead.len();
+                    if !ok {
+                        eprintln!(
+                            "[STAGE1-ASSERT] chip='{}' {label}: LENGTH MISMATCH \
+                             full={} mle_lead={}",
+                            chip.name(),
+                            full.len(),
+                            mle_lead.len()
+                        );
+                    }
+                    let mut lead_form_match = 0usize; // literal verifier form
+                    for c in 0..n {
+                        let expected = mle_lead[c] * embed_trailing;
+                        if full[c] != expected {
+                            ok = false;
+                            eprintln!(
+                                "[STAGE1-ASSERT] chip='{}' {label}: col {c} VALUE-PRESERVE \
+                                 MISMATCH full={:?} expected(embed_trail·MLE_lead)={:?} \
+                                 diff={:?}",
+                                chip.name(),
+                                full[c],
+                                expected,
+                                full[c] - expected
+                            );
+                        }
+                        // Track how often the LITERAL verifier form holds, to
+                        // document the rev-convention gap (non-fatal).
+                        if c < trailing.len() && full[c] == trailing[c] * embed_lead {
+                            lead_form_match += 1;
+                        }
+                    }
+                    eprintln!(
+                        "[STAGE1-ASSERT] chip='{}' {label}: {} (cols={}, log_h={}, \
+                         N={}, lead_form_match={}/{} [literal verifier form; <{} ⇒ \
+                         rev-convention gap, expected, Stage 2])",
+                        chip.name(),
+                        if ok { "VALUE-PRESERVE-OK" } else { "FAIL" },
+                        n,
+                        log_main_height,
+                        n_full,
+                        lead_form_match,
+                        n,
+                        n,
+                    );
+                    ok
+                };
+
+                let mut all_ok = true;
+                if let Some(ref full_main) = main_evals_full {
+                    all_ok &= check(
+                        "main",
+                        &main_evals,
+                        full_main,
+                        &main_trace.values,
+                        main_trace.width,
+                    );
+                }
+                if let (Some(prep_t), Some(prep_f)) =
+                    (prep_evals.as_ref(), prep_evals_full.as_ref())
+                {
+                    all_ok &= check(
+                        "prep",
+                        prep_t,
+                        prep_f,
+                        &prep_trace.values,
+                        prep_trace.width,
+                    );
+                }
+
+                assert!(
+                    all_ok,
+                    "[STAGE1-ASSERT] chip='{}' VALUE-PRESERVING ASSERT FAILED: \
+                     full-point opening != embed_trailing · MLE(trace @ leading \
+                     log_h coords). The single full-point collapse would NOT be \
+                     value-preserving. See per-column diagnostics above.",
+                    chip.name()
+                );
+            }
+
             (
                 chip.name().to_string(),
                 ChipEvaluation {
                     main_trace_evaluations: main_evals,
                     preprocessed_trace_evaluations: prep_evals,
                     log_degree: u8::try_from(log_main_height).unwrap_or(0),
+                    main_trace_evaluations_full: main_evals_full,
+                    preprocessed_trace_evaluations_full: prep_evals_full,
                 },
             )
         })

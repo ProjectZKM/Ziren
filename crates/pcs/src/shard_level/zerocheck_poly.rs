@@ -2241,6 +2241,202 @@ mod tests {
         (inv1, inv2)
     }
 
+    /// STAGE-2 PROBE: the rev(zeta) convention.  Mirror of [`run_sweep_case_z`]
+    /// but instead of bit-reversing the trace rows and anchoring on `zeta`, it
+    /// feeds the poly the NATURAL trace rows and anchors on `rev(zeta)` (the
+    /// reversed GKR point).  The claim seed is byte-identical to the bitrev
+    /// path (same value: `claim_gkr · embed_factor`).  Returns `(inv1, inv2)`
+    /// where inv2 is checked against the UNCHANGED verifier identity
+    /// `eq_pt(zeta_ORIGINAL, z) · (C+batch)@z` — i.e. the verifier eq-bridge
+    /// stays anchored on the ORIGINAL `zeta`.  GREEN here proves the rev(zeta)
+    /// convention is value- AND verifier-identity-preserving (the Stage-2
+    /// convention-convergence gate), so dropping bitrev_rows + feeding rev(zeta)
+    /// in the production prover keeps the existing verifier correct.
+    fn run_sweep_case_z_rev(
+        num_vars: u32,
+        real_vars: u32,
+        zeta_real_vars: u32,
+        ncols: usize,
+    ) -> (bool, bool) {
+        use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
+        use p3_challenger::DuplexChallenger;
+        use p3_koala_bear::Poseidon2KoalaBear;
+        let perm: Poseidon2KoalaBear<16> = zkm_primitives::poseidon2_init();
+        let mut challenger = DuplexChallenger::<InnerVal, _, 16, 8>::new(perm);
+
+        assert!(real_vars <= zeta_real_vars && zeta_real_vars <= num_vars);
+        let height = 1usize << real_vars;
+
+        let trace_base: Vec<InnerVal> = (0..height)
+            .flat_map(|r| {
+                (0..ncols)
+                    .map(move |c| {
+                        if c == 0 {
+                            InnerVal::from_u64((r % 3) as u64)
+                        } else {
+                            InnerVal::from_u64((r * 13 + c * 7 + 1) as u64)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let main_cells: Vec<EF> = trace_base.iter().map(|&v| EF::from(v)).collect();
+
+        let zeta: Vec<EF> = (0..num_vars as usize)
+            .map(|k| {
+                if (k as u32) < (num_vars - zeta_real_vars) {
+                    EF::ZERO
+                } else {
+                    EF::from_u64((k * 7 + 3) as u64 + 200)
+                }
+            })
+            .collect();
+        // The eq-anchor the poly is fed: the REVERSED GKR point.
+        let zeta_rev: Vec<EF> = zeta.iter().rev().copied().collect();
+
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let lambda = EF::from_u64(31);
+        let pv: Vec<InnerVal> = Vec::new();
+
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..main_width {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let batch =
+            |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
+        let cval = |main_row: &[EF]| -> EF {
+            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+        };
+
+        // Claim seed — the STAGE-2 COLLAPSED claim: seed from the FULL-POINT
+        // opening `main_trace_evaluations_full` with NO embed_factor.  Under
+        // the rev(zeta) anchor the poly's cube-sum equals the full-point
+        // opening, which (Stage-1 transform) is `embed_TRAILING · MLE_lead`:
+        //   MLE_lead     = MLE(trace @ zeta[0..log_h])   (LEADING coords)
+        //   embed_TRAIL  = Π_{k=log_h}^{N-1}(1 − zeta[k]) (TRAILING coords)
+        // This is the bitrev-conjugate of the OLD claim (`MLE_trailing ·
+        // embed_LEAD`) and is GENUINELY a different value (the old claim is
+        // NOT verifier-form, see zerocheck_prover comment) — the rev(zeta)
+        // convention is inseparable from this collapsed seed.
+        let log_h = real_vars as usize;
+        let mle_lead =
+            evaluate_trace_columns_at_point::<InnerVal, EF>(&trace_base, main_width, &zeta[..log_h]);
+        let embed_trailing: EF = zeta[log_h..]
+            .iter()
+            .fold(EF::ONE, |acc, &zk| acc * (EF::ONE - zk));
+        let main_full: Vec<EF> = mle_lead.iter().map(|&v| v * embed_trailing).collect();
+        let claim: EF =
+            main_full.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
+
+        // NATURAL cells (NO bitrev); anchor on rev(zeta).
+        let poly_cells = main_cells.clone();
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
+        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+            &chip,
+            &pv,
+            alpha,
+            gkr_powers.clone(),
+            zeta_rev.clone(),
+            poly_cells,
+            main_width,
+            None,
+            prep_width,
+            height,
+            num_vars,
+            EF::ONE,
+            EF::ZERO,
+            pra,
+            vg,
+        );
+
+        // INVARIANT (1): brute-force cube-sum under the rev(zeta) anchor.  The
+        // poly folds the LSB first and peels zeta_rev[dim-1] first, so row-bit
+        // b ↔ zeta_rev[dim-1-b] = zeta[b]; natural cells at row x.
+        let dim = num_vars as usize;
+        let mut cube_sum = EF::ZERO;
+        for x in 0..height {
+            let mut pt = vec![EF::ZERO; dim];
+            for b in 0..(real_vars as usize) {
+                if (x >> b) & 1 == 1 {
+                    pt[dim - 1 - b] = EF::ONE;
+                }
+            }
+            let row = &main_cells[x * ncols..x * ncols + ncols];
+            cube_sum += eq_pt(&zeta_rev, &pt) * (cval(row) + batch(row));
+        }
+        let inv1 = cube_sum == claim;
+
+        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+            vec![poly],
+            &mut challenger,
+            vec![claim],
+            1,
+            lambda,
+        );
+        let z = &proof.point_and_eval.0;
+        let main_at_z = &cpe[0][prep_width..];
+        // VERIFIER IDENTITY: anchored on rev(zeta) (the eq-bridge receives the
+        // reversed GKR point in lockstep with the rev-anchored poly).
+        let expected = eq_pt(&zeta_rev, z) * (cval(main_at_z) + batch(main_at_z));
+        let inv2 = proof.point_and_eval.1 == expected;
+        (inv1, inv2)
+    }
+
+    /// STAGE-2 GATE: the rev(zeta) convention keeps invariant (2) — the
+    /// reduced value equals the UNCHANGED verifier identity `eq(zeta,z)·(C+
+    /// batch)@z` — across the same mixed-height sweep the bitrev convention
+    /// passes.  If GREEN, feeding rev(zeta)+dropping bitrev_rows in the
+    /// production prover is value- and verifier-preserving.
+    #[test]
+    fn orientation_sweep_revzeta() {
+        let configs = [
+            (4u32, 2u32, 2u32, 2usize),
+            (4, 2, 2, 5),
+            (5, 2, 2, 2),
+            (6, 2, 2, 2),
+            (8, 2, 2, 2),
+            (6, 4, 4, 2),
+            (8, 4, 4, 2),
+            (10, 8, 8, 2),
+            (12, 6, 6, 8),
+            (16, 10, 10, 4),
+            (22, 16, 16, 2), // e2e shape (tallest chip)
+            // mixed-height (shorter chip beside taller): the embed-factor case.
+            (8, 2, 4, 2),
+            (8, 2, 6, 2),
+            (22, 10, 16, 2),
+            (12, 4, 8, 4),
+        ];
+        let mut any_fail = false;
+        for &(nv, rv, zrv, nc) in configs.iter() {
+            let (i1, i2) = run_sweep_case_z_rev(nv, rv, zrv, nc);
+            eprintln!(
+                "REVZETA nv={:>2} rv={:>2} zrv={:>2} nc={} | inv1={} inv2={}",
+                nv, rv, zrv, nc, i1, i2
+            );
+            if !i2 {
+                any_fail = true;
+            }
+        }
+        assert!(
+            !any_fail,
+            "some rev(zeta) config failed invariant (2) — the rev(zeta) \
+             convention is NOT verifier-identity-preserving (see REVZETA lines)"
+        );
+    }
+
     /// Bisect the unit-test shape (4,2,2 — passes) toward the e2e shape
     /// (22,16,2 — AddSub chip0) to localize any shape-dependent break in
     /// the bit-reverse-rows orientation fix.  Prints per-config results; the

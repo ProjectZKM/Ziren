@@ -290,8 +290,26 @@ where
         })
         .collect();
 
-    let max_log_row_count =
-        BasefoldShardVerifier::production_default().max_log_row_count;
+    // PER-STAGE cube: the DUMMY shard proof's zerocheck dim must match what a
+    // REAL proof at this `shape` produces.  A real proof's prover sets
+    // `max_log_row_count = BASE.max(band-max chip log-height)`, so the dummy
+    // must too — else the program/VK enumerated from the dummy expects dim=22
+    // while a real FIX-off proof (band-5: ext_alu 24 / base_alu 23) is at
+    // dim=24.  NO-OP (== BASE=22) for every FIX-on shape (≤ band-4, max 21)
+    // → the FIX-on vk_map enumeration stays BYTE-IDENTICAL.
+    let base_cube = BasefoldShardVerifier::production_default().max_log_row_count;
+    let shape_max_log = chip_log_heights_pairs
+        .iter()
+        .map(|(_n, lh)| *lh as usize)
+        .max()
+        .unwrap_or(0);
+    let max_log_row_count = base_cube.max(shape_max_log);
+    if max_log_row_count != base_cube {
+        eprintln!(
+            "PERSTAGE-CUBE dummy[basefold_shard_proof]: base={base_cube} \
+             shape_max_log={shape_max_log} -> cube={max_log_row_count}"
+        );
+    }
 
     let proof = crate::dummy::dummy_basefold_shard_proof::<KoalaBear, InnerChallenge, A>(
         &chips,

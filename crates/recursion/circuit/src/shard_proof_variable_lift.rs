@@ -79,6 +79,10 @@ pub fn lift_chip_evaluation<K: Clone>(src: &st::ChipEvaluation<K>) -> rc::ChipEv
     rc::ChipEvaluation {
         main_trace_evaluations: src.main_trace_evaluations.clone(),
         preprocessed_trace_evaluations: src.preprocessed_trace_evaluations.clone(),
+        // #88 Stage 3b: thread the FULL-POINT openings through so the
+        // in-circuit LogUp last-layer reconstruction can read them.
+        main_trace_evaluations_full: src.main_trace_evaluations_full.clone(),
+        preprocessed_trace_evaluations_full: src.preprocessed_trace_evaluations_full.clone(),
     }
 }
 
@@ -784,6 +788,8 @@ mod tests {
                 main_trace_evaluations: vec![zero, zero, zero],
                 preprocessed_trace_evaluations: Some(vec![zero]),
                 log_degree: 0,
+                main_trace_evaluations_full: None,
+                preprocessed_trace_evaluations_full: None,
             },
         );
         chip_openings.insert(
@@ -792,6 +798,8 @@ mod tests {
                 main_trace_evaluations: vec![zero, zero],
                 preprocessed_trace_evaluations: None,
                 log_degree: 0,
+                main_trace_evaluations_full: None,
+                preprocessed_trace_evaluations_full: None,
             },
         );
         let opened = build_opened_values_from_chip_openings::<InnerConfig>(
@@ -850,6 +858,8 @@ mod tests {
                         main_trace_evaluations: vec![v(200), v(201)],
                         preprocessed_trace_evaluations: Some(vec![v(202)]),
                         log_degree: 0,
+                        main_trace_evaluations_full: None,
+                        preprocessed_trace_evaluations_full: None,
                     },
                 )]),
             },

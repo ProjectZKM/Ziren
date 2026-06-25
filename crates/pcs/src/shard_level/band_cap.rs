@@ -66,6 +66,26 @@ thread_local! {
     /// path, and FIX-on where raw==band) == legacy own-height packing.
     static CURRENT_RAW_LOG_HEIGHTS: std::cell::RefCell<Option<BTreeMap<String, usize>>> =
         const { std::cell::RefCell::new(None) };
+
+    /// STAGE 2.5 (#88) LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
+    /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
+    /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
+    /// no-observe verify recompute, the zerocheck residual, and the
+    /// `prove_shard_to_basefold` residual fast-path.  Computed ONCE per shard at
+    /// `BandCapGuard::new` (same predicate the zerocheck uses on the host path:
+    /// `ZIREN_STAGE2_REVZETA=1` AND no device trace provider — on the pure-host
+    /// FIX-off path every chip then carries `main_trace_evaluations_full`, so
+    /// this equals the zerocheck's full predicate) and installed for the WHOLE
+    /// guard scope (`prover.commit` + `prover.open`, the SAME rayon task), so the
+    /// commit orientation and the zerocheck orientation can NEVER drift per
+    /// shard.  `Some(use_rev)` when a guard set it (the core FIX-off path);
+    /// `None` (every non-core path, e.g. FIX-on `test_simple_prove`,
+    /// recursion / shrink / wrap) == no carrier => readers fall back to their
+    /// own legacy predicate (byte-identical to today).  Flag OFF
+    /// (`ZIREN_STAGE2_REVZETA` unset) => `Some(false)` on the core path, which is
+    /// the legacy bitrev branch (byte-identical).
+    static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 static GUARD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -89,6 +109,7 @@ impl BandCapGuard {
         band_cap: BTreeMap<String, (usize, usize)>,
         missing_traces: BTreeMap<String, RowMajorMatrix<InnerVal>>,
         raw_log_heights: BTreeMap<String, usize>,
+        use_rev: bool,
     ) -> Self {
         let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         CURRENT_BAND_CAP.with(|c| {
@@ -104,6 +125,13 @@ impl BandCapGuard {
         // disagree and the stacked open trips StackingMismatch.
         CURRENT_RAW_LOG_HEIGHTS.with(|c| {
             *c.borrow_mut() = Some(raw_log_heights);
+        });
+        // STAGE 2.5: the per-shard rev(zeta) orientation decision, the single
+        // source of truth installed for the whole commit+open scope so the
+        // jagged commit (materialize), the y recompute, and the zerocheck
+        // residual all read ONE boolean (no lockstep drift).
+        CURRENT_USE_REV.with(|c| {
+            *c.borrow_mut() = Some(use_rev);
         });
         Self { gen }
     }
@@ -132,6 +160,13 @@ impl Drop for BandCapGuard {
         // otherwise); clear it on guard drop so no stale map outlives the
         // band-cap scope on a reused worker thread.
         CURRENT_RAW_LOG_HEIGHTS.with(|c| {
+            *c.borrow_mut() = None;
+        });
+        // The rev decision is likewise rewritten fresh every guard install and
+        // cleared on drop so no stale orientation outlives the scope on a
+        // reused worker thread (a non-core path then reads `None` and keeps its
+        // own legacy predicate).
+        CURRENT_USE_REV.with(|c| {
             *c.borrow_mut() = None;
         });
     }
@@ -170,4 +205,26 @@ pub fn set_raw_log_heights(map: Option<BTreeMap<String, usize>>) {
 #[must_use]
 pub fn current_raw_log_heights() -> Option<BTreeMap<String, usize>> {
     CURRENT_RAW_LOG_HEIGHTS.with(|c| c.borrow().clone())
+}
+
+/// Install (or clear, with `None`) the per-shard rev(zeta) orientation decision
+/// for the calling thread.  `BandCapGuard::new` calls it with `Some(use_rev)`;
+/// also exposed standalone so a future GPU / non-guard path can set the same
+/// single signal.  Passing `None` restores the legacy per-reader fallback.
+pub fn set_use_rev(decision: Option<bool>) {
+    CURRENT_USE_REV.with(|c| {
+        *c.borrow_mut() = decision;
+    });
+}
+
+/// The currently-installed per-shard rev(zeta) orientation decision for the
+/// calling thread.  `Some(true)` => the jagged commit / `y_per_chip` / zerocheck
+/// residual must all use the NATURAL (rev(zeta)) orientation; `Some(false)` =>
+/// the legacy bitrev orientation (the core path with the flag OFF, byte-identical
+/// to today); `None` => no carrier installed (every non-core path) => the reader
+/// keeps its own legacy predicate.  This is the SINGLE SOURCE OF TRUTH that keeps
+/// the commit orientation and the zerocheck orientation in lockstep per shard.
+#[must_use]
+pub fn current_use_rev() -> Option<bool> {
+    CURRENT_USE_REV.with(|c| *c.borrow())
 }

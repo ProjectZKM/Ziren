@@ -679,6 +679,84 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         })
     }
 
+    /// PER-STAGE zerocheck-cube floor (= `BasefoldShardVerifier`
+    /// production default `max_log_row_count`, 22).
+    fn perstage_base_cube() -> usize {
+        zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count
+    }
+
+    /// PER-STAGE zerocheck cube for a recursion verifier-circuit, derived
+    /// from the INPUT proofs the circuit verifies.
+    ///
+    /// The cube a circuit is BUILT with is the `max_log_row_count` it uses
+    /// to verify its input proofs; the in-circuit checks assert that value
+    /// against the input proof's actual zerocheck dim and LogUp-GKR round
+    /// count (`verify_zerocheck` zerocheck.rs:523 `point.dim ==
+    /// pcs_max_log_row_count`; `verify_logup_gkr` logup_gkr.rs:354
+    /// `round_proofs.len()+1 == max_log_row_count`).  So the circuit cube
+    /// MUST equal the dim the PREVIOUS stage proved its proof at.  Each
+    /// prover (`try_prove_shard_to_basefold_boxed`, the shrink prover, the
+    /// core prover) sets `cube = BASE.max(band-max chip log-height)` from
+    /// its own band-padded traces, so the recorded zerocheck dim of a
+    /// proof IS that stage's cube — read it back here.
+    ///
+    /// NOT derived from the program's OWN `fix_shape` band: a program can
+    /// land on a band (e.g. FIX-off band-5, ext_alu:24) whose declared
+    /// per-chip heights exceed what it needs, and the INPUT proofs it
+    /// verifies may have been proven at a SMALLER cube (the prewarm dummy
+    /// inputs use the smallest band) — using the program's own band would
+    /// then mismatch the input round count.  The input-dim source matches
+    /// exactly what the in-circuit asserts check.
+    ///
+    /// NO-OP (== BASE=22) when every input proof's dim ≤ 22 (all FIX-on
+    /// recursion + core) → the cube=BASE program is reused (no rebuild) →
+    /// BYTE-IDENTICAL, preserving the production vk_map invariant.
+    ///
+    /// `stage` labels the diagnostic eprintln.
+    fn perstage_cube_from_input_proofs<'a, I>(
+        proofs: I,
+        base: usize,
+        stage: &str,
+    ) -> usize
+    where
+        I: IntoIterator<
+            Item = &'a zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
+                zkm_pcs::InnerVal,
+                zkm_pcs::InnerChallenge,
+            >,
+        >,
+    {
+        let in_dim = proofs
+            .into_iter()
+            .map(|p| p.zerocheck_proof.point_and_eval.0.len())
+            .max()
+            .unwrap_or(0);
+        let cube = base.max(in_dim);
+        if cube != base {
+            eprintln!(
+                "PERSTAGE-CUBE build[{stage}]: base={base} input_zc_dim={in_dim} \
+                 -> cube={cube} (FIX-off input proof above base; rebuilding circuit)"
+            );
+        }
+        cube
+    }
+
+    /// PER-STAGE zerocheck cube for the *terminal* (shrink / wrap_bn254)
+    /// stages — convenience wrapper over [`Self::perstage_cube_from_input_proofs`]
+    /// for the `(vk, proof)`-shaped wrap witness.
+    fn perstage_cube_from_wrap_input(
+        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
+        base: usize,
+        stage: &str,
+    ) -> usize {
+        Self::perstage_cube_from_input_proofs(
+            input.vks_and_proofs.iter().map(|(_vk, p)| p),
+            base,
+            stage,
+        )
+    }
+
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
@@ -698,9 +776,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count;
+        // PER-STAGE cube from the INPUT (core shard) proofs' zerocheck dims —
+        // the normalize circuit verifies these proofs at `max_log_row_count`.
+        // FIX-off core shards reach 2^24, so cube follows the input dim.
+        let base = Self::perstage_base_cube();
+        let max_log_row_count = Self::perstage_cube_from_input_proofs(
+            input.shard_proofs.iter(),
+            base,
+            "normalize",
+        );
         let mut program = build_normalize_basefold_program(
             self.core_prover.machine(),
             input,
@@ -780,9 +864,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count;
+        // PER-STAGE cube from the INPUT (normalize/compose) proofs' zerocheck
+        // dims — the compose circuit verifies these at `max_log_row_count`.
+        let base = Self::perstage_base_cube();
+        let max_log_row_count = Self::perstage_cube_from_input_proofs(
+            input.vks_and_proofs.iter().map(|(_vk, p)| p),
+            base,
+            "compose",
+        );
         // basefold-for-recursion is now the default. The
         // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env toggle and the legacy
         // `build_compose_basefold_program` branch have been retired —
@@ -806,9 +895,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMDeferredBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count;
+        // PER-STAGE cube from the INPUT (deferred/compress) proofs' dims.
+        let base = Self::perstage_base_cube();
+        let max_log_row_count = Self::perstage_cube_from_input_proofs(
+            input.vks_and_proofs.iter().map(|(_vk, p)| p),
+            base,
+            "deferred",
+        );
         // basefold-for-recursion is now the default. Mirrors the
         // cutover on `build_compose_program_basefold_uncached`.
         let mut program = build_deferred_basefold_recursion_program(
@@ -831,9 +924,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count;
+        // PER-STAGE cube from the INPUT (compose) proof's zerocheck dim —
+        // shrink does not fix_shape its own program, so the band-max source
+        // is unavailable; use the dim the verifier circuit asserts against.
+        let max_log_row_count = Self::perstage_cube_from_wrap_input(
+            input,
+            Self::perstage_base_cube(),
+            "shrink",
+        );
         let program = build_wrap_basefold_program(
             self.compress_prover.machine(),
             input,
@@ -872,9 +970,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
 
-        let max_log_row_count =
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count;
+        // PER-STAGE cube from the INPUT (shrink) proof's zerocheck dim — same
+        // reasoning as `shrink_program_basefold`.
+        let max_log_row_count = Self::perstage_cube_from_wrap_input(
+            input,
+            Self::perstage_base_cube(),
+            "wrap_bn254",
+        );
 
         let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
         let mut builder = Builder::<WrapConfig>::default();
@@ -1907,13 +2009,39 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 roots[0]
             };
 
-            // Pin to the BasefoldShardVerifier production default
-            // (max_log_row_count = 22), matching the CPU helper
-            // (prover.rs:1165) and the compress orchestrator
-            // (compress_multi_gpu.rs:1613).
-            let max_log_row_count =
+            // PER-STAGE cube for the SHRINK proof: `cube = BASE.max(band-max
+            // shrink-AIR chip log-height)`.  The wrap_bn254 circuit reads this
+            // proof's recorded zerocheck dim, so the cube here defines the
+            // shrink-proof dim.  NO-OP (== BASE=22) when all shrink traces
+            // fit 2^22 (the common case) → byte-identical.  Heights are
+            // power-of-2 post-trace-gen so log2 = trailing_zeros.
+            let base_cube =
                 zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                     .max_log_row_count;
+            let max_log_row_count = {
+                let mut cube = base_cube;
+                for t in main_traces.iter() {
+                    let w = t.width;
+                    if w == 0 {
+                        continue;
+                    }
+                    let h = t.values.len() / w;
+                    if h == 0 {
+                        continue;
+                    }
+                    let log_h = (h as u64).trailing_zeros() as usize;
+                    if log_h > cube {
+                        cube = log_h;
+                    }
+                }
+                cube
+            };
+            if max_log_row_count != base_cube {
+                eprintln!(
+                    "PERSTAGE-CUBE prover[shrink]: base={base_cube} -> \
+                     cube={max_log_row_count} (FIX-off shrink trace above base)"
+                );
+            }
 
             let bf_proof = zkm_pcs::shard_level::prover::prove_shard_to_basefold::<
                 InnerSC,
@@ -3166,6 +3294,140 @@ pub mod tests {
             opts,
             Test::Compress,
         )
+    }
+
+    /// MILESTONE harness: FIX-off MULTI-SHARD compress PROVE + host VERIFY.
+    /// Loads the fibonacci-1k corpus (program.bin + bincode ZKMStdin
+    /// stdin.bin) from FIXOFF_PROGRAM_DIR (default
+    /// /data/stephen/ziren-shape-bin/fibonacci-1k), proves core, compresses,
+    /// and host-verifies the compressed proof (`verify_compressed`, the
+    /// recursion-shard crypto verify that previously failed with
+    /// `StackingMismatch` for sub-stripe FIX-off commits).
+    ///
+    /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
+    ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
+    ///   ZIREN_HA_BAKED_COLPS=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
+    ///   cargo test -p zkm-prover --release fixoff_multishard_compress_verify \
+    ///     -- --ignored --exact --nocapture
+    #[test]
+    #[serial]
+    #[ignore]
+    fn fixoff_multishard_compress_verify() -> Result<()> {
+        setup_logger();
+        let dir = std::env::var("FIXOFF_PROGRAM_DIR")
+            .unwrap_or_else(|_| "/data/stephen/ziren-shape-bin/fibonacci-1k".to_string());
+        let elf = std::fs::read(format!("{dir}/program.bin")).expect("read program.bin");
+        let stdin_bytes = std::fs::read(format!("{dir}/stdin.bin")).expect("read stdin.bin");
+        let stdin: ZKMStdin = match bincode::deserialize::<ZKMStdin>(&stdin_bytes) {
+            Ok(s) => {
+                eprintln!("[FIXOFF-MS] stdin = bincode ZKMStdin ({} bufs)", s.buffer.len());
+                s
+            }
+            Err(_) => {
+                eprintln!("[FIXOFF-MS] stdin = raw {} bytes -> write_vec", stdin_bytes.len());
+                let mut s = ZKMStdin::new();
+                s.write_vec(stdin_bytes);
+                s
+            }
+        };
+        let opts = ZKMProverOpts::default();
+        eprintln!(
+            "[FIXOFF-MS] shard_size={} REDUCE_BATCH_SIZE={} elf_bytes={}",
+            opts.core_opts.shard_size,
+            REDUCE_BATCH_SIZE,
+            elf.len()
+        );
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        eprintln!("[FIXOFF-MS] vk_verification={}", prover.vk_verification);
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(&elf);
+        eprintln!("[FIXOFF-MS] prove core ...");
+        let core_proof = prover.prove_core(&pk_d, program, &stdin, opts, context)?;
+        let n_shards = core_proof.proof.0.len();
+        eprintln!("[FIXOFF-MS] core shard count = {n_shards}");
+        eprintln!("[FIXOFF-MS] verify core ...");
+        prover.verify(&core_proof.proof, &vk)?;
+        eprintln!("[FIXOFF-MS] core verify OK; compress ...");
+        let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
+        eprintln!("[FIXOFF-MS] compress done; verify_compressed (THE MILESTONE) ...");
+        prover.verify_compressed(&compressed_proof, &vk)?;
+        eprintln!(
+            "[FIXOFF-MS] *** verify_compressed ACCEPTED *** (n_shards={n_shards})"
+        );
+        Ok(())
+    }
+
+    /// MILESTONE harness: FIX-off MULTI-SHARD FULL inner chain PROVE +
+    /// host VERIFY through compress -> shrink -> wrap_bn254.  Same corpus
+    /// and env as `fixoff_multishard_compress_verify`, but continues past
+    /// compress into shrink (verifies the compress proof) and wrap_bn254
+    /// (verifies the shrink proof), host-verifying each stage.  This is the
+    /// final inner-chain soundness gate before the (owner-gated) vk_map
+    /// regen.  Returns BEFORE the heavy PLONK/Groth16 artifact build.
+    ///
+    /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
+    ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
+    ///   ZIREN_HA_BAKED_COLPS=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
+    ///   cargo test -p zkm-prover --release tests::fixoff_multishard_wrap_verify \
+    ///     -- --ignored --exact --nocapture
+    #[test]
+    #[serial]
+    #[ignore]
+    fn fixoff_multishard_wrap_verify() -> Result<()> {
+        setup_logger();
+        let dir = std::env::var("FIXOFF_PROGRAM_DIR")
+            .unwrap_or_else(|_| "/data/stephen/ziren-shape-bin/fibonacci-1k".to_string());
+        let elf = std::fs::read(format!("{dir}/program.bin")).expect("read program.bin");
+        let stdin_bytes = std::fs::read(format!("{dir}/stdin.bin")).expect("read stdin.bin");
+        let stdin: ZKMStdin = match bincode::deserialize::<ZKMStdin>(&stdin_bytes) {
+            Ok(s) => {
+                eprintln!("[FIXOFF-MSW] stdin = bincode ZKMStdin ({} bufs)", s.buffer.len());
+                s
+            }
+            Err(_) => {
+                eprintln!("[FIXOFF-MSW] stdin = raw {} bytes -> write_vec", stdin_bytes.len());
+                let mut s = ZKMStdin::new();
+                s.write_vec(stdin_bytes);
+                s
+            }
+        };
+        let opts = ZKMProverOpts::default();
+        eprintln!(
+            "[FIXOFF-MSW] shard_size={} REDUCE_BATCH_SIZE={} elf_bytes={}",
+            opts.core_opts.shard_size,
+            REDUCE_BATCH_SIZE,
+            elf.len()
+        );
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        eprintln!("[FIXOFF-MSW] vk_verification={}", prover.vk_verification);
+        let context = ZKMContext::default();
+        let (_, pk_d, program, vk) = prover.setup(&elf);
+        eprintln!("[FIXOFF-MSW] prove core ...");
+        let core_proof = prover.prove_core(&pk_d, program, &stdin, opts, context)?;
+        let n_shards = core_proof.proof.0.len();
+        eprintln!("[FIXOFF-MSW] core shard count = {n_shards}");
+        eprintln!("[FIXOFF-MSW] verify core ...");
+        prover.verify(&core_proof.proof, &vk)?;
+        eprintln!("[FIXOFF-MSW] core verify OK; compress ...");
+        let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
+        eprintln!("[FIXOFF-MSW] compress done; verify_compressed ...");
+        prover.verify_compressed(&compressed_proof, &vk)?;
+        eprintln!("[FIXOFF-MSW] *** verify_compressed ACCEPTED *** (n_shards={n_shards})");
+
+        eprintln!("[FIXOFF-MSW] shrink ...");
+        let shrink_proof = prover.shrink(compressed_proof, opts)?;
+        eprintln!("[FIXOFF-MSW] shrink done; verify_shrink ...");
+        prover.verify_shrink(&shrink_proof, &vk)?;
+        eprintln!("[FIXOFF-MSW] *** verify_shrink ACCEPTED ***");
+
+        eprintln!("[FIXOFF-MSW] wrap_bn254 ...");
+        let wrapped_bn254_proof = prover.wrap_bn254(shrink_proof, opts)?;
+        eprintln!("[FIXOFF-MSW] wrap_bn254 done; verify_wrap_bn254 ...");
+        prover.verify_wrap_bn254(&wrapped_bn254_proof, &vk).unwrap();
+        eprintln!(
+            "[FIXOFF-MSW] *** verify_wrap_bn254 ACCEPTED *** FULL INNER CHAIN GREEN (n_shards={n_shards})"
+        );
+        Ok(())
     }
 
     /// FIX-off robustness: compress a KECCAK (precompile + multi-shard)

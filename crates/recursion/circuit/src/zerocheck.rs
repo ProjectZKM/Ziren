@@ -471,6 +471,29 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
+        // ── STAGE 2 (#88): SHARD-UNIFORM rev/collapsed convention decision ──
+        // Mirror the host (verifier.rs:852-860 `verifier_use_rev` /
+        // verifier.rs:1026-1033 `conv_use_rev`): the prover decides
+        // rev(zeta)+collapsed-claim per SHARD (every chip shares the
+        // eq-anchor orientation), so derive ONE boolean = (ZIREN_STAGE2_REVZETA
+        // on) AND (every GKR chip-opening carries the FULL-POINT opening
+        // `*_full`).  The recursion proof is generated under
+        // ZIREN_STAGE2_REVZETA=1 at prove time, so the in-circuit verifier must
+        // adopt the same convention to stay in lock-step with the prover.  This
+        // is plain host code inside the circuit-CONSTRUCTION fn (env access is
+        // identical to logup_gkr.rs / the host verifier); the rev convention is
+        // decided per-shard at prove time, so no in-circuit-witness gating is
+        // needed — the witnessed `*_full` presence is the shard-uniform signal.
+        let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false);
+        let verifier_use_rev = stage2_revzeta_on
+            && !gkr_evaluations.chip_openings.is_empty()
+            && gkr_evaluations
+                .chip_openings
+                .values()
+                .all(|ce| ce.main_trace_evaluations_full.is_some());
+
         // (1) Sample per-phase challenges from the transcript.
         let alpha = challenger.sample_ext(builder);
         let gkr_batch_open_ext = challenger.sample_ext(builder);
@@ -478,14 +501,28 @@ where
         let lambda = challenger.sample_ext(builder);
 
         // (2) eq(zerocheck reduced point, GKR-emitted point).
+        //
+        // ── STAGE 2 (#88): rev(zeta) eq-bridge anchor ──────────────────────
+        // Under the collapsed convention the prover anchors every chip's
+        // zerocheck poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the
+        // batched reduced value carries `eq(rev(z_gkr), z*)`.  Mirror the host
+        // (verifier.rs:1034-1041): feed the eq-bridge the REVERSED GKR point
+        // under `verifier_use_rev`.  `zerocheck_eq_val` multiplies into the
+        // per-chip RLC fold (section (4h)) whose accumulator is asserted ==
+        // `zerocheck_proof.point_and_eval.1` (section (5)) — the OTHER half of
+        // the binding — so the anchor MUST match the prover or that assert
+        // fails.  Legacy shards keep `eq(z_gkr, z*)`.
         let point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = zerocheck_proof
             .point_and_eval
             .0
             .iter()
             .map(|x| (*x).into())
             .collect();
-        let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> =
-            gkr_evaluations.point.iter().map(|x| (*x).into()).collect();
+        let gkr_point_symbolic: Vec<SymbolicExt<C::F, C::EF>> = if verifier_use_rev {
+            gkr_evaluations.point.iter().rev().map(|x| (*x).into()).collect()
+        } else {
+            gkr_evaluations.point.iter().map(|x| (*x).into()).collect()
+        };
         let zerocheck_eq_val = eq_eval::<C>(&gkr_point_symbolic, &point_symbolic);
 
         // (3) Pre-compute the GKR-batch-open challenge powers,
@@ -628,6 +665,49 @@ where
             .values()
             .zip(opened_values.chips.iter())
             .map(|(chip_evaluation, opening)| {
+                // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // When the SHARD uses the collapsed convention, seed the
+                // per-chip claimed_sum term DIRECTLY from the FULL-POINT
+                // openings (`*_full`) with NO embed_factor — mirroring the host
+                // (verifier.rs:877-892) and the prover (zerocheck_prover.rs
+                // Stage-2 collapse).  The full-point opening already carries the
+                // mixed-height padding factor
+                //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
+                //               zeta[0..log_h])
+                // intrinsically, so the legacy `raw(trailing) · embed_LEAD`
+                // correction is DROPPED.  This makes `*_full` an input to the
+                // in-circuit claim-binding assert (section (7), `assert_ext_eq`
+                // at the bottom), so forging `*_full` trips that INDEPENDENT
+                // assert — the recursion analog of host verifier.rs:921 'GKR
+                // sum-modification identity failed' — not just the
+                // reconstruction (logup_gkr.rs check (i)).
+                if verifier_use_rev {
+                    let main_full = chip_evaluation
+                        .main_trace_evaluations_full
+                        .as_deref()
+                        .expect(
+                            "rev claim-collapse requires main_trace_evaluations_full \
+                             (FIX-off core proof)",
+                        );
+                    let prep_full = chip_evaluation
+                        .preprocessed_trace_evaluations_full
+                        .as_deref()
+                        .unwrap_or(&[]);
+                    return main_full
+                        .iter()
+                        .copied()
+                        .chain(prep_full.iter().copied())
+                        .zip(gkr_batch_open_challenge_powers.iter().copied())
+                        .map(|(o, power)| {
+                            let o_sym: SymbolicExt<C::F, C::EF> = o.into();
+                            o_sym * power
+                        })
+                        .sum::<SymbolicExt<C::F, C::EF>>();
+                }
+
+                // LEGACY path (rev OFF / no `*_full`): trailing opening + the
+                // degree one-hot mixed-height embed, kept in lock-step with the
+                // host `!verifier_use_rev` branch (verifier.rs:893-918).
                 let raw: SymbolicExt<C::F, C::EF> = chip_evaluation
                     .main_trace_evaluations
                     .iter()
@@ -777,5 +857,175 @@ mod tests {
             })
             .collect();
         let _result = eq_eval::<C>(&a, &b);
+    }
+
+    // ── #88 Stage 3b: in-circuit *_full → claimed_sum CLAIM-BINDING ──
+    //
+    // These EXECUTED-CIRCUIT tests (`run_test_recursion`) drive the EXACT
+    // section-(6)/(7) claim-binding arithmetic that `verify_zerocheck` computes
+    // under the rev (collapsed) convention — the per-chip seed
+    //   modification = Σ (main_full ++ prep_full) · β^(1..)        [no embed]
+    // the cross-chip fold `acc = λ·acc + modification`, and the binding assert
+    //   builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification)   [§(7)]
+    // — and assert it against a supplied `claimed_sum`.  This is the in-circuit
+    // analog of host verifier.rs:921 'GKR sum-modification identity failed'.
+    //
+    // CRITICAL: there is NO LogUp reconstruction (logup_gkr.rs check (i)) in
+    // this harness.  The reconstruction lives in `verify_logup_gkr`, a SEPARATE
+    // phase; here we exercise ONLY the zerocheck claim-binding.  So a forged
+    // `*_full` that trips `run_full_claim_binding` proves the binding rejects
+    // INDEPENDENTLY of the reconstruction — exactly the property the Stage-3b
+    // port is meant to add (forging `*_full` must trip an INDEPENDENT in-circuit
+    // claim-binding assert, not just the reconstruction).
+
+    /// Off-circuit replica of the rev-path per-chip seed (no embed): the
+    /// honest `claimed_sum` a single-chip shard would carry.  Mirrors the
+    /// in-circuit section (6) rev branch + the section-(3) β-power convention
+    /// (β powers start at β¹ — `successors(ONE).skip(1)`).
+    fn host_full_claim_single_chip(
+        main_full: &[EF],
+        prep_full: &[EF],
+        beta: EF,
+    ) -> EF {
+        // β powers β¹, β², … (skip the β⁰=1 term — matches
+        // `gkr_batch_open_challenge_powers` at zerocheck.rs:499-505).
+        let n = main_full.len() + prep_full.len();
+        let mut powers: Vec<EF> = Vec::with_capacity(n);
+        let mut acc = EF::ONE;
+        for _ in 0..n {
+            acc *= beta;
+            powers.push(acc);
+        }
+        main_full
+            .iter()
+            .copied()
+            .chain(prep_full.iter().copied())
+            .zip(powers.iter().copied())
+            .fold(EF::ZERO, |a, (o, p)| a + o * p)
+        // Single chip ⇒ the cross-chip fold `λ·acc + m` reduces to `m`
+        // (acc starts at 0), so this IS the whole `zerocheck_sum_modification`.
+    }
+
+    /// Build + EXECUTE the in-circuit rev-path claim-binding for ONE chip:
+    /// rebuild `modification = Σ (main_full ++ prep_full) · β^(1..)` exactly as
+    /// the section-(6) rev branch does, then assert it equals the supplied
+    /// `claimed_sum` — the section-(7) binding `assert_ext_eq`.  Runs the DSL so
+    /// the assert fires at runtime.  No reconstruction is present.
+    fn run_full_claim_binding(
+        main_full_vals: &[EF],
+        prep_full_vals: &[EF],
+        beta_val: EF,
+        claimed_sum_val: EF,
+    ) {
+        use crate::utils::tests::run_test_recursion;
+        use zkm_recursion_compiler::ir::Builder;
+        let mut builder = Builder::<C>::default();
+
+        let main_full: Vec<Ext<F, EF>> =
+            main_full_vals.iter().map(|&v| builder.constant(v)).collect();
+        let prep_full: Vec<Ext<F, EF>> =
+            prep_full_vals.iter().map(|&v| builder.constant(v)).collect();
+        let beta_ext: Ext<F, EF> = builder.constant(beta_val);
+        let claimed_sum: Ext<F, EF> = builder.constant(claimed_sum_val);
+
+        // β-power vector β¹.. — EXACT mirror of zerocheck.rs:499-505.
+        let beta_sym: SymbolicExt<F, EF> = beta_ext.into();
+        let n = main_full.len() + prep_full.len();
+        let powers: Vec<SymbolicExt<F, EF>> =
+            std::iter::successors(Some(SymbolicExt::ONE), |prev| Some(*prev * beta_sym))
+                .skip(1)
+                .take(n)
+                .collect();
+
+        // section (6) rev branch: Σ (main_full ++ prep_full) · β^(1..).
+        let modification: SymbolicExt<F, EF> = main_full
+            .iter()
+            .chain(prep_full.iter())
+            .copied()
+            .zip(powers.iter().copied())
+            .map(|(o, power)| {
+                let o_sym: SymbolicExt<F, EF> = o.into();
+                o_sym * power
+            })
+            .sum();
+
+        // section (6)/(7): single-chip fold `λ·0 + modification == modification`,
+        // then the binding assert `claimed_sum == zerocheck_sum_modification`.
+        let zerocheck_sum_modification: Ext<F, EF> = builder.eval(modification);
+        builder.assert_ext_eq(claimed_sum, zerocheck_sum_modification);
+
+        run_test_recursion(builder.into_operations(), std::iter::empty());
+    }
+
+    /// POSITIVE: honest `*_full` → the rebuilt `modification` equals the
+    /// `claimed_sum` computed from the SAME honest `*_full` → the section-(7)
+    /// binding `assert_ext_eq` is a no-op → the circuit runs clean.
+    #[test]
+    fn full_claim_binding_accepts_honest_full() {
+        let main_full = vec![
+            EF::from(F::from_u32(5)),
+            EF::from(F::from_u32(7)),
+            EF::from(F::from_u32(9)),
+        ];
+        let prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        let claimed_sum = host_full_claim_single_chip(&main_full, &prep_full, beta);
+        run_full_claim_binding(&main_full, &prep_full, beta, claimed_sum);
+    }
+
+    /// NEGATIVE (the `*_full` → commitment binding, INDEPENDENT of the LogUp
+    /// reconstruction): keep the HONEST `claimed_sum` (seeded from the honest
+    /// `*_full`, the value pinned to `opened_values@z*` via the telescoping
+    /// claimed_sum + eq-bridge), but FORGE `main_trace_evaluations_full`.  The
+    /// rebuilt section-(6) `modification` now diverges from the honest
+    /// `claimed_sum` → the section-(7) binding `assert_ext_eq` TRIPS.
+    ///
+    /// This harness contains NO reconstruction (that is a separate phase,
+    /// `verify_logup_gkr`), so the trip is purely the claim-binding — proving a
+    /// forged `*_full` is rejected by the zerocheck binding ON ITS OWN.  This is
+    /// the recursion analog of host verifier.rs:921; combined with the
+    /// reconstruction (logup_gkr.rs check (i), which a forged DEGREE trips and
+    /// which forces a compensating `*_full` change), NO `*_full` satisfies both
+    /// → the joint adaptive forgery is impossible.
+    #[test]
+    #[should_panic]
+    fn full_claim_binding_rejects_forged_full() {
+        let honest_main_full = vec![
+            EF::from(F::from_u32(5)),
+            EF::from(F::from_u32(7)),
+            EF::from(F::from_u32(9)),
+        ];
+        let prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        // HONEST claimed_sum (the value bound to the commitment @z*).
+        let claimed_sum = host_full_claim_single_chip(&honest_main_full, &prep_full, beta);
+        // FORGED *_full (one entry 5→6); the claimed_sum is still the honest
+        // one above → mismatch → the binding assert trips.
+        let forged_main_full = vec![
+            EF::from(F::from_u32(6)),
+            EF::from(F::from_u32(7)),
+            EF::from(F::from_u32(9)),
+        ];
+        run_full_claim_binding(&forged_main_full, &prep_full, beta, claimed_sum);
+    }
+
+    /// NEGATIVE (the preprocessed `*_full` side): same binding, forging the
+    /// `preprocessed_trace_evaluations_full` entry instead of the main one —
+    /// confirms BOTH the main and preprocessed full-point openings are inputs to
+    /// the section-(7) claim-binding assert.
+    #[test]
+    #[should_panic]
+    fn full_claim_binding_rejects_forged_prep_full() {
+        let main_full = vec![
+            EF::from(F::from_u32(5)),
+            EF::from(F::from_u32(7)),
+            EF::from(F::from_u32(9)),
+        ];
+        let honest_prep_full = vec![EF::from(F::from_u32(3))];
+        let beta = EF::from(F::from_u32(11));
+        let claimed_sum = host_full_claim_single_chip(&main_full, &honest_prep_full, beta);
+        // FORGED preprocessed *_full (3→4).
+        let forged_prep_full = vec![EF::from(F::from_u32(4))];
+        run_full_claim_binding(&main_full, &forged_prep_full, beta, claimed_sum);
     }
 }

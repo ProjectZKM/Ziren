@@ -95,6 +95,20 @@ pub struct ChipEvaluation<EF> {
     /// Evaluations of the preprocessed trace at the same point,
     /// or `None` if the chip carries no preprocessed columns.
     pub preprocessed_trace_evaluations: Option<Vec<EF>>,
+    /// SP1-parity FULL-POINT main-trace opening — the chip's main
+    /// columns evaluated at the FULL `max_log_row_count`-coord GKR
+    /// `trace_point` (LSB-first / natural-row).  Mirrors the host
+    /// `zkm_pcs::shard_level::types::ChipEvaluation::main_trace_evaluations_full`.
+    /// This is the convention the in-circuit LogUp last-layer
+    /// degree-masked reconstruction (#88 Stage 3b) consumes (the GKR
+    /// leaf is LSB-first natural-row); the trailing-`log_h`
+    /// `main_trace_evaluations` above stays for the zerocheck's
+    /// bit-reversed sum-modification path.  `None` on legacy proof
+    /// bytes / non-core stages where the reconstruction is skipped.
+    pub main_trace_evaluations_full: Option<Vec<EF>>,
+    /// Companion FULL-POINT preprocessed-trace opening (see
+    /// `main_trace_evaluations_full`).
+    pub preprocessed_trace_evaluations_full: Option<Vec<EF>>,
 }
 
 /// The data passed from the LogUp-GKR prover to the zerocheck
@@ -124,6 +138,8 @@ mod tests {
         let chip_eval: ChipEvaluation<F> = ChipEvaluation {
             main_trace_evaluations: vec![F::ZERO; 4],
             preprocessed_trace_evaluations: Some(vec![F::ONE; 2]),
+            main_trace_evaluations_full: None,
+            preprocessed_trace_evaluations_full: None,
         };
         let mut openings = BTreeMap::new();
         openings.insert("Cpu".to_string(), chip_eval);

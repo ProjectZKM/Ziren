@@ -788,11 +788,49 @@ where
     // (The former `catch_unwind` masked a row-only LogUp-GKR
     // shape-handling gap that no longer exists; a panic here now is a
     // genuine bug to surface, exactly as SP1 does.)
-    // Pin max_log_row_count to the BasefoldShardVerifier production
-    // default (22) so the prover's sumchecks run over exactly the
-    // variable count the verifier expects at zerocheck_point dim check.
-    let max_log_row_count = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-        .max_log_row_count;
+    // PER-STAGE cube: `cube = max(BASE, max over chips of log2(resolved
+    // height))` where BASE=22 (= BasefoldShardVerifier production default).
+    // The zerocheck cube (`max_log_row_count`) MUST cover the tallest chip
+    // trace; #88's FIX-off recursion bands (ext_alu:24, base_alu:23) can pad
+    // a chip above 22, so a fixed 22 underflows the zerocheck embed-factor
+    // slice.  The prover-computed cube here MUST equal the cube the
+    // verifier-circuit was BUILT with (recursion `build_*_basefold_program`
+    // is rebuilt at the same band-max in crates/prover/src/lib.rs+build.rs).
+    //
+    // NO-OP for core + FIX-on recursion: all heights ≤ 21/22 → cube stays 22
+    // → BYTE-IDENTICAL (the production vk_map invariant).  Heights are
+    // power-of-2 post-fix_shape, so log2 = trailing_zeros.  CPU path (no
+    // device): height = main values.len() / width.  Resolved exactly the
+    // same way as the residual_y block (prover.rs:695-707): commit width==0
+    // → device chip_height; else values.len()/width; skip h==0.
+    let base_cube =
+        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
+    let max_log_row_count = {
+        let mut cube = base_cube;
+        for arc in main_traces.iter() {
+            let w = arc.width();
+            if w == 0 {
+                continue;
+            }
+            let h = arc.values.len() / w;
+            if h == 0 {
+                continue;
+            }
+            // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
+            let log_h = (h as u64).trailing_zeros() as usize;
+            if log_h > cube {
+                cube = log_h;
+            }
+        }
+        cube
+    };
+    if max_log_row_count != base_cube {
+        eprintln!(
+            "PERSTAGE-CUBE prover: base={base_cube} -> cube={max_log_row_count} \
+             (FIX-off band-padded chip exceeds base)"
+        );
+    }
     // Materialize the Arc-wrapped main traces into a contiguous
     // `Vec<RowMajorMatrix>` for the legacy shard-level prover API.
     // The clone cost matches the pre-Vec<Arc<M>> refactor (the

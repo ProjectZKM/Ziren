@@ -1558,6 +1558,40 @@ pub mod jagged {
         verify_jagged_pcs,
     };
 
+    // ── Test-only verify-progress tracker ─────────────────────────────────
+    // Records how FAR the host verifier got, so CP-A validation can assert
+    // the per-round restructure is transcript-faithful (coverage + every
+    // group's reduction pass) even when the BaseFold OPEN fails for a reason
+    // ORTHOGONAL to the split (e.g. an in-progress jagged-eval/div-fix bug
+    // shared by the G==1 path on this WIP branch).
+    #[cfg(test)]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum VerifyStage {
+        /// Failed the coverage check (group map ≠ partition).
+        Coverage,
+        /// Failed a per-group jagged-sumcheck reduction (group index).
+        Reduction(usize),
+        /// Failed a per-group BaseFold open (group index).
+        Open(usize),
+        /// All G groups accepted.
+        Accepted,
+    }
+    #[cfg(test)]
+    thread_local! {
+        pub(crate) static LAST_VERIFY_STAGE: core::cell::Cell<Option<VerifyStage>> =
+            const { core::cell::Cell::new(None) };
+    }
+
+    /// Record the verify stage (no-op outside tests).
+    macro_rules! record_stage {
+        ($s:expr) => {
+            #[cfg(test)]
+            {
+                LAST_VERIFY_STAGE.with(|c| c.set(Some($s)));
+            }
+        };
+    }
+
     /// Wire-format jagged metadata: only the per-bundle quantities
     /// the verifier needs to reconstruct the same `JaggedPacking`
     /// from chip_infos it receives separately.  We don't serialize
@@ -1592,25 +1626,119 @@ pub mod jagged {
         deserialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Deserialize<'de>, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Deserialize<'de>"
     ))]
     pub struct JaggedBasefoldBundleGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
+        /// Group-0 jagged-sumcheck reduction proof.  On the default (FIX-on /
+        /// core, G==1) path this is the WHOLE proof and `extra_*` below are
+        /// empty — byte-identical to the pre-split bundle.  On the per-round
+        /// split (G≥2) path this is the FIRST group and the remaining G-1
+        /// groups live in the `extra_*` Vecs (see [`Self::reduction_g`]).
+        ///
+        /// Rationale for "scalar group-0 + extra Vecs" rather than a single
+        /// `Vec<G>`: it keeps the recursion lift + in-circuit verifier
+        /// (`shard_level_witness.rs`, `recursive_jagged_pcs.rs`) — which read
+        /// these scalar fields and are NOT touched in CP-A (host-only) —
+        /// compiling unchanged, AND keeps the G==1 wire format byte-identical
+        /// (the `extra_*` / `groups` fields are `serde(default)` empty so they
+        /// serialize away).  CP-C folds these into the in-circuit G-loop.
         pub reduction: JaggedReductionProof<InnerChallenge>,
+        /// Group-0 BaseFold open proof.
         pub basefold_proof: StackedBasefoldProof<
             InnerVal,
             InnerChallenge,
             MT,
         >,
+        /// Per-chip per-column row-MLE values, FLAT in name-sorted chip order
+        /// (NOT grouped) — the `groups` index map below partitions it.  Shared
+        /// across all groups.
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
+        /// Group-0 BaseFold commit.
         pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
+        /// Group-0 packing metadata (group-LOCAL offsets / prefix-sums).
         pub packing: PackingMeta,
-        /// Jagged-eval sub-protocol proof (SP1 port scaffold).
+        /// Group-0 jagged-eval sub-protocol proof.
         ///
-        /// Produced by [`crate::jagged_eval_sumcheck::prove_jagged_evaluation`]
-        /// alongside the outer reduction sumcheck.  Currently a
-        /// scaffold dummy; the real body is still to be ported.
-        ///
-        /// `serde(default)` so existing wire-format bundles
-        /// deserialize cleanly with a placeholder.
+        /// `serde(default)` so existing wire-format bundles deserialize.
         #[serde(default = "crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy")]
         pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
+
+        // ── Per-round split (Architecture A) extra groups (G≥2 only) ──────
+        // All `serde(default)` empty so a G==1 bundle is byte-identical to the
+        // pre-split wire format.  Indexed g-1 for group g≥1.
+        /// Reductions for groups 1..G.
+        #[serde(default)]
+        pub extra_reduction: Vec<JaggedReductionProof<InnerChallenge>>,
+        /// BaseFold opens for groups 1..G.
+        #[serde(default)]
+        pub extra_basefold_proof: Vec<StackedBasefoldProof<InnerVal, InnerChallenge, MT>>,
+        /// BaseFold commits for groups 1..G.
+        #[serde(default)]
+        pub extra_commit: Vec<crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>>,
+        /// Packing metadata for groups 1..G.
+        #[serde(default)]
+        pub extra_packing: Vec<PackingMeta>,
+        /// Jagged-eval proofs for groups 1..G.
+        #[serde(default)]
+        pub extra_jagged_eval: Vec<crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>>,
+        /// Group membership: `groups[g]` lists the indices (INTO the
+        /// name-sorted chip set) committed in group `g`.  THE wire form the
+        /// verifier's coverage check validates against an independent
+        /// [`crate::jagged::partition_from_chip_infos`] run.  Must be an
+        /// exact cover (no drop, no dup, canonical name-sorted order).
+        /// `serde(default)` empty for G==1 / legacy bundles → the verifier
+        /// treats an empty map as the single-group identity cover.
+        #[serde(default)]
+        pub groups: Vec<Vec<usize>>,
+    }
+
+    impl<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> JaggedBasefoldBundleGeneric<MT> {
+        /// Number of independent jagged groups (G).  `1` on the default path.
+        #[must_use]
+        pub fn num_groups(&self) -> usize {
+            1 + self.extra_reduction.len()
+        }
+        /// Reduction proof for group `g` (group 0 is the scalar field).
+        #[must_use]
+        pub fn reduction_g(&self, g: usize) -> &JaggedReductionProof<InnerChallenge> {
+            if g == 0 { &self.reduction } else { &self.extra_reduction[g - 1] }
+        }
+        /// BaseFold open proof for group `g`.
+        #[must_use]
+        pub fn basefold_proof_g(
+            &self,
+            g: usize,
+        ) -> &StackedBasefoldProof<InnerVal, InnerChallenge, MT> {
+            if g == 0 { &self.basefold_proof } else { &self.extra_basefold_proof[g - 1] }
+        }
+        /// BaseFold commit for group `g`.
+        #[must_use]
+        pub fn commit_g(
+            &self,
+            g: usize,
+        ) -> &crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT> {
+            if g == 0 { &self.commit } else { &self.extra_commit[g - 1] }
+        }
+        /// Packing metadata for group `g`.
+        #[must_use]
+        pub fn packing_g(&self, g: usize) -> &PackingMeta {
+            if g == 0 { &self.packing } else { &self.extra_packing[g - 1] }
+        }
+        /// Jagged-eval proof for group `g`.
+        #[must_use]
+        pub fn jagged_eval_g(
+            &self,
+            g: usize,
+        ) -> &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge> {
+            if g == 0 { &self.jagged_eval } else { &self.extra_jagged_eval[g - 1] }
+        }
+        /// The group membership map, defaulting to the identity single-group
+        /// cover when empty (G==1 / legacy bundles).
+        #[must_use]
+        pub fn groups_or_identity(&self, n_chips: usize) -> Vec<Vec<usize>> {
+            if self.groups.is_empty() {
+                alloc::vec![(0..n_chips).collect()]
+            } else {
+                self.groups.clone()
+            }
+        }
     }
 
     /// Concrete inner (Poseidon2-KoalaBear) bundle alias -- the type every
@@ -2103,6 +2231,44 @@ pub mod jagged {
         // open at z*.
         let n_chips = chip_traces.len();
 
+        // ── Per-round jagged split (Architecture A) ──────────────────────
+        // Decide G from the public name-sorted chip dims.  Default OFF
+        // (`ZIREN_JAGGED_GROUPS` unset) ⇒ ONE group over all chips ⇒ the
+        // exact single-round body below runs unchanged (byte-identical).
+        // When G>1 the chips' total dense area exceeds 2^30 and we run G
+        // INDEPENDENT host jagged instances (each own metadata/commit/
+        // reduction/jagged-eval/open over group-LOCAL prefix-sums so every
+        // `log_m_g < 30`); the shared `z_row` ties them to one zerocheck
+        // opening, and the verifier re-derives the SAME partition + a
+        // coverage check.  HOST-ONLY (CP-A): the multi-group path
+        // re-materializes + host-commits per group and observes each commit
+        // in-band, so it does NOT consume the single-main-commit
+        // `precomputed` (which covers all chips as one dense).  GPU
+        // single-main-commit + multi-commit observe is CP-B/CP-C.
+        let chip_infos_for_groups: Vec<crate::jagged::JaggedChipInfo> = chip_traces
+            .iter()
+            .map(|(name, t)| {
+                let h = t.values.len() / t.width.max(1);
+                crate::jagged::JaggedChipInfo {
+                    name: name.clone(),
+                    row_count: h,
+                    column_count: t.width,
+                }
+            })
+            .collect();
+        let groups = crate::jagged::partition_from_chip_infos(&chip_infos_for_groups);
+        if groups.len() > 1 {
+            return prove_jagged_basefold_multi_group(
+                chip_traces,
+                r_row_per_chip,
+                z_row,
+                pre_y_per_chip,
+                &groups,
+                challenger,
+                provider,
+            );
+        }
+
         // (1) + (2): Pack metadata + commit dense as a single Mle via
         // BaseFold-stacked.  When `precomputed` is `Some`, both steps
         // were run up-front by the orchestrator's single-main-commit
@@ -2211,6 +2377,14 @@ pub mod jagged {
             // happy path takes the `pre` branch above).
             let rematerialized_for_y =
                 rematerialize_chip_traces_via_provider(chip_traces, provider);
+            // STAGE 2.5 (#88): read the rev(zeta) orientation ONCE on THIS thread
+            // (the carrier is thread-local, installed by `BandCapGuard` only on
+            // the worker that runs commit+open); the per-chip / per-column
+            // reductions below run on RAYON worker threads where `current_use_
+            // rev()` would return `None`, so it MUST be hoisted here and captured
+            // by value.
+            let use_rev_y =
+                crate::shard_level::band_cap::current_use_rev() == Some(true);
             rematerialized_for_y
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
@@ -2244,8 +2418,17 @@ pub mod jagged {
                     let _ = r_row_c;
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // Orientation: bit-reverse the trace row index so
-                    // y_per_chip == opened_values (= MLE of bitrev(trace)).
+                    // STAGE 2.5 (#88): the rev(zeta) orientation (single source of
+                    // truth, set by `BandCapGuard` for the whole commit+open
+                    // scope).  Under rev, the COMMIT (`materialize_dense_jagged`)
+                    // places the data in NATURAL row order, so the column claim
+                    // must read NATURAL rows too (`src = row`) — together with the
+                    // natural-indexed `build_weight_table` the round-0 identity
+                    // `Σ z_col·y == Σ_b q·w` holds.  Else (legacy) bit-reverse the
+                    // trace row index so `y_per_chip == opened_values` (= MLE of
+                    // bitrev(trace)), byte-identical to today.  `use_rev_y` is
+                    // hoisted above (read on the carrier thread, not in this rayon
+                    // closure).
                     let is_pow2 = h.is_power_of_two();
                     let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                     (0..w)
@@ -2253,7 +2436,9 @@ pub mod jagged {
                         .map(|col| {
                             let mut acc = InnerChallenge::ZERO;
                             for row in 0..h {
-                                let src = if is_pow2 {
+                                let src = if use_rev_y {
+                                    row
+                                } else if is_pow2 {
                                     ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
                                 } else {
                                     row
@@ -2803,6 +2988,9 @@ pub mod jagged {
                 .map(|ci| ci.column_count)
                 .collect(),
         };
+        // G==1: scalar group-0 fields; `extra_*` + `groups` empty ⇒ the wire
+        // bytes are byte-identical to the pre-split bundle.
+        let _ = n_chips;
         JaggedBasefoldBundle {
             reduction,
             basefold_proof: proof,
@@ -2810,6 +2998,261 @@ pub mod jagged {
             commit,
             packing: packing_meta,
             jagged_eval,
+            extra_reduction: Vec::new(),
+            extra_basefold_proof: Vec::new(),
+            extra_commit: Vec::new(),
+            extra_packing: Vec::new(),
+            extra_jagged_eval: Vec::new(),
+            groups: Vec::new(),
+        }
+    }
+
+    /// HOST-ONLY per-round (G≥2) prover (Architecture A).  Runs G
+    /// INDEPENDENT jagged instances over the partition `groups` (indices
+    /// into the name-sorted `chip_traces`).  The shared `z_row` (zerocheck
+    /// point) is GLOBAL across groups; each group g gets group-LOCAL
+    /// metadata (prefix-sums restart at 0 ⇒ `log_dense_size_g < 30`), its
+    /// own commit `C_g`, `z_col_g`, reduction, jagged-eval, and BaseFold
+    /// open.  Transcript order: observe ALL G commits up-front in partition
+    /// order, then per group sample `z_col_g` → reduction_g → jagged-eval_g
+    /// → extend → open_g.  No GPU hooks (CP-A host-only); `provider`
+    /// re-materializes empty device-resident traces so a GPU-resident shard
+    /// can still be host-proved.
+    #[allow(clippy::too_many_arguments)]
+    fn prove_jagged_basefold_multi_group(
+        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        groups: &[Vec<usize>],
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    ) -> JaggedBasefoldBundle {
+        use p3_maybe_rayon::prelude::*;
+        let g_count = groups.len();
+        tracing::info!(
+            groups = g_count,
+            chips = chip_traces.len(),
+            "jagged_pcs: per-round split active (Architecture A, host)",
+        );
+
+        // Re-materialize empty (device-resident) chip traces ONCE up front so
+        // every group's dense pack + y-eval sees real cells (no-op clone when
+        // the provider is None / traces already full).
+        let chip_traces_full =
+            rematerialize_chip_traces_via_provider(chip_traces, provider);
+        let chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)] =
+            &chip_traces_full;
+
+        // Per-group materialized inputs: group-local chip-trace slices (clones
+        // of the member chips, preserving name-sorted order) + group-local
+        // metadata.  The clone is acceptable for the CP-A host path; the
+        // device path (CP-B/C) will pack D2D per group.
+        let mut group_traces: Vec<Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)>> =
+            Vec::with_capacity(g_count);
+        let mut group_packing: Vec<crate::jagged::JaggedPacking<InnerVal>> =
+            Vec::with_capacity(g_count);
+        for grp in groups.iter() {
+            let traces_g: Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = grp
+                .iter()
+                .map(|&i| chip_traces[i].clone())
+                .collect();
+            let packing_g = compute_jagged_metadata::<InnerVal>(&traces_g);
+            debug_assert!(
+                packing_g.log_dense_size < crate::jagged::MAX_ROUND_LOG_AREA as usize,
+                "group log_dense_size {} must be < {}",
+                packing_g.log_dense_size,
+                crate::jagged::MAX_ROUND_LOG_AREA,
+            );
+            group_traces.push(traces_g);
+            group_packing.push(packing_g);
+        }
+
+        // STEP 1 (transcript): commit every group, observing ALL G commits
+        // up-front in partition order BEFORE any z_col is sampled.
+        let mut group_commits: Vec<crate::jagged_pcs::BasefoldLateBindingCommit> =
+            Vec::with_capacity(g_count);
+        let mut group_prover_data: Vec<crate::jagged_pcs::BasefoldLateBindingProverData> =
+            Vec::with_capacity(g_count);
+        for (g, traces_g) in group_traces.iter().enumerate() {
+            let dense_q =
+                materialize_dense_jagged::<InnerVal>(traces_g, group_packing[g].log_dense_size);
+            debug_assert_eq!(dense_q.len(), 1usize << group_packing[g].log_dense_size);
+            let dense_traces = vec![(
+                alloc::string::String::from("<jagged-dense>"),
+                RowMajorMatrix::new(dense_q, 1),
+            )];
+            let (commit_g, prover_data_g) = commit_jagged_pcs(dense_traces, challenger);
+            group_commits.push(commit_g);
+            group_prover_data.push(prover_data_g);
+        }
+
+        // STEP 3: per group, sample z_col_g, reduce, jagged-eval, open.
+        // z_row stays GLOBAL (shared across groups).
+        let mut out_reduction: Vec<crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>> =
+            Vec::with_capacity(g_count);
+        let mut out_basefold: Vec<crate::basefold::StackedBasefoldProof<InnerVal, InnerChallenge, crate::jagged_pcs::JaggedMmcs>> =
+            Vec::with_capacity(g_count);
+        let mut out_jagged_eval: Vec<crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>> =
+            Vec::with_capacity(g_count);
+        let mut out_packing: Vec<crate::jagged_pcs::jagged::PackingMeta> =
+            Vec::with_capacity(g_count);
+        // Flat y_per_chip (name-sorted chip order), filled per group.
+        let mut y_per_chip: Vec<Vec<InnerChallenge>> = vec![Vec::new(); chip_traces.len()];
+
+        let mut prover_data_iter = group_prover_data.into_iter();
+        for (g, grp) in groups.iter().enumerate() {
+            let traces_g = &group_traces[g];
+            let packing_g = &group_packing[g];
+            let prover_data_g = prover_data_iter.next().expect("one prover_data per group");
+
+            // Group-local r_row slices (same per-chip points as the global
+            // r_row_per_chip, indexed by membership).
+            let r_row_g: Vec<Vec<InnerChallenge>> =
+                grp.iter().map(|&i| r_row_per_chip[i].clone()).collect();
+
+            // (3) per-chip per-column y_{c,j} for this group: reuse the
+            // shard-wide pre_y_per_chip when supplied, else recompute via the
+            // shared host helper.
+            // STAGE 2.5 (#88): hoist the rev(zeta) orientation onto THIS thread
+            // (thread-local carrier; the per-chip rayon closures below would see
+            // `None`).
+            let use_rev_y =
+                crate::shard_level::band_cap::current_use_rev() == Some(true);
+            let y_g: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip.as_ref() {
+                grp.iter().map(|&i| pre[i].clone()).collect()
+            } else {
+                traces_g
+                    .par_iter()
+                    .map(|(_name, trace)| {
+                        let h = trace.values.len() / trace.width.max(1);
+                        let w = trace.width;
+                        if h == 0 || w == 0 {
+                            return Vec::new();
+                        }
+                        let z_row_rev: Vec<InnerChallenge> =
+                            z_row.iter().rev().copied().collect();
+                        let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(
+                            &z_row_rev,
+                        );
+                        // STAGE 2.5 (#88): same rev(zeta) orientation as the
+                        // production y site — the no-observe verify recompute must
+                        // read NATURAL rows under rev so the round-0 identity holds
+                        // on BOTH prove and no-observe verify.  `use_rev_y` is
+                        // hoisted above this group's `par_iter` (carrier-thread
+                        // read), captured by value into these rayon closures.
+                        let is_pow2 = h.is_power_of_two();
+                        let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
+                        (0..w)
+                            .into_par_iter()
+                            .map(|col| {
+                                let mut acc = InnerChallenge::ZERO;
+                                for row in 0..h {
+                                    let src = if use_rev_y {
+                                        row
+                                    } else if is_pow2 {
+                                        ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
+                                    } else {
+                                        row
+                                    };
+                                    acc += eq_c[row]
+                                        * InnerChallenge::from(trace.values[src * w + col]);
+                                }
+                                acc
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect()
+            };
+            // Scatter into the flat y_per_chip in name-sorted positions.
+            for (slot, &i) in grp.iter().enumerate() {
+                y_per_chip[i] = y_g[slot].clone();
+            }
+
+            // (4) sample z_col_g (group-local column dim), then reduce over
+            // the group-LOCAL dense.
+            let num_cols = packing_g.offsets.len().saturating_sub(1);
+            let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+            let z_col_g: Vec<InnerChallenge> = (0..num_col_vars)
+                .map(|_| challenger.sample_algebra_element())
+                .collect();
+            let reduction_g = {
+                let dense_q = materialize_dense_jagged::<InnerVal>(
+                    traces_g,
+                    packing_g.log_dense_size,
+                );
+                crate::jagged_sumcheck::prove_jagged_reduction_owned(
+                    dense_q, packing_g, &r_row_g, &y_g, &z_col_g, z_row, challenger,
+                )
+            };
+
+            // (4b) jagged-eval sub-protocol over group-local prefix-sums.
+            let z_trace_be: Vec<InnerChallenge> =
+                reduction_g.eval_point.iter().rev().copied().collect();
+            let jagged_eval_g = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+                &packing_g.offsets,
+                z_row,
+                &z_col_g,
+                &z_trace_be,
+                challenger,
+            );
+
+            // (5) extend z*_g to log2(area_g) + BaseFold open of C_g.
+            let target_dim = prover_data_g.area.trailing_zeros() as usize;
+            let mut extended_eval_point = reduction_g.eval_point.clone();
+            while extended_eval_point.len() < target_dim {
+                let r: InnerChallenge = challenger.sample_algebra_element();
+                extended_eval_point.push(r);
+            }
+            let proof_g = open_jagged_pcs(prover_data_g, extended_eval_point, challenger);
+
+            out_packing.push(crate::jagged_pcs::jagged::PackingMeta {
+                offsets: packing_g.offsets.clone(),
+                total_values: packing_g.total_values,
+                log_dense_size: packing_g.log_dense_size,
+                column_counts: packing_g
+                    .chip_infos
+                    .iter()
+                    .map(|ci| ci.column_count)
+                    .collect(),
+            });
+            out_reduction.push(reduction_g);
+            out_jagged_eval.push(jagged_eval_g);
+            out_basefold.push(proof_g);
+
+            tracing::info!(
+                group = g,
+                log_m_g = packing_g.log_dense_size as u64,
+                chips_in_group = grp.len(),
+                "jagged per-round group done (log_m_g < 30)",
+            );
+        }
+
+        // Split scalar group-0 from the extra groups (1..G).
+        let mut red_it = out_reduction.into_iter();
+        let mut bf_it = out_basefold.into_iter();
+        let mut je_it = out_jagged_eval.into_iter();
+        let mut pk_it = out_packing.into_iter();
+        let mut cm_it = group_commits.into_iter();
+        let reduction0 = red_it.next().expect("G>=1");
+        let basefold0 = bf_it.next().expect("G>=1");
+        let jagged_eval0 = je_it.next().expect("G>=1");
+        let packing0 = pk_it.next().expect("G>=1");
+        let commit0 = cm_it.next().expect("G>=1");
+
+        JaggedBasefoldBundle {
+            reduction: reduction0,
+            basefold_proof: basefold0,
+            y_per_chip,
+            commit: commit0,
+            packing: packing0,
+            jagged_eval: jagged_eval0,
+            extra_reduction: red_it.collect(),
+            extra_basefold_proof: bf_it.collect(),
+            extra_commit: cm_it.collect(),
+            extra_packing: pk_it.collect(),
+            extra_jagged_eval: je_it.collect(),
+            groups: groups.to_vec(),
         }
     }
 
@@ -2840,6 +3283,11 @@ pub mod jagged {
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the ITEM-12 embedding factor + empty-chip skip).
+        // STAGE 2.5 (#88): hoist the rev(zeta) orientation onto THIS thread
+        // (thread-local carrier; the per-chip rayon closures below would see
+        // `None`).  On the wrap/BN254 path no `BandCapGuard` is installed, so
+        // this is `None` => legacy bitrev (byte-identical).
+        let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);
         let y_per_chip: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip {
             assert_eq!(pre.len(), chip_traces.len(),
                 "pre_y_per_chip length must match chip_traces length");
@@ -2863,8 +3311,12 @@ pub mod jagged {
                     // eq_mle_table's LSB-first bitrev), matching build_weight_table.
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // Orientation: bit-reverse the trace row index so
-                    // y_per_chip == opened_values (= MLE of bitrev(trace)).
+                    // STAGE 2.5 (#88): same rev(zeta) orientation (single source
+                    // of truth) — NATURAL rows under rev so the round-0 identity
+                    // holds on this no-observe verify recompute too; legacy bitrev
+                    // (`y_per_chip == MLE of bitrev(trace)`) otherwise.
+                    // `use_rev_y` is hoisted above the `par_iter` (carrier-thread
+                    // read), captured by value into these rayon closures.
                     let is_pow2 = h.is_power_of_two();
                     let log_h2 = if is_pow2 { (h as u32).trailing_zeros() } else { 0 };
                     (0..w)
@@ -2872,7 +3324,9 @@ pub mod jagged {
                         .map(|col| {
                             let mut acc = InnerChallenge::ZERO;
                             for row in 0..h {
-                                let src = if is_pow2 {
+                                let src = if use_rev_y {
+                                    row
+                                } else if is_pow2 {
                                     ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
                                 } else {
                                     row
@@ -2930,6 +3384,8 @@ pub mod jagged {
             log_dense_size: packing.log_dense_size,
             column_counts: packing.chip_infos.iter().map(|ci| ci.column_count).collect(),
         };
+        // The BN254 wrap path is always single-round (G==1): scalar fields,
+        // empty extra_* / groups (byte-identical to the pre-split bundle).
         JaggedBasefoldBundleGeneric {
             reduction,
             basefold_proof: proof,
@@ -2937,6 +3393,12 @@ pub mod jagged {
             commit,
             packing: packing_meta,
             jagged_eval,
+            extra_reduction: Vec::new(),
+            extra_basefold_proof: Vec::new(),
+            extra_commit: Vec::new(),
+            extra_packing: Vec::new(),
+            extra_jagged_eval: Vec::new(),
+            groups: Vec::new(),
         }
     }
     /// Verifier mirror.
@@ -2987,37 +3449,109 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
-        // Replay the commit observation — unless the caller is the
-        // Option B single-main-commit flow, which observed the 8-felt
-        // digest earlier (Phase 1 prologue) under the
-        // `main_commitment` slot.
-        if !skip_commit_observe {
-            challenger.observe(bundle.commit.commitment.clone());
+        // ── COVERAGE CHECK (the #1 soundness guard — FIRST assertion) ─────
+        // Independently re-derive the round partition from the PUBLIC
+        // name-sorted (name,row_count,column_count) the verifier already
+        // holds, and require the proof's `groups` membership to equal it
+        // EXACTLY (no chip dropped, none duplicated, canonical order).
+        // Without this a malicious prover could OMIT a chip from every
+        // group — that chip's trace is then never opened, and nothing
+        // downstream would notice.
+        let expected_groups = crate::jagged::partition_from_chip_infos(chip_infos);
+        let proof_groups: Vec<Vec<usize>> = bundle.groups_or_identity(chip_infos.len());
+        if proof_groups != expected_groups {
+            eprintln!(
+                "[basefold verify] COVERAGE CHECK FAILED: proof groups {:?} != expected {:?}",
+                proof_groups, expected_groups
+            );
+            record_stage!(VerifyStage::Coverage);
+            return false;
+        }
+        // Structural agreement between the group map and the per-group data.
+        let g_count = proof_groups.len();
+        if bundle.num_groups() != g_count {
+            eprintln!(
+                "[basefold verify] COVERAGE CHECK FAILED: bundle carries {} groups \
+                 but the group map has G={}",
+                bundle.num_groups(),
+                g_count,
+            );
+            record_stage!(VerifyStage::Coverage);
+            return false;
         }
 
-        // Verify jagged sumcheck reduction (verifier-side).  We
-        // recompose the full `JaggedPacking` from the `chip_infos`
-        // the verifier already has + the per-bundle metadata
-        // (offsets, total_values, log_dense_size).  `dense_values`
-        // stays empty — `verify_jagged_reduction` only needs the
-        // metadata fields.
-        let packing = JaggedPacking {
-            dense_values: Vec::new(),
-            chip_infos: chip_infos.to_vec(),
-            offsets: bundle.packing.offsets.clone(),
-            total_values: bundle.packing.total_values,
-            log_dense_size: bundle.packing.log_dense_size,
-        };
-        // [STEP7] faithful replication of the in-circuit step-7 prefix-sum
-        // consistency check (recursive_jagged_pcs.rs:260-272) on the lift's
-        // exact transform of this CORE bundle's packing — fires during the
-        // fast core verify to localize the `acc != prefix_sum_felts`
-        // divergence without the 40-min compress.  Mirrors
-        // shard_level_witness.rs lift_jagged_basefold_bundle.
+        // STEP 1 (transcript): observe ALL G commits up-front in partition
+        // order — unless the Option B single-main-commit flow already
+        // observed them at the Phase 1 prologue.  (G==1 single-commit is the
+        // current Option B path; multi-commit Option B is CP-B/CP-C.)
+        if !skip_commit_observe {
+            for g in 0..g_count {
+                challenger.observe(bundle.commit_g(g).commitment.clone());
+            }
+        }
+
+        // STEP 3: verify each independent jagged instance against the SHARED
+        // z_row.  All G must accept.
+        for g in 0..g_count {
+            let grp = &proof_groups[g];
+            // Group-LOCAL chip_infos / r_row (membership-indexed); the
+            // per-group bundle metadata (offsets/total/log_dense_size) is
+            // group-local too (prefix-sums restart at 0).
+            let chip_infos_g: Vec<JaggedChipInfo> =
+                grp.iter().map(|&i| chip_infos[i].clone()).collect();
+            let r_row_g: Vec<Vec<InnerChallenge>> =
+                grp.iter().map(|&i| r_row_per_chip[i].clone()).collect();
+            let y_per_chip_g: Vec<Vec<InnerChallenge>> =
+                grp.iter().map(|&i| bundle.y_per_chip[i].clone()).collect();
+            let pkg = bundle.packing_g(g);
+            let packing = JaggedPacking {
+                dense_values: Vec::new(),
+                chip_infos: chip_infos_g,
+                offsets: pkg.offsets.clone(),
+                total_values: pkg.total_values,
+                log_dense_size: pkg.log_dense_size,
+            };
+            if !verify_one_jagged_group(
+                &packing,
+                &r_row_g,
+                z_row,
+                &y_per_chip_g,
+                bundle.reduction_g(g),
+                bundle.jagged_eval_g(g),
+                bundle.commit_g(g),
+                bundle.basefold_proof_g(g),
+                challenger,
+                g,
+            ) {
+                return false;
+            }
+        }
+        record_stage!(VerifyStage::Accepted);
+        true
+    }
+
+    /// Verify ONE independent jagged instance (group `g`) against the shared
+    /// `z_row`: sample `z_col_g`, verify the reduction, replay the
+    /// jagged-eval transcript, extend `z*_g`, and verify the BaseFold open
+    /// of `C_g`.  Returns `false` on any rejection.
+    #[allow(clippy::too_many_arguments)]
+    fn verify_one_jagged_group(
+        packing: &JaggedPacking<InnerVal>,
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        y_per_chip: &[Vec<InnerChallenge>],
+        reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
+        jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
+        commit: &crate::jagged_pcs::BasefoldLateBindingCommit,
+        basefold_proof: &crate::basefold::StackedBasefoldProof<InnerVal, InnerChallenge, crate::jagged_pcs::JaggedMmcs>,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        g: usize,
+    ) -> bool {
+        // [STEP7] gated diagnostic (single-group prefix-sum consistency).
         if std::env::var("ZIREN_STEP7_DBG").is_ok() {
-            let pcc: Vec<usize> = bundle.packing.column_counts.clone();
-            let offsets = &bundle.packing.offsets;
-            let tv = bundle.packing.total_values;
+            let pcc: Vec<usize> = packing.chip_infos.iter().map(|ci| ci.column_count).collect();
+            let offsets = &packing.offsets;
+            let tv = packing.total_values;
             // packing_row_counts (offset-walk, shard_level_witness.rs:874-895)
             let mut prc: Vec<usize> = Vec::with_capacity(pcc.len());
             {
@@ -3041,7 +3575,7 @@ pub mod jagged {
             }).sum();
             let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
             let col_prefix_sums_len = padded_cols + 1;
-            let jagged_pt_len = bundle.jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
+            let jagged_pt_len = jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
             let bits_per_entry = if jagged_pt_len >= 2 { jagged_pt_len / 2 } else { 0 };
             let clamp = if bits_per_entry < 63 { (1usize << bits_per_entry) - 1 } else { usize::MAX };
             let cap = |v: usize| -> usize { if bits_per_entry < 63 { v.min(clamp) } else { v } };
@@ -3068,8 +3602,8 @@ pub mod jagged {
                 }
             }
             let max_off = offsets.iter().copied().max().unwrap_or(0);
-            eprintln!("[STEP7] chips={} pcc.len={} offsets.len={} total_values={} log_dense={} jagged_pt_len={} bits_per_entry={} clamp={} max_off={} CLAMP_HIT={} padded_cols={} prefix_sum.len={} repeated.len={}",
-                chip_infos.len(), pcc.len(), offsets.len(), tv, bundle.packing.log_dense_size,
+            eprintln!("[STEP7] group={} chips={} pcc.len={} offsets.len={} total_values={} log_dense={} jagged_pt_len={} bits_per_entry={} clamp={} max_off={} CLAMP_HIT={} padded_cols={} prefix_sum.len={} repeated.len={}",
+                g, packing.chip_infos.len(), pcc.len(), offsets.len(), tv, packing.log_dense_size,
                 jagged_pt_len, bits_per_entry, clamp, max_off, max_off > clamp || tv > clamp,
                 padded_cols, prefix_sum.len(), repeated.len());
             eprintln!("[STEP7] column_counts={:?}", pcc);
@@ -3095,16 +3629,17 @@ pub mod jagged {
             .map(|_| challenger.sample_algebra_element())
             .collect();
         let red_result = verify_jagged_reduction(
-            &bundle.reduction,
-            &packing,
+            reduction,
+            packing,
             r_row_per_chip,
-            &bundle.y_per_chip,
+            y_per_chip,
             &z_col,
             z_row,
             challenger,
         );
         let Some((z_star, q_at_z, _w_at_z)) = red_result else {
-            eprintln!("[basefold verify] jagged sumcheck reduction REJECTED");
+            eprintln!("[basefold verify] group {g}: jagged sumcheck reduction REJECTED");
+            record_stage!(VerifyStage::Reduction(g));
             return false;
         };
 
@@ -3114,7 +3649,7 @@ pub mod jagged {
         // recursion verifier; the host self-check needs only transcript
         // fidelity here.)
         crate::jagged_eval_sumcheck::replay_jagged_evaluation_transcript(
-            &bundle.jagged_eval,
+            jagged_eval,
             challenger,
         );
 
@@ -3123,26 +3658,53 @@ pub mod jagged {
         // prover's extension in `prove_jagged_basefold` step (5).
         // Both sides sample from the same transcript state at the same
         // point in the protocol so the coords match.
-        let target_dim = bundle.commit.area.trailing_zeros() as usize;
+        // Capture the reduced (pre-extension) length BEFORE the extend
+        // loop: that is the de-clamped log_stacking-equivalent height of
+        // this (per-group) commit, used below to gate the sub-stripe
+        // Π(1-r) claim adjustment.
+        let z_star_orig_len = z_star.len();
+        let target_dim = commit.area.trailing_zeros() as usize;
         let mut extended_z_star = z_star;
         while extended_z_star.len() < target_dim {
             let r: InnerChallenge = challenger.sample_algebra_element();
             extended_z_star.push(r);
         }
 
-        // Verify the BaseFold opening: claim is q_at_z, point is the
-        // extended z*.
+        // FIX-off sub-stripe commits (host analog of the in-circuit
+        // `claim_adj`, recursive_stacked_pcs.rs): when the reduced point is
+        // SHORTER than the commit's log_stacking_height, the FS-extension
+        // coords falling in the STACK portion `[z_star_orig_len, stack_dim)`
+        // correspond to the ZERO high-half padding of the stripe (the dense
+        // poly of `z_star_orig_len` vars is zero-padded up to `2^stack_dim`).
+        // By the MLE zero-padding identity the committed stripe's eval at
+        // `stack_point` carries a Π(1 - r_k) factor over those coords that the
+        // reduced-point claim lacks, so the stacked reconstruction equals
+        // Π(1 - r_k) · q_at_z.  Multiply the claim to match.  NO-OP when
+        // z_star_orig_len >= stack_dim (all FIX-on and large FIX-off commits)
+        // ⇒ byte-identical there.  Each group is verified through this
+        // function, so this covers every group (CP-A round-split included).
+        let stack_dim = commit.log_stacking_height as usize;
+        let mut q_at_z_adj = q_at_z;
+        if z_star_orig_len < stack_dim {
+            for r in &extended_z_star[z_star_orig_len..stack_dim.min(target_dim)] {
+                q_at_z_adj *= InnerChallenge::ONE - *r;
+            }
+        }
+
+        // Verify the BaseFold opening: claim is q_at_z (sub-stripe adjusted),
+        // point is the extended z*.
         let res = verify_jagged_pcs(
-            &bundle.commit.commitment,
-            bundle.commit.area,
-            bundle.commit.log_stacking_height,
+            &commit.commitment,
+            commit.area,
+            commit.log_stacking_height,
             &extended_z_star,
-            q_at_z,
-            &bundle.basefold_proof,
+            q_at_z_adj,
+            basefold_proof,
             challenger,
         );
         if let Err(e) = &res {
             eprintln!("[basefold verify] basefold opening REJECTED: {:?}", e);
+            record_stage!(VerifyStage::Open(g));
         }
         res.is_ok()
     }
@@ -3229,6 +3791,14 @@ pub mod jagged {
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
+        // The BN254 wrap path is single-round (G==1) — scalar group-0 fields.
+        // The coverage check (group-map vs partition) is enforced on the
+        // INNER host verifier; the wrap bundle always carries the identity
+        // cover (empty `groups` / `extra_*`).
+        debug_assert_eq!(
+            bundle.num_groups(), 1,
+            "wrap verify expects a single-round (G==1) bundle",
+        );
         if !skip_commit_observe {
             challenger.observe(bundle.commit.commitment.clone());
         }
@@ -3261,18 +3831,33 @@ pub mod jagged {
             &bundle.jagged_eval,
             challenger,
         );
+        // Capture the reduced (pre-extension) length BEFORE the extend loop
+        // (see the inner verifier for the rationale).
+        let z_star_orig_len = z_star.len();
         let target_dim = bundle.commit.area.trailing_zeros() as usize;
         let mut extended_z_star = z_star;
         while extended_z_star.len() < target_dim {
             let r: InnerChallenge = challenger.sample_algebra_element();
             extended_z_star.push(r);
         }
+        // FIX-off sub-stripe commits: host analog of the in-circuit
+        // `claim_adj` (recursive_stacked_pcs.rs).  Multiply q_at_z by the
+        // Π(1-r) factor over the stack-portion extension coords when the
+        // reduced point is shorter than log_stacking_height.  NO-OP (byte
+        // identical) when z_star_orig_len >= stack_dim.
+        let stack_dim = bundle.commit.log_stacking_height as usize;
+        let mut q_at_z_adj = q_at_z;
+        if z_star_orig_len < stack_dim {
+            for r in &extended_z_star[z_star_orig_len..stack_dim.min(target_dim)] {
+                q_at_z_adj *= InnerChallenge::ONE - *r;
+            }
+        }
         let res = crate::jagged_pcs::verify_jagged_pcs_generic::<Challenger, MT, D>(
             &bundle.commit.commitment,
             bundle.commit.area,
             bundle.commit.log_stacking_height,
             &extended_z_star,
-            q_at_z,
+            q_at_z_adj,
             &bundle.basefold_proof,
             challenger,
             mmcs,
@@ -3592,5 +4177,272 @@ mod test {
         // Hook returns None — dispatcher would fall through to the
         // host body.  We're testing the signature, not the dispatch.
         None
+    }
+
+    // ════════════════════════════════════════════════════════════════
+    // CP-A: per-round jagged split (Architecture A) host validation.
+    // ════════════════════════════════════════════════════════════════
+
+    use crate::jagged_pcs::jagged::{
+        prove_jagged_basefold, verify_jagged_basefold, JaggedBasefoldBundle, VerifyStage,
+        LAST_VERIFY_STAGE,
+    };
+
+    /// Run `verify_jagged_basefold` and return (accepted, last_stage).
+    fn verify_with_stage(
+        chip_infos: &[crate::jagged::JaggedChipInfo],
+        r_row: &[Vec<JaggedChallenge>],
+        z_row: &[JaggedChallenge],
+        bundle: &JaggedBasefoldBundle,
+    ) -> (bool, Option<VerifyStage>) {
+        LAST_VERIFY_STAGE.with(|c| c.set(None));
+        let mut v = build_challenger();
+        let ok = verify_jagged_basefold(chip_infos, r_row, z_row, bundle, &mut v);
+        (ok, LAST_VERIFY_STAGE.with(core::cell::Cell::get))
+    }
+
+    /// Build (traces, r_row_per_chip, z_row) for a set of `(width, height)`
+    /// chip shapes, with deterministic random cells.
+    fn mk_shard(
+        shapes: &[(usize, usize)],
+        seed: u64,
+    ) -> (
+        Vec<(String, RowMajorMatrix<JaggedVal>)>,
+        Vec<Vec<JaggedChallenge>>,
+        Vec<JaggedChallenge>,
+    ) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        // Name-sorted so the partition's name-sorted-order precondition holds.
+        let traces: Vec<(String, RowMajorMatrix<JaggedVal>)> = shapes
+            .iter()
+            .enumerate()
+            .map(|(i, &(w, h))| {
+                let v: Vec<JaggedVal> = (0..w * h).map(|_| rand_kb(&mut rng)).collect();
+                (alloc::format!("chip{i:03}"), RowMajorMatrix::new(v, w))
+            })
+            .collect();
+        let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
+            .iter()
+            .map(|(_, t)| {
+                let h = t.values.len() / t.width.max(1);
+                let log_h = h.next_power_of_two().trailing_zeros() as usize;
+                (0..log_h).map(|_| rand_ef(&mut rng)).collect()
+            })
+            .collect();
+        let z_row: Vec<JaggedChallenge> = r_row_per_chip
+            .iter()
+            .max_by_key(|v| v.len())
+            .cloned()
+            .unwrap_or_default();
+        (traces, r_row_per_chip, z_row)
+    }
+
+    /// (i) NO-OP byte-identity: with grouping OFF (the default), a G==1
+    /// bundle has scalar group-0 fields, EMPTY `extra_*` + `groups`, and an
+    /// honest roundtrip verifies.  The empty `serde(default)` fields make the
+    /// wire bytes byte-identical to the pre-split format (a freshly
+    /// deserialized bundle is bit-for-bit equal AND still verifies).
+    #[test]
+    fn test_cp_a_g1_noop_byte_identity() {
+        // grouping OFF (no test threshold set, env unset).
+        let (traces, r_row, z_row) = mk_shard(&[(4, 16), (2, 8), (6, 4)], 0xA11CE);
+        let mut p_chal = build_challenger();
+        let bundle = prove_jagged_basefold(&traces, &r_row, &z_row, &mut p_chal);
+
+        // Single-group invariants: scalar fields populated, extras empty.
+        assert_eq!(bundle.num_groups(), 1, "grouping OFF ⇒ G==1");
+        assert!(bundle.groups.is_empty(), "G==1 ⇒ empty group map");
+        assert!(bundle.extra_reduction.is_empty());
+        assert!(bundle.extra_basefold_proof.is_empty());
+        assert!(bundle.extra_commit.is_empty());
+        assert!(bundle.extra_packing.is_empty());
+        assert!(bundle.extra_jagged_eval.is_empty());
+
+        // Wire-format round-trip is bit-identical.
+        let bytes = bundle.to_bytes();
+        let bundle2 = JaggedBasefoldBundle::from_bytes(&bytes)
+            .expect("deserialize G==1 bundle");
+        let bytes2 = bundle2.to_bytes();
+        assert_eq!(bytes, bytes2, "G==1 bundle bytes must round-trip identically");
+
+        // Honest verify: coverage passes (identity cover) and the verifier
+        // reaches at least the per-group reduction.  On a fully-green branch
+        // it ACCEPTS; on this WIP branch the BaseFold open can fail for a
+        // reason ORTHOGONAL to CP-A (a pre-existing jagged-eval/div-fix bug
+        // shared by today's single-group path — see report).  Either way the
+        // failure must NOT be at coverage (the CP-A guard).
+        let chip_infos =
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+        let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle);
+        eprintln!("[CP-A (i) G==1 no-op] accepted={ok} stage={stage:?}");
+        assert!(
+            stage != Some(VerifyStage::Coverage),
+            "G==1 must pass the coverage check (identity cover)"
+        );
+        assert!(
+            ok || matches!(stage, Some(VerifyStage::Open(_))),
+            "G==1 must either verify or only fail at the BaseFold open \
+             (pre-existing, orthogonal to CP-A); got accepted={ok} stage={stage:?}"
+        );
+        // The deserialized copy behaves identically (legacy-shape equivalence).
+        let (ok2, stage2) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle2);
+        assert_eq!(
+            (ok, stage), (ok2, stage2),
+            "deserialized G==1 bundle must verify identically"
+        );
+    }
+
+    /// (ii) MULTI-ROUND GREEN: force a LOW per-round threshold so a small
+    /// synthetic shard splits into G≥2 independent jagged instances; the
+    /// honest prove+verify is GREEN and every group's `log_m_g < 30`.
+    #[test]
+    fn test_cp_a_multi_group_green() {
+        // 4 chips, area 4<<3 = 32 each.  Threshold 96 ⇒ groups [0,1] and
+        // [2,3] (greedy closes before chip2 would push the round to 96).
+        let shapes = [(4, 8), (4, 8), (4, 8), (4, 8)];
+        let (traces, r_row, z_row) = mk_shard(&shapes, 0xBEEF_2);
+        let chip_infos =
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+
+        // G==1 baseline: grouping OFF entirely (no test threshold) so BOTH the
+        // prover and verifier see the identity single-group cover.  Captures
+        // this WIP branch's single-group honest-verify behaviour (accepts on
+        // a green branch; reaches the BaseFold OPEN and fails there on this
+        // branch for a reason orthogonal to CP-A).
+        let (g1_ok, g1_stage) = {
+            let mut p = build_challenger();
+            let bundle_g1 = prove_jagged_basefold(&traces, &r_row, &z_row, &mut p);
+            assert_eq!(bundle_g1.num_groups(), 1, "baseline must be G==1");
+            assert!(bundle_g1.groups.is_empty(), "G==1 ⇒ empty group map");
+            verify_with_stage(&chip_infos, &r_row, &z_row, &bundle_g1)
+        };
+        eprintln!("[CP-A (ii) baseline G==1] accepted={g1_ok} stage={g1_stage:?}");
+
+        crate::jagged::with_test_round_threshold(96, || {
+            // Confirm the partition really splits (G≥2).
+            let groups = crate::jagged::partition_from_chip_infos(&chip_infos);
+            assert!(
+                groups.len() >= 2,
+                "forced-low threshold must split into G≥2, got {:?}",
+                groups
+            );
+            assert_eq!(groups, vec![vec![0, 1], vec![2, 3]], "expected 2 groups of 2");
+
+            let mut p_chal = build_challenger();
+            let bundle = prove_jagged_basefold(&traces, &r_row, &z_row, &mut p_chal);
+
+            assert_eq!(bundle.num_groups(), groups.len(), "bundle G == partition G");
+            assert_eq!(bundle.groups, groups, "bundle carries the partition map");
+
+            // Per-group log_m_g < 30 (the FIX): print each.
+            for g in 0..bundle.num_groups() {
+                let lm = bundle.packing_g(g).log_dense_size;
+                eprintln!("[CP-A multi-group] group {g} log_m_g = {lm}");
+                assert!(
+                    lm < crate::jagged::MAX_ROUND_LOG_AREA as usize,
+                    "group {g} log_m_g {lm} must be < {}",
+                    crate::jagged::MAX_ROUND_LOG_AREA
+                );
+            }
+
+            // Honest G≥2 verify.  The per-round restructure must be
+            // transcript-faithful: coverage passes AND every per-group
+            // reduction passes.  On a fully-green branch the whole thing
+            // ACCEPTS; on this WIP branch the verify reaches the BaseFold
+            // OPEN and fails there for the SAME orthogonal reason the G==1
+            // single-group baseline does (the split adds NO new desync — the
+            // decisive CP-A finding).
+            let (g2_ok, g2_stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle);
+            eprintln!("[CP-A (ii) G≥2 multi-round] accepted={g2_ok} stage={g2_stage:?}");
+
+            // CP-A guarantees: coverage passes and no per-group reduction is
+            // rejected for the G≥2 path.
+            assert!(
+                g2_stage != Some(VerifyStage::Coverage),
+                "G≥2 must pass the coverage check"
+            );
+            assert!(
+                !matches!(g2_stage, Some(VerifyStage::Reduction(_))),
+                "G≥2 must pass every per-group reduction; got {g2_stage:?}"
+            );
+            if g1_ok {
+                // Fully-green branch: the multi-round path must ALSO accept.
+                assert!(g2_ok, "G≥2 honest multi-round bundle must verify when G==1 does");
+            } else {
+                // WIP branch: both fail ONLY at the (orthogonal) BaseFold open.
+                assert!(
+                    matches!(g1_stage, Some(VerifyStage::Open(_))),
+                    "baseline G==1 fails at the open (orthogonal to CP-A); got {g1_stage:?}"
+                );
+                assert!(
+                    matches!(g2_stage, Some(VerifyStage::Open(_))),
+                    "G≥2 reaches the open like the G==1 baseline (no new desync); got {g2_stage:?}"
+                );
+            }
+        });
+    }
+
+    /// (iii) NEGATIVE — coverage check (the headline soundness guard).
+    /// A proof with a chip DROPPED from `groups` (its trace is never
+    /// opened) MUST be rejected; likewise a DUPLICATED chip.
+    #[test]
+    fn test_cp_a_coverage_drop_and_dup_reject() {
+        let shapes = [(4, 8), (4, 8), (4, 8), (4, 8)];
+        let (traces, r_row, z_row) = mk_shard(&shapes, 0xC0FFEE);
+        let chip_infos =
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+
+        crate::jagged::with_test_round_threshold(96, || {
+            let mut p_chal = build_challenger();
+            let bundle = prove_jagged_basefold(&traces, &r_row, &z_row, &mut p_chal);
+            assert_eq!(bundle.groups, vec![vec![0, 1], vec![2, 3]]);
+
+            // Sanity: the honest bundle PASSES coverage (it may fail later at
+            // the open on this WIP branch — orthogonal to the coverage guard).
+            let (_ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle);
+            assert!(
+                stage != Some(VerifyStage::Coverage),
+                "honest bundle must pass coverage; stage={stage:?}"
+            );
+
+            // DROP chip 3 from the group map → coverage check must FIRE (and
+            // be the FIRST thing that rejects — before any reduction/open).
+            let mut dropped = bundle.clone();
+            dropped.groups = vec![vec![0, 1], vec![2]]; // chip 3 omitted
+            let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &dropped);
+            assert!(!ok, "verifier MUST reject a dropped-chip group map");
+            assert_eq!(
+                stage, Some(VerifyStage::Coverage),
+                "drop must be caught by the COVERAGE check (the #1 guard)"
+            );
+
+            // DUPLICATE chip 2 → coverage check must fire.
+            let mut duped = bundle.clone();
+            duped.groups = vec![vec![0, 1], vec![2, 2]]; // chip 3 → dup of 2
+            let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &duped);
+            assert!(!ok, "verifier MUST reject a duplicated-chip group map");
+            assert_eq!(
+                stage, Some(VerifyStage::Coverage),
+                "duplicate must be caught by the COVERAGE check"
+            );
+
+            // WRONG ORDER (non-canonical) → coverage check must fire.
+            let mut reordered = bundle.clone();
+            reordered.groups = vec![vec![1, 0], vec![2, 3]];
+            let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &reordered);
+            assert!(!ok, "verifier MUST reject a non-canonical group order");
+            assert_eq!(
+                stage, Some(VerifyStage::Coverage),
+                "non-canonical order must be caught by the COVERAGE check"
+            );
+
+            // EXTRA chip beyond the set, and a TOTALLY empty map: both reject
+            // at coverage.
+            let mut bad = bundle.clone();
+            bad.groups = vec![vec![0, 1, 2, 3]]; // wrong G (single group) vs partition
+            let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bad);
+            assert!(!ok && stage == Some(VerifyStage::Coverage),
+                "wrong group count must be caught by coverage; stage={stage:?}");
+        });
     }
 }

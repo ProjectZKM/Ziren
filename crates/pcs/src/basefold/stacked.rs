@@ -572,4 +572,182 @@ mod test {
             )
             .expect("stacked verifier should accept honest proof");
     }
+
+    /// CHECKPOINT 2 de-risk: a TWO-ROUND (G=2) stacked-PCS roundtrip.
+    ///
+    /// This is the host-side proof that the multi-round commit→open→verify
+    /// path is sound AND that the per-round commitment observe order is
+    /// honored (the #1 Fiat-Shamir-desync risk for the <2^30 jagged
+    /// round-split).  Two SEPARATE commits are produced, both observed into
+    /// the transcript IN PARTITION ORDER (round 0 then round 1), the open
+    /// runs over `vec![pd0, pd1]`, and the verify runs over `&[c0, c1]` +
+    /// `&[area0, area1]`.  The honest evaluation_claim is the flattened
+    /// per-round batch-evaluations interpolated at the batch point — exactly
+    /// what the verifier reconstructs — so a sound implementation accepts.
+    ///
+    /// Both rounds share the SAME log_stacking_height (the production
+    /// invariant) and the SAME global eval point; only the BATCH (stripe)
+    /// coordinate count is shared.  `total_vars` is sized to the GRAND total
+    /// stripe count across both rounds.
+    #[test]
+    fn test_stacked_two_round_roundtrip_observe_order() {
+        type F = InnerVal;
+        type EF = InnerChallenge;
+
+        let log_stacking_height = 4u32; // stripe height = 16
+        let batch_size = 2usize;
+        let stack_height = 1usize << log_stacking_height;
+
+        let mut rng = StdRng::seed_from_u64(0xD1F_F0FF);
+
+        let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
+            let n = (1usize << log_h) * width;
+            let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
+            Arc::new(Mle::new(RowMajorMatrix::new(v, width)))
+        };
+
+        // Round 0: two MLEs (heterogeneous), 16 + 16 = 32 entries.
+        let r0_a = make_mle(2, 3, &mut rng);
+        let r0_b = make_mle(1, 4, &mut rng);
+        // Round 1: two MLEs, 16 + 32 = 48 entries.
+        let r1_a = make_mle(1, 4, &mut rng);
+        let r1_b = make_mle(2, 4, &mut rng);
+
+        let fri_config = FriConfig::<F>::test_fri_config();
+        let mmcs = build_mmcs();
+        let dft = Arc::new(Radix2DitParallel::<F>::default());
+
+        let basefold_prover = BasefoldProver::<F, EF, _, _>::new(
+            fri_config.clone(),
+            dft,
+            mmcs.clone(),
+            2, // num_expected_commitments = G = 2
+        );
+        let basefold_verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2);
+
+        let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, batch_size);
+        let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
+
+        // ── Commit each round separately; observe BOTH digests IN ORDER. ──
+        let mut p_chal = build_challenger();
+        let (commit0, data0) = prover.commit_multilinears(vec![r0_a.clone(), r0_b.clone()]);
+        p_chal.observe(commit0.clone());
+        let (commit1, data1) = prover.commit_multilinears(vec![r1_a.clone(), r1_b.clone()]);
+        p_chal.observe(commit1.clone());
+
+        // Per-round areas (each padded to the stacking height independently).
+        let area0 = 32usize.next_multiple_of(stack_height);
+        let area1 = 48usize.next_multiple_of(stack_height);
+        let stripes0 = area0 >> log_stacking_height;
+        let stripes1 = area1 >> log_stacking_height;
+        let total_stripes = stripes0 + stripes1;
+        let num_batch_vars = total_stripes.next_power_of_two().trailing_zeros() as usize;
+        let total_point_vars = num_batch_vars + log_stacking_height as usize;
+
+        let eval_point: Vec<EF> = (0..total_point_vars).map(|_| rand_ef(&mut rng)).collect();
+        let stack_point: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
+        let batch_point = &eval_point[log_stacking_height as usize..];
+
+        // Honest claim: flatten the per-round stripe-evals (round 0 then
+        // round 1) and interpolate at the batch point — the SAME walk the
+        // verifier does (`eval_multilinear_padded(flatten(batch_evals))`).
+        let mut batch_evals_flat: Vec<EF> = Vec::new();
+        for m in data0.interleaved_mles.iter() {
+            batch_evals_flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        for m in data1.interleaved_mles.iter() {
+            batch_evals_flat.extend(m.eval_at::<EF>(&stack_point));
+        }
+        let evaluation_claim =
+            eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
+
+        // Open over BOTH rounds' prover data, in partition order.
+        let proof = prover.prove_trusted_evaluation(
+            eval_point.clone(),
+            vec![data0, data1],
+            &mut p_chal,
+        );
+
+        // Verifier replays the SAME observe order before verifying.
+        let mut v_chal = build_challenger();
+        v_chal.observe(commit0.clone());
+        v_chal.observe(commit1.clone());
+        verifier
+            .verify_trusted_evaluation(
+                &[commit0, commit1],
+                &[area0, area1],
+                &eval_point,
+                &proof,
+                evaluation_claim,
+                &mut v_chal,
+            )
+            .expect("stacked verifier should accept honest TWO-ROUND proof (G=2)");
+    }
+
+    /// Negative control for the FS observe-order risk: if the verifier
+    /// observes the two round commitments in the WRONG order, the BaseFold
+    /// transcript desyncs and verification must FAIL.  This proves the
+    /// roundtrip above is actually exercising the per-round observe binding
+    /// (not vacuously passing).
+    #[test]
+    fn test_stacked_two_round_wrong_observe_order_rejected() {
+        type F = InnerVal;
+        type EF = InnerChallenge;
+
+        let log_stacking_height = 4u32;
+        let batch_size = 2usize;
+        let stack_height = 1usize << log_stacking_height;
+        let mut rng = StdRng::seed_from_u64(0xBAD_0_DEAD);
+
+        let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
+            let n = (1usize << log_h) * width;
+            let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
+            Arc::new(Mle::new(RowMajorMatrix::new(v, width)))
+        };
+        let r0 = make_mle(2, 3, &mut rng);
+        let r1 = make_mle(2, 4, &mut rng);
+
+        let fri_config = FriConfig::<F>::test_fri_config();
+        let mmcs = build_mmcs();
+        let dft = Arc::new(Radix2DitParallel::<F>::default());
+        let basefold_prover =
+            BasefoldProver::<F, EF, _, _>::new(fri_config.clone(), dft, mmcs.clone(), 2);
+        let basefold_verifier = BasefoldVerifier::<F, EF, _>::new(fri_config, mmcs, 2);
+        let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, batch_size);
+        let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
+
+        let mut p_chal = build_challenger();
+        let (c0, d0) = prover.commit_multilinears(vec![r0.clone()]);
+        p_chal.observe(c0.clone());
+        let (c1, d1) = prover.commit_multilinears(vec![r1.clone()]);
+        p_chal.observe(c1.clone());
+
+        let area0 = 16usize.next_multiple_of(stack_height);
+        let area1 = 32usize.next_multiple_of(stack_height);
+        let total_stripes = (area0 >> log_stacking_height) + (area1 >> log_stacking_height);
+        let nbv = total_stripes.next_power_of_two().trailing_zeros() as usize;
+        let tpv = nbv + log_stacking_height as usize;
+        let eval_point: Vec<EF> = (0..tpv).map(|_| rand_ef(&mut rng)).collect();
+        let sp: Vec<EF> = eval_point[..log_stacking_height as usize].to_vec();
+        let bp = &eval_point[log_stacking_height as usize..];
+        let mut bef: Vec<EF> = Vec::new();
+        for m in d0.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
+        for m in d1.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
+        let claim = eval_multilinear_padded::<F, EF>(&bef, bp);
+        let proof = prover.prove_trusted_evaluation(eval_point.clone(), vec![d0, d1], &mut p_chal);
+
+        // WRONG order: observe c1 then c0.
+        let mut v_chal = build_challenger();
+        v_chal.observe(c1.clone());
+        v_chal.observe(c0.clone());
+        let res = verifier.verify_trusted_evaluation(
+            &[c0, c1],
+            &[area0, area1],
+            &eval_point,
+            &proof,
+            claim,
+            &mut v_chal,
+        );
+        assert!(res.is_err(), "wrong observe order MUST be rejected (FS desync)");
+    }
 }

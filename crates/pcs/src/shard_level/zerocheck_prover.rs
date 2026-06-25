@@ -170,6 +170,71 @@ where
         let mut name_order: Vec<usize> = (0..chips.len()).collect();
         name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 
+        // ── STAGE 2 (#88): SHARD-UNIFORM rev(zeta) convention decision ──────
+        // The batched zerocheck reduces ALL chip polys to ONE reduced point z*,
+        // and the verifier binds the reduced value with a SINGLE eq-bridge
+        // `eq(anchor, z*)` (verifier.rs recompute_zerocheck_rlc_eval_host) — so
+        // the eq-anchor MUST be the same orientation for every chip in the
+        // shard.  Use the new rev(zeta)+collapsed-claim convention iff:
+        //   (a) EVERY chip opening carries the FULL-POINT opening (`*_full`),
+        //       AND
+        //   (b) there is NO device trace provider (pure host path) — the
+        //       device-fold prepare hook still bit-reverses cells to the legacy
+        //       `zeta` anchor, so a device-folded shard stays legacy until the
+        //       GPU hook is ported (out of scope for this CPU stage).
+        // Otherwise the whole shard falls back to the legacy bitrev+embed_LEAD
+        // convention.  The verifier picks the same branch from the same env
+        // gate + proof bytes.
+        //
+        // GATE (default OFF): `ZIREN_STAGE2_REVZETA=1`.  The rev(zeta)+collapse
+        // is validated end-to-end on the host for shards whose jagged commit is
+        // NON-low-placement (FIX-on shape-padded, raw==band; test_simple_prove
+        // GREEN), but the FIX-off band-cap LOW-PLACEMENT commit (`materialize_
+        // dense_jagged` bit-reverses raw data into the low rows of each band
+        // slot to match the LEGACY bitrev zerocheck) does NOT match the
+        // rev(zeta) natural-orientation residual — the jagged round-0 identity
+        // `Σ z_col·y == Σ_b q·w` then fails.  Reconciling that needs the whole
+        // jagged orientation (commit materialize + weight table + y) flipped to
+        // natural in lockstep, which is committed-byte-changing and recursion/
+        // regen-coupled (out of this CPU stage).  Default OFF keeps the GREEN
+        // FIX-off baseline; flip ON to exercise the validated rev machinery.
+        // STAGE 2.5 (#88) LOCKSTEP: take the per-shard rev(zeta) decision from
+        // the SINGLE SOURCE OF TRUTH installed by `BandCapGuard` for the whole
+        // commit+open scope (`current_use_rev`), so the COMMIT orientation
+        // (`materialize_dense_jagged`) and this zerocheck residual orientation
+        // can never drift.  The carrier was computed at the core prove site as
+        // `ZIREN_STAGE2_REVZETA` (no device provider there); here — where the
+        // device + full-openings state IS known — we re-apply the SAME local
+        // guards the legacy predicate used (no device traces, every chip carries
+        // `main_trace_evaluations_full`), so a device-fold shard stays legacy
+        // (the GPU prepare hook still bitrevs — out of scope) and an incomplete
+        // opening can never select rev.  On the pure-host FIX-off path both
+        // guards hold, so this equals the carrier verbatim => true lockstep with
+        // the commit.  `None` (no guard: FIX-on `test_simple_prove`, recursion /
+        // shrink / wrap) => fall back to the legacy full predicate (unchanged
+        // behaviour, byte-identical).
+        let full_openings_ok = || {
+            name_order.iter().all(|&i| {
+                let name = chips[i].name().to_string();
+                logup_evaluations
+                    .chip_openings
+                    .get(&name)
+                    .map(|o| o.main_trace_evaluations_full.is_some())
+                    .unwrap_or(false)
+            })
+        };
+        let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
+            Some(carrier) => {
+                carrier && _device_traces.is_none() && full_openings_ok()
+            }
+            None => {
+                let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
+                    .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                    .unwrap_or(false);
+                stage2_revzeta_on && _device_traces.is_none() && full_openings_ok()
+            }
+        };
+
         for &chip_idx in name_order.iter() {
             let chip = chips[chip_idx];
             let name = chip.name().to_string();
@@ -292,38 +357,85 @@ where
                 }
             }
 
-            // chip claim = Σ (main_evals ++ prep_evals) · β^(1..).
-            let prep_evals: &[Challenge<SC>] =
-                opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]);
-            let claim_gkr = opening
-                .main_trace_evaluations
-                .iter()
-                .chain(prep_evals.iter())
-                .zip(gkr_powers.iter())
-                .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p);
-
-            // MIXED-HEIGHT EMBEDDING CORRECTION (SP1 PaddedMle::eval_at_eq).
-            // SP1 opens each chip at the FULL max-dim point, so its opening
-            // carries Π_high(1 − zeta[k]) over every zeta coord ABOVE this
-            // chip's own trailing log_h (the chip's trace is zero on the
-            // x_high≠0 sub-cube).  Ziren's GKR opens at the trailing log_h
-            // only (top_level.rs), dropping that factor — so for any chip
-            // SHORTER than the tallest chip in the shard the claim is too
-            // small and the zerocheck reduction is corrupted.  Re-apply the
-            // factor over the leading (num_variables − log_h) zeta coords;
-            // the left-pad ZERO coords contribute (1−0)=1, so this reduces to
-            // the nonzero "extra-real" coords.  For the tallest chip the range
-            // is empty (factor = 1).  Validated by the orientation_sweep_mixed
-            // _height unit test.
+            // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────────
+            // Seed the per-chip zerocheck claim from the FULL-POINT openings
+            // (`main_trace_evaluations_full` ++ `preprocessed_trace_evaluations
+            // _full`) with NO embed_factor.  Under the rev(zeta) convention
+            // (the poly is anchored on `rev(zeta)`, natural cells, see the
+            // `zeta_rev` build + dropped bitrev below), the poly's boolean-cube
+            // sum equals exactly the FULL-POINT opening, which already carries
+            // the mixed-height padding factor baked in:
+            //   main_full[col] = Σ_{row<height} eq(row, zeta)·trace[row]
+            //                  = embed_TRAILING · MLE(trace @ zeta[0..log_h])
+            //   embed_TRAILING = Π_{k=log_h}^{N-1}(1 − zeta[k])
+            // (rows ≥ height are zero, so the high coords contribute the
+            // padding factor).  This REPLACES the old `claim_gkr · embed_LEAD`
+            // (trailing-`log_h` opening lifted by Π over the LEADING zeta
+            // coords) — a bitrev-conjugate that is a GENUINELY different value
+            // (the old claim is NOT verifier-form; see the Stage-1 finding).
+            // Validated by `orientation_sweep_revzeta` (zerocheck_poly tests):
+            // the rev(zeta) poly cube-sum == this collapsed claim across every
+            // mixed-height config, and the reduced value matches the rev(zeta)
+            // eq-bridge.  The verifier seeds the SAME collapsed claim with no
+            // embed (verifier.rs G2-b) — kept in lockstep.
+            //
+            // FALLBACK: if the GKR phase did not emit `*_full` (older proof
+            // bytes / non-core stages), fall back to the legacy trailing
+            // opening + embed_LEAD so this path stays additive; in that case
+            // the legacy bitrev anchor is used (see the cells/anchor branch).
             let log_h = if main_height == 0 {
                 0usize
             } else {
                 (main_height as u64).trailing_zeros() as usize
             };
-            let embed_factor: Challenge<SC> = zeta[..(num_variables as usize - log_h)]
-                .iter()
-                .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
-            let claim = claim_gkr * embed_factor;
+            if log_h > num_variables as usize {
+                eprintln!(
+                    "ZC-DIAG OVERTALL chip='{}' chip_idx={} main_height={} main_width={} log_h={} num_variables(max_log_row_count)={}",
+                    name, chip_idx, main_height, main_width, log_h, num_variables
+                );
+            }
+            let main_full_opt: Option<&[Challenge<SC>]> =
+                opening.main_trace_evaluations_full.as_deref();
+            let prep_full_opt: Option<&[Challenge<SC>]> =
+                opening.preprocessed_trace_evaluations_full.as_deref();
+            // `use_rev` gates BOTH the claim seed AND the cells/anchor
+            // orientation below, so the two stay consistent per chip.  It is a
+            // SHARD-UNIFORM decision (`shard_use_rev`, computed before the loop)
+            // so every chip in the batched reduction shares the same eq-anchor
+            // orientation — required because the verifier binds the single
+            // reduced value with one global eq-bridge.  `df_dims` (device-fold)
+            // is always None when `shard_use_rev` is true (it requires no device
+            // provider), so the `df_dims` guard is implied; kept explicit for
+            // clarity at the cells branch.
+            let use_rev = shard_use_rev;
+            debug_assert!(
+                !(use_rev && df_dims.is_some()),
+                "shard_use_rev requires no device provider, so df_dims must be None",
+            );
+            let claim: Challenge<SC> = if use_rev {
+                let main_full = main_full_opt.expect("use_rev => main_full_opt.is_some()");
+                let prep_full = prep_full_opt.unwrap_or(&[]);
+                main_full
+                    .iter()
+                    .chain(prep_full.iter())
+                    .zip(gkr_powers.iter())
+                    .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p)
+            } else {
+                // Legacy trailing-opening + embed_LEAD (pre-Stage-2 form).
+                let prep_evals: &[Challenge<SC>] =
+                    opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]);
+                let claim_gkr = opening
+                    .main_trace_evaluations
+                    .iter()
+                    .chain(prep_evals.iter())
+                    .zip(gkr_powers.iter())
+                    .fold(Challenge::<SC>::ZERO, |acc, (o, p)| acc + *o * *p);
+                let embed_lead = (num_variables as usize).saturating_sub(log_h);
+                let embed_factor: Challenge<SC> = zeta[..embed_lead]
+                    .iter()
+                    .fold(Challenge::<SC>::ONE, |acc, &zk| acc * (Challenge::<SC>::ONE - zk));
+                claim_gkr * embed_factor
+            };
             chip_sumcheck_claims.push(claim);
 
             // Lift real trace rows to the challenge field. Device-fold chips keep
@@ -339,22 +451,39 @@ where
                 None
             };
 
-            // ORIENTATION FIX: the GKR per-chip opening (eq_mle_table) is
-            // LSB-first while this poly's eq-anchor (partial_lagrange / fold_cells
-            // peel of zeta[dim-1]) is big-endian (SP1-matching).  Bit-reversing
-            // the trace rows makes the poly's big-endian boolean-cube sum equal
-            // the LSB-first GKR-batch claim (MLE_MSB(bitrev(T))@zeta ==
-            // MLE_LSB(T)@zeta), restoring claim == cube-sum without changing
-            // zeta, the GKR openings, or the claim.
-            // Device-fold cells are bit-reversed by the prepare hook on device;
-            // only host cells need bitrev here.
-            let main_cells = if df_dims.is_some() {
+            // ── STAGE 2 (#88): rev(zeta) CONVENTION CONVERGENCE ─────────────
+            // NEW (use_rev): feed NATURAL trace rows and anchor the poly on
+            // `rev(zeta)` (built at the poly construction below).  The poly's
+            // big-endian fold over rev(zeta) then computes the LSB-first
+            // natural-row value — its boolean-cube sum equals the FULL-POINT
+            // opening (the collapsed claim seeded above).  This DROPS the
+            // bitrev_rows endian adapter: bitrev(trace)@zeta and trace@rev(zeta)
+            // are equal (MLE_MSB(bitrev(T))@zeta == MLE_LSB(T)@zeta is exactly a
+            // reversal of the eq-anchor), so reversing zeta subsumes the row
+            // bit-reversal.  Validated by `orientation_sweep_revzeta`.
+            //
+            // LEGACY (!use_rev): keep the bit-reversed rows + `zeta` anchor.
+            // Device-fold cells are bit-reversed by the GPU prepare hook (the
+            // device path is always !use_rev here); only host cells bitrev.
+            let main_cells = if use_rev || df_dims.is_some() {
+                // use_rev: natural cells.  df_dims (device-fold): cells empty.
                 main_cells
             } else {
                 crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height)
             };
-            let prep_cells = prep_cells
-                .map(|c| crate::shard_level::zerocheck_poly::bitrev_rows(&c, prep_width, main_height));
+            let prep_cells = if use_rev {
+                prep_cells
+            } else {
+                prep_cells.map(|c| {
+                    crate::shard_level::zerocheck_poly::bitrev_rows(&c, prep_width, main_height)
+                })
+            };
+            // The poly eq-anchor: rev(zeta) under the new convention, else zeta.
+            let zeta_anchor: Vec<Challenge<SC>> = if use_rev {
+                zeta.iter().rev().copied().collect()
+            } else {
+                zeta.clone()
+            };
 
             let padded_row_adjustment = compute_padded_row_adjustment::<
                 Val<SC>,
@@ -375,7 +504,7 @@ where
                 public_values,
                 alpha,
                 gkr_powers,
-                zeta.clone(),
+                zeta_anchor,
                 main_cells,
                 main_width,
                 prep_cells,

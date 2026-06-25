@@ -80,6 +80,32 @@ pub struct ChipEvaluation<EF> {
     /// verifier treats 0 as uniform-max-log-row-count padding.
     #[serde(default)]
     pub log_degree: u8,
+    /// SP1-parity FULL-POINT main-trace opening: the chip's main
+    /// trace columns evaluated at the FULL `max_log_row_count`-coord
+    /// GKR `trace_point` (SP1 `eval_point.last_k(trace_dimension)`),
+    /// LSB-first / natural-row.  The existing `main_trace_evaluations`
+    /// is the chip's own trailing-`log_h` opening (consumed by the
+    /// zerocheck's bit-reversed sum-modification path); this field is
+    /// the convention the LogUp last-layer reconstruction needs (the
+    /// GKR leaf is LSB-first natural-row — see
+    /// `verify_logup_gkr_host`).  `None` on older proof bytes /
+    /// non-core stages → the reconstruction is skipped (it is gated
+    /// `ZIREN_LOGUP_RECONSTRUCTION=1` and additive).
+    /// `default = "none_opt_vec"` (not bare `default`) so serde does NOT
+    /// add an `EF: Default` bound to the derive (`Option::None` needs no
+    /// `EF: Default`).
+    #[serde(default = "none_opt_vec")]
+    pub main_trace_evaluations_full: Option<Vec<EF>>,
+    /// Companion FULL-POINT preprocessed-trace opening (see
+    /// `main_trace_evaluations_full`).
+    #[serde(default = "none_opt_vec")]
+    pub preprocessed_trace_evaluations_full: Option<Vec<EF>>,
+}
+
+/// serde default for the `*_full` Option fields — returns `None` without
+/// requiring `EF: Default` (a bare `#[serde(default)]` would).
+fn none_opt_vec<EF>() -> Option<Vec<EF>> {
+    None
 }
 
 /// Data passed from the LogUp-GKR prover to the zerocheck prover.
@@ -152,6 +178,8 @@ mod tests {
                         main_trace_evaluations: vec![v(14)],
                         preprocessed_trace_evaluations: Some(vec![v(15)]),
                         log_degree: 0,
+                        main_trace_evaluations_full: None,
+                        preprocessed_trace_evaluations_full: None,
                     },
                 )]),
             },

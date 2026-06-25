@@ -18,6 +18,7 @@
 //! Mirrors SP1's crates/recursion/circuit/src/basefold/stacked.rs
 //! from the upstream BaseFold verifier reference.
 
+use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
 
 use crate::challenger::FieldChallengerVariable;
@@ -225,7 +226,27 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // Reconstructed evaluation at batch_point must equal claim.
         let expected_evaluation =
             evaluate_mle_ext::<C>(builder, &batch_evals_flat, batch_point);
-        builder.assert_ext_eq(claim_ext, expected_evaluation);
+
+        // FIX-off sub-stripe commits: when the reduced point is SHORTER than the
+        // (de-clamped) log_stacking_height, the FS-extension coords that fall in
+        // the STACK portion `[point.len(), stack_dim)` correspond to the ZERO
+        // high-half padding of the stripe (the dense poly of `point.len()` vars
+        // is zero-padded up to `2^stack_dim`).  By the MLE zero-padding identity,
+        // the committed stripe's eval at `stack_point` carries a Π(1 - r_k)
+        // factor over those coords that the reduced-point claim lacks, so the
+        // batch reconstruction equals Π(1 - r_k) · claim.  Multiply the claim to
+        // match.  No-op when point.len() >= stack_dim (all FIX-on and large
+        // FIX-off commits) ⇒ byte-identical there.
+        let mut claim_adj: SymbolicExt<C::F, C::EF> = claim_ext.into();
+        let orig_point_len = point.len();
+        if orig_point_len < stack_dim {
+            for r in &padded_point[orig_point_len..stack_dim] {
+                let r_sym: SymbolicExt<C::F, C::EF> = (*r).into();
+                claim_adj = claim_adj * (SymbolicExt::<C::F, C::EF>::ONE - r_sym);
+            }
+        }
+        let claim_adj_ext: Ext<C::F, C::EF> = builder.eval(claim_adj);
+        builder.assert_ext_eq(claim_adj_ext, expected_evaluation);
 
         // Forward to the underlying PCS verifier with the per-
         // stripe batch_evaluations as the inner-PCS evaluation
