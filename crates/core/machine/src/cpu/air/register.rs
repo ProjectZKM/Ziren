@@ -49,6 +49,13 @@ impl CpuChip {
             .when_not(local.instruction.op_a_0)
             .assert_word_eq(local.op_a_value, *local.op_a_access.value());
 
+        // If `op_a` is an immutable read from register 0, the logical operand
+        // sent to instruction chips must also be zero. Writes to register 0
+        // are intentionally excluded because their computed result is discarded.
+        builder
+            .when(local.instruction.op_a_0 * local.op_a_immutable)
+            .assert_word_zero(local.op_a_value);
+
         // If we are maddu，msubu，madd, msub, ins，mne, meq, syscall and memory instruction then the hi_or_prev_a should equal to op_a_access.prev_value.
         builder
             .when(local.is_rw_a)
