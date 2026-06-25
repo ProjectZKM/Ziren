@@ -1899,7 +1899,7 @@ impl<'a> Executor<'a> {
             } else if instruction.opcode == Opcode::MADDU {
                 (hi_or_prev_a, a, b, c) = self.execute_maddu(instruction);
             } else if instruction.opcode == Opcode::INS {
-                (hi_or_prev_a, a, b, c) = self.execute_ins(instruction);
+                (hi_or_prev_a, a, b, c) = self.execute_ins(instruction)?;
             } else if instruction.opcode == Opcode::SEXT {
                 (a, b, c) = self.execute_sext(instruction);
             } else if instruction.opcode == Opcode::TEQ {
@@ -2178,7 +2178,10 @@ impl<'a> Executor<'a> {
         (a, b, c)
     }
 
-    fn execute_ins(&mut self, instruction: &Instruction) -> (Option<u32>, u32, u32, u32) {
+    fn execute_ins(
+        &mut self,
+        instruction: &Instruction,
+    ) -> Result<(Option<u32>, u32, u32, u32), ExecutionError> {
         let (rd, rt, c) =
             (instruction.op_a.into(), (instruction.op_b as u8).into(), instruction.op_c);
         let b = self.rr_cpu(rt, MemoryAccessPosition::B);
@@ -2186,11 +2189,14 @@ impl<'a> Executor<'a> {
         let prev_a = a;
         let msb = c >> 5;
         let lsb = c & 0x1f;
+        if msb < lsb {
+            return Err(ExecutionError::ExceptionOrTrap());
+        }
         let mask = if msb - lsb + 1 == 32 { 0xFFFFFFFF } else { (1u32 << (msb - lsb + 1)) - 1 };
         let mask_field = mask << lsb;
         let a = (a & !mask_field) | ((b << lsb) & mask_field);
         self.rw_cpu(rd, a, MemoryAccessPosition::A);
-        (Some(prev_a), a, b, c)
+        Ok((Some(prev_a), a, b, c))
     }
 
     fn execute_teq(
