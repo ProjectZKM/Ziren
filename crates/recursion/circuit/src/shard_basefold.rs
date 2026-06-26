@@ -615,10 +615,17 @@ impl<P> BasefoldShardVerifier<P> {
             let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true);
-            // Only run the inner-ring re-bind when modified_commitments are
-            // actually carried (non-empty, distinct path).  The outer ring sets
-            // modified == original and re-binds in its hook → skip here.
+            // Only run the re-bind on rings that actually carry the SP1-faithful
+            // hash-bind (the INNER KoalaBear rings, where `modified` is the real
+            // FS-observed digest distinct from the RAW root).  The OUTER BN254
+            // (gnark wrap) ring's commitment IS the raw wrap root — its lift sets
+            // `modified == original`, so running the rebind there would assert
+            // `compress([original, hash(counts)]) == original` (always false for
+            // a Poseidon2-BN254 digest) — the gnark AssertEqV failure.
+            // `HV::jagged_hash_bind_in_circuit()` is the value-independent,
+            // build-time ring discriminator (true inner / false outer).
             if hash_bind_on
+                && HV::jagged_hash_bind_in_circuit()
                 && evaluation_proof.modified_commitments.len()
                     == evaluation_proof.original_commitments.len()
             {

@@ -52,6 +52,27 @@ pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
 pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     type DigestVariable: Clone + Copy;
 
+    /// Whether this ring carries the SP1-faithful jagged geometry HASH-BIND
+    /// (`modified_commitment = compress([raw_root, hash(counts)])`) and must
+    /// re-bind it in-circuit inside
+    /// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
+    ///
+    /// The INNER KoalaBear rings (core/compress/shrink) carry a real MODIFIED
+    /// (FS-observed) digest distinct from the RAW commit root — they MUST run
+    /// the rebind (that's where the count↔commitment soundness lives), so the
+    /// default is `true`.
+    ///
+    /// The OUTER BN254 (gnark wrap) ring's commitment IS the raw wrap root —
+    /// there are NO jagged counts to hash-bind for the wrap proof, so its lift
+    /// carries `modified == original` (a documented placeholder, see
+    /// `lift_jagged_basefold_bundle_outer`).  Running the rebind there would
+    /// assert `compress([original, hash(counts)]) == original`, which is FALSE
+    /// (a BN254 Poseidon2 digest can never equal one of its preimages) — so the
+    /// outer impl overrides this to `false`.
+    fn jagged_hash_bind_in_circuit() -> bool {
+        true
+    }
+
     fn hash(builder: &mut Builder<C>, input: &[Felt<C::F>]) -> Self::DigestVariable;
 
     fn compress(builder: &mut Builder<C>, input: [Self::DigestVariable; 2])
@@ -506,6 +527,14 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
     for KoalaBearPoseidon2Outer
 {
     type DigestVariable = [Var<Bn254>; BN254_DIGEST_SIZE];
+
+    /// OUTER (gnark wrap) ring: the wrap commitment is the RAW BN254 root with
+    /// no jagged counts to hash-bind, so the lift carries `modified == original`
+    /// and the in-circuit rebind must be skipped (else it would assert
+    /// `compress([original, hash]) == original`, the gnark AssertEqV failure).
+    fn jagged_hash_bind_in_circuit() -> bool {
+        false
+    }
 
     fn hash(builder: &mut Builder<C>, input: &[Felt<<C as Config>::F>]) -> Self::DigestVariable {
         assert!(C::N::bits() == p3_bn254_fr::Bn254::bits());
