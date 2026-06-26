@@ -116,8 +116,16 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// + the SP1 main-padding-column bit-bound) instead of baking them.
     pub row_counts: Vec<Vec<Felt<F>>>,
     /// Per-round original commitment digests (before any
-    /// chip-info-hash mix-in).
+    /// chip-info-hash mix-in).  The BaseFold opening binds against THESE
+    /// (the RAW BaseFold roots).
     pub original_commitments: Vec<Digest>,
+    /// Per-round MODIFIED commitment digests — the FS-observed
+    /// `compress([original_commitment, hash(once(len) ++ row_counts ++
+    /// column_counts)])` (SP1 hash-bind).  The in-circuit re-bind asserts
+    /// `compress([original_commitments[r], hash]) == modified_commitments[r]`,
+    /// tying the per-chip geometry to the observed commitment.  On the
+    /// hash-bind-off path these equal `original_commitments`.
+    pub modified_commitments: Vec<Digest>,
     /// Expected evaluation claim — the value the jagged sumcheck
     /// reduces to and the BaseFold opener verifies.
     pub expected_eval: Ext<F, EF>,

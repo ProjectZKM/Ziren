@@ -162,6 +162,10 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
+        // SP1 hash-bind: the MODIFIED (FS-observed) digest = main_commitment.
+        // The inner impl threads it into modified_commitments; the outer impl
+        // (dead bundle arm) ignores it.
+        modified_commitment: [Felt<C::F>; 8],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
@@ -386,6 +390,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
+        modified_commitment: [Felt<C::F>; 8],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
@@ -412,6 +417,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             jagged_eval,
             expected_eval,
             commit_root,
+            modified_commitment,
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
@@ -632,6 +638,7 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         _jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
         _expected_eval: Ext<C::F, C::EF>,
         _commit_root: [Felt<C::F>; 8],
+        _modified_commitment: [Felt<C::F>; 8],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         _row_counts_by_round: Option<&[Vec<usize>]>,

@@ -770,8 +770,46 @@ where
     // outer = BN254 split_32) via BasefoldRing::digest_felts, then reinterpret
     // [JaggedVal;8] as [Val<SC>;8] (JaggedVal == Val<SC> == KoalaBear for both
     // rings — the only reinterpretation left).
-    let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
+    let digest_jv_raw: [crate::jagged_pcs::JaggedVal; 8] =
         <SC as BasefoldRing>::digest_felts(&precomputed.commit.commitment);
+
+    // ── SP1-faithful jagged HASH-BIND (#88) — THE FS-observed digest ─────
+    // This `digest` is what the transcript prologue observes as
+    // `main_commitment` (prover.rs `digest` -> prove_shard_to_basefold ->
+    // shard_level prologue).  Fold the per-chip (row_count, column_count)
+    // geometry into it:  modified = compress([raw_root, hash(counts)]).  The
+    // BaseFold open still binds the RAW root (carried in the bundle's commit +
+    // witnessed `jagged_original_commitment`); the host verifier Stage-3.5
+    // re-check recomputes this from `bundle.packing`.  INNER KoalaBear ring
+    // only (the challenger is JaggedChallenger; the outer BN254 wrap re-binds
+    // in its registered hook).  Default-ON; ZIREN_JAGGED_HASH_BIND=0 = legacy.
+    let digest_jv: [crate::jagged_pcs::JaggedVal; 8] = {
+        use core::any::TypeId;
+        let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(true);
+        let is_inner = TypeId::of::<SC::Challenger>()
+            == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
+        if hash_bind_on && is_inner {
+            let modified = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
+                digest_jv_raw,
+                &precomputed.packing,
+            );
+            if std::env::var("ZIREN_HASHBIND_DBG").is_ok() {
+                let (rc, cc) = crate::jagged_pcs::jagged_counts_from_jagged_packing(
+                    &precomputed.packing,
+                );
+                eprintln!(
+                    "[HASHBIND-DBG] EMIT raw_root={digest_jv_raw:?}\n  modified={modified:?}\n  \
+                     len={} row_counts={rc:?}\n  col_counts={cc:?}",
+                    cc.len(),
+                );
+            }
+            modified
+        } else {
+            digest_jv_raw
+        }
+    };
     let digest: [Val<SC>; 8] =
         unsafe { core::ptr::read(&digest_jv as *const _ as *const [Val<SC>; 8]) };
 
@@ -984,9 +1022,21 @@ where
         // the recursion `opened_values.chips` BTreeMap expect).
         named_traces_inner.sort_by(|(a, _), (b, _)| a.cmp(b));
     }
+    // PRODUCTION (#88 Option A): keep PRESENT chips at their natural raw height
+    // (no band-pad) so the committed packing offsets are raw-keyed — DEFAULT-ON
+    // for FIX-off (the `Some(_)` band-cap arm IS the FIX-off predicate; FIX-on
+    // reaches `None` and is byte-identical).  Missing chips were already
+    // injected above at band height (chip-SET / VK preserved).  Stays
+    // consistent with the open-path pad gate in
+    // prove_shard_to_basefold_with_loader.  Opt-out
+    // ZIREN_FIXOFF_NATURAL_COMMIT=0 = legacy band-pad / low-placement.
+    let natural_commit = std::env::var("ZIREN_FIXOFF_NATURAL_COMMIT")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
     let commit_named_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> =
         match crate::shard_level::band_cap::current_band_cap() {
             None => named_traces_inner.clone(),
+            Some(_) if natural_commit => named_traces_inner.clone(),
             Some(band_cap) => named_traces_inner
                 .iter()
                 .map(|(name, t)| {
@@ -1024,6 +1074,11 @@ where
             &precomputed.commit,
         ),
     );
+    // NOTE: this `Com<SC>` is the LEGACY-FRI placeholder commitment (24-byte,
+    // 6-felt) carried for API symmetry — it is NOT the BaseFold 8-felt digest
+    // the transcript observes.  The SP1 jagged HASH-BIND is applied to the REAL
+    // FS-observed 8-felt digest in `try_prove_shard_to_basefold_boxed`
+    // (the `digest_jv` block), NOT here.
     let main_commit: Com<SC> = *commitment_any
         .downcast::<Com<SC>>()
         .unwrap_or_else(|_| {

@@ -313,6 +313,104 @@ impl BasefoldShardVerifier {
             &proof.opened_values,
         )?;
 
+        // ── Stage 3.5 — SP1-faithful jagged HASH-BIND re-check ───────
+        //
+        // Host mirror of SP1 `verify_trusted_evaluations`
+        // (slop/crates/jagged/src/verifier.rs:206-217): recompute
+        //   modified' = compress([raw_root, hash(once(len) ++ rc ++ cc)])
+        // from the bundle's RAW BaseFold root + per-chip geometry, and assert
+        // it equals the FS-observed `main_commitment`.  This ties the
+        // per-chip (row_count, column_count) geometry to the commitment so a
+        // height-agnostic prover cannot witness a geometry different from what
+        // was committed.  Only the inner KoalaBear ring (the one that emits a
+        // `Bundle`); the outer ring re-binds inside its registered hook.
+        // Skipped when the hash-bind is off (then `main_commitment` IS the raw
+        // root — the bundle re-check would trivially fail, so gate on it).
+        {
+            use core::any::TypeId;
+            use crate::shard_level::shard_proof::EvaluationProof;
+            use crate::{InnerChallenge, InnerVal};
+            let inner_ring = TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
+                && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
+                && TypeId::of::<SC::Challenger>()
+                    == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
+            let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+            if inner_ring && hash_bind_on {
+                if let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof {
+                    let raw_inner =
+                        crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+
+                    // SP1 verifier.rs:195-238 guards (BaseFieldOverflow +
+                    // AreaOutOfBounds).  Counts feed `from_canonical_usize`
+                    // (wraps mod the field order ~2^31), so a count >= ORDER
+                    // could alias to a different felt — reject it.  And the
+                    // total area must be 0 < area < 2^30 (field-arith overflow
+                    // bound).  These are host-side usize checks on the SAME
+                    // per-chip (row, col) counts the hash is taken over.
+                    let (rc_g, cc_g) =
+                        crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing);
+                    let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
+                    if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
+                        return Err(BasefoldVerifyError::JaggedPcs(
+                            "jagged hash-bind: count >= F::ORDER (BaseFieldOverflow)".into(),
+                        ));
+                    }
+                    let area: usize = rc_g
+                        .iter()
+                        .zip(cc_g.iter())
+                        .map(|(r, c)| r.saturating_mul(*c))
+                        .fold(0usize, |a, b| a.saturating_add(b));
+                    if area == 0 || area >= (1usize << 30) {
+                        return Err(BasefoldVerifyError::JaggedPcs(
+                            "jagged hash-bind: area out of bounds (0 < area < 2^30) \
+                             (AreaOutOfBounds)"
+                                .into(),
+                        ));
+                    }
+
+                    // The bundle carries `packing: PackingMeta` (offsets +
+                    // column_counts) — use the PackingMeta overload so the
+                    // hashed felt sequence is byte-identical to the host emit
+                    // (which used the full JaggedPacking; both derive the same
+                    // per-chip (row, col) counts).
+                    let recomputed = crate::jagged_pcs::jagged_hash_bind_from_packing(
+                        raw_inner,
+                        &bundle.packing,
+                    );
+                    // SAFETY: [InnerVal;8] == [Val<SC>;8] under the inner gate.
+                    let observed_inner: [InnerVal; 8] = unsafe {
+                        core::mem::transmute_copy::<[Val<SC>; 8], [InnerVal; 8]>(
+                            &proof.main_commitment,
+                        )
+                    };
+                    if recomputed != observed_inner {
+                        if std::env::var("ZIREN_HASHBIND_DBG").is_ok() {
+                            let (rc, cc) =
+                                crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing);
+                            let raw8 = raw_inner;
+                            eprintln!(
+                                "[HASHBIND-DBG] MISMATCH\n  raw_root={raw8:?}\n  \
+                                 recomputed={recomputed:?}\n  observed={observed_inner:?}\n  \
+                                 len={} row_counts={rc:?}\n  col_counts={cc:?}\n  \
+                                 offsets.len={} total_values={}",
+                                cc.len(),
+                                bundle.packing.offsets.len(),
+                                bundle.packing.total_values,
+                            );
+                        }
+                        return Err(BasefoldVerifyError::JaggedPcs(
+                            "jagged hash-bind mismatch: recomputed \
+                             compress([raw_root, hash(counts)]) != observed \
+                             main_commitment (IncorrectTableSizes)"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+        }
+
         // ── Stage 4 — Jagged-PCS opening verification ────────────
         //
         // Delegate to the existing host-side verifier at

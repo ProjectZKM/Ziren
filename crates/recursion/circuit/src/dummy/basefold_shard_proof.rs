@@ -398,6 +398,9 @@ where
         fold_orientation: FoldOrientation::Msb,
         row_counts,
         padding_column_counts,
+        // Hash-bind: value-independent (the recursion program is built from the
+        // dummy; only the witness-stream LENGTH — 8 felts — must match real).
+        jagged_original_commitment: std::array::from_fn(|_| F::ZERO),
     }
 }
 

@@ -667,3 +667,100 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
     );
     eprintln!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim (recon-ON) => {tag}");
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// G3b/G3c — SP1-faithful jagged HASH-BIND forgeries (#88 hash-bind port).
+//
+// The hash-bind ties the per-chip (row_count, column_count) geometry to the
+// FS-observed commitment via
+//   main_commitment = compress([raw_root, hash(once(len) ++ rc ++ cc)]).
+// The host shard verifier re-check (shard_level/verifier.rs Stage 3.5)
+// recomputes this from the bundle's RAW root + packing and asserts it equals
+// `main_commitment`.  Tampering with ANY count (row or column) in the bundle's
+// packing — WITHOUT being able to forge the corresponding raw root — must make
+// the recompute diverge and REJECT (`JaggedPcs(... IncorrectTableSizes)`).
+// This is the count↔commitment tie that the legacy raw-root-only digest
+// lacked entirely (a prover could witness any geometry).
+// ─────────────────────────────────────────────────────────────────────
+
+/// G3b — COLUMN-count tamper: bump a chip's `column_count` in the bundle's
+/// packing (leaving the committed raw root untouched).  The host re-check
+/// recomputes hash(counts) over the tampered count → != observed
+/// main_commitment → reject.
+fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
+    match &mut bf.evaluation_proof {
+        EvaluationProof::Bundle(bundle) => {
+            // Find a chip with a nonzero column count and bump it by 1.
+            let idx = bundle
+                .packing
+                .column_counts
+                .iter()
+                .position(|&c| c > 0)
+                .expect("at least one chip with columns");
+            let old = bundle.packing.column_counts[idx];
+            bundle.packing.column_counts[idx] = old + 1;
+            eprintln!(
+                "[STAGE0][FORGE] COUNT-tamper column: packing.column_counts[{idx}] {old} -> {}",
+                old + 1
+            );
+        }
+        _other => panic!("expected EvaluationProof::Bundle for count-tamper"),
+    }
+}
+
+/// G3b' — ROW-count tamper: shift a packing OFFSET so one chip's derived
+/// row_count (= offsets[i+1]-offsets[i]) changes.  Same effect: the hash over
+/// the (now different) row_counts diverges from the observed main_commitment.
+fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
+    use zkm_pcs::shard_level::shard_proof::EvaluationProof;
+    let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
+    match &mut bf.evaluation_proof {
+        EvaluationProof::Bundle(bundle) => {
+            // Bump an interior offset (not the first, not the sentinel) so the
+            // chip straddling it gets a different height.  Pick offset[1].
+            let n = bundle.packing.offsets.len();
+            assert!(n >= 3, "need >=3 offsets to tamper an interior boundary");
+            let idx = 1.min(n - 2);
+            let old = bundle.packing.offsets[idx];
+            bundle.packing.offsets[idx] = old + 1;
+            eprintln!(
+                "[STAGE0][FORGE] COUNT-tamper row: packing.offsets[{idx}] {old} -> {} \
+                 (changes a derived row_count)",
+                old + 1
+            );
+        }
+        _other => panic!("expected EvaluationProof::Bundle for row-count tamper"),
+    }
+}
+
+#[test]
+#[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
+fn stage0_forge_count_tamper_column_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/count-tamper-column",
+        fibonacci_program(),
+        ZKMStdin::new(),
+        false, // recon gate (irrelevant to hash-bind) — production default
+        true,  // MUST reject (hash-bind)
+        forge_count_tamper_column,
+    );
+    eprintln!("[STAGE0][VERDICT] fibonacci COLUMN-count tamper (hash-bind) => {tag}");
+}
+
+#[test]
+#[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
+fn stage0_forge_count_tamper_row_fibonacci() {
+    setup_logger();
+    let tag = run_forgery(
+        "fibonacci/count-tamper-row",
+        fibonacci_program(),
+        ZKMStdin::new(),
+        false,
+        true,
+        forge_count_tamper_row,
+    );
+    eprintln!("[STAGE0][VERDICT] fibonacci ROW-count tamper (hash-bind) => {tag}");
+}

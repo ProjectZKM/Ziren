@@ -1343,6 +1343,145 @@ pub mod tests {
         println!("There are {num_shapes} core shapes");
     }
 
+    /// STEP-0 LINCHPIN PROBE (#88 DivEAssert band-fix): for a FIXED chip-SET,
+    /// is the per-chip canonical-cluster BAND-CAP height INVARIANT across
+    /// different RAW height profiles (= different program lengths)?  If YES the
+    /// targeted DivEAssert fix (round raw height UP to cluster band-cap
+    /// in-circuit, keyed on the witnessed chip-set) is enumerability-safe (the
+    /// band-cap is f(chip-set) only).  If NO (the band-cap moves with raw
+    /// heights), the fix re-breaks #82 (program-length-dependent VK) and must be
+    /// abandoned for the SP1-faithful hash-bound port.
+    #[test]
+    fn step0_bandcap_invariance_for_fixed_chipset() {
+        use p3_koala_bear::KoalaBear;
+        let cfg = CoreShapeConfig::<KoalaBear>::default();
+        // The fib-1k CPU shard chip-SET (same names as raw_canonical_matches_*),
+        // here used as a FIXED chip-set whose RAW heights we sweep.
+        let names: Vec<&str> = vec![
+            "AddSub", "Bitwise", "Branch", "CloClz", "Cpu", "DivRem", "Global",
+            "Jump", "Lt", "MemoryInstrs", "MemoryLocal", "MiscInstrs", "MovCond",
+            "Mul", "ShiftLeft", "ShiftRight", "SyscallCore", "SyscallInstrs",
+        ];
+        // Several RAW height profiles, ALL with the SAME chip-set present (every
+        // chip has >=1 event so it is genuinely present, never canonicalized
+        // away), but with very different magnitudes — mimicking short vs long
+        // programs.  Program prep band swept too (14/15/16 -> 19/20/21).
+        // (cpu_events, addsub, lt, mul, divrem, mem_local, program_raw_log)
+        let profiles: Vec<(&str, BTreeMap<String, usize>)> = {
+            let mk = |cpu: usize, big: usize, mid: usize, small: usize, prog_log: usize| {
+                let mut m: BTreeMap<String, usize> = BTreeMap::new();
+                for n in &names {
+                    let v = match *n {
+                        "Cpu" => cpu,
+                        "AddSub" | "Lt" | "Mul" | "DivRem" => big,
+                        "Bitwise" | "Branch" | "MemoryInstrs" | "Global" => mid,
+                        _ => small,
+                    };
+                    m.insert(n.to_string(), v.max(1));
+                }
+                m.insert("Program".to_string(), 1usize << prog_log);
+                m.insert("Byte".to_string(), 1usize << 16);
+                m
+            };
+            vec![
+                ("tiny",   mk(8369, 4860, 1000, 24, 14)),
+                ("small",  mk(20000, 10000, 3000, 60, 14)),
+                ("medium", mk(120000, 60000, 20000, 500, 15)),
+                ("large",  mk(900000, 400000, 100000, 4000, 16)),
+                ("xlarge", mk(3500000, 1500000, 400000, 20000, 16)),
+            ]
+        };
+
+        let mut results: Vec<(String, Vec<(String, usize)>)> = Vec::new();
+        for (tag, raw) in &profiles {
+            match cfg.find_canonical_cluster_shape_from_raw(raw) {
+                Some(shape) => {
+                    let mut v: Vec<(String, usize)> =
+                        shape.iter().map(|(id, h)| (id.to_string(), *h)).collect();
+                    v.sort();
+                    eprintln!("[STEP0] {tag}: canonical={v:?}");
+                    results.push((tag.to_string(), v));
+                }
+                None => {
+                    eprintln!("[STEP0] {tag}: NO cluster fits (None)");
+                    results.push((tag.to_string(), vec![]));
+                }
+            }
+        }
+
+        // Compare per-chip band-cap across profiles for chips PRESENT in all.
+        // Build name -> set of distinct band-caps observed.
+        use std::collections::{BTreeMap as BM, BTreeSet};
+        let mut per_chip: BM<String, BTreeSet<usize>> = BM::new();
+        let mut chipset_per_profile: Vec<BTreeSet<String>> = Vec::new();
+        for (_tag, v) in &results {
+            let mut cs = BTreeSet::new();
+            for (n, h) in v {
+                cs.insert(n.clone());
+                per_chip.entry(n.clone()).or_default().insert(*h);
+            }
+            chipset_per_profile.push(cs);
+        }
+        // Report chip-set drift (canonicalization could add/drop chips).
+        let base_cs = &chipset_per_profile[0];
+        let mut chipset_invariant = true;
+        for (i, cs) in chipset_per_profile.iter().enumerate() {
+            if cs != base_cs {
+                chipset_invariant = false;
+                eprintln!(
+                    "[STEP0] chip-SET DIFFERS at profile {}: only_here={:?} missing_here={:?}",
+                    i,
+                    cs.difference(base_cs).collect::<Vec<_>>(),
+                    base_cs.difference(cs).collect::<Vec<_>>(),
+                );
+            }
+        }
+        eprintln!("[STEP0] chipset_invariant={chipset_invariant}");
+
+        let mut bandcap_invariant = true;
+        for (n, caps) in &per_chip {
+            if caps.len() > 1 {
+                bandcap_invariant = false;
+                eprintln!("[STEP0] chip {n}: band-caps VARY across profiles = {caps:?}");
+            }
+        }
+        eprintln!(
+            "[STEP0] VERDICT: bandcap_invariant_for_fixed_chipset={bandcap_invariant} \
+             (true => fix is enumerability-safe; false => fix re-breaks #82)"
+        );
+
+        // ESCAPE-HATCH CHECK: would rounding to the cluster's MAXIMAL per-chip
+        // cap (hs.last(), a truly chip-set-keyed value) match the host's
+        // committed geometry?  The host commits at find_canonical_cluster_shape
+        // = the min-area FITTING shape (varies above), NOT the maximal.  Print
+        // the maximal-cap shape that the SAME chip-set would map to, to show it
+        // differs from the per-profile committed shapes (so a chip-set-only
+        // round-up cannot equal the host offsets).
+        {
+            // Take the 'tiny' profile's selected cluster band-caps vs 'medium'
+            // — if even the maximal cap were used, all profiles would share it,
+            // but the host does NOT use the maximal (it uses the fitting shape),
+            // so matching the host still requires the height-dependent value.
+            let nonempty: Vec<&(String, Vec<(String, usize)>)> =
+                results.iter().filter(|(_, v)| !v.is_empty()).collect();
+            if nonempty.len() >= 2 {
+                let a = &nonempty[0].1;
+                let b = &nonempty[nonempty.len() - 1].1;
+                let differ: Vec<String> = a
+                    .iter()
+                    .zip(b.iter())
+                    .filter(|((n1, h1), (n2, h2))| n1 == n2 && h1 != h2)
+                    .map(|((n, h1), (_, h2))| format!("{n}:{h1}->{h2}"))
+                    .collect();
+                eprintln!(
+                    "[STEP0] host-committed shapes DIFFER between '{}' and '{}' on {} chips: {:?}",
+                    nonempty[0].0, nonempty[nonempty.len() - 1].0, differ.len(), differ
+                );
+            }
+        }
+        // Do NOT assert — this is a diagnostic probe; the printout is the result.
+    }
+
     #[test]
     fn test_dummy_record() {
         use crate::utils::setup_logger;

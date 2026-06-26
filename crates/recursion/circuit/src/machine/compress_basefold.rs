@@ -350,7 +350,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         use crate::shard_level_witness::LiftedEvalProof;
         let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
         let evaluation_proof_var = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                 crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                     builder,
                     host,
@@ -359,6 +359,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                         jagged_eval.clone(),
                         *expected_eval,
                         *commit_root,
+                        *modified_commitment,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
@@ -565,7 +566,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // when small shards triggered `pick_log_stacking_height` clamping.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
                 per_proof_verifier =

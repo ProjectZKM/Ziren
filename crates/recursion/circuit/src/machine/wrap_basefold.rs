@@ -275,7 +275,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 None,
             )
         }
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
+        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
             // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
             // bundle) and outer (BN254, dead arm → placeholder).
@@ -287,6 +287,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 jagged_eval.clone(),
                 *expected_eval,
                 *commit_root,
+                *modified_commitment,
                 max_log_row_count,
                 &column_counts_by_round,
                 None,
@@ -416,7 +417,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier = match &evaluation_proof {
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } if !legacy_lift => {
+        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
             let bundle_num_vars =
                 host.basefold_proof.basefold_proof.fri_commitments.len();
             per_proof_verifier =

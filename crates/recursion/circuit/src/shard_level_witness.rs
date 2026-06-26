@@ -263,11 +263,21 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
-        // original_commitments[0] = the BaseFold commit cap
-        // root, which equals `main_commitment` (basefold_commit_digest =
-        // commitment.roots()[0]).  Reuse the already-witnessed main_commitment
-        // so the lift doesn't BAKE the proof-specific root (value-independence).
+        // original_commitments[0] = the RAW BaseFold commit cap root (the
+        // value the BaseFold opening binds against).  Under the SP1-faithful
+        // hash-bind, `main_commitment` is the MODIFIED digest
+        // `compress([raw_root, hash(counts)])` (observed in the FS prologue),
+        // so the raw root is witnessed SEPARATELY here (from
+        // `BasefoldShardProof::jagged_original_commitment`).  On the
+        // hash-bind-off path the host writes `main_commitment` into that field
+        // too, so this still equals main_commitment.
         commit_root: [Felt<C::F>; 8],
+        // The MODIFIED (FS-observed) digest = `main_commitment` — carried so
+        // the lift can populate the in-circuit `commitments` (the value the
+        // hash-bind assert `compress([original, hash(counts)]) == commitments`
+        // checks).  Reuses the already-witnessed `main_commitment` (no extra
+        // stream felts).
+        modified_commitment: [Felt<C::F>; 8],
     },
     // P2c-for-outer: the gnark wrap path.  The host carries the outer bundle
     // (`JaggedBasefoldBundleGeneric<OuterValMmcs>`, BN254 commitments) as
@@ -340,6 +350,12 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.main_commitment[i].read(builder));
+        // SP1-faithful hash-bind: witness the RAW BaseFold root (the value the
+        // BaseFold open binds against) separately from the MODIFIED
+        // `main_commitment` (the FS-observed digest).  Same stream position as
+        // `write` below (immediately after main_commitment).
+        let jagged_original_commitment_arr: [Felt<C::F>; 8] =
+            core::array::from_fn(|i| self.jagged_original_commitment[i].read(builder));
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
@@ -385,9 +401,11 @@ where
                     sumcheck,
                     jagged_eval,
                     expected_eval,
-                    // reuse the witnessed main_commitment (== the commit
-                    // cap root) — no extra stream felts, value-independent.
-                    commit_root: main_commitment_arr,
+                    // RAW root → original_commitments (BaseFold open binds it);
+                    // MODIFIED (main_commitment) → commitments (hash-bind
+                    // assert).  Both witnessed, value-independent.
+                    commit_root: jagged_original_commitment_arr,
+                    modified_commitment: main_commitment_arr,
                 }
             }
             }
@@ -409,6 +427,11 @@ where
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         for f in self.main_commitment.iter() {
+            f.write(witness);
+        }
+        // SP1-faithful hash-bind: write the RAW BaseFold root immediately after
+        // main_commitment (mirrors `read`).
+        for f in self.jagged_original_commitment.iter() {
             f.write(witness);
         }
         self.public_values.write(witness);
@@ -1246,6 +1269,13 @@ where
     for _ in 1..num_rounds {
         original_commitments.push(zero_digest_var);
     }
+    // OUTER ring (gnark wrap): the BN254 hash-bind / re-bind is performed
+    // inside the registered outer jagged-verify hook, NOT in this lift.  Carry
+    // modified == original here so the in-circuit assert in
+    // `verify_trusted_evaluations` is a no-op (compress([orig,hash])==orig is
+    // NOT what runs — the outer path uses its own digest-mix; see hash.rs).
+    // The inner ring (where the de-risk gates run) carries the real modified.
+    let modified_commitments = original_commitments.clone();
 
     // ── P2c-for-outer: jagged_eval_proof = the WITNESSED sub-sumcheck ──
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
@@ -1352,6 +1382,7 @@ where
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
         original_commitments,
+        modified_commitments,
         expected_eval,
     }
 }
@@ -1396,9 +1427,21 @@ where
 {
     if let Some(bundle) = JaggedBasefoldBundle::from_bytes(bytes) {
         let (cp, sc, je, ee, cr) = const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
+        // Bytes-path: const-build the MODIFIED (hash-bound) digest from the
+        // bundle's raw root + packing (mirror of jagged_pcs_lift bytes path).
+        use p3_field::PrimeCharacteristicRing;
+        let cap_roots = bundle.commit.commitment.roots();
+        let mc: [Felt<C::F>; 8] = if cap_roots.is_empty() {
+            core::array::from_fn(|_| builder.constant(C::F::ZERO))
+        } else {
+            let raw: [InnerVal; 8] = cap_roots[0];
+            let modified =
+                zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(raw, &bundle.packing);
+            core::array::from_fn(|i| builder.constant(modified[i]))
+        };
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, cp, sc, je, ee, cr, max_log_row_count, column_counts_by_round, None,
-            None,
+            builder, &bundle, cp, sc, je, ee, cr, mc, max_log_row_count, column_counts_by_round,
+            None, None,
         )
     } else {
         // Empty / malformed bytes — fall back to the all-zero
@@ -1787,10 +1830,14 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     preread_sumcheck: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
     preread_expected_eval: Ext<C::F, C::EF>,
-    // the witnessed commit cap root (== main_commitment) for
-    // original_commitments[0]; replaces the baked const_digest of the
-    // proof-specific root (value-independence).
+    // the witnessed RAW commit cap root for original_commitments[0] (the
+    // value the BaseFold open binds against); replaces the baked const_digest
+    // of the proof-specific root (value-independence).
     preread_commit_root: [Felt<C::F>; 8],
+    // the witnessed MODIFIED (FS-observed) digest = main_commitment, for
+    // modified_commitments[0] (the value the hash-bind assert checks).  On the
+    // hash-bind-off path this equals preread_commit_root.
+    preread_modified_commitment: [Felt<C::F>; 8],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1891,6 +1938,13 @@ where
     original_commitments.push(first_commit_digest);
     for _ in 1..num_rounds {
         original_commitments.push(zero_digest_var);
+    }
+    // SP1-faithful hash-bind: modified_commitments[0] = the witnessed
+    // MODIFIED (FS-observed) digest; the rest mirror original (zeros).
+    let mut modified_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
+    modified_commitments.push(preread_modified_commitment);
+    for _ in 1..num_rounds {
+        modified_commitments.push(zero_digest_var);
     }
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
@@ -2175,6 +2229,7 @@ where
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
         original_commitments,
+        modified_commitments,
         expected_eval,
     }
 }

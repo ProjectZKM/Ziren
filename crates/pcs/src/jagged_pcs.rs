@@ -485,6 +485,188 @@ where
     commit.commitment.clone()
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// SP1-faithful jagged "hash-bind" (the count ↔ commitment tie).
+//
+// Ziren historically returned the RAW BaseFold root as the observed
+// commitment, with NO cryptographic binding of the per-chip
+// (row_count, column_count) geometry to that root.  That left the jagged
+// geometry prover-supplied and (under the height-agnostic recursion)
+// forgeable: a prover could witness a different geometry than was actually
+// committed and still pass the prefix-sum / area consistency checks (which
+// only tie the geometry to itself).
+//
+// SP1 closes this by hashing the geometry and folding it into the observed
+// commitment (slop/crates/jagged/src/prover.rs:141-149):
+//
+//     hash = hash_iter( once(len) ++ row_counts ++ column_counts )
+//     modified = compress([raw_root, hash])
+//
+// and re-checking it in `verify_trusted_evaluations`
+// (slop/crates/jagged/src/verifier.rs:206-217).  The observed (Fiat-Shamir)
+// commitment becomes `modified`; the BaseFold opening still binds against
+// `raw_root` (carried as `original_commitment`).
+//
+// CONVENTION LOCK (host == circuit must be byte-identical):
+//   * `len` is `column_counts.len()` (== `row_counts.len()`; SP1 prover
+//     uses `row_counts.len()`, the in-circuit verifier uses
+//     `column_counts.len()` — they are equal, we pick `column_counts.len()`
+//     and use it IDENTICALLY in both places to avoid any FS desync).
+//   * the geometry is the PER-CHIP `(row_count, column_count)` derived from
+//     the SAME `packing.offsets` / `packing.column_counts` the recursion
+//     lift reconstructs (`shard_level_witness.rs` `packing_row_counts`),
+//     so the in-circuit recompute hashes the identical felt sequence.
+//   * felts are `from_canonical_usize` (wraps mod the field order — the
+//     in-circuit verifier guards each count `< F::ORDER` so the wrap can
+//     never be exploited; see the recursion guards).
+// ─────────────────────────────────────────────────────────────────────
+
+/// Derive the per-chip `(row_counts, column_counts)` the hash-bind hashes,
+/// from the host jagged `PackingMeta`.  This is the SINGLE source of truth
+/// for the hash convention — both the host emit path
+/// (`jagged_hash_bind_modified`) and the in-circuit recompute consume the
+/// SAME per-chip vectors (the recursion lift's `packing_row_counts` /
+/// `packing.column_counts`), so the hashed felt sequence is byte-identical.
+///
+/// `row_counts[i]` = height of chip `i` = `offsets[col_i+1] - offsets[col_i]`
+/// where `col_i` is the first column index of chip `i` (a `column_count==0`
+/// chip contributes height `0`).  `column_counts[i] = packing.column_counts[i]`.
+#[must_use]
+pub fn jagged_counts_from_packing(
+    packing: &jagged::PackingMeta,
+) -> (Vec<usize>, Vec<usize>) {
+    let column_counts: Vec<usize> = packing.column_counts.clone();
+    let offsets = &packing.offsets;
+    let total_values = packing.total_values;
+    let mut row_counts: Vec<usize> = Vec::with_capacity(column_counts.len());
+    let mut col_idx = 0usize;
+    for &cc in column_counts.iter() {
+        if cc == 0 {
+            row_counts.push(0);
+            continue;
+        }
+        let h = if col_idx + 1 < offsets.len() {
+            offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+        } else if col_idx < offsets.len() {
+            total_values.saturating_sub(offsets[col_idx])
+        } else {
+            0
+        };
+        row_counts.push(h);
+        col_idx += cc;
+    }
+    (row_counts, column_counts)
+}
+
+/// Compute the SP1-faithful geometry hash for ONE round (one commit):
+/// `hash_iter( once(len) ++ row_counts ++ column_counts )` where
+/// `len = column_counts.len()`.  Uses the inner Poseidon2-KoalaBear sponge
+/// (`InnerHash`) — the SAME hasher `SC::hash` resolves to in-circuit.
+#[must_use]
+pub fn jagged_geometry_hash(
+    row_counts: &[usize],
+    column_counts: &[usize],
+) -> [JaggedVal; 8] {
+    use p3_field::PrimeCharacteristicRing;
+    use p3_symmetric::CryptographicHasher;
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let hasher = crate::kb31_poseidon2::InnerHash::new(perm);
+    let len = column_counts.len();
+    let iter = core::iter::once(JaggedVal::from_canonical_usize(len))
+        .chain(row_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)))
+        .chain(column_counts.iter().map(|&c| JaggedVal::from_canonical_usize(c)));
+    hasher.hash_iter(iter)
+}
+
+/// Fold the geometry hash into the raw BaseFold root: `compress([raw, hash])`.
+/// Uses `InnerCompress` (the SAME compressor `SC::compress` resolves to
+/// in-circuit).  Returns the MODIFIED 8-felt digest that the Fiat-Shamir
+/// transcript observes as `main_commitment`.
+#[must_use]
+pub fn jagged_hash_bind_modified(
+    raw_root: [JaggedVal; 8],
+    row_counts: &[usize],
+    column_counts: &[usize],
+) -> [JaggedVal; 8] {
+    use p3_symmetric::PseudoCompressionFunction;
+    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+    let compressor = crate::kb31_poseidon2::InnerCompress::new(perm);
+    let hash = jagged_geometry_hash(row_counts, column_counts);
+    compressor.compress([raw_root, hash])
+}
+
+/// Convenience: compute the MODIFIED digest directly from the raw commit +
+/// packing — the host emit-site one-liner.
+#[must_use]
+pub fn jagged_hash_bind_from_packing(
+    raw_root: [JaggedVal; 8],
+    packing: &jagged::PackingMeta,
+) -> [JaggedVal; 8] {
+    let (row_counts, column_counts) = jagged_counts_from_packing(packing);
+    jagged_hash_bind_modified(raw_root, &row_counts, &column_counts)
+}
+
+/// Derive the per-chip `(row_counts, column_counts)` from a full
+/// [`crate::jagged::JaggedPacking`] (the form the host commit prover holds in
+/// `PrecomputedJaggedCommit.packing`).  Uses the OFFSETS-based derivation
+/// (NOT `chip_infos[i].row_count`) so it is byte-identical to the recursion
+/// lift's `packing_row_counts` (`shard_level_witness.rs`) and to
+/// [`jagged_counts_from_packing`]: a `column_count == 0` chip contributes
+/// height `0` regardless of its raw trace height.
+#[must_use]
+pub fn jagged_counts_from_jagged_packing(
+    packing: &crate::jagged::JaggedPacking<JaggedVal>,
+) -> (Vec<usize>, Vec<usize>) {
+    let column_counts: Vec<usize> =
+        packing.chip_infos.iter().map(|ci| ci.column_count).collect();
+    let offsets = &packing.offsets;
+    let total_values = packing.total_values;
+    let mut row_counts: Vec<usize> = Vec::with_capacity(column_counts.len());
+    let mut col_idx = 0usize;
+    for &cc in column_counts.iter() {
+        if cc == 0 {
+            row_counts.push(0);
+            continue;
+        }
+        let h = if col_idx + 1 < offsets.len() {
+            offsets[col_idx + 1].saturating_sub(offsets[col_idx])
+        } else if col_idx < offsets.len() {
+            total_values.saturating_sub(offsets[col_idx])
+        } else {
+            0
+        };
+        row_counts.push(h);
+        col_idx += cc;
+    }
+    (row_counts, column_counts)
+}
+
+/// Host emit-site one-liner: the MODIFIED digest from the raw root + the
+/// full `JaggedPacking` the commit prover holds.  This is the value the
+/// Fiat-Shamir transcript observes as `main_commitment`.
+#[must_use]
+pub fn jagged_hash_bind_from_jagged_packing(
+    raw_root: [JaggedVal; 8],
+    packing: &crate::jagged::JaggedPacking<JaggedVal>,
+) -> [JaggedVal; 8] {
+    let (row_counts, column_counts) = jagged_counts_from_jagged_packing(packing);
+    jagged_hash_bind_modified(raw_root, &row_counts, &column_counts)
+}
+
+/// Host-side mirror of the in-circuit re-bind (SP1
+/// `verify_trusted_evaluations`): recompute `compress([raw, hash(counts)])`
+/// and check it equals the observed `modified` digest.  Used by the G-host
+/// round-trip gate to LOCK the convention before the circuit consumes it.
+#[must_use]
+pub fn jagged_hash_bind_verify(
+    raw_root: [JaggedVal; 8],
+    modified: [JaggedVal; 8],
+    packing: &jagged::PackingMeta,
+) -> bool {
+    let recomputed = jagged_hash_bind_from_packing(raw_root, packing);
+    recomputed == modified
+}
+
 /// Production-grade FRI config used by the jagged-PCS pipeline.
 /// Public so the GPU dispatch hook can construct a matching
 /// device-side encoder (same `log_blowup`, same coset shift) without
@@ -4444,5 +4626,107 @@ mod test {
             assert!(!ok && stage == Some(VerifyStage::Coverage),
                 "wrong group count must be caught by coverage; stage={stage:?}");
         });
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // G-host: LOCK THE HASH-BIND CONVENTION (SP1-faithful jagged geometry
+    // count ↔ commitment tie) with a host-only commit → verify round-trip,
+    // BEFORE any circuit consumes it.  A wrong order / missing len-prefix
+    // would silently desync Fiat-Shamir; this test prints the host hash and
+    // asserts modified == recomputed host-side.
+    // ───────────────────────────────────────────────────────────────────
+    #[test]
+    fn g_host_hash_bind_roundtrip() {
+        use crate::jagged_pcs::jagged::PackingMeta;
+        // A heterogeneous per-chip geometry (varied heights == a FIX-off
+        // natural-commit shard), with the SENTINEL offset (len = total_cols+1).
+        // chip heights:   3,      5,           2,        (a 0-col chip)
+        // chip widths:    2,      1,           3,        0
+        let column_counts: Vec<usize> = vec![2, 1, 3, 0];
+        // offsets: column-major prefix sums. col widths sum = 6 columns.
+        //  chip0 cols 0,1 (h=3) -> 0,3 ; chip1 col2 (h=5) -> 6 ; chip2 cols 3,4,5 (h=2) -> 11,13,15 ; sentinel 17
+        let offsets: Vec<usize> = vec![0, 3, 6, 11, 13, 15, 17];
+        let total_values = 17usize;
+        let packing = PackingMeta {
+            offsets,
+            total_values,
+            log_dense_size: (total_values.next_power_of_two()).trailing_zeros() as usize,
+            column_counts: column_counts.clone(),
+        };
+
+        // The derived per-chip (row_counts, column_counts) — the EXACT felt
+        // sequence both host and circuit hash.
+        let (row_counts, col_counts) = jagged_counts_from_packing(&packing);
+        assert_eq!(col_counts, column_counts);
+        // chip0 h = offsets[1]-offsets[0] = 3; chip1 h = offsets[3]-offsets[2] = 5;
+        // chip2 h = offsets[5]-offsets[4]... col_idx walk: chip0 col_idx=0 -> 3;
+        //   chip1 col_idx=2 -> offsets[3]-offsets[2]=5; chip2 col_idx=3 ->
+        //   offsets[4]-offsets[3]=2; chip3 cc==0 -> 0.
+        assert_eq!(row_counts, vec![3usize, 5, 2, 0], "row_counts derivation");
+
+        // A toy raw root.
+        let raw_root: [JaggedVal; 8] =
+            core::array::from_fn(|i| JaggedVal::from_u32((i as u32 + 1) * 7));
+
+        let hash = jagged_geometry_hash(&row_counts, &col_counts);
+        let modified = jagged_hash_bind_modified(raw_root, &row_counts, &col_counts);
+        let modified_from_packing = jagged_hash_bind_from_packing(raw_root, &packing);
+
+        eprintln!("[G-HOST] raw_root      = {raw_root:?}");
+        eprintln!("[G-HOST] geometry_hash = {hash:?}");
+        eprintln!("[G-HOST] modified      = {modified:?}");
+        eprintln!(
+            "[G-HOST] len(=col_counts.len())={} row_counts={row_counts:?} col_counts={col_counts:?}",
+            col_counts.len()
+        );
+
+        // Convention self-consistency: the packing one-liner equals the
+        // explicit path.
+        assert_eq!(modified, modified_from_packing, "from_packing must match explicit");
+
+        // The host re-bind check (mirror of SP1 verify_trusted_evaluations)
+        // must ACCEPT the honest modified digest.
+        assert!(
+            jagged_hash_bind_verify(raw_root, modified, &packing),
+            "G-host: host re-bind must accept the honest modified digest"
+        );
+
+        // FORGERY-SHAPED negative #1: a TAMPERED row_count must change the
+        // hash -> modified, so the re-bind REJECTS it (the count↔commitment
+        // tie).  (This is the host-side analog of G3b.)
+        {
+            let mut bad = packing.clone();
+            // inflate chip0 height: offsets[1] 3 -> 4 (shifts everything)
+            bad.offsets[1] = 4;
+            assert!(
+                !jagged_hash_bind_verify(raw_root, modified, &bad),
+                "G-host: a tampered row_count MUST fail the re-bind"
+            );
+        }
+        // FORGERY-SHAPED negative #2: a TAMPERED column_count must reject.
+        {
+            let mut bad = packing.clone();
+            bad.column_counts[0] = 3; // was 2
+            assert!(
+                !jagged_hash_bind_verify(raw_root, modified, &bad),
+                "G-host: a tampered column_count MUST fail the re-bind"
+            );
+        }
+        // LEN-PREFIX guard: omitting/altering the len prefix would silently
+        // collide honest geometries of different lengths.  Verify the len is
+        // genuinely mixed in: a geometry with one MORE (zero-height, zero-col)
+        // chip — same row/col VALUES extended by a 0 — hashes DIFFERENTLY
+        // because the len prefix changes.
+        {
+            let mut rc2 = row_counts.clone();
+            let mut cc2 = col_counts.clone();
+            rc2.push(0);
+            cc2.push(0);
+            let h2 = jagged_geometry_hash(&rc2, &cc2);
+            assert_ne!(
+                hash, h2,
+                "G-host: the len prefix MUST distinguish different-length geometries"
+            );
+        }
     }
 }

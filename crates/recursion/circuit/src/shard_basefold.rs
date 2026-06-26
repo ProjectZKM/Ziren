@@ -584,15 +584,97 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|chip| chip.main.local.clone())
             .collect();
 
+        // ── SP1-faithful jagged HASH-BIND re-check (in-circuit) ──────────
+        //
+        // Port of SP1 `RecursiveJaggedPcsVerifier::verify_trusted_evaluations`
+        // (crates/recursion/circuit/src/jagged/verifier.rs:96-115): for each
+        // round recompute
+        //   hash = SC::hash([col_counts.len()] ++ row_counts ++ col_counts)
+        //   expected = SC::compress([original_commitment, hash])
+        //   assert_digest_eq(expected, modified_commitment)
+        // tying the per-chip (row_count, column_count) geometry to the
+        // FS-observed (modified) commitment.  `row_counts` are the WITNESSED
+        // per-chip height felts (from the opened degree); `column_counts` are
+        // the per-chip widths.  `len = column_counts.len()` (== row_counts.len)
+        // — IDENTICAL to the host emit convention (jagged_hash_bind_modified).
+        //
+        // GUARDS (SP1 verifier.rs:195-238 analog) are enforced inside the host
+        // counts (counts < F::ORDER is structural — host felts wrap, and the
+        // recompute-equality already rejects any inconsistent geometry; the
+        // 0 < area < 2^30 bound is enforced by the existing
+        // assert_row_count_le_cube + final-area chain inside
+        // verify_trusted_evaluations).
+        //
+        // Skipped when modified == original byte-for-byte per round (the
+        // hash-bind-off A/B path: then this would assert
+        // compress([orig,hash]) == orig which is false; the lift sets
+        // modified == original ONLY on the outer ring whose re-bind runs in its
+        // own hook — guard by env so the inner default path always runs it).
+        {
+            use p3_field::PrimeCharacteristicRing;
+            let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
+                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+                .unwrap_or(true);
+            // Only run the inner-ring re-bind when modified_commitments are
+            // actually carried (non-empty, distinct path).  The outer ring sets
+            // modified == original and re-binds in its hook → skip here.
+            if hash_bind_on
+                && evaluation_proof.modified_commitments.len()
+                    == evaluation_proof.original_commitments.len()
+            {
+                for (round_idx, (original, modified)) in evaluation_proof
+                    .original_commitments
+                    .iter()
+                    .zip(evaluation_proof.modified_commitments.iter())
+                    .enumerate()
+                {
+                    // Gather this round's row_counts (witnessed felts) and
+                    // column_counts (usize). Round-0 carries the real geometry;
+                    // padding rounds (zeros) carry empty/zero, matching host.
+                    let round_row_counts: &[Felt<C::F>] = evaluation_proof
+                        .row_counts
+                        .get(round_idx)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    let round_col_counts: &[usize] = evaluation_proof
+                        .column_counts
+                        .get(round_idx)
+                        .map(|v| v.as_slice())
+                        .unwrap_or(&[]);
+                    // Skip empty (padding) rounds where there is no geometry to
+                    // bind (host carries zero digests there; the open ignores
+                    // them).  An empty round on the inner ring only occurs for
+                    // num_rounds>1 padding, which the single-main-commit flow
+                    // does not produce, so this is defensive.
+                    if round_col_counts.is_empty() {
+                        continue;
+                    }
+                    let mut felts_vec: Vec<Felt<C::F>> = Vec::with_capacity(
+                        1 + round_row_counts.len() + round_col_counts.len(),
+                    );
+                    felts_vec.push(
+                        builder.eval(C::F::from_canonical_usize(round_col_counts.len())),
+                    );
+                    for &rc in round_row_counts.iter() {
+                        felts_vec.push(rc);
+                    }
+                    for &cc in round_col_counts.iter() {
+                        felts_vec.push(builder.eval(C::F::from_canonical_usize(cc)));
+                    }
+                    let hash = HV::hash(builder, &felts_vec);
+                    let expected = HV::compress(builder, [*original, hash]);
+                    HV::assert_digest_eq(builder, expected, *modified);
+                }
+            }
+        }
+
         // The jagged-PCS commitments are the per-round digests the
         // BaseFold opener binds; on the OUTER ring these are BN254
-        // (`HV::DigestVariable`).  The jagged verifier's
-        // `verify_trusted_evaluations` currently only uses them for a
-        // deferred digest-mix check (recursive_jagged_pcs.rs:163
-        // `let _ = commitments`), and the binding ones are
-        // `proof.original_commitments`; pass those so the slice type is
-        // `HV::DigestVariable` (the main-trace KoalaBear commit is
-        // observed separately in phase 1).
+        // (`HV::DigestVariable`).  The binding ones are
+        // `proof.original_commitments` (the RAW BaseFold roots — the BaseFold
+        // open at recursive_jagged_pcs.rs binds against THESE, NOT the
+        // hash-bound modified digest).  The main-trace KoalaBear commit is
+        // observed separately in phase 1 (= the modified digest).
         let commitments = evaluation_proof.original_commitments.clone();
 
         let _prefix_sum_felts = jagged_verifier.verify_trusted_evaluations::<C, FC, JE>(
@@ -873,6 +955,7 @@ where
             column_counts: vec![vec![1]],
             row_counts: vec![vec![zero_felt(builder)]],
             original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
+            modified_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             expected_eval: zero_ext(builder),
         }
     };

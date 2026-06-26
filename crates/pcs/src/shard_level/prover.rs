@@ -137,8 +137,29 @@ where
             ),
         }
     };
-    let digest_inner: [InnerVal; 8] =
+    let raw_root_inner: [InnerVal; 8] =
         crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+
+    // ── SP1-faithful jagged HASH-BIND (#88) ──────────────────────────────
+    // Tie the per-chip (row_count, column_count) geometry to the commitment:
+    //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
+    // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
+    // below); the BaseFold opening still binds against `raw_root`, carried to
+    // the recursion lift via `BasefoldShardProof::jagged_original_commitment`.
+    // Default-ON (the production / enumerable+sound path); opt-out
+    // ZIREN_JAGGED_HASH_BIND=0 keeps the legacy raw-root-only digest for A/B
+    // (then the lift falls back to main_commitment == raw_root).
+    let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
+    let digest_inner: [InnerVal; 8] = if hash_bind_on {
+        crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
+            raw_root_inner,
+            &precomputed.packing,
+        )
+    } else {
+        raw_root_inner
+    };
 
     // Move matrices back out (same reinterpret, no copy).
     let main_traces: Vec<RowMajorMatrix<Val<SC>>> = named_inner
@@ -427,9 +448,27 @@ where
     // device-side); the GPU commit-dense hook owns their packing, so the
     // band-cap device pad is a separate (out-of-scope) GPU concern -- this
     // host pad is the CPU `FIX_CORE_SHAPES=false` correctness path.
+    // OPTION-A EXPERIMENT (ZIREN_FIXOFF_NATURAL_COMMIT): when set, do NOT
+    // band-pad the PRESENT chips' commit traces — keep them at their NATURAL
+    // raw height so the host packing offsets == the raw degree heights == the
+    // in-circuit RAW col_prefix_sums reconstruction.  Missing chips are still
+    // injected (in commit_basefold_path) at band height to preserve the
+    // chip-SET / VK.
+    //
+    // PRODUCTION (#88 Option A): natural-height commit is now the DEFAULT for
+    // FIX-off (the verifying + enumerable path the SP1 hash-bind makes sound) —
+    // the band cap is only ever installed under FIX-off recursion, so
+    // `current_band_cap().is_some()` IS the FIX-off predicate (no separate
+    // `recursion_fix_shape_enabled()` plumbing needed here, and FIX-on never
+    // reaches the `Some(_)` arm).  Opt-out `ZIREN_FIXOFF_NATURAL_COMMIT=0`
+    // restores the legacy band-pad / low-placement commit for A/B.
+    let natural_commit = std::env::var("ZIREN_FIXOFF_NATURAL_COMMIT")
+        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
     let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = {
         match crate::shard_level::band_cap::current_band_cap() {
             None => commit_traces,
+            Some(_) if natural_commit => commit_traces,
             Some(band_cap) => chips
                 .iter()
                 .zip(commit_traces.into_iter())
@@ -1060,6 +1099,24 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
+    // SP1-faithful jagged hash-bind (#88): carry the RAW BaseFold root (the
+    // value the BaseFold opening binds against) so the recursion lift can
+    // populate `original_commitments` from it while the FS-observed
+    // `main_commitment` is the MODIFIED digest.  Recover the raw root from the
+    // bundle's commit; fall back to `main_commitment` (== raw root on the
+    // hash-bind-off path / non-bundle proofs).
+    let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
+        crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+            let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
+            // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the inner-ring
+            // TypeId identity (the only ring that produces a Bundle).
+            unsafe {
+                core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
+            }
+        }
+        _ => main_commitment,
+    };
+
     let proof = BasefoldShardProof {
         public_values,
         main_commitment,
@@ -1072,6 +1129,7 @@ where
         fold_orientation: orientation,
         row_counts,
         padding_column_counts,
+        jagged_original_commitment,
     };
     drop(_phase5_span);
     tracing::info!(

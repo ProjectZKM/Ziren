@@ -64,11 +64,20 @@ impl Default for EvaluationProof {
 /// Host-side BaseFold-pipeline shard proof. No `Debug` derive: the
 /// embedded `JaggedBasefoldBundle::MT::Proof` has no `Debug` bound.
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(bound = "F: Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
+#[serde(bound = "F: p3_field::Field + Serialize + for<'d> Deserialize<'d>, EF: Serialize + for<'d> Deserialize<'d>")]
 pub struct BasefoldShardProof<F, EF> {
     /// Public values for the shard.
     pub public_values: Vec<F>,
     /// Commitment digest to the main trace.
+    ///
+    /// SP1-faithful jagged hash-bind (#88): this is the **MODIFIED** digest
+    /// `compress([raw_root, hash(once(len) ++ row_counts ++ column_counts)])`
+    /// — the value the Fiat-Shamir transcript observes (so the per-chip
+    /// geometry is cryptographically tied to the commitment).  The RAW
+    /// BaseFold root (the value the BaseFold opening binds against) is carried
+    /// separately in [`Self::jagged_original_commitment`].  On the legacy
+    /// (hash-bind-off) path this equals the raw root and
+    /// `jagged_original_commitment` is empty.
     pub main_commitment: [F; 8],
     /// Shard-level LogUp-GKR sumcheck-stack proof.
     pub logup_gkr_proof: LogupGkrProof<F, EF>,
@@ -109,6 +118,20 @@ pub struct BasefoldShardProof<F, EF> {
     /// proof bytes.
     #[serde(default)]
     pub padding_column_counts: Vec<usize>,
+    /// SP1-faithful jagged hash-bind (#88): the **RAW** BaseFold cap root
+    /// (pre-hash-bind) — the value the BaseFold opening binds against and
+    /// the recursion lift populates `original_commitments` from.  The
+    /// FS-observed [`Self::main_commitment`] is the MODIFIED digest
+    /// `compress([raw_root, hash(counts)])`.  Empty `[F;8]`/absent on the
+    /// legacy hash-bind-off path (then `main_commitment` IS the raw root and
+    /// the lift falls back to it).  `#[serde(default)]` keeps old proof bytes
+    /// deserializable.
+    #[serde(default = "default_zero_digest")]
+    pub jagged_original_commitment: [F; 8],
+}
+
+fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
+    [F::ZERO; 8]
 }
 
 impl<F, EF> BasefoldShardProof<F, EF>
@@ -132,6 +155,8 @@ where
             // empty/dummy-inner proof (no packing to derive from).
             row_counts: Vec::new(),
             padding_column_counts: Vec::new(),
+            // Hash-bind: no raw root for the empty/dummy proof.
+            jagged_original_commitment: [F::ZERO; 8],
         }
     }
 }

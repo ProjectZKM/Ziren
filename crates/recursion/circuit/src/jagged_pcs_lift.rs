@@ -109,6 +109,23 @@ where
         {
             let (cp, sc, je, ee, cr) =
                 crate::shard_level_witness::const_basefold_proof_from_bundle::<C, HV>(&bundle, builder);
+            // Bytes-fallback (legacy/scaffolding): const-build the MODIFIED
+            // (hash-bound) digest from the real bundle's raw root + packing so
+            // the in-circuit re-bind holds on this path too.  Inner ring only
+            // (HV::DigestVariable == [Felt;8]); a degenerate / empty-cap bundle
+            // yields all-zero (re-bind skipped on empty rounds).
+            use p3_field::PrimeCharacteristicRing;
+            let cap_roots = bundle.commit.commitment.roots();
+            let mc: [Felt<C::F>; 8] = if cap_roots.is_empty() {
+                core::array::from_fn(|_| builder.constant(C::F::ZERO))
+            } else {
+                let raw: [zkm_pcs::InnerVal; 8] = cap_roots[0];
+                let modified = zkm_pcs::jagged_pcs::jagged_hash_bind_from_packing(
+                    raw,
+                    &bundle.packing,
+                );
+                core::array::from_fn(|i| builder.constant(modified[i]))
+            };
             return crate::shard_level_witness::lift_jagged_basefold_bundle::<C, HV>(
                 builder,
                 &bundle,
@@ -117,6 +134,7 @@ where
                 je,
                 ee,
                 cr,
+                mc,
                 max_log_row_count,
                 column_counts_by_round,
                 None,
@@ -350,6 +368,10 @@ where
     // computed at the top of the fn.
     let original_commitments: Vec<HV::DigestVariable> =
         (0..num_rounds).map(|_| zero_digest_var).collect();
+    // Placeholder/bytes path: modified == original (all-zero); the in-circuit
+    // re-bind is skipped for empty rounds (see shard_basefold.rs).
+    let modified_commitments: Vec<HV::DigestVariable> =
+        (0..num_rounds).map(|_| zero_digest_var).collect();
 
     // stacked_point_dim used for silencing dead_code warning.
     let _ = stacked_point_dim;
@@ -362,6 +384,7 @@ where
         column_counts,
         row_counts,
         original_commitments,
+        modified_commitments,
         expected_eval: zero_ext(builder),
     }
 }
