@@ -33,14 +33,16 @@ use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
-    /// A normalize/recursion batch.  Carries the per-shard shapes for an
-    /// arity-`proof_shapes.len()` first-compose-layer normalize program
-    /// (`build_normalize_basefold_program` verifies a BATCH of shard
-    /// proofs — arity = number of shards in the batch).  Real multishard
-    /// proofs batch core shards in `chunks(REDUCE_BATCH_SIZE)`
-    /// (`get_recursion_core_inputs_basefold`), so the enumeration emits
-    /// arity 1..=REDUCE_BATCH_SIZE.  Arity-1 (`vec![one]`) is the legacy
-    /// single-shard shape, byte-identical to the prior `Recursion(OrderedShape)`.
+    /// A single-shard normalize/recursion shape (#88/#82).  Carries exactly
+    /// ONE per-shard shape: the production normalize is arity-1 (`compress` →
+    /// `get_first_layer_inputs` with first_layer_batch_size=1 →
+    /// `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
+    /// `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
+    /// shard_proofs.len()==1).  The arity≥2 Recursion shapes the enumerator
+    /// once emitted were a PHANTOM VK class no real proof produced;
+    /// cross-shard aggregation lives in COMPRESS.  The `Vec` is retained for
+    /// wire-format/serde stability but the enumerator now emits only
+    /// `vec![one]` and the dummy/in-circuit verifier assert len==1.
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
     Deferred(OrderedShape),
@@ -531,26 +533,100 @@ impl ZKMProofShape {
         // collapse over the real reachable per-chip profiles) — neither this
         // sweep (misses) nor `enumerate_canonical_cluster_shapes_fast`
         // (over-emits, no collapse) is the final answer.
-        let small_shapes: Vec<OrderedShape> = {
-            let mut by_shape: BTreeMap<Vec<(String, usize)>, OrderedShape> = BTreeMap::new();
-            // Insert one lifted+deduped canonical shape for a raw profile.
-            let mut lift_and_insert = |raw: &OrderedShape| {
-                if let Some(shape) =
-                    core_shape_config.find_canonical_cluster_shape_from_ordered(raw)
-                {
-                    let mut inner: Vec<(String, usize)> = shape
-                        .iter()
-                        .map(|(id, h)| (id.to_string(), *h))
-                        .filter(|(n, _)| chips_by_name.contains_key(n))
-                        .collect();
-                    inner.sort();
-                    if !inner.is_empty() {
-                        by_shape
-                            .entry(inner.clone())
-                            .or_insert(OrderedShape { inner });
+        // ── A-DIRECT (#88/#82): enumerate the per-shard normalize shape at
+        // EVERY integer log_dense L in [L_min, L_max] per cluster, DIRECTLY.
+        //
+        // After increment-1 (recursion VK = f(cluster, arity, log_dense),
+        // height-INDEPENDENT given log_dense) the right key is L itself, not a
+        // particular height profile.  The prior uniform-height SWEEP + LIFT
+        // (find_canonical_cluster_shape_from_ordered) only deduped a SPARSE set
+        // of band-quantized L values, so real NON-uniform FIX-off proofs whose
+        // NATURAL log_dense fell between the swept L's were MISSING (Chain A:
+        // only 1/4 real multi-shard VKs in-map; sha3-a1 ld=25 / fib1k-a4 ld=22
+        // / sha2 ld=23 all absent).  We now emit ONE canonical shape per integer
+        // L so any real proof landing at log_dense L hits the map regardless of
+        // how its heights are distributed.
+        //
+        // Per-L construction (value-independent; the VK is height-independent
+        // given L so the exact distribution is free): Byte at its 2^16
+        // lookup-table height; Program canonical-minimal; every other
+        // byte-lookup-EMITTING chip pinned minimal (so the VK-setup
+        // `Σ byte_lookups·2^h ≤ |F|` always holds); the remaining area is
+        // GREEDILY packed into the byte-lookup-FREE filler chips (each ≤ 2^cube)
+        // until total_values reaches ~2^L.  `log_dense_of` (= jagged
+        // `packing.log_dense_size`) then confirms the produced shape lands at L;
+        // we dedup by the produced OrderedShape so identical chip-NAME-sets
+        // (cluster duplicates) collapse, and cap L < 30 (the AreaOutOfBounds
+        // guard) — `build_compress_vks` catch_unwinds any overflow.
+        let cube = consts::CORE_MAX_LOG_ROW_COUNT;
+        // Build the canonical shape for `cluster` at a target log_dense `target`.
+        // Returns None when `target` is below the fixed-overhead floor or above
+        // the all-chips-at-cube ceiling for this cluster.
+        let shape_at_log_dense =
+            |names: &[String], fillers: &std::collections::HashSet<&String>, target: usize| -> Option<OrderedShape> {
+                // Fixed overhead: Byte (2^16), Program (minimal), other
+                // byte-lookup chips (minimal).  The fillers absorb the rest.
+                let mut heights: Vec<(String, usize)> = names
+                    .iter()
+                    .map(|n| {
+                        let h = if n == "Byte" {
+                            16
+                        } else {
+                            1
+                        };
+                        (n.clone(), h)
+                    })
+                    .collect();
+                let area_of = |hs: &[(String, usize)]| -> u128 {
+                    hs.iter().map(|(n, h)| (chip_width(n) as u128) * (1u128 << *h)).sum()
+                };
+                // Greedily raise filler heights to approach 2^target without
+                // overshooting (so log_dense lands EXACTLY at `target`).
+                let cap_area: u128 = 1u128 << target;
+                // Iterate height levels high→low; for each filler, set the
+                // largest height whose marginal area still fits under cap_area.
+                let mut filler_idx: Vec<usize> = heights
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (n, _))| fillers.contains(n))
+                    .map(|(i, _)| i)
+                    .collect();
+                // Stable order so the produced shape is deterministic.
+                filler_idx.sort_by(|&a, &b| heights[a].0.cmp(&heights[b].0));
+                for &i in &filler_idx {
+                    // Largest h ≤ cube with this chip's marginal area still
+                    // fitting under cap_area.
+                    let mut best = 1usize;
+                    for h in 1..=cube {
+                        let mut trial = heights.clone();
+                        trial[i].1 = h;
+                        if area_of(&trial) <= cap_area {
+                            best = h;
+                        } else {
+                            break;
+                        }
                     }
+                    heights[i].1 = best;
+                }
+                let os = OrderedShape::from_log2_heights(&heights);
+                if log_dense_of(&os) == target {
+                    Some(os)
+                } else {
+                    None
                 }
             };
+        // Realistic per-cluster log_dense window.  A cluster's MINIMAL feasible
+        // L (all fillers at 1, Byte at 2^16) is its natural floor; real proofs
+        // vary the event counts UP from there by a bounded amount, so we emit L
+        // in `[L_min, min(L_min + L_WINDOW, L_HARD_CAP)]`.  This covers every
+        // real FIX-off proof's natural log_dense (validated by check_vk_coverage)
+        // while keeping the wide-precompile-cluster program-build count tractable
+        // (the full [1,30) sweep emits ~10–40 L per fat cluster, almost all
+        // unreachable).  L_HARD_CAP < 30 stays under the AreaOutOfBounds guard.
+        const L_WINDOW: usize = 8;
+        const L_HARD_CAP: usize = 28;
+        let small_shapes: Vec<OrderedShape> = {
+            let mut by_shape: BTreeMap<Vec<(String, usize)>, OrderedShape> = BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
                 let names: Vec<String> = cluster
                     .iter()
@@ -567,44 +643,45 @@ impl ZKMProofShape {
                             && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
                     })
                     .collect();
-                for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
-                    let inner: Vec<(String, usize)> = names
-                        .iter()
-                        .map(|n| {
-                            let height = if fillers.contains(n) {
-                                h
-                            } else if n == "Byte" {
-                                16
-                            } else {
-                                1
-                            };
-                            (n.clone(), height)
-                        })
-                        .collect();
-                    lift_and_insert(&OrderedShape::from_log2_heights(&inner));
+                // Find this cluster's L_min (first feasible target), then sweep
+                // the realistic window above it.
+                let mut l_min = None;
+                for target in 1..=L_HARD_CAP {
+                    if shape_at_log_dense(&names, &fillers, target).is_some() {
+                        l_min = Some(target);
+                        break;
+                    }
+                }
+                let Some(l_min) = l_min else { continue };
+                let l_max = (l_min + L_WINDOW).min(L_HARD_CAP);
+                for target in l_min..=l_max {
+                    if let Some(os) = shape_at_log_dense(&names, &fillers, target) {
+                        let mut inner = os.inner.clone();
+                        inner.sort();
+                        by_shape.entry(inner.clone()).or_insert(OrderedShape { inner });
+                    }
                 }
             }
             by_shape.into_values().collect()
         };
         let _ = &log_dense_of;
 
-        // Emit arity 1..=reduce_batch_size normalize batches.  Real
-        // multishard proofs batch core shards in chunks(REDUCE_BATCH_SIZE)
-        // (`get_recursion_core_inputs_basefold`); within a chunk every
-        // shard shares the program's chip cluster, so the dominant batch
-        // is UNIFORM (all shards at the same band).  We emit the uniform
-        // arity-N batch (`vec![shape; arity]`) per per-shard class.
-        // Arity-1 reproduces today's single-shard normalize VK set
-        // exactly (same distinct (chip_set, log_dense) classes).
-        let arity_recursion_shapes: Vec<Self> = {
-            let mut out = Vec::with_capacity(small_shapes.len() * reduce_batch_size);
-            for arity in 1..=reduce_batch_size {
-                for os in &small_shapes {
-                    out.push(Self::Recursion(vec![os.clone(); arity]));
-                }
-            }
-            out
-        };
+        // #88/#82 SINGLE-SHARD NORMALIZE: emit ONLY arity-1 normalize shapes.
+        // The production normalize is single-shard (`compress` →
+        // `get_first_layer_inputs` with first_layer_batch_size=1 →
+        // `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
+        // `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
+        // shard_proofs.len()==1).  The arity≥2 Recursion shapes were a PHANTOM
+        // VK class that NO real proof ever produced — only the enumerator
+        // emitted them.  Cross-shard aggregation lives in COMPRESS (arity-4 +
+        // arity-1 tail), which has the full SP1-parity PV chain.  Emitting just
+        // arity-1 makes the enumerated normalize VK set match the runtime
+        // exactly (every real single-shard normalize lands in-map) and shrinks
+        // the map (4× fewer Recursion shapes).
+        let arity_recursion_shapes: Vec<Self> = small_shapes
+            .iter()
+            .map(|os| Self::Recursion(vec![os.clone()]))
+            .collect();
 
         // ───────────────────────────────────────────────────────────────
         // G1 Stage D1 (#88): re-key Compress / Deferred / Shrink from the
@@ -667,15 +744,50 @@ impl ZKMProofShape {
                     total.next_power_of_two().trailing_zeros() as usize
                 }
             };
-            // Sweep a uniform height across the recursion chips; dedup by
-            // (chip_set fixed, log_dense). Keep the first (smallest sweep
-            // height) representative per class — the VK is class-determined.
+            // A-DIRECT (#88/#82): emit ONE representative per integer log_dense
+            // L directly (the compose VK is (chip-set, arity, child_log_dense)-
+            // determined, height-independent given L).  The prior uniform-height
+            // sweep only hit a sparse set of L (each step ~doubles total),
+            // SKIPPING L's that real children land on.  The recursion machine
+            // carries NO byte-lookups, so we just greedily pack area into the
+            // chips to land total_values exactly at 2^L (cap each chip ≤ 2^cube).
+            let cube_rec = consts::CORE_MAX_LOG_ROW_COUNT;
+            let rec_shape_at_ld = |target: usize| -> Option<OrderedShape> {
+                let mut heights: Vec<(String, usize)> =
+                    rec_names.iter().map(|n| (n.clone(), 1usize)).collect();
+                let area_of = |hs: &[(String, usize)]| -> u128 {
+                    hs.iter()
+                        .map(|(n, h)| {
+                            (rec_chip_widths.get(n).copied().unwrap_or(1) as u128) * (1u128 << *h)
+                        })
+                        .sum()
+                };
+                let cap_area: u128 = 1u128 << target;
+                for i in 0..heights.len() {
+                    let mut best = 1usize;
+                    for h in 1..=cube_rec {
+                        let mut trial = heights.clone();
+                        trial[i].1 = h;
+                        if area_of(&trial) <= cap_area {
+                            best = h;
+                        } else {
+                            break;
+                        }
+                    }
+                    heights[i].1 = best;
+                }
+                let os = OrderedShape::from_log2_heights(&heights);
+                if log_dense_rec(&os) == target {
+                    Some(os)
+                } else {
+                    None
+                }
+            };
             let mut by_ld: BTreeMap<usize, OrderedShape> = BTreeMap::new();
-            for h in 1..=consts::CORE_MAX_LOG_ROW_COUNT {
-                let inner: Vec<(String, usize)> =
-                    rec_names.iter().map(|n| (n.clone(), h)).collect();
-                let os = OrderedShape::from_log2_heights(&inner);
-                by_ld.entry(log_dense_rec(&os)).or_insert(os);
+            for target in 1..30usize {
+                if let Some(os) = rec_shape_at_ld(target) {
+                    by_ld.entry(log_dense_rec(&os)).or_insert(os);
+                }
             }
             by_ld.into_values().collect()
         };
@@ -722,15 +834,15 @@ impl ZKMProofShape {
         } else {
             core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
         };
-        // Emit arity 1..=reduce_batch_size uniform normalize batches per
-        // maximal core shape (so the program-build check exercises the
-        // multishard normalize program too — matches `generate`).
+        // #88/#82 single-shard normalize: emit ONLY arity-1 normalize shapes per
+        // maximal core shape (matches `generate`; production normalize is
+        // single-shard, and arity>=2 normalize programs now assert len==1).
         core_shape_iter
-            .flat_map(move |core_shape| {
+            .map(move |core_shape| {
                 let os = OrderedShape {
                     inner: core_shape.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
                 };
-                (1..=reduce_batch_size).map(move |arity| Self::Recursion(vec![os.clone(); arity]))
+                Self::Recursion(vec![os])
             })
             .chain((1..=reduce_batch_size).flat_map(|batch_size| {
                 recursion_shape_config.get_all_shape_combinations(batch_size).map(Self::Compress)
@@ -1129,9 +1241,11 @@ mod tests {
         );
     }
 
-    /// ARITY-ENUM coverage: generate() emits arity 1..=REDUCE_BATCH_SIZE
-    /// uniform normalize batches, and the per-arity counts are equal
-    /// (uniform replication of the deduped per-shard class set).
+    /// ARITY-ENUM coverage (#88/#82 single-shard normalize): generate()
+    /// emits ONLY arity-1 normalize shapes — the production normalize is
+    /// single-shard, so the arity≥2 Recursion shapes were a phantom VK class
+    /// no real proof ever produced.  Every Recursion shape must be exactly one
+    /// per-shard shape.
     #[test]
     fn generate_emits_arity_1_to_reduce_batch_size() {
         use crate::REDUCE_BATCH_SIZE;
@@ -1143,22 +1257,13 @@ mod tests {
         {
             if let ZKMProofShape::Recursion(batch) = s {
                 *per_arity.entry(batch.len()).or_default() += 1;
-                // Uniform batch: all shards identical.
-                assert!(
-                    batch.windows(2).all(|w| w[0] == w[1]),
-                    "generate() should emit UNIFORM arity batches"
-                );
             }
         }
         let arities: BTreeSet<usize> = per_arity.keys().cloned().collect();
-        let expected: BTreeSet<usize> = (1..=REDUCE_BATCH_SIZE).collect();
-        assert_eq!(arities, expected, "must emit exactly arities 1..=REDUCE_BATCH_SIZE");
-        // Each arity has the same count (uniform replication of one class set).
-        let counts: BTreeSet<usize> = per_arity.values().cloned().collect();
+        let expected: BTreeSet<usize> = BTreeSet::from([1]);
         assert_eq!(
-            counts.len(),
-            1,
-            "per-arity counts should be equal (uniform replication): {per_arity:?}"
+            arities, expected,
+            "normalize is single-shard (#88/#82): must emit exactly arity {{1}}, got {arities:?}"
         );
         eprintln!("[ARITY] per_arity_recursion_counts = {per_arity:?}");
     }

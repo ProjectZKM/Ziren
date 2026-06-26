@@ -379,6 +379,12 @@ pub fn verify_deferred_basefold<C, SC, A>(
             LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
+                // DE-CLAMP GUARD (#88/#82): see core_basefold.
+                crate::shard_level_witness::assert_recursion_stacking_height_fixed(
+                    bundle_num_vars,
+                    host.commit.log_stacking_height,
+                    "deferred_basefold",
+                );
                 per_proof_verifier =
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                         max_log_row_count,

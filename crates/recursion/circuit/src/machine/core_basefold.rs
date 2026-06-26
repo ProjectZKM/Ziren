@@ -200,7 +200,22 @@ pub fn verify_core_basefold<C, SC, A>(
     let mut global_cumulative_sums = Vec::new();
     let mut cpu_shard_seen = false;
 
-    assert!(!shard_proof_tuples.is_empty());
+    // #88/#82 SINGLE-SHARD NORMALIZE: the production normalize is arity-1
+    // (one core shard per `ZKMCoreBasefoldWitnessValues`; see
+    // `get_recursion_core_inputs_basefold` / `get_first_layer_inputs`
+    // first_layer_batch_size=1, and SP1 core.rs:118 `assert shard_proofs.len()==1`).
+    // The aggregate loop below is collapsed to the single lone-shard body
+    // (the first-shard init runs once, the cross-shard `+1`/continuity becomes
+    // `next = start + 1` for the one shard).  Bind the arity here so the
+    // program shape stays single-shard — the multi-shard normalize VK was a
+    // phantom the enumerator no longer emits.
+    assert_eq!(
+        shard_proof_tuples.len(),
+        1,
+        "normalize is single-shard (#88/#82): verify_core_basefold expects exactly \
+         one shard proof per normalize, got {}",
+        shard_proof_tuples.len()
+    );
 
     // Per-shard loop split into a parallel
     // VERIFY pass (via ir_par_map_collect, mirrors compress_basefold and
@@ -546,6 +561,22 @@ pub fn verify_core_basefold<C, SC, A>(
                 LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
+                    // DE-CLAMP GUARD (#88/#82): enumerability rests on every
+                    // recursion bundle committing at the FIXED
+                    // DEFAULT_LOG_STACKING_HEIGHT (= 21, jagged_pcs.rs:122
+                    // unconditional).  If a future change re-introduced the
+                    // `pick_log_stacking_height` area-clamp, `bundle_num_vars`
+                    // (= fri_commitments.len()) would vary with the trace area,
+                    // making this per-proof verifier rebuild — hence the program
+                    // bytes and the recursion VK — clamp-dependent again (and
+                    // FS-desyncing the masked-tail path).  Catch that regression
+                    // at program-build time rather than silently producing an
+                    // un-enumerable VK.
+                    crate::shard_level_witness::assert_recursion_stacking_height_fixed(
+                        bundle_num_vars,
+                        host.commit.log_stacking_height,
+                        "core_basefold",
+                    );
                     per_proof_verifier =
                         crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                             max_log_row_count,
@@ -583,10 +614,24 @@ pub fn verify_core_basefold<C, SC, A>(
             (public_values_raw, shard_globals)
         });
 
-    // ---- AGGREGATE pass (sequential) ----
-    // Walks verify outputs in shard order, runs first-shard init at i==0,
-    // then the cross-shard consistency assertions and state mutations.
-    for (i, (public_values_raw, shard_globals)) in verify_outputs.into_iter().enumerate() {
+    // ---- AGGREGATE pass (single-shard, #88/#82) ----
+    // Normalize is arity-1, so the legacy per-shard loop collapses to its
+    // `i == 0` body run ONCE for the lone shard: the first-shard init runs,
+    // then the cross-shard continuity degenerates to `next = start + 1` for the
+    // single shard (`current_shard == public_values.shard` is `initial_shard ==
+    // shard` here, then `current_shard = shard + 1` → `next_shard`).  The
+    // dead multi-shard branches are removed; this is BYTE-IDENTICAL to the old
+    // loop driven with a single element (the body is verbatim, `i` is bound to
+    // 0).  The 3 chip-set STRUCTURAL checks (non-CPU shard != 1, CPU start_pc !=
+    // 0, exit_code == 0) and the per-shard anchors (is_first binds, start_pc ==
+    // vk.pc_start, select_global_cumulative_sum, shard range-check) are KEPT —
+    // they have NO compress analog.
+    {
+        let i = 0usize;
+        let (public_values_raw, shard_globals) = verify_outputs
+            .into_iter()
+            .next()
+            .expect("single-shard normalize has exactly one verify output");
         let public_values: &PublicValues<Word<Felt<C::F>>, Felt<C::F>> =
             public_values_raw.as_slice().borrow();
         let chip_names = &per_shard_chip_names[i];
@@ -881,6 +926,19 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         >,
         shape: &super::core::ZKMRecursionShape,
     ) -> Self {
+        // #88/#82 SINGLE-SHARD NORMALIZE: normalize is arity-1, so the dummy
+        // (which `program_from_shape` builds the normalize program from) must
+        // carry exactly one per-shard shape.  The enumerator now emits only
+        // `Recursion(vec![os])` (single element), and the live input
+        // constructor produces one shard per `ZKMCoreBasefoldWitnessValues`.
+        // Bind it here so the dummy program shape matches the runtime exactly.
+        assert_eq!(
+            shape.proof_shapes.len(),
+            1,
+            "normalize is single-shard (#88/#82): ZKMCoreBasefoldWitnessValues::dummy \
+             expects exactly one proof shape, got {}",
+            shape.proof_shapes.len()
+        );
         let (vks, shard_proofs): (Vec<_>, Vec<_>) = shape
             .proof_shapes
             .iter()

@@ -24,6 +24,39 @@ use crate::witness::{Witnessable, WitnessWriter};
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
+/// DE-CLAMP GUARD (#88/#82): assert a recursion bundle commits at the FIXED
+/// `DEFAULT_LOG_STACKING_HEIGHT`.  Enumerability (recursion VK = f(chip-set,
+/// arity)) rests on `pick_log_stacking_height` being unconditional
+/// (jagged_pcs.rs:122): every bundle is honestly 21-round, so the per-proof
+/// verifier rebuild constant-folds to `num_variables = 21`.  A regression that
+/// re-introduced the area-clamp would make `bundle_num_vars` (=
+/// `fri_commitments.len()`) and `log_stacking_height` vary with the trace area
+/// → program-bytes/VK become clamp-dependent again (re-breaking #82) AND the
+/// masked-tail path Fiat-Shamir-desyncs.  This guard catches that at
+/// program-build time (it runs for both the real proof and the enum dummy,
+/// which take the same branch).  Called from every recursion stage's per-proof
+/// verifier rebuild (core / compress / deferred / shrink).
+pub fn assert_recursion_stacking_height_fixed(
+    bundle_num_vars: usize,
+    log_stacking_height: u32,
+    stage: &str,
+) {
+    use zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+    let expected = DEFAULT_LOG_STACKING_HEIGHT as usize;
+    assert_eq!(
+        bundle_num_vars, expected,
+        "[{stage}] DE-CLAMP REGRESSION (#88/#82): recursion bundle num_variables \
+         (fri_commitments.len() = {bundle_num_vars}) != DEFAULT_LOG_STACKING_HEIGHT \
+         ({expected}); the prover de-clamp (pick_log_stacking_height fixed at 21) \
+         regressed → the recursion VK is no longer enumerable",
+    );
+    assert_eq!(
+        log_stacking_height as usize, expected,
+        "[{stage}] DE-CLAMP REGRESSION (#88/#82): bundle log_stacking_height \
+         ({log_stacking_height}) != DEFAULT_LOG_STACKING_HEIGHT ({expected})",
+    );
+}
+
 // ── Per-chip cumulative sums (swap 1+2) ────────────────
 
 impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>

@@ -1205,6 +1205,26 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
+            // #88/#82 SINGLE-SHARD NORMALIZE: the production normalize path is
+            // arity-1 (`compress` calls `get_first_layer_inputs` with
+            // `first_layer_batch_size = 1` → this function is reached with
+            // `batch_size = 1`, one shard per `ZKMCoreBasefoldWitnessValues`).
+            // The multi-shard normalize VK was a PHANTOM (only the enumerator
+            // ever emitted arity≥2 Recursion shapes), so the in-circuit
+            // aggregate loop + the multi-shard dummy were dead weight on a path
+            // SP1 likewise forbids (core.rs:118 asserts shard_proofs.len()==1).
+            // Hard-assert the single-shard invariant so any caller that batches
+            // core shards into the normalize stage (a regression) is caught at
+            // input construction rather than silently building a normalize proof
+            // whose VK the enumerator no longer covers.
+            assert_eq!(
+                batch.len(),
+                1,
+                "normalize is single-shard (#88/#82): get_recursion_core_inputs_basefold \
+                 must be called with batch_size=1 (one core shard per normalize); \
+                 got a batch of {} shards",
+                batch.len()
+            );
             let bf_proofs = batch
                 .iter()
                 .map(|sp| *sp.basefold_shard_proof.as_ref().unwrap().clone())

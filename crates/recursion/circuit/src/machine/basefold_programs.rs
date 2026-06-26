@@ -598,24 +598,22 @@ mod tests {
         use zkm_pcs::shape::OrderedShape;
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
-        // Two-shard shape — first shard has 2 chips, second has 1.
+        // #88/#82 SINGLE-SHARD NORMALIZE: normalize is arity-1, so the dummy
+        // takes exactly ONE per-shard shape (the multi-shard normalize VK was a
+        // phantom — only the enumerator ever emitted arity≥2 Recursion).
+        // Single-shard shape with 2 chips.
         let shape = super::super::core::ZKMRecursionShape {
-            proof_shapes: vec![
-                OrderedShape::from_log2_heights(&[
-                    ("AddSub".to_string(), 3),
-                    ("Bitwise".to_string(), 3),
-                ]),
-                OrderedShape::from_log2_heights(&[("AddSub".to_string(), 4)]),
-            ],
+            proof_shapes: vec![OrderedShape::from_log2_heights(&[
+                ("AddSub".to_string(), 3),
+                ("Bitwise".to_string(), 3),
+            ])],
             is_complete: false,
         };
         let witness =
             super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
-        assert_eq!(witness.shard_proofs.len(), 2);
+        assert_eq!(witness.shard_proofs.len(), 1);
         assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
-        assert_eq!(witness.shard_proofs[1].chip_cumulative_sums.len(), 1);
         assert_eq!(witness.shard_proofs[0].chip_log_heights.len(), 2);
-        assert_eq!(witness.shard_proofs[1].chip_log_heights.len(), 1);
         assert!(!witness.is_complete);
     }
 

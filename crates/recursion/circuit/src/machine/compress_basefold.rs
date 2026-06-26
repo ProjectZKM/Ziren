@@ -569,6 +569,14 @@ pub fn verify_compress_basefold<C, SC, A>(
             LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
+                // DE-CLAMP GUARD (#88/#82): see core_basefold — every recursion
+                // bundle must commit at the fixed DEFAULT_LOG_STACKING_HEIGHT so
+                // the compose VK stays clamp-independent.
+                crate::shard_level_witness::assert_recursion_stacking_height_fixed(
+                    bundle_num_vars,
+                    host.commit.log_stacking_height,
+                    "compress_basefold",
+                );
                 per_proof_verifier =
                     crate::shard_proof_variable_lift::build_basefold_shard_verifier_with_num_vars::<SC>(
                         max_log_row_count,
@@ -773,6 +781,30 @@ pub fn verify_compress_basefold<C, SC, A>(
         // Assert start pc / shard match.
         builder.assert_felt_eq(_pc, _current_public_values.start_pc);
         builder.assert_felt_eq(_shard, _current_public_values.start_shard);
+
+        // GAP-1 (#88/#82 SOUNDNESS): per-input shard-index range check.
+        // The single-shard normalize range-checks `public_values.shard`
+        // (`core_basefold.rs` C::range_check_felt at MAX_LOG_NUMBER_OF_SHARDS),
+        // but compress had NO shard range-check analog.  Without it a child can
+        // claim a near-modulus `start_shard`/`next_shard` so the `_shard ==
+        // start_shard` continuity chain WRAPS the prime modulus (e.g. a child
+        // claiming `next_shard = p - 1` then the next claiming `start_shard =
+        // p - 1` while the honest count would overflow), breaking the
+        // shard-monotonicity the cumulative-sum + pc chain rely on.  Bind both
+        // the start and next shard index of every composed child to
+        // [0, 2^MAX_LOG_NUMBER_OF_SHARDS).  range_check_felt is height-
+        // independent (always num2bits(value,31) + a fixed number of bit-zero
+        // asserts), so the compose program VK stays f(chip-set, arity).
+        C::range_check_felt(
+            builder,
+            _current_public_values.start_shard,
+            zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS,
+        );
+        C::range_check_felt(
+            builder,
+            _current_public_values.next_shard,
+            zkm_core_machine::mips::MAX_LOG_NUMBER_OF_SHARDS,
+        );
 
         // Execution-shard constraints (boolean flag + first-seen
         // logic + consistency).
