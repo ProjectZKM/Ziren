@@ -2469,7 +2469,7 @@ impl<'a> Executor<'a> {
                 rt
             }
             // Opcode::SDC1 => 0,
-            _ => todo!(),
+            _ => unreachable!("unexpected store opcode: {:?}", instruction.opcode),
         };
 
         if aligned_addr + 3 > MAX_MEMORY as u32 {

@@ -121,9 +121,13 @@ impl ByteRecord for Vec<ByteLookupEvent> {
 
     fn add_byte_lookup_events_from_maps(
         &mut self,
-        _new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
+        new_events: Vec<&HashMap<ByteLookupEvent, usize>>,
     ) {
-        todo!()
+        for new_blu_map in new_events {
+            for (blu_event, count) in new_blu_map.iter() {
+                self.extend(std::iter::repeat_n(*blu_event, *count));
+            }
+        }
     }
 }
 
@@ -183,5 +187,24 @@ impl ByteOpcode {
     #[must_use]
     pub fn as_field<F: Field>(self) -> F {
         F::from_u8(self as u8)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vec_add_byte_lookup_events_from_maps_expands_counts() {
+        let event = ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 1, 2);
+        let mut map = HashMap::new();
+        map.insert(event, 3);
+
+        let mut events = Vec::new();
+        events.add_byte_lookup_events_from_maps(vec![&map]);
+
+        assert_eq!(events.len(), 3);
+        assert!(events.iter().all(|e| *e == event));
     }
 }
