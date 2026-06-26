@@ -142,12 +142,170 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let is_packed = has_cpu
             && (!record.global_memory_finalize_events.is_empty()
                 || !record.global_memory_initialize_events.is_empty());
+        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): a no-CPU precompile shard
+        // (e.g. an in-guest sha256 output-commit shard carrying ONLY ShaExtend,
+        // not ShaCompress) is a SUB-FAMILY of its whole precompile-family
+        // cluster.  The core/packed branches below `return None` for no-CPU
+        // records, which leaves the shard committed at its raw sub-family
+        // chip-set whose normalize VK is NOT enumerated (the enum emits one
+        // cluster per WHOLE family).  Lift it UP to the whole-family cluster
+        // here (same SP1 `smallest_cluster`-superset model the core path uses):
+        // build the shard's precompile shape, then `canonicalize_shape` injects
+        // the missing family chips so the committed chip-SET == the enumerated
+        // whole-family cluster == IN-MAP.
+        if !has_cpu
+            && record.global_memory_initialize_events.is_empty()
+            && record.global_memory_finalize_events.is_empty()
+        {
+            return self.precompile_canonical_cluster_shape(prep, record);
+        }
         let mut heights = MipsAir::<F>::core_heights(record);
         if is_packed {
             heights.extend(MipsAir::<F>::memory_heights(record));
         }
         let log2_shard_size = record.cpu_events.len().next_power_of_two().ilog2() as usize;
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
+    }
+
+    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): canonical-cluster shape for a
+    /// no-CPU precompile shard.  Mirrors the precompile branch of
+    /// [`Self::fix_shape`] (the same `partial_precompile_shapes` +
+    /// `get_precompile_shapes` band-cap search), unioned with `prep` and then
+    /// lifted to the WHOLE-family cluster via [`canonicalize_shape`].  The
+    /// committed shard then presents the whole-family chip-SET (sub-family
+    /// shards get the absent family chips injected at log-1 by the band-cap
+    /// guard's missing-chip injection), so its FIX-off normalize VK equals the
+    /// enumerated whole-family cluster VK in the production vk_map.
+    ///
+    /// Returns `None` when the record carries no precompile events at all (no
+    /// band-cap installed → legacy own-height packing, as before).
+    fn precompile_canonical_cluster_shape(
+        &self,
+        prep: Shape<MipsAirId>,
+        record: &ExecutionRecord,
+    ) -> Option<Shape<MipsAirId>> {
+        let mut shape = prep;
+        // Find the precompile worker air whose events this record carries and
+        // run the SAME band-cap fitting search as `fix_shape`'s precompile arm.
+        for (air, (memory_events_per_row, allowed_log2_heights)) in
+            self.partial_precompile_shapes.iter()
+        {
+            let Some((height, num_memory_local_events, num_global_events)) =
+                air.precompile_heights(record)
+            else {
+                continue;
+            };
+            for allowed_log2_height in allowed_log2_heights {
+                let allowed_height = 1usize << allowed_log2_height;
+                if height <= allowed_height {
+                    for cand in
+                        self.get_precompile_shapes(air, *memory_events_per_row, *allowed_log2_height)
+                    {
+                        let mem_events_height = cand[2].1;
+                        let global_events_height = cand[3].1;
+                        if num_memory_local_events.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW)
+                            <= (1 << mem_events_height)
+                            && num_global_events <= (1 << global_events_height)
+                        {
+                            shape.extend(
+                                cand.iter()
+                                    .map(|x| (MipsAirId::from_str(&x.0).unwrap(), x.1)),
+                            );
+                            // Lift the sub-family shard to its whole-family
+                            // cluster (inject the absent family chips at log-1).
+                            canonicalize_shape(&mut shape);
+                            return Some(shape);
+                        }
+                    }
+                }
+            }
+            // The precompile worker is present but no band fits — fall through
+            // to None (legacy own-height packing; `fix_shape` would error here,
+            // but the FIX-off band-cap is best-effort).
+            return None;
+        }
+        None
+    }
+
+    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): NAME-based sibling of
+    /// [`Self::precompile_canonical_cluster_shape`], for the enum / gate side
+    /// (`_from_ordered` / `_from_raw`) which holds a chip NAME -> raw-rows map
+    /// rather than a record.  The committed shard pads each PRESENT chip to its
+    /// own raw height and injects the absent whole-family chips at log-1, so the
+    /// canonical shape is `prep ∪ {present precompile-shard chips at their
+    /// log-height} ∪ {missing family chips at log-1}` (`canonicalize_shape`).
+    /// This matches the chip-SET the real-proof band-cap path produces.
+    ///
+    /// `raw` maps chip NAME -> RAW row count (2^log_h).  Returns `None` if the
+    /// shard carries no recognizable precompile worker chip.
+    fn precompile_canonical_cluster_shape_from_names(
+        &self,
+        prep: Shape<MipsAirId>,
+        raw: &std::collections::BTreeMap<String, usize>,
+    ) -> Option<Shape<MipsAirId>> {
+        // A precompile shard is identified by carrying SyscallPrecompile (the
+        // worker-syscall chip every precompile shard emits) plus at least one
+        // precompile worker chip (anything that is neither a core/memory chip
+        // nor a preprocessed chip).  We rebuild the shape from the present
+        // chip NAMEs at their raw log-heights, then canonicalize up.
+        let mut shape = prep;
+        let mut saw_precompile_worker = false;
+        for (name, rows) in raw.iter() {
+            if *rows == 0 {
+                continue;
+            }
+            let Ok(id) = MipsAirId::from_str(name) else { continue };
+            // Skip the preprocessed chips already in `prep`.
+            if matches!(id, MipsAirId::Program | MipsAirId::Byte) {
+                continue;
+            }
+            let log_h = rows.next_power_of_two().trailing_zeros() as usize;
+            shape.insert(id, log_h);
+            // Any chip outside the core/memory set that is not the shared
+            // SyscallPrecompile/MemoryLocal/Global plumbing marks this as a
+            // genuine precompile shard.
+            if !matches!(
+                id,
+                MipsAirId::SyscallPrecompile
+                    | MipsAirId::MemoryLocal
+                    | MipsAirId::Global
+                    | MipsAirId::SyscallCore
+            ) && !Self::is_core_or_memory_id(id)
+            {
+                saw_precompile_worker = true;
+            }
+        }
+        if !saw_precompile_worker {
+            return None;
+        }
+        canonicalize_shape(&mut shape);
+        Some(shape)
+    }
+
+    /// Whether `id` is a core-execution or global-memory chip (NOT a precompile
+    /// worker).  Used to distinguish precompile-shard worker chips from the
+    /// shared core/memory plumbing.
+    fn is_core_or_memory_id(id: MipsAirId) -> bool {
+        matches!(
+            id,
+            MipsAirId::Cpu
+                | MipsAirId::Branch
+                | MipsAirId::Jump
+                | MipsAirId::MovCond
+                | MipsAirId::MiscInstrs
+                | MipsAirId::MemoryInstrs
+                | MipsAirId::SyscallInstrs
+                | MipsAirId::DivRem
+                | MipsAirId::AddSub
+                | MipsAirId::Bitwise
+                | MipsAirId::Mul
+                | MipsAirId::ShiftRight
+                | MipsAirId::ShiftLeft
+                | MipsAirId::Lt
+                | MipsAirId::CloClz
+                | MipsAirId::MemoryGlobalInit
+                | MipsAirId::MemoryGlobalFinalize
+        )
     }
 
     /// `OrderedShape` (chip NAME -> raw log_height) sibling of
@@ -176,6 +334,13 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|id| (id, get(&id)))
             .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
+        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): no-CPU precompile shard.
+        if !has_cpu
+            && get(&MipsAirId::MemoryGlobalInit) == 0
+            && get(&MipsAirId::MemoryGlobalFinalize) == 0
+        {
+            return self.precompile_canonical_cluster_shape_from_names(prep, &raw);
+        }
         // Core heights (same MipsAirIds + order as MipsAir::core_heights), then
         // memory heights for the packed branch (same as MipsAir::memory_heights).
         let core_ids = [
@@ -226,6 +391,13 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|id| (id, get(&id)))
             .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
+        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): no-CPU precompile shard.
+        if !has_cpu
+            && get(&MipsAirId::MemoryGlobalInit) == 0
+            && get(&MipsAirId::MemoryGlobalFinalize) == 0
+        {
+            return self.precompile_canonical_cluster_shape_from_names(prep, raw);
+        }
         let core_ids = [
             MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
             MipsAirId::MiscInstrs, MipsAirId::MemoryInstrs, MipsAirId::SyscallInstrs,
@@ -1575,6 +1747,146 @@ pub mod tests {
         // Originals preserved at their real heights.
         assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::Cpu).unwrap().1, 21);
         assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::AddSub).unwrap().1, 21);
+    }
+
+    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): a no-CPU sha256 shard carrying
+    /// only ShaExtend (+ control) — an in-guest sha256 output-commit splits the
+    /// sha256 family across shards — must canonicalize UP to the WHOLE sha256
+    /// family cluster (inject ShaCompress + ShaCompressControl), so its FIX-off
+    /// normalize VK lands on the enumerated whole-family cluster VK.  Before the
+    /// fix `find_canonical_cluster_shape_from_raw` returned `None` for this shard
+    /// (the `canonical_cluster_from_parts` no-CPU branch is `return None`),
+    /// leaving the sub-family chip-set un-enumerated.
+    #[test]
+    fn precompile_subfamily_canonicalizes_to_whole_family() {
+        use std::collections::BTreeMap;
+        use std::str::FromStr;
+        let cfg = CoreShapeConfig::<p3_koala_bear::KoalaBear>::default();
+
+        // The exact sub-family shard the task describes: ShaExtend WITHOUT
+        // ShaCompress.  Raw row counts (the `_from_raw` input convention).
+        let raw: BTreeMap<String, usize> = [
+            ("Byte", 1 << 16),
+            ("Program", 1 << 19),
+            ("Global", 128),
+            ("MemoryLocal", 16),
+            ("SyscallPrecompile", 16),
+            ("ShaExtend", 64),
+            ("ShaExtendControl", 16),
+        ]
+        .into_iter()
+        .map(|(n, h)| (n.to_string(), h))
+        .collect();
+
+        let shape = cfg
+            .find_canonical_cluster_shape_from_raw(&raw)
+            .expect("precompile sub-family shard must canonicalize to a cluster (was None)");
+        let present: std::collections::BTreeSet<String> =
+            shape.iter().map(|(id, _)| id.to_string()).collect();
+
+        // The whole sha256 family chips must ALL be present (the two absent
+        // worker/control chips injected by `canonicalize_shape`).
+        for must in [
+            "ShaExtend",
+            "ShaExtendControl",
+            "ShaCompress",
+            "ShaCompressControl",
+            "SyscallPrecompile",
+            "MemoryLocal",
+            "Global",
+            "Byte",
+            "Program",
+        ] {
+            assert!(present.contains(must), "canonicalized shard must contain {must}; got {present:?}");
+        }
+        // The injected ShaCompress chips sit at log-height 1 (zero-event pad).
+        assert_eq!(
+            *shape.iter().find(|(id, _)| id.to_string() == "ShaCompress").unwrap().1,
+            1,
+            "injected ShaCompress must be at log-height 1"
+        );
+        // No CORE-execution chips leak in (the smallest superset is the precompile
+        // cluster, NOT the legacy core+sha union).
+        for forbidden in ["Cpu", "AddSub", "DivRem", "MemoryGlobalInit"] {
+            assert!(
+                !present.contains(forbidden),
+                "precompile cluster must NOT contain core chip {forbidden}; got {present:?}"
+            );
+        }
+        // The resulting chip-SET must equal a WHOLE-family precompile cluster in
+        // build_mips_machine_shape (== what the enum `generate()` emits), so the
+        // normalize VK is in-map.
+        let machine_shape = zkm_pcs::stacked_shapes::build_mips_machine_shape();
+        let present_ids: std::collections::BTreeSet<MipsAirId> =
+            present.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
+        let enumerated = machine_shape.chip_clusters.iter().any(|c| {
+            let ids: std::collections::BTreeSet<MipsAirId> =
+                c.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
+            ids == present_ids
+        });
+        assert!(
+            enumerated,
+            "canonicalized precompile chip-SET must equal an enumerated cluster; got {present_ids:?}"
+        );
+    }
+
+    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): the fix is GENERAL across all
+    /// precompile families and across ANY sub-family of a family (the SP1
+    /// `smallest_cluster`-superset model collapses every sub-family of a family
+    /// to the SAME whole-family cluster, so the reachable set is BOUNDED — one
+    /// enumerated cluster per family, NOT combinatorial).  Each case here is a
+    /// no-CPU precompile shard carrying a STRICT SUBSET of its family's chips;
+    /// after canonicalization the chip-SET must equal an enumerated cluster.
+    #[test]
+    fn precompile_subfamily_coverage_is_general_and_bounded() {
+        use std::collections::BTreeMap;
+        use std::str::FromStr;
+        let cfg = CoreShapeConfig::<p3_koala_bear::KoalaBear>::default();
+        let machine_shape = zkm_pcs::stacked_shapes::build_mips_machine_shape();
+        let base = |extra: &[(&str, usize)]| -> BTreeMap<String, usize> {
+            let mut m: BTreeMap<String, usize> = [
+                ("Byte", 1 << 16),
+                ("Program", 1 << 18),
+                ("Global", 128),
+                ("MemoryLocal", 16),
+                ("SyscallPrecompile", 16),
+            ]
+            .into_iter()
+            .map(|(n, h)| (n.to_string(), h))
+            .collect();
+            for (n, h) in extra {
+                m.insert(n.to_string(), *h);
+            }
+            m
+        };
+        // (label, present-precompile-subset) — each a STRICT subset of its family.
+        let cases: &[(&str, &[(&str, usize)])] = &[
+            // sha256: the OTHER half (ShaCompress-only, no ShaExtend).
+            ("sha256_compress_only", &[("ShaCompress", 64), ("ShaCompressControl", 16)]),
+            // keccak worker WITHOUT its control twin.
+            ("keccak_worker_only", &[("KeccakSponge", 32)]),
+            // secp256k1: only AddAssign (no Double/Decompress).
+            ("k256_add_only", &[("Secp256k1AddAssign", 32)]),
+            // ed25519: only EdAddAssign (no EdDecompress).
+            ("ed25519_add_only", &[("EdAddAssign", 32)]),
+        ];
+        for (label, extra) in cases {
+            let raw = base(extra);
+            let shape = cfg.find_canonical_cluster_shape_from_raw(&raw).unwrap_or_else(|| {
+                panic!("[{label}] sub-family shard must canonicalize to a cluster (was None)")
+            });
+            let present_ids: std::collections::BTreeSet<MipsAirId> =
+                shape.iter().map(|(id, _)| *id).collect();
+            let enumerated = machine_shape.chip_clusters.iter().any(|c| {
+                let ids: std::collections::BTreeSet<MipsAirId> =
+                    c.iter().filter_map(|n| MipsAirId::from_str(n).ok()).collect();
+                ids == present_ids
+            });
+            assert!(
+                enumerated,
+                "[{label}] canonicalized chip-SET must equal an enumerated cluster; got {present_ids:?}"
+            );
+        }
     }
 }
 
