@@ -186,8 +186,22 @@ pub fn zkm_debug_mode() -> bool {
 ///
 /// This function is safe to use only for fields that can be transmuted from 0u32.
 pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
-    debug_assert!(std::mem::size_of::<F>() == 4);
+    assert!(std::mem::size_of::<F>() == 4, "zeroed_f_vec only supports 4-byte field elements");
 
     let vec = vec![0u32; len];
     unsafe { std::mem::transmute::<Vec<u32>, Vec<F>>(vec) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use p3_field::FieldAlgebra;
+    use p3_koala_bear::KoalaBear;
+
+    #[test]
+    fn zeroed_f_vec_returns_zero_values_for_koalabear() {
+        let values = zeroed_f_vec::<KoalaBear>(4);
+        assert_eq!(values.len(), 4);
+        assert!(values.iter().all(|value| *value == KoalaBear::ZERO));
+    }
 }
