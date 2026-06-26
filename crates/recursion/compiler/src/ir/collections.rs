@@ -30,9 +30,7 @@ impl<C: Config, V: MemVariable<C>> Array<C, V> {
     /// Shifts the array by `shift` elements.
     pub fn shift(&self, builder: &mut Builder<C>, shift: Var<C::N>) -> Array<C, V> {
         match self {
-            Self::Fixed(_) => {
-                todo!()
-            }
+            Self::Fixed(_) => unreachable!("Array::Fixed does not support shift()"),
             Self::Dyn(ptr, len) => {
                 assert!(V::size_of() == 1, "only support variables of size 1");
                 let new_address = builder.eval(ptr.address + shift);
@@ -47,9 +45,7 @@ impl<C: Config, V: MemVariable<C>> Array<C, V> {
     /// Truncates the array to `len` elements.
     pub fn truncate(&self, builder: &mut Builder<C>, len: Usize<C::N>) {
         match self {
-            Self::Fixed(_) => {
-                todo!()
-            }
+            Self::Fixed(_) => unreachable!("Array::Fixed does not support truncate()"),
             Self::Dyn(_, old_len) => {
                 builder.assign(*old_len, len);
             }
@@ -157,9 +153,7 @@ impl<C: Config> Builder<C> {
         let index = index.into();
 
         match slice {
-            Array::Fixed(_) => {
-                todo!()
-            }
+            Array::Fixed(_) => unreachable!("Array::Fixed does not support get_ptr()"),
             Array::Dyn(ptr, len) => {
                 if self.debug {
                     let index_v = index.materialize(self);
@@ -184,8 +178,13 @@ impl<C: Config> Builder<C> {
         let index = index.into();
 
         match slice {
-            Array::Fixed(_) => {
-                todo!()
+            Array::Fixed(slice) => {
+                if let Usize::Const(idx) = index {
+                    let value: V = self.eval(value);
+                    slice[idx] = value;
+                } else {
+                    unreachable!("Array::Fixed does not support symbolic indices in set()")
+                }
             }
             Array::Dyn(ptr, len) => {
                 if self.debug {
@@ -210,8 +209,12 @@ impl<C: Config> Builder<C> {
         let index = index.into();
 
         match slice {
-            Array::Fixed(_) => {
-                todo!()
+            Array::Fixed(slice) => {
+                if let Usize::Const(idx) = index {
+                    slice[idx] = value;
+                } else {
+                    unreachable!("Array::Fixed does not support symbolic indices in set_value()")
+                }
             }
             Array::Dyn(ptr, _) => {
                 let index = MemIndex { index, offset: 0, size: V::size_of() };
@@ -362,5 +365,63 @@ impl<C: Config, V: FromConstant<C> + MemVariable<C>, const N: usize> FromConstan
 
     fn constant(value: Self::Constant, builder: &mut Builder<C>) -> Self {
         value.map(|x| V::constant(x, builder))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::OuterConfig;
+    use crate::ir::Felt;
+    use p3_field::FieldAlgebra;
+
+    type C = OuterConfig;
+    type N = <C as Config>::N;
+    type Ff = <C as Config>::F;
+
+    #[test]
+    fn fixed_array_set_and_set_value_update_elements() {
+        let mut builder = Builder::<C>::default();
+        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let two: Felt<Ff> = builder.eval(Ff::from_canonical_u32(2));
+        let three: Felt<Ff> = builder.eval(Ff::from_canonical_u32(3));
+        let seven: Felt<Ff> = builder.eval(Ff::from_canonical_u32(7));
+        let nine: Felt<Ff> = builder.eval(Ff::from_canonical_u32(9));
+        let mut array = builder.vec::<Felt<Ff>>(vec![one, two, three]);
+
+        builder.set_value(&mut array, 1, seven);
+        builder.set(&mut array, 2, nine);
+
+        let values = array.vec();
+        assert_eq!(values.len(), 3);
+        assert_eq!(array.len(), Usize::Const(3));
+    }
+
+    #[test]
+    #[should_panic(expected = "Array::Fixed does not support shift()")]
+    fn fixed_array_shift_panics_with_clear_message() {
+        let mut builder = Builder::<C>::default();
+        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let shift = builder.eval(N::from_canonical_u32(1));
+        let array = builder.vec::<Felt<Ff>>(vec![one]);
+        let _ = array.shift(&mut builder, shift);
+    }
+
+    #[test]
+    #[should_panic(expected = "Array::Fixed does not support truncate()")]
+    fn fixed_array_truncate_panics_with_clear_message() {
+        let mut builder = Builder::<C>::default();
+        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let array = builder.vec::<Felt<Ff>>(vec![one]);
+        array.truncate(&mut builder, Usize::Const(0));
+    }
+
+    #[test]
+    #[should_panic(expected = "Array::Fixed does not support get_ptr()")]
+    fn fixed_array_get_ptr_panics_with_clear_message() {
+        let mut builder = Builder::<C>::default();
+        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let array = builder.vec::<Felt<Ff>>(vec![one]);
+        let _ = builder.get_ptr(&array, 0usize);
     }
 }
