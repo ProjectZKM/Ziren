@@ -10,6 +10,18 @@ pub const PAGE_ADDR_SIZE: usize = 12;
 pub const PAGE_ADDR_MASK: usize = (1 << PAGE_ADDR_SIZE) - 1;
 pub const PAGE_SIZE: usize = 1 << PAGE_ADDR_SIZE;
 
+
+fn align_size(size: u32) -> Result<u32, ExecutionError> {
+    if size & (PAGE_ADDR_MASK as u32) == 0 {
+        return Ok(size);
+    }
+
+    let aligned = size
+        .checked_add(PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32)))
+        .ok_or(ExecutionError::InvalidSyscallArgs())?;
+    Ok(aligned)
+}
+
 impl Syscall for SysMmapSyscall {
     fn num_extra_cycles(&self) -> u32 {
         0
@@ -22,12 +34,8 @@ impl Syscall for SysMmapSyscall {
         a0: u32,
         a1: u32,
     ) -> Result<Option<u32>, ExecutionError> {
-        let mut size = a1;
         let start_clk = rt.clk;
-        if size & (PAGE_ADDR_MASK as u32) != 0 {
-            // adjust size to align with page size
-            size = size.wrapping_add(PAGE_SIZE as u32 - (size & (PAGE_ADDR_MASK as u32)));
-        }
+        let size = align_size(a1)?;
 
         let a3_record = rt.rw_traced(Register::A3, 0);
 
@@ -55,5 +63,26 @@ impl Syscall for SysMmapSyscall {
             rt.rt.syscall_event(start_clk, None, rt.next_pc, syscall_code.syscall_id(), a0, a1);
         rt.add_precompile_event(SyscallCode::SYS_LINUX, syscall_event, event);
         Ok(Some(v0))
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_align_size_preserves_aligned_values() {
+        assert_eq!(align_size(0x2000).unwrap(), 0x2000);
+    }
+
+    #[test]
+    fn test_align_size_rounds_up_misaligned_values() {
+        assert_eq!(align_size(0x1001).unwrap(), 0x2000);
+    }
+
+    #[test]
+    fn test_align_size_rejects_overflow() {
+        assert!(matches!(align_size(0xFFFF_F001), Err(ExecutionError::InvalidSyscallArgs())));
     }
 }
