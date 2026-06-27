@@ -337,7 +337,22 @@ pub fn full_jagged_evaluation<EF: Field>(
     // the top prefix-sum bit for single/equal-height packings.
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    let num_bits = log_m + 1;
+    // RECURSION-LAYER AREA PIN (#88/#82 Stage 2): mirror `prove_jagged_evaluation`'s
+    // pinned `half`.  This closed form computes the `claimed_sum` the prover
+    // observes into the transcript; the in-circuit recursion verifier re-derives
+    // the SAME closed form with `num_bits = jagged_n/2` read from the witnessed
+    // bundle (shard_level_witness.rs:1330), so the prover side MUST use the same
+    // `num_bits = z_index.len() + 1` (= pinned L + 1) when the area pin is active
+    // — else the prover's `claimed_sum` (natural bits) would not match the
+    // in-circuit recompute (pinned bits) and the compose closing would reject.
+    // The host verifier only REPLAYS the transcript (it does not recompute this
+    // closed form — verify_jagged_basefold uses replay_jagged_evaluation_transcript),
+    // so a pin-gated change here is prove-side only.  `None` (CORE / shrink / wrap
+    // / every test) → NATURAL `log_m + 1` (byte-identical to today).
+    let num_bits = match crate::shard_level::band_cap::current_recursion_area_pin() {
+        Some(_) => z_index.len() + 1,
+        None => log_m + 1,
+    };
 
     // z_col_lagrange[k] = EQ(k_bits, z_col)
     let z_col_lagrange = partial_lagrange(z_col);

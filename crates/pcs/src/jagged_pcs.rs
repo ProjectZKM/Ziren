@@ -86,6 +86,27 @@ pub type BasefoldLateBindingProverData = BasefoldLateBindingProverDataGeneric<Ja
 /// stacked PCS doesn't end up over-padding past the actual data.
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
+/// SP1-faithful RECURSION-LAYER trace-area pin (#88/#82, Stage 1).
+///
+/// SP1's `crates/prover/src/components.rs` pins `RECURSION_LOG_TRACE_AREA = 27`
+/// for the compress/recursion machine: every recursion proof (normalize AND
+/// compose) commits its jagged dense at a FIXED area `2^27`, so the committed
+/// codeword always has `num_stripes = 2^(27 - log_stacking_height) = 2^(27-21)
+/// = 64` columns BY CONSTRUCTION.  With the per-child stripe shape fixed, every
+/// compose child-bundle read is constant-length, so the compose VK collapses to
+/// `f(chip-set, arity)` (the precondition for an enumerable FIX-off recursion
+/// vk_map).
+///
+/// The CORE (`RiscvAir`) commit is NOT pinned — it stays NATURAL (the FIX-off
+/// perf win is a core-trace property).  The pin is keyed by which machine is
+/// proving: the recursion (`compress`) prover installs the
+/// [`crate::shard_level::band_cap::RecursionAreaPinGuard`] around its
+/// commit+open so [`precompute_jagged_basefold_commit_generic`] /
+/// [`precompute_jagged_basefold_commit`] bump `packing.log_dense_size` to
+/// `max(natural, RECURSION_LOG_TRACE_AREA)`; core leaves the carrier unset
+/// (`None`) and is byte-identical to the unpinned path.
+pub const RECURSION_LOG_TRACE_AREA: usize = 27;
+
 /// Interleave batch size for the stacked PCS: number of MLE-column
 /// streams packed into each stripe.  **`32`** matches SP1's
 /// `slop_jagged::basefold::DEFAULT_INTERLEAVE_BATCH_SIZE`
@@ -2104,7 +2125,15 @@ pub mod jagged {
 
         let _t_meta = std::time::Instant::now();
         let _meta_span = tracing::info_span!("jagged_compute_metadata_pre").entered();
-        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        // RECURSION-LAYER AREA PIN (#88/#82 Stage 1): see the twin in
+        // `precompute_jagged_basefold_commit_generic`.  Carrier-keyed
+        // (recursion-only); `None` on CORE/shrink/wrap → byte-identical.
+        if let Some(target) = crate::shard_level::band_cap::current_recursion_area_pin() {
+            if packing.log_dense_size < target {
+                packing.log_dense_size = target;
+            }
+        }
         drop(_meta_span);
         tracing::info!(
             elapsed_ms = _t_meta.elapsed().as_millis() as u64,
@@ -2205,7 +2234,35 @@ pub mod jagged {
             > + Clone
             + 'static,
     {
-        let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
+        // RECURSION-LAYER AREA PIN (#88/#82 Stage 1, SP1-faithful).  When the
+        // recursion (`compress`) prover has installed the area pin on this
+        // thread, raise `log_dense_size` to the pin floor so the dense
+        // materialize + commit run at a FIXED area (`2^pin`) → constant
+        // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
+        // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
+        let pin = crate::shard_level::band_cap::current_recursion_area_pin();
+        let natural_log_dense = packing.log_dense_size;
+        if let Some(target) = pin {
+            if packing.log_dense_size < target {
+                packing.log_dense_size = target;
+            }
+        }
+        // STAGE-1 AREA-PIN PROBE (#88/#82, env ZIREN_AREA_PIN_DBG=1, default
+        // OFF): show that CORE commits read pin=None (natural area, untouched)
+        // while RECURSION commits read pin=Some(27) → log_dense pinned to 27.
+        if std::env::var("ZIREN_AREA_PIN_DBG").is_ok() {
+            let stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+            let final_area = (1usize << packing.log_dense_size)
+                .next_multiple_of(1usize << stack);
+            eprintln!(
+                "[APIN] pin={pin:?} natural_log_dense={natural_log_dense} \
+                 final_log_dense={} final_area=2^{} num_stripes={}",
+                packing.log_dense_size,
+                (final_area as u64).trailing_zeros(),
+                final_area >> stack as usize,
+            );
+        }
         let (commit, prover_data) = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);

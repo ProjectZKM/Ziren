@@ -569,6 +569,15 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 >,
             >,
     {
+        // RECURSION-LAYER AREA PIN (#88/#82 Stage 2 DUMMY MIRROR): the shrink
+        // program (built from this wrap dummy) verifies a single CHILD that is
+        // a RECURSION (compress) proof committed at the FIXED pinned area
+        // `2^RECURSION_LOG_TRACE_AREA`.  Install the same thread-local pin so
+        // the dummy child bundle matches the real pinned compress proof
+        // (constant num_stripes / L), keeping the shrink VK enumerable.
+        let _recursion_area_pin = zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
+            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
+        );
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes

@@ -549,7 +549,21 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     } else {
         (last - 1).next_power_of_two().trailing_zeros() as usize
     };
-    let half = log_m + 1;
+    // RECURSION-LAYER AREA PIN (#88/#82 Stage 2): when the recursion (`compress`)
+    // prover has installed the area pin on this thread, run the jagged-eval over
+    // the PINNED dense rather than the natural column geometry, so its dimension
+    // is CONSTANT across heterogeneous recursion children (the precondition for
+    // an enumerable compose VK).  `z_trace` is the reduction's eval_point over
+    // the pinned `2^log_dense_size` dense, so `z_trace.len() == pinned L`; using
+    // `half = z_trace.len() + 1` makes `n = 2*(L+1)` (= 2*28 = 56 at L=27),
+    // matching the dummy mirror (`dummy_jagged_basefold_bundle`, log_m = pinned
+    // L).  The prefix sums (natural, ≤ 2^L) fit in `L+1` bits, so the bigger
+    // representation is faithful (extra high bits zero).  `None` (CORE / shrink /
+    // wrap, and every test) → the NATURAL `log_m + 1` (byte-identical to today).
+    let half = match crate::shard_level::band_cap::current_recursion_area_pin() {
+        Some(_) => z_trace.len() + 1,
+        None => log_m + 1,
+    };
     let n = 2 * half;
 
     let claimed_sum = full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);

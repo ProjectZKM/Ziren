@@ -86,6 +86,20 @@ thread_local! {
     /// the legacy bitrev branch (byte-identical).
     static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
         const { std::cell::RefCell::new(None) };
+
+    /// RECURSION-LAYER trace-area pin (#88/#82 Stage 1, SP1-faithful).  When
+    /// `Some(target_log)`, the jagged dense commit on this thread is pinned to
+    /// `log_dense_size = max(natural, target_log)` (= a FIXED `2^target_log`
+    /// committed area → constant `num_stripes`), so every recursion proof
+    /// (normalize AND compose) commits at one stripe shape and the compose VK
+    /// becomes `f(chip-set, arity)` only.  Installed ONLY by the recursion
+    /// (`compress`) prover via [`RecursionAreaPinGuard`] for the scope of its
+    /// `commit` + `open` (the same worker thread); `None` on every other path
+    /// (CORE, shrink, wrap) == NATURAL own-area commit (byte-identical to the
+    /// unpinned path).  This is the REAL DEFAULT (no env flag); the constant is
+    /// `crate::jagged_pcs::RECURSION_LOG_TRACE_AREA`.
+    static CURRENT_RECURSION_AREA_PIN: std::cell::RefCell<Option<usize>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 static GUARD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -227,4 +241,58 @@ pub fn set_use_rev(decision: Option<bool>) {
 #[must_use]
 pub fn current_use_rev() -> Option<bool> {
     CURRENT_USE_REV.with(|c| *c.borrow())
+}
+
+/// RAII guard that pins the RECURSION-LAYER jagged commit area for its scope on
+/// the calling thread (#88/#82 Stage 1).  The recursion (`compress`) prover
+/// installs it around its per-shard `commit` + `open` (which run on the same
+/// worker thread) so the jagged dense commit is pinned to
+/// `log_dense_size = max(natural, target_log)` — a FIXED committed area, hence a
+/// fixed `num_stripes`, hence a compose VK that depends only on (chip-set,
+/// arity).  On Drop the slot is cleared only when it still holds this guard's
+/// generation, so a stale Drop on a reused worker thread never clears a newer
+/// install (and a non-recursion commit on a reused thread reads `None`).
+pub struct RecursionAreaPinGuard {
+    gen: u64,
+}
+
+impl RecursionAreaPinGuard {
+    /// Install `Some(target_log)` as the recursion area pin for the calling
+    /// thread and return a guard that clears it on drop.
+    #[must_use]
+    pub fn new(target_log: usize) -> Self {
+        let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        CURRENT_RECURSION_AREA_PIN.with(|c| {
+            *c.borrow_mut() = Some(target_log);
+        });
+        RECURSION_AREA_PIN_GEN.with(|g| {
+            *g.borrow_mut() = gen;
+        });
+        Self { gen }
+    }
+}
+
+impl Drop for RecursionAreaPinGuard {
+    fn drop(&mut self) {
+        let still_ours = RECURSION_AREA_PIN_GEN.with(|g| *g.borrow() == self.gen);
+        if still_ours {
+            CURRENT_RECURSION_AREA_PIN.with(|c| {
+                *c.borrow_mut() = None;
+            });
+        }
+    }
+}
+
+thread_local! {
+    /// Generation tag for the currently-installed [`RecursionAreaPinGuard`] on
+    /// this thread (nested-guard safe; mirrors `CURRENT_BAND_CAP`'s gen tag).
+    static RECURSION_AREA_PIN_GEN: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
+}
+
+/// The currently-installed recursion-layer area pin (`log_dense_size` floor) for
+/// the calling thread, or `None` when no [`RecursionAreaPinGuard`] is installed
+/// (every CORE / shrink / wrap commit → NATURAL own-area packing).
+#[must_use]
+pub fn current_recursion_area_pin() -> Option<usize> {
+    CURRENT_RECURSION_AREA_PIN.with(|c| *c.borrow())
 }

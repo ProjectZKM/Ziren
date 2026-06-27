@@ -477,7 +477,32 @@ pub fn dummy_jagged_basefold_bundle(
         .collect();
     let packing = pack_traces_jagged::<F>(&traces);
     let total_values = packing.total_values;
-    let log_dense_size = packing.log_dense_size;
+    // ── RECURSION-LAYER AREA PIN (#88/#82 Stage 2 DUMMY MIRROR) ──
+    // Mirror EXACTLY the host pin in
+    // `zkm_pcs::jagged_pcs::precompute_jagged_basefold_commit_generic`:
+    // when the recursion (`compress`) prover has installed the area pin on
+    // this thread (via `RecursionAreaPinGuard`, read with
+    // `current_recursion_area_pin()`), raise `log_dense_size` (= L) to the pin
+    // floor so the dummy commits at the FIXED area `2^pin` — giving constant
+    // `num_stripes = 2^(L - log_stacking) = 2^(27-21) = 64`, constant reduction
+    // rounds / eval_point (= L), and `commit.chip_dims = [(1, L)]` — IDENTICAL
+    // to the real PINNED recursion proof regardless of the child's natural
+    // heights.  CORE children (normalize) leave the carrier UNSET (`None`) →
+    // NATURAL own-area packing (byte-identical to the unpinned dummy).
+    //
+    // `offsets` / `column_counts` / `total_values` stay NATURAL — the host pin
+    // raises only the committed dense AREA (`log_dense_size`), never the column
+    // geometry; the recursion verifier reads these WITNESSED offsets directly.
+    // The jagged-eval sub-sumcheck dimension `jagged_n` IS pinned, though (see
+    // the `log_m` note below) — it tracks the PINNED dense, mirroring the real
+    // prover's pinned `prove_jagged_evaluation` (`half = z_trace.len() + 1`).
+    let recursion_pin = zkm_pcs::shard_level::band_cap::current_recursion_area_pin();
+    let mut log_dense_size = packing.log_dense_size;
+    if let Some(target) = recursion_pin {
+        if log_dense_size < target {
+            log_dense_size = target;
+        }
+    }
     let column_counts: Vec<usize> =
         packing.chip_infos.iter().map(|ci| ci.column_count).collect();
     let packing_meta = PackingMeta {
@@ -514,10 +539,26 @@ pub fn dummy_jagged_basefold_bundle(
     // default this is blowup=2 (was 1), so the dummy path length must track
     // the config, not a hardcoded `+1`.
     let inner_log_blowup = inner_fri.log_blowup();
-    let log_m = if total_values <= 1 {
-        0
-    } else {
-        (total_values - 1).next_power_of_two().trailing_zeros() as usize
+    // jagged-eval sub-sumcheck dimension `jagged_n = 2*(log_m+1)`.
+    //
+    // RECURSION-LAYER AREA PIN (#88/#82 Stage 2): when the area pin is active,
+    // the real prover's `prove_jagged_evaluation` runs the jagged-eval over the
+    // PINNED dense (it sets `half = z_trace.len() + 1` where `z_trace` is the
+    // reduction's eval_point of the pinned `2^log_dense_size` dense), so
+    // `jagged_n = 2*(log_dense_size + 1)` regardless of the child's NATURAL
+    // `total_values`.  Mirror that here (`log_m = log_dense_size`, the pinned L)
+    // so the dummy child's `jagged_n` equals the real pinned child's — the LAST
+    // height-dependent length, collapsing the compose VK to f(chip-set, arity).
+    // CORE children (`None`) keep the NATURAL derivation (byte-identical).
+    let log_m = match recursion_pin {
+        Some(_) => log_dense_size,
+        None => {
+            if total_values <= 1 {
+                0
+            } else {
+                (total_values - 1).next_power_of_two().trailing_zeros() as usize
+            }
+        }
     };
     let jagged_n = 2 * (log_m + 1);
 

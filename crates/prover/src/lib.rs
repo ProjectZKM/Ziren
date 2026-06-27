@@ -1001,6 +1001,87 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             crate::vk_shape_capture::record("compose", child_shapes, &vk);
         }
 
+        // TEMP DIAG (#88/#82 compose-heterogeneity): dump per-child geometry,
+        // the compose VK, and its membership in the committed recursion_vk_map.
+        if std::env::var("ZIREN_COMPOSE_DIAG").is_ok() {
+            use crate::types::HashableKey;
+            use p3_field::PrimeField32;
+            let vk = self.compress_prover.setup(&program).1;
+            let digest = vk.hash_koalabear();
+            let in_map = self.recursion_vk_map.contains_key(&digest);
+            let du = digest.map(|x: KoalaBear| x.as_canonical_u32());
+            eprintln!(
+                "[CDIAG] ===== compose arity={} vk={:?} in_map={} =====",
+                input.vks_and_proofs.len(),
+                du,
+                in_map
+            );
+            for (i, (_vk, sp)) in input.vks_and_proofs.iter().enumerate() {
+                let zc_dim = sp.zerocheck_proof.point_and_eval.0.len();
+                let zc_polys = sp.zerocheck_proof.univariate_polys.len();
+                let gkr_rounds = sp.logup_gkr_proof.round_proofs.len();
+                let num = sp.logup_gkr_proof.circuit_output.numerator.len();
+                let den = sp.logup_gkr_proof.circuit_output.denominator.len();
+                let lev_pt = sp.logup_gkr_proof.logup_evaluations.point.len();
+                let chip_open = sp.logup_gkr_proof.logup_evaluations.chip_openings.len();
+                let mte: Vec<(String, usize, bool)> = sp
+                    .logup_gkr_proof
+                    .logup_evaluations
+                    .chip_openings
+                    .iter()
+                    .map(|(n, e)| {
+                        (
+                            n.clone(),
+                            e.main_trace_evaluations.len(),
+                            e.preprocessed_trace_evaluations.is_some(),
+                        )
+                    })
+                    .collect();
+                let heights: Vec<(String, u8)> =
+                    sp.chip_log_heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
+                // RECURSION-LAYER AREA PIN PROBE (#88/#82 Stage 1): the child's
+                // committed jagged dense geometry — `area`, `log_stacking_height`
+                // (L_stack), and the derived `num_stripes = area >> L_stack`.
+                // After the pin, EVERY recursion child must show num_stripes==64
+                // (area==2^27, the {L=20,20,22,23} heterogeneity collapsed).
+                let (area, l_stack, num_stripes, red_l, jagged_n, total_vals): (
+                    usize,
+                    u32,
+                    usize,
+                    usize,
+                    usize,
+                    usize,
+                ) = match &sp.evaluation_proof {
+                    zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(b) => {
+                        let a = b.commit.area;
+                        let ls = b.commit.log_stacking_height;
+                        (
+                            a,
+                            ls,
+                            a >> ls as usize,
+                            b.reduction.eval_point.len(),
+                            b.jagged_eval.partial_sumcheck_proof.univariate_polys.len(),
+                            b.packing.total_values,
+                        )
+                    }
+                    _ => (0, 0, 0, 0, 0, 0),
+                };
+                eprintln!(
+                    "[CDIAG]  child{i}: AREA={area} L_stack={l_stack} num_stripes={num_stripes} \
+                     (L_dense={}) red_L={red_l} jagged_n={jagged_n} total_values={total_vals} \
+                     zc_dim={zc_dim} zc_polys={zc_polys} gkr_rounds={gkr_rounds} \
+                     num={num} den={den} lev_pt={lev_pt} chip_open={chip_open}",
+                    if num_stripes > 0 {
+                        (num_stripes * (1usize << l_stack)).trailing_zeros()
+                    } else {
+                        0
+                    },
+                );
+                eprintln!("[CDIAG]    heights={heights:?}");
+                eprintln!("[CDIAG]    mte(name,len,prep)={mte:?}");
+            }
+        }
+
         program
     }
 
@@ -1695,6 +1776,25 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
+                                // RECURSION-LAYER AREA PIN (#88/#82 Stage 1,
+                                // SP1-faithful, REAL DEFAULT — no env flag):
+                                // pin this recursion proof's (normalize AND
+                                // compose) jagged dense commit to a FIXED area
+                                // 2^RECURSION_LOG_TRACE_AREA so every recursion
+                                // child commits at a uniform num_stripes =
+                                // 2^(27-21) = 64 → the compose VK collapses to
+                                // f(chip-set, arity).  The guard is read at the
+                                // commit precompute (commit_basefold_path ->
+                                // precompute_jagged_basefold_commit_generic) and
+                                // inherited by the open/reduce via pre.packing;
+                                // the SAME worker thread runs commit + open here,
+                                // so it covers both.  CORE (RiscvAir) never
+                                // installs it → core commit stays NATURAL.
+                                let _recursion_area_pin =
+                                    zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
+                                        zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
+                                    );
+
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")
                                     .in_scope(|| self.compress_prover.setup(&program));

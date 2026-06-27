@@ -684,36 +684,32 @@ impl ZKMProofShape {
             .collect();
 
         // ───────────────────────────────────────────────────────────────
-        // G1 Stage D1 (#88): re-key Compress / Deferred / Shrink from the
-        // band-cartesian (`get_all_shape_combinations` = bands^arity) to the
-        // natural (recursion-cluster, child_log_dense) class enumeration.
+        // #88/#82 Stage 3 ENUM RE-KEY: collapse Compress / Deferred / Shrink to
+        // f(recursion-chip-set, arity) — a SINGLE child class.
         //
         // A compose/deferred/shrink program verifies a BATCH of CHILD proofs,
         // each itself a RECURSION (normalize/compose) proof over the fixed
-        // 7-chip recursion machine (uniform chip-set).  The compose program —
-        // hence its VK — is determined by (recursion-chip-set, arity,
-        // child_log_dense): the child's jagged-bundle `log_dense_size` drives
-        // `num_stripes` / `batch_evaluations` / BaseFold rounds the compose
-        // circuit `read()`s (traced in `dummy_jagged_basefold_bundle`, pinned
-        // by `tests::compose_program_basefold_band_is_load_bearing` and
-        // `tests::vkroot_localize_compose_shape_keys`).  The band a child
-        // lands in is just a quantized stand-in for the child's log_dense, so
-        // the right key is the child's NATURAL log_dense — NOT an arbitrary
-        // bands^arity tuple (which over-enumerates 5^4=625 just for arity-4
-        // Compress, and whose band heights do not correspond to the natural
-        // heights a height-agnostic (FIX-off) recursion proof produces).
+        // 7-chip recursion machine (uniform chip-set).  PREVIOUSLY the compose
+        // VK also depended on each child's jagged-bundle `log_dense_size` (it
+        // drives `num_stripes` / `batch_evaluations` / reduction rounds, and the
+        // child's `total_values` drove `jagged_n`), so the enumeration emitted
+        // one class per integer child log_dense L (A-DIRECT `by_ld`).
         //
-        // Construction mirrors the per-shard normalize re-key above, but on
-        // the RECURSION machine: sweep a uniform height over its chips, dedup
-        // by (chip_set, log_dense) → the distinct child classes.  The
-        // recursion chips carry NO byte-lookups, so no per-chip lookup-budget
-        // pinning is needed (unlike the core normalize sweep).  We emit:
-        //   * Compress: arity 1..=reduce_batch_size uniform batches per class.
-        //   * Deferred / Shrink: one shape per class.
-        // With `ZIREN_HA_NO_FIXSHAPE` ON the program is built at the child's
-        // natural heights (no `fix_shape` band-snap), so the enumerated dummy
-        // VK == the real FIX-off proof's VK for the same (cluster, arity,
-        // child_log_dense).  Validated by the membership check (Stage D1 (b)).
+        // With the RECURSION-LAYER AREA PIN (Stage 1, `RECURSION_LOG_TRACE_AREA`
+        // = 27 — installed by the recursion prover around its commit+open, and
+        // mirrored in the dummy via `RecursionAreaPinGuard` in the compress/wrap
+        // dummy builders), EVERY recursion child commits at the FIXED area 2^27:
+        // num_stripes = 64, reduction L = 27, and (via the pinned jagged-eval,
+        // `prove_jagged_evaluation` half = z_trace.len()+1) jagged_n = 56 —
+        // ALL height-INDEPENDENT.  So the per-L `by_ld` sweep collapses to ONE
+        // class, and the compose VK becomes f(chip-set, arity) only.  We emit:
+        //   * Compress: ONE shape per arity (1..=reduce_batch_size).
+        //   * Deferred / Shrink: ONE shape each.
+        // The single representative is a recursion shape with natural log_dense
+        // ≤ pin (so the pin raises it to exactly 27) and heights ≤ cube (so the
+        // per-stage cube is 22, matching real children).  Validated by G2 (every
+        // heterogeneous child-L spread → identical compose program+VK) and G3
+        // (the enumerated arity-N compose VK == the real FIX-off proof's VK).
         let compress_child_classes: Vec<OrderedShape> = {
             use p3_koala_bear::KoalaBear as KB;
             use zkm_pcs::stacked_shapes::types::consts;
@@ -744,13 +740,20 @@ impl ZKMProofShape {
                     total.next_power_of_two().trailing_zeros() as usize
                 }
             };
-            // A-DIRECT (#88/#82): emit ONE representative per integer log_dense
-            // L directly (the compose VK is (chip-set, arity, child_log_dense)-
-            // determined, height-independent given L).  The prior uniform-height
-            // sweep only hit a sparse set of L (each step ~doubles total),
-            // SKIPPING L's that real children land on.  The recursion machine
-            // carries NO byte-lookups, so we just greedily pack area into the
-            // chips to land total_values exactly at 2^L (cap each chip ≤ 2^cube).
+            // SINGLE-CLASS COLLAPSE (#88/#82 Stage 3 ENUM RE-KEY): with the
+            // recursion AREA PIN (`RECURSION_LOG_TRACE_AREA`), EVERY recursion
+            // child (normalize / compose output) commits its jagged dense at the
+            // FIXED pinned area `2^27` → num_stripes = 2^(27-21) = 64, reduction
+            // rounds / eval_point L = 27, and (via the pinned jagged-eval, see
+            // `prove_jagged_evaluation` / `dummy_jagged_basefold_bundle`)
+            // jagged_n = 2*(27+1) = 56 — IDENTICAL regardless of the child's
+            // NATURAL heights.  So the prior A-DIRECT per-L `by_ld` sweep (one
+            // class per integer log_dense L) collapses to a SINGLE class: any
+            // recursion shape whose NATURAL log_dense ≤ pin (so the pin raises it
+            // to exactly 27) and whose chip heights ≤ cube (so the per-stage cube
+            // is the base 22, matching the real children).  We greedily pack area
+            // into the recursion chips (cap each ≤ 2^cube) and pick the LARGEST
+            // achievable natural-L ≤ pin representative (closest to the ceiling).
             let cube_rec = consts::CORE_MAX_LOG_ROW_COUNT;
             let rec_shape_at_ld = |target: usize| -> Option<OrderedShape> {
                 let mut heights: Vec<(String, usize)> =
@@ -783,13 +786,15 @@ impl ZKMProofShape {
                     None
                 }
             };
-            let mut by_ld: BTreeMap<usize, OrderedShape> = BTreeMap::new();
-            for target in 1..30usize {
+            let pin = zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA;
+            let mut rep: Option<OrderedShape> = None;
+            for target in (1..=pin).rev() {
                 if let Some(os) = rec_shape_at_ld(target) {
-                    by_ld.entry(log_dense_rec(&os)).or_insert(os);
+                    rep = Some(os);
+                    break;
                 }
             }
-            by_ld.into_values().collect()
+            rep.into_iter().collect()
         };
 
         let arity_compress_shapes: Vec<Self> = {
