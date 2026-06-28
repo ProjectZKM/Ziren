@@ -396,9 +396,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
         .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
 
+        // #79 DEFAULT FLIP: FIX-off (height-agnostic natural-commit) is now the
+        // production DEFAULT.  Unset / not "true" => `None` => core shards prove
+        // at their NATURAL per-shard heights (no band padding), the faster
+        // height-agnostic path that the recursion area-pin + count-hash-bind make
+        // enumerable + VERIFY_VK=true-verifying (240-key vk_map).  FIX-on stays
+        // SELECTABLE as a fallback: `FIX_CORE_SHAPES=true` => `Some(..)` => the
+        // legacy band-padded core shapes (byte-identical to the pre-flip default).
+        // NOTE: the offline vk_map regen tooling (`build_compress_vks` ->
+        // `shapes::{check_shapes,build_vk_map}`) still `.expect()`s a core shape
+        // config, so it MUST be run with `FIX_CORE_SHAPES=true` explicitly after
+        // this flip (the prove path no longer requires it).
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(true)
+            .unwrap_or(false)
             .then_some(CoreShapeConfig::default());
 
         let recursion_shape_config = env::var("FIX_RECURSION_SHAPES")
