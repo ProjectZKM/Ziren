@@ -615,16 +615,38 @@ impl ZKMProofShape {
                     None
                 }
             };
-        // Realistic per-cluster log_dense window.  A cluster's MINIMAL feasible
-        // L (all fillers at 1, Byte at 2^16) is its natural floor; real proofs
-        // vary the event counts UP from there by a bounded amount, so we emit L
-        // in `[L_min, min(L_min + L_WINDOW, L_HARD_CAP)]`.  This covers every
-        // real FIX-off proof's natural log_dense (validated by check_vk_coverage)
-        // while keeping the wide-precompile-cluster program-build count tractable
-        // (the full [1,30) sweep emits ~10–40 L per fat cluster, almost all
-        // unreachable).  L_HARD_CAP < 30 stays under the AreaOutOfBounds guard.
-        const L_WINDOW: usize = 8;
-        const L_HARD_CAP: usize = 28;
+        // #115 Path B — FULL reachable per-cluster log_dense range (close the
+        // #112 enumeration-completeness gap WITHOUT core-area padding).
+        //
+        // A cluster's MINIMAL feasible L (all fillers at 1, Byte at its fixed
+        // 2^16 lookup-table height) is its natural floor; every real core shard
+        // carries the Byte table, so no provable shard lands below L_min = 20.
+        // The UPPER bound is the AreaOutOfBounds guard (shard_level/verifier.rs:
+        // ~365): a proof is rejected unless `0 < total_values < 2^30`, so the
+        // largest provable shard has `log_dense = ceil(log2(total_values)) <= 30`.
+        // We therefore emit EVERY integer L in `[L_min, L_HARD_CAP]` the greedy
+        // construction can hit, filtered to `total_values < 2^30` (the provable
+        // set).  The prior windowed `[L_min, L_min+8]` (cap 28) MISSED real
+        // shards whose natural log_dense was 29/30 ("Invalid verification key" /
+        // "vk not allowed", #112).  The complete grid is small: 268 normalize
+        // (+ 6 compress/deferred/shrink) = 274 keys, well under the
+        // VK_MERKLE_TREE_HEIGHT=11 (2048) ceiling — measured by
+        // scripts/pathb_grid.rs; regen-only (vk_root witnessed, no re-ceremony).
+        // L_WINDOW is kept generous so the AreaOutOfBounds cap binds for every
+        // cluster (l_min + L_WINDOW >= L_HARD_CAP always).
+        const L_WINDOW: usize = 64;
+        const L_HARD_CAP: usize = 30;
+        // AreaOutOfBounds: a real proof's total trace-cell count must be
+        // strictly below 2^30 to verify (host hash-bind guard).  Skip any
+        // greedy shape that would land at/above it so the map contains only
+        // provable normalize VKs.
+        const MAX_TOTAL_VALUES: u128 = 1u128 << 30;
+        let total_values_of = |os: &OrderedShape| -> u128 {
+            os.inner
+                .iter()
+                .map(|(name, log_h)| (chip_width(name) as u128) * (1u128 << *log_h))
+                .sum()
+        };
         let small_shapes: Vec<OrderedShape> = {
             let mut by_shape: BTreeMap<Vec<(String, usize)>, OrderedShape> = BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
@@ -656,6 +678,10 @@ impl ZKMProofShape {
                 let l_max = (l_min + L_WINDOW).min(L_HARD_CAP);
                 for target in l_min..=l_max {
                     if let Some(os) = shape_at_log_dense(&names, &fillers, target) {
+                        // #115 Path B: keep only provable shapes (AreaOutOfBounds).
+                        if total_values_of(&os) >= MAX_TOTAL_VALUES {
+                            continue;
+                        }
                         let mut inner = os.inner.clone();
                         inner.sort();
                         by_shape.entry(inner.clone()).or_insert(OrderedShape { inner });
