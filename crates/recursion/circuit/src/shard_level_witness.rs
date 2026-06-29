@@ -2046,7 +2046,8 @@ where
     // row_counts below (so they match the baked band col_prefix_sums under
     // ZIREN_HA_BAKED_COLPS).  The col_prefix_sums path is unchanged (baked when
     // chip_height_felts is None / gated).
-    let ha_baked_band = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok();
+    let ha_baked_band = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok()
+        || std::env::var("ZIREN_SP1_ZEROPAD").is_ok();
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
         // reconstruct col_prefix_sums IN-CIRCUIT
         // from the WITNESSED per-chip heights instead of baking

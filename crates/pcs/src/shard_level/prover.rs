@@ -287,7 +287,7 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    let main_traces: Vec<RowMajorMatrix<Val<SC>>> =
+    let mut main_traces: Vec<RowMajorMatrix<Val<SC>>> =
         main_trace_loader.materialize_all();
 
     // Option B auto-precompute (GPU pipeline path). The host CPU prover
@@ -509,6 +509,28 @@ where
             _device_traces,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
+    // ZIREN_SP1_ZEROPAD (SP1 missing-chip model): the zero-padded missing chips
+    // were committed at band height above (`commit_traces` and the precomputed
+    // commit keep the chip-SET / VK).  For the STARK phases below they have a
+    // REAL height of 0 — replace each with a 0-row (width-preserved) trace so:
+    //   * the LogUp-GKR leaves are the identity (0,1) (RowMajorTable virtual
+    //     rows beyond `num_real_rows == 0`), matching the verifier's
+    //     degree-masked reconstruction (`full_geq(degree=0)=1` => num=0,den=1);
+    //   * the zerocheck contributes zero (`num_real == 0` short-circuit);
+    //   * the global cumulative sum is the septic identity (`sz < 14`), so the
+    //     all-zero rows do NOT leak spurious address-0 LogUp sends (the #1 risk);
+    //   * the witnessed degree/log_degree/chip_log_heights are 0 (degree loop
+    //     below), so the verifier's threshold + reconstruction fully mask it.
+    // Done AFTER `commit_traces` is built so the commit stays band-height.
+    // `None` (default / FIX-on / non-core) => no change (byte-identical).
+    if let Some(zeropad_missing) = crate::shard_level::band_cap::current_zeropad_missing() {
+        for (chip, trace) in chips.iter().zip(main_traces.iter_mut()) {
+            if zeropad_missing.contains(&MachineAir::<Val<SC>>::name(*chip)) {
+                let w = trace.width.max(1);
+                *trace = RowMajorMatrix::new(Vec::new(), w);
+            }
+        }
+    }
     let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
 
     let n_chips = chips.len();
@@ -941,9 +963,17 @@ where
                 .unwrap_or(0)
                 .max(1)
         } else {
-            trace.height().max(1)
+            // ZIREN_SP1_ZEROPAD: a zero-padded missing chip was turned into a
+            // 0-row trace above => `trace.height() == 0` => REAL height 0 =>
+            // degree=0 / log_degree=0 (all-zero `degree_bits`), so the verifier
+            // masks it.  Present chips always have >= 1 row, so dropping the
+            // `.max(1)` is byte-identical when zero-pad is off.
+            trace.height()
         };
-        let log_h = if h.is_power_of_two() {
+        let log_h = if h <= 1 {
+            // h == 0 (zero-padded missing) and h == 1 both have log-height 0.
+            0u8
+        } else if h.is_power_of_two() {
             h.trailing_zeros() as u8
         } else {
             (usize::BITS - h.leading_zeros()) as u8

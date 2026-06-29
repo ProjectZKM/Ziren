@@ -315,8 +315,16 @@ pub fn verify_core_basefold<C, SC, A>(
             // cannot misalign the witness stream.  Real + dummy take the same
             // branch, so the program shape (VK) stays matched.  When NOT gated,
             // compute Some(raw) (legacy default path, unchanged).
+            //
+            // ZIREN_SP1_ZEROPAD (SP1 missing-chip model): zero-padded missing
+            // chips are committed at BAND height (commit geometry) but witnessed
+            // with degree=0 (the full_geq mask).  The hash-bind / jagged geometry
+            // row_counts MUST come from the COMMIT PACKING (band), NOT the opened
+            // degree (=0) — the baked-band path.  So zero-pad implies baked-band.
             let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-                if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
+                if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok()
+                    || std::env::var("ZIREN_SP1_ZEROPAD").is_ok()
+                {
                     None
                 } else {
                     Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
