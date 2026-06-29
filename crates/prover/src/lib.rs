@@ -3592,7 +3592,7 @@ pub mod tests {
     ///
     /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
-    ///   ZIREN_HA_BAKED_COLPS=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
+    ///   ZIREN_HA_NO_FIXSHAPE=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
     ///   cargo test -p zkm-prover --release fixoff_multishard_compress_verify \
     ///     -- --ignored --exact --nocapture
     #[test]
@@ -3691,7 +3691,7 @@ pub mod tests {
     ///
     /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
-    ///   ZIREN_HA_BAKED_COLPS=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
+    ///   ZIREN_HA_NO_FIXSHAPE=1 ZIREN_PROGRAM_CACHE=0 SHARD_SIZE=262144 \
     ///   cargo test -p zkm-prover --release tests::fixoff_multishard_wrap_verify \
     ///     -- --ignored --exact --nocapture
     #[test]
@@ -5416,7 +5416,7 @@ pub mod tests {
     ///
     /// Run (CPU):
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
-    ///   ZIREN_HA_NO_FIXSHAPE=1 ZIREN_HA_BAKED_COLPS=1 SHARD_SIZE=262144 \
+    ///   ZIREN_HA_NO_FIXSHAPE=1 SHARD_SIZE=262144 \
     ///   CUDA_VISIBLE_DEVICES="" cargo test -p zkm-prover --release \
     ///     vkmap_membership_gate -- --ignored --exact --nocapture
     /// G1 Stage D1 (#88) FAST membership gate against the ACTUAL re-keyed
@@ -5431,7 +5431,7 @@ pub mod tests {
     ///
     /// Run (CPU):
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
-    ///   ZIREN_HA_NO_FIXSHAPE=1 ZIREN_HA_BAKED_COLPS=1 SHARD_SIZE=262144 \
+    ///   ZIREN_HA_NO_FIXSHAPE=1 SHARD_SIZE=262144 \
     ///   CUDA_VISIBLE_DEVICES="" cargo test -p zkm-prover --release \
     ///     vkmap_membership_gate_fast -- --ignored --exact --nocapture
     #[test]
