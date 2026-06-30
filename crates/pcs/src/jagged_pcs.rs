@@ -2165,7 +2165,36 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None }
+        // FIX A (#116 inc-4): retain the commit's dense_q so EVERY shard —
+        // including the ones with NO device-trace provider (the dominant
+        // big-shard case: only the first `provider_inflight_cap` shards
+        // snapshot a provider, the rest get `device_traces = None`) — carries
+        // the ~4 GiB commit-output forward to the step-4 reduction via
+        // `host_dense_q`.  The downstream gate (`device_happy =
+        // precomputed_host_dense_q.is_some() && ...`) then fires the carried
+        // reduce path (uploads this 4 GiB dense pack H2D and folds it on
+        // device), with NO 16 GiB per-chip provider, NO inflight cap, and NO
+        // extra resident VRAM.  This is shard-0's already-byte-identical
+        // device-reduce path extended to all shards: the carried dense_q is
+        // byte-identical to the committed digest by construction (same
+        // `materialize_dense_jagged` over the same chips that produced
+        // `commit`).  Gated `ZIREN_GPU_FREE_TRACES_PRE_REDUCE` (default OFF →
+        // `host_dense_q = None`, byte-identical to the prior behavior); the
+        // orchestrator sets it for the device-happy path (it is the natural
+        // companion to the pre-reduce trace-free, which keys on the same env).
+        let host_dense_q = if std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+        {
+            let dense_q =
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
+            Some(dense_q)
+        } else {
+            None
+        };
+
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -2749,17 +2778,28 @@ pub mod jagged {
 
         // DROPLDES (#74): free the prior-phase device residency BEFORE
         // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
-        // model.  The reduce reads ONLY dense_q (registered in the
-        // dense_q_device_registry via precomputed_dense_handle on the
-        // device-happy path), NOT the per-chip device traces held by the
-        // provider.  Freeing the provider traces is sound ONLY on the
-        // device-happy path (precomputed_dense_handle.is_some() AND
-        // ZIREN_GPU_JAGGED_PCS!=0 AND a V2 hook present) where the reduce
-        // routes through the device hook and does NOT re-pack dense_q from
-        // the provider; off that path a later cold re-materialize from the
-        // drained provider would silently produce an INVALID proof, so we
-        // leave the traces in place.  Pure lifetime change, transcript-
-        // neutral.  Gated ZIREN_GPU_FREE_TRACES_PRE_REDUCE (default OFF).
+        // model.  The reduce reads ONLY dense_q (either the device-resident
+        // buffer registered via precomputed_dense_handle, OR the CARRIED host
+        // dense_q the #77 commit-decline path captured into
+        // precomputed_host_dense_q), NOT the per-chip device traces held by
+        // the provider.  Freeing the provider traces is sound on EITHER
+        // device-happy path -- the reduce has its dense_q without
+        // re-materializing from the (about-to-be-drained) provider; off both
+        // paths a later cold re-materialize from the drained provider would
+        // silently produce an INVALID proof, so we leave the traces in place.
+        // Pure lifetime change, transcript-neutral.  Gated
+        // ZIREN_GPU_FREE_TRACES_PRE_REDUCE (default OFF; orchestrator sets it).
+        //
+        // #116: the original gate required precomputed_dense_handle.is_some()
+        // (the DEVICE-commit path).  On big shards (TM 2^22, log_dense=29)
+        // the device commit OOM-DECLINES to host (TMFIT/H53 preflight, ~6 GiB
+        // free) so the handle is None and the dense_q is the CARRIED host
+        // buffer -- the gate skipped, the ~16 GiB of traces stayed resident,
+        // and the device reduce host-fell-back.  Adding
+        // precomputed_host_dense_q.is_some() to the gate fires the free on
+        // that carried path too (the dominant big-shard case): the reduce
+        // uploads/folds the carried dense_q and never touches the provider,
+        // so freeing it here is sound and lets the reduce go device.
         if let Some(p) = provider {
             let free_pre_reduce = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
                 .map(|v| v != "0")
@@ -2769,8 +2809,10 @@ pub mod jagged {
                     .map(|v| v != "0")
                     .unwrap_or(false);
                 let hook_v2_present = super::get_gpu_jagged_reduction_hook_v2().is_some();
-                let device_happy =
-                    precomputed_dense_handle.is_some() && try_gpu_pr && hook_v2_present;
+                let device_happy = (precomputed_dense_handle.is_some()
+                    || precomputed_host_dense_q.is_some())
+                    && try_gpu_pr
+                    && hook_v2_present;
                 if device_happy {
                     let _rel_span =
                         tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
@@ -2789,10 +2831,12 @@ pub mod jagged {
                     WARN_ONCE.get_or_init(|| {
                         tracing::warn!(
                             precomputed_dense_handle = precomputed_dense_handle.is_some(),
+                            carried_host_dense_q = precomputed_host_dense_q.is_some(),
                             try_gpu = try_gpu_pr,
                             hook_v2 = hook_v2_present,
-                            "DROPLDES (#74): pre-reduce free requested but NOT on \
-                             the device-happy path -- skipping (a later cold path \
+                            "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
+                             the device-happy path (neither a device handle nor a \
+                             carried host dense_q) -- skipping (a later cold path \
                              could re-materialize from the provider)."
                         );
                     });
