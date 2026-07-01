@@ -17,6 +17,7 @@ use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;
 use crate::air::MachineAir;
 use crate::logup_gkr::{GkrGrind, GKR_GRINDING_BITS};
+use crate::multilinear::PaddedMle;
 use crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point;
 use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput, LogupGkrProof};
 use crate::zerocheck_prover::eq_mle_table;
@@ -32,6 +33,12 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     max_log_row_count: usize,
     challenger: &mut Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    // #125 INC-2: the shared per-chip analytic trace-MLE (chip-index order),
+    // built once at trace-gen over the `max_log_row_count` cube, threaded
+    // read-only. When present, the FULL-POINT main-trace opening consumes it
+    // (`PaddedMle::eval_at`) instead of re-evaluating the trace on the fly;
+    // `None` falls back to `evaluate_trace_columns_at_point` (byte-identical).
+    shared_trace_mles: Option<&[PaddedMle<F>]>,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -428,7 +435,8 @@ where
         .par_iter()
         .zip(main_traces.par_iter())
         .zip(preprocessed_traces.par_iter())
-        .map(|((chip, main_trace), prep_trace)| {
+        .enumerate()
+        .map(|(chip_idx, ((chip, main_trace), prep_trace))| {
             let main_height = if main_trace.width == 0 {
                 // Device-only chip — its real height lives in the
                 // per-shard provider (host trace empty). Falls back to 1
@@ -523,11 +531,22 @@ where
                     )
                 })
             } else if main_trace.width > 0 {
-                Some(evaluate_trace_columns_at_point::<F, EF>(
-                    &main_trace.values,
-                    main_trace.width,
-                    full_eval_point,
-                ))
+                // #125 INC-2: consume the shared analytic trace-MLE at the
+                // FULL point (`num_variables == max_log_row_count ==
+                // full_eval_point.len()`, zero padding) instead of
+                // re-evaluating the trace on the fly.  `PaddedMle::eval_at`
+                // reproduces `evaluate_trace_columns_at_point` bit-for-bit
+                // (INC-1's `eval_at_matches_evaluate_trace_columns`), so this
+                // is transcript-neutral.  Falls back to the on-the-fly path
+                // when no shared MLE is threaded (e.g. device loaders).
+                Some(match shared_trace_mles.and_then(|s| s.get(chip_idx)) {
+                    Some(pm) => pm.eval_at::<EF>(full_eval_point),
+                    None => evaluate_trace_columns_at_point::<F, EF>(
+                        &main_trace.values,
+                        main_trace.width,
+                        full_eval_point,
+                    ),
+                })
             } else {
                 None
             };

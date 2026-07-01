@@ -34,6 +34,22 @@ pub trait MainTraceLoader<F> {
         None
     }
 
+    /// #125 INC-2: the whole shared trace-MLE slice (chip-index order),
+    /// when this loader carries one.  Lets the LogUp-GKR stage consume the
+    /// per-chip analytic trace-MLE built once at trace-gen instead of
+    /// re-evaluating each chip's trace on the fly.
+    ///
+    /// Default `None`; only [`EagerHostLoader`] (host CPU path) populates
+    /// it (via [`EagerHostLoader::with_padded`]).  A `None` return makes the
+    /// consumer fall back to the on-the-fly evaluation — byte-identical
+    /// either way.
+    fn padded_slice(&self) -> Option<&[crate::multilinear::PaddedMle<F>]>
+    where
+        F: p3_field::Field,
+    {
+        None
+    }
+
     /// Materialize all chip traces in chip-iteration order.
     fn materialize_all(&self) -> Vec<RowMajorMatrix<F>>
     where
@@ -95,6 +111,10 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
 
     fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>> {
         self.padded.and_then(|p| p.get(i))
+    }
+
+    fn padded_slice(&self) -> Option<&[crate::multilinear::PaddedMle<F>]> {
+        self.padded
     }
 }
 
