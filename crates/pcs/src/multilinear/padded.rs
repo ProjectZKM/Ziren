@@ -478,4 +478,52 @@ mod tests {
         let threshold = vec![EF::ZERO; 5];
         assert_eq!(full_geq(&threshold, &point), EF::ONE);
     }
+
+    /// #125 INC-3 CORE INVARIANT: `main_cells` sourced from the shared
+    /// trace-MLE's inner cells (`PaddedMle::inner`) reproduce the
+    /// raw-trace-derived `main_cells` bit-for-bit — the SAME base->EF lift
+    /// (`EF::from`) over the SAME row-major cells, followed by the SAME
+    /// legacy `bitrev_rows`.  This is exactly what
+    /// `prove_shard_zerocheck` now relies on: the inner Mle is
+    /// `Mle::new(raw trace)`, so `guts().values == raw.values`, and the
+    /// zerocheck's downstream lift+bitrev then yields identical cells.
+    #[test]
+    fn inc3_inner_cells_match_raw_trace_lift_and_bitrev() {
+        use crate::shard_level::zerocheck_poly::bitrev_rows;
+        let mut rng = StdRng::seed_from_u64(505);
+        for &(real_log, width) in &[(0usize, 1usize), (2, 1), (3, 5), (4, 3), (5, 7)] {
+            let height = 1usize << real_log;
+            for pad in 0..=3usize {
+                let l = real_log + pad;
+                let trace = rand_trace(&mut rng, height, width);
+
+                // Raw-trace path (the legacy `prove_shard_zerocheck` source):
+                // lift the row-major trace cells to EF, then bitrev the rows.
+                let raw_lift: Vec<EF> =
+                    trace.values.iter().map(|v| EF::from(*v)).collect();
+                let raw_cells = bitrev_rows(&raw_lift, width, height);
+
+                // Shared-MLE path (INC-3): lift the PaddedMle inner cells,
+                // then the SAME bitrev.
+                let padded = PaddedMle::padded_with_zeros(
+                    Arc::new(Mle::new(trace.clone())),
+                    l as u32,
+                );
+                let inner = padded.inner().as_ref().expect("width>0 => inner Some");
+                assert_eq!(
+                    inner.guts().values,
+                    trace.values,
+                    "INC-3: inner cells must equal the raw trace (real_log={real_log} width={width})",
+                );
+                let mle_lift: Vec<EF> =
+                    inner.guts().values.iter().map(|v| EF::from(*v)).collect();
+                let mle_cells = bitrev_rows(&mle_lift, width, height);
+
+                assert_eq!(
+                    mle_cells, raw_cells,
+                    "INC-3: shared-MLE main_cells diverge (real_log={real_log} width={width} pad={pad})",
+                );
+            }
+        }
+    }
 }

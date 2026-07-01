@@ -76,6 +76,14 @@ pub fn prove_shard_zerocheck<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    // #125 INC-3: the shared per-chip analytic trace-MLE (chip-index order),
+    // built once at trace-gen over the `max_log_row_count` cube, threaded
+    // read-only. When present, each chip's `main_cells` are sourced from the
+    // shared MLE's real inner cells (`PaddedMle::inner`, `= Mle::new(raw
+    // trace)`) instead of re-lifting the raw trace; `None` (or a dummy /
+    // device-materialized chip whose inner is `None`) falls back to the raw
+    // trace path (byte-identical either way).
+    shared_trace_mles: Option<&[crate::multilinear::PaddedMle<Val<SC>>]>,
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,
     std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
@@ -440,10 +448,32 @@ where
 
             // Lift real trace rows to the challenge field. Device-fold chips keep
             // host cells EMPTY (the device cells carry the trace).
+            //
+            // #125 INC-3: source the raw base-field cells from the shared
+            // trace-MLE (INC-1's `PaddedMle`, chip-index order) when it is
+            // threaded AND this chip carries real inner cells.  The inner Mle
+            // is `Mle::new(raw trace)`, so `guts().values` equals
+            // `main_trace.values` bit-for-bit (same row-major layout) — the
+            // SAME lift (`Challenge::from`) and the SAME downstream bitrev then
+            // reproduce IDENTICAL `main_cells`.  A dummy / device-materialized
+            // chip has `inner() == None` (width-0 host trace), so it falls back
+            // to the raw `main_trace.values` — the only case where those cells
+            // differ from a `padded_with_zeros(main_traces[chip_idx])` inner.
+            // `None` slice (unthreaded loaders) also falls back.  Byte-neutral.
             let main_cells: Vec<Challenge<SC>> = if df_dims.is_some() {
                 Vec::new()
             } else {
-                main_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect()
+                let cells_src: &[Val<SC>] = shared_trace_mles
+                    .and_then(|s| s.get(chip_idx))
+                    .and_then(|pm| pm.inner().as_ref())
+                    .map(|mle| mle.guts().values.as_slice())
+                    .unwrap_or(&main_trace.values);
+                debug_assert_eq!(
+                    cells_src.len(),
+                    main_trace.values.len(),
+                    "INC-3: shared-MLE main_cells len must equal the raw trace",
+                );
+                cells_src.iter().map(|v| Challenge::<SC>::from(*v)).collect()
             };
             let prep_cells: Option<Vec<Challenge<SC>>> = if df_dims.is_none() && prep_width > 0 {
                 Some(prep_trace.values.iter().map(|v| Challenge::<SC>::from(*v)).collect())

@@ -875,6 +875,10 @@ where
             max_log_row_count,
             challenger,
             _device_traces,
+            // #125 INC-3: the shared per-chip trace-MLE built once at the
+            // loader-construction seam (`with_padded`); `None` for loaders
+            // that do not carry one (device path falls back to on-the-fly).
+            main_trace_loader.padded_slice(),
         )
     };
     tracing::info!(
