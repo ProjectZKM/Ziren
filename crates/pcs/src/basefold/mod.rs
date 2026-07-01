@@ -27,7 +27,6 @@ pub mod config;
 pub mod encoder;
 pub mod fri;
 pub mod mle;
-pub mod padded;
 pub mod proof;
 // jagged_per_chip module removed: per-chip
 // jagged-PCS path was a perf experiment that diverged from SP1's
@@ -47,7 +46,6 @@ pub use config::*;
 pub use encoder::*;
 pub use fri::*;
 pub use mle::*;
-pub use padded::*;
 pub use proof::*;
 pub use prover::*;
 pub use verifier::*;

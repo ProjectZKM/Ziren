@@ -16,16 +16,13 @@
 //! | `Padding::Constant((c, n))` | `Padding::Constant(c, n)`      |
 //! | `Padding::Generic(evals)`   | `Padding::Generic(Arc<Vec<T>>)`|
 //!
-//! ## Relationship to `crate::basefold::padded::PaddedMle`
-//!
-//! That other `PaddedMle` is a *row-major, GKR-round* helper
-//! (`fold_row_msb`, per-chip row folds).  This one is the SP1-shaped
+//! This is the single `PaddedMle` in the crate: the SP1-shaped
 //! *analytic* multilinear (`eval_at` / `fix_last_variable` over an
-//! arbitrary point) used to build a single shared trace-MLE once at
-//! trace-gen and thread it to the shard prover.  They intentionally
-//! live in separate modules; neither is glob-exported at the crate
-//! root, so `crate::multilinear::PaddedMle` and
-//! `crate::basefold::PaddedMle` never collide.
+//! arbitrary point) used to build the shared trace-MLE once at
+//! trace-gen and thread it to the shard prover.  (A second, never-
+//! integrated GKR-round `PaddedMle` in `basefold::padded` — `fold_row_msb`
+//! only — was removed as dead code, #125; the LogUp-GKR layers use
+//! `RowMajorTable`.)
 //!
 //! ## #125 INC-1
 //!

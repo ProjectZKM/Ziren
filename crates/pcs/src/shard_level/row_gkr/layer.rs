@@ -81,7 +81,7 @@ impl<F: Clone> RowMajorTable<F> {
     /// `(1 << num_row_variables) - num_real_rows` rows are virtual and
     /// resolve to a per-quadrant identity-fraction value at access time
     /// (`F::ZERO` for numerators, `F::ONE` for denominators).  Mirrors
-    /// SP1's `PaddedMle::padded` (see `crate::basefold::padded::PaddedMle`).
+    /// SP1's `PaddedMle::padded` analytic-padding pattern.
     ///
     /// Caller must satisfy:
     ///   * `cells.len() == num_real_rows * num_interactions`
@@ -116,8 +116,8 @@ impl<F: Clone> RowMajorTable<F> {
     /// Raw indexing — `interaction` must be `< num_interactions`, AND
     /// `row` must address a **materialized** cell (`< num_real_rows`).
     /// Reading virtual rows in `[num_real_rows, 1 << num_row_variables)`
-    /// is the caller's responsibility to handle (PaddedMle pattern;
-    /// see `crate::basefold::padded::PaddedMle`).
+    /// is the caller's responsibility to handle (the analytic-padding
+    /// pattern).
     #[inline]
     #[must_use]
     pub fn idx(&self, row: usize, interaction: usize) -> usize {

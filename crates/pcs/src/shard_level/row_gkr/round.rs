@@ -2092,7 +2092,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
 ///   * `0 < real < row_half`  → only outputs `r ∈ [0, real)` read from
 ///     real input → `new_real = real`.
 ///
-/// (Mirrors `crate::basefold::padded::PaddedMle::fold_row_msb`.)
+/// (The row-MSB fold for the LogUp-GKR layer state.)
 fn fold_chip_state_row<EF: Field + Send + Sync>(state: &mut ChipLayerState<EF>, alpha: EF) {
     use p3_maybe_rayon::prelude::*;
 
