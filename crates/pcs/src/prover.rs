@@ -236,6 +236,16 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                     'b,
                     Val<SC>,
                     crate::Challenge<SC>,
+                    crate::Challenge<SC>,
+                >,
+            >
+            // #125 INC-4a: the K = F (base-field first round) folder instance.
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    Val<SC>,
+                    crate::Challenge<SC>,
                 >,
             > + Sync,
         Val<SC>: p3_field::PrimeField + 'static,
@@ -378,6 +388,16 @@ where
         + for<'a> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'a,
+                Val<SC>,
+                SC::Challenge,
+                SC::Challenge,
+            >,
+        >
+        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        + for<'a> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'a,
+                Val<SC>,
                 Val<SC>,
                 SC::Challenge,
             >,
@@ -876,6 +896,16 @@ where
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'b,
+                Val<SC>,
+                <SC as StarkGenericConfig>::Challenge,
+                <SC as StarkGenericConfig>::Challenge,
+            >,
+        >
+        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
             >,

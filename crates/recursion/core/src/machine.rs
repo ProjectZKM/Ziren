@@ -309,7 +309,7 @@ impl From<RecursionShape> for OrderedShape {
 
 /// Compile-time proof that every
 /// `RecursionAir` chip implements
-/// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+/// `Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
 ///
 /// The host-side `BasefoldConstraintFolder` (defined at
 /// `zkm-pcs::shard_level::basefold_constraint_folder`) is
@@ -344,10 +344,10 @@ mod basefold_air_assertions {
         shard_level::basefold_constraint_folder::BasefoldConstraintFolder, InnerChallenge,
     };
 
-    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>`.
+    /// Compile-time bound: `T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>`.
     fn assert_basefold_air<T>()
     where
-        T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge>>,
+        T: for<'a> Air<BasefoldConstraintFolder<'a, KoalaBear, InnerChallenge, InnerChallenge>>,
     {
     }
 

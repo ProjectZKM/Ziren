@@ -225,6 +225,17 @@ where
                 'b,
                 Val<SC>,
                 Challenge<SC>,
+                Challenge<SC>,
+            >,
+        >
+        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // required by the pure-host zerocheck round-0 path.
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Val<SC>,
+                Challenge<SC>,
             >,
         > + Sync,
     Val<SC>: PrimeField,
@@ -423,6 +434,17 @@ where
                 'b,
                 Val<SC>,
                 Challenge<SC>,
+                Challenge<SC>,
+            >,
+        >
+        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // required by the pure-host zerocheck round-0 path.
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Val<SC>,
+                Challenge<SC>,
             >,
         > + Sync,
     Val<SC>: PrimeField,
@@ -485,6 +507,17 @@ where
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'b,
+                Val<SC>,
+                Challenge<SC>,
+                Challenge<SC>,
+            >,
+        >
+        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // required by the pure-host zerocheck round-0 path.
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
                 Val<SC>,
                 Challenge<SC>,
             >,

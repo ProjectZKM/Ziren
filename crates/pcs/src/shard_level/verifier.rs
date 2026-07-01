@@ -136,7 +136,7 @@ impl BasefoldShardVerifier {
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
         A: MachineAir<Val<SC>>
-            + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
+            + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
         // STAGE-B b1': threaded to `verify_jagged_pcs_host`'s static OUTER
@@ -904,7 +904,7 @@ fn verify_zerocheck_host<SC, A>(
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
+        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {
@@ -1167,7 +1167,7 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
+        + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy,
 {

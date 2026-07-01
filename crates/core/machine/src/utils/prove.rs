@@ -1124,6 +1124,14 @@ where
             'b,
             Val<SC>,
             <SC as StarkGenericConfig>::Challenge,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
+        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
         >>
         + Air<SymbolicAirBuilder<SC::Val>>,
     A::Record: MachineRecord<Config = ZKMCoreOpts>,
@@ -1176,6 +1184,14 @@ where
         + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
         + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
             'b,
+            Val<SC>,
+            <SC as StarkGenericConfig>::Challenge,
+            <SC as StarkGenericConfig>::Challenge,
+        >>
+        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+            'b,
+            Val<SC>,
             Val<SC>,
             <SC as StarkGenericConfig>::Challenge,
         >>

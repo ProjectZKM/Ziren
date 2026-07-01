@@ -787,6 +787,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
+                    <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
         // STAGE-B b1': threaded to the shard verifier's static OUTER generic

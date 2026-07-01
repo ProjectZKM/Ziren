@@ -368,7 +368,15 @@ impl<F: Field> VirtualGeq<F> {
 ///
 /// Lifetime `'a` borrows the chip + public values for the duration of a
 /// single `prove_shard_zerocheck` call; the poly never escapes it.
-pub struct ZeroCheckPoly<'a, F: Field, EF: ExtensionField<F>, A> {
+///
+/// The `K` type parameter is the *cell* field (the field the trace rows
+/// `main_cells` / `prep_cells` are held in).  Following SP1, the FIRST
+/// sumcheck round runs in the base field (`K = F`, no up-front `EF` lift
+/// of the widest round) and every later round in the extension field
+/// (`K = EF`); `fix_last` folds the cells crossing `K → EF`.  The
+/// challenge-side scalars (`alpha`, `gkr_powers`, `zeta`, `eq_adjustment`,
+/// …) always live in `EF`.
+pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     /// The chip whose AIR constraints are summed.
     air: &'a Chip<F, A>,
     /// Shard public values.
@@ -381,12 +389,13 @@ pub struct ZeroCheckPoly<'a, F: Field, EF: ExtensionField<F>, A> {
     /// The eq anchor — the LogUp-GKR emitted point; shrinks by one
     /// coordinate per fold.
     zeta: Vec<EF>,
-    /// Real main-trace cells, row-major `num_real_entries × num_main_cols`
-    /// (lifted to `EF`).
-    main_cells: Vec<EF>,
+    /// Real main-trace cells, row-major `num_real_entries × num_main_cols`,
+    /// in the current cell field `K` (base `F` at round 0, `EF` after the
+    /// first fold).
+    main_cells: Vec<K>,
     num_main_cols: usize,
     /// Real preprocessed-trace cells, if the chip has a preprocessed trace.
-    prep_cells: Option<Vec<EF>>,
+    prep_cells: Option<Vec<K>>,
     num_prep_cols: usize,
     /// Number of real rows currently held (halves each fold).
     num_real_entries: usize,
@@ -411,14 +420,16 @@ pub struct ZeroCheckPoly<'a, F: Field, EF: ExtensionField<F>, A> {
     _marker: PhantomData<A>,
 }
 
-impl<'a, F, EF, A> ZeroCheckPoly<'a, F, EF, A>
+impl<'a, F, K, EF, A> ZeroCheckPoly<'a, F, K, EF, A>
 where
     F: Field,
-    EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+    K: ExtensionField<F>,
+    EF: ExtensionField<F> + ExtensionField<K>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>,
 {
     /// Construct a chip's zerocheck poly.  `main_cells` / `prep_cells`
-    /// are the real (un-padded) trace rows, row-major, lifted to `EF`.
+    /// are the real (un-padded) trace rows, row-major, in the cell field
+    /// `K` (base `F` for the first round, `EF` after a fold).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         air: &'a Chip<F, A>,
@@ -426,9 +437,9 @@ where
         alpha: EF,
         gkr_powers: Vec<EF>,
         zeta: Vec<EF>,
-        main_cells: Vec<EF>,
+        main_cells: Vec<K>,
         num_main_cols: usize,
-        prep_cells: Option<Vec<EF>>,
+        prep_cells: Option<Vec<K>>,
         num_prep_cols: usize,
         num_real_entries: usize,
         num_variables: u32,
@@ -477,18 +488,27 @@ where
         self
     }
 
-    /// Evaluate the chip's α-RLC'd constraints at a single `EF` row.
-    fn eval_air_at_row(&self, prep_row: &[EF], main_row: &[EF]) -> EF {
-        eval_air_constraints_at_row(self.air, self.alpha, self.public_values, prep_row, main_row)
+    /// Evaluate the chip's α-RLC'd constraints at a single `K` row,
+    /// accumulating in `EF` (see [`BasefoldConstraintFolder`]).
+    fn eval_air_at_row(&self, prep_row: &[K], main_row: &[K]) -> EF {
+        eval_air_constraints_at_row::<F, K, EF, A>(
+            self.air,
+            self.alpha,
+            self.public_values,
+            prep_row,
+            main_row,
+        )
     }
 
-    /// `Σ_i (main_row ++ prep_row)[i] · gkr_powers[i]`.
-    fn gkr_batch(&self, main_row: &[EF], prep_row: &[EF]) -> EF {
+    /// `Σ_i (main_row ++ prep_row)[i] · gkr_powers[i]`.  Cells are `K`,
+    /// powers are `EF`; the product `EF·K` lands in `EF` (`EF·ι(F)` when
+    /// `K = F`, byte-identical to lifting the cell first).
+    fn gkr_batch(&self, main_row: &[K], prep_row: &[K]) -> EF {
         main_row
             .iter()
             .chain(prep_row.iter())
             .zip(self.gkr_powers.iter())
-            .fold(EF::ZERO, |acc, (v, p)| acc + *v * *p)
+            .fold(EF::ZERO, |acc, (v, p)| acc + *p * *v)
     }
 
     /// Core round polynomial.  `IS_FIRST_ROUND` skips the
@@ -539,7 +559,14 @@ where
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
         type Kb = p3_koala_bear::KoalaBear;
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>() || TypeId::of::<F>() != TypeId::of::<Kb>() {
+        // The host cells are reinterpreted as `Ef4` below, so the CELL field
+        // `K` (not just `EF`) must be `Ef4`.  On the base-field first round
+        // (`K = F`) this is false → host fallback (the base-field round-0 is a
+        // pure-host CPU path; the device base-field round-0 is a GPU follow-on).
+        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
+            || TypeId::of::<K>() != TypeId::of::<Ef4>()
+            || TypeId::of::<F>() != TypeId::of::<Kb>()
+        {
             return None;
         }
         let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_batched_ytuple_hook()?;
@@ -784,12 +811,18 @@ where
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
         type Kb = p3_koala_bear::KoalaBear;
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>() || TypeId::of::<F>() != TypeId::of::<Kb>() {
+        // `K` (the cell field) must be `Ef4` — the host `main_cells` are
+        // reinterpreted as `Ef4` below.  Base-field round 0 (`K = F`) falls
+        // back to the host y-tuple loop.
+        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
+            || TypeId::of::<K>() != TypeId::of::<Ef4>()
+            || TypeId::of::<F>() != TypeId::of::<Kb>()
+        {
             return None;
         }
         let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_ytuple_hook()?;
 
-        // SAFETY: the TypeId equalities above guarantee `EF == Ef4` and
+        // SAFETY: the TypeId equalities above guarantee `EF == K == Ef4` and
         // `F == Kb`, so these slice / scalar reinterpretations are
         // layout-safe for the duration of the call (shared borrows only).
         let main_ef4: &[Ef4] = unsafe {
@@ -839,7 +872,12 @@ where
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
         type Kb = p3_koala_bear::KoalaBear;
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>() || TypeId::of::<F>() != TypeId::of::<Kb>() {
+        // Device residency is only ever attached to `K = EF` polys; the
+        // `K = Ef4` guard keeps that invariant explicit.
+        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
+            || TypeId::of::<K>() != TypeId::of::<Ef4>()
+            || TypeId::of::<F>() != TypeId::of::<Kb>()
+        {
             return None;
         }
         let dc = self.device_cells.as_ref()?;
@@ -902,18 +940,22 @@ where
 
         let (mut y_0, mut y_2, mut y_3, mut y_4) = (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
 
-        // Scratch buffers reused across pairs.
-        let mut m0 = vec![EF::ZERO; nm];
-        let mut m2 = vec![EF::ZERO; nm];
-        let mut m3 = vec![EF::ZERO; nm];
-        let mut m4 = vec![EF::ZERO; nm];
-        let mut p0 = vec![EF::ZERO; np];
-        let mut p2 = vec![EF::ZERO; np];
-        let mut p3 = vec![EF::ZERO; np];
-        let mut p4 = vec![EF::ZERO; np];
+        // Scratch buffers reused across pairs, in the cell field `K`.
+        let mut m0 = vec![K::ZERO; nm];
+        let mut m2 = vec![K::ZERO; nm];
+        let mut m3 = vec![K::ZERO; nm];
+        let mut m4 = vec![K::ZERO; nm];
+        let mut p0 = vec![K::ZERO; np];
+        let mut p2 = vec![K::ZERO; np];
+        let mut p3 = vec![K::ZERO; np];
+        let mut p4 = vec![K::ZERO; np];
         // Sample point 3 lies on the row-pair line midway between 2 and 4
-        // (interp_pair is affine in the sample point): m3 = (m2 + m4)/2.
+        // (interp_pair is affine in the sample point): m3 = (m2 + m4)/2.  The
+        // column interpolation runs in `K` (`half_cell`), the GKR-batch
+        // interpolation in `EF` (`half`); for `K = F`, `ι(1/2_F) = 1/2_EF`
+        // (ring-hom), so the two agree byte-for-byte with the all-`EF` fold.
         let half = EF::from_u64(2).inverse();
+        let half_cell = K::from_u64(2).inverse();
 
         for pair in 0..num_pairs {
             let eq = partial[pair];
@@ -926,10 +968,10 @@ where
                 interp_pair(prep, np, num_real, row0, row1, &mut p0, &mut p2, &mut p4);
             }
             for c in 0..nm {
-                m3[c] = (m2[c] + m4[c]) * half;
+                m3[c] = (m2[c] + m4[c]) * half_cell;
             }
             for c in 0..np {
-                p3[c] = (p2[c] + p4[c]) * half;
+                p3[c] = (p2[c] + p4[c]) * half_cell;
             }
 
             let g0 = self.gkr_batch(&m0, &p0);
@@ -1027,9 +1069,14 @@ where
         interpolate_univariate_polynomial(&xs, &ys)
     }
 
-    /// Fix the last (least-significant) variable to `alpha`.
-    fn fix_last(self, alpha: EF) -> Self {
+    /// Fix the last (least-significant) variable to `alpha`, folding the
+    /// cells from `K` to `EF`.  The next-round poly is therefore always a
+    /// `ZeroCheckPoly<'a, F, EF, EF, A>` (for `K = EF` this is `Self`; for
+    /// the base-field first round `K = F` it lifts on the fold).
+    fn fix_last(self, alpha: EF) -> ZeroCheckPoly<'a, F, EF, EF, A> {
         // Device-fold: fold the device cells on device; host cells unused.
+        // Device residency is only ever `K = EF`, so this branch is dead for
+        // the base-field first round (`device_cells` is `None`).
         let new_device_cells: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
             if self.device_cells.is_some() {
                 Some(self.gpu_fold_device(alpha).expect(
@@ -1038,17 +1085,17 @@ where
             } else {
                 None
             };
-        let new_main = if self.device_cells.is_some() {
+        let new_main: Vec<EF> = if self.device_cells.is_some() {
             Vec::new()
         } else {
-            fold_cells(&self.main_cells, self.num_main_cols, self.num_real_entries, alpha)
+            fold_cells::<K, EF>(&self.main_cells, self.num_main_cols, self.num_real_entries, alpha)
         };
-        let new_prep = if self.device_cells.is_some() {
+        let new_prep: Option<Vec<EF>> = if self.device_cells.is_some() {
             None
         } else {
             self.prep_cells
                 .as_ref()
-                .map(|c| fold_cells(c, self.num_prep_cols, self.num_real_entries, alpha))
+                .map(|c| fold_cells::<K, EF>(c, self.num_prep_cols, self.num_real_entries, alpha))
         };
         let new_num_real = self.num_real_entries.div_ceil(2);
         let new_num_vars = self.num_variables - 1;
@@ -1058,18 +1105,30 @@ where
         let last = self.zeta[dim - 1];
         let rest: Vec<EF> = self.zeta[..dim - 1].to_vec();
 
+        // Type changes `K → EF`, so the next-round poly is built explicitly
+        // (no `..self` struct-update, which would require `K == EF`).
         if self.num_real_entries == 0 {
             // Pure padding: nothing to weight, keep eq/geq/pra as-is.
-            return Self {
+            return ZeroCheckPoly {
+                air: self.air,
+                public_values: self.public_values,
+                alpha: self.alpha,
+                gkr_powers: self.gkr_powers,
                 zeta: rest,
                 main_cells: new_main,
+                num_main_cols: self.num_main_cols,
                 prep_cells: new_prep,
+                num_prep_cols: self.num_prep_cols,
                 num_real_entries: new_num_real,
                 num_variables: new_num_vars,
+                eq_adjustment: self.eq_adjustment,
+                geq_value: self.geq_value,
+                padded_row_adjustment: self.padded_row_adjustment,
                 virtual_geq: new_virtual_geq,
                 device_cells: new_device_cells,
+                device_prep: self.device_prep,
                 device_round0: false,
-                ..self
+                _marker: PhantomData,
             };
         }
 
@@ -1084,43 +1143,54 @@ where
             (EF::ONE - self.geq_value) * alpha + self.geq_value
         };
 
-        Self {
+        ZeroCheckPoly {
+            air: self.air,
+            public_values: self.public_values,
+            alpha: self.alpha,
+            gkr_powers: self.gkr_powers,
             zeta: rest,
             main_cells: new_main,
+            num_main_cols: self.num_main_cols,
             prep_cells: new_prep,
+            num_prep_cols: self.num_prep_cols,
             num_real_entries: new_num_real,
             num_variables: new_num_vars,
             eq_adjustment,
             geq_value,
+            padded_row_adjustment: self.padded_row_adjustment,
             virtual_geq: new_virtual_geq,
             device_cells: new_device_cells,
+            device_prep: self.device_prep,
             device_round0: false,
-            ..self
+            _marker: PhantomData,
         }
     }
 }
 
-/// Evaluate a chip's α-RLC'd AIR constraints at one `EF` row through
-/// the [`BasefoldConstraintFolder`] (Horner α; cumulative sums held at
-/// zero — lookup soundness rides on LogUp-GKR, not this zerocheck).
-pub fn eval_air_constraints_at_row<F, EF, A>(
+/// Evaluate a chip's α-RLC'd AIR constraints at one `K` row through the
+/// [`BasefoldConstraintFolder`] (Horner α accumulating in `EF`; cumulative
+/// sums held at zero — lookup soundness rides on LogUp-GKR, not this
+/// zerocheck).  `K` is the cell field (base `F` for the first round, `EF`
+/// after a fold).
+pub fn eval_air_constraints_at_row<F, K, EF, A>(
     chip: &Chip<F, A>,
     alpha: EF,
     public_values: &[F],
-    prep_row: &[EF],
-    main_row: &[EF],
+    prep_row: &[K],
+    main_row: &[K],
 ) -> EF
 where
     F: Field,
-    EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+    K: ExtensionField<F>,
+    EF: ExtensionField<F> + ExtensionField<K>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>,
 {
     let local_sum = EF::ZERO;
     let global_sum: SepticDigest<F> = SepticDigest(SepticCurve {
         x: SepticExtension::<F>([F::ZERO; 7]),
         y: SepticExtension::<F>([F::ZERO; 7]),
     });
-    let mut folder = BasefoldConstraintFolder::<F, EF> {
+    let mut folder = BasefoldConstraintFolder::<F, K, EF> {
         preprocessed: PairWindow { local: prep_row, next: prep_row },
         main: PairWindow { local: main_row, next: main_row },
         alpha,
@@ -1148,7 +1218,7 @@ pub fn compute_padded_row_adjustment<F, EF, A>(
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
 {
     // A width-0 main trace (absent / placeholder chip in this shard) => main_height==0
     // => num_real==0 => sum_as_poly emits the degree-4 dummy and never uses this
@@ -1157,29 +1227,31 @@ where
     if main_width == 0 {
         return EF::ZERO;
     }
+    // The padded row is all-zero, so the cell field is immaterial — evaluate
+    // it in `EF` (`K = EF`), independent of the round.
     let main_row = vec![EF::ZERO; main_width];
     let prep_row = vec![EF::ZERO; prep_width];
-    eval_air_constraints_at_row(chip, alpha, public_values, &prep_row, &main_row)
+    eval_air_constraints_at_row::<F, EF, EF, A>(chip, alpha, public_values, &prep_row, &main_row)
 }
 
 /// Linear interpolation of one column-pair `(row0, row1)` at last-var
 /// points 0, 2, 4.  Out-of-range `row1` (odd tail) is the `ZERO`
 /// padding constant.  `vals_0 = r0`, `vals_2 = r0 + 2·slope`,
 /// `vals_4 = r0 + 4·slope`, `slope = r1 − r0`.
-fn interp_pair<EF: Field>(
-    cells: &[EF],
+fn interp_pair<K: Field>(
+    cells: &[K],
     ncols: usize,
     num_real: usize,
     row0: usize,
     row1: usize,
-    vals_0: &mut [EF],
-    vals_2: &mut [EF],
-    vals_4: &mut [EF],
+    vals_0: &mut [K],
+    vals_2: &mut [K],
+    vals_4: &mut [K],
 ) {
     let r0 = &cells[row0 * ncols..row0 * ncols + ncols];
     for c in 0..ncols {
         let a = r0[c];
-        let b = if row1 < num_real { cells[row1 * ncols + c] } else { EF::ZERO };
+        let b = if row1 < num_real { cells[row1 * ncols + c] } else { K::ZERO };
         let slope = b - a;
         let slope2 = slope + slope;
         let slope4 = slope2 + slope2;
@@ -1189,9 +1261,18 @@ fn interp_pair<EF: Field>(
     }
 }
 
-/// Fold the last (least-significant) variable of a real-cell buffer:
+/// Fold the last (least-significant) variable of a real-cell buffer,
+/// lifting the cell field `K` to the challenge field `EF`:
 /// `out[i] = α·(row_{2i+1} − row_{2i}) + row_{2i}`, odd tail vs `ZERO`.
-fn fold_cells<EF: Field>(cells: &[EF], ncols: usize, num_real: usize, alpha: EF) -> Vec<EF> {
+/// For `K = F` the product `EF·(F−F)` is a scalar multiply and `+ F`
+/// embeds into the constant coefficient — byte-identical to lifting the
+/// cells to `EF` first and folding all-`EF`.
+fn fold_cells<K: Field, EF: ExtensionField<K>>(
+    cells: &[K],
+    ncols: usize,
+    num_real: usize,
+    alpha: EF,
+) -> Vec<EF> {
     if ncols == 0 || num_real == 0 {
         return Vec::new();
     }
@@ -1202,7 +1283,7 @@ fn fold_cells<EF: Field>(cells: &[EF], ncols: usize, num_real: usize, alpha: EF)
         let r1 = 2 * i + 1;
         for c in 0..ncols {
             let x = cells[r0 * ncols + c];
-            let y = if r1 < num_real { cells[r1 * ncols + c] } else { EF::ZERO };
+            let y = if r1 < num_real { cells[r1 * ncols + c] } else { K::ZERO };
             out[i * ncols + c] = alpha * (y - x) + x;
         }
     }
@@ -1236,9 +1317,10 @@ pub(crate) fn bitrev_rows<EF: Field>(cells: &[EF], ncols: usize, height: usize) 
 
 // ───────────────────────────── trait impls ───────────────────────────────
 
-impl<F, EF, A> SumcheckPolyBase for ZeroCheckPoly<'_, F, EF, A>
+impl<F, K, EF, A> SumcheckPolyBase for ZeroCheckPoly<'_, F, K, EF, A>
 where
     F: Field,
+    K: Field,
     EF: ExtensionField<F>,
 {
     fn num_variables(&self) -> u32 {
@@ -1246,23 +1328,31 @@ where
     }
 }
 
-impl<F, EF, A> ComponentPoly<EF> for ZeroCheckPoly<'_, F, EF, A>
+impl<F, K, EF, A> ComponentPoly<EF> for ZeroCheckPoly<'_, F, K, EF, A>
 where
     F: Field,
-    EF: ExtensionField<F>,
+    K: Field,
+    EF: ExtensionField<F> + ExtensionField<K>,
 {
     /// Final per-column evaluations at the reduced point, preprocessed
     /// then main (SP1 ordering).  Ziren's zerocheck consumers discard
     /// this (openings come from the GKR phase); provided for the trait.
+    ///
+    /// Called only at `num_variables == 0`, i.e. on the fully-reduced
+    /// `K = EF` poly; the `EF::from` lift is an identity there and merely
+    /// keeps the impl valid for the generic `K` (base-field first round).
     fn get_component_poly_evals(&self) -> Vec<EF> {
         debug_assert_eq!(self.num_variables, 0, "get_component_poly_evals before full reduction");
         let mut out = Vec::with_capacity(self.num_prep_cols + self.num_main_cols);
         if self.num_real_entries >= 1 {
             // Device-fold: extract the folded 1-row openings from device cells.
+            // Device residency implies `K == EF == Ef4`.
             if let Some(dc) = self.device_cells.as_ref() {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-                if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
+                if TypeId::of::<EF>() == TypeId::of::<Ef4>()
+                    && TypeId::of::<K>() == TypeId::of::<Ef4>()
+                {
                     if let Some(hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_zerocheck_extract_final_hook()
                     {
@@ -1299,11 +1389,17 @@ where
                 }
             }
             if let Some(prep) = self.prep_cells.as_ref() {
-                out.extend_from_slice(&prep[..self.num_prep_cols.min(prep.len())]);
+                out.extend(
+                    prep[..self.num_prep_cols.min(prep.len())].iter().map(|&v| EF::from(v)),
+                );
             } else {
                 out.extend(std::iter::repeat(EF::ZERO).take(self.num_prep_cols));
             }
-            out.extend_from_slice(&self.main_cells[..self.num_main_cols.min(self.main_cells.len())]);
+            out.extend(
+                self.main_cells[..self.num_main_cols.min(self.main_cells.len())]
+                    .iter()
+                    .map(|&v| EF::from(v)),
+            );
         } else {
             out.extend(std::iter::repeat(EF::ZERO).take(self.num_prep_cols + self.num_main_cols));
         }
@@ -1311,11 +1407,13 @@ where
     }
 }
 
-impl<F, EF, A> SumcheckPoly<EF> for ZeroCheckPoly<'_, F, EF, A>
+// Rounds ≥ 1 (and the device-resident first round): cells are `EF`, so the
+// poly folds `EF → EF` in place — `fix_last_variable` returns `Self`.
+impl<F, EF, A> SumcheckPoly<EF> for ZeroCheckPoly<'_, F, EF, EF, A>
 where
     F: Field,
     EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
 {
     fn fix_last_variable(self, alpha: EF) -> Self {
         self.fix_last(alpha)
@@ -1340,13 +1438,20 @@ where
     }
 }
 
-impl<'a, F, EF, A> SumcheckPolyFirstRound<EF> for ZeroCheckPoly<'a, F, EF, A>
+// The first round is generic over the cell field `K` (base `F` for the
+// host base-field round, `EF` for the device-resident / GPU-hook round).
+// `fix_t_variables` folds `K → EF`, so the next-round poly is always the
+// `K = EF` variant.
+impl<'a, F, K, EF, A> SumcheckPolyFirstRound<EF> for ZeroCheckPoly<'a, F, K, EF, A>
 where
     F: Field,
-    EF: ExtensionField<F>,
-    A: MachineAir<F> + for<'b> Air<BasefoldConstraintFolder<'b, F, EF>>,
+    K: ExtensionField<F>,
+    EF: ExtensionField<F> + ExtensionField<K>,
+    A: MachineAir<F>
+        + for<'b> Air<BasefoldConstraintFolder<'b, F, K, EF>>
+        + for<'b> Air<BasefoldConstraintFolder<'b, F, EF, EF>>,
 {
-    type NextRoundPoly = ZeroCheckPoly<'a, F, EF, A>;
+    type NextRoundPoly = ZeroCheckPoly<'a, F, EF, EF, A>;
 
     fn fix_t_variables(self, alpha: EF, t: usize) -> Self::NextRoundPoly {
         assert_eq!(t, 1, "ZeroCheckPoly only supports t = 1");
@@ -1656,7 +1761,7 @@ mod tests {
             row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum()
         };
         let cval = |main_row: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
         let zero_row = vec![EF::ZERO; ncols];
         let h = |x: usize| -> EF {
@@ -1686,7 +1791,7 @@ mod tests {
         let main_height = num_real;
         let vg = VirtualGeq::new(main_height as u32, EF::ONE, EF::ZERO, num_vars);
         let init_geq = if main_height > 0 { EF::ZERO } else { EF::ONE };
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
             &pv,
             alpha,
@@ -1730,6 +1835,101 @@ mod tests {
         assert_eq!(
             proof.point_and_eval.1, expected,
             "sum_as_poly reduction != eq*(C(trace@z)+batch) — host zerocheck bug reproduced"
+        );
+    }
+
+    /// #125 INC-4a — the base-field first round.  Build the SAME chip's
+    /// round-0 `ZeroCheckPoly` twice: once with base-field cells (`K = F`,
+    /// no up-front `EF` lift) and once with the cells lifted to `EF`
+    /// (`K = EF`, the legacy widest-round lift), then assert the round-0
+    /// univariate polynomials are BIT-FOR-BIT identical.  This is the whole
+    /// safety argument: `iota: F -> EF` is a ring homomorphism, so computing
+    /// the `{0,2,3,4}` column values + the AIR constraint eval + the GKR
+    /// batch in the base field and lifting yields the identical `EF` round
+    /// poly as lifting first.  Covers a mixed-value trace (heavy padding:
+    /// `num_real` < `2^num_variables`) and BOTH the first-round point-0 skip
+    /// (`is_first_round = true`) and the full degree-4 eval
+    /// (`is_first_round = false`).
+    #[test]
+    fn base_field_round0_equals_ef_round0() {
+        let num_vars = 4u32;
+        let ncols = 2usize;
+        // 8 real rows in a 2^4 = 16 hypercube (exercises VirtualGeq padding).
+        let height = 8usize;
+        // col0 ∈ {0,1,2} → MockAir x(x-1)(x-2) = 0 on real rows; col1 arbitrary.
+        let col0 = [0u64, 1, 2, 1, 0, 2, 1, 0];
+        let col1 = [9u64, 4, 7, 13, 5, 2, 8, 3];
+        let trace_f: Vec<InnerVal> = (0..height)
+            .flat_map(|r| [InnerVal::from_u64(col0[r]), InnerVal::from_u64(col1[r])])
+            .collect();
+        let main_cells_ef: Vec<EF> = trace_f.iter().map(|&v| EF::from(v)).collect();
+
+        let alpha = EF::from_u64(17);
+        let beta = EF::from_u64(29);
+        let pv: Vec<InnerVal> = Vec::new();
+        let chip = Chip::new(MockAir { ncols });
+        let main_width = ncols;
+        let prep_width = 0usize;
+        let gkr_powers: Vec<EF> = {
+            let mut v = Vec::new();
+            let mut acc = EF::ONE;
+            for _ in 0..main_width {
+                acc *= beta;
+                v.push(acc);
+            }
+            v
+        };
+        let zeta: Vec<EF> =
+            (0..num_vars as usize).map(|k| EF::from_u64((k * 7 + 3) as u64 + 200)).collect();
+        let pra = compute_padded_row_adjustment::<InnerVal, EF, MockAir>(
+            &chip, alpha, &pv, main_width, prep_width,
+        );
+        let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
+        let claim = EF::from_u64(1234567);
+
+        // K = F (base-field cells, no lift).
+        let poly_f = ZeroCheckPoly::<InnerVal, InnerVal, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), trace_f.clone(), main_width,
+            None, prep_width, height, num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+        // K = EF (legacy up-front lift).
+        let poly_ef = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), main_cells_ef, main_width,
+            None, prep_width, height, num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+
+        // Round 0 (is_first_round = true): the point-0 constraint eval is
+        // skipped; {2,3,4} column evals + GKR batch run in the base field.
+        let r0_f = poly_f.sum_as_poly(Some(claim), true);
+        let r0_ef = poly_ef.sum_as_poly(Some(claim), true);
+        assert_eq!(
+            r0_f.coefficients, r0_ef.coefficients,
+            "K=F round-0 (first) poly must equal K=EF bit-for-bit",
+        );
+
+        // Full degree-4 eval (is_first_round = false): also runs the point-0
+        // AIR constraint eval in the base field.
+        let rf_f = poly_f.sum_as_poly(Some(claim), false);
+        let rf_ef = poly_ef.sum_as_poly(Some(claim), false);
+        assert_eq!(
+            rf_f.coefficients, rf_ef.coefficients,
+            "K=F round-0 (full) poly must equal K=EF bit-for-bit",
+        );
+
+        // The fold `K = F -> EF` must also produce the identical next-round
+        // poly (cells, eq_adjustment, geq, virtual_geq all match).
+        let a1 = EF::from_u64(98765);
+        let next_f = poly_f.fix_last(a1);
+        let next_ef = poly_ef.fix_last(a1);
+        assert_eq!(
+            next_f.main_cells, next_ef.main_cells,
+            "folded (K=F->EF) main_cells must equal the (K=EF->EF) fold",
+        );
+        let n0_f = next_f.sum_as_poly(Some(claim), false);
+        let n0_ef = next_ef.sum_as_poly(Some(claim), false);
+        assert_eq!(
+            n0_f.coefficients, n0_ef.coefficients,
+            "post-fold round poly must match between the F->EF and EF->EF folds",
         );
     }
 
@@ -1823,7 +2023,7 @@ mod tests {
         };
         let batch = |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
         let cval = |main_row: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
 
         // *** THE REAL PROVER'S CLAIM ***  GKR-forward main_trace_evaluations
@@ -1843,7 +2043,7 @@ mod tests {
             &chip, alpha, &pv, main_width, prep_width,
         );
         let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), poly_cells, main_width, None,
             prep_width, height, num_vars, EF::ONE, EF::ZERO, pra, vg,
         );
@@ -2006,7 +2206,7 @@ mod tests {
         };
         let batch = |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
         let cval = |main_row: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
 
         // GKR-forward claim over the pow2-padded trace at trailing log_h coords.
@@ -2033,7 +2233,7 @@ mod tests {
             &chip, alpha, &pv, main_width, prep_width,
         );
         let vg = VirtualGeq::new(vg_threshold, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), poly_cells, main_width, None,
             prep_width, num_real, num_vars, EF::ONE, EF::ZERO, pra, vg,
         );
@@ -2161,7 +2361,7 @@ mod tests {
         let batch =
             |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
         let cval = |main_row: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
 
         let start = (num_vars - real_vars) as usize;
@@ -2192,7 +2392,7 @@ mod tests {
             &chip, alpha, &pv, main_width, prep_width,
         );
         let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
             &pv,
             alpha,
@@ -2314,7 +2514,7 @@ mod tests {
         let batch =
             |row: &[EF]| -> EF { row.iter().zip(gkr_powers.iter()).map(|(&v, &p)| v * p).sum() };
         let cval = |main_row: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
 
         // Claim seed — the STAGE-2 COLLAPSED claim: seed from the FULL-POINT
@@ -2343,7 +2543,7 @@ mod tests {
             &chip, alpha, &pv, main_width, prep_width,
         );
         let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip,
             &pv,
             alpha,
@@ -2519,7 +2719,7 @@ mod tests {
     // interpolation) is mirrored from the spec — the end-to-end correctness of
     // that stage is independently pinned by `orientation_sweep`'s inv1/inv2.
     fn cpu_ref_round_poly(
-        poly: &ZeroCheckPoly<InnerVal, EF, MockAir>,
+        poly: &ZeroCheckPoly<InnerVal, EF, EF, MockAir>,
         claim: EF,
         is_first_round: bool,
     ) -> UnivariatePolynomial<EF> {
@@ -2561,7 +2761,7 @@ mod tests {
             m.iter().chain(p.iter()).zip(gkr.iter()).fold(EF::ZERO, |a, (v, pw)| a + *v * *pw)
         };
         let cval = |p: &[EF], m: &[EF]| -> EF {
-            eval_air_constraints_at_row::<InnerVal, EF, MockAir>(
+            eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(
                 poly.air,
                 poly.alpha,
                 poly.public_values,
@@ -2694,7 +2894,7 @@ mod tests {
             &chip, alpha, &pv, main_width, prep_width,
         );
         let vg = VirtualGeq::new(height as u32, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip, &pv, alpha, gkr_powers, zeta, poly_cells, main_width, None, prep_width, height,
             num_vars, EF::ONE, EF::ZERO, pra, vg,
         );
@@ -2750,7 +2950,7 @@ mod tests {
 
         // pure padding.
         let vg0 = VirtualGeq::new(0, EF::ONE, EF::ZERO, num_vars);
-        let poly0 = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly0 = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), Vec::new(), ncols, None, 0, 0,
             num_vars, EF::ONE, EF::ZERO, pra, vg0,
         );
@@ -2768,7 +2968,7 @@ mod tests {
             })
             .collect();
         let vg = VirtualGeq::new(num_real as u32, EF::ONE, EF::ZERO, num_vars);
-        let poly = ZeroCheckPoly::<InnerVal, EF, MockAir>::new(
+        let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
             &chip, &pv, alpha, gkr_powers, zeta, main_cells, ncols, None, 0, num_real, num_vars,
             EF::ONE, EF::ZERO, pra, vg,
         );

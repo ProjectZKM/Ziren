@@ -41,6 +41,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                     'b,
                     Val<SC>,
                     <SC as StarkGenericConfig>::Challenge,
+                    <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
         // STAGE-B b1': threaded to the shard-level BaseFold verifier's static
