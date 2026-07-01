@@ -191,6 +191,7 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     d1: &[EF],
     lambda: EF,
     current_claim: EF,
+    round_coord: EF,
 ) -> [EF; 4] {
     debug_assert_eq!(n0.len(), d0.len());
     debug_assert_eq!(n0.len(), d0.len());
@@ -214,6 +215,72 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     let row_half = rows_r / 2;
     let col_half = cols_r / 2; // only meaningful when folding interaction
 
+    use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+    // Use a moderate chunk size so each rayon task has enough work to
+    // amortize dispatch overhead, but small enough that the input
+    // streams stay hot in L2.
+    let chunk_size = 4096.min(half).max(1);
+
+    // Per-pair bracket contribution `e · [λ·(n0·d1 + n1·d0) + d0·d1]`.
+    let contrib = |e: EF, n0x: EF, d0x: EF, n1x: EF, d1x: EF| -> EF {
+        e * (lambda * (n0x * d1x + n1x * d0x) + d0x * d1x)
+    };
+    // Factored-eq lookup for the MSB-fold pair (i, i+half): the eq
+    // weight when the top remaining variable is 0 (`e0`) vs 1 (`e1`).
+    let eq_pair = |i: usize| -> (EF, EF) {
+        if folding_row {
+            let col0 = i % cols_r;
+            let row0 = i / cols_r;
+            let row1 = row0 + row_half;
+            let col_factor = eq_int[col0];
+            (col_factor * eq_row[row0], col_factor * eq_row[row1])
+        } else {
+            let row_factor = eq_row[0];
+            (eq_int[i] * row_factor, eq_int[i + col_half] * row_factor)
+        }
+    };
+
+    // ── SP1 eq-root HALF trick ──────────────────────────────────────
+    // `p(X) = eq(round_coord, X) · g(X)` factors through the eq factor of
+    // the bound variable, so `p` vanishes at the eq-factor root and (by
+    // the sumcheck identity) `p(0) + p(1) = current_claim`.  Evaluate the
+    // sum at only `X = 0` and `X = 1/2`, then reconstruct the bit-identical
+    // degree-3 polynomial from {p(0), p(1/2), claim, eq_root}.  Degenerate
+    // coordinates fall through to the direct {1, 2, 3} sweep below.
+    if let Some(half_inv) = EF::ONE.double().try_inverse() {
+        let (sum0, sum_half) = (0..half)
+            .into_par_iter()
+            .with_min_len(chunk_size)
+            .map(|i| {
+                let j0 = i;
+                let j1 = i + half;
+                let (e0, e1) = eq_pair(i);
+                let (n00, d00, n10, d10) = (n0[j0], d0[j0], n1[j0], d1[j0]);
+                let (n01, d01, n11, d11) = (n0[j1], d0[j1], n1[j1], d1[j1]);
+                // X = 0 reads the lo cells directly (no interpolation).
+                let s0 = contrib(e0, n00, d00, n10, d10);
+                // X = 1/2 is the midpoint of the lo/hi linearisation.
+                let eh = (e0 + e1) * half_inv;
+                let n0h = (n00 + n01) * half_inv;
+                let d0h = (d00 + d01) * half_inv;
+                let n1h = (n10 + n11) * half_inv;
+                let d1h = (d10 + d11) * half_inv;
+                let sh = contrib(eh, n0h, d0h, n1h, d1h);
+                (s0, sh)
+            })
+            .reduce(
+                || (EF::ZERO, EF::ZERO),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+            );
+        if let Some(evals) =
+            reconstruct_round_evals_from_eqroot(sum0, sum_half, current_claim, round_coord)
+        {
+            return evals;
+        }
+    }
+
+    // Direct {1, 2, 3} sweep — fallback for a degenerate `round_coord`.
+    //
     // EF arithmetic optimizations:
     //   - `x.double()` (4 base adds) instead of `two * x` (16 base muls)
     //   - SP1's 3-point sumcheck trick: skip the X=0 evaluation since
@@ -221,11 +288,6 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     //     for free.  Saves the entire `contrib(e0, n00, d00, n10, d10)`
     //     call per pair — 5 EF muls — for a ~25% reduction in the
     //     per-pair contrib cost.
-    use p3_maybe_rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
-    // Use a moderate chunk size so each rayon task has enough work to
-    // amortize dispatch overhead, but small enough that the 5 input
-    // streams (per-pair: 5 × 2 EFs = 160 bytes) stay hot in L2.
-    let chunk_size = 4096.min(half).max(1);
     let (p1, p2, p3) = (0..half)
         .into_par_iter()
         .with_min_len(chunk_size)
@@ -534,9 +596,11 @@ fn synthetic_diff_test_step7z() {
     // and eq_int.len()=1 so empty sum = ZERO.
     let pad_eq_int_sum = ProdEF::ZERO;
 
-    // Host evals.
+    // Host evals.  Round-0 row binding ⇒ eq-root coordinate = the top
+    // remaining row coord row_point[log2(eq_row.len()) - 1] (= c1 here).
+    let synth_round_coord = row_point[eq_row.len().trailing_zeros() as usize - 1];
     let host_evals = round_poly_evaluations_chip_structured(
-        &chip_state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim,
+        &chip_state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, synth_round_coord,
     );
     let host_coeffs = poly_coefficients_from_evals(host_evals);
 
@@ -672,6 +736,66 @@ fn lagrange_interp_4<EF: Field>(pts: [EF; 4], vals: [EF; 4]) -> [EF; 4] {
         }
     }
     result
+}
+
+/// Reconstruct the four round-polynomial evaluations at `{0, 1, 2, 3}`
+/// from the SP1 **eq-root HALF trick**.
+///
+/// Each per-layer LogUp-GKR round polynomial factors as
+///   `p(X) = eq(c, X) · g(X)`
+/// where `c` is the round's binding coordinate,
+///   `eq(c, X) = c·X + (1-c)·(1-X)`
+/// is the (linear) eq factor of the variable being bound, and `g` is
+/// degree-2.  Two consequences let us skip a third sum:
+///   * the sumcheck identity gives `p(0) + p(1) = claim`, so
+///     `p(1) = claim - p(0)` for free; and
+///   * `p` vanishes at the eq-factor root
+///       `eq_root = (1 - c) / (1 - 2c)`   (since `eq(c, eq_root) = 0`).
+///
+/// Thus, having summed the round poly at only `X = 0` and `X = 1/2`,
+/// we know it at four DISTINCT nodes
+///   `{0, 1, 1/2, eq_root}  →  {p0, claim - p0, p_half, 0}`,
+/// which uniquely determine the degree-3 `p`.  Interpolating and
+/// re-evaluating at `{0, 1, 2, 3}` yields the SAME field elements the
+/// direct `{1, 2, 3}` sweep produces (exact field arithmetic — the
+/// polynomial is unique), so the emitted round message is bit-identical.
+///
+/// Returns `None` for the degenerate coordinates `c ∈ {0, 1, 1/2}`,
+/// where `eq_root` is undefined (`c = 1/2` ⇒ `1 - 2c = 0`) or collides
+/// with an existing interpolation node (`c = 1` ⇒ `eq_root = 0`,
+/// `c = 0` ⇒ `eq_root = 1`).  The caller then falls back to the direct
+/// `{1, 2, 3}` sweep, which is coordinate-independent and always valid.
+fn reconstruct_round_evals_from_eqroot<EF: Field>(
+    p0: EF,
+    p_half: EF,
+    claim: EF,
+    c: EF,
+) -> Option<[EF; 4]> {
+    let one = EF::ONE;
+    let two = one.double();
+    // `c == 1/2` ⇒ the eq factor is constant in the top variable and has
+    // no finite root — `try_inverse` returns `None`, folding this case in.
+    let inv_one_minus_2c = (one - two * c).try_inverse()?;
+    let eq_root = (one - c) * inv_one_minus_2c;
+    // `2` is invertible in any odd-characteristic field (all fields here).
+    let half = two.try_inverse()?;
+    // The four interpolation nodes must be distinct: reject the `c = 0`
+    // (`eq_root = 1`) and `c = 1` (`eq_root = 0`) collisions, plus the
+    // pathological `eq_root = 1/2`.
+    if eq_root == EF::ZERO || eq_root == one || eq_root == half {
+        return None;
+    }
+    let p1 = claim - p0;
+    let pts = [EF::ZERO, one, half, eq_root];
+    let vals = [p0, p1, p_half, EF::ZERO];
+    let coeffs = lagrange_interp_4(pts, vals);
+    let three = two + one;
+    Some([
+        poly_eval(&coeffs, EF::ZERO),
+        poly_eval(&coeffs, one),
+        poly_eval(&coeffs, two),
+        poly_eval(&coeffs, three),
+    ])
 }
 
 /// Dedicated rayon pool — dedicated rayon pool for the GPU first-round marshal.
@@ -1291,6 +1415,18 @@ where
     };
 
     // Compute host evals via the production round-poly path.
+    // Round-0 row binding ⇒ eq-root coordinate = the top remaining row
+    // coord row_point[log2(eq_row.len()) - 1] (row_point is the row-axis
+    // suffix of eval_point).
+    let round_coord: EF = {
+        let num_int_vars = first_layer.num_interaction_variables;
+        let row_point = &eval_point[num_int_vars..];
+        if eq_row.len() > 1 {
+            row_point[eq_row.len().trailing_zeros() as usize - 1]
+        } else {
+            EF::ZERO
+        }
+    };
     let host_evals = round_poly_evaluations_chip_structured(
         chip_state,
         eq_int,
@@ -1298,6 +1434,7 @@ where
         pad_eq_int_sum,
         _lambda,
         claimed_sum,
+        round_coord,
     );
 
     // Cast partials EF -> ProdEF.
@@ -1610,6 +1747,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     pad_eq_int_sum: EF,
     lambda: EF,
     current_claim: EF,
+    round_coord: EF,
 ) -> [EF; 4] {
     use p3_maybe_rayon::prelude::*;
 
@@ -1711,6 +1849,100 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
         .collect();
 
     let num_chips = state.n0.len();
+
+    // ── SP1 eq-root HALF trick ──────────────────────────────────────
+    // `p(X) = eq(round_coord, X) · g(X)` (the row eq factor `eq(c, X)` is
+    // common across every chip / row / pad term), so `p` vanishes at the
+    // eq-factor root and `p(0) + p(1) = current_claim`.  Evaluate the FULL
+    // layer sum (chips + pad tail) at only `X = 0` and `X = 1/2`, then
+    // reconstruct the bit-identical degree-3 polynomial.  Degenerate
+    // coordinates fall through to the direct {1, 2, 3} sweep below.
+    if let Some(half_inv) = EF::ONE.double().try_inverse() {
+        // Row eq sums at X = 0 (= lo half) and X = 1/2 (midpoint).
+        let er_sum0 = sum_lo;
+        let er_sum_half = (sum_lo + sum_hi) * half_inv;
+        let (chip_sum0, chip_sum_half) = (0..num_chips)
+            .into_par_iter()
+            .map(|c| {
+                let n0_chip = &state.n0[c];
+                let d0_chip = &state.d0[c];
+                let n1_chip = &state.n1[c];
+                let d1_chip = &state.d1[c];
+                let chip_off = state.chip_offsets[c];
+                let cols = state.chip_cols[c];
+                let real = state.num_real_rows[c];
+                let chip_eq_int_sum = chip_eq_int_sums[c];
+
+                // Fully-padding chip: bracket = 1 everywhere.
+                if real == 0 {
+                    return (chip_eq_int_sum * er_sum0, chip_eq_int_sum * er_sum_half);
+                }
+
+                (0..row_half)
+                    .into_par_iter()
+                    .with_min_len(64)
+                    .map(|row| {
+                        let er0 = eq_row[row];
+                        let er1 = eq_row[row + row_half];
+                        let er_half = (er0 + er1) * half_inv;
+
+                        let lo_real = row < real;
+                        let hi_real = row + row_half < real;
+
+                        if !lo_real && !hi_real {
+                            // (pad, pad): bracket = 1 for every column.
+                            return (chip_eq_int_sum * er0, chip_eq_int_sum * er_half);
+                        }
+
+                        let lo_base = row * cols;
+                        let hi_base = (row + row_half) * cols;
+
+                        let mut chip_s0 = EF::ZERO;
+                        let mut chip_sh = EF::ZERO;
+                        for col in 0..cols {
+                            let n00 = if lo_real { n0_chip[lo_base + col] } else { EF::ZERO };
+                            let d00 = if lo_real { d0_chip[lo_base + col] } else { EF::ONE };
+                            let n10 = if lo_real { n1_chip[lo_base + col] } else { EF::ZERO };
+                            let d10 = if lo_real { d1_chip[lo_base + col] } else { EF::ONE };
+                            let n01 = if hi_real { n0_chip[hi_base + col] } else { EF::ZERO };
+                            let d01 = if hi_real { d0_chip[hi_base + col] } else { EF::ONE };
+                            let n11 = if hi_real { n1_chip[hi_base + col] } else { EF::ZERO };
+                            let d11 = if hi_real { d1_chip[hi_base + col] } else { EF::ONE };
+
+                            let ei = eq_int[chip_off + col];
+                            // X = 0 reads the lo cells directly.
+                            let bracket0 = lambda * (n00 * d10 + n10 * d00) + d00 * d10;
+                            // X = 1/2 is the midpoint of the lo/hi cells.
+                            let n0h = (n00 + n01) * half_inv;
+                            let d0h = (d00 + d01) * half_inv;
+                            let n1h = (n10 + n11) * half_inv;
+                            let d1h = (d10 + d11) * half_inv;
+                            let bracket_half = lambda * (n0h * d1h + n1h * d0h) + d0h * d1h;
+                            chip_s0 += ei * bracket0;
+                            chip_sh += ei * bracket_half;
+                        }
+                        (chip_s0 * er0, chip_sh * er_half)
+                    })
+                    .reduce(
+                        || (EF::ZERO, EF::ZERO),
+                        |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+                    )
+            })
+            .reduce(
+                || (EF::ZERO, EF::ZERO),
+                |(a0, ah), (b0, bh)| (a0 + b0, ah + bh),
+            );
+        // Global pad-tail (identity-fraction columns): bracket = 1.
+        let sum0 = chip_sum0 + pad_eq_int_sum * er_sum0;
+        let sum_half = chip_sum_half + pad_eq_int_sum * er_sum_half;
+        if let Some(evals) =
+            reconstruct_round_evals_from_eqroot(sum0, sum_half, current_claim, round_coord)
+        {
+            return evals;
+        }
+    }
+
+    // Direct {1, 2, 3} sweep — fallback for a degenerate `round_coord`.
     // Per-chip parallel reduce.  Each chip walks its `row_half` rows in
     // parallel, accumulating contributions to (p(1), p(2), p(3)).
     let (p1, p2, p3) = (0..num_chips)
@@ -2095,6 +2327,15 @@ pub struct LogupRoundPolynomial<EF> {
     /// Factored eq table for the **row** variables.  Length is
     /// `2^remaining_row_vars`.
     eq_row: Vec<EF>,
+    /// Original (unfolded) LSB-first interaction-axis coordinates
+    /// (`eval_point[..num_interaction_variables]`).  The coordinate `c`
+    /// bound in an interaction round is `int_point[log2(eq_int.len()) - 1]`
+    /// — threaded into the eq-root HALF trick in the round-poly evaluators.
+    int_point: Vec<EF>,
+    /// Original (unfolded) LSB-first row-axis coordinates
+    /// (`eval_point[num_interaction_variables..]`).  The coordinate `c`
+    /// bound in a row round is `row_point[log2(eq_row.len()) - 1]`.
+    row_point: Vec<EF>,
     /// Cached `Σ eq_int[total_chip_cols..]` — analytic contribution
     /// from the per-row "padding tail" of identity-fraction cells.
     /// Recomputed when an interaction-binding round shrinks `eq_int`.
@@ -2286,6 +2527,8 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             state: initial_state,
             eq_int,
             eq_row,
+            int_point: interaction_point.to_vec(),
+            row_point: row_point.to_vec(),
             pad_eq_int_sum,
             active_cols: total_chip_cols,
             lambda,
@@ -2552,6 +2795,19 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
             return cached_round_poly.clone();
         }
         let claim_v = claim.expect("sum_as_poly_in_last_variable: claim required");
+        // Coordinate `c` bound this round, for the eq-root HALF trick.
+        // MSB-first cadence binds row variables first (while `eq_row.len() > 1`),
+        // then interaction variables — the same discriminator `fix_last_variable`
+        // uses.  With LSB-first eq tables the top remaining coordinate sits at
+        // index `log2(len) - 1` of the ORIGINAL (unfolded) point.
+        let round_coord: EF = if self.eq_row.len() > 1 {
+            let k = self.eq_row.len().trailing_zeros() as usize;
+            self.row_point[k - 1]
+        } else {
+            let k = self.eq_int.len().trailing_zeros() as usize;
+            debug_assert!(k >= 1, "sum_as_poly: no variable remaining to bind");
+            self.int_point[k - 1]
+        };
         let evals = match &self.state {
             PolynomialLayer::Chip(state) => {
                 // Device-resident: optional device-resident dispatch.
@@ -2639,6 +2895,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                     self.pad_eq_int_sum,
                     self.lambda,
                     claim_v,
+                    round_coord,
                 )
             }
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
@@ -2711,6 +2968,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                     d1,
                     self.lambda,
                     claim_v,
+                    round_coord,
                 )
             },
             PolynomialLayer::GpuPrefolded { .. } => {
@@ -3857,8 +4115,11 @@ mod tests {
         // current_claim = p(0) + p(1) = 174 + 0 = 174 (sumcheck invariant
         // exploited by the 3-point trick where p(0) is recovered as
         // current_claim - p(1)).
+        // round_coord = r = 0 here (eq_int = [(1-r), r] = [1, 0]).  c = 0 is
+        // a DEGENERATE eq-root coordinate (eq_root = 1 collides with a node),
+        // so this exercises the direct {1, 2, 3} fallback sweep.
         let evals = round_poly_evaluations(
-            &eq_int, &eq_row, &n0, &d0, &n1, &d1, EF::ONE, EF::from_u32(174),
+            &eq_int, &eq_row, &n0, &d0, &n1, &d1, EF::ONE, EF::from_u32(174), EF::ZERO,
         );
         assert_eq!(evals[0], EF::from_u32(174));
         assert_eq!(evals[1], EF::ZERO);
@@ -4041,6 +4302,232 @@ mod tests {
                 prev_at_alpha,
                 curr_at_zero + curr_at_one,
                 "sumcheck inconsistency at round {i}",
+            );
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────
+    // #122 eq-root HALF-trick bit-identity tests.
+    //
+    // These assert the SP1 {0, 1/2}+claim+eq_root reconstruction produces
+    // the SAME degree-3 round polynomial (bit-for-bit) as the direct
+    // {1, 2, 3} sweep.  Because the round poly is unique and field
+    // arithmetic is exact, the two paths are guaranteed identical for any
+    // non-degenerate coordinate — the trick only trades the third sum for
+    // an interpolation.  Passing `round_coord = 0` (a degenerate value)
+    // forces the direct {1, 2, 3} fallback, giving the reference sweep.
+    // ───────────────────────────────────────────────────────────────
+
+    /// Independent brute-force evaluation of the packed round polynomial
+    /// `p(X)` at a single `X` under the factored-eq layout.  Mirrors the
+    /// math of `round_poly_evaluations` WITHOUT the eq-root trick — the
+    /// ground truth for the bit-identity tests.
+    fn ref_p(
+        eq_int: &[EF],
+        eq_row: &[EF],
+        n0: &[EF],
+        d0: &[EF],
+        n1: &[EF],
+        d1: &[EF],
+        lambda: EF,
+        x: EF,
+    ) -> EF {
+        let half = n0.len() / 2;
+        let cols_r = eq_int.len();
+        let rows_r = eq_row.len();
+        let folding_row = rows_r > 1;
+        let row_half = rows_r / 2;
+        let col_half = cols_r / 2;
+        let lin = |a: EF, b: EF| (EF::ONE - x) * a + x * b;
+        let mut acc = EF::ZERO;
+        for i in 0..half {
+            let (e0, e1) = if folding_row {
+                let col0 = i % cols_r;
+                let row0 = i / cols_r;
+                (eq_int[col0] * eq_row[row0], eq_int[col0] * eq_row[row0 + row_half])
+            } else {
+                (eq_int[i] * eq_row[0], eq_int[i + col_half] * eq_row[0])
+            };
+            let ex = lin(e0, e1);
+            let n0x = lin(n0[i], n0[i + half]);
+            let d0x = lin(d0[i], d0[i + half]);
+            let n1x = lin(n1[i], n1[i + half]);
+            let d1x = lin(d1[i], d1[i + half]);
+            acc += ex * (lambda * (n0x * d1x + n1x * d0x) + d0x * d1x);
+        }
+        acc
+    }
+
+    /// Materialize a `ChipLayerState` into the layer-wide flat MLE
+    /// quadrants (matching `flatten_layer`'s layout) so `ref_p` can score
+    /// the equivalent packed poly.  Virtual rows / pad-tail columns carry
+    /// the identity fraction `(0, 1)`.
+    fn flatten_chip_state(
+        state: &ChipLayerState<EF>,
+        global_cols: usize,
+    ) -> (Vec<EF>, Vec<EF>, Vec<EF>, Vec<EF>) {
+        let rows = state.chip_rows;
+        let total = rows * global_cols;
+        let mut n0 = vec![EF::ZERO; total];
+        let mut d0 = vec![EF::ONE; total];
+        let mut n1 = vec![EF::ZERO; total];
+        let mut d1 = vec![EF::ONE; total];
+        for c in 0..state.n0.len() {
+            let off = state.chip_offsets[c];
+            let cols = state.chip_cols[c];
+            let real = state.num_real_rows[c];
+            for row in 0..real {
+                for col in 0..cols {
+                    let flat = row * global_cols + off + col;
+                    n0[flat] = state.n0[c][row * cols + col];
+                    d0[flat] = state.d0[c][row * cols + col];
+                    n1[flat] = state.n1[c][row * cols + col];
+                    d1[flat] = state.d1[c][row * cols + col];
+                }
+            }
+        }
+        (n0, d0, n1, d1)
+    }
+
+    #[test]
+    fn eqroot_reconstruction_matches_sweep_packed_both_branches() {
+        let lambda = EF::from_u32(13);
+        // For a given eq layout + binding coordinate: the eq-root path
+        // (non-degenerate round_coord) must reproduce the {1, 2, 3} sweep
+        // (forced by round_coord = 0) bit-for-bit, and both must equal the
+        // independent brute reference at {0, 1, 2, 3}.
+        let check = |eq_int: &[EF], eq_row: &[EF], round_coord: EF,
+                     n0: &[EF], d0: &[EF], n1: &[EF], d1: &[EF]| {
+            // True claim = p(0) + p(1) (sumcheck invariant).
+            let claim = ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::ZERO)
+                + ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::ONE);
+            let eqroot = round_poly_evaluations(
+                eq_int, eq_row, n0, d0, n1, d1, lambda, claim, round_coord,
+            );
+            let sweep = round_poly_evaluations(
+                eq_int, eq_row, n0, d0, n1, d1, lambda, claim, EF::ZERO,
+            );
+            assert_eq!(eqroot, sweep, "eq-root reconstruction != {{1,2,3}} sweep");
+            let reference = [
+                ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::ZERO),
+                ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::ONE),
+                ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::from_u32(2)),
+                ref_p(eq_int, eq_row, n0, d0, n1, d1, lambda, EF::from_u32(3)),
+            ];
+            assert_eq!(eqroot, reference, "eq-root reconstruction != brute reference");
+        };
+
+        // Branch A: interaction binding (folding_row == false).
+        // eq_row = [1], eq_int = eq(c_int) with c_int = 7 (non-degenerate).
+        let c_int = EF::from_u32(7);
+        let eq_int_a = build_eq_table(&[c_int]); // len 2
+        let eq_row_a = vec![EF::ONE];
+        check(
+            &eq_int_a, &eq_row_a, c_int,
+            &[EF::from_u32(2), EF::from_u32(3)],
+            &[EF::from_u32(5), EF::from_u32(7)],
+            &[EF::from_u32(11), EF::from_u32(13)],
+            &[EF::from_u32(17), EF::from_u32(19)],
+        );
+
+        // Branch B: row binding (folding_row == true), cols_r = 2.
+        // eq_int (len 2) ⊗ eq_row (len 2) ⇒ flat length 4.  round_coord =
+        // the top row coord c_row = 9 (non-degenerate).
+        let c_row = EF::from_u32(9);
+        let eq_int_b = build_eq_table(&[EF::from_u32(5)]); // len 2
+        let eq_row_b = build_eq_table(&[c_row]);           // len 2
+        check(
+            &eq_int_b, &eq_row_b, c_row,
+            &[EF::from_u32(2), EF::from_u32(3), EF::from_u32(4), EF::from_u32(6)],
+            &[EF::from_u32(5), EF::from_u32(7), EF::from_u32(8), EF::from_u32(10)],
+            &[EF::from_u32(11), EF::from_u32(13), EF::from_u32(14), EF::from_u32(15)],
+            &[EF::from_u32(17), EF::from_u32(19), EF::from_u32(20), EF::from_u32(21)],
+        );
+    }
+
+    #[test]
+    fn eqroot_reconstruction_matches_sweep_chip_structured_padding_branches() {
+        let lambda = EF::from_u32(13);
+        // Row-binding round: chip_rows = 4 (row_half = 2).  round_coord =
+        // the top remaining row coord (non-degenerate).
+        let row_point = [EF::from_u32(3), EF::from_u32(9)];
+        let eq_row = build_eq_table(&row_point); // len 4
+        let round_coord = row_point[eq_row.len().trailing_zeros() as usize - 1]; // 9
+        // Interaction axis: 3 vars (global_cols = 8), 4 real cols ⇒ pad tail.
+        let int_point = [EF::from_u32(2), EF::from_u32(5), EF::from_u32(6)];
+        let eq_int = build_eq_table(&int_point); // len 8
+        let global_cols = eq_int.len();
+
+        // Chips exercising every padding branch:
+        //   A: cols 1, real 3  (real >= row_half ⇒ (real,real) + (real,pad))
+        //   B: cols 2, real 1  (0 < real < row_half ⇒ (real,pad) + (pad,pad))
+        //   C: cols 1, real 0  (fully-padding chip fast path)
+        // total_chip_cols = 4 < global_cols = 8 ⇒ pad tail contributes.
+        let mk = |vals: &[u32]| -> Vec<EF> { vals.iter().map(|&v| EF::from_u32(v)).collect() };
+        let state = ChipLayerState::<EF> {
+            n0: vec![mk(&[2, 3, 4]), mk(&[5, 6]), vec![]],
+            d0: vec![mk(&[7, 8, 9]), mk(&[10, 11]), vec![]],
+            n1: vec![mk(&[12, 13, 14]), mk(&[15, 16]), vec![]],
+            d1: vec![mk(&[17, 18, 19]), mk(&[20, 21]), vec![]],
+            chip_offsets: vec![0, 1, 3],
+            chip_cols: vec![1, 2, 1],
+            num_real_rows: vec![3, 1, 0],
+            chip_rows: 4,
+        };
+        let total_chip_cols: usize = state.chip_cols.iter().sum();
+        let pad_eq_int_sum: EF =
+            eq_int[total_chip_cols..].iter().copied().fold(EF::ZERO, |a, b| a + b);
+
+        // True claim from the independent flat reference.
+        let (fn0, fd0, fn1, fd1) = flatten_chip_state(&state, global_cols);
+        let claim = ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ZERO)
+            + ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ONE);
+
+        let eqroot = round_poly_evaluations_chip_structured(
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, round_coord,
+        );
+        let sweep = round_poly_evaluations_chip_structured(
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, EF::ZERO,
+        );
+        assert_eq!(eqroot, sweep, "chip eq-root reconstruction != {{1,2,3}} sweep");
+
+        let reference = [
+            ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ZERO),
+            ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ONE),
+            ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::from_u32(2)),
+            ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::from_u32(3)),
+        ];
+        assert_eq!(eqroot, reference, "chip eq-root reconstruction != flat brute reference");
+    }
+
+    #[test]
+    fn reconstruct_eqroot_helper_exact_and_degenerate() {
+        let one = EF::ONE;
+        let half = (one + one).inverse();
+        // Build a genuine round polynomial q(X) = eq(c, X)·g(X) with a
+        // non-degenerate coordinate c and a degree-2 g, then confirm the
+        // helper recovers q at {0,1,2,3} from only {p(0), p(1/2), claim}.
+        let c = EF::from_u32(7);
+        let eq_c = |x: EF| c * x + (one - c) * (one - x);
+        let g = |x: EF| EF::from_u32(2) + EF::from_u32(3) * x + EF::from_u32(5) * x * x;
+        let q = |x: EF| eq_c(x) * g(x);
+        let p0 = q(EF::ZERO);
+        let p_half = q(half);
+        let claim = q(EF::ZERO) + q(EF::ONE);
+        let got = reconstruct_round_evals_from_eqroot(p0, p_half, claim, c)
+            .expect("non-degenerate c must reconstruct");
+        let expected =
+            [q(EF::ZERO), q(EF::ONE), q(EF::from_u32(2)), q(EF::from_u32(3))];
+        assert_eq!(got, expected, "eq-root reconstruction != true q");
+
+        // Degenerate coordinates return None (caller falls back to {1,2,3}):
+        //   c = 0   ⇒ eq_root = 1  (collides with node X = 1)
+        //   c = 1   ⇒ eq_root = 0  (collides with node X = 0)
+        //   c = 1/2 ⇒ 1 - 2c = 0   (eq factor constant, no finite root)
+        for &deg in &[EF::ZERO, EF::ONE, half] {
+            assert!(
+                reconstruct_round_evals_from_eqroot(p0, p_half, claim, deg).is_none(),
+                "degenerate coordinate must return None",
             );
         }
     }
