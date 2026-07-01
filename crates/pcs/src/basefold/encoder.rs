@@ -70,8 +70,8 @@ where
         let log_blowup = self.config.log_blowup();
         data.into_iter()
             .map(|mle| {
-                let width = mle.guts.width();
-                let mut padded = mle.guts.values.clone();
+                let width = mle.num_polynomials();
+                let mut padded = mle.guts().as_slice().to_vec();
                 padded.resize(padded.len() << log_blowup, F::ZERO);
                 let mat = RowMajorMatrix::new(padded, width);
                 // We need the codeword in BIT-REVERSED row order

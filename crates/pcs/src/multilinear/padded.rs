@@ -51,7 +51,6 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, Field};
-use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::basefold::Mle;
@@ -123,9 +122,9 @@ impl<T: Field> PaddedMle<T> {
     /// `PaddedMle::padded`.
     pub fn padded(inner: Arc<Mle<T>>, num_variables: u32, padding: Padding<T>) -> Self {
         assert!(
-            inner.guts().height() <= 1usize << num_variables,
+            inner.hypercube_size() <= 1usize << num_variables,
             "PaddedMle::padded: real rows {} exceed 2^num_variables {}",
-            inner.guts().height(),
+            inner.hypercube_size(),
             1usize << num_variables,
         );
         assert_eq!(
@@ -160,7 +159,7 @@ impl<T: Field> PaddedMle<T> {
     /// Number of real (materialized) rows — `O(1)` (the inner's height).
     #[inline]
     pub fn num_real_entries(&self) -> usize {
-        self.inner.as_ref().map(|m| m.guts().height()).unwrap_or(0)
+        self.inner.as_ref().map(|m| m.hypercube_size()).unwrap_or(0)
     }
 
     /// Number of polynomials (columns) in the batch.
@@ -209,16 +208,17 @@ impl<T: Field> PaddedMle<T> {
         };
 
         let new_inner = self.inner.as_ref().map(|mle| {
-            let g = mle.guts();
-            let width = g.width();
-            let height = g.height();
+            let width = mle.num_polynomials();
+            let height = mle.hypercube_size();
+            // Obtain the flat row-major slice ONCE (zero-copy borrow).
+            let g = mle.guts().as_slice();
             let out_height = height.div_ceil(2);
             let mut out: Vec<EF> = vec![EF::ZERO; out_height * width];
             for i in 0..out_height {
                 for j in 0..width {
-                    let lo: EF = EF::from(g.values[(2 * i) * width + j]);
+                    let lo: EF = EF::from(g[(2 * i) * width + j]);
                     let hi: EF = if 2 * i + 1 < height {
-                        EF::from(g.values[(2 * i + 1) * width + j])
+                        EF::from(g[(2 * i + 1) * width + j])
                     } else {
                         // Missing odd tail folds against the padding value.
                         EF::from(self.padding.value_at(j))
@@ -227,7 +227,7 @@ impl<T: Field> PaddedMle<T> {
                     out[i * width + j] = lo + alpha * (hi - lo);
                 }
             }
-            Arc::new(Mle::new(RowMajorMatrix::new(out, width)))
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(out, width)))
         });
 
         PaddedMle {
@@ -277,10 +277,10 @@ impl<T: Field> PaddedMle<T> {
         // parallelized across columns.
         use p3_maybe_rayon::prelude::*;
         let mut evals: Vec<EF> = if let Some(inner) = self.inner.as_ref() {
-            let g = inner.guts();
-            let width = g.width();
+            let width = inner.num_polynomials();
             debug_assert_eq!(width, np);
-            let cells = &g.values;
+            // Obtain the flat row-major slice ONCE (zero-copy borrow).
+            let cells = inner.guts().as_slice();
             (0..width)
                 .into_par_iter()
                 .map(|col| {
@@ -388,7 +388,7 @@ mod tests {
                     evaluate_trace_columns_at_point::<F, EF>(&trace.values, width, &point);
 
                 let padded = PaddedMle::padded_with_zeros(
-                    Arc::new(Mle::new(trace)),
+                    Arc::new(Mle::from_row_major(trace)),
                     l as u32,
                 );
                 let got = padded.eval_at(&point);
@@ -413,7 +413,7 @@ mod tests {
                 let point = rand_point(&mut rng, l);
 
                 let padded =
-                    PaddedMle::padded_with_zeros(Arc::new(Mle::new(trace)), l as u32);
+                    PaddedMle::padded_with_zeros(Arc::new(Mle::from_row_major(trace)), l as u32);
                 let full = padded.eval_at(&point);
 
                 let folded = padded.fix_last_variable::<EF>(point[0]);
@@ -456,7 +456,7 @@ mod tests {
                     evaluate_trace_columns_at_point::<F, EF>(&full_tbl, width, &point);
 
                 let padded = PaddedMle::padded(
-                    Arc::new(Mle::new(trace)),
+                    Arc::new(Mle::from_row_major(trace)),
                     l as u32,
                     Padding::Constant(pad_val, width),
                 );
@@ -503,17 +503,17 @@ mod tests {
                 // Shared-MLE path (INC-3): lift the PaddedMle inner cells,
                 // then the SAME bitrev.
                 let padded = PaddedMle::padded_with_zeros(
-                    Arc::new(Mle::new(trace.clone())),
+                    Arc::new(Mle::from_row_major(trace.clone())),
                     l as u32,
                 );
                 let inner = padded.inner().as_ref().expect("width>0 => inner Some");
                 assert_eq!(
-                    inner.guts().values,
-                    trace.values,
+                    inner.guts().as_slice(),
+                    trace.values.as_slice(),
                     "INC-3: inner cells must equal the raw trace (real_log={real_log} width={width})",
                 );
                 let mle_lift: Vec<EF> =
-                    inner.guts().values.iter().map(|v| EF::from(*v)).collect();
+                    inner.guts().as_slice().iter().map(|v| EF::from(*v)).collect();
                 let mle_cells = bitrev_rows(&mle_lift, width, height);
 
                 assert_eq!(

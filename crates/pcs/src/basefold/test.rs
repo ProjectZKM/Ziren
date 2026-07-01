@@ -63,7 +63,7 @@ fn test_basefold_roundtrip_single_round() {
     for _ in 0..(1 << num_variables) * num_polys {
         values.push(rand_kb(&mut rng));
     }
-    let mle = Arc::new(Mle::new(RowMajorMatrix::new(values, num_polys)));
+    let mle = Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, num_polys)));
 
     let fri_config = FriConfig::<F>::test_fri_config();
     let mmcs = build_mmcs();
@@ -123,7 +123,7 @@ fn test_basefold_roundtrip_two_rounds() {
         for _ in 0..n {
             v.push(rand_kb(rng));
         }
-        Arc::new(Mle::new(RowMajorMatrix::new(v, num_polys)))
+        Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, num_polys)))
     };
 
     let mle_round_0 = vec![make_mle(2, &mut rng), make_mle(3, &mut rng)];

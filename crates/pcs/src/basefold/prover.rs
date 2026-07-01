@@ -262,7 +262,7 @@ where
                 let coeffs = &batching_coefficients[coeff_idx..coeff_idx + n_polys];
 
                 debug_assert_eq!(mle.hypercube_size(), hyp_size);
-                let mle_vals = &mle.guts.values;
+                let mle_vals = mle.guts().as_slice();
                 batched_mle.par_iter_mut().enumerate().for_each(|(row, acc)| {
                     let row_start = row * n_polys;
                     let mut row_sum = EF::ZERO;
@@ -301,7 +301,7 @@ where
             EF::DIMENSION,
         ));
 
-        let batched_mle = Mle::new(RowMajorMatrix::new(batched_mle, 1));
+        let batched_mle = Mle::from_row_major(RowMajorMatrix::new(batched_mle, 1));
 
         (batched_mle, batched_codeword, batched_eval)
     }

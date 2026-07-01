@@ -85,8 +85,11 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         // single inner loop dominates the BaseFold commit path
         // (~30s/40s pre-fix). Each output column is independent, so
         // chunk the output by column and fan out across cores.
-        let width = mle.guts.width;
-        let height = mle.guts.values.len() / width.max(1);
+        let width = mle.num_polynomials();
+        // Obtain the flat row-major slice ONCE (zero-copy borrow) and
+        // index it directly in the transpose below.
+        let mle_vals = mle.guts().as_slice();
+        let height = mle_vals.len() / width.max(1);
         use p3_maybe_rayon::prelude::*;
         // Allocator opt: skip the F::ZERO init; every slot is written
         // by the column-major transpose loop below.  For 134M cells
@@ -97,7 +100,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         if width > 0 {
             data.par_chunks_mut(height).enumerate().for_each(|(col, dst)| {
                 for row in 0..height {
-                    dst[row] = mle.guts.values[row * width + col];
+                    dst[row] = mle_vals[row * width + col];
                 }
             });
         }
@@ -129,7 +132,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             // as columns — matches the per-Mle convention used by
             // BaseFold's encoder.
             let mat = transpose_row_major(&elements, batch_size, stack_height);
-            batch_multilinears.push(Arc::new(Mle::new(mat)));
+            batch_multilinears.push(Arc::new(Mle::from_row_major(mat)));
 
             needed = stripe_capacity;
         }
@@ -145,7 +148,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     let overflow_batch = overflow.len() / stack_height;
     if overflow_batch > 0 {
         let mat = transpose_row_major(&overflow, overflow_batch, stack_height);
-        batch_multilinears.push(Arc::new(Mle::new(mat)));
+        batch_multilinears.push(Arc::new(Mle::from_row_major(mat)));
     }
 
     batch_multilinears
@@ -505,7 +508,7 @@ mod test {
         let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
             let n = (1usize << log_h) * width;
             let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
-            Arc::new(Mle::new(RowMajorMatrix::new(v, width)))
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
 
         let mle_a = make_mle(2, 3, &mut rng); // 8 rows × 2 polys = 16 entries
@@ -603,7 +606,7 @@ mod test {
         let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
             let n = (1usize << log_h) * width;
             let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
-            Arc::new(Mle::new(RowMajorMatrix::new(v, width)))
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
 
         // Round 0: two MLEs (heterogeneous), 16 + 16 = 32 entries.
@@ -702,7 +705,7 @@ mod test {
         let make_mle = |width: usize, log_h: usize, rng: &mut StdRng| -> Arc<Mle<F>> {
             let n = (1usize << log_h) * width;
             let v: Vec<F> = (0..n).map(|_| rand_kb(rng)).collect();
-            Arc::new(Mle::new(RowMajorMatrix::new(v, width)))
+            Arc::new(Mle::from_row_major(RowMajorMatrix::new(v, width)))
         };
         let r0 = make_mle(2, 3, &mut rng);
         let r1 = make_mle(2, 4, &mut rng);

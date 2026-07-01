@@ -237,7 +237,7 @@ fn chips_to_mles(
         let mut padded = trace.values.clone();
         padded.resize(padded_height * width, JaggedVal::ZERO);
 
-        mles.push(Arc::new(Mle::new(RowMajorMatrix::new(padded, width))));
+        mles.push(Arc::new(Mle::from_row_major(RowMajorMatrix::new(padded, width))));
         dims.push((width, log_h));
     }
     (mles, dims)
@@ -265,7 +265,7 @@ pub fn chips_to_mles_owned(
             padded
         };
 
-        mles.push(Arc::new(Mle::new(RowMajorMatrix::new(values, width))));
+        mles.push(Arc::new(Mle::from_row_major(RowMajorMatrix::new(values, width))));
         dims.push((width, log_h));
     }
     (mles, dims)
@@ -443,7 +443,7 @@ where
     D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
 {
     let (mles, chip_dims) = chips_to_mles_owned(chip_traces);
-    let total_entries: usize = mles.iter().map(|m| m.guts.values.len()).sum();
+    let total_entries: usize = mles.iter().map(|m| m.guts().total_len()).sum();
     let log_stacking_height = pick_log_stacking_height(total_entries);
     let area = total_entries.next_multiple_of(1usize << log_stacking_height);
 

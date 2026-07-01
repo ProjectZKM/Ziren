@@ -1,17 +1,28 @@
-//! Minimal `Mle<F>` (Multilinear Extension) wrapper used throughout
+//! Minimal `Mle<F, A>` (Multilinear Extension) wrapper used throughout
 //! the Ziren basefold port.
 //!
-//! Source-mapped from SP1's `slop_multilinear::Mle`.  The SP1 type
-//! carries a backend-generic `Tensor<F, A>`; here we use
-//! `RowMajorMatrix<F>` directly because Ziren only has the CPU
-//! backend.
+//! Source-mapped from SP1's `slop_multilinear::Mle`.  Like SP1 this type
+//! is now **backend-generic** over a [`Backend`]: it holds a
+//! [`Tensor<F, A>`] rather than a `RowMajorMatrix<F>` directly (#125
+//! INC-6).  Ziren has only the CPU backend today, so `A` defaults to
+//! [`CpuBackend`] — which makes every existing `Mle<F>` / `Arc<Mle<F>>`
+//! annotation keep compiling unchanged (SP1's default-type-param trick).
+//!
+//! The split is deliberate:
+//!   * `impl<F, A: Backend> Mle<F, A>` — the shape-only accessors, which
+//!     read the tensor's [`Dimensions`] and work for any backend.
+//!   * `impl<F: Field> Mle<F, CpuBackend>` — the CPU hot paths
+//!     (`from_values` / `eval_at` / `fold`), which obtain a flat `&[F]`
+//!     (or move the backing `Vec<F>`) exactly once and index it directly.
+//!     These stay byte- and perf-identical to the pre-tensor code.
 //!
 //! # Layout convention
 //!
-//! `guts` is a row-major matrix where:
-//!   * **height** = `2^num_variables` (one row per hypercube point)
-//!   * **width**  = `num_polynomials` (one column per polynomial in
-//!     the batch)
+//! `guts` is a row-major tensor `[rows = 2^num_variables, cols =
+//! num_polynomials]`:
+//!   * **rows** = `2^num_variables` (one row per hypercube point)
+//!   * **cols** = `num_polynomials` (one column per polynomial in the
+//!     batch)
 //!
 //! This matches SP1's storage convention and lines up with Plonky3's
 //! [`TwoAdicSubgroupDft`] APIs (which DFT each column independently).
@@ -20,40 +31,69 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, Field};
-use p3_matrix::Matrix;
 use p3_matrix::dense::RowMajorMatrix;
 
+use crate::tensor::{Backend, CpuBackend, Tensor};
+
 #[derive(Clone, Debug)]
-pub struct Mle<F: Field> {
-    pub guts: RowMajorMatrix<F>,
+pub struct Mle<F, A: Backend = CpuBackend> {
+    guts: Tensor<F, A>,
 }
 
-impl<F: Field> Mle<F> {
-    pub const fn new(guts: RowMajorMatrix<F>) -> Self {
+impl<F, A: Backend> Mle<F, A> {
+    /// Wrap a row-major `[hypercube, num_polys]` tensor.
+    #[inline]
+    pub fn new(guts: Tensor<F, A>) -> Self {
         Self { guts }
     }
 
-    /// Single-polynomial constructor: `values` interpreted as the
-    /// dense evaluation table on the hypercube.
+    /// Number of polynomials in the batch (tensor columns).
+    #[inline]
+    pub fn num_polynomials(&self) -> usize {
+        self.guts.sizes()[1]
+    }
+
+    /// `log2` of the hypercube size (tensor rows).
+    #[inline]
+    pub fn num_variables(&self) -> u32 {
+        self.guts.sizes()[0].trailing_zeros()
+    }
+
+    /// Hypercube size — `2^num_variables` (tensor rows).
+    #[inline]
+    pub fn hypercube_size(&self) -> usize {
+        self.guts.sizes()[0]
+    }
+
+    /// Borrow the backing tensor.
+    #[inline]
+    pub fn guts(&self) -> &Tensor<F, A> {
+        &self.guts
+    }
+
+    /// Consume, returning the backing tensor.
+    #[inline]
+    pub fn into_guts(self) -> Tensor<F, A> {
+        self.guts
+    }
+}
+
+impl<F: Field> Mle<F, CpuBackend> {
+    /// Build directly from a Plonky3 row-major matrix (`[height, width]`
+    /// tensor).  Convenience over `Mle::new(mat.into())`.
+    #[inline]
+    pub fn from_row_major(guts: RowMajorMatrix<F>) -> Self {
+        Self { guts: Tensor::from(guts) }
+    }
+
+    /// Single-polynomial constructor: `values` interpreted as the dense
+    /// evaluation table on the hypercube (a `[len, 1]` tensor, matching
+    /// the old `RowMajorMatrix::new_col`).
     pub fn from_values(values: Vec<F>) -> Self {
         debug_assert!(values.len().is_power_of_two());
-        Self { guts: RowMajorMatrix::new_col(values) }
-    }
-
-    pub fn num_polynomials(&self) -> usize {
-        self.guts.width()
-    }
-
-    pub fn num_variables(&self) -> u32 {
-        self.guts.height().trailing_zeros()
-    }
-
-    pub fn hypercube_size(&self) -> usize {
-        self.guts.height()
-    }
-
-    pub fn guts(&self) -> &RowMajorMatrix<F> {
-        &self.guts
+        // `Tensor::from(Vec<F>)` reshapes to `[len, 1]` (zero-copy move),
+        // byte-identical to the old `RowMajorMatrix::new_col(values)`.
+        Self { guts: Tensor::from(values) }
     }
 
     /// Standard multilinear evaluation at an extension-field point.
@@ -70,6 +110,9 @@ impl<F: Field> Mle<F> {
         debug_assert_eq!(point.len(), self.num_variables() as usize);
         let n_polys = self.num_polynomials();
         use p3_maybe_rayon::prelude::*;
+        // Obtain the flat row-major slice ONCE (zero-copy borrow) and
+        // index it directly — never a per-element 2D stride multiply.
+        let values = self.guts.as_slice();
         // Parallelize only the initial F → EF lift (the largest single
         // pass).  The per-round Lagrange fold remains sequential to
         // preserve in-place write semantics — earlier attempts to
@@ -77,8 +120,7 @@ impl<F: Field> Mle<F> {
         // recursion-circuit's bit-exact OOD checks (root cause not
         // isolated; the algorithm here still produces the same Vec<EF>
         // but the proof bytes change in a way the verifier rejects).
-        let mut current: Vec<EF> =
-            self.guts.values.par_iter().map(|&v| EF::from(v)).collect();
+        let mut current: Vec<EF> = values.par_iter().map(|&v| EF::from(v)).collect();
         let mut n_rows = self.hypercube_size();
         for &r in point {
             let half = n_rows / 2;
@@ -107,16 +149,18 @@ impl<F: Field> Mle<F> {
     /// separate slots of the pre-allocated output. Called per round
     /// in `commit_phase_round`; total work across rounds is ~2N
     /// elements (geometric sum).
-    pub fn fold<EF: ExtensionField<F> + Send + Sync>(self, beta: EF) -> Mle<EF>
+    pub fn fold<EF: ExtensionField<F> + Send + Sync>(self, beta: EF) -> Mle<EF, CpuBackend>
     where
         F: Sync,
     {
-        let width = self.guts.width();
-        let height = self.guts.height();
+        let width = self.num_polynomials();
+        let height = self.hypercube_size();
         debug_assert!(height >= 2);
         let half = height / 2;
 
-        let values = self.guts.values;
+        // MOVE the backing Vec out of the tensor (zero-copy), never a
+        // clone — the fold consumes `self`.
+        let values = self.guts.into_buffer().into_vec();
         // Allocator opt: skip vec![EF::ZERO; half*width] zero-init; every
         // slot is written by the for_each closure below.
         let new_len = half * width;
@@ -132,7 +176,7 @@ impl<F: Field> Mle<F> {
                 }
             });
         }
-        Mle { guts: RowMajorMatrix::new(folded, width) }
+        Mle { guts: Tensor::from(RowMajorMatrix::new(folded, width)) }
     }
 }
 
@@ -150,4 +194,3 @@ pub type Rounds<T> = Vec<T>;
 pub fn message_from_iter<T, I: IntoIterator<Item = T>>(iter: I) -> Message<T> {
     iter.into_iter().map(Arc::new).collect()
 }
-

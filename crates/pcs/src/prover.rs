@@ -281,10 +281,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                         crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
                     );
                 }
-                let mle = std::sync::Arc::new(crate::basefold::Mle::new(RowMajorMatrix::new(
-                    t.values.clone(),
-                    width,
-                )));
+                let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                    RowMajorMatrix::new(t.values.clone(), width),
+                ));
                 crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
             })
             .collect();

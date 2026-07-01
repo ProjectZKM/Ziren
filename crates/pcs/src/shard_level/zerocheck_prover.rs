@@ -449,7 +449,7 @@ where
             let cells_src: &[Val<SC>] = shared_trace_mles
                 .and_then(|s| s.get(chip_idx))
                 .and_then(|pm| pm.inner().as_ref())
-                .map(|mle| mle.guts().values.as_slice())
+                .map(|mle| mle.guts().as_slice())
                 .unwrap_or(&main_trace.values);
             debug_assert_eq!(
                 cells_src.len(),
