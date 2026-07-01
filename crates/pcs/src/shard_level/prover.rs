@@ -254,10 +254,149 @@ where
     )
 }
 
-/// Loader-based entry point. Materializes all traces upfront via
-/// `MainTraceLoader::materialize_all` because every downstream phase
-/// (cumulative sums, batched pre-pass, jagged-PCS clone) reads every
-/// chip's host trace today.
+// ───────────────────────────────────────────────────────────────────────
+// STAGE-B b2 (#118): the jagged trusted-evaluations open as a static-dispatch
+// PRODUCER seam.
+//
+// `prove_shard_to_basefold_with_loader` used to hard-call the free-fn
+// `prove_trusted_evaluations` at Stage 4.  b3 needs a device-resident prover
+// (`StarkGpuProver`) to OVERRIDE that open (its device hooks #2/#3 become an
+// inherent `MachineProver::prove_trusted_evaluations`), so the loader body now
+// calls `D::produce` instead of the free-fn directly.  Two producers exist:
+//   * `FreeFnJaggedEval` — the free-fn path (ziren-gpu + the host free-fn
+//     callers: `prover/lib.rs` shrink, `basefold_programs.rs` dummy).  Calls
+//     the free-fn `prove_trusted_evaluations` verbatim → BYTE-IDENTICAL.
+//   * `ProverJaggedEval(&prover)` — routes through
+//     `prover.prove_trusted_evaluations`, so a `StarkGpuProver` override is
+//     picked up.  On `CpuProver` the trait method delegates to the same
+//     free-fn → BYTE-IDENTICAL.
+// The producer indirection is a zero-cost generic: with `FreeFnJaggedEval` it
+// monomorphizes to the exact pre-b2 call.
+// ───────────────────────────────────────────────────────────────────────
+
+/// The jagged trusted-evaluations open producer — the b3 static-dispatch
+/// override point (see the block comment above).  `produce` mirrors the
+/// [`prove_trusted_evaluations`] free-fn signature exactly.
+pub trait JaggedEvalProducer<SC, A>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    A: MachineAir<Val<SC>>,
+{
+    /// Produce the jagged trusted-evaluations proof for one shard's opening.
+    #[allow(clippy::too_many_arguments)]
+    fn produce(
+        &self,
+        chips: &[&Chip<Val<SC>, A>],
+        main_traces: &[RowMajorMatrix<Val<SC>>],
+        shared_eval_point: &[Challenge<SC>],
+        challenger: &mut SC::Challenger,
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        precomputed_commit: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                <SC as crate::BasefoldRing>::BfMmcs,
+            >,
+        >,
+        pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    ) -> crate::shard_level::shard_proof::EvaluationProof;
+}
+
+/// Free-fn producer: the pre-b2 host path (ziren-gpu + the host free-fn
+/// callers).  Byte-identical to calling [`prove_trusted_evaluations`] directly.
+pub struct FreeFnJaggedEval;
+
+impl<SC, A> JaggedEvalProducer<SC, A> for FreeFnJaggedEval
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
+{
+    fn produce(
+        &self,
+        chips: &[&Chip<Val<SC>, A>],
+        main_traces: &[RowMajorMatrix<Val<SC>>],
+        shared_eval_point: &[Challenge<SC>],
+        challenger: &mut SC::Challenger,
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        precomputed_commit: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                <SC as crate::BasefoldRing>::BfMmcs,
+            >,
+        >,
+        pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        prove_trusted_evaluations::<SC, A>(
+            chips,
+            main_traces,
+            shared_eval_point,
+            challenger,
+            device_traces,
+            precomputed_commit,
+            pre_y_per_chip,
+        )
+    }
+}
+
+/// Prover-routed producer: dispatches the open through
+/// `prover.prove_trusted_evaluations` so a [`crate::prover::MachineProver`]
+/// override (b3 `StarkGpuProver`, reading its own provider) is picked up.  On
+/// `CpuProver` the trait method delegates to the free-fn → byte-identical.
+pub struct ProverJaggedEval<'a, P>(pub &'a P);
+
+impl<SC, A, P> JaggedEvalProducer<SC, A> for ProverJaggedEval<'_, P>
+where
+    P: crate::prover::MachineProver<SC, A>,
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: PrimeField + 'static,
+    Challenge<SC>: ExtensionField<Val<SC>> + 'static,
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
+{
+    fn produce(
+        &self,
+        chips: &[&Chip<Val<SC>, A>],
+        main_traces: &[RowMajorMatrix<Val<SC>>],
+        shared_eval_point: &[Challenge<SC>],
+        challenger: &mut SC::Challenger,
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        precomputed_commit: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                <SC as crate::BasefoldRing>::BfMmcs,
+            >,
+        >,
+        pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        self.0.prove_trusted_evaluations(
+            chips,
+            main_traces,
+            shared_eval_point,
+            challenger,
+            device_traces,
+            precomputed_commit,
+            pre_y_per_chip,
+        )
+    }
+}
+
+/// Loader-based entry point (free-fn form for ziren-gpu + the host free-fn
+/// callers).  STAGE-B b2: thin shim over
+/// [`prove_shard_to_basefold_with_loader_dispatch`] with the free-fn jagged
+/// open producer — signature + bytes IDENTICAL to the pre-b2 body.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     chips: &[&Chip<Val<SC>, A>],
@@ -267,7 +406,7 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
@@ -289,6 +428,71 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     L: MainTraceLoader<Val<SC>>,
+    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // OUTER generic BaseFold open (see its where-clause).
+    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
+{
+    prove_shard_to_basefold_with_loader_dispatch::<SC, A, L, FreeFnJaggedEval>(
+        chips,
+        preprocessed_traces,
+        main_trace_loader,
+        main_commitment,
+        public_values,
+        max_log_row_count,
+        challenger,
+        device_traces,
+        orientation,
+        precomputed_commit,
+        &FreeFnJaggedEval,
+    )
+}
+
+/// Loader-based entry point, generic over the jagged trusted-evaluations open
+/// [`JaggedEvalProducer`] (STAGE-B b2 seam — see the block comment above).
+/// Materializes all traces upfront via `MainTraceLoader::materialize_all`
+/// because every downstream phase (cumulative sums, batched pre-pass,
+/// jagged-PCS clone) reads every chip's host trace today.
+#[allow(clippy::too_many_arguments)]
+pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
+    chips: &[&Chip<Val<SC>, A>],
+    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    main_trace_loader: &L,
+    main_commitment: [Val<SC>; 8],
+    public_values: Vec<Val<SC>>,
+    max_log_row_count: usize,
+    challenger: &mut SC::Challenger,
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
+    orientation: FoldOrientation,
+    precomputed_commit: Option<
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
+    >,
+    // STAGE-B b2: the jagged trusted-evaluations open producer.  Free-fn path
+    // passes `&FreeFnJaggedEval`; a prover routes `&ProverJaggedEval(self)`.
+    jagged_eval_producer: &D,
+) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    A: MachineAir<Val<SC>>
+        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
+        + for<'b> Air<
+            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                'b,
+                Val<SC>,
+                Challenge<SC>,
+            >,
+        > + Sync,
+    Val<SC>: PrimeField,
+    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+    L: MainTraceLoader<Val<SC>>,
+    D: JaggedEvalProducer<SC, A>,
     // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -937,7 +1141,10 @@ where
     let _t_phase4 = std::time::Instant::now();
     let evaluation_proof = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
-        prove_trusted_evaluations::<SC, A>(
+        // STAGE-B b2: dispatch the jagged open through the producer (free-fn
+        // path == `FreeFnJaggedEval` → byte-identical; a prover routes through
+        // its own `prove_trusted_evaluations`).
+        jagged_eval_producer.produce(
             chips,
             // Commit-coverage trace set (device-resident chips
             // materialized) — MUST be the same traces the precompute
@@ -1217,7 +1424,12 @@ where
 /// `recursive_jagged_pcs.rs:248`, output `J(r)·F(r) == sumcheck_final` `:406`,
 /// opening `:412` — over the SAME `opened_values` Vec zerocheck constrains, so
 /// the trusted evals cannot diverge from the committed trace.
-fn prove_trusted_evaluations<SC, A>(
+///
+/// STAGE-B b2 (#118): `pub` so the `MachineProver::prove_trusted_evaluations`
+/// default (CpuProver) + the [`FreeFnJaggedEval`] producer can delegate to this
+/// host body.  b3's `StarkGpuProver` override lives in ziren-gpu and reads its
+/// own provider; this stays the CPU body.
+pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],

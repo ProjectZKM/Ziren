@@ -154,6 +154,121 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error>;
 
+    /// STAGE-B b2 (#118): the jagged trusted-evaluations open — the b3
+    /// static-dispatch OVERRIDE point.  Default = the host free-fn
+    /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
+    /// byte-identical).  b3's `StarkGpuProver` overrides this with a device
+    /// body that reads its OWN provider.  `device_traces` is kept on the seam
+    /// (CpuProver's `prove_shard_to_basefold` passes `None`) so the free-fn
+    /// callers + the CPU path are unchanged; the override is free to ignore the
+    /// param and source the provider from `self` instead — the param does NOT
+    /// force `None` on the seam, since each prover provides its own body.
+    #[allow(clippy::too_many_arguments)]
+    fn prove_trusted_evaluations(
+        &self,
+        chips: &[&MachineChip<SC, A>],
+        main_traces: &[RowMajorMatrix<Val<SC>>],
+        shared_eval_point: &[crate::Challenge<SC>],
+        challenger: &mut SC::Challenger,
+        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        precomputed_commit: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                <SC as BasefoldRing>::BfMmcs,
+            >,
+        >,
+        pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
+    ) -> crate::shard_level::shard_proof::EvaluationProof
+    where
+        SC: BasefoldRing,
+        Val<SC>: p3_field::PrimeField + 'static,
+        crate::Challenge<SC>: p3_field::ExtensionField<Val<SC>> + 'static,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
+    {
+        crate::shard_level::prover::prove_trusted_evaluations::<SC, A>(
+            chips,
+            main_traces,
+            shared_eval_point,
+            challenger,
+            device_traces,
+            precomputed_commit,
+            pre_y_per_chip,
+        )
+    }
+
+    /// STAGE-B b2 (#118): the shard-level BaseFold producer as a trait method.
+    /// Default routes the loader pipeline through
+    /// [`crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch`]
+    /// with the jagged open dispatched via `self.prove_trusted_evaluations`
+    /// (`ProverJaggedEval(self)`), so a `StarkGpuProver` (b3) that overrides
+    /// `prove_trusted_evaluations` has its device body picked up here.  On
+    /// `CpuProver` every step delegates to the free-fn → BYTE-IDENTICAL to the
+    /// pre-b2 `prove_shard_to_basefold` free-fn path.
+    #[allow(clippy::too_many_arguments)]
+    fn prove_shard_to_basefold(
+        &self,
+        chips: &[&MachineChip<SC, A>],
+        preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+        main_traces: &[RowMajorMatrix<Val<SC>>],
+        main_commitment: [Val<SC>; 8],
+        public_values: Vec<Val<SC>>,
+        max_log_row_count: usize,
+        challenger: &mut SC::Challenger,
+        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        orientation: crate::shard_level::shard_proof::FoldOrientation,
+        precomputed_commit: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                <SC as BasefoldRing>::BfMmcs,
+            >,
+        >,
+    ) -> crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, crate::Challenge<SC>>
+    where
+        SC: BasefoldRing,
+        A: for<'b> Air<VerifierConstraintFolder<'b, SC>>
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    crate::Challenge<SC>,
+                >,
+            > + Sync,
+        Val<SC>: p3_field::PrimeField + 'static,
+        crate::Challenge<SC>: p3_field::ExtensionField<Val<SC>>
+            + p3_field::BasedVectorSpace<Val<SC>>
+            + 'static,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
+        Self: Sized,
+    {
+        let loader =
+            crate::shard_level::main_trace_loader::EagerHostLoader::new(main_traces);
+        crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch::<SC, A, _, _>(
+            chips,
+            preprocessed_traces,
+            &loader,
+            main_commitment,
+            public_values,
+            max_log_row_count,
+            challenger,
+            device_traces,
+            orientation,
+            precomputed_commit,
+            &crate::shard_level::prover::ProverJaggedEval(self),
+        )
+    }
+
     /// Generate a proof for the given records.
     fn prove(
         &self,
@@ -559,7 +674,11 @@ where
             // prover, which routes it to the jagged-PCS body to
             // skip the in-band commit step + observe.
             let precomputed_basefold_taken = data.precomputed_basefold;
-            let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A>(
+            // STAGE-B b2 (#118): pass `self` so the basefold producer routes
+            // through the trait-method seam (`self.prove_shard_to_basefold` ->
+            // `self.prove_trusted_evaluations`).  CpuProver path byte-identical.
+            let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A, _>(
+                self,
                 &chips,
                 &pk.traces,
                 &pk.chip_ordering,
@@ -699,7 +818,13 @@ impl Error for CpuProverError {}
 /// between the generic `StarkMachine::open` state and the shard-level
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
-fn try_prove_shard_to_basefold_boxed<SC, A>(
+fn try_prove_shard_to_basefold_boxed<SC, A, P>(
+    // STAGE-B b2 (#118): the prover, so the inner
+    // `prove_shard_to_basefold` call routes through `prover`'s trait method
+    // (`prover.prove_shard_to_basefold` -> `self.prove_trusted_evaluations`),
+    // exposing the b3 override seam.  On `CpuProver` every step delegates to
+    // the free-fn → byte-identical.
+    prover: &P,
     chips: &[&MachineChip<SC, A>],
     pk_traces: &[RowMajorMatrix<Val<SC>>],
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
@@ -717,6 +842,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A>(
 >
 where
     SC: StarkGenericConfig + BasefoldRing,
+    P: MachineProver<SC, A>,
     A: MachineAir<Val<SC>>
         + for<'b> Air<VerifierConstraintFolder<'b, SC>>
         + for<'b> Air<
@@ -725,11 +851,12 @@ where
                 Val<SC>,
                 <SC as StarkGenericConfig>::Challenge,
             >,
-        >,
+        > + Sync,
     Val<SC>: PrimeField32,
     SC::Challenger: Clone + 'static,
     Val<SC>: 'static,
-    <SC as StarkGenericConfig>::Challenge: 'static,
+    <SC as StarkGenericConfig>::Challenge:
+        p3_field::BasedVectorSpace<Val<SC>> + 'static,
     // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -913,7 +1040,11 @@ where
     let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
         main_traces.iter().map(|arc| (**arc).clone()).collect();
 
-    let proof = crate::shard_level::prover::prove_shard_to_basefold::<SC, A>(
+    // STAGE-B b2 (#118): route through the prover's trait method so the jagged
+    // open is dispatched via `prover.prove_trusted_evaluations` (b3 override
+    // seam).  On `CpuProver` this delegates step-for-step to the same free-fns
+    // as the pre-b2 `prove_shard_to_basefold` call → byte-identical.
+    let proof = prover.prove_shard_to_basefold(
         &chips_reborrow,
         &preprocessed_traces,
         &main_traces_owned,
