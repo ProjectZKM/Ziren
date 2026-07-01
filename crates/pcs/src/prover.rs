@@ -252,8 +252,36 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
-        let loader =
-            crate::shard_level::main_trace_loader::EagerHostLoader::new(main_traces);
+        // #125 INC-1: build the shared analytic trace-MLE ONCE, per chip,
+        // in chip-index order, from the materialized main traces and the
+        // per-stage cube `max_log_row_count` (the same cube the zerocheck /
+        // LogUp-GKR stages open over).  Threaded read-only into the shard
+        // prover via the `EagerHostLoader` seam.  In INC-1 NONE of the three
+        // stages consume it (they still run their current code), so it never
+        // reaches the Fiat-Shamir transcript — additive + byte-neutral by
+        // construction.  A width-0 chip (device-resident / unexercised) has
+        // no host cells to wrap, so it maps to a fully-virtual `dummy`.
+        let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
+            .iter()
+            .map(|t| {
+                let width = t.width;
+                if width == 0 {
+                    return crate::multilinear::PaddedMle::dummy(
+                        max_log_row_count as u32,
+                        crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
+                    );
+                }
+                let mle = std::sync::Arc::new(crate::basefold::Mle::new(RowMajorMatrix::new(
+                    t.values.clone(),
+                    width,
+                )));
+                crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
+            })
+            .collect();
+        let loader = crate::shard_level::main_trace_loader::EagerHostLoader::with_padded(
+            main_traces,
+            &shared_trace_mles,
+        );
         crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch::<SC, A, _, _>(
             chips,
             preprocessed_traces,

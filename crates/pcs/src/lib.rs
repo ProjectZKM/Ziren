@@ -18,6 +18,7 @@ pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;
 pub mod jagged_sumcheck;
 pub mod logup_gkr;
+pub mod multilinear;
 pub mod shard_level;
 // Top-level re-export for `ziren-gpu` callers (basefold/src/device_first_layer.rs)
 // that use the `zkm_pcs::device_first_layer_context::*` path.

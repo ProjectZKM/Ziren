@@ -17,6 +17,23 @@ pub trait MainTraceLoader<F> {
     /// this multiple times per chip, so implementations may cache.
     fn get(&self, i: usize) -> RowMajorMatrix<F>;
 
+    /// #125 INC-1 (read-only seam): the shared analytic trace-MLE for
+    /// chip `i`, built once at trace-gen, when this loader carries one.
+    ///
+    /// Default `None`; only [`EagerHostLoader`] (host CPU path)
+    /// populates it via [`EagerHostLoader::with_padded`].  In INC-1 the
+    /// three shard stages do NOT read this yet (dead-but-threaded), so
+    /// it is byte-neutral; INC-2+ switches a consumer over.  Adding it as
+    /// a defaulted method keeps every existing implementor (including
+    /// ziren-gpu's device loaders) source-compatible.
+    #[allow(unused_variables)]
+    fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>>
+    where
+        F: p3_field::Field,
+    {
+        None
+    }
+
     /// Materialize all chip traces in chip-iteration order.
     fn materialize_all(&self) -> Vec<RowMajorMatrix<F>>
     where
@@ -27,17 +44,40 @@ pub trait MainTraceLoader<F> {
 }
 
 /// Loader backed by a borrowed slice of host `RowMajorMatrix`s.
-pub struct EagerHostLoader<'a, F> {
+///
+/// Optionally carries the #125 INC-1 shared analytic trace-MLE
+/// (`padded`), a per-chip `PaddedMle<F>` slice parallel to `traces`,
+/// threaded read-only to the shard prover.
+pub struct EagerHostLoader<'a, F: p3_field::Field> {
     traces: &'a [RowMajorMatrix<F>],
+    /// #125 INC-1: per-chip shared trace-MLE (chip-index order), or
+    /// `None` when the caller does not supply one.
+    padded: Option<&'a [crate::multilinear::PaddedMle<F>]>,
 }
 
-impl<'a, F> EagerHostLoader<'a, F> {
+impl<'a, F: p3_field::Field> EagerHostLoader<'a, F> {
     pub fn new(traces: &'a [RowMajorMatrix<F>]) -> Self {
-        Self { traces }
+        Self { traces, padded: None }
+    }
+
+    /// Construct a loader that also carries the #125 INC-1 shared
+    /// trace-MLE (`padded[i]` = chip `i`'s analytic trace-MLE, parallel
+    /// to `traces`).  Read-only; consumed by no transcript stage in
+    /// INC-1.
+    pub fn with_padded(
+        traces: &'a [RowMajorMatrix<F>],
+        padded: &'a [crate::multilinear::PaddedMle<F>],
+    ) -> Self {
+        debug_assert_eq!(
+            traces.len(),
+            padded.len(),
+            "EagerHostLoader::with_padded: traces and padded must be parallel arrays",
+        );
+        Self { traces, padded: Some(padded) }
     }
 }
 
-impl<'a, F: Clone + Send + Sync> MainTraceLoader<F> for EagerHostLoader<'a, F> {
+impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
     fn len(&self) -> usize {
         self.traces.len()
     }
@@ -51,6 +91,10 @@ impl<'a, F: Clone + Send + Sync> MainTraceLoader<F> for EagerHostLoader<'a, F> {
             .iter()
             .map(|t| RowMajorMatrix::new(t.values.clone(), t.width))
             .collect()
+    }
+
+    fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>> {
+        self.padded.and_then(|p| p.get(i))
     }
 }
 
