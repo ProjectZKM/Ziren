@@ -313,6 +313,84 @@ pub(crate) fn interpolate_univariate_polynomial<EF: Field>(
     UnivariatePolynomial { coefficients: result }
 }
 
+/// The eq-factor root for the zerocheck round poly's binding coordinate
+/// `last`.  The corrected round poly factors as `p(X) = elf_X · h(X)` where
+/// `elf_X = eq(last, X) = (2·last − 1)·X + (1 − last)` is the (degree-1) eq
+/// factor of the variable being bound and `h` is degree 3, so the degree-4
+/// `p` vanishes at the eq root
+///   `eq_root = (1 − last) / (1 − 2·last)`   (where `elf_{eq_root} = 0`).
+///
+/// Returns `Some(eq_root)` only when the five degree-4 interpolation nodes
+/// `{0, 1, 2, 4, eq_root}` are pairwise distinct (so the eq-root
+/// reconstruction is well posed), and `None` for the degenerate coordinates
+/// where `eq_root` is undefined or collides with an existing node:
+///   `last = 1/2` ⇒ `1 − 2·last = 0` (no finite root),
+///   `last = 1`   ⇒ eq_root = 0,   `last = 0`   ⇒ eq_root = 1,
+///   `last = 1/3` ⇒ eq_root = 2,   `last = 3/7` ⇒ eq_root = 4.
+/// The caller then falls back to the direct `{0,1,2,3,4}` sweep, which is
+/// coordinate-independent and always valid.  (`eq_root = 3` is permitted — 3
+/// is not one of the reconstruction nodes.)
+fn zerocheck_eq_root<EF: Field>(last: EF) -> Option<EF> {
+    let one = EF::ONE;
+    let two = one.double();
+    // `last == 1/2` ⇒ `1 − 2·last == 0` ⇒ `try_inverse` is `None`.
+    let eq_root = (one - last) * (one - two * last).try_inverse()?;
+    let four = two.double();
+    if eq_root == EF::ZERO || eq_root == one || eq_root == two || eq_root == four {
+        return None;
+    }
+    Some(eq_root)
+}
+
+/// Reconstruct the five zerocheck round-poly evaluations at `{0, 1, 2, 3, 4}`
+/// from the SP1 **eq-root trick**, given the three computed samples
+/// `p0 = p(0)`, `p2 = p(2)`, `p4 = p(4)` of the *corrected* round poly (the
+/// `elf_X · eq_adjustment` scale + VirtualGeq padded-row subtraction already
+/// applied), the round `claim`, and the binding coordinate `last`.
+///
+/// The corrected degree-4 round poly `p(X) = elf_X · h(X)` is pinned by five
+/// DISTINCT nodes without ever computing the `X = 3` sample:
+///   * `p(0) = p0`, `p(2) = p2`, `p(4) = p4`  (the three computed samples);
+///   * `p(1) = claim − p0`  (the sumcheck identity `p(0) + p(1) = claim`); and
+///   * `p(eq_root) = 0`  (the eq factor `elf_X` vanishes at `eq_root`).
+/// These uniquely determine `p`.  Re-evaluating the interpolant at
+/// `{0,1,2,3,4}` yields exactly the field elements the direct `{0,1,2,3,4}`
+/// sweep produces — the interpolant is unique and the field arithmetic is
+/// exact — so the emitted round message is bit-identical while the host skips
+/// the entire `X = 3` per-pair constraint eval.
+///
+/// Returns `None` for the degenerate coordinates (see [`zerocheck_eq_root`]);
+/// the caller then falls back to the direct sweep (which needs the `X = 3`
+/// sample, so [`ZeroCheckPoly::accumulate_y_tuple_host`] must have computed
+/// `y_3` in that case — gated on the SAME `zerocheck_eq_root(last)` predicate).
+fn reconstruct_zerocheck_evals_from_eqroot<EF: Field>(
+    p0: EF,
+    p2: EF,
+    p4: EF,
+    claim: EF,
+    last: EF,
+) -> Option<[EF; 5]> {
+    let eq_root = zerocheck_eq_root(last)?;
+    let one = EF::ONE;
+    let two = one.double();
+    let three = two + one;
+    let four = two.double();
+    let p1 = claim - p0;
+    // Interpolate the degree-4 `p` through {0, 1, 2, 4, eq_root}, then read
+    // off {0,1,2,3,4}.  Evaluating at the interpolation nodes returns the node
+    // values exactly, so this yields [p0, p1, p2, p(3), p4] with p(3) derived.
+    let xs = [EF::ZERO, one, two, four, eq_root];
+    let ys = [p0, p1, p2, p4, EF::ZERO];
+    let poly = interpolate_univariate_polynomial(&xs, &ys);
+    Some([
+        poly.eval_at_point(EF::ZERO),
+        poly.eval_at_point(one),
+        poly.eval_at_point(two),
+        poly.eval_at_point(three),
+        poly.eval_at_point(four),
+    ])
+}
+
 /// Dense linear combination of a geq and an eq polynomial sharing one
 /// threshold.  Port of `slop_multilinear::VirtualGeq` restricted to the
 /// `fix_last_variable` + `eval_at_usize` operations the zerocheck round
@@ -537,7 +615,16 @@ where
         // accumulator.  This is a pure extraction — byte-identical to the
         // original fused loop (validated by `orientation_sweep` inv1/inv2 and
         // `sum_as_poly_matches_spec_reference`).
-        let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round);
+        //
+        // eq-root HALF trick (#122-zc): the finalize reconstructs `p(3)`
+        // analytically from the eq-factor root, so the host skips the entire
+        // `X = 3` per-pair constraint eval — EXCEPT for the degenerate
+        // coordinates where the reconstruction is ill posed, in which case the
+        // direct `{0,1,2,3,4}` sweep is used and `y_3` is required.  The skip
+        // decision is gated on `zerocheck_eq_root(last)` so accumulate and
+        // finalize stay in lock-step on the same `last`.
+        let compute_y3 = zerocheck_eq_root(last).is_none();
+        let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round, compute_y3);
         // finalize needs only partial[threshold_half] (ZERO when the
         // boundary index falls past the table — same guard as before the
         // device-eq scalar refactor; `partial.len() == 2^{num_variables-1}`).
@@ -760,7 +847,12 @@ where
     /// gate; mirrors the prover's device-resident-verify pattern).  The
     /// transcript is unaffected either way — `finalize_round_poly` and the
     /// challenger stay host.
-    fn accumulate_y_tuple(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
+    fn accumulate_y_tuple(
+        &self,
+        partial: &[EF],
+        is_first_round: bool,
+        compute_y3: bool,
+    ) -> (EF, EF, EF, EF) {
         // Device-fold: if cells live on device, compute the y-tuple on
         // device directly (no host upload). Falls through to the host-cell
         // paths below if the device hook is unregistered.
@@ -790,7 +882,11 @@ where
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false);
             if verify {
-                let h = self.accumulate_y_tuple_host(partial, is_first_round);
+                // Compare the FULL tuple: force the host to compute `y_3`
+                // (`compute_y3 = true`) so the parity check covers all four
+                // accumulators the device kernel emits, independent of whether
+                // this round's `last` would take the eq-root skip in finalize.
+                let h = self.accumulate_y_tuple_host(partial, is_first_round, true);
                 assert!(
                     dev.0 == h.0 && dev.1 == h.1 && dev.2 == h.2 && dev.3 == h.3,
                     "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: device y-tuple != host for chip {} \
@@ -800,7 +896,7 @@ where
             }
             return dev;
         }
-        self.accumulate_y_tuple_host(partial, is_first_round)
+        self.accumulate_y_tuple_host(partial, is_first_round, compute_y3)
     }
 
     /// TypeId-guarded bridge to the registered device y-tuple hook.
@@ -932,7 +1028,20 @@ where
     /// bit-reversed trace at interpolation samples `X ∈ {0,2,3,4}`); the host
     /// retains `finalize_round_poly`.  `partial = partial_lagrange(zeta[..dim-1])`.
     /// Caller guarantees `num_real_entries > 0`.
-    fn accumulate_y_tuple_host(&self, partial: &[EF], is_first_round: bool) -> (EF, EF, EF, EF) {
+    ///
+    /// eq-root HALF trick (#122-zc): when `compute_y3 == false` the `X = 3`
+    /// sample is skipped entirely (the expensive per-pair `eval_air_at_row`
+    /// among them) and `y_3` is returned as `ZERO` — `finalize_round_poly`
+    /// then reconstructs `p(3)` from the eq-factor root.  `compute_y3` is
+    /// `true` only for the degenerate coordinates where that reconstruction is
+    /// ill posed (`zerocheck_eq_root(last).is_none()`), which is the sole case
+    /// `finalize` falls back to the direct `{0,1,2,3,4}` sweep.
+    fn accumulate_y_tuple_host(
+        &self,
+        partial: &[EF],
+        is_first_round: bool,
+        compute_y3: bool,
+    ) -> (EF, EF, EF, EF) {
         let num_real = self.num_real_entries;
         let nm = self.num_main_cols;
         let np = self.num_prep_cols;
@@ -943,17 +1052,23 @@ where
         // Scratch buffers reused across pairs, in the cell field `K`.
         let mut m0 = vec![K::ZERO; nm];
         let mut m2 = vec![K::ZERO; nm];
-        let mut m3 = vec![K::ZERO; nm];
         let mut m4 = vec![K::ZERO; nm];
         let mut p0 = vec![K::ZERO; np];
         let mut p2 = vec![K::ZERO; np];
-        let mut p3 = vec![K::ZERO; np];
         let mut p4 = vec![K::ZERO; np];
-        // Sample point 3 lies on the row-pair line midway between 2 and 4
-        // (interp_pair is affine in the sample point): m3 = (m2 + m4)/2.  The
-        // column interpolation runs in `K` (`half_cell`), the GKR-batch
-        // interpolation in `EF` (`half`); for `K = F`, `ι(1/2_F) = 1/2_EF`
-        // (ring-hom), so the two agree byte-for-byte with the all-`EF` fold.
+        // The `X = 3` scratch + its 1/2 factors are only needed on the
+        // degenerate fallback path; skip their allocation on the common
+        // eq-root path.  Sample point 3 lies on the row-pair line midway
+        // between 2 and 4 (interp_pair is affine in the sample point):
+        // m3 = (m2 + m4)/2.  The column interpolation runs in `K`
+        // (`half_cell`), the GKR-batch interpolation in `EF` (`half`); for
+        // `K = F`, `ι(1/2_F) = 1/2_EF` (ring-hom), so the two agree
+        // byte-for-byte with the all-`EF` fold.
+        let (mut m3, mut p3) = if compute_y3 {
+            (vec![K::ZERO; nm], vec![K::ZERO; np])
+        } else {
+            (Vec::new(), Vec::new())
+        };
         let half = EF::from_u64(2).inverse();
         let half_cell = K::from_u64(2).inverse();
 
@@ -967,27 +1082,33 @@ where
                 let prep = self.prep_cells.as_ref().expect("prep_cells present when np > 0");
                 interp_pair(prep, np, num_real, row0, row1, &mut p0, &mut p2, &mut p4);
             }
-            for c in 0..nm {
-                m3[c] = (m2[c] + m4[c]) * half_cell;
-            }
-            for c in 0..np {
-                p3[c] = (p2[c] + p4[c]) * half_cell;
-            }
 
             let g0 = self.gkr_batch(&m0, &p0);
             let g2 = self.gkr_batch(&m2, &p2);
             let g4 = g2 + g2 - g0; // gkr is linear in the row values
-            let g3 = (g2 + g4) * half; // linear interpolant at 3
 
             let c0 = if is_first_round { EF::ZERO } else { self.eval_air_at_row(&p0, &m0) };
             let c2 = self.eval_air_at_row(&p2, &m2);
-            let c3 = self.eval_air_at_row(&p3, &m3);
             let c4 = self.eval_air_at_row(&p4, &m4);
 
             y_0 += (c0 + g0) * eq;
             y_2 += (c2 + g2) * eq;
-            y_3 += (c3 + g3) * eq;
             y_4 += (c4 + g4) * eq;
+
+            // eq-root HALF trick: the X = 3 sample is derived analytically in
+            // finalize on the common path, so only compute it on the
+            // degenerate fallback.
+            if compute_y3 {
+                for c in 0..nm {
+                    m3[c] = (m2[c] + m4[c]) * half_cell;
+                }
+                for c in 0..np {
+                    p3[c] = (p2[c] + p4[c]) * half_cell;
+                }
+                let g3 = (g2 + g4) * half; // linear interpolant at 3
+                let c3 = self.eval_air_at_row(&p3, &m3);
+                y_3 += (c3 + g3) * eq;
+            }
         }
         (y_0, y_2, y_3, y_4)
     }
@@ -1000,17 +1121,22 @@ where
     /// `partial_lagrange(zeta[..dim-1])[threshold_half]` (ZERO when the
     /// boundary index falls past the table) — the ONLY table entry finalize
     /// needs, pre-resolved by the caller so the device-eq path can skip
-    /// materializing the host table (via [`eq_at_index`]).  Pure extraction
-    /// of the original fused tail.
+    /// materializing the host table (via [`eq_at_index`]).
     ///
-    /// Interpolation samples: the degree-4 round poly over the always-distinct
-    /// points {0,1,2,3,4}.  Point 1 is fixed by the sumcheck relation
-    /// p(0)+p(1)=claim.  The eq term's known root is *implied* by these samples,
-    /// so it need not be sampled explicitly — avoiding the original
-    /// {0,1,2,4,eq-root} scheme's `(1 − 2·last)` inverse (panics at last = 1/2)
-    /// and its `eq-root ∈ {0,1,2,4}` duplicate-point collision.  Same
-    /// coefficients → identical proof/transcript.  `elf_X = (2X − 1)·last −
-    /// (X − 1)` is the eq term's last factor at X.
+    /// eq-root HALF trick (#122-zc): the corrected round poly
+    /// `p(X) = elf_X · h(X)` has the eq factor `elf_X = (2X − 1)·last − (X − 1)`
+    /// baked in, so it vanishes at `eq_root(last)`.  Combined with the sumcheck
+    /// identity `p(0) + p(1) = claim`, five DISTINCT nodes
+    /// `{0, 1, 2, 4, eq_root}` pin the degree-4 `p` from just the THREE computed
+    /// samples `p(0), p(2), p(4)` — the host never evaluates the `X = 3`
+    /// constraint.  [`reconstruct_zerocheck_evals_from_eqroot`] re-reads
+    /// `{0,1,2,3,4}` from that interpolant and this fn interpolates the SAME
+    /// `{0,1,2,3,4}` message it always did → bit-identical coefficients.
+    ///
+    /// The degenerate coordinates `last ∈ {0, 1, 1/2, 1/3, 3/7}` (eq_root
+    /// undefined or colliding with a node) fall back to the direct
+    /// `{0,1,2,3,4}` sweep, which additionally needs the `y_3` accumulator the
+    /// caller computed (gated on the SAME `zerocheck_eq_root(last)` predicate).
     fn finalize_round_poly(
         &self,
         claim: EF,
@@ -1021,7 +1147,6 @@ where
         y_3: EF,
         y_4: EF,
     ) -> UnivariatePolynomial<EF> {
-        let (mut y_0, mut y_2, mut y_3, mut y_4) = (y_0, y_2, y_3, y_4);
         let num_pairs = self.num_real_entries.div_ceil(2);
 
         // Padded-row correction at the boundary index.  The caller resolved
@@ -1031,41 +1156,40 @@ where
         let virtual_0 = self.virtual_geq.fix_last_variable(EF::ZERO).eval_at_usize(threshold_half);
         let virtual_2 =
             self.virtual_geq.fix_last_variable(EF::from_u64(2)).eval_at_usize(threshold_half);
-        let virtual_3 =
-            self.virtual_geq.fix_last_variable(EF::from_u64(3)).eval_at_usize(threshold_half);
         let virtual_4 =
             self.virtual_geq.fix_last_variable(EF::from_u64(4)).eval_at_usize(threshold_half);
 
-        let mut xs: Vec<EF> = Vec::with_capacity(5);
-        let mut ys: Vec<EF> = Vec::with_capacity(5);
-
-        xs.push(EF::ZERO);
+        // Corrected samples p(0), p(2), p(4) = y_X · (elf_X · eq_adjustment) −
+        // padded_row_adjustment · virtual_X · msb_lagrange_eval · elf_X.
         let elf_0 = EF::ONE - last;
-        y_0 = y_0 * (elf_0 * self.eq_adjustment)
+        let p0 = y_0 * (elf_0 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_0 * msb_lagrange_eval * elf_0;
-        ys.push(y_0);
-
-        xs.push(EF::ONE);
-        ys.push(claim - y_0);
-
-        xs.push(EF::from_u64(2));
         let elf_2 = last * EF::from_u64(3) - EF::ONE;
-        y_2 = y_2 * (elf_2 * self.eq_adjustment)
+        let p2 = y_2 * (elf_2 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_2 * msb_lagrange_eval * elf_2;
-        ys.push(y_2);
-
-        xs.push(EF::from_u64(3));
-        let elf_3 = last * EF::from_u64(5) - EF::from_u64(2);
-        y_3 = y_3 * (elf_3 * self.eq_adjustment)
-            - self.padded_row_adjustment * virtual_3 * msb_lagrange_eval * elf_3;
-        ys.push(y_3);
-
-        xs.push(EF::from_u64(4));
         let elf_4 = last * EF::from_u64(7) - EF::from_u64(3);
-        y_4 = y_4 * (elf_4 * self.eq_adjustment)
+        let p4 = y_4 * (elf_4 * self.eq_adjustment)
             - self.padded_row_adjustment * virtual_4 * msb_lagrange_eval * elf_4;
-        ys.push(y_4);
 
+        // Common path: reconstruct the {0,1,2,3,4} evals from the eq-root
+        // (skips the X = 3 constraint eval).  Degenerate `last` → direct sweep,
+        // which corrects the caller-computed `y_3` at X = 3.
+        let ys: [EF; 5] =
+            match reconstruct_zerocheck_evals_from_eqroot(p0, p2, p4, claim, last) {
+                Some(evals) => evals,
+                None => {
+                    let virtual_3 = self
+                        .virtual_geq
+                        .fix_last_variable(EF::from_u64(3))
+                        .eval_at_usize(threshold_half);
+                    let elf_3 = last * EF::from_u64(5) - EF::from_u64(2);
+                    let p3 = y_3 * (elf_3 * self.eq_adjustment)
+                        - self.padded_row_adjustment * virtual_3 * msb_lagrange_eval * elf_3;
+                    [p0, claim - p0, p2, p3, p4]
+                }
+            };
+
+        let xs = [EF::ZERO, EF::ONE, EF::from_u64(2), EF::from_u64(3), EF::from_u64(4)];
         interpolate_univariate_polynomial(&xs, &ys)
     }
 
@@ -1507,6 +1631,68 @@ mod tests {
             acc += v * w;
         }
         acc
+    }
+
+    /// #122-zc — the eq-root reconstruction reproduces the direct
+    /// `{0,1,2,3,4}` sweep of the corrected degree-4 zerocheck round poly
+    /// `p(X) = elf_X · g(X)` (bit-identically) for a non-degenerate binding
+    /// coordinate, and declines (`None`) for the degenerate coordinates
+    /// `last ∈ {0, 1, 1/2, 1/3, 3/7}` that force the direct-sweep fallback.
+    #[test]
+    fn reconstruct_zerocheck_eqroot_matches_direct_sweep() {
+        // Concrete degree-4 poly of the TRUE finalize form p(X) = elf_X · g(X),
+        // elf_X = (2·last − 1)·X + (1 − last), g an arbitrary cubic.  A
+        // reconstruction that reproduces p at {0,1,2,3,4} is byte-identical to
+        // the interpolation the fallback performs.
+        let last = EF::from_u64(123457);
+        let two = EF::from_u64(2);
+        let elf = |x: EF| (two * last - EF::ONE) * x + (EF::ONE - last);
+        let g = |x: EF| {
+            EF::from_u64(7)
+                + EF::from_u64(11) * x
+                + EF::from_u64(29) * x * x
+                + EF::from_u64(5) * x * x * x
+        };
+        let p = |x: EF| elf(x) * g(x);
+
+        let p0 = p(EF::ZERO);
+        let p2 = p(two);
+        let p3 = p(EF::from_u64(3));
+        let p4 = p(EF::from_u64(4));
+        let claim = p(EF::ZERO) + p(EF::ONE); // sumcheck identity p(0)+p(1)=claim
+
+        let evals = reconstruct_zerocheck_evals_from_eqroot(p0, p2, p4, claim, last)
+            .expect("non-degenerate last must reconstruct");
+        let direct = [p0, claim - p0, p2, p3, p4];
+        assert_eq!(evals, direct, "eq-root reconstruction != direct {{0,1,2,3,4}} sweep");
+
+        // The emitted round message (interpolated coeffs) is bit-identical.
+        let xs = [EF::ZERO, EF::ONE, EF::from_u64(2), EF::from_u64(3), EF::from_u64(4)];
+        let recon_poly = interpolate_univariate_polynomial(&xs, &evals);
+        assert_eq!(
+            recon_poly.coefficients,
+            interpolate_univariate_polynomial(&xs, &direct).coefficients,
+            "reconstructed message != direct message",
+        );
+        // Sanity: the corrected round poly genuinely factors through eq_root
+        // and is genuinely degree 4 (nonzero X^4 coeff).
+        let eq_root = zerocheck_eq_root(last).unwrap();
+        assert_eq!(recon_poly.eval_at_point(eq_root), EF::ZERO, "p must vanish at eq_root");
+        assert_eq!(recon_poly.coefficients.len(), 5);
+        assert_ne!(recon_poly.coefficients[4], EF::ZERO, "round poly is genuinely degree 4");
+
+        // Degenerate coordinates: eq_root undefined or collides with a node
+        // {0,1,2,4} → decline, so the caller uses the direct sweep (with y_3).
+        let half = two.inverse();
+        let third = EF::from_u64(3).inverse();
+        let three_sevenths = EF::from_u64(3) * EF::from_u64(7).inverse();
+        for deg in [EF::ZERO, EF::ONE, half, third, three_sevenths] {
+            assert!(zerocheck_eq_root(deg).is_none(), "degenerate last must decline: {deg:?}");
+            assert!(
+                reconstruct_zerocheck_evals_from_eqroot(p0, p2, p4, claim, deg).is_none(),
+                "degenerate last must decline reconstruction: {deg:?}",
+            );
+        }
     }
 
     /// `fold_cells` applied round-by-round (fixing the LSB each round, as
@@ -2969,13 +3155,45 @@ mod tests {
             .collect();
         let vg = VirtualGeq::new(num_real as u32, EF::ONE, EF::ZERO, num_vars);
         let poly = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
-            &chip, &pv, alpha, gkr_powers, zeta, main_cells, ncols, None, 0, num_real, num_vars,
-            EF::ONE, EF::ZERO, pra, vg,
+            &chip, &pv, alpha, gkr_powers.clone(), zeta.clone(), main_cells.clone(), ncols, None,
+            0, num_real, num_vars, EF::ONE, EF::ZERO, pra, vg,
+        );
+
+        // #122-zc: `sum_as_poly` reconstructs the round poly via the eq-root
+        // trick, which assumes the HONEST sumcheck claim `p(0)+p(1)=claim` (so
+        // the corrected poly factors through `eq_root`).  An arbitrary claim
+        // would legitimately diverge from the direct reference.  The honest
+        // claim (= physical trace sum) is the unique claim making the direct
+        // reference vanish at `eq_root` — and `cpu_ref_round_poly` is affine in
+        // the claim, so two evaluations pin it.
+        let last = poly.zeta[poly.zeta.len() - 1];
+        let eq_root = zerocheck_eq_root(last).expect("non-degenerate last for eq-root path");
+        let v0 = cpu_ref_round_poly(&poly, EF::ZERO, true).eval_at_point(eq_root);
+        let v1 = cpu_ref_round_poly(&poly, EF::ONE, true).eval_at_point(eq_root);
+        let honest_claim = v0 * (v0 - v1).inverse();
+        let h = poly.sum_as_poly(Some(honest_claim), true);
+        let r = cpu_ref_round_poly(&poly, honest_claim, true);
+        assert_eq!(r.coefficients, h.coefficients, "odd-tail mismatch (eq-root path)");
+
+        // Degenerate `last` (here `1/2`, where `eq_root` is undefined) forces
+        // the direct `{0,1,2,3,4}` sweep FALLBACK, which is byte-identical to
+        // the reference for ANY claim (incl. this arbitrary one) — i.e. the
+        // exact pre-#122-zc behavior.
+        let mut zeta_deg = zeta.clone();
+        let nz = zeta_deg.len();
+        zeta_deg[nz - 1] = EF::from_u64(2).inverse(); // last = 1/2 => no finite eq_root
+        assert!(zerocheck_eq_root(zeta_deg[nz - 1]).is_none());
+        let poly_deg = ZeroCheckPoly::<InnerVal, EF, EF, MockAir>::new(
+            &chip, &pv, alpha, gkr_powers, zeta_deg, main_cells, ncols, None, 0, num_real,
+            num_vars, EF::ONE, EF::ZERO, pra, vg,
         );
         let arb2 = EF::from_u64(424242);
-        let h = poly.sum_as_poly(Some(arb2), true);
-        let r = cpu_ref_round_poly(&poly, arb2, true);
-        assert_eq!(r.coefficients, h.coefficients, "odd-tail mismatch");
+        let h_deg = poly_deg.sum_as_poly(Some(arb2), true);
+        let r_deg = cpu_ref_round_poly(&poly_deg, arb2, true);
+        assert_eq!(
+            r_deg.coefficients, h_deg.coefficients,
+            "odd-tail fallback mismatch (arbitrary claim, degenerate last)"
+        );
     }
 
     /// The byte-exact device-kernel target: independent reference == live
