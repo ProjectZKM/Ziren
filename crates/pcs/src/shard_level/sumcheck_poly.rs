@@ -1038,27 +1038,17 @@ gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
 // challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical
 // KoalaBear / KoalaBear^4 for both rings, so the trace/point payloads cross the
 // boundary unchanged; only the challenger + MMCS (type-erased here) differ.
-type OuterEf4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-
-// STAGE-B b1: the OUTER jagged BaseFold OPEN hook (`OuterJaggedOpenFn` +
-// `OUTER_JAGGED_OPEN_HOOK` + register/get accessors) was RETIRED. The shard
-// prover now names `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing`
-// associated type and calls `prove_jagged_basefold_inner_generic` statically
-// (see `prove_trusted_evaluations`), so the dyn-Any open hook is dead. The
-// VERIFY + PREP-COMMIT hooks below remain (their static ports are b1').
-
-/// Outer jagged BaseFold VERIFY. Deserializes `bundle_bytes` as
-/// `JaggedBasefoldBundleGeneric<OuterValMmcs>` and verifies it with the
-/// `&mut OuterChallenger`. Returns accept/reject.
-pub type OuterJaggedVerifyFn = fn(
-    chip_widths: &[usize],
-    eval_point: &[OuterEf4],
-    bundle_bytes: &[u8],
-    challenger: &mut dyn core::any::Any,
-) -> bool;
-
-gpu_hook_accessors!(OUTER_JAGGED_VERIFY_HOOK: OuterJaggedVerifyFn
-    => register_outer_jagged_verify_hook, get_outer_jagged_verify_hook);
+// STAGE-B b1/b1': the OUTER jagged BaseFold OPEN hook (b1) AND VERIFY hook (b1')
+// (`OuterJaggedOpenFn`/`OuterJaggedVerifyFn` + their `OUTER_JAGGED_*_HOOK` slots
+// + register/get accessors) were RETIRED. The shard prover
+// (`prove_trusted_evaluations`) and host verifier (`verify_jagged_pcs_host`) now
+// name `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
+// and call `prove_jagged_basefold_inner_generic` / `build_jagged_verify_inputs`
+// + `verify_jagged_basefold_inner_generic` statically, so the dyn-Any open/verify
+// hooks are dead. Only the PREP-COMMIT hook below remains — it feeds the VK on
+// the setup side, is a plain (no dyn-Any) crate-dep fn pointer, and converting it
+// would thread `BasefoldRing` through ~60 `StarkMachine::setup` callsites, so it
+// is intentionally left as a hook.
 
 /// Outer PREPROCESSED-trace setup commit (SP1-style: stacked BaseFold over
 /// the Poseidon2-BN254 `OuterValMmcs`, NO two-adic coset LDE).  Input =

@@ -400,78 +400,35 @@ mod basefold_over_bn254_generic_typecheck {
 }
 
 
-// #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify hook
-// bodies. Registered into zkm-pcs's process-global hook slots so the generic
-// shard prover (`prove_trusted_evaluations`) / verifier (`verify_jagged_pcs_host`),
-// which cannot name `OuterValMmcs`/`OuterChallenger`, route the wrap-ring open /
-// verify here. `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so
-// only the MMCS + challenger differ.
+// #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold setup hook.
+// STAGE-B b1/b1' retired the open + verify hook bodies (now static generic calls
+// in `prove_trusted_evaluations` / `verify_jagged_pcs_host` over the `BasefoldRing`
+// associated type). Only `outer_prep_commit` remains — registered into zkm-pcs's
+// process-global hook slot so `StarkMachine::setup` (which cannot name
+// `OuterValMmcs`) routes the wrap-ring preprocessed commit here. `Val`/`Challenge`
+// are KoalaBear / KoalaBear^4 for both rings, so only the MMCS differs.
 pub mod outer_jagged_hooks {
-    use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
-    use core::any::Any;
+    use super::{KoalaBearPoseidon2Outer, OuterValMmcs};
     use p3_matrix::dense::RowMajorMatrix;
-    use std::sync::Arc;
-    use zkm_pcs::jagged_pcs::jagged::{
-        build_jagged_verify_inputs, verify_jagged_basefold_inner_generic,
-        JaggedBasefoldBundleGeneric,
-    };
-    use zkm_pcs::jagged_pcs::{JaggedChallenge, JaggedVal};
-    use zkm_pcs::BasefoldRing;
+    use zkm_pcs::jagged_pcs::JaggedVal;
 
-    // STAGE-B b1: `outer_open` (the former `OUTER_JAGGED_OPEN_HOOK` body) was
-    // RETIRED — the shard prover (`prove_trusted_evaluations`) now names
-    // `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
-    // and calls `prove_jagged_basefold_inner_generic` statically, so the
-    // dyn-Any open hook is dead. `outer_verify` + `outer_prep_commit` remain.
+    // STAGE-B b1/b1': `outer_open` (former `OUTER_JAGGED_OPEN_HOOK` body, b1) and
+    // `outer_verify` (former `OUTER_JAGGED_VERIFY_HOOK` body, b1') were RETIRED —
+    // the shard prover (`prove_trusted_evaluations`) and host verifier
+    // (`verify_jagged_pcs_host`) now name `OuterChallenger`/`OuterValMmcs` via the
+    // `BasefoldRing` associated type and call the generic BaseFold open/verify
+    // statically, so the dyn-Any open/verify hooks are dead. Only
+    // `outer_prep_commit` remains (setup/VK-side; a plain crate-dep fn pointer).
 
-    fn outer_verify(
-        chip_widths: &[usize],
-        eval_point: &[JaggedChallenge],
-        bundle_bytes: &[u8],
-        challenger: &mut dyn Any,
-    ) -> bool {
-        let bundle = match JaggedBasefoldBundleGeneric::<OuterValMmcs>::from_bytes(bundle_bytes) {
-            Some(b) => b,
-            None => {
-                eprintln!(
-                    "outer_verify: bundle deserialize failed ({} bytes)",
-                    bundle_bytes.len()
-                );
-                return false;
-            }
-        };
-        let challenger = challenger
-            .downcast_mut::<OuterChallenger>()
-            .expect("outer_verify: challenger downcast to OuterChallenger");
-        let (chip_infos, r_row_per_chip, z_row) =
-            build_jagged_verify_inputs(&bundle.packing, chip_widths, eval_point);
-        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
-        let dft = Arc::new(OuterDft::default());
-        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
-        verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            &chip_infos,
-            &r_row_per_chip,
-            &z_row,
-            &bundle,
-            challenger,
-            mmcs,
-            dft,
-            /* skip_commit_observe = */ true,
-            fri,
-        )
-    }
-
-    /// Register the outer-ring jagged BaseFold open/verify hooks into zkm-pcs.
+    /// Register the outer-ring jagged BaseFold prep-commit hook into zkm-pcs.
     /// Idempotent (OnceLock-backed); safe to call repeatedly. Must run before the
     /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
     /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
     pub fn register_outer_jagged_hooks() {
-        // STAGE-B b1: `register_outer_jagged_open_hook(outer_open)` removed — the
-        // open path is now a static generic call in the shard prover. The
-        // VERIFY + PREP-COMMIT hooks are still dyn-Any (b1' will static-port
-        // them).
-        let _ =
-            zkm_pcs::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
+        // STAGE-B b1/b1': `register_outer_jagged_open_hook` (b1) and
+        // `register_outer_jagged_verify_hook` (b1') removed — the open + verify
+        // paths are now static generic calls in the shard prover / host verifier.
+        // Only the PREP-COMMIT hook remains (setup/VK-side crate-dep fn pointer).
         let _ = zkm_pcs::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
             outer_prep_commit,
         );

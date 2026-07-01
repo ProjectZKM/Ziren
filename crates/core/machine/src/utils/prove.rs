@@ -1135,6 +1135,11 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     zkm_pcs::ShardProof<SC>: Sync,
+    // STAGE-B b1': required by `StarkMachine::verify` (its static OUTER BaseFold
+    // verify threads these challenger capability bounds). Both rings satisfy it.
+    SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
 {
     let mut challenger = prover.config().challenger();
     let prove_span = tracing::debug_span!("prove").entered();

@@ -789,6 +789,18 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
+        // STAGE-B b1': threaded to the shard verifier's static OUTER generic
+        // BaseFold verify (former `OUTER_JAGGED_VERIFY_HOOK`). Verify-only, no
+        // VK / committed-byte impact; both rings satisfy it.
+        SC: crate::BasefoldRing,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
     {
         // Observe the preprocessed commitment.
         vk.observe_into(challenger);

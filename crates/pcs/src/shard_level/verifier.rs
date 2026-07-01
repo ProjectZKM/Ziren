@@ -134,11 +134,22 @@ impl BasefoldShardVerifier {
         num_pv_elts: usize,
     ) -> Result<(), BasefoldVerifyError>
     where
-        SC: StarkGenericConfig,
+        SC: StarkGenericConfig + crate::BasefoldRing,
         A: MachineAir<Val<SC>>
             + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+        // STAGE-B b1': threaded to `verify_jagged_pcs_host`'s static OUTER
+        // generic BaseFold verify (see its where-clause). Verify-only, both
+        // rings satisfy it.
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
     {
         // Shape check: public_values length.
         if proof.public_values.len() != num_pv_elts {
@@ -504,11 +515,23 @@ fn verify_jagged_pcs_host<SC, A>(
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
-    SC: StarkGenericConfig,
+    SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
-    SC::Challenger: 'static,
+    // STAGE-B b1': `SC::Challenger` drives the generic jagged BaseFold VERIFIER
+    // directly on the OUTER (wrap) branch — the static monomorphization of the
+    // former `OUTER_JAGGED_VERIFY_HOOK`. Same capability bounds the prover
+    // threads (b1); both rings satisfy them (inner `JaggedChallenger`, wrap
+    // `OuterChallenger`). Verify-only: no VK / committed-byte impact.
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
 {
     use core::any::{Any, TypeId};
     use crate::jagged_pcs::jagged::{
@@ -519,15 +542,17 @@ where
     use crate::{InnerChallenge, InnerVal};
 
     // Type gate (same as prover-side prove_trusted_evaluations).
-    // BaseFold-over-BN254 wrap port: this verifier-side gate is kept as a
-    // TypeId transmute-safety guard (rather than `BasefoldRing::use_basefold()`)
-    // so the `BasefoldRing` bound does not have to thread through the entire
-    // host-verify generic API (`Verifier::verify_shard` -> `StarkMachine::verify`
-    // -> all generic test/util callers). It is functionally equivalent: it is
-    // reached only when the prover emitted a BaseFold bundle (i.e. the config
-    // proved via BaseFold), and the TypeId check is exactly the identity that
-    // makes the transmute + challenger downcast below sound. Convert to the
-    // trait gate together with the wrap-verify genericization (downstream).
+    // BaseFold-over-BN254 wrap port: this verifier-side FIELD gate is kept as a
+    // TypeId transmute-safety guard for the unsafe `InnerChallenge`
+    // reinterpretation below (rather than `BasefoldRing::use_basefold()`). It is
+    // functionally equivalent: it is reached only when the prover emitted a
+    // BaseFold bundle (i.e. the config proved via BaseFold), and the TypeId check
+    // is exactly the identity that makes the transmute sound. STAGE-B b1' DID
+    // thread the `BasefoldRing` bound through the host-verify API
+    // (`Verifier::verify_shard` -> `StarkMachine::verify` -> generic test/util
+    // callers) so the OUTER (wrap) branch can call the generic BaseFold verify
+    // statically; only the field/challenger TypeId gates remain (transmute +
+    // static-vs-dynamic dispatch guards).
     if TypeId::of::<Val<SC>>() != TypeId::of::<InnerVal>()
         || TypeId::of::<Challenge<SC>>() != TypeId::of::<InnerChallenge>()
     {
@@ -537,13 +562,26 @@ where
 
     // BaseFold-over-BN254 wrap port: OUTER ring dispatch. Val/Challenge are
     // KoalaBear / KoalaBear^4 here, but the challenger is OuterChallenger (not
-    // JaggedChallenger). Verify via the recursion-core-registered hook over
-    // OuterValMmcs / OuterChallenger (zkm-pcs cannot name those types); the
-    // prover emitted the bundle as EvaluationProof::Bytes.
+    // JaggedChallenger).
+    //
+    // STAGE-B b1': STATIC monomorphization of the former
+    // `OUTER_JAGGED_VERIFY_HOOK`.  recursion-core's `outer_verify` body WAS
+    // exactly this deserialize + `build_jagged_verify_inputs` +
+    // `verify_jagged_basefold_inner_generic` sequence over
+    // `OuterChallenger`/`OuterValMmcs`; naming those via the `BasefoldRing`
+    // associated type + the trait-level challenger bounds is byte-identical BY
+    // CONSTRUCTION (on this branch `SC::Challenger == OuterChallenger`,
+    // `SC::BfMmcs == OuterValMmcs`, and both rings' DFT is the same
+    // `Radix2DitParallel<JaggedVal>`).  Verify-only: no VK / committed-byte
+    // impact.  The dyn-Any challenger downcast is gone.
     if TypeId::of::<SC::Challenger>()
         != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         use p3_air::BaseAir;
+        use crate::jagged_pcs::jagged::{
+            build_jagged_verify_inputs, verify_jagged_basefold_inner_generic,
+            JaggedBasefoldBundleGeneric,
+        };
         let bytes = match evaluation_proof {
             EvaluationProof::Empty => return Ok(()),
             EvaluationProof::Bytes(b) => b,
@@ -554,14 +592,18 @@ where
                 ));
             }
         };
-        let hook = crate::shard_level::sumcheck_poly::get_outer_jagged_verify_hook()
-            .ok_or_else(|| {
-                BasefoldVerifyError::JaggedPcs(
-                    "outer jagged-verify hook not registered \
-                     (recursion-core::register_outer_jagged_hooks)"
-                        .into(),
-                )
-            })?;
+        let bundle = match JaggedBasefoldBundleGeneric::<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >::from_bytes(bytes)
+        {
+            Some(b) => b,
+            None => {
+                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    "outer BaseFold bundle deserialize failed ({} bytes)",
+                    bytes.len()
+                )));
+            }
+        };
         let chip_widths: Vec<usize> =
             chips.iter().map(|c| <_ as BaseAir<Val<SC>>>::width(*c)).collect();
         // SAFETY: Challenge<SC> == InnerChallenge under the field gate above.
@@ -571,13 +613,33 @@ where
                 shared_eval_point.len(),
             )
         };
-        let challenger_any: &mut dyn Any = challenger;
-        let ok = hook(&chip_widths, eval_point_inner, bytes, challenger_any);
+        let (chip_infos, r_row_per_chip, z_row) =
+            build_jagged_verify_inputs(&bundle.packing, &chip_widths, eval_point_inner);
+        let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
+        let dft = std::sync::Arc::new(
+            p3_dft::Radix2DitParallel::<crate::jagged_pcs::JaggedVal>::default(),
+        );
+        let fri = <SC as crate::BasefoldRing>::fri_config();
+        let ok = verify_jagged_basefold_inner_generic::<
+            SC::Challenger,
+            <SC as crate::BasefoldRing>::BfMmcs,
+            p3_dft::Radix2DitParallel<crate::jagged_pcs::JaggedVal>,
+        >(
+            &chip_infos,
+            &r_row_per_chip,
+            &z_row,
+            &bundle,
+            challenger,
+            mmcs,
+            dft,
+            /* skip_commit_observe = */ true,
+            fri,
+        );
         return if ok {
             Ok(())
         } else {
             Err(BasefoldVerifyError::JaggedPcs(
-                "outer jagged-verify hook rejected the bundle".into(),
+                "outer BaseFold bundle rejected".into(),
             ))
         };
     }
