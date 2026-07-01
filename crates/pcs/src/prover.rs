@@ -667,7 +667,7 @@ impl Error for CpuProverError {}
 ///
 /// Returns `Some(Box::new(basefold_proof))` when SC is
 /// `KoalaBearPoseidon2` (monomorphic dispatch gate — see
-/// `crate::shard_level::prover::emit_jagged_pcs_bytes`) and
+/// `crate::shard_level::prover::prove_trusted_evaluations`) and
 /// `None` otherwise.
 ///
 /// Invoked from the KoalaBear/JaggedChallenger BaseFold path.  Bridges
@@ -721,7 +721,7 @@ where
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
-        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in emit_jagged_pcs_bytes",
+        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
     );
 
     // Build per-chip preprocessed traces aligned with `chips` (empty
@@ -750,7 +750,7 @@ where
     // BaseFold-over-BN254 wrap port: recover the precomputed commit from
     // the type-erased box as PrecomputedJaggedCommitGeneric<SC::BfMmcs> — works
     // for BOTH rings (inner BfMmcs=JaggedMmcs, outer BfMmcs=OuterValMmcs). The
-    // shard prover threads it generically; emit_jagged_pcs_bytes dispatches the
+    // shard prover threads it generically; prove_trusted_evaluations dispatches the
     // open per ring.
     let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
         <SC as BasefoldRing>::BfMmcs,

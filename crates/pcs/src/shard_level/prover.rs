@@ -919,7 +919,7 @@ where
     let _t_phase4 = std::time::Instant::now();
     let evaluation_proof = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
-        emit_jagged_pcs_bytes::<SC, A>(
+        prove_trusted_evaluations::<SC, A>(
             chips,
             // Commit-coverage trace set (device-resident chips
             // materialized) — MUST be the same traces the precompute
@@ -1184,7 +1184,22 @@ where
 /// digest was already observed in the transcript prologue as
 /// `main_commitment`.  GPU jagged-PCS hooks (which do their own
 /// commit) are bypassed in that case to avoid a double-commit.
-fn emit_jagged_pcs_bytes<SC, A>(
+/// Prove the shard's **trusted evaluations**: that the per-chip main-column
+/// openings at `z_row` (`pre_y_per_chip` — these ARE the
+/// `opened_values.chips[].main.local` values that zerocheck + LogUp-GKR
+/// constrain) are the committed columns' values at `z_row`.
+///
+/// Ziren's analog of SP1's `prove_trusted_evaluations`
+/// (sp1-gpu/crates/shard_prover/src/prover.rs). The emitted proof is the FULL
+/// chain — not just the F(r) opening: the real jagged-eval sumcheck reducing the
+/// trusted-eval claims to `sumcheck_final = F(r)·J(r)`
+/// (`prove_jagged_reduction_owned` + `prove_jagged_evaluation`), PLUS the
+/// jagged-PCS opening proving `F(r)` is the committed polynomial at the reduced
+/// point. The recursion verifier binds this exact chain — input claim
+/// `recursive_jagged_pcs.rs:248`, output `J(r)·F(r) == sumcheck_final` `:406`,
+/// opening `:412` — over the SAME `opened_values` Vec zerocheck constrains, so
+/// the trusted evals cannot diverge from the committed trace.
+fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
@@ -1227,8 +1242,28 @@ where
     debug_assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
-        "emit_jagged_pcs_bytes: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
+        "prove_trusted_evaluations: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
     );
+
+    // SP1-port scaffold (INC1): one reviewed reinterpret for the three
+    // KoalaBear Val/Challenge `Vec` transmutes below (chip-trace cells,
+    // per-chip `r_row`, and the zerocheck-residual column claims / SP1
+    // `evaluation_claims`).  Under the TypeId gate asserted above,
+    // `Val<SC> == InnerVal` and `Challenge<SC> == InnerChallenge`, so each
+    // conversion is a zero-copy relabel with identical layout.  Folding the
+    // three copies of `ManuallyDrop` + `from_raw_parts` into one helper
+    // shrinks the unsafe surface (soundness audit, task #119) and is exactly
+    // the boilerplate the device-native `JaggedTraceMle` port (port stage c)
+    // deletes once the traces stop round-tripping through host `Vec`s.
+    //
+    // SAFETY: every caller passes `A`/`B` that are the SAME KoalaBear type
+    // (the TypeId gate). `ManuallyDrop` forbids the source double-free; the
+    // (ptr, len, cap) triple is reused verbatim under an identical layout, so
+    // the produced `Vec<B>` is byte-for-byte the reinterpreted `Vec<A>`.
+    unsafe fn reinterpret_vec<A, B>(v: alloc::vec::Vec<A>) -> alloc::vec::Vec<B> {
+        let mut v = core::mem::ManuallyDrop::new(v);
+        alloc::vec::Vec::from_raw_parts(v.as_mut_ptr() as *mut B, v.len(), v.capacity())
+    }
 
     // Send `trace.width` directly; the verifier reads each chip's
     // `column_count` from `PackingMeta` so padding to `chip.width()`
@@ -1238,20 +1273,11 @@ where
         .zip(main_traces.iter())
         .map(|(chip, trace)| {
             let name = chip.name().to_string();
-            let values_cloned: Vec<Val<SC>> = trace.values.clone();
             let trace_width = trace.width;
             // SAFETY: Val<SC> == InnerVal under the TypeId gate.
-            let (ptr, len, cap) = {
-                let mut v = core::mem::ManuallyDrop::new(values_cloned);
-                (v.as_mut_ptr(), v.len(), v.capacity())
-            };
-            let values: Vec<InnerVal> = unsafe {
-                Vec::from_raw_parts(ptr as *mut InnerVal, len, cap)
-            };
-            (
-                name,
-                RowMajorMatrix::new(values, trace_width),
-            )
+            let values: Vec<InnerVal> =
+                unsafe { reinterpret_vec::<Val<SC>, InnerVal>(trace.values.clone()) };
+            (name, RowMajorMatrix::new(values, trace_width))
         })
         .collect();
 
@@ -1283,12 +1309,7 @@ where
                 shared_eval_point
             };
             // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
-            let cloned: Vec<Challenge<SC>> = slice.to_vec();
-            let (ptr, len, cap) = {
-                let mut v = core::mem::ManuallyDrop::new(cloned);
-                (v.as_mut_ptr(), v.len(), v.capacity())
-            };
-            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+            unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(slice.to_vec()) }
         })
         .collect();
 
@@ -1313,12 +1334,12 @@ where
         != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
         let precomputed = precomputed_commit.expect(
-            "emit_jagged_pcs_bytes: outer BaseFold path requires a precomputed \
+            "prove_trusted_evaluations: outer BaseFold path requires a precomputed \
              commit (commit_basefold_path sets it under the same use_basefold gate)",
         );
         let hook = crate::shard_level::sumcheck_poly::get_outer_jagged_open_hook()
             .expect(
-                "emit_jagged_pcs_bytes: outer ring (non-JaggedChallenger) BaseFold \
+                "prove_trusted_evaluations: outer ring (non-JaggedChallenger) BaseFold \
                  open requires the outer jagged-open hook \
                  (recursion-core::register_outer_jagged_hooks)",
             );
@@ -1343,14 +1364,8 @@ where
     // identical values either way).
     let pre_y_inner: Option<Vec<Vec<InnerChallenge>>> = pre_y_per_chip.map(|per| {
         per.into_iter()
-            .map(|v| {
-                let (ptr, len, cap) = {
-                    let mut v = core::mem::ManuallyDrop::new(v);
-                    (v.as_mut_ptr(), v.len(), v.capacity())
-                };
-                // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
-                unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
-            })
+            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
+            .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
             .collect()
     });
 
@@ -1364,7 +1379,7 @@ where
         let precomputed_inner: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
             let any: Box<dyn core::any::Any> = Box::new(precomputed);
             *any.downcast().expect(
-                "emit_jagged_pcs_bytes inner path: PrecomputedJaggedCommitGeneric\
+                "prove_trusted_evaluations inner path: PrecomputedJaggedCommitGeneric\
                  <SC::BfMmcs> is PrecomputedJaggedCommit when SC::Challenger == \
                  JaggedChallenger",
             )

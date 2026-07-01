@@ -87,7 +87,7 @@ fn build_weight_table(
             // prover committed (from main_trace.width).  This used to
             // overflow with an opaque 'index out of bounds'; now caught
             // here with chip name + offsets context.  The
-            // emit_jagged_pcs_bytes width-pad fix is what should keep
+            // prove_trusted_evaluations width-pad fix is what should keep
             // this from firing in production.
             // Kept as a release-mode bounds guard to avoid silent OOBs.
             assert!(
@@ -96,7 +96,7 @@ fn build_weight_table(
                  h_c={h_c} (off+h_c={}) > n={n}. \
                  chip_infos.len={}, offsets.len={}, total_values={}.  Prover/verifier \
                  disagree on chip column count.  Likely cause: trace.width < chip.width() \
-                 in emit_jagged_pcs_bytes; pad to chip.width().",
+                 in prove_trusted_evaluations; pad to chip.width().",
                 info.name, off + h_c,
                 packing.chip_infos.len(), packing.offsets.len(), packing.total_values,
             );

@@ -1034,7 +1034,7 @@ gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
 // types live in recursion-core, which depends on zkm-pcs, so zkm-pcs cannot
 // name them. recursion-core registers these hooks; the generic shard
-// prover (`emit_jagged_pcs_bytes`) / verifier consult them when the config's
+// prover (`prove_trusted_evaluations`) / verifier consult them when the config's
 // challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical
 // KoalaBear / KoalaBear^4 for both rings, so the trace/point payloads cross the
 // boundary unchanged; only the challenger + MMCS (type-erased here) differ.

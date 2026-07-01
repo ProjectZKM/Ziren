@@ -494,7 +494,7 @@ fn derive_effective_max_log_row_count(
 /// host verifier already exists; we just need to wire up the
 /// KoalaBearPoseidon2-specialised call.
 ///
-/// The TypeId gate mirrors emit_jagged_pcs_bytes — returns `Ok(())`
+/// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
 /// for non-KoalaBear configs (nothing to verify in that path).
 fn verify_jagged_pcs_host<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -518,7 +518,7 @@ where
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{InnerChallenge, InnerVal};
 
-    // Type gate (same as prover-side emit_jagged_pcs_bytes).
+    // Type gate (same as prover-side prove_trusted_evaluations).
     // BaseFold-over-BN254 wrap port: this verifier-side gate is kept as a
     // TypeId transmute-safety guard (rather than `BasefoldRing::use_basefold()`)
     // so the `BasefoldRing` bound does not have to thread through the entire

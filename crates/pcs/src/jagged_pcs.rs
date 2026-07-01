@@ -2475,6 +2475,101 @@ pub mod jagged {
             .collect()
     }
 
+    /// **INC-2 shared linear core** — the SP1-shaped, path-INDEPENDENT
+    /// challenger sequence at the heart of every jagged-BaseFold prove.
+    ///
+    /// Mirrors SP1 `JaggedProver::prove_trusted_evaluations`
+    /// (`slop/crates/jagged/src/prover.rs`): sample `z_col` at the
+    /// verifier-matching transcript position → jagged-sumcheck reduction →
+    /// jagged-eval sub-protocol → open.  The ONE Ziren-specific deviation is
+    /// the point-extension after the reduction (SP1 opens at
+    /// `final_eval_point` directly; Ziren extends `log_dense → log2(area)`
+    /// via extra Fiat-Shamir coords — preserved here exactly).
+    ///
+    /// The `reduce` and `open` closures are the ONLY per-path variation
+    /// (host-owned vs device-hook reduction; concrete vs BN254 open; the
+    /// DROPLDES / PIECE2 device-memory frees) and NEITHER may run any
+    /// challenger op outside its documented reduction/open — so every caller
+    /// (single-group concrete, per-group multi-group, BN254 generic) lands its
+    /// `z_col` / reduction / jagged-eval / point-extend / open challenger ops
+    /// in the IDENTICAL order.  This is the de-dup that stops `z_col`'s
+    /// transcript position from being path-dependent.
+    #[allow(clippy::type_complexity)]
+    fn prove_jagged_basefold_linear_core<Ch, P>(
+        offsets: &[usize],
+        z_row: &[InnerChallenge],
+        area: usize,
+        challenger: &mut Ch,
+        reduce: impl FnOnce(&[InnerChallenge], &mut Ch) -> JaggedReductionProof<InnerChallenge>,
+        open: impl FnOnce(Vec<InnerChallenge>, &mut Ch) -> P,
+    ) -> (
+        JaggedReductionProof<InnerChallenge>,
+        crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
+        P,
+    )
+    where
+        Ch: FieldChallenger<InnerVal>,
+    {
+        // (4) SP1-aligned: sample `z_col` (one challenge per column variable)
+        // at the verifier-matching transcript position — after the commit
+        // observe, immediately before the jagged sumcheck reduction.  Used
+        // both to weight the column mix in the reduction and as the column
+        // point for the branching-program jagged-eval sub-protocol.
+        let num_cols = offsets.len().saturating_sub(1);
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
+            .map(|_| challenger.sample_algebra_element())
+            .collect();
+
+        // Jagged sumcheck reduction.  The caller's closure supplies the
+        // host-owned / device-hook / group-local body; it MUST be
+        // transcript-equivalent to
+        // `prove_jagged_reduction_owned(.., &z_col, z_row, ..)` (the device
+        // hook is byte-equivalent + snapshot-guarded; see the concrete path).
+        let reduction = reduce(&z_col, challenger);
+
+        // (4b) Jagged-eval sub-protocol at (z_row, z_col, rev(z*)).  PHASE 2:
+        // the BranchingProgram reads its z_index big-endian while the
+        // reduction emits z_star little-endian, so feed rev(z_star) — matches
+        // recursive_jagged_pcs.rs (verify_sumcheck → jagged_evaluator_fn).
+        let z_trace_be: Vec<InnerChallenge> =
+            reduction.eval_point.iter().rev().copied().collect();
+        let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+            offsets,
+            z_row,
+            &z_col,
+            &z_trace_be,
+            challenger,
+        );
+
+        // Gated host replica of the recursion's jagged-eval closing (localizes
+        // the FIX-off compress div-by-zero).  Read-only, no challenger touch.
+        if std::env::var("ZIREN_JE_SELFCHECK").is_ok() {
+            crate::jagged_eval_sumcheck::debug_jagged_eval_closing(
+                offsets,
+                z_row,
+                &z_col,
+                &z_trace_be,
+                &jagged_eval,
+            );
+        }
+
+        // (5) Ziren point-extend (SP1 opens at `final_eval_point` directly):
+        // the BaseFold commit covers `area` cells (num_stripes × batch_size ×
+        // stack_height), which can exceed 2^log_dense_size, so extend z* to
+        // log2(area) with extra Fiat-Shamir coords (the verifier samples the
+        // matching coords in the same transcript order), then open at z*.
+        let target_dim = area.trailing_zeros() as usize;
+        let mut extended_eval_point = reduction.eval_point.clone();
+        while extended_eval_point.len() < target_dim {
+            let r: InnerChallenge = challenger.sample_algebra_element();
+            extended_eval_point.push(r);
+        }
+        let proof = open(extended_eval_point, challenger);
+
+        (reduction, jagged_eval, proof)
+    }
+
     /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
     /// observe-inside flow) and [`prove_jagged_basefold_with_precomputed`]
     /// (the single-commit flow).  When `precomputed` is `Some`,
@@ -2764,18 +2859,21 @@ pub mod jagged {
         // semantics with `None` collapse to V1 behaviour; the signature
         // is in place for future Ziren-side wiring (e.g. GPU-resident
         // chip-trace materialization) to skip the H→D upload.
-        // SP1-aligned: sample `z_col` (one challenge per column
-        // variable) at the verifier-matching transcript position —
-        // after the commit observe, immediately before the jagged
-        // sumcheck reduction.  Used both to weight the column mix in the
-        // reduction and as the column point for the branching-program
-        // jagged-eval sub-protocol.  Mirrors recursive_jagged_pcs.rs.
-        let num_cols = packing.offsets.len().saturating_sub(1);
-        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
-            .map(|_| challenger.sample_algebra_element())
-            .collect();
-
+        // ── INC-2: the jagged reduction (DROPLDES pre-free + hook dispatch +
+        // PIECE2 post-free) packaged as the `reduce` closure threaded through
+        // the shared `prove_jagged_basefold_linear_core`.  The core samples
+        // `z_col` at the SP1 transcript position (after the commit observe,
+        // immediately before the reduction) and passes it in.  This closure
+        // runs NO challenger op outside the reduction itself, so `z_col`'s
+        // transcript position is identical to the generic / per-group paths —
+        // the whole point of the de-dup.  Non-`move`: every capture (packing /
+        // y_per_chip / chip_traces / provider / r_row_per_chip / z_row /
+        // n_chips / the device handle) is read by reference; only
+        // `precomputed_host_dense_q` is consumed, via `.take()`.
+        let mut precomputed_host_dense_q = precomputed_host_dense_q;
+        let reduce = |z_col: &[InnerChallenge],
+                      challenger: &mut crate::jagged_pcs::JaggedChallenger|
+              -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
         // DROPLDES (#74): free the prior-phase device residency BEFORE
         // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
         // model.  The reduce reads ONLY dense_q (either the device-resident
@@ -2903,7 +3001,7 @@ pub mod jagged {
             let mut dense_q_is_carried = false;
             let dense_q = if skip_host_dense {
                 Vec::new()
-            } else if let Some(carried) = precomputed_host_dense_q {
+            } else if let Some(carried) = precomputed_host_dense_q.take() {
                 dense_q_is_carried = true;
                 // #77 (H53 D2H-skip hole fix): the device commit DECLINED
                 // (e.g. H53/TMFIT OOM preflight) and the provider-aware host
@@ -3183,80 +3281,46 @@ pub mod jagged {
             }
         }
 
-        // (4b) Jagged-eval sub-protocol — SP1's branching-program proof
-        // that the per-column geometry (prefix sums) is consistent with
-        // the reduced point.  Runs BETWEEN the reduction and the open so
-        // the transcript order matches the recursion verifier
-        // (recursive_jagged_pcs.rs: verify_sumcheck → jagged_evaluator_fn
-        // → PCS open).  Coordinate mapping (resolved against the live
-        // verifier): col_prefix_sums = packing.offsets (per-column,
-        // incl. total); z_row = shared zerocheck point; z_col as sampled;
-        // z_trace/z_index = the outer reduction's eval_point (z*).
-        // PHASE 2 (jagged SP1 re-align): the BranchingProgram reads its
-        // z_index BIG-endian (get_ith_lsb_ef = point[dim-1-i]) while the
-        // reduction emits z_star LITTLE-endian (z_star[0]=LSB).  Feed the
-        // BP / structural eval-sumcheck rev(z_star) so claimed_sum equals
-        // the reduction's closing weight w_at_z (the SP1 closing identity
-        // validated by phase1_acceptance_gate).  reduction.eval_point is
-        // kept UN-reversed for the BaseFold open below (the PCS point).
-        let z_trace_be: Vec<InnerChallenge> =
-            reduction.eval_point.iter().rev().copied().collect();
-        let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+            reduction
+        };
+
+        // ── INC-2: the BaseFold open packaged as the `open` closure.  Moves
+        // `prover_data` in; captures `n_chips` by copy.  Runs NO challenger op
+        // outside `open_jagged_pcs`, so the point-extend (sampled by the core
+        // immediately before) lands identically across all paths.
+        //
+        // (5) SP1-port: the jagged sumcheck reduces over `dense_q` (2^log_dense
+        // cells) but the BaseFold commit covers `prover_data.area` cells
+        // (num_stripes × batch_size × stack_height), which can exceed
+        // 2^log_dense_size; the core extends z* to log2(area) with extra
+        // Fiat-Shamir coords (SP1's `prove_trusted_evaluation` opens at
+        // `final_eval_point` directly — Ziren's one deviation) before this
+        // open runs.
+        let area = prover_data.area;
+        let open = move |extended_eval_point: Vec<InnerChallenge>,
+                         challenger: &mut crate::jagged_pcs::JaggedChallenger| {
+            let _t_open = std::time::Instant::now();
+            let _open_span = tracing::info_span!("jagged_basefold_open").entered();
+            let proof = open_jagged_pcs(prover_data, extended_eval_point, challenger);
+            drop(_open_span);
+            tracing::info!(
+                elapsed_ms = _t_open.elapsed().as_millis() as u64,
+                chips = n_chips,
+                sub_phase = "basefold_open",
+                "jagged sub-phase done"
+            );
+            proof
+        };
+
+        // Shared linear core: z_col sample → reduce → jagged-eval →
+        // point-extend → open (SP1 `prove_trusted_evaluations` shape).
+        let (reduction, jagged_eval, proof) = prove_jagged_basefold_linear_core(
             &packing.offsets,
             z_row,
-            &z_col,
-            &z_trace_be,
+            area,
             challenger,
-        );
-
-        // DIAGNOSTIC (gated): host replica of the recursion's jagged-eval
-        // closing (compress_basefold.rs:1154) to localize the FIX-off compress
-        // div-by-zero — see jagged_eval_sumcheck::debug_jagged_eval_closing.
-        if std::env::var("ZIREN_JE_SELFCHECK").is_ok() {
-            crate::jagged_eval_sumcheck::debug_jagged_eval_closing(
-                &packing.offsets,
-                z_row,
-                &z_col,
-                &z_trace_be,
-                &jagged_eval,
-            );
-        }
-
-        // (5) Open the BaseFold commit at z*.
-        //
-        // SP1-port: the jagged sumcheck reduces over `dense_q`
-        // which has 2^log_dense_size cells.  But the BaseFold
-        // commitment covers `prover_data.area` cells (= num_stripes ×
-        // batch_size × stack_height after interleaving), which can be
-        // strictly larger than 2^log_dense_size when the dense data
-        // doesn't fill the next stripe-multiple.  The BaseFold open
-        // requires a point of dimension log2(area), not
-        // log_dense_size.
-        //
-        // Mirrors SP1's `slop_stacked::StackedPcsProver::prove_trusted_evaluation`
-        // contract: `eval_point.dimension() == log2(total_data_length)`.
-        // Sample additional Fiat-Shamir coords to extend the point;
-        // the verifier samples matching coords in the same transcript
-        // order (recursive_jagged_pcs.rs after `verify_sumcheck`).
-        let target_dim = prover_data.area.trailing_zeros() as usize;
-        let mut extended_eval_point = reduction.eval_point.clone();
-        while extended_eval_point.len() < target_dim {
-            let r: InnerChallenge = challenger.sample_algebra_element();
-            extended_eval_point.push(r);
-        }
-        let _t_open = std::time::Instant::now();
-        let _open_span = tracing::info_span!("jagged_basefold_open").entered();
-        let proof = open_jagged_pcs(
-            prover_data,
-            extended_eval_point,
-            challenger,
-        );
-        drop(_open_span);
-        tracing::info!(
-            elapsed_ms = _t_open.elapsed().as_millis() as u64,
-            chips = n_chips,
-            sub_phase = "basefold_open",
-            "jagged sub-phase done"
+            reduce,
+            open,
         );
 
         let packing_meta = PackingMeta {
@@ -3452,42 +3516,35 @@ pub mod jagged {
                 y_per_chip[i] = y_g[slot].clone();
             }
 
-            // (4) sample z_col_g (group-local column dim), then reduce over
-            // the group-LOCAL dense.
-            let num_cols = packing_g.offsets.len().saturating_sub(1);
-            let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-            let z_col_g: Vec<InnerChallenge> = (0..num_col_vars)
-                .map(|_| challenger.sample_algebra_element())
-                .collect();
-            let reduction_g = {
+            // ── INC-2: group-LOCAL reduce + open threaded through the shared
+            // `prove_jagged_basefold_linear_core` (the core samples `z_col_g`
+            // at the group's SP1 transcript position, then runs jagged-eval_g
+            // + point-extend_g).  Group-local host reduction (no device hooks
+            // on the CP-A per-round path); `z_row` stays GLOBAL.
+            let reduce_g = |z_col_g: &[InnerChallenge],
+                            challenger: &mut crate::jagged_pcs::JaggedChallenger|
+                  -> JaggedReductionProof<InnerChallenge> {
                 let dense_q = materialize_dense_jagged::<InnerVal>(
                     traces_g,
                     packing_g.log_dense_size,
                 );
                 crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                    dense_q, packing_g, &r_row_g, &y_g, &z_col_g, z_row, challenger,
+                    dense_q, packing_g, &r_row_g, &y_g, z_col_g, z_row, challenger,
                 )
             };
-
-            // (4b) jagged-eval sub-protocol over group-local prefix-sums.
-            let z_trace_be: Vec<InnerChallenge> =
-                reduction_g.eval_point.iter().rev().copied().collect();
-            let jagged_eval_g = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
+            let area_g = prover_data_g.area;
+            let open_g = move |extended_eval_point: Vec<InnerChallenge>,
+                               challenger: &mut crate::jagged_pcs::JaggedChallenger| {
+                open_jagged_pcs(prover_data_g, extended_eval_point, challenger)
+            };
+            let (reduction_g, jagged_eval_g, proof_g) = prove_jagged_basefold_linear_core(
                 &packing_g.offsets,
                 z_row,
-                &z_col_g,
-                &z_trace_be,
+                area_g,
                 challenger,
+                reduce_g,
+                open_g,
             );
-
-            // (5) extend z*_g to log2(area_g) + BaseFold open of C_g.
-            let target_dim = prover_data_g.area.trailing_zeros() as usize;
-            let mut extended_eval_point = reduction_g.eval_point.clone();
-            while extended_eval_point.len() < target_dim {
-                let r: InnerChallenge = challenger.sample_algebra_element();
-                extended_eval_point.push(r);
-            }
-            let proof_g = open_jagged_pcs(prover_data_g, extended_eval_point, challenger);
 
             out_packing.push(crate::jagged_pcs::jagged::PackingMeta {
                 offsets: packing_g.offsets.clone(),
@@ -3624,42 +3681,39 @@ pub mod jagged {
                 .collect()
         };
 
-        // (4) sample z_col, then run the HOST jagged-sumcheck reduction.
-        let num_cols = packing.offsets.len().saturating_sub(1);
-        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
-        let z_col: Vec<InnerChallenge> = (0..num_col_vars)
-            .map(|_| challenger.sample_algebra_element())
-            .collect();
-        let reduction = {
+        // ── INC-2: the HOST reduction (no device hooks on the BN254 wrap
+        // path) + the BN254 BaseFold open as the `reduce` / `open` closures
+        // threaded through the shared `prove_jagged_basefold_linear_core`.
+        // The core samples `z_col` at the SP1 transcript position and runs the
+        // jagged-eval + point-extend — so this path lands its challenger ops in
+        // the IDENTICAL order to the concrete single-group + per-group paths.
+        let reduce = |z_col: &[InnerChallenge],
+                      challenger: &mut Challenger|
+              -> JaggedReductionProof<InnerChallenge> {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
             crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                dense_q, &packing, r_row_per_chip, &y_per_chip, &z_col, z_row, challenger,
+                dense_q, &packing, r_row_per_chip, &y_per_chip, z_col, z_row, challenger,
             )
         };
-
-        // jagged-eval sub-proof at (z_row, z_col, z*).  PHASE 2 (jagged SP1
-        // re-align): feed rev(z_star) — BP reads z_index big-endian while the
-        // reduction emits z_star little-endian (see prove_jagged_basefold_inner).
-        let z_trace_be: Vec<InnerChallenge> =
-            reduction.eval_point.iter().rev().copied().collect();
-        let jagged_eval = crate::jagged_eval_sumcheck::prove_jagged_evaluation(
-            &packing.offsets, z_row, &z_col, &z_trace_be, challenger,
+        let area = prover_data.area;
+        let open = move |extended_eval_point: Vec<InnerChallenge>,
+                         challenger: &mut Challenger| {
+            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+            crate::jagged_pcs::open_jagged_pcs_host_generic::<
+                Challenger,
+                MT,
+                crate::jagged_pcs::JaggedDft,
+            >(prover_data, extended_eval_point, challenger, mmcs, dft, fri)
+        };
+        let (reduction, jagged_eval, proof) = prove_jagged_basefold_linear_core(
+            &packing.offsets,
+            z_row,
+            area,
+            challenger,
+            reduce,
+            open,
         );
-
-        // (5) extend the eval point to log2(area) + BaseFold open at z*.
-        let target_dim = prover_data.area.trailing_zeros() as usize;
-        let mut extended_eval_point = reduction.eval_point.clone();
-        while extended_eval_point.len() < target_dim {
-            let r: InnerChallenge = challenger.sample_algebra_element();
-            extended_eval_point.push(r);
-        }
-        let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-        let proof = crate::jagged_pcs::open_jagged_pcs_host_generic::<
-            Challenger,
-            MT,
-            crate::jagged_pcs::JaggedDft,
-        >(prover_data, extended_eval_point, challenger, mmcs, dft, fri);
 
         let packing_meta = PackingMeta {
             offsets: packing.offsets.clone(),
@@ -4307,6 +4361,74 @@ mod test {
         assert!(ok, "jagged-basefold pipeline should accept honest proof");
     }
 
+    /// **INC-2 byte-identity gate for the MULTI-GROUP path.**  Forces the
+    /// `groups.len() > 1` dispatch via [`with_test_round_threshold`] (the
+    /// production trigger — total dense area >= 2^30 with `ZIREN_JAGGED_GROUPS`
+    /// set — is not host-reproducible in a unit test), proves + verifies an
+    /// honest bundle, and prints a stable FNV-1a digest of the serialized
+    /// bundle.  Run BEFORE and AFTER the `prove_jagged_basefold_inner`
+    /// de-dup: the digest MUST be identical (the multi-group per-group body
+    /// is a literal instance of the shared linear core).
+    #[test]
+    fn test_jagged_basefold_multigroup_digest() {
+        use crate::jagged::with_test_round_threshold;
+        use crate::jagged_pcs::jagged::{prove_jagged_basefold, verify_jagged_basefold};
+
+        let mut rng = StdRng::seed_from_u64(0x6E75_6C6C_6D67_0002);
+        let mk = |w: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<JaggedVal> {
+            let v: Vec<JaggedVal> = (0..w * h).map(|_| rand_kb(rng)).collect();
+            RowMajorMatrix::new(v, w)
+        };
+        // Name-sorted; each chip area = width << log_h = 64.  With a forced
+        // threshold of 100 the greedy partition yields G=2: R0={AAA}, R1={BBB}.
+        let traces = vec![
+            ("AAA".to_string(), mk(4, 16, &mut rng)), // 4 << 4 = 64
+            ("BBB".to_string(), mk(8, 8, &mut rng)),  // 8 << 3 = 64
+        ];
+        let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
+            .iter()
+            .map(|(_, t)| {
+                let h = t.values.len() / t.width.max(1);
+                let log_h = h.next_power_of_two().trailing_zeros() as usize;
+                (0..log_h).map(|_| rand_ef(&mut rng)).collect()
+            })
+            .collect();
+        let z_row: Vec<JaggedChallenge> = r_row_per_chip
+            .iter()
+            .max_by_key(|v| v.len())
+            .cloned()
+            .unwrap_or_default();
+
+        with_test_round_threshold(100, || {
+            let infos = crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            let parts = crate::jagged::partition_from_chip_infos(&infos);
+            assert!(parts.len() >= 2, "expected multi-group, got {} group(s)", parts.len());
+
+            let mut p_chal = build_challenger();
+            let bundle = prove_jagged_basefold(&traces, &r_row_per_chip, &z_row, &mut p_chal);
+            assert!(!bundle.groups.is_empty(), "bundle must carry multi-group metadata");
+
+            let mut v_chal = build_challenger();
+            let ok = verify_jagged_basefold(&infos, &r_row_per_chip, &z_row, &bundle, &mut v_chal);
+            assert!(ok, "multi-group honest proof must verify");
+
+            let bytes = bincode::serialize(&bundle).expect("serialize bundle");
+            let mut h: u64 = 0xcbf29ce484222325;
+            for b in &bytes {
+                h ^= u64::from(*b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            println!("MG_DIGEST groups={} bytes={} fnv1a=0x{:016x}", bundle.groups.len(), bytes.len(), h);
+            // Byte-identity lock: captured from the PRE-de-dup impl (HEAD
+            // 91d450bd).  The multi-group per-group body is a literal instance
+            // of `prove_jagged_basefold_linear_core`; any future increment that
+            // deliberately moves this transcript (e.g. the SP1-explicit lift)
+            // must re-baseline these values consciously.
+            assert_eq!(bundle.groups.len(), 2, "expected G=2");
+            assert_eq!(bytes.len(), 2_488_120, "multi-group bundle byte length drifted");
+            assert_eq!(h, 0xf921_3854_cb16_156e, "multi-group bundle digest drifted");
+        });
+    }
 
     /// **Soundness sanity** — flipping any single field of the bundle
     /// must cause the verifier to reject.  Catches whole classes of

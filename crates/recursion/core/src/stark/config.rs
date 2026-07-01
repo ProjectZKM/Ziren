@@ -233,7 +233,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // proves + host-verifies over the BN254 BaseFold jagged-PCS
         // (OuterValMmcs + OuterChallenger). commit_basefold_path builds the BN254
         // commit via precompute_jagged_basefold_commit_generic::<OuterValMmcs>;
-        // emit_jagged_pcs_bytes / verify_jagged_pcs_host route to the
+        // prove_trusted_evaluations / verify_jagged_pcs_host route to the
         // recursion-core hooks. (gnark verify_wrap_basefold + wrap vk regen +
         // FRI deletion remain.)
         true
@@ -402,7 +402,7 @@ mod basefold_over_bn254_generic_typecheck {
 
 // #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold open/verify hook
 // bodies. Registered into zkm-pcs's process-global hook slots so the generic
-// shard prover (`emit_jagged_pcs_bytes`) / verifier (`verify_jagged_pcs_host`),
+// shard prover (`prove_trusted_evaluations`) / verifier (`verify_jagged_pcs_host`),
 // which cannot name `OuterValMmcs`/`OuterChallenger`, route the wrap-ring open /
 // verify here. `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so
 // only the MMCS + challenger differ.
