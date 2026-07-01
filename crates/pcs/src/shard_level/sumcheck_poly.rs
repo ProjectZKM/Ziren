@@ -1038,24 +1038,14 @@ gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
 // challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical
 // KoalaBear / KoalaBear^4 for both rings, so the trace/point payloads cross the
 // boundary unchanged; only the challenger + MMCS (type-erased here) differ.
-type OuterKb = p3_koala_bear::KoalaBear;
 type OuterEf4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
 
-/// Outer jagged BaseFold OPEN. Inputs mirror the inner host open
-/// (`prove_jagged_basefold_inner_generic`); `precomputed` is a type-erased
-/// `PrecomputedJaggedCommitGeneric<OuterValMmcs>` and `challenger` a
-/// `&mut OuterChallenger`. Returns the rmp-serialized
-/// `JaggedBasefoldBundleGeneric<OuterValMmcs>`.
-pub type OuterJaggedOpenFn = fn(
-    chip_traces: &[(std::string::String, p3_matrix::dense::RowMajorMatrix<OuterKb>)],
-    r_row_per_chip: &[Vec<OuterEf4>],
-    z_row: &[OuterEf4],
-    precomputed: Box<dyn core::any::Any + Send + Sync>,
-    challenger: &mut dyn core::any::Any,
-) -> Vec<u8>;
-
-gpu_hook_accessors!(OUTER_JAGGED_OPEN_HOOK: OuterJaggedOpenFn
-    => register_outer_jagged_open_hook, get_outer_jagged_open_hook);
+// STAGE-B b1: the OUTER jagged BaseFold OPEN hook (`OuterJaggedOpenFn` +
+// `OUTER_JAGGED_OPEN_HOOK` + register/get accessors) was RETIRED. The shard
+// prover now names `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing`
+// associated type and calls `prove_jagged_basefold_inner_generic` statically
+// (see `prove_trusted_evaluations`), so the dyn-Any open hook is dead. The
+// VERIFY + PREP-COMMIT hooks below remain (their static ports are b1').
 
 /// Outer jagged BaseFold VERIFY. Deserializes `bundle_bytes` as
 /// `JaggedBasefoldBundleGeneric<OuterValMmcs>` and verifies it with the

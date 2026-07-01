@@ -229,6 +229,15 @@ where
         > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // OUTER generic BaseFold open (see its where-clause).
+    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
 {
     let loader = EagerHostLoader::new(main_traces);
     prove_shard_to_basefold_with_loader::<SC, A, _>(
@@ -280,6 +289,15 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     L: MainTraceLoader<Val<SC>>,
+    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // OUTER generic BaseFold open (see its where-clause).
+    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
 {
     debug_assert_eq!(
         chips.len(),
@@ -1221,7 +1239,19 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    SC::Challenger: 'static,
+    // STAGE-B b1: `SC::Challenger` drives the generic jagged BaseFold prover
+    // directly on the OUTER (wrap) branch — the capability bounds
+    // `prove_jagged_basefold_inner_generic` requires. Both rings satisfy them
+    // (inner `JaggedChallenger`, wrap `OuterChallenger`); NOT expressible as a
+    // `BasefoldRing` implied bound, so threaded down the call chain.
+    SC::Challenger: 'static
+        + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
 {
     use core::any::{Any, TypeId};
     use crate::jagged_pcs::jagged::{
@@ -1333,24 +1363,35 @@ where
     if TypeId::of::<SC::Challenger>()
         != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
+        // STAGE-B b1: STATIC monomorphization of the former
+        // `OUTER_JAGGED_OPEN_HOOK`.  The recursion-core hook body
+        // (`outer_open`) WAS exactly this generic call over
+        // `OuterChallenger`/`OuterValMmcs`; b1 removes the dyn-Any
+        // indirection.  On this branch `SC::Challenger == OuterChallenger`
+        // and `SC::BfMmcs == OuterValMmcs` (the wrap ring is the only
+        // non-`JaggedChallenger` ring), so naming them via the `BasefoldRing`
+        // associated type + trait-level challenger bounds is byte-identical
+        // BY CONSTRUCTION.  `pre_y_per_chip = None` mirrors the hook (its
+        // own legacy step-3 y_per_chip recompute — identical values), so the
+        // serialized bundle bytes match the pre-b1 hook output exactly.
         let precomputed = precomputed_commit.expect(
             "prove_trusted_evaluations: outer BaseFold path requires a precomputed \
              commit (commit_basefold_path sets it under the same use_basefold gate)",
         );
-        let hook = crate::shard_level::sumcheck_poly::get_outer_jagged_open_hook()
-            .expect(
-                "prove_trusted_evaluations: outer ring (non-JaggedChallenger) BaseFold \
-                 open requires the outer jagged-open hook \
-                 (recursion-core::register_outer_jagged_hooks)",
-            );
-        let precomputed_box: Box<dyn Any + Send + Sync> = Box::new(precomputed);
-        // SAFETY: chip_traces/r_row_per_chip/z_row are over InnerVal/InnerChallenge
-        // == OuterVal/OuterChallenge (KoalaBear / KoalaBear^4); the hook downcasts
-        // the challenger to &mut OuterChallenger under the TypeId guard above.
-        let challenger_any: &mut dyn Any = challenger;
-        let bytes =
-            hook(&chip_traces, &r_row_per_chip, z_row, precomputed_box, challenger_any);
-        return EvaluationProof::Bytes(bytes);
+        let bundle = crate::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
+            SC::Challenger,
+            <SC as BasefoldRing>::BfMmcs,
+        >(
+            &chip_traces,
+            &r_row_per_chip,
+            z_row,
+            None,
+            precomputed,
+            challenger,
+            <SC as BasefoldRing>::bf_mmcs(),
+            <SC as BasefoldRing>::fri_config(),
+        );
+        return EvaluationProof::Bytes(bundle.to_bytes());
     }
 
     let challenger_any: &mut dyn Any = challenger;

@@ -245,6 +245,15 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: Clone,
+    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // OUTER generic BaseFold open (see its where-clause).
+    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
     <SC as BasefoldRing>::BfMmcs:
         p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
     <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
@@ -366,7 +375,15 @@ where
         // Obtain the challenges used for the local permutation argument.
         let mut local_permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
-            local_permutation_challenges.push(challenger.sample_algebra_element());
+            // STAGE-B b1: UFCS-disambiguate `F = Val<SC>` — the impl now also
+            // carries `SC::Challenger: FieldChallenger<JaggedVal>` (threaded to
+            // the static outer BaseFold open), so bare `sample_algebra_element`
+            // is ambiguous. `Val<SC>` preserves the pre-b1 resolution exactly.
+            local_permutation_challenges.push(
+                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
+                    challenger,
+                ),
+            );
         }
 
         let packed_perm_challenges = local_permutation_challenges
@@ -443,14 +460,22 @@ where
             }
 
             // Sample alpha (constraint mixing challenge).
-            let _alpha: SC::Challenge = challenger.sample_algebra_element();
+            // STAGE-B b1: UFCS-disambiguate `F = Val<SC>` (see the perm-challenge
+            // sample above) — preserves the pre-b1 resolution byte-for-byte.
+            let _alpha: SC::Challenge =
+                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
+                    challenger,
+                );
 
             // No quotient commit to observe (skipped).
             // Sample zeta (evaluation point) for the legacy prep/main
             // opening fields that are still carried in the shard-proof
             // envelope.  Permutation and quotient are intentionally
             // absent in the BaseFold path.
-            let _zeta: SC::Challenge = challenger.sample_algebra_element();
+            let _zeta: SC::Challenge =
+                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
+                    challenger,
+                );
 
             // === Option B single-main-commit: placeholder pcs.open ===
             //
@@ -705,6 +730,15 @@ where
     SC::Challenger: Clone + 'static,
     Val<SC>: 'static,
     <SC as StarkGenericConfig>::Challenge: 'static,
+    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // OUTER generic BaseFold open (see its where-clause).
+    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<
+            <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
 {
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};

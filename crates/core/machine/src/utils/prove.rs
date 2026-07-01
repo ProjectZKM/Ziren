@@ -1182,6 +1182,11 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
+    // STAGE-B b1: required by `CpuProver: MachineProver` (the impl threads the
+    // static outer BaseFold open bound). Both rings satisfy it.
+    SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
+        + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
 {
     let prover = CpuProver::new(machine);
     run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)

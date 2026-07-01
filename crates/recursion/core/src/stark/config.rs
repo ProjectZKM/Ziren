@@ -412,43 +412,17 @@ pub mod outer_jagged_hooks {
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
     use zkm_pcs::jagged_pcs::jagged::{
-        build_jagged_verify_inputs, prove_jagged_basefold_inner_generic,
-        verify_jagged_basefold_inner_generic, JaggedBasefoldBundleGeneric,
-        PrecomputedJaggedCommitGeneric,
+        build_jagged_verify_inputs, verify_jagged_basefold_inner_generic,
+        JaggedBasefoldBundleGeneric,
     };
     use zkm_pcs::jagged_pcs::{JaggedChallenge, JaggedVal};
     use zkm_pcs::BasefoldRing;
 
-    fn outer_open(
-        chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
-        r_row_per_chip: &[Vec<JaggedChallenge>],
-        z_row: &[JaggedChallenge],
-        precomputed: Box<dyn Any + Send + Sync>,
-        challenger: &mut dyn Any,
-    ) -> Vec<u8> {
-        let precomputed = *precomputed
-            .downcast::<PrecomputedJaggedCommitGeneric<OuterValMmcs>>()
-            .expect(
-                "outer_open: precompute downcast to \
-                 PrecomputedJaggedCommitGeneric<OuterValMmcs>",
-            );
-        let challenger = challenger
-            .downcast_mut::<OuterChallenger>()
-            .expect("outer_open: challenger downcast to OuterChallenger");
-        let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
-        let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
-        let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
-            chip_traces,
-            r_row_per_chip,
-            z_row,
-            None,
-            precomputed,
-            challenger,
-            mmcs,
-            fri,
-        );
-        bundle.to_bytes()
-    }
+    // STAGE-B b1: `outer_open` (the former `OUTER_JAGGED_OPEN_HOOK` body) was
+    // RETIRED — the shard prover (`prove_trusted_evaluations`) now names
+    // `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
+    // and calls `prove_jagged_basefold_inner_generic` statically, so the
+    // dyn-Any open hook is dead. `outer_verify` + `outer_prep_commit` remain.
 
     fn outer_verify(
         chip_widths: &[usize],
@@ -492,8 +466,10 @@ pub mod outer_jagged_hooks {
     /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
     /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
     pub fn register_outer_jagged_hooks() {
-        let _ =
-            zkm_pcs::shard_level::sumcheck_poly::register_outer_jagged_open_hook(outer_open);
+        // STAGE-B b1: `register_outer_jagged_open_hook(outer_open)` removed — the
+        // open path is now a static generic call in the shard prover. The
+        // VERIFY + PREP-COMMIT hooks are still dyn-Any (b1' will static-port
+        // them).
         let _ =
             zkm_pcs::shard_level::sumcheck_poly::register_outer_jagged_verify_hook(outer_verify);
         let _ = zkm_pcs::shard_level::sumcheck_poly::register_outer_prep_commit_hook(

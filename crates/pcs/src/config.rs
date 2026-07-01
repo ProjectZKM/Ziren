@@ -140,10 +140,24 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
     /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
     /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
+    ///
+    /// STAGE-B b1: `Commitment`/`Proof` carry `Serialize + Deserialize` so the
+    /// generic bundle's `to_bytes()` is callable directly from the shard prover
+    /// (the wrap `EvaluationProof::Bytes` path).  These are associated-type
+    /// bounds (implied at every `SC: BasefoldRing` site).  The `SC::Challenger`
+    /// capability bounds the generic BaseFold prover needs are NOT expressible
+    /// as implied bounds, so they live on the shard-prover call chain instead
+    /// (see `prove_trusted_evaluations`).
     type BfMmcs: p3_commit::Mmcs<Val<Self>, Commitment: Clone>
         + p3_commit::Mmcs<
             crate::jagged_pcs::JaggedVal,
-            Commitment: Clone + Send + Sync + 'static,
+            Commitment: Clone
+                + Send
+                + Sync
+                + 'static
+                + serde::Serialize
+                + for<'d> serde::Deserialize<'d>,
+            Proof: serde::Serialize + for<'d> serde::Deserialize<'d>,
             ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>:
                 Send + Sync + 'static,
         >
@@ -182,6 +196,15 @@ pub trait BasefoldRing: StarkGenericConfig {
         commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 }
+
+/// STAGE-B b1: the BaseFold jagged-PCS commitment type for a `BasefoldRing`
+/// config — `<SC::BfMmcs as Mmcs<JaggedVal>>::Commitment`.  Exposed so
+/// downstream crates (e.g. `zkm-core-machine`, which does not depend on
+/// `p3-commit`) can name the `CanObserve<..>` bound the static outer BaseFold
+/// open threads through the shard-prover call chain.
+pub type BfCommitment<SC> = <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+    crate::jagged_pcs::JaggedVal,
+>>::Commitment;
 
 #[derive(Clone)]
 pub struct UniConfig<SC>(pub SC);
