@@ -42,12 +42,42 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
 
     /// The number of public values elements that the machine uses
     num_pv_elts: usize,
+
+    /// #125 INC-4b: whether this machine's shard proofs use the rev(zeta) CORE
+    /// orientation (the SP1-natural / collapsed-claim convention).  `true` ONLY
+    /// for the CORE (MIPS) machine — its FIX-off/FIX-on prove path installs the
+    /// `Some(true)` orientation carrier, so its shard proofs are rev.  `false`
+    /// (the default) for every recursion / shrink / wrap machine — those proofs
+    /// are LEGACY (the recursion prover never installs the carrier).  Threaded
+    /// to the host `verify_zerocheck_host` / `recompute_zerocheck_rlc_eval_host`
+    /// so a core proof is host-verified rev and a recursion/wrap proof legacy
+    /// (the `ZIREN_STAGE2_REVZETA` env is RETIRED).
+    core_rev: bool,
 }
 
 impl<SC: StarkGenericConfig, A> StarkMachine<SC, A> {
-    /// Creates a new [`StarkMachine`].
+    /// Creates a new [`StarkMachine`] whose shard proofs use the LEGACY zerocheck
+    /// orientation (every recursion / shrink / wrap machine, and test machines).
     pub const fn new(config: SC, chips: Vec<Chip<Val<SC>, A>>, num_pv_elts: usize) -> Self {
-        Self { config, chips, num_pv_elts }
+        Self { config, chips, num_pv_elts, core_rev: false }
+    }
+
+    /// #125 INC-4b: creates a CORE [`StarkMachine`] whose shard proofs use the
+    /// rev(zeta) orientation (host verify picks the collapsed / no-embed claim).
+    /// Used ONLY by the MIPS core machine.
+    pub const fn new_core_rev(
+        config: SC,
+        chips: Vec<Chip<Val<SC>, A>>,
+        num_pv_elts: usize,
+    ) -> Self {
+        Self { config, chips, num_pv_elts, core_rev: true }
+    }
+
+    /// #125 INC-4b: whether this machine's shard proofs use the rev(zeta) CORE
+    /// orientation.
+    #[inline]
+    pub const fn core_rev(&self) -> bool {
+        self.core_rev
     }
 }
 
@@ -836,6 +866,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &chips,
                         &mut shard_challenger,
                         shard_proof,
+                        self.core_rev,
                     )
                     .map_err(MachineVerificationError::InvalidShardProof)
                 })

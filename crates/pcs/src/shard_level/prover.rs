@@ -1019,14 +1019,12 @@ where
                 .chip_openings
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
+        // #125 INC-4b: orientation driven solely by the core-scoped
+        // `current_use_rev()` carrier; the `ZIREN_STAGE2_REVZETA` env is RETIRED.
+        // `None` (every recursion / shrink / wrap prove) => LEGACY (byte-identical).
         let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
             Some(carrier) => carrier && _device_traces.is_none() && full_openings_ok,
-            None => {
-                let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
-                    .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                    .unwrap_or(false);
-                stage2_revzeta_on && _device_traces.is_none() && full_openings_ok
-            }
+            None => false,
         };
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))

@@ -193,7 +193,9 @@ pub enum MipsAir<F: PrimeField32> {
 impl<F: PrimeField32> MipsAir<F> {
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
-        StarkMachine::new(config, chips, ZKM_PROOF_NUM_PV_ELTS)
+        // #125 INC-4b: the CORE machine's shard proofs use the rev(zeta) CORE
+        // orientation, so host verify picks the collapsed/no-embed claim.
+        StarkMachine::new_core_rev(config, chips, ZKM_PROOF_NUM_PV_ELTS)
     }
 
     /// Get all the different MIPS AIRs.
@@ -1762,12 +1764,12 @@ pub mod tests {
         }
     }
 
-    // Shared helper: FIX-off prove a single-shard program at RAW heights UNDER
-    // rev (ZIREN_STAGE2_REVZETA=1 set for PROVING so the prover emits the
-    // rev/natural-convention proof — commit+y+weight all natural, claim seeded
-    // from `*_full`).  Mirror of stage0_prove_fixoff with rev forced on during
-    // proving.  CRITICAL: the proof MUST be produced under rev or the verifier's
-    // rev-anchored item-12 / claim-collapse will not match it.
+    // Shared helper: FIX-off prove a single-shard program at RAW heights.
+    // #125 INC-4b: rev(zeta) is now the CORE DEFAULT (the core prove path
+    // installs the `Some(true)` orientation carrier unconditionally), so the
+    // emitted core proof is rev without any env toggle — commit+y+weight all
+    // natural, claim seeded from `*_full`.  (The `ZIREN_STAGE2_REVZETA` A/B env
+    // is RETIRED.)
     #[cfg(test)]
     fn stage3_prove_fixoff_rev(
         program: Program,
@@ -1777,19 +1779,17 @@ pub mod tests {
         StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
         StarkVerifyingKey<KoalaBearPoseidon2>,
     ) {
-        std::env::set_var("ZIREN_STAGE2_REVZETA", "1");
         // Reconstruction is verifier-only + transcript-neutral, so its state
         // during proving is irrelevant; clear it so proving is unaffected.
         std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
-        let out = stage0_prove_fixoff(program, shard_size);
-        out
+        stage0_prove_fixoff(program, shard_size)
     }
 
-    // Shared helper: run the FULL machine.verify under rev (ZIREN_STAGE2_REVZETA)
-    // with the reconstruction in the requested state, returning the error string
-    // (or "OK").  Self-contained env management so the rev/recon gates are set
-    // INSIDE the test (the stage0_* baselines remove ZIREN_LOGUP_RECONSTRUCTION,
-    // so Stage 3 needs its own driver).
+    // Shared helper: run the FULL machine.verify with the reconstruction in the
+    // requested state, returning the error string (or "OK").  #125 INC-4b: the
+    // CORE (MIPS) machine host-verifies rev by construction (`core_rev` flag), so
+    // no env toggle is needed.  Self-contained recon-env management (the stage0_*
+    // baselines remove ZIREN_LOGUP_RECONSTRUCTION, so Stage 3 needs its own driver).
     #[cfg(test)]
     fn stage3_verify_rev(
         machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
@@ -1798,7 +1798,6 @@ pub mod tests {
         recon_on: bool,
     ) -> String {
         use zkm_pcs::StarkGenericConfig;
-        std::env::set_var("ZIREN_STAGE2_REVZETA", "1");
         if recon_on {
             std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
         } else {
@@ -1916,7 +1915,6 @@ pub mod tests {
     fn stage3_rev_ab_neutrality_probe() {
         setup_logger();
         let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
-        std::env::set_var("ZIREN_STAGE2_REVZETA", "1");
         std::env::set_var("S8J_RLC", "1");
 
         std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");

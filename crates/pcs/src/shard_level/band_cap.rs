@@ -284,6 +284,34 @@ pub fn current_use_rev() -> Option<bool> {
     CURRENT_USE_REV.with(|c| *c.borrow())
 }
 
+/// #125 INC-4b: RAII guard that installs ONLY the rev(zeta) orientation carrier
+/// (`CURRENT_USE_REV = Some(use_rev)`) for its scope, WITHOUT any band-cap /
+/// missing-chip / raw-log machinery.  Used by the CORE prover for shards that do
+/// NOT map to a canonical cluster (e.g. the no-CPU memory-finalize shard, where
+/// `find_canonical_cluster_shape` returns `None`): those shards still commit at
+/// their own (raw) height — `current_band_cap()` stays `None`, so the natural
+/// raw commit is byte-geometry-identical to legacy — but MUST carry the rev
+/// orientation so the CORE proof is uniformly rev (every core shard rev), keeping
+/// the host `core_rev=true` verify and the in-circuit NORMALIZE `core_layer_rev`
+/// consistent.  On drop it clears the carrier (`None`) so no stale orientation
+/// outlives the scope on a reused worker thread.
+pub struct UseRevGuard;
+
+impl UseRevGuard {
+    /// Install `CURRENT_USE_REV = Some(use_rev)` for the calling thread.
+    #[must_use]
+    pub fn new(use_rev: bool) -> Self {
+        set_use_rev(Some(use_rev));
+        Self
+    }
+}
+
+impl Drop for UseRevGuard {
+    fn drop(&mut self) {
+        set_use_rev(None);
+    }
+}
+
 /// RAII guard that pins the RECURSION-LAYER jagged commit area for its scope on
 /// the calling thread (#88/#82 Stage 1).  The recursion (`compress`) prover
 /// installs it around its per-shard `commit` + `open` (which run on the same

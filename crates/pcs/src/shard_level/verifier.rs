@@ -132,6 +132,10 @@ impl BasefoldShardVerifier {
         proof: &BasefoldShardProof<Val<SC>, Challenge<SC>>,
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
+        // #125 INC-4b: `true` for the CORE machine (rev shard proofs); `false`
+        // for recursion / shrink / wrap (LEGACY). Drives the zerocheck host
+        // orientation (collapsed/no-embed claim + rev(z_gkr) eq-bridge anchor).
+        core_rev: bool,
     ) -> Result<(), BasefoldVerifyError>
     where
         SC: StarkGenericConfig + crate::BasefoldRing,
@@ -317,6 +321,7 @@ impl BasefoldShardVerifier {
             &proof.logup_gkr_proof.logup_evaluations,
             &proof.public_values,
             effective_max_log_row_count,
+            core_rev,
             challenger,
             // Discriminator: opened_values carries the trace@z*
             // openings the circuit's rlc_eval (zerocheck.rs:613) is built
@@ -898,6 +903,9 @@ fn verify_zerocheck_host<SC, A>(
     gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
     max_log_row_count: usize,
+    // #125 INC-4b: `true` for the CORE machine (rev shard proofs); `false` for
+    // recursion / shrink / wrap (LEGACY). Replaces the retired ZIREN_STAGE2_REVZETA.
+    core_rev: bool,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
 ) -> Result<(), BasefoldVerifyError>
@@ -944,6 +952,7 @@ where
         gkr_batch_open,
         lambda,
         opened_values,
+        core_rev,
     );
     if rlc_eval != zerocheck_proof.point_and_eval.1 {
         return Err(BasefoldVerifyError::Zerocheck(
@@ -1009,10 +1018,11 @@ where
         // the same boolean from `gkr_evaluations`).  CAVEAT: a GPU device-fold
         // proof emits `*_full` yet uses the legacy `zeta` anchor — that path is
         // out of scope for this CPU stage (needs the GPU prepare-hook port).
-        let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false);
-        let verifier_use_rev = stage2_revzeta_on
+        // #125 INC-4b: the rev/collapsed convention is now the per-machine
+        // `core_rev` flag (true for the CORE machine, false for recursion / wrap)
+        // — NOT the retired ZIREN_STAGE2_REVZETA env.  A core proof is verified
+        // rev; a recursion / wrap proof legacy (its embed-loop untouched).
+        let verifier_use_rev = core_rev
             && !gkr_evaluations.chip_openings.is_empty()
             && gkr_evaluations
                 .chip_openings
@@ -1163,6 +1173,9 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    // #125 INC-4b: `true` for the CORE machine (rev eq-bridge anchor rev(z_gkr)),
+    // `false` for recursion / shrink / wrap (LEGACY). Replaces ZIREN_STAGE2_REVZETA.
+    core_rev: bool,
 ) -> Challenge<SC>
 where
     SC: StarkGenericConfig,
@@ -1183,9 +1196,9 @@ where
     // the eq-bridge the reversed GKR point.  The decision is SHARD-UNIFORM and
     // derived from the SAME signal as the claimed_sum block (every chip carries
     // `*_full`).  Legacy shards keep `eq(z_gkr, z*)`.
-    let conv_use_rev = std::env::var("ZIREN_STAGE2_REVZETA")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(false)
+    // #125 INC-4b: the eq-bridge anchor orientation follows the per-machine
+    // `core_rev` flag (NOT the retired ZIREN_STAGE2_REVZETA env). Core => rev.
+    let conv_use_rev = core_rev
         && !gkr_evaluations.chip_openings.is_empty()
         && gkr_evaluations
             .chip_openings

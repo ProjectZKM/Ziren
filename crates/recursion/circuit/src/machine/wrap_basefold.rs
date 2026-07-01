@@ -489,6 +489,9 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         &insertion_points,
         &mut challenger,
         machine.num_pv_elts(),
+        // #125 INC-4b: WRAP verifies the LEGACY shrink/recursion proof -> legacy
+        // (keeps the BN254 wrap R1CS UNCHANGED so the gnark ceremony STANDS).
+        false,
         eval_public_values_fn,
         jagged_evaluator_fn,
     );

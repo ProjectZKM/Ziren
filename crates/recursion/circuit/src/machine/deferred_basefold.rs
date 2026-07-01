@@ -409,6 +409,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
             &insertion_points,
             &mut challenger,
             machine.num_pv_elts(),
+            // #125 INC-4b: DEFERRED verifies LEGACY recursion proofs -> legacy.
+            false,
             eval_public_values_fn,
             jagged_evaluator_fn,
         );

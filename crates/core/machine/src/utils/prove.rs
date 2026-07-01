@@ -911,16 +911,22 @@ where
                                                 // full-openings guard locally where that
                                                 // info is known, so a GPU run (out of
                                                 // scope; flag default-OFF) stays bitrev.
-                                                // Flag OFF => `false` => the legacy
-                                                // bitrev branch, byte-identical to today.
-                                                let stage2_use_rev = std::env::var(
-                                                    "ZIREN_STAGE2_REVZETA",
-                                                )
-                                                .map(|v| {
-                                                    v != "0"
-                                                        && !v.eq_ignore_ascii_case("false")
-                                                })
-                                                .unwrap_or(false);
+                                                // #125 INC-4b: rev(zeta) is now
+                                                // the CORE DEFAULT.  This carrier is
+                                                // installed ONLY on the CORE prove
+                                                // path (this closure runs iff
+                                                // `find_canonical_cluster_shape`
+                                                // returned Some), so `Some(true)` is
+                                                // CORE-SCOPED by construction — the
+                                                // recursion / shrink / wrap provers
+                                                // never enter here, so their
+                                                // `current_use_rev()` stays `None`
+                                                // (legacy).  The `ZIREN_STAGE2_REVZETA`
+                                                // A/B env is RETIRED: a `const true`
+                                                // (not an env read) makes the core
+                                                // orientation a compile-time DEFAULT,
+                                                // not a runtime toggle.
+                                                let stage2_use_rev = true;
 
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
                                                     map,
@@ -930,6 +936,26 @@ where
                                                     zeropad_missing,
                                                 )
                                             })
+                                    };
+
+                                    // #125 INC-4b: a CORE shard that maps to NO
+                                    // canonical cluster (`find_canonical_cluster_shape`
+                                    // == None — e.g. the no-CPU memory-finalize shard)
+                                    // gets no `BandCapGuard`, so without this it would
+                                    // carry no rev carrier and be proven LEGACY while
+                                    // the CORE machine host-verifies it rev
+                                    // (core_rev=true) => an item-12 mismatch, and the
+                                    // in-circuit NORMALIZE (core_layer_rev=true) would
+                                    // likewise reject it.  Install the rev orientation
+                                    // for EVERY core shard so the whole CORE proof is
+                                    // uniformly rev; these shards still commit at own
+                                    // (raw) height (`current_band_cap()` stays None =>
+                                    // geometry byte-identical to legacy), only the
+                                    // orientation flips (regen-only VK-value change).
+                                    let _rev_only_guard = if _band_cap_guard.is_none() {
+                                        Some(zkm_pcs::shard_level::band_cap::UseRevGuard::new(true))
+                                    } else {
+                                        None
                                     };
 
                                     let t_commit = std::time::Instant::now();
@@ -944,6 +970,7 @@ where
                                     let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
                                     drop(_band_cap_guard);
+                                    drop(_rev_only_guard);
 
                                     tracing::info!(
                                         "PCS timing: commit={}ms open={}ms total={}ms",

@@ -603,6 +603,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                 &_insertion_points,
                 &mut _challenger,
                 machine.num_pv_elts(),
+                // #125 INC-4b: COMPRESS verifies LEGACY recursion proofs -> legacy.
+                false,
                 _eval_public_values_fn,
                 _jagged_evaluator_fn,
             );

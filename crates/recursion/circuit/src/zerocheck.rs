@@ -456,6 +456,7 @@ where
         zerocheck_proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
         pcs_max_log_row_count: usize,
         public_values: &'a [Felt<C::F>],
+        core_layer_rev: bool,
         challenger: &mut FC,
     ) where
         FC: FieldChallengerVariable<C, C::Bit>,
@@ -471,23 +472,21 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        // ── STAGE 2 (#88): SHARD-UNIFORM rev/collapsed convention decision ──
-        // Mirror the host (verifier.rs:852-860 `verifier_use_rev` /
-        // verifier.rs:1026-1033 `conv_use_rev`): the prover decides
-        // rev(zeta)+collapsed-claim per SHARD (every chip shares the
-        // eq-anchor orientation), so derive ONE boolean = (ZIREN_STAGE2_REVZETA
-        // on) AND (every GKR chip-opening carries the FULL-POINT opening
-        // `*_full`).  The recursion proof is generated under
-        // ZIREN_STAGE2_REVZETA=1 at prove time, so the in-circuit verifier must
-        // adopt the same convention to stay in lock-step with the prover.  This
-        // is plain host code inside the circuit-CONSTRUCTION fn (env access is
-        // identical to logup_gkr.rs / the host verifier); the rev convention is
-        // decided per-shard at prove time, so no in-circuit-witness gating is
-        // needed — the witnessed `*_full` presence is the shard-uniform signal.
-        let stage2_revzeta_on = std::env::var("ZIREN_STAGE2_REVZETA")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false);
-        let verifier_use_rev = stage2_revzeta_on
+        // ── #125 INC-4b: PER-PROGRAM rev/collapsed convention decision ──────
+        // rev(zeta) is now scoped to the CORE commit + the NORMALIZE
+        // recursion-verify.  `core_layer_rev` is a CIRCUIT-CONSTRUCTION-TIME
+        // flag passed by the caller: it is `true` ONLY for the NORMALIZE program
+        // (`core_basefold`, which verifies the rev core shard proof) and `false`
+        // for COMPRESS / SHRINK / WRAP (which verify LEGACY recursion proofs —
+        // the recursion prover never installs the rev carrier, so those proofs
+        // are legacy).  This keeps the recursion rings' in-circuit verify on the
+        // legacy embed-loop (section (6) below), so the WRAP R1CS is UNCHANGED
+        // and the gnark ceremony STANDS.  The `ZIREN_STAGE2_REVZETA` A/B env is
+        // RETIRED (a global env-flip would have leaked rev into the wrap ring
+        // because recursion proofs also carry `*_full`).  The witnessed `*_full`
+        // presence is still required (the NORMALIZE program's core-proof
+        // openings always carry it).
+        let verifier_use_rev = core_layer_rev
             && !gkr_evaluations.chip_openings.is_empty()
             && gkr_evaluations
                 .chip_openings

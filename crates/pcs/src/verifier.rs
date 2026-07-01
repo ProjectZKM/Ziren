@@ -33,6 +33,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         chips: &[&MachineChip<SC, A>],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
+        // #125 INC-4b: `true` for the CORE machine (rev shard proofs), `false`
+        // for recursion / shrink / wrap (LEGACY). Threaded to the host zerocheck.
+        core_rev: bool,
     ) -> Result<(), VerificationError<SC>>
     where
         A: for<'a> Air<VerifierConstraintFolder<'a, SC>>
@@ -72,7 +75,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             crate::shard_level::verifier::BasefoldShardVerifier::production_default();
         let num_pv_elts = proof.public_values.len();
         shard_verifier
-            .verify_shard::<SC, A>(vk, chips, basefold_proof.as_ref(), challenger, num_pv_elts)
+            .verify_shard::<SC, A>(
+                vk,
+                chips,
+                basefold_proof.as_ref(),
+                challenger,
+                num_pv_elts,
+                core_rev,
+            )
             .map_err(|e| VerificationError::BasefoldShardVerifier(format!("{e}")))?;
         return Ok(());
     }

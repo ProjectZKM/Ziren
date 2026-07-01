@@ -361,6 +361,12 @@ impl<P> BasefoldShardVerifier<P> {
         insertion_points: &[usize],
         challenger: &mut FC,
         num_pv_elts: usize,
+        // #125 INC-4b PER-PROGRAM rev flag: `true` ONLY for the NORMALIZE program
+        // (`core_basefold`, verifies the rev core proof); `false` for
+        // COMPRESS / SHRINK / WRAP (verify LEGACY recursion proofs). Keeps the
+        // recursion rings' in-circuit verify_zerocheck on the legacy embed-loop
+        // (WRAP R1CS unchanged → gnark ceremony STANDS).
+        core_layer_rev: bool,
         eval_public_values_fn: EVPV,
         jagged_evaluator_fn: JE,
     ) where
@@ -506,6 +512,7 @@ impl<P> BasefoldShardVerifier<P> {
             zerocheck_proof,
             self.max_log_row_count,
             public_values,
+            core_layer_rev,
             challenger,
         );
 
