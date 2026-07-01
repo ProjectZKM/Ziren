@@ -4073,25 +4073,6 @@ pub mod jagged {
                 record_stage!(VerifyStage::Reduction(g));
                 return false;
             }
-            // Optional layout diagnostic (ZIREN_121_DBG=1): report whether the
-            // honest openings match y_per_chip ELEMENT-WISE in addition to the
-            // enforced MLE bind — documents the prep/main + orientation layout.
-            if std::env::var("ZIREN_121_DBG").is_ok() {
-                let mut elemwise = true;
-                let mut per_chip = Vec::with_capacity(y_per_chip.len());
-                for (yc, mc) in y_per_chip.iter().zip(opened_main_g.iter()) {
-                    let eq = mc.len() >= yc.len() && yc[..] == mc[..yc.len()];
-                    elemwise &= eq;
-                    per_chip.push((yc.len(), mc.len(), eq));
-                }
-                eprintln!(
-                    "[#121 DBG] group={g} chips={} num_cols={} MLE-bind=OK \
-                     element-wise-equal={elemwise} per_chip(y_cols,main_cols,eq)={:?}",
-                    y_per_chip.len(),
-                    y_per_chip.iter().map(|y| y.len()).sum::<usize>(),
-                    per_chip,
-                );
-            }
         }
 
         // Replay the jagged-eval sub-protocol transcript so the
