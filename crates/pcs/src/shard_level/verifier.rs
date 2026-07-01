@@ -439,6 +439,9 @@ impl BasefoldShardVerifier {
             &proof.zerocheck_proof.point_and_eval.0,
             &proof.evaluation_proof,
             &proof.logup_gkr_proof.logup_evaluations,
+            // #121: the trace openings the recursion circuit cross-binds to the
+            // jagged claimed sum; index-aligned with `chips`.
+            &proof.opened_values,
             challenger,
         )?;
 
@@ -517,6 +520,14 @@ fn verify_jagged_pcs_host<SC, A>(
     shared_eval_point: &[Challenge<SC>],
     evaluation_proof: &super::shard_proof::EvaluationProof,
     _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
+    // #121 cross-bind: the shard's trace openings.  `opened_values.chips[i]`
+    // is index-aligned with `chips[i]` and the bundle's `y_per_chip[i]`
+    // (all three share the machine's name-sorted chip order); we pass each
+    // chip's `main.local` into the jagged verifier so it can mirror the
+    // recursion circuit's `evaluate_mle(main.local, z_col) == claimed_sum`
+    // assert (recursive_jagged_pcs.rs:247) and reject a bundle whose
+    // `y_per_chip` diverges from the openings the zerocheck consumed.
+    opened_values: &crate::ShardOpenedValues<Val<SC>, Challenge<SC>>,
     challenger: &mut SC::Challenger,
 ) -> Result<(), BasefoldVerifyError>
 where
@@ -770,6 +781,29 @@ where
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
+    // #121 cross-bind: reinterpret each chip's `main.local` opening as
+    // `InnerChallenge` (sound under the TypeId gate above: Challenge<SC> ==
+    // InnerChallenge on this inner KoalaBear ring) and hand it to the jagged
+    // verifier index-aligned with `chip_infos` / `bundle.y_per_chip`.  The
+    // recursion circuit binds these SAME openings to the jagged claimed sum
+    // (shard_basefold.rs:588 → recursive_jagged_pcs.rs:247); the host did not,
+    // so a malicious proof could ship y_per_chip ≠ opened_values.main and be
+    // accepted by both the zerocheck (opened_values) and jagged (y_per_chip)
+    // phases independently.  See `verify_one_jagged_group`.
+    let opened_main: Vec<Vec<InnerChallenge>> = opened_values
+        .chips
+        .iter()
+        .map(|c| {
+            let cloned: Vec<Challenge<SC>> = c.main.local.clone();
+            let (ptr, len, cap) = {
+                let mut v = core::mem::ManuallyDrop::new(cloned);
+                (v.as_mut_ptr(), v.len(), v.capacity())
+            };
+            // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
+            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+        })
+        .collect();
+
     // Delegate to the existing host-side verifier.
     //
     // Option B single-main-commit: the prover's transcript prologue
@@ -778,7 +812,14 @@ where
     // Use the `_no_observe` variant so the verifier doesn't observe
     // the same digest a second time (which would desync the
     // transcript vs the prover).
-    if !verify_jagged_basefold_no_observe(&chip_infos, &r_row_per_chip, &z_row_inner, &bundle, lb_challenger) {
+    if !verify_jagged_basefold_no_observe(
+        &chip_infos,
+        &r_row_per_chip,
+        &z_row_inner,
+        &bundle,
+        Some(&opened_main),
+        lb_challenger,
+    ) {
         return Err(BasefoldVerifyError::JaggedPcs(
             "verify_jagged_basefold_no_observe rejected the bundle".into(),
         ));

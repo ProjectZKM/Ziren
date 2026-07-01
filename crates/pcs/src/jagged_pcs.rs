@@ -3751,6 +3751,9 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             bundle,
+            // #121: synthetic-bundle callers (unit tests) carry no shard
+            // openings — the cross-bind is a no-op here.
+            None,
             challenger,
             /* skip_commit_observe = */ false,
         )
@@ -3761,11 +3764,15 @@ pub mod jagged {
     /// `challenger.observe(commitment)` because the orchestrator's
     /// Phase 1 prologue already observed the BaseFold commit's 8-felt
     /// digest as `main_commitment`.
+    #[allow(clippy::too_many_arguments)]
     pub fn verify_jagged_basefold_no_observe(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
+        // #121 cross-bind: per-chip `opened_values.chips[].main.local` (index-
+        // aligned with `chip_infos` / `bundle.y_per_chip`); `None` disables the bind.
+        opened_main: Option<&[Vec<InnerChallenge>]>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
         verify_jagged_basefold_inner(
@@ -3773,16 +3780,22 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             bundle,
+            opened_main,
             challenger,
             /* skip_commit_observe = */ true,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn verify_jagged_basefold_inner(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
+        // #121 cross-bind: per-chip `opened_values.chips[].main.local` trace
+        // openings (index-aligned with `chip_infos` / `bundle.y_per_chip`), or
+        // `None` for synthetic-bundle unit tests with no shard openings.
+        opened_main: Option<&[Vec<InnerChallenge>]>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         skip_commit_observe: bool,
     ) -> bool {
@@ -3840,6 +3853,10 @@ pub mod jagged {
                 grp.iter().map(|&i| r_row_per_chip[i].clone()).collect();
             let y_per_chip_g: Vec<Vec<InnerChallenge>> =
                 grp.iter().map(|&i| bundle.y_per_chip[i].clone()).collect();
+            // #121: slice this group's opened main.local columns in the SAME
+            // membership order as `y_per_chip_g` so the cross-bind k-walk lines up.
+            let opened_main_g: Option<Vec<Vec<InnerChallenge>>> = opened_main
+                .map(|om| grp.iter().map(|&i| om[i].clone()).collect());
             let pkg = bundle.packing_g(g);
             let packing = JaggedPacking {
                 dense_values: Vec::new(),
@@ -3853,6 +3870,7 @@ pub mod jagged {
                 &r_row_g,
                 z_row,
                 &y_per_chip_g,
+                opened_main_g.as_deref(),
                 bundle.reduction_g(g),
                 bundle.jagged_eval_g(g),
                 bundle.commit_g(g),
@@ -3877,6 +3895,10 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         y_per_chip: &[Vec<InnerChallenge>],
+        // #121 cross-bind: this group's per-chip `opened_values.chips[].main.local`
+        // trace openings (index-aligned with `y_per_chip`), or `None` for callers
+        // (unit tests) that verify a synthetic bundle with no shard openings.
+        opened_main: Option<&[Vec<InnerChallenge>]>,
         reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
         jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
         commit: &crate::jagged_pcs::BasefoldLateBindingCommit,
@@ -3979,6 +4001,98 @@ pub mod jagged {
             record_stage!(VerifyStage::Reduction(g));
             return false;
         };
+
+        // ── #121 CROSS-BIND (host analog of recursive_jagged_pcs.rs:247) ─────
+        //
+        // The recursion CIRCUIT ties the jagged sumcheck's claimed sum to the
+        // TRACE OPENINGS: it forms `column_claims = opened_values.chips[].main.local`
+        // (shard_basefold.rs:588 → recursive_jagged_pcs.rs:218) and asserts
+        //   evaluate_mle(column_claims, z_col) == sumcheck_proof.claimed_sum   (:247).
+        //
+        // The host, in contrast, DERIVES the claimed sum from the bundle's
+        // `y_per_chip` alone — `verify_jagged_reduction` uses
+        //   t = Σ_k z_col_lagrange[k]·y_flat[k] = evaluate_mle(y_flat, z_col)
+        // as its round-0 claim (jagged_sumcheck.rs:735-742) and NEVER checks
+        // `y_per_chip` against the openings.  So a malicious host proof could ship
+        // `y_per_chip ≠ opened_values.main.local` and be accepted by BOTH the
+        // zerocheck (which consumes `opened_values`) and this jagged phase (which
+        // consumes `y_per_chip`) independently — the soundness-parity gap #121.
+        //
+        // Close it exactly as the circuit does: recompute the OPENED-VALUES column
+        // MLE at the SAME `z_col` and require it to equal the y-derived claimed sum
+        // `t`.  We mirror the MLE form rather than a raw element-wise compare: under
+        // the rev(zeta) orientation the two column vectors are NOT guaranteed
+        // element-wise equal, but their `z_col`-MLEs ARE equal — that is precisely
+        // the identity the circuit asserts and that passes on every honest proof.
+        // We weight only the columns the sumcheck actually consumed (per-chip
+        // `y_per_chip[i].len()`, i.e. the packed column_count), matching the k-walk
+        // in `verify_jagged_reduction` so `sum_y` reproduces its `t` bit-for-bit.
+        if let Some(opened_main_g) = opened_main {
+            if opened_main_g.len() != y_per_chip.len() {
+                eprintln!(
+                    "[basefold verify] group {g}: #121 cross-bind FAILED — opened-main \
+                     chip count {} != y_per_chip {}",
+                    opened_main_g.len(),
+                    y_per_chip.len(),
+                );
+                record_stage!(VerifyStage::Reduction(g));
+                return false;
+            }
+            let z_col_lagrange =
+                crate::jagged_branching_program::partial_lagrange(&z_col);
+            let mut sum_y = InnerChallenge::ZERO;
+            let mut sum_open = InnerChallenge::ZERO;
+            let mut k = 0usize;
+            let mut ok = true;
+            'chips: for (yc, mc) in y_per_chip.iter().zip(opened_main_g.iter()) {
+                // The opened trace must expose at least the columns the sumcheck
+                // consumed (column_count ≤ BaseAir::width); a proof opening fewer
+                // is malformed → reject.
+                if mc.len() < yc.len() {
+                    ok = false;
+                    break 'chips;
+                }
+                for j in 0..yc.len() {
+                    if k >= z_col_lagrange.len() {
+                        ok = false;
+                        break 'chips;
+                    }
+                    let w = z_col_lagrange[k];
+                    sum_y += w * yc[j];
+                    sum_open += w * mc[j];
+                    k += 1;
+                }
+            }
+            if !ok || sum_open != sum_y {
+                eprintln!(
+                    "[basefold verify] group {g}: #121 CROSS-BIND FAILED — the bundle's \
+                     y_per_chip column claims are inconsistent with \
+                     opened_values.main.local at z_col \
+                     (evaluate_mle(opened_main, z_col) != jagged claimed_sum)"
+                );
+                record_stage!(VerifyStage::Reduction(g));
+                return false;
+            }
+            // Optional layout diagnostic (ZIREN_121_DBG=1): report whether the
+            // honest openings match y_per_chip ELEMENT-WISE in addition to the
+            // enforced MLE bind — documents the prep/main + orientation layout.
+            if std::env::var("ZIREN_121_DBG").is_ok() {
+                let mut elemwise = true;
+                let mut per_chip = Vec::with_capacity(y_per_chip.len());
+                for (yc, mc) in y_per_chip.iter().zip(opened_main_g.iter()) {
+                    let eq = mc.len() >= yc.len() && yc[..] == mc[..yc.len()];
+                    elemwise &= eq;
+                    per_chip.push((yc.len(), mc.len(), eq));
+                }
+                eprintln!(
+                    "[#121 DBG] group={g} chips={} num_cols={} MLE-bind=OK \
+                     element-wise-equal={elemwise} per_chip(y_cols,main_cols,eq)={:?}",
+                    y_per_chip.len(),
+                    y_per_chip.iter().map(|y| y.len()).sum::<usize>(),
+                    per_chip,
+                );
+            }
+        }
 
         // Replay the jagged-eval sub-protocol transcript so the
         // challenger stays in sync with the prover before the BaseFold
@@ -4205,6 +4319,109 @@ pub mod jagged {
             eprintln!("[basefold verify outer] basefold opening REJECTED: {:?}", e);
         }
         res.is_ok()
+    }
+
+    // ── #121 cross-bind forgery-rejection test ───────────────────────────
+    // Lives inside `mod jagged` so it can drive the private
+    // `verify_jagged_basefold_inner` (skip_commit_observe=false) with the
+    // SAME transcript `prove_jagged_basefold` produced, and inject the
+    // per-chip `opened_values.main.local` openings the production shard
+    // verifier now threads in.
+    #[cfg(test)]
+    mod crossbind_121_test {
+        use super::*;
+        use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
+        use rand::rngs::StdRng;
+        use rand::{Rng, SeedableRng};
+
+        fn rk<R: Rng>(rng: &mut R) -> InnerVal {
+            InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)
+        }
+        fn re<R: Rng>(rng: &mut R) -> InnerChallenge {
+            <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+                (0..4).map(|_| rk(rng)),
+            )
+            .unwrap()
+        }
+        fn chal() -> crate::jagged_pcs::JaggedChallenger {
+            crate::jagged_pcs::JaggedChallenger::new(zkm_primitives::poseidon2_init())
+        }
+
+        /// The recursion circuit binds the jagged claimed sum to the trace
+        /// openings (recursive_jagged_pcs.rs:247); #121 mirrors that on the
+        /// host.  This test proves the bind is load-bearing:
+        ///   (1) honest openings (== y_per_chip) verify;
+        ///   (2) a bundle whose column claims DIVERGE from the openings is
+        ///       REJECTED once the openings are threaded in (`Some`);
+        ///   (3) the SAME divergent proof is (wrongly) ACCEPTED with the bind
+        ///       disabled (`None`) — i.e. exactly the pre-#121 host behaviour.
+        #[test]
+        fn crossbind_rejects_divergent_openings() {
+            let mut rng = StdRng::seed_from_u64(0x0121_0BAD_C0DE);
+            let mk = |w: usize, h: usize, rng: &mut StdRng| -> RowMajorMatrix<InnerVal> {
+                let v: Vec<InnerVal> = (0..w * h).map(|_| rk(rng)).collect();
+                RowMajorMatrix::new(v, w)
+            };
+            let traces = vec![
+                ("Cpu".to_string(), mk(4, 16, &mut rng)),
+                ("Add".to_string(), mk(2, 8, &mut rng)),
+            ];
+            let r_row_per_chip: Vec<Vec<InnerChallenge>> = traces
+                .iter()
+                .map(|(_, t)| {
+                    let h = t.values.len() / t.width.max(1);
+                    let log_h = h.next_power_of_two().trailing_zeros() as usize;
+                    (0..log_h).map(|_| re(&mut rng)).collect()
+                })
+                .collect();
+            let z_row: Vec<InnerChallenge> = r_row_per_chip
+                .iter()
+                .max_by_key(|v| v.len())
+                .cloned()
+                .unwrap_or_default();
+
+            let mut p = chal();
+            let bundle = prove_jagged_basefold(&traces, &r_row_per_chip, &z_row, &mut p);
+            let infos =
+                crate::jagged::compute_jagged_metadata::<InnerVal>(&traces).chip_infos;
+
+            // The honest per-chip `main.local` openings coincide with the
+            // bundle's column claims (single-orientation synthetic bundle).
+            let opened_ok: Vec<Vec<InnerChallenge>> = bundle.y_per_chip.clone();
+
+            // (1) honest openings + cross-bind ON → ACCEPT.
+            let mut v = chal();
+            assert!(
+                verify_jagged_basefold_inner(
+                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    Some(&opened_ok), &mut v, false,
+                ),
+                "#121: honest openings must verify"
+            );
+
+            // (2) DIVERGENT openings + cross-bind ON → REJECT.
+            let mut opened_bad = opened_ok.clone();
+            opened_bad[0][0] += InnerChallenge::ONE; // tamper ONE column claim
+            let mut v = chal();
+            assert!(
+                !verify_jagged_basefold_inner(
+                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    Some(&opened_bad), &mut v, false,
+                ),
+                "#121: y_per_chip diverging from openings MUST be rejected by the cross-bind"
+            );
+
+            // (3) SAME divergent openings but bind OFF (None) → ACCEPT.
+            //     Documents the pre-fix gap the cross-bind closes.
+            let mut v = chal();
+            assert!(
+                verify_jagged_basefold_inner(
+                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    None, &mut v, false,
+                ),
+                "#121 pre-fix baseline: with no opened-values bind the divergent proof is (wrongly) accepted"
+            );
+        }
     }
 }
 
