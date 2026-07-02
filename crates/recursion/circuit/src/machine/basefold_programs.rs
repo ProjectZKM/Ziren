@@ -337,6 +337,8 @@ mod tests {
             None,
             // #118: host-only synthetic witness → host open.
             None,
+            // #118: host-only synthetic witness → host precompute.
+            None,
         )
     }
 

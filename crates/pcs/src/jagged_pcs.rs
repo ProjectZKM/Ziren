@@ -1886,23 +1886,13 @@ pub mod jagged {
         provider: &dyn crate::shard_level::DeviceTraceProvider,
     ) -> Option<PrecomputedJaggedCommit>;
 
-    static GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK: std::sync::OnceLock<GpuJaggedPrecomputeCommitFn> =
-        std::sync::OnceLock::new();
-
-    /// Register the GPU precompute-commit hook.  Idempotent; returns
-    /// `Err(existing)` when already registered.  Called once by
-    /// ziren-gpu's prover startup blocks.
-    pub fn register_gpu_jagged_precompute_commit_hook(
-        f: GpuJaggedPrecomputeCommitFn,
-    ) -> Result<(), GpuJaggedPrecomputeCommitFn> {
-        GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK.set(f)
-    }
-
-    /// Read the registered GPU precompute-commit hook, if any.
-    #[must_use]
-    pub fn get_gpu_jagged_precompute_commit_hook() -> Option<GpuJaggedPrecomputeCommitFn> {
-        GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK.get().copied()
-    }
+    // #118: the GPU jagged precompute-commit fn is provided STATICALLY
+    // (threaded from the prover's `gpu_jagged_precompute_commit_hook()` down
+    // to the `maybe_auto_precompute_basefold` device-precompute dispatch), not
+    // via a global registry.  The former `GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK`
+    // OnceLock + `register_/get_` accessors were removed; the `prover` crate
+    // passes `Some(device_fn)` into the `prove_shard_to_basefold` free-fn
+    // (which threads it through the auto-precompute path).
 
     // ─────────────────────────────────────────────────────────────────
     // Device BaseFold-over-BN254 wrap Merkle commit.

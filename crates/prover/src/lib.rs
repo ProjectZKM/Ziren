@@ -2111,6 +2111,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // #118: host shrink caller cannot name the ziren-gpu open fn
                 // → host open (byte-identical).
                 None,
+                // #118: host shrink caller cannot name the ziren-gpu
+                // precompute-commit fn → host precompute (byte-identical).
+                None,
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over

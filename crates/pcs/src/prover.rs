@@ -219,6 +219,26 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         None
     }
 
+    /// The device jagged precompute-commit function, provided statically by
+    /// the prover (#118 static dispatch of the former global
+    /// `GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK` OnceLock).  Default `None` = the
+    /// host precompute
+    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]).
+    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
+    /// down through the auto-precompute path to the device precompute-commit
+    /// dispatch in `maybe_auto_precompute_basefold`, so no global registry is
+    /// consulted.  On the CPU prover the default `None` yields the exact
+    /// unregistered-hook (host precompute) path → byte-identical.  A
+    /// `StarkGpuProver` cannot name the device fn (it lives in
+    /// `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the `prover`
+    /// crate instead passes `Some(device_fn)` at the free-fn
+    /// `prove_shard_to_basefold` call sites.
+    fn gpu_jagged_precompute_commit_hook(
+        &self,
+    ) -> Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn> {
+        None
+    }
+
     /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
@@ -375,6 +395,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             self.gpu_jagged_reduction_v2(),
             self.gpu_basefold_commit_hook(),
             self.gpu_basefold_open_hook(),
+            self.gpu_jagged_precompute_commit_hook(),
         )
     }
 
