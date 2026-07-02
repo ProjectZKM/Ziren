@@ -50,6 +50,21 @@ pub trait MainTraceLoader<F> {
         None
     }
 
+    /// #127: borrow the whole per-chip main-trace slice read-only, when this
+    /// loader already holds it on the host.
+    ///
+    /// Default `None`; only [`EagerHostLoader`] (host CPU path) returns
+    /// `Some(&self.traces)`.  The device [`LazyDeviceLoader`] cannot borrow
+    /// (it pulls each chip on demand) so it keeps the `None` default and the
+    /// caller falls back to [`MainTraceLoader::materialize_all`].  Returning a
+    /// borrow lets the host prover skip the full-trace `materialize_all` clone
+    /// (a pure `values.clone()` for `EagerHostLoader`) — byte-identical either
+    /// way.  Defaulted so external device loaders (ziren-gpu) stay
+    /// source-compatible.
+    fn borrow_all(&self) -> Option<&[RowMajorMatrix<F>]> {
+        None
+    }
+
     /// Materialize all chip traces in chip-iteration order.
     fn materialize_all(&self) -> Vec<RowMajorMatrix<F>>
     where
@@ -115,6 +130,14 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
 
     fn padded_slice(&self) -> Option<&[crate::multilinear::PaddedMle<F>]> {
         self.padded
+    }
+
+    /// #127: the host loader carries the traces read-only, so hand back a
+    /// borrow — `materialize_all` above is a pure per-chip `values.clone()`,
+    /// so `&self.traces` is byte-identical to its output and lets the caller
+    /// skip the full-trace copy.
+    fn borrow_all(&self) -> Option<&[RowMajorMatrix<F>]> {
+        Some(self.traces)
     }
 }
 

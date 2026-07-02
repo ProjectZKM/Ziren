@@ -542,8 +542,21 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    let main_traces: Vec<RowMajorMatrix<Val<SC>>> =
-        main_trace_loader.materialize_all();
+    // #127: `main_traces` is read-only for the rest of this scope (#129
+    // removed the last mutation — the zeropad zeroing).  On the host path the
+    // `EagerHostLoader` already holds the traces, so borrow them instead of
+    // cloning via `materialize_all` (a pure per-chip `values.clone()`).  The
+    // device `LazyDeviceLoader` returns `None` (it pulls each chip on demand)
+    // and keeps the owned-clone path byte-for-byte unchanged.  `_owned` holds
+    // the fallback Vec so the borrow lives for the whole commit+open scope.
+    let _owned_main_traces: Vec<RowMajorMatrix<Val<SC>>>;
+    let main_traces: &[RowMajorMatrix<Val<SC>>] = match main_trace_loader.borrow_all() {
+        Some(borrowed) => borrowed,
+        None => {
+            _owned_main_traces = main_trace_loader.materialize_all();
+            &_owned_main_traces
+        }
+    };
 
     // Option B auto-precompute (GPU pipeline path). The host CPU prover
     // supplies `Some(precomputed)` from `commit_basefold_path` / `open()`;
@@ -764,7 +777,8 @@ where
             _device_traces,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
-    let main_traces: &[RowMajorMatrix<Val<SC>>] = &main_traces;
+    // #127: `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed
+    // from the loader above), so no reborrow is needed here.
 
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!(
