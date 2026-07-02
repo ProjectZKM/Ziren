@@ -228,6 +228,10 @@ pub fn prove_shard_to_basefold<SC, A>(
     // (core/compress) provides the device commit statically, `None` on host
     // callers = host commit.
     gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
+    // #118: device BaseFold open fn; `Some(..)` on the GPU callers
+    // (core/compress) provides the device open statically, `None` on host
+    // callers = host open.
+    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -277,6 +281,7 @@ where
         precomputed_commit,
         gpu_jagged_reduction,
         gpu_basefold_commit,
+        gpu_basefold_open,
     )
 }
 
@@ -324,6 +329,7 @@ where
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
         gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
 
@@ -360,6 +366,7 @@ where
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
         gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         prove_trusted_evaluations::<SC, A>(
             chips,
@@ -370,6 +377,7 @@ where
             precomputed_commit,
             pre_y_per_chip,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 }
@@ -410,6 +418,7 @@ where
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
         gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         self.0.prove_trusted_evaluations(
             chips,
@@ -420,6 +429,7 @@ where
             precomputed_commit,
             pre_y_per_chip,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 }
@@ -452,6 +462,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // (core/compress) provides the device commit statically, `None` on host
     // callers = host commit.
     gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
+    // #118: device BaseFold open fn; `Some(..)` on the GPU callers
+    // (core/compress) provides the device open statically, `None` on host
+    // callers = host open.
+    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -502,6 +516,7 @@ where
         &FreeFnJaggedEval,
         gpu_jagged_reduction,
         gpu_basefold_commit,
+        gpu_basefold_open,
     )
 }
 
@@ -537,6 +552,11 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // `gpu_basefold_commit_hook()` (or `None` on the free-fn / CPU path) and
     // threaded into `maybe_auto_precompute_basefold`'s host-fallback commit.
     gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
+    // The device BaseFold open fn (#118), read from the prover's
+    // `gpu_basefold_open_hook()` (or `None` on the free-fn / CPU path) and
+    // threaded through the producer's `prove_trusted_evaluations` down to the
+    // `open_jagged_pcs` dispatch.
+    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1185,6 +1205,7 @@ where
             precomputed_commit,
             residual_y,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     };
     tracing::info!(
@@ -1471,6 +1492,9 @@ pub fn prove_trusted_evaluations<SC, A>(
     // #130: the device jagged-reduction fn, provided statically by the
     // prover; `None` = host reduction (CPU / free-fn callers).
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    // #118: the device BaseFold open fn, provided statically by the
+    // prover; `None` = host open (CPU / free-fn callers).
+    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1675,6 +1699,7 @@ where
             // (device-resident) chip traces — no-op on the happy path.
             _device_traces,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         );
         return EvaluationProof::Bundle(bundle);
     }
@@ -1732,6 +1757,7 @@ where
         pre_y_inner,
         lb_challenger,
         gpu_jagged_reduction,
+        gpu_basefold_open,
     );
     EvaluationProof::Bundle(bundle)
 }

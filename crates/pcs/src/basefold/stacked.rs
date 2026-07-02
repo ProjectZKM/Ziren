@@ -316,9 +316,9 @@ where
         // GPU dispatch hook for the
         // **OPEN/prove** phase.  The COMMIT side of `ZIREN_GPU_BASEFOLD=1`
         // is wired in `jagged_pcs::commit_jagged_pcs`
-        // (see `register_gpu_basefold_commit_hook`).  The OPEN side is
+        // (statically-provided `GpuBasefoldCommitFn`).  The OPEN side is
         // wired one level up at `jagged_pcs::open_jagged_pcs`
-        // (see `register_gpu_basefold_open_hook`) — the
+        // (statically-provided `GpuBasefoldOpenFn`) — the
         // sister hook intercepts at the jagged-PCS entry so it can
         // see the full `BasefoldLateBindingProverData` (including the
         // commit-time metadata it needs to drive the device prove).

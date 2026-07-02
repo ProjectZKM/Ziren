@@ -201,6 +201,24 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         None
     }
 
+    /// The device BaseFold open function, provided statically by the
+    /// prover (#118 static dispatch of the former global
+    /// `GPU_BASEFOLD_OPEN_HOOK` OnceLock).  Default `None` = the host open
+    /// ([`crate::jagged_pcs::open_jagged_pcs`] with a `None` hook).
+    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
+    /// down through the jagged-eval producer + `prove_trusted_evaluations` to
+    /// the `open_jagged_pcs` dispatch, so no global registry is consulted.  On
+    /// the CPU prover the default `None` yields the exact unregistered-hook
+    /// (host) path → byte-identical.  A `StarkGpuProver` cannot name the device
+    /// fn (it lives in `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`);
+    /// the `prover` crate instead passes `Some(device_fn)` at the free-fn
+    /// `prove_shard_to_basefold` call sites.
+    fn gpu_basefold_open_hook(
+        &self,
+    ) -> Option<crate::jagged_pcs::GpuBasefoldOpenFn> {
+        None
+    }
+
     /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
@@ -225,6 +243,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         >,
         pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
         gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
     ) -> crate::shard_level::shard_proof::EvaluationProof
     where
         SC: BasefoldRing,
@@ -248,6 +267,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             precomputed_commit,
             pre_y_per_chip,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 
@@ -354,6 +374,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             &crate::shard_level::prover::ProverJaggedEval(self),
             self.gpu_jagged_reduction_v2(),
             self.gpu_basefold_commit_hook(),
+            self.gpu_basefold_open_hook(),
         )
     }
 

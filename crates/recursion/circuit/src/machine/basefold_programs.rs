@@ -335,6 +335,8 @@ mod tests {
             None,
             // #118: host-only synthetic witness → host commit.
             None,
+            // #118: host-only synthetic witness → host open.
+            None,
         )
     }
 

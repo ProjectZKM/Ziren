@@ -1265,22 +1265,27 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// `log_stacking_height + log(num_stripes_padded)`.
 ///
 /// GPU open dispatch — when
-/// `ZIREN_GPU_BASEFOLD=1` is set AND ziren-gpu has registered the GPU
-/// open hook (via [`register_gpu_basefold_open_hook`]), the open
+/// `ZIREN_GPU_BASEFOLD=1` is set AND the prover statically provided
+/// `gpu_basefold_open` (`Some(GpuBasefoldOpenFn)`), the open
 /// dispatches through `FriCudaProver::prove` on device.  Output proof
 /// must be byte-identical to the host path (the device hook host-side
 /// observes the same digests + univariate messages into the supplied
 /// `JaggedChallenger`).  Falls through to the host implementation on any
-/// of: env unset, hook unregistered, hook returns `Err` (shape
+/// of: env unset, `gpu_basefold_open == None`, hook returns `Err` (shape
 /// unsupported / device error — `Err` returns ownership of the
 /// `prover_data` so the host fallback can run without losing it).
 pub fn open_jagged_pcs(
     prover_data: BasefoldLateBindingProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
+    // #118: the device BaseFold open fn, provided statically by the
+    // prover (was the global `GPU_BASEFOLD_OPEN_HOOK` OnceLock).  `None`
+    // = host open (CPU prover / free-fn callers), byte-identical to the
+    // pre-#118 unregistered-hook path.
+    gpu_basefold_open: Option<GpuBasefoldOpenFn>,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = get_gpu_basefold_open_hook() {
+        if let Some(hook) = gpu_basefold_open {
             // Transcript safety: the device open ADVANCES the
             // challenger (pre-prove grind, per-round digest observes,
             // FRI PoW, query sampling) before it can fail —
@@ -1367,9 +1372,11 @@ where
 
 // ─────────────────────────────────────────────────────────────────────
 // GPU BaseFold open
-// dispatch hook.
+// dispatch fn.
 //
-// Mirror of the GPU commit hook ([`register_gpu_basefold_commit_hook`]).
+// Mirror of the GPU commit fn ([`GpuBasefoldCommitFn`]) — provided
+// statically by the prover (`MachineProver::gpu_basefold_open_hook`) and
+// threaded down to the `open_jagged_pcs` dispatch, not via a registry.
 // The hook receives the same inputs as `open_jagged_pcs` and
 // returns a byte-identical `StackedBasefoldProof` — the device side is
 // responsible for:
@@ -1406,23 +1413,13 @@ pub type GpuBasefoldOpenFn = fn(
     (BasefoldLateBindingProverData, Vec<JaggedChallenge>),
 >;
 
-static GPU_BASEFOLD_OPEN_HOOK: std::sync::OnceLock<GpuBasefoldOpenFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU BaseFold open driver.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.  Called
-/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_basefold_open_hook(
-    f: GpuBasefoldOpenFn,
-) -> Result<(), GpuBasefoldOpenFn> {
-    GPU_BASEFOLD_OPEN_HOOK.set(f)
-}
-
-/// Read the registered GPU BaseFold open hook, if any.
-#[must_use]
-pub fn get_gpu_basefold_open_hook() -> Option<GpuBasefoldOpenFn> {
-    GPU_BASEFOLD_OPEN_HOOK.get().copied()
-}
+// #118: the GPU BaseFold open fn is provided STATICALLY (threaded from
+// the prover down to the `open_jagged_pcs` dispatch), not via a global
+// registry.  The former `GPU_BASEFOLD_OPEN_HOOK` OnceLock + `register_/get_`
+// accessors were removed; the `prover` crate passes `Some(device_fn)` into
+// the `prove_shard_to_basefold` free-fn (which threads it through the
+// jagged-eval producer + `prove_trusted_evaluations` down to
+// `prove_jagged_basefold_inner`'s open closure).
 
 /// Verify the proof against a previously observed commitment.
 pub fn verify_jagged_pcs(
@@ -2202,6 +2199,7 @@ pub mod jagged {
             None,
             challenger,
             None,
+            None,
         )
     }
 
@@ -2221,6 +2219,7 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_with_precomputed_provider(
             chip_traces,
@@ -2231,6 +2230,7 @@ pub mod jagged {
             challenger,
             None,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 
@@ -2256,6 +2256,7 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -2266,6 +2267,7 @@ pub mod jagged {
             challenger,
             provider,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 
@@ -2281,6 +2283,7 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
+        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -2291,6 +2294,7 @@ pub mod jagged {
             challenger,
             None,
             gpu_jagged_reduction,
+            gpu_basefold_open,
         )
     }
 
@@ -2430,6 +2434,12 @@ pub mod jagged {
         // prover / free-fn callers), byte-identical to the pre-#130
         // unregistered-hook path.
         gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
+        // The device BaseFold open function, provided statically by the
+        // prover (`MachineProver::gpu_basefold_open_hook`) and threaded down
+        // to the `open_jagged_pcs` dispatch (the `open` closure below).
+        // `None` = host open (CPU prover / free-fn callers), byte-identical
+        // to the pre-#118 unregistered-hook path.
+        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
     ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
@@ -3035,7 +3045,8 @@ pub mod jagged {
                          challenger: &mut crate::jagged_pcs::JaggedChallenger| {
             let _t_open = std::time::Instant::now();
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
-            let proof = open_jagged_pcs(prover_data, extended_eval_point, challenger);
+            let proof =
+                open_jagged_pcs(prover_data, extended_eval_point, challenger, gpu_basefold_open);
             drop(_open_span);
             tracing::info!(
                 elapsed_ms = _t_open.elapsed().as_millis() as u64,
@@ -3271,7 +3282,9 @@ pub mod jagged {
             let area_g = prover_data_g.area;
             let open_g = move |extended_eval_point: Vec<InnerChallenge>,
                                challenger: &mut crate::jagged_pcs::JaggedChallenger| {
-                open_jagged_pcs(prover_data_g, extended_eval_point, challenger)
+                // #118: CP-A per-group host path — no device open hook here
+                // (matches the host commit/reduce on this path), so `None`.
+                open_jagged_pcs(prover_data_g, extended_eval_point, challenger, None)
             };
             let (reduction_g, jagged_eval_g, proof_g) = prove_jagged_basefold_linear_core(
                 &packing_g.offsets,
@@ -4154,7 +4167,7 @@ mod test {
             current[0]
         };
 
-        let proof = open_jagged_pcs(prover_data, eval_point.clone(), &mut p_chal);
+        let proof = open_jagged_pcs(prover_data, eval_point.clone(), &mut p_chal, None);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.commitment.clone());
