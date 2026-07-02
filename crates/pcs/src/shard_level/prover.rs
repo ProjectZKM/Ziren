@@ -1022,8 +1022,13 @@ where
         // #125 INC-4b: orientation driven solely by the core-scoped
         // `current_use_rev()` carrier; the `ZIREN_STAGE2_REVZETA` env is RETIRED.
         // `None` (every recursion / shrink / wrap prove) => LEGACY (byte-identical).
+        // #118 DEVICE-REV: drop the `_device_traces.is_none()` guard so the GPU CORE
+        // path (device provider present) also declines the zerocheck-residual reuse
+        // under rev — forcing the fresh jagged step-3 recompute (natural rows under
+        // rev), matching the host CPU rev path. Core-scoped: only the CORE prover
+        // installs the carrier, so compress/shrink/wrap stay legacy.
         let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
-            Some(carrier) => carrier && _device_traces.is_none() && full_openings_ok,
+            Some(carrier) => carrier && full_openings_ok,
             None => false,
         };
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")

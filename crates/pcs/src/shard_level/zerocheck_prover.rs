@@ -195,8 +195,16 @@ where
     // path; `None` on every recursion / shrink / wrap prove).  The
     // `ZIREN_STAGE2_REVZETA` A/B env is RETIRED — `None` (no carrier) is LEGACY
     // (byte-identical to the recursion rings today).
+    // #118 DEVICE-REV: the `_device_traces.is_none()` guard is DROPPED so the GPU
+    // CORE device-fold path (which carries a per-shard device trace provider) also
+    // honours the rev(zeta) carrier. Core-scoped: only the CORE prover installs the
+    // carrier (`Some(true)`), so compress/shrink/wrap (carrier `None`) still take the
+    // `None => false` legacy arm. The device prepare-cells hook feeds NATURAL cells
+    // and the eq-anchor built here is `rev(zeta)`, so the device fold reproduces the
+    // host CPU rev proof byte-for-byte. `full_openings_ok()` guarantees the rev claim
+    // seed (`main_trace_evaluations_full`) is present.
     let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
-        Some(carrier) => carrier && _device_traces.is_none() && full_openings_ok(),
+        Some(carrier) => carrier && full_openings_ok(),
         None => false,
     };
 
@@ -394,15 +402,16 @@ where
         // SHARD-UNIFORM decision (`shard_use_rev`, computed before the loop)
         // so every chip in the batched reduction shares the same eq-anchor
         // orientation — required because the verifier binds the single
-        // reduced value with one global eq-bridge.  `df_dims` (device-fold)
-        // is always None when `shard_use_rev` is true (it requires no device
-        // provider), so the `df_dims` guard is implied; kept explicit for
-        // clarity at the cells branch.
+        // reduced value with one global eq-bridge.
+        //
+        // #118 DEVICE-REV: `use_rev` and `df_dims` (device-fold) are NO LONGER
+        // mutually exclusive — the GPU CORE path now runs the device fold under the
+        // rev(zeta) convention. Under rev the device chips keep EMPTY host cells (the
+        // device prepare hook feeds NATURAL cells) and the eq-anchor below is
+        // `rev(zeta)`; the claim is seeded from the full-point opening
+        // (`main_trace_evaluations_full`), which the device GKR phase populates. So
+        // no host cells are needed here regardless of `df_dims`.
         let use_rev = shard_use_rev;
-        debug_assert!(
-            !(use_rev && df_dims.is_some()),
-            "shard_use_rev requires no device provider, so df_dims must be None",
-        );
         let claim: Challenge<SC> = if use_rev {
             let main_full = main_full_opt.expect("use_rev => main_full_opt.is_some()");
             let prep_full = prep_full_opt.unwrap_or(&[]);
