@@ -124,12 +124,6 @@ where
     // ZIREN_GPU_COMMIT_DENSE=0.
     let precomputed = {
         let device_precompute = device_traces.and_then(|p| {
-            let on = std::env::var("ZIREN_GPU_COMMIT_DENSE")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
-            if !on {
-                return None;
-            }
             let hook = gpu_jagged_precompute_commit?;
             hook(&named_inner, p)
         });
@@ -763,12 +757,6 @@ where
     // them.  In that case we MUST keep the eager early D2H (captured here,
     // pre-drain) for a correct dense_q.  Kill-switch
     // ZIREN_GPU_COMMIT_TRACES_D2H=1 forces the eager materialize too.
-    let eager_kill = std::env::var("ZIREN_GPU_COMMIT_TRACES_D2H")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
-    let commit_dense_on = std::env::var("ZIREN_GPU_COMMIT_DENSE")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
     let jagged_on = std::env::var("ZIREN_GPU_JAGGED_PCS")
         .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
@@ -805,10 +793,8 @@ where
     } else {
         (prospective_total.next_power_of_two()).trailing_zeros() as usize
     };
-    let handle_path_guaranteed = commit_dense_on
-        && jagged_on
-        && prospective_log_dense >= gpu_min_log_dense;
-    let skip_device_d2h = !eager_kill && handle_path_guaranteed;
+    let handle_path_guaranteed = jagged_on && prospective_log_dense >= gpu_min_log_dense;
+    let skip_device_d2h = handle_path_guaranteed;
     let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
         .iter()
         .zip(main_traces.iter())
@@ -861,77 +847,16 @@ where
             )
         })
         .collect();
-    // -- HEIGHT-AGNOSTIC RECURSION: pad the per-chip COMMIT
-    // traces UP to the per-shard CLUSTER band-cap before packing.  The
-    // band-cap (chip name -> log_height) is installed by the CORE prove
-    // site (`zkm_core_machine::utils::prove::prove_with_context` phase-2
-    // worker) via `band_cap::BandCapGuard`, carried across the generic
-    // `MachineProver::open` boundary in a per-thread stash.  Padding only
-    // the COMMIT traces (NOT `main_traces`) keeps the zerocheck / LogUp-GKR
-    // STARK at the ACTUAL heights (the `FIX_CORE_SHAPES=false` perf win)
-    // while the jagged commit / reduction / BaseFold open emit the bounded
-    // cluster-max shape, so the recursion normalize VK = f(chip-SET).
-    //
-    // `None` (recursion / shrink / wrap stages, or FIX_RECURSION-padded
-    // callers) => unchanged own-height packing.  Resize is UP-ONLY (a
-    // chip already at/above its band-cap is left untouched -- the cap is a
-    // ceiling the cluster guarantees fits).  Device-resident chips
-    // (width==0) are NOT host-padded here (their dense cells live
-    // device-side); the GPU commit-dense hook owns their packing, so the
-    // band-cap device pad is a separate (out-of-scope) GPU concern -- this
-    // host pad is the CPU `FIX_CORE_SHAPES=false` correctness path.
-    // NATURAL-COMMIT (ZIREN_FIXOFF_NATURAL_COMMIT): when set, do NOT
-    // band-pad the PRESENT chips' commit traces — keep them at their NATURAL
-    // raw height so the host packing offsets == the raw degree heights == the
-    // in-circuit RAW col_prefix_sums reconstruction.  Missing chips are still
-    // injected (in commit_basefold_path) at band height to preserve the
-    // chip-SET / VK.
-    //
-    // Natural-height commit is the DEFAULT for
-    // FIX-off (the verifying + enumerable path the SP1 hash-bind makes sound) —
-    // the band cap is only ever installed under FIX-off recursion, so
-    // `current_band_cap().is_some()` IS the FIX-off predicate (no separate
-    // `recursion_fix_shape_enabled()` plumbing needed here, and FIX-on never
-    // reaches the `Some(_)` arm).  Opt-out `ZIREN_FIXOFF_NATURAL_COMMIT=0`
-    // restores the legacy band-pad / low-placement commit for A/B.
-    let natural_commit = std::env::var("ZIREN_FIXOFF_NATURAL_COMMIT")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
-    let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = {
-        match crate::shard_level::band_cap::current_band_cap() {
-            None => commit_traces,
-            Some(_) if natural_commit => commit_traces,
-            Some(band_cap) => chips
-                .iter()
-                .zip(commit_traces.into_iter())
-                .map(|(chip, mut t)| {
-                    if t.width == 0 {
-                        // Device placeholder: leave for the GPU dense hook.
-                        return t;
-                    }
-                    let name = MachineAir::<Val<SC>>::name(*chip);
-                    if let Some(&(_w, cap_log)) = band_cap.get(&name) {
-                        let cap_rows = 1usize << cap_log;
-                        let cur_rows = t.values.len() / t.width.max(1);
-                        if cap_rows > cur_rows {
-                            // Resize UP: append zero rows.  This sizes the
-                            // column SLOT to the band height (chip-set-keyed
-                            // offsets / log_dense / VK).  The LOW-PLACEMENT
-                            // materialize (keyed by the raw-log map installed by
-                            // the BandCapGuard for the whole commit+open scope)
-                            // writes only the low `cur_rows` data rows into the
-                            // slot, bit-reversed over the RAW log height, so the
-                            // reduction's column value equals the zerocheck's
-                            // raw opening (band_y == raw_y) and the recursion
-                            // accepts the raw claims with no embed_factor.
-                            t.values.resize(cap_rows * t.width, Val::<SC>::ZERO);
-                        }
-                    }
-                    t
-                })
-                .collect(),
-        }
-    };
+    // HEIGHT-AGNOSTIC RECURSION: the PRESENT chips' commit traces stay at their
+    // NATURAL raw height (no band-pad), so the host packing offsets == the raw
+    // degree heights == the in-circuit RAW col_prefix_sums reconstruction.  The
+    // core STARK proves at those same actual heights (the `FIX_CORE_SHAPES=false`
+    // perf win).  Missing (injected) chips are packed at band height (in
+    // commit_basefold_path) to preserve the chip-SET / VK, so the recursion
+    // normalize VK = f(chip-SET).  A band-cap being installed IS the FIX-off
+    // predicate; FIX-on installs none and is byte-identical.  Device-resident
+    // chips (width==0) are not host-packed here — the GPU commit-dense path owns
+    // their packing.
     let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A>(
             chips,

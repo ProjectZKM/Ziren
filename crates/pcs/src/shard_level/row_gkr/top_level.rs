@@ -391,10 +391,8 @@ where
     // (same kernels, same fold); the par_iter below reads each device chip's
     // result from this map. Falls back to the per-chip hook when disabled, the
     // batch hook is unregistered, or a chip is absent from the batch result.
-    let batch_enabled =
-        std::env::var("ZIREN_GPU_EVAL_AT_BATCH").map(|v| v != "0").unwrap_or(true);
     let batched_main_evals: BTreeMap<String, Vec<EF>> =
-        if let (true, Some(provider)) = (batch_enabled, _device_traces) {
+        if let Some(provider) = _device_traces {
             let mut names: Vec<String> = Vec::new();
             let mut points: Vec<Vec<EF>> = Vec::new();
             for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
@@ -426,33 +424,6 @@ where
                 for (name, res) in names.iter().zip(results.into_iter()) {
                     if let Some(v) = res {
                         map.insert(name.clone(), v);
-                    }
-                }
-                // Parity gate (ZIREN_GPU_EVAL_AT_BATCH_VERIFY=1): re-run the
-                // legacy per-chip eval-at for every batched chip and assert the
-                // batched result is BYTE-IDENTICAL, proving the batched path
-                // is transcript-neutral.
-                if std::env::var("ZIREN_GPU_EVAL_AT_BATCH_VERIFY").is_ok() {
-                    for (name, point) in names.iter().zip(points.iter()) {
-                        let per_chip =
-                            crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
-                                name, point, provider,
-                            );
-                        match (map.get(name), per_chip.as_ref()) {
-                            (Some(b), Some(pc)) => {
-                                assert_eq!(
-                                    b, pc,
-                                    "#49 parity: batched != per-chip for chip {name}"
-                                );
-                                tracing::info!(chip = %name, "#49 eval-at parity OK (byte-identical)");
-                            }
-                            (None, None) => {}
-                            (b, pc) => panic!(
-                                "#49 parity presence mismatch chip {name}: batched={} per_chip={}",
-                                b.is_some(),
-                                pc.is_some()
-                            ),
-                        }
                     }
                 }
                 map

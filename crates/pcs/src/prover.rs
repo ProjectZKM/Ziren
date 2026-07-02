@@ -1367,39 +1367,14 @@ where
         // the recursion `opened_values.chips` BTreeMap expect).
         named_traces_inner.sort_by(|(a, _), (b, _)| a.cmp(b));
     }
-    // Keep PRESENT chips at their natural raw height
-    // (no band-pad) so the committed packing offsets are raw-keyed — DEFAULT-ON
-    // for FIX-off (the `Some(_)` band-cap arm IS the FIX-off predicate; FIX-on
-    // reaches `None` and is byte-identical).  Missing chips were already
-    // injected above at band height (chip-SET / VK preserved).  Stays
-    // consistent with the open-path pad gate in
-    // prove_shard_to_basefold_with_loader.  Opt-out
-    // ZIREN_FIXOFF_NATURAL_COMMIT=0 = legacy band-pad / low-placement.
-    let natural_commit = std::env::var("ZIREN_FIXOFF_NATURAL_COMMIT")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
+    // PRESENT chips stay at their natural raw height (no band-pad) so the
+    // committed packing offsets are raw-keyed.  This is the FIX-off path (a
+    // band-cap being installed IS the FIX-off predicate); FIX-on installs no
+    // band-cap and is byte-identical.  Missing chips were already injected
+    // above at band height (chip-SET / VK preserved).  Stays consistent with
+    // the open-path packing in prove_shard_to_basefold_with_loader.
     let commit_named_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> =
-        match crate::shard_level::band_cap::current_band_cap() {
-            None => named_traces_inner.clone(),
-            Some(_) if natural_commit => named_traces_inner.clone(),
-            Some(band_cap) => named_traces_inner
-                .iter()
-                .map(|(name, t)| {
-                    if t.width == 0 {
-                        return (name.clone(), t.clone());
-                    }
-                    let mut values = t.values.clone();
-                    if let Some(&(_w, cap_log)) = band_cap.get(name) {
-                        let cap_rows = 1usize << cap_log;
-                        let cur_rows = values.len() / t.width.max(1);
-                        if cap_rows > cur_rows {
-                            values.resize(cap_rows * t.width, crate::InnerVal::ZERO);
-                        }
-                    }
-                    (name.clone(), RowMajorMatrix::new(values, t.width))
-                })
-                .collect(),
-        };
+        named_traces_inner.clone();
 
     // Build the commit over the ring's BfMmcs
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).

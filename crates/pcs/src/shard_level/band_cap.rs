@@ -53,20 +53,6 @@ thread_local! {
         Option<(u64, BTreeMap<String, RowMajorMatrix<InnerVal>>)>,
     > = const { std::cell::RefCell::new(None) };
 
-    /// Low-placement commit: chip name -> the
-    /// chip's RAW log-height (the ACTUAL trace height before the band-cap
-    /// pad).  Set by the core prover's band-pad loop for the shard currently
-    /// committing on this thread; read by `materialize_dense_jagged` so it can
-    /// place each chip's data in the LOW `2^raw_log` rows of its BAND-length
-    /// column slot (bit-reversed over the RAW log height), leaving the high
-    /// rows zero.  That makes the committed/reduced column value equal the
-    /// zerocheck's raw opening EXACTLY (band_y == raw_y), so the recursion
-    /// accepts the raw column claims with NO embed_factor while the offsets /
-    /// log_dense stay band-keyed (chip-set-keyed VK).  `None` (every non-core
-    /// path, and FIX-on where raw==band) == legacy own-height packing.
-    static CURRENT_RAW_LOG_HEIGHTS: std::cell::RefCell<Option<BTreeMap<String, usize>>> =
-        const { std::cell::RefCell::new(None) };
-
     /// LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
     /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
     /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
@@ -128,7 +114,6 @@ impl BandCapGuard {
     pub fn new(
         band_cap: BTreeMap<String, (usize, usize)>,
         missing_traces: BTreeMap<String, RowMajorMatrix<InnerVal>>,
-        raw_log_heights: BTreeMap<String, usize>,
         use_rev: bool,
         _zeropad_missing: Option<BTreeSet<String>>,
     ) -> Self {
@@ -138,14 +123,6 @@ impl BandCapGuard {
         });
         CURRENT_MISSING_TRACES.with(|c| {
             *c.borrow_mut() = Some((gen, missing_traces));
-        });
-        // Low-placement raw log-heights, installed for the WHOLE guard scope
-        // (prover.commit + prover.open) so BOTH the jagged commit and the
-        // reduce materialize with the same low-placement layout — otherwise the
-        // commit (legacy bitrev over band) and the reduce (low-placement)
-        // disagree and the stacked open trips StackingMismatch.
-        CURRENT_RAW_LOG_HEIGHTS.with(|c| {
-            *c.borrow_mut() = Some(raw_log_heights);
         });
         // The per-shard rev(zeta) orientation decision, the single
         // source of truth installed for the whole commit+open scope so the
@@ -176,13 +153,6 @@ impl Drop for BandCapGuard {
                 }
             }
         });
-        // The raw-log map is not generation-tagged (it is rewritten fresh by
-        // the band-pad loop every shard, Some on the band-cap branch and None
-        // otherwise); clear it on guard drop so no stale map outlives the
-        // band-cap scope on a reused worker thread.
-        CURRENT_RAW_LOG_HEIGHTS.with(|c| {
-            *c.borrow_mut() = None;
-        });
         // The rev decision is likewise rewritten fresh every guard install and
         // cleared on drop so no stale orientation outlives the scope on a
         // reused worker thread (a non-core path then reads `None` and keeps its
@@ -207,25 +177,6 @@ pub fn current_band_cap() -> Option<BTreeMap<String, (usize, usize)>> {
 #[must_use]
 pub fn current_missing_chip_traces() -> Option<BTreeMap<String, RowMajorMatrix<InnerVal>>> {
     CURRENT_MISSING_TRACES.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
-}
-
-/// Install (or clear, with `None`) the per-shard RAW log-heights map for the
-/// calling thread.  The core prover's band-pad loop calls this once per shard
-/// (after building the band-padded commit traces, before the commit) so that
-/// `materialize_dense_jagged` can do low-placement packing.  Passing `None`
-/// (the non-band-cap branch) restores legacy own-height packing and clears any
-/// stale map left by a prior shard on a reused worker thread.
-pub fn set_raw_log_heights(map: Option<BTreeMap<String, usize>>) {
-    CURRENT_RAW_LOG_HEIGHTS.with(|c| {
-        *c.borrow_mut() = map;
-    });
-}
-
-/// Clone of the currently-stashed RAW log-heights map for the calling thread,
-/// or `None` when none is installed (legacy own-height packing).
-#[must_use]
-pub fn current_raw_log_heights() -> Option<BTreeMap<String, usize>> {
-    CURRENT_RAW_LOG_HEIGHTS.with(|c| c.borrow().clone())
 }
 
 /// Install (or clear, with `None`) the per-shard rev(zeta) orientation decision

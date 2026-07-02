@@ -908,15 +908,11 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// Kill-switch for the device-built logup-round eq_row table.
-/// `ZIREN_GPU_LOGUP_DEVICE_EQ=0` forces the legacy host build+upload.
-/// Default ON.
+/// The logup-round eq_row table is built on device (the finalize step reads the
+/// single needed entry via `eq_at_index`); the host build+upload is not used.
 #[must_use]
 pub fn logup_device_eq_enabled() -> bool {
-    static FLAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FLAG.get_or_init(|| {
-        std::env::var("ZIREN_GPU_LOGUP_DEVICE_EQ").as_deref() != Ok("0")
-    })
+    true
 }
 
 /// Host stashes the row_point (LSB-first coords) for the GPU hook

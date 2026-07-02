@@ -152,23 +152,10 @@ where
     (output, LogupGkrCpuCircuit::new(layers))
 }
 
-/// Device path returns `Some(terminal)` when it ran end-to-end and
-/// pulled the terminal layer back to host; `None` falls back to host.
-/// Side effects on `Some`: `last_ef_layer` consumed; `layers` gains
-/// one `LayerState::Device` per intermediate.
-///
-/// Process-cached env: default ON, opt out with either
-/// `ZIREN_GPU_DEVICE_HOOKS=0` or `ZIREN_GPU_LAYER_TRANSITION=0`.
-fn layer_transition_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        let disabled = std::env::var("ZIREN_GPU_DEVICE_HOOKS").as_deref() == Ok("0")
-            || std::env::var("ZIREN_GPU_LAYER_TRANSITION").as_deref() == Ok("0");
-        !disabled
-    })
-}
-
+/// Runs the GKR layer walk on device: returns `Some(terminal)` when it ran
+/// end-to-end and pulled the terminal layer back to host; `None` falls back to
+/// host.  Side effects on `Some`: `last_ef_layer` consumed; `layers` gains one
+/// `LayerState::Device` per intermediate.
 fn try_run_device_path<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
@@ -178,9 +165,6 @@ where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    if !layer_transition_env_cached() {
-        return None;
-    }
     // Require a GPU pool worker TLS context: off-pool basefold rayon
     // workers have no `cudaSetDevice` and would dispatch to the wrong
     // GPU (or GPU 0 by default), paying full PCIe + launch overhead.

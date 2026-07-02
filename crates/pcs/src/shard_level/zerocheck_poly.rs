@@ -673,21 +673,10 @@ where
         // the hook's pointer-array kernel reads them IN PLACE.  One launch
         // per round (SP1 jagged_constraint_poly_eval shape) instead of
         // per-chip launches.
-        // Device-eq: under ZIREN_GPU_DEVICE_EQ (default ON, =0/false
-        // kill-switch) the host SKIPS the per-chip per-round
-        // `partial_lagrange` table build entirely — the hook constructs the
-        // eq table ON DEVICE from `zeta_rest` (passed below; `eq` left
-        // empty), and the finalize step's single needed entry is computed
-        // in O(dim) via `eq_at_index`.  With the switch off, the legacy
-        // host-build-and-upload path is byte-identical to before.
-        let device_eq: bool = {
-            static GATE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-            *GATE.get_or_init(|| {
-                std::env::var("ZIREN_GPU_DEVICE_EQ")
-                    .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-                    .unwrap_or(true)
-            })
-        };
+        // Device-eq: the host SKIPS the per-chip per-round `partial_lagrange`
+        // table build entirely — the hook constructs the eq table ON DEVICE
+        // from `zeta_rest` (passed below; `eq` left empty), and the finalize
+        // step's single needed entry is computed in O(dim) via `eq_at_index`.
         let mut partials: Vec<Vec<EF>> = Vec::new();
         let mut names: Vec<String> = Vec::new();
         let mut lasts: Vec<EF> = Vec::new();
@@ -698,11 +687,7 @@ where
             }
             let dim = poly.zeta.len();
             lasts.push(poly.zeta[dim - 1]);
-            if device_eq {
-                partials.push(Vec::new());
-            } else {
-                partials.push(partial_lagrange(&poly.zeta[..dim - 1]));
-            }
+            partials.push(Vec::new());
             names.push(poly.air.name());
             real_poly_idx.push(i);
         }
@@ -794,15 +779,11 @@ where
             let yt = &tuples[r];
             let claim = claims[i].expect("batched_device_round: claim required");
             // Device-eq: finalize needs only partial[threshold_half] —
-            // with the device-built table it is recomputed in O(dim);
-            // otherwise it is read from the host table (same guard as the
-            // pre-refactor in-bounds check: partial.len() == 2^{dim-1}).
+            // with the device-built table it is recomputed in O(dim).
             let threshold_half = poly.num_real_entries.div_ceil(2) - 1;
-            let partial_at_threshold = if device_eq {
+            let partial_at_threshold = {
                 let dim = poly.zeta.len();
                 eq_at_index(&poly.zeta[..dim - 1], threshold_half)
-            } else {
-                partials[r].get(threshold_half).copied().unwrap_or(EF::ZERO)
             };
             out.push(poly.finalize_round_poly(
                 claim,
@@ -816,25 +797,6 @@ where
             r += 1;
         }
 
-        // VERIFY: the batched path bypasses accumulate_y_tuple's own dual-run,
-        // so cross-check each device-eligible chip's finalized round poly against
-        // the per-chip sum_as_poly path (itself device-vs-host validated).
-        if std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
-            .map(|v| v == "1")
-            .unwrap_or(false)
-        {
-            for (i, poly) in polys.iter().enumerate() {
-                if poly.num_real_entries == 0 {
-                    continue;
-                }
-                let reference = poly.sum_as_poly(claims[i], is_first_round);
-                assert_eq!(
-                    out[i].coefficients, reference.coefficients,
-                    "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: batched round poly != per-chip for chip {} (is_first_round={})",
-                    poly.air.name(), is_first_round,
-                );
-            }
-        }
         Some(out)
     }
 
@@ -878,22 +840,6 @@ where
         // Device-on by default; gpu_y_tuple returns None (-> host) unless EF==Ef4,
         // F==KoalaBear and a hook is registered (the TypeId guard is the safety net).
         if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
-            let verify = std::env::var("ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-            if verify {
-                // Compare the FULL tuple: force the host to compute `y_3`
-                // (`compute_y3 = true`) so the parity check covers all four
-                // accumulators the device kernel emits, independent of whether
-                // this round's `last` would take the eq-root skip in finalize.
-                let h = self.accumulate_y_tuple_host(partial, is_first_round, true);
-                assert!(
-                    dev.0 == h.0 && dev.1 == h.1 && dev.2 == h.2 && dev.3 == h.3,
-                    "ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY: device y-tuple != host for chip {} \
-                     (is_first_round={is_first_round})",
-                    self.air.name(),
-                );
-            }
             return dev;
         }
         self.accumulate_y_tuple_host(partial, is_first_round, compute_y3)

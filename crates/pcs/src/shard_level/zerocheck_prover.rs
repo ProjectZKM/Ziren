@@ -253,16 +253,12 @@ where
         // match the host bitrev_rows below). No materialize D2H. Falls back
         // to the materialize path (host cells) when the device-fold prepare
         // hook isn't registered.
-        // Default on (kill-switch ZIREN_GPU_DEVICE_FOLD=0)
-        // for ALL device-only chips. Mixed-height is handled in fold_device_hook
+        // For ALL device-only chips. Mixed-height is handled in fold_device_hook
         // (odd num_real folds host-side, div_ceil + ZERO tail, matching host
         // fold_cells); the virtual_geq/padded_row_adjustment pad correction stays
         // host-side in finalize (same as the materialize path).
-        let device_fold_on = std::env::var("ZIREN_GPU_DEVICE_FOLD")
-            .map(|v| v != "0")
-            .unwrap_or(true);
         let device_cells_opt: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
-            if pm.inner().is_none() && device_fold_on {
+            if pm.inner().is_none() {
                 _device_traces.and_then(|p| {
                     let prep_hook =
                         crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;

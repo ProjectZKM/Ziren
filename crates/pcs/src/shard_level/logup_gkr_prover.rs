@@ -67,26 +67,6 @@ use crate::zerocheck_prover::eq_mle_table;
 ///
 /// See the ziren-gpu basefold crate's `per_chip_eval_at.rs` for the
 /// GPU implementation.
-/// Process-cached env lookup for Step-6 eval_at GPU
-/// dispatch.  Returns true only when `ZIREN_GPU_EVAL_AT=1` is set.
-///
-/// Kept opt-in: the hook signature has no chip-name or provider arg,
-/// so we can't short-circuit when called from the off-pool basefold
-/// worker (no `cudaSetDevice` context).  Reth A/B with eval_at always
-/// engaged showed core +16% regression from wasted dispatches on those
-/// workers.  Kept opt-in pending either (a) hook signature extension
-/// to accept a provider, OR (b) thread-local detection of "is this a
-/// GPU pool worker?".
-fn eval_at_env_cached() -> bool {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<bool> = OnceLock::new();
-    *CACHED.get_or_init(|| {
-        std::env::var("ZIREN_GPU_EVAL_AT")
-            .map(|v| v == "1")
-            .unwrap_or(false)
-    })
-}
-
 pub fn evaluate_trace_columns_at_point_or_device<F, EF>(
     trace: &[F],
     width: usize,
@@ -96,41 +76,6 @@ where
     F: PrimeField + Sync,
     EF: ExtensionField<F> + Send + Sync,
 {
-    // Env read is process-cached — `std::env::var` takes a libc
-    // environ Mutex that contends under multi-worker concurrency.
-    if eval_at_env_cached() {
-        if let Some(gpu_hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_eval_at_hook()
-        {
-            use core::any::TypeId;
-            type Kb = p3_koala_bear::KoalaBear;
-            type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
-            if TypeId::of::<F>() == TypeId::of::<Kb>()
-                && TypeId::of::<EF>() == TypeId::of::<Ef4>()
-            {
-                // SAFETY: TypeId equality guarantees F == Kb and EF == Ef4.
-                unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
-                    core::slice::from_raw_parts(
-                        s.as_ptr().cast::<B>(),
-                        s.len(),
-                    )
-                }
-                unsafe {
-                    let result_ef4: Vec<Ef4> = gpu_hook(
-                        slice_cast::<F, Kb>(trace),
-                        width,
-                        slice_cast::<EF, Ef4>(eval_point),
-                    );
-                    // SAFETY: EF == Ef4 — Vec layout identical.
-                    let len = result_ef4.len();
-                    let cap = result_ef4.capacity();
-                    let ptr = core::mem::ManuallyDrop::new(result_ef4)
-                        .as_mut_ptr() as *mut EF;
-                    return Vec::from_raw_parts(ptr, len, cap);
-                }
-            }
-        }
-    }
     evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
 }
 

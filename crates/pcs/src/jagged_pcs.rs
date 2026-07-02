@@ -1981,10 +1981,13 @@ pub mod jagged {
         // `host_dense_q = None`, byte-identical to the prior behavior); the
         // orchestrator sets it for the device-happy path (it is the natural
         // companion to the pre-reduce trace-free, which keys on the same env).
-        let host_dense_q = if std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false)
-        {
+        // Carry the committed dense_q forward for the step-4 device reduce to
+        // upload+fold (no re-materialize, no per-chip provider). Only useful on
+        // the device commit path, so key it on the device BaseFold commit fn
+        // being present; the host commit path (`None`) leaves it `None`.
+        // Byte-identical to the committed digest by construction (same
+        // `materialize_dense_jagged` over the same chips).
+        let host_dense_q = if gpu_basefold_commit.is_some() {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
@@ -2705,46 +2708,41 @@ pub mod jagged {
         // touch the provider, so freeing it here is sound and lets the reduce
         // go device.
         if let Some(p) = provider {
-            let free_pre_reduce = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
+            let try_gpu_pr = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v != "0")
                 .unwrap_or(false);
-            if free_pre_reduce {
-                let try_gpu_pr = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                    .map(|v| v != "0")
-                    .unwrap_or(false);
-                let hook_v2_present = gpu_jagged_reduction.is_some();
-                let device_happy = (precomputed_dense_handle.is_some()
-                    || precomputed_host_dense_q.is_some())
-                    && try_gpu_pr
-                    && hook_v2_present;
-                if device_happy {
-                    let _rel_span =
-                        tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
-                    p.release_all();
-                    tracing::info!(
-                        chips = n_chips,
-                        log_dense_size = packing.log_dense_size as u64,
-                        sub_phase = "free_traces_pre_reduce",
-                        "DROPLDES (#74): released device-trace provider refs \
-                         BEFORE the jagged reduce (SP1 drop_ldes analog; \
-                         dense_q registry untouched)"
+            let hook_v2_present = gpu_jagged_reduction.is_some();
+            let device_happy = (precomputed_dense_handle.is_some()
+                || precomputed_host_dense_q.is_some())
+                && try_gpu_pr
+                && hook_v2_present;
+            if device_happy {
+                let _rel_span =
+                    tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
+                p.release_all();
+                tracing::info!(
+                    chips = n_chips,
+                    log_dense_size = packing.log_dense_size as u64,
+                    sub_phase = "free_traces_pre_reduce",
+                    "DROPLDES (#74): released device-trace provider refs \
+                     BEFORE the jagged reduce (SP1 drop_ldes analog; \
+                     dense_q registry untouched)"
+                );
+            } else {
+                use std::sync::OnceLock;
+                static WARN_ONCE: OnceLock<()> = OnceLock::new();
+                WARN_ONCE.get_or_init(|| {
+                    tracing::warn!(
+                        precomputed_dense_handle = precomputed_dense_handle.is_some(),
+                        carried_host_dense_q = precomputed_host_dense_q.is_some(),
+                        try_gpu = try_gpu_pr,
+                        hook_v2 = hook_v2_present,
+                        "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
+                         the device-happy path (neither a device handle nor a \
+                         carried host dense_q) -- skipping (a later cold path \
+                         could re-materialize from the provider)."
                     );
-                } else {
-                    use std::sync::OnceLock;
-                    static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                    WARN_ONCE.get_or_init(|| {
-                        tracing::warn!(
-                            precomputed_dense_handle = precomputed_dense_handle.is_some(),
-                            carried_host_dense_q = precomputed_host_dense_q.is_some(),
-                            try_gpu = try_gpu_pr,
-                            hook_v2 = hook_v2_present,
-                            "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
-                             the device-happy path (neither a device handle nor a \
-                             carried host dense_q) -- skipping (a later cold path \
-                             could re-materialize from the provider)."
-                        );
-                    });
-                }
+                });
             }
         }
 
@@ -2960,19 +2958,13 @@ pub mod jagged {
         // so the host test/verify path is unaffected.  Kill-switch:
         // ZIREN_GPU_FREE_TRACES_PRE_OPEN=0.
         if let Some(p) = provider {
-            let free_pre_open = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_OPEN")
-                .map(|v| v != "0")
-                .unwrap_or(true);
-            if free_pre_open {
-                let _rel_span =
-                    tracing::info_span!("piece2_free_traces_pre_open").entered();
-                p.release_all();
-                tracing::info!(
-                    chips = n_chips,
-                    sub_phase = "free_traces_pre_open",
-                    "PIECE2: released device-trace provider refs before open"
-                );
-            }
+            let _rel_span = tracing::info_span!("piece2_free_traces_pre_open").entered();
+            p.release_all();
+            tracing::info!(
+                chips = n_chips,
+                sub_phase = "free_traces_pre_open",
+                "PIECE2: released device-trace provider refs before open"
+            );
         }
 
             reduction

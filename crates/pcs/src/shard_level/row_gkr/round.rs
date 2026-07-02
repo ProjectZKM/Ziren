@@ -883,12 +883,12 @@ where
     use core::any::TypeId;
     use std::sync::OnceLock;
 
-    static GATE_CACHED: OnceLock<bool> = OnceLock::new();
-    let enabled = *GATE_CACHED.get_or_init(|| {
-        std::env::var("ZIREN_GPU_FUSED_FIRST_ROUND")
-            .map(|v| v == "1")
-            .unwrap_or(false)
-    });
+    // The fused GPU first-round (GpuPrefolded) path is not engaged: the proof
+    // takes the legacy per-chip round-0 path, which is itself device-accelerated
+    // via the zerocheck device-fold / device-eq / y-tuple hooks.  The body below
+    // is the sole consumer of first_round_device_hook / drain_hook; it is
+    // retained (byte-identical when engaged) but returns `None` here.
+    let enabled = false;
     if !enabled {
         return None;
     }
@@ -908,27 +908,14 @@ where
     // operators can opt out of the per-shard cudaFree churn from
     // draining the handle.
     let _device_first_layer_guard = {
-        static CONSUME_GATE: OnceLock<bool> = OnceLock::new();
-        let consume = *CONSUME_GATE.get_or_init(|| {
-            // default ON to match SP1 (device-first-layer stash drain
-            // is mandatory in SP1's first-round kernel pipeline — no env
-            // gate). Opt-OUT with ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=0.
-            std::env::var("ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME")
-                .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-                .unwrap_or(true)
-        });
         use crate::shard_level::device_first_layer_context as dfl;
-        // ALWAYS drain on each shard's first dispatch.
-        // The TLS slot persists across shards (Drop is no-op), so the
-        // is_none() check would skip drain after shard 1 → all later
-        // shards would reuse shard 1's stale handle. Drain unconditionally
-        // when CONSUME=1: each call replaces the slot with fresh data.
-        if consume {
-            // #118: drain fn threaded from the prover (was `REGISTERED_DRAIN_HOOK`).
-            dfl::drain_via_hook(drain_hook).map(dfl::DeviceFirstLayerGuard::new)
-        } else {
-            None
-        }
+        // Drain the device-first-layer stash on each shard's first dispatch
+        // (matches SP1's mandatory first-round kernel pipeline).  The TLS slot
+        // persists across shards (Drop is a no-op), so we drain unconditionally:
+        // each call replaces the slot with fresh data (an is_none() check would
+        // reuse shard 1's stale handle on later shards).  drain fn threaded from
+        // the prover.
+        dfl::drain_via_hook(drain_hook).map(dfl::DeviceFirstLayerGuard::new)
     };
     static SYN_TEST: OnceLock<()> = OnceLock::new();
     SYN_TEST.get_or_init(|| synthetic_diff_test_step7z());
@@ -1314,33 +1301,10 @@ where
         });
     }
     let device_result: Option<(Vec<ProdEF>, Vec<ProdEF>)> = {
-        static GATE: OnceLock<bool> = OnceLock::new();
-        let env_on = *GATE.get_or_init(|| {
-            // default ON to match SP1 (no per-shard env gate; phase 3
-            // device dispatch is always engaged when TLS+hook present).
-            // Opt-OUT with ZIREN_GPU_PHASE3_DISPATCH=0.
-            let v = std::env::var("ZIREN_GPU_PHASE3_DISPATCH")
-                .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-                .unwrap_or(true);
-            tracing::warn!("Diag-PROBE phase4 gate read env_on={v} (default ON )");
-            v
-        });
-        // Threshold gate: skip device dispatch when first_layer.num_row_variables
-        // is below `ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS` (default 0 = no
-        // threshold).  Per-shard dispatch overhead exceeds GPU speedup
-        // on small layers (~700µs/call vs ~10µs host), so a size
-        // threshold guards default-on.
-        static PHASE3_THRESHOLD: OnceLock<u32> = OnceLock::new();
-        let phase3_threshold = *PHASE3_THRESHOLD.get_or_init(|| {
-            std::env::var("ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS")
-                .ok()
-                .and_then(|v| v.parse::<u32>().ok())
-                .unwrap_or(0)
-        });
-        let total_vars_u = first_layer.num_row_variables as u32;
-        let under_threshold = phase3_threshold > 0 && total_vars_u < phase3_threshold;
+        // Phase-3 device dispatch is always engaged when the first-layer TLS
+        // stash + hook are present (matches SP1; no per-shard gate).
         use crate::shard_level::device_first_layer_context as dfl;
-        if env_on && !under_threshold && dfl::current_device_first_layer().is_some() {
+        if dfl::current_device_first_layer().is_some() {
             // #118: first-round fn threaded from the prover (was
             // `REGISTERED_FIRST_ROUND_HOOK`).
             if let Some(device_hook) = first_round_device_hook {
