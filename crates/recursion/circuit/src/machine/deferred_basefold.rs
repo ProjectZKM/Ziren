@@ -240,11 +240,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, SKIP the recompose
         // (its ext2felt asserts base-field and FAILS under FIX-off; unused on
         // the baked-band path; sound to skip — consumes no Witnessable stream).
-        // ZIREN_SP1_ZEROPAD implies baked-band (commit=band, degree=0 mask).
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok()
-                || std::env::var("ZIREN_SP1_ZEROPAD").is_ok()
-            {
+            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
                 None
             } else {
                 Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(

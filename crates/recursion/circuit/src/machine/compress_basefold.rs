@@ -330,12 +330,8 @@ pub fn verify_compress_basefold<C, SC, A>(
         // runtime-self-computed hints, so removing these self-contained ops can't
         // misalign the stream; real + dummy take the same branch (VK matched).
         // When NOT gated, compute Some(raw) (legacy default, unchanged).
-        // ZIREN_SP1_ZEROPAD implies baked-band (commit=band geometry, degree=0
-        // mask => row_counts must come from the packing, not the opened degree).
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok()
-                || std::env::var("ZIREN_SP1_ZEROPAD").is_ok()
-            {
+            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
                 None
             } else {
                 Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(

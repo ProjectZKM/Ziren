@@ -713,36 +713,12 @@ where
                                                 // (rollout 1) matched the VK but
                                                 // tripped the injected chips'
                                                 // constraints in `verify_shard`.
-                                                //
-                                                // ZIREN_SP1_ZEROPAD (SP1 missing-chip
-                                                // model): skip the constraint-valid
-                                                // synthesis entirely and commit the
-                                                // missing chips as ZERO (band height).
-                                                // Soundness is recovered by witnessing
-                                                // them at REAL height 0 so the verifier's
-                                                // degree=0 full_geq threshold + the
-                                                // degree-masked LogUp reconstruction mask
-                                                // them. Default OFF = byte-identical.
-                                                let sp1_zeropad = std::env::var(
-                                                    "ZIREN_SP1_ZEROPAD",
-                                                )
-                                                .map(|v| {
-                                                    v != "0"
-                                                        && !v.eq_ignore_ascii_case("false")
-                                                })
-                                                .unwrap_or(false);
                                                 let missing_traces: std::collections::BTreeMap<
                                                     String,
                                                     p3_matrix::dense::RowMajorMatrix<
                                                         zkm_pcs::InnerVal,
                                                     >,
-                                                > = if sp1_zeropad {
-                                                    // Empty => commit_basefold_path's
-                                                    // fallback synthesizes the all-zero
-                                                    // band-height matrix for each missing
-                                                    // chip (the zero-pad commit).
-                                                    Default::default()
-                                                } else {
+                                                > = {
                                                     use core::any::TypeId;
                                                     // Only the KoalaBear inner ring
                                                     // takes the BaseFold band-cap path
@@ -812,33 +788,6 @@ where
                                                     }
                                                 };
 
-                                                // ZIREN_SP1_ZEROPAD: the names of the
-                                                // canonical-cluster chips this raw shard
-                                                // is MISSING (band-cap chips absent from
-                                                // main_traces) — committed as zeros and
-                                                // witnessed at REAL height 0.  `None`
-                                                // (default) keeps constraint-valid
-                                                // injection (byte-identical).
-                                                let zeropad_missing: Option<
-                                                    std::collections::BTreeSet<String>,
-                                                > = if sp1_zeropad {
-                                                    let present: std::collections::BTreeSet<
-                                                        String,
-                                                    > = main_traces
-                                                        .iter()
-                                                        .map(|(n, _)| n.clone())
-                                                        .collect();
-                                                    Some(
-                                                        shape
-                                                            .iter()
-                                                            .map(|(air, _)| air.to_string())
-                                                            .filter(|n| !present.contains(n))
-                                                            .collect(),
-                                                    )
-                                                } else {
-                                                    None
-                                                };
-
                                                 // Low-placement raw log-heights: each PRESENT
                                                 // chip's actual (raw) trace height.  Installed
                                                 // for the whole guard scope so the jagged commit
@@ -906,7 +855,11 @@ where
                                                     missing_traces,
                                                     raw_log_heights,
                                                     stage2_use_rev,
-                                                    zeropad_missing,
+                                                    // #129: vestigial `_zeropad_missing`
+                                                    // slot (ZIREN_SP1_ZEROPAD removed;
+                                                    // constraint-valid injection is
+                                                    // unconditional).
+                                                    None,
                                                 )
                                             })
                                     };

@@ -87,21 +87,6 @@ thread_local! {
     static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
         const { std::cell::RefCell::new(None) };
 
-    /// ZIREN_SP1_ZEROPAD (SP1 missing-chip model): the set of canonical-cluster
-    /// chip NAMES this shard is MISSING and which are committed as ZERO-PADDED
-    /// (band-height all-zero) instead of constraint-valid synthesized traces.
-    /// Set by [`BandCapGuard::new`] ONLY when `ZIREN_SP1_ZEROPAD` is on (else
-    /// `None` => the legacy constraint-valid injection, byte-identical).  Read
-    /// once in `prove_shard_to_basefold` to give each such chip a REAL height of
-    /// 0 (a 0-row STARK trace) so the verifier's `full_geq(degree=0)=1`
-    /// threshold (zerocheck) AND the degree-masked LogUp reconstruction mask it
-    /// from the constraints AND the lookup balance, and its global cumulative
-    /// sum is the septic identity (`sz < 14`), while the jagged commit keeps it
-    /// at band height (chip-SET / VK preserved — no regen).  Generation-tagged
-    /// like `CURRENT_BAND_CAP` so a stale Drop never serves the wrong shard.
-    static CURRENT_ZEROPAD_MISSING: std::cell::RefCell<Option<(u64, BTreeSet<String>)>> =
-        const { std::cell::RefCell::new(None) };
-
     /// RECURSION-LAYER trace-area pin (#88/#82 Stage 1, SP1-faithful).  When
     /// `Some(target_log)`, the jagged dense commit on this thread is pinned to
     /// `log_dense_size = max(natural, target_log)` (= a FIXED `2^target_log`
@@ -133,13 +118,20 @@ impl BandCapGuard {
     /// constraint-valid (FIX-on-faithful) committed traces of the
     /// canonical-cluster chips this raw shard lacks; `commit_basefold_path`
     /// injects them instead of all-zero matrices so the FIX-off proof verifies.
+    ///
+    /// `_zeropad_missing` is a VESTIGIAL parameter (always `None`): the
+    /// ZIREN_SP1_ZEROPAD all-zero missing-chip experiment was removed (#129,
+    /// constraint-valid injection is now unconditional).  The slot is retained
+    /// only so the ziren-gpu device caller (`core_multi_gpu.rs`, 5-arg call)
+    /// keeps compiling; its removal is deferred to the device follow-up
+    /// (#130/#118).
     #[must_use]
     pub fn new(
         band_cap: BTreeMap<String, (usize, usize)>,
         missing_traces: BTreeMap<String, RowMajorMatrix<InnerVal>>,
         raw_log_heights: BTreeMap<String, usize>,
         use_rev: bool,
-        zeropad_missing: Option<BTreeSet<String>>,
+        _zeropad_missing: Option<BTreeSet<String>>,
     ) -> Self {
         let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         CURRENT_BAND_CAP.with(|c| {
@@ -147,13 +139,6 @@ impl BandCapGuard {
         });
         CURRENT_MISSING_TRACES.with(|c| {
             *c.borrow_mut() = Some((gen, missing_traces));
-        });
-        // ZIREN_SP1_ZEROPAD: install the zero-padded missing-chip name set
-        // (generation-tagged) so `prove_shard_to_basefold` can give each such
-        // chip a REAL height of 0.  `None` (the default / constraint-valid
-        // injection) leaves the slot empty => legacy behaviour.
-        CURRENT_ZEROPAD_MISSING.with(|c| {
-            *c.borrow_mut() = zeropad_missing.map(|s| (gen, s));
         });
         // Low-placement raw log-heights, installed for the WHOLE guard scope
         // (prover.commit + prover.open) so BOTH the jagged commit and the
@@ -192,14 +177,6 @@ impl Drop for BandCapGuard {
                 }
             }
         });
-        CURRENT_ZEROPAD_MISSING.with(|c| {
-            let mut slot = c.borrow_mut();
-            if let Some((gen, _)) = slot.as_ref() {
-                if *gen == self.gen {
-                    *slot = None;
-                }
-            }
-        });
         // The raw-log map is not generation-tagged (it is rewritten fresh by
         // the band-pad loop every shard, Some on the band-cap branch and None
         // otherwise); clear it on guard drop so no stale map outlives the
@@ -231,16 +208,6 @@ pub fn current_band_cap() -> Option<BTreeMap<String, (usize, usize)>> {
 #[must_use]
 pub fn current_missing_chip_traces() -> Option<BTreeMap<String, RowMajorMatrix<InnerVal>>> {
     CURRENT_MISSING_TRACES.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
-}
-
-/// Clone of the currently-stashed ZIREN_SP1_ZEROPAD missing-chip name set for
-/// the calling thread, or `None` when zero-pad is off (legacy constraint-valid
-/// injection).  `prove_shard_to_basefold` reads this once to give each listed
-/// chip a REAL height of 0 (0-row STARK trace), so the verifier's degree=0
-/// threshold masks it from the constraints and the LogUp balance.
-#[must_use]
-pub fn current_zeropad_missing() -> Option<BTreeSet<String>> {
-    CURRENT_ZEROPAD_MISSING.with(|c| c.borrow().as_ref().map(|(_, s)| s.clone()))
 }
 
 /// Install (or clear, with `None`) the per-shard RAW log-heights map for the
