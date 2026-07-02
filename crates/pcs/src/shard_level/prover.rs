@@ -215,6 +215,10 @@ pub fn prove_shard_to_basefold<SC, A>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
+    // #130: device jagged-reduction fn; `Some(..)` on the GPU
+    // callers (core/compress) provides the device reduction
+    // statically, `None` on host callers = host reduction.
+    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -262,6 +266,7 @@ where
         device_traces,
         orientation,
         precomputed_commit,
+        gpu_jagged_reduction,
     )
 }
 
@@ -308,6 +313,7 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
 
@@ -343,6 +349,7 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         prove_trusted_evaluations::<SC, A>(
             chips,
@@ -352,6 +359,7 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
+            gpu_jagged_reduction,
         )
     }
 }
@@ -391,6 +399,7 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         self.0.prove_trusted_evaluations(
             chips,
@@ -400,6 +409,7 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
+            gpu_jagged_reduction,
         )
     }
 }
@@ -424,6 +434,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
+    // #130: device jagged-reduction fn; `Some(..)` on the GPU
+    // callers (core/compress) provides the device reduction
+    // statically, `None` on host callers = host reduction.
+    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -472,6 +486,7 @@ where
         orientation,
         precomputed_commit,
         &FreeFnJaggedEval,
+        gpu_jagged_reduction,
     )
 }
 
@@ -499,6 +514,10 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // The jagged trusted-evaluations open producer.  Free-fn path
     // passes `&FreeFnJaggedEval`; a prover routes `&ProverJaggedEval(self)`.
     jagged_eval_producer: &D,
+    // The device jagged-reduction fn (#130), read from the prover's
+    // `gpu_jagged_reduction_v2()` (or `None` on the free-fn path) and
+    // threaded into the producer's `prove_trusted_evaluations`.
+    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1108,6 +1127,7 @@ where
             _device_traces,
             precomputed_commit,
             residual_y,
+            gpu_jagged_reduction,
         )
     };
     tracing::info!(
@@ -1391,6 +1411,9 @@ pub fn prove_trusted_evaluations<SC, A>(
     // empty Vec per empty chip.  `Some` skips the jagged step-3 host
     // recompute (identical values, identical bytes); `None` = legacy.
     pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    // #130: the device jagged-reduction fn, provided statically by the
+    // prover; `None` = host reduction (CPU / free-fn callers).
+    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1594,6 +1617,7 @@ where
             // Provider arms the host-fallback re-materialize for empty
             // (device-resident) chip traces — no-op on the happy path.
             _device_traces,
+            gpu_jagged_reduction,
         );
         return EvaluationProof::Bundle(bundle);
     }
@@ -1650,6 +1674,7 @@ where
         z_row,
         pre_y_inner,
         lb_challenger,
+        gpu_jagged_reduction,
     );
     EvaluationProof::Bundle(bundle)
 }

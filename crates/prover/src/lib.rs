@@ -2100,6 +2100,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,
+                // #130: host shrink caller has no ziren-gpu reduction fn to
+                // name → host reduction (byte-identical; the device fn
+                // declines sub-threshold shards anyway).
+                None,
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over

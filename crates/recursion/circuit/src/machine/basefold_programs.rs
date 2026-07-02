@@ -331,6 +331,8 @@ mod tests {
             // Precomputed-commit not used for the synthetic witness
             // builder — uses the in-band commit flow.
             None,
+            // #130: host-only synthetic witness → host reduction.
+            None,
         )
     }
 

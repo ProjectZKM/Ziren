@@ -771,93 +771,30 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 // per-shard host bottleneck after the BaseFold commit moved to GPU.
 // ─────────────────────────────────────────────────────────────────────
 
-/// Signature of the GPU jagged-reduction prover hook.  Same inputs
-/// as [`crate::jagged_sumcheck::prove_jagged_reduction_owned`], same
-/// output.  Implementations MUST be byte-equivalent to the host
-/// reduction (verified by the existing host fallback when the hook is
-/// not registered).  Implementations MAY return `None` to signal a
-/// hard fall-through to the host body (e.g. when shape constraints
-/// the GPU path doesn't support are detected).
-/// The hook also receives `z_col` (the caller-sampled column point — the
-/// hook must NOT sample anything before the round loop, and must not
-/// gamma-mix) and `z_row` (the full zerocheck-reduced z* driving the
-/// row-eq embedding weights).  These mirror
-/// `prove_jagged_reduction_owned`'s signature; sampling gamma or
-/// observing evals before the round loop produces INVALID proofs.
-pub type GpuJaggedReductionFn = fn(
-    dense_q: alloc::vec::Vec<JaggedVal>,
-    packing: &crate::jagged::JaggedPacking<JaggedVal>,
-    r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
-    y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
-    z_col: &[JaggedChallenge],
-    z_row: &[JaggedChallenge],
-    challenger: &mut JaggedChallenger,
-) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
-
-static GPU_JAGGED_REDUCTION_HOOK: std::sync::OnceLock<GpuJaggedReductionFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU jagged-reduction hook.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.  Called
-/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_jagged_reduction_hook(
-    f: GpuJaggedReductionFn,
-) -> Result<(), GpuJaggedReductionFn> {
-    GPU_JAGGED_REDUCTION_HOOK.set(f)
-}
-
-/// Read the registered GPU jagged-reduction hook, if any.
-#[must_use]
-pub fn get_gpu_jagged_reduction_hook() -> Option<GpuJaggedReductionFn> {
-    GPU_JAGGED_REDUCTION_HOOK.get().copied()
-}
-
-// ─────────────────────────────────────────────────────────────────────
-// V2 jagged-reduction hook signature with optional device-resident
-// dense_q handle (hardening of the device hook).
-//
-// Rationale:
-// V1's hook accepts an owned `Vec<JaggedVal>` for `dense_q`.  When the
-// producer (`ziren-gpu/basefold/src/jagged_reduction_dispatch.rs`)
-// wraps it as `DenseQDevice::Host(...)`, the device round-0 path in
-// `prove_jagged_reduction_gpu` is *never* taken — it bails on
-// `as_device_buffer() == None` — and the host fallback runs the
-// 2.5s/shard reduction.  See
-// `ziren-gpu/basefold/src/jagged_sumcheck.rs:557-595` for the device
-// round-0 dispatch.
-//
-// V2 adds an opaque `Option<u64>` device handle alongside the owned
-// `Vec`.  When `Some(handle)`, the producer dereferences the handle
-// through its own per-thread registry and wraps the buffer as
-// `DenseQDevice::Borrowed(...)`, unlocking the device round-0 path.
-// When `None`, V2 behaves byte-identically to V1.
-//
-// Opaque-`u64`-handle pattern mirrors `GpuLayerTransitionFn` /
-// `GpuLayerInitFn` / `GpuLayerPullFn` above — stark crate never
-// dereferences the handle, that's entirely GPU-side bookkeeping.  This
-// is the simpler newtype-wrapper approach (passing
-// a real `&DeviceBuffer<JaggedVal>` would require pulling
-// `zkm-gpu-core` into `zkm-pcs`'s public API — a backend
-// abstraction that is explicitly out of scope here).
-//
-// **Backward compatible** — V1 hook remains.  Dispatch site prefers
-// V2 when both are registered; otherwise falls back to V1; otherwise
-// runs the host body.
-// ─────────────────────────────────────────────────────────────────────
-
-/// Signature of the GPU jagged-reduction prover hook (V2).
+/// Signature of the GPU jagged-reduction prover function.
 ///
-/// Extends [`GpuJaggedReductionFn`] with an optional device handle
-/// for the dense_q buffer.  When `dense_q_device_handle` is
-/// `Some(handle)`, the producer uses the device-resident buffer
-/// (looked up in its own registry) and the `dense_q_host` argument
-/// MAY be empty (the producer will pull-to-host on round 0 if it
-/// needs to — but the device round-0 path avoids that).  When
-/// `dense_q_device_handle` is `None`, V2 falls back to V1 semantics
-/// using `dense_q_host`.
+/// A device-resident prover supplies this via
+/// [`crate::prover::MachineProver::gpu_jagged_reduction_v2`]; the shard
+/// prover threads the returned `Option` down to the jagged-reduction
+/// dispatch below and calls it in place of the host
+/// [`crate::jagged_sumcheck::prove_jagged_reduction_owned`].
 ///
-/// The handle is opaque — `zkm-pcs` never dereferences it.  The
-/// GPU side owns allocation / deallocation.
+/// Implementations MUST be byte-equivalent to that host reduction: the
+/// host body runs whenever the prover provides `None` (the CPU / free-fn
+/// path) OR the function itself returns `None` (a shape the GPU path
+/// declines).  The function receives `z_col` (the caller-sampled column
+/// point — it must NOT sample anything before the round loop, and must
+/// not gamma-mix) and `z_row` (the full zerocheck-reduced z* driving the
+/// row-eq embedding weights).  These mirror `prove_jagged_reduction_owned`'s
+/// signature; sampling gamma or observing evals before the round loop
+/// produces INVALID proofs.
+///
+/// `dense_q_device_handle` is an opaque device-resident dense_q handle:
+/// when `Some(handle)` the producer uses the device buffer (looked up in
+/// its own registry) and `dense_q_host` MAY be empty (the device round-0
+/// path avoids the pull-to-host); when `None` it falls back to
+/// `dense_q_host`.  `zkm-pcs` never dereferences the handle — the GPU
+/// side owns allocation / deallocation.
 pub type GpuJaggedReductionFnV2 = fn(
     dense_q_host: alloc::vec::Vec<JaggedVal>,
     dense_q_device_handle: Option<u64>,
@@ -869,86 +806,11 @@ pub type GpuJaggedReductionFnV2 = fn(
     challenger: &mut JaggedChallenger,
 ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
 
-static GPU_JAGGED_REDUCTION_HOOK_V2: std::sync::OnceLock<GpuJaggedReductionFnV2> =
-    std::sync::OnceLock::new();
-
-/// Register the V2 GPU jagged-reduction hook (with device-handle
-/// support).  Idempotent; returns `Err(existing_hook)` when a hook
-/// was already registered.  V2 is preferred over V1 at dispatch.
-pub fn register_gpu_jagged_reduction_hook_v2(
-    f: GpuJaggedReductionFnV2,
-) -> Result<(), GpuJaggedReductionFnV2> {
-    GPU_JAGGED_REDUCTION_HOOK_V2.set(f)
-}
-
-/// Read the registered V2 GPU jagged-reduction hook, if any.
-#[must_use]
-pub fn get_gpu_jagged_reduction_hook_v2() -> Option<GpuJaggedReductionFnV2> {
-    GPU_JAGGED_REDUCTION_HOOK_V2.get().copied()
-}
-
-// ─── Hook-hardening diagnostic counters / loggers ────────────────────
-//
-// Counts the number of times the dispatch path was rejected for each
-// reason.  Logged on each Nth rejection (geometric — 1, 8, 64, ...)
-// so a busy run doesn't spam but a debugging run still sees activity.
-//
-// All counters are global (single shared atomic) — fine since dispatch
-// is from a hot path on the per-shard prove orchestrator and a single
-// atomic increment is negligible.
-
-/// Diagnostic counters for the GPU jagged-reduction dispatch site.
-/// Exposed for testing — not part of the public API.
-#[doc(hidden)]
-pub mod jagged_dispatch_diag {
-    use core::sync::atomic::{AtomicU64, Ordering};
-
-    /// `ZIREN_GPU_JAGGED_PCS=1` set but no hook registered.
-    pub static ENV_SET_BUT_UNREGISTERED: AtomicU64 = AtomicU64::new(0);
-    /// Hook registered but env not set (silently skipped — possible
-    /// misconfiguration).
-    pub static HOOK_REGISTERED_BUT_ENV_UNSET: AtomicU64 = AtomicU64::new(0);
-    /// Hook returned `None` (shape rejected by the GPU path).
-    pub static SHAPE_REJECTED: AtomicU64 = AtomicU64::new(0);
-    /// Hook fired and returned a proof (V1 or V2 path).
-    pub static HOOK_FIRED: AtomicU64 = AtomicU64::new(0);
-    /// V2 hook fired (subset of HOOK_FIRED) — used to confirm the
-    /// device-handle path is exercised when expected.
-    pub static V2_HOOK_FIRED: AtomicU64 = AtomicU64::new(0);
-    /// V2 hook fired with `Some(handle)` — i.e. the device path was
-    /// actually taken (not the V2-with-None pseudo-V1 path).
-    pub static V2_WITH_DEVICE_HANDLE_FIRED: AtomicU64 = AtomicU64::new(0);
-
-    /// Bump a counter and return its NEW value.  Used by the dispatch
-    /// site to decide whether to emit a log on the Nth rejection.
-    #[inline]
-    pub(crate) fn bump(counter: &AtomicU64) -> u64 {
-        counter.fetch_add(1, Ordering::Relaxed).saturating_add(1)
-    }
-
-    /// True if `n` is a power of two (or 1).  Used to decide whether
-    /// to log on the Nth rejection (geometric back-off).
-    #[inline]
-    pub(crate) fn should_log_geometric(n: u64) -> bool {
-        n.is_power_of_two()
-    }
-
-    /// Reset all counters to zero.  Test helper.
-    #[doc(hidden)]
-    pub fn reset_all() {
-        ENV_SET_BUT_UNREGISTERED.store(0, Ordering::Relaxed);
-        HOOK_REGISTERED_BUT_ENV_UNSET.store(0, Ordering::Relaxed);
-        SHAPE_REJECTED.store(0, Ordering::Relaxed);
-        HOOK_FIRED.store(0, Ordering::Relaxed);
-        V2_HOOK_FIRED.store(0, Ordering::Relaxed);
-        V2_WITH_DEVICE_HANDLE_FIRED.store(0, Ordering::Relaxed);
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // GPU row-GKR layer-transition dispatch hook scaffolding.
 //
-// Mirror of the existing GpuJaggedReductionFn pattern above.  Used by
+// Mirror of the GpuJaggedReductionFnV2 device-fn pattern above.  Used by
 // future steps (4b/4c) that migrate
 // `crate::shard_level::row_gkr::build::build_gkr_circuit` from running
 // host transitions UPFRONT to lazily evolving a device-resident layer
@@ -2337,6 +2199,7 @@ pub mod jagged {
             z_row,
             None,
             challenger,
+            None,
         )
     }
 
@@ -2355,6 +2218,7 @@ pub mod jagged {
         precomputed: PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_with_precomputed_provider(
             chip_traces,
@@ -2364,6 +2228,7 @@ pub mod jagged {
             pre_y_per_chip,
             challenger,
             None,
+            gpu_jagged_reduction,
         )
     }
 
@@ -2388,6 +2253,7 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -2397,6 +2263,7 @@ pub mod jagged {
             Some(precomputed),
             challenger,
             provider,
+            gpu_jagged_reduction,
         )
     }
 
@@ -2411,6 +2278,7 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
+        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -2420,6 +2288,7 @@ pub mod jagged {
             None,
             challenger,
             None,
+            gpu_jagged_reduction,
         )
     }
 
@@ -2553,6 +2422,12 @@ pub mod jagged {
         // Per-shard device-trace provider, used only to re-materialize
         // empty (device-resident) chip traces on the host-fallback edges.
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // The device jagged-reduction function, provided statically by the
+        // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded down
+        // to the reduction dispatch below.  `None` = host reduction (CPU
+        // prover / free-fn callers), byte-identical to the pre-#130
+        // unregistered-hook path.
+        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
     ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
@@ -2872,7 +2747,7 @@ pub mod jagged {
                 let try_gpu_pr = std::env::var("ZIREN_GPU_JAGGED_PCS")
                     .map(|v| v != "0")
                     .unwrap_or(false);
-                let hook_v2_present = super::get_gpu_jagged_reduction_hook_v2().is_some();
+                let hook_v2_present = gpu_jagged_reduction.is_some();
                 let device_happy = (precomputed_dense_handle.is_some()
                     || precomputed_host_dense_q.is_some())
                     && try_gpu_pr
@@ -2936,11 +2811,10 @@ pub mod jagged {
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true);
 
-            // Look up BOTH hooks so we can emit diagnostics on
-            // mismatches (env-set/unregistered, hook-registered/env-unset).
-            let hook_v1 = super::get_gpu_jagged_reduction_hook();
-            let hook_v2 = super::get_gpu_jagged_reduction_hook_v2();
-            let any_hook_registered = hook_v1.is_some() || hook_v2.is_some();
+            // The device reduction function, provided statically by the
+            // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded
+            // in.  `None` on the host / CPU-prover path → host body below.
+            let hook_v2 = gpu_jagged_reduction;
 
             // Single shard-wide commit buffer: when the precompute
             // registered a device-resident dense_q AND the V2 hook will
@@ -2981,35 +2855,16 @@ pub mod jagged {
                 materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size)
             };
 
-            // Diagnostic (1): env=1 but no hook → bump the counter.
-            if try_gpu && !any_hook_registered {
-                let _ = super::jagged_dispatch_diag::bump(
-                    &super::jagged_dispatch_diag::ENV_SET_BUT_UNREGISTERED,
-                );
-            }
-
-            // Diagnostic (2): hook registered but env=0 → bump the
-            // counter.  This is normally fine (caller explicitly opted
-            // out) but on a perf-experiment run it can mask intended
-            // GPU acceleration.
-            if !try_gpu && any_hook_registered {
-                let _ = super::jagged_dispatch_diag::bump(
-                    &super::jagged_dispatch_diag::HOOK_REGISTERED_BUT_ENV_UNSET,
-                );
-            }
-
-            // Pick the active hook: V2 preferred if available, else
-            // V1, else None (drops to host body).
+            // Pick the active reduction: the statically-provided device
+            // function if present (and GPU enabled), else None → host body.
             enum ActiveHook {
                 V2(super::GpuJaggedReductionFnV2),
-                V1(super::GpuJaggedReductionFn),
                 None,
             }
             let active = if try_gpu {
-                match (hook_v2, hook_v1) {
-                    (Some(f2), _) => ActiveHook::V2(f2),
-                    (None, Some(f1)) => ActiveHook::V1(f1),
-                    (None, None) => ActiveHook::None,
+                match hook_v2 {
+                    Some(f2) => ActiveHook::V2(f2),
+                    None => ActiveHook::None,
                 }
             } else {
                 ActiveHook::None
@@ -3021,7 +2876,7 @@ pub mod jagged {
             // `PrecomputedJaggedCommit::dense_device_handle`; the V2
             // hook takes it from the registry (`DenseQDevice::Owned`) so
             // commit + reduction share ONE device buffer.  `None` on the
-            // host build path — V2 collapses to V1 semantics.
+            // host build path — the device handle is then unused.
             let dense_q_device_handle: Option<u64> = if try_gpu && hook_v2.is_some() {
                 precomputed_dense_handle
             } else {
@@ -3030,17 +2885,6 @@ pub mod jagged {
 
             match active {
                 ActiveHook::V2(f) => {
-                    let _ = super::jagged_dispatch_diag::bump(
-                        &super::jagged_dispatch_diag::HOOK_FIRED,
-                    );
-                    let _ = super::jagged_dispatch_diag::bump(
-                        &super::jagged_dispatch_diag::V2_HOOK_FIRED,
-                    );
-                    if dense_q_device_handle.is_some() {
-                        let _ = super::jagged_dispatch_diag::bump(
-                            &super::jagged_dispatch_diag::V2_WITH_DEVICE_HANDLE_FIRED,
-                        );
-                    }
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
                     // With the device-handle skip, `dense_q` is an
@@ -3080,90 +2924,18 @@ pub mod jagged {
                         Some(p) => p,
                         None => {
                             *challenger = challenger_snapshot;
-                            let n = super::jagged_dispatch_diag::bump(
-                                &super::jagged_dispatch_diag::SHAPE_REJECTED,
+                            tracing::warn!(
+                                chips = n_chips,
+                                log_dense_size = packing.log_dense_size as u64,
+                                "jagged_pcs device reduction returned None \
+                                 (shape rejected) — falling back to host \
+                                 prove_jagged_reduction_owned",
                             );
-                            if super::jagged_dispatch_diag::should_log_geometric(n) {
-                                tracing::warn!(
-                                    chips = n_chips,
-                                    log_dense_size = packing.log_dense_size as u64,
-                                    shape_rejected_count = n,
-                                    "#107 jagged_pcs V2 hook returned None \
-                                     (shape rejected) — falling back to host \
-                                     prove_jagged_reduction_owned",
-                                );
-                            }
                             let dense_q = saved_dense.unwrap_or_else(|| {
                                 // Re-materialize empty (device-resident)
                                 // chip traces from the provider so the host
                                 // reduction fallback rebuilds the correct
                                 // dense_q (not a partial zero buffer).
-                                let rematerialized =
-                                    rematerialize_chip_traces_via_provider(
-                                        chip_traces,
-                                        provider,
-                                    );
-                                materialize_dense_jagged::<InnerVal>(
-                                    &rematerialized,
-                                    packing.log_dense_size,
-                                )
-                            });
-                            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                                dense_q,
-                                &packing,
-                                r_row_per_chip,
-                                &y_per_chip,
-                                &z_col,
-                                z_row,
-                                challenger,
-                            )
-                        }
-                    }
-                }
-                ActiveHook::V1(f) => {
-                    let _ = super::jagged_dispatch_diag::bump(
-                        &super::jagged_dispatch_diag::HOOK_FIRED,
-                    );
-                    // Move dense_q into the hook.  Move-not-clone:
-                    // avoids holding a 4N base-field duplicate live
-                    // across the call.  On a hard fall-through (None
-                    // returned by the hook) we lose ownership — the
-                    // host fallback below re-materializes dense_q in
-                    // that case.
-                    let r_row = r_row_per_chip.to_vec();
-                    let y_clone = y_per_chip.clone();
-                    // See the V2 twin — always save the carried dense_q
-                    // (drained provider can't be re-materialized correctly).
-                    let saved_dense = if dense_q_is_carried {
-                        Some(dense_q.clone())
-                    } else if std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
-                        .map(|v| v == "1").unwrap_or(false)
-                    {
-                        Some(dense_q.clone())
-                    } else {
-                        None
-                    };
-                    // Transcript-safety: see the V2 twin above.
-                    let challenger_snapshot = challenger.clone();
-                    match f(dense_q, &packing, &r_row, &y_clone, &z_col, z_row, challenger) {
-                        Some(p) => p,
-                        None => {
-                            *challenger = challenger_snapshot;
-                            let n = super::jagged_dispatch_diag::bump(
-                                &super::jagged_dispatch_diag::SHAPE_REJECTED,
-                            );
-                            if super::jagged_dispatch_diag::should_log_geometric(n) {
-                                tracing::warn!(
-                                    chips = n_chips,
-                                    log_dense_size = packing.log_dense_size as u64,
-                                    shape_rejected_count = n,
-                                    "#107 jagged_pcs V1 hook returned None \
-                                     (shape rejected) — falling back to host \
-                                     prove_jagged_reduction_owned",
-                                );
-                            }
-                            let dense_q = saved_dense.unwrap_or_else(|| {
-                                // Provider-aware re-materialize (V1 twin).
                                 let rematerialized =
                                     rematerialize_chip_traces_via_provider(
                                         chip_traces,
@@ -4579,92 +4351,7 @@ mod test {
         );
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // Hook hardening diagnostic
-    // counters: smoke tests for the geometric back-off and the bump()
-    // helper.  The full dispatch-site behaviour (env-set/unregistered
-    // warn, hook-registered/env-unset warn, V2-preferred-over-V1) is
-    // exercised by the smoke flag of the production e2e run; the
-    // counters here are the test hooks that prove the wiring is sane.
-    // ────────────────────────────────────────────────────────────────
 
-    #[test]
-    fn test_jagged_dispatch_diag_geometric_backoff() {
-        use super::jagged_dispatch_diag::should_log_geometric;
-        // log on 1, 2, 4, 8, ... (powers of two)
-        assert!(should_log_geometric(1));
-        assert!(should_log_geometric(2));
-        assert!(should_log_geometric(4));
-        assert!(should_log_geometric(8));
-        assert!(should_log_geometric(64));
-        assert!(should_log_geometric(1024));
-        // don't log on intermediate counts
-        assert!(!should_log_geometric(3));
-        assert!(!should_log_geometric(5));
-        assert!(!should_log_geometric(7));
-        assert!(!should_log_geometric(63));
-    }
-
-    #[test]
-    fn test_jagged_dispatch_diag_bump_returns_new_count() {
-        use core::sync::atomic::AtomicU64;
-        use super::jagged_dispatch_diag::bump;
-        let counter = AtomicU64::new(0);
-        assert_eq!(bump(&counter), 1);
-        assert_eq!(bump(&counter), 2);
-        assert_eq!(bump(&counter), 3);
-    }
-
-    #[test]
-    fn test_jagged_dispatch_diag_reset() {
-        use core::sync::atomic::{AtomicU64, Ordering};
-        use super::jagged_dispatch_diag::bump;
-        let counter = AtomicU64::new(0);
-        bump(&counter);
-        bump(&counter);
-        assert_eq!(counter.load(Ordering::Relaxed), 2);
-        // reset_all touches the production counters; bump our local
-        // first to ensure the API surface compiles & runs.
-        super::jagged_dispatch_diag::reset_all();
-        assert_eq!(
-            super::jagged_dispatch_diag::ENV_SET_BUT_UNREGISTERED
-                .load(Ordering::Relaxed),
-            0,
-        );
-        assert_eq!(
-            super::jagged_dispatch_diag::SHAPE_REJECTED.load(Ordering::Relaxed),
-            0,
-        );
-    }
-
-    // V2 hook signature smoke test.
-    // Registers a thin V2 hook that records whether a device handle
-    // was passed, asserts the signature is callable end-to-end.
-    #[test]
-    fn test_gpu_jagged_reduction_hook_v2_signature() {
-        // Use a stand-alone callable — we don't actually register
-        // (`set` can fail in the global slot if another test ran)
-        // but we DO exercise the type so the signature is stable.
-        let _hook: super::GpuJaggedReductionFnV2 = test_v2_hook_noop;
-        // get_gpu_jagged_reduction_hook_v2 must be callable.
-        let _: Option<super::GpuJaggedReductionFnV2> =
-            super::get_gpu_jagged_reduction_hook_v2();
-    }
-
-    fn test_v2_hook_noop(
-        _dense_q_host: Vec<JaggedVal>,
-        _dense_q_device_handle: Option<u64>,
-        _packing: &crate::jagged::JaggedPacking<JaggedVal>,
-        _r_row_per_chip: &[Vec<JaggedChallenge>],
-        _y_per_chip: &[Vec<JaggedChallenge>],
-        _z_col: &[JaggedChallenge],
-        _z_row: &[JaggedChallenge],
-        _challenger: &mut JaggedChallenger,
-    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>> {
-        // Hook returns None — dispatcher would fall through to the
-        // host body.  We're testing the signature, not the dispatch.
-        None
-    }
 
     // ════════════════════════════════════════════════════════════════
     // CP-A: per-round jagged split (Architecture A) host validation.

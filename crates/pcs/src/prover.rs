@@ -154,6 +154,21 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error>;
 
+    /// The device jagged-reduction function, provided statically by the
+    /// prover (#130 static dispatch of the former global reduction OnceLock).
+    /// Default `None` = the host reduction
+    /// ([`crate::jagged_sumcheck::prove_jagged_reduction_owned`]); a
+    /// `StarkGpuProver` overrides this to return its device reduction.
+    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
+    /// down to the jagged-PCS reduction dispatch, so no global registry is
+    /// consulted.  On the CPU prover the default `None` yields the exact
+    /// unregistered-hook (host) path → byte-identical.
+    fn gpu_jagged_reduction_v2(
+        &self,
+    ) -> Option<crate::jagged_pcs::GpuJaggedReductionFnV2> {
+        None
+    }
+
     /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
@@ -177,6 +192,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
+        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
     ) -> crate::shard_level::shard_proof::EvaluationProof
     where
         SC: BasefoldRing,
@@ -199,6 +215,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
+            gpu_jagged_reduction,
         )
     }
 
@@ -303,6 +320,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             orientation,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
+            self.gpu_jagged_reduction_v2(),
         )
     }
 
