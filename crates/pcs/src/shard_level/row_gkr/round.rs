@@ -901,12 +901,9 @@ where
         return None;
     }
 
-    // Lazily drain the ziren-gpu device-first-layer
-    // stash and install into TLS for this scope.  Gated by
-    // `ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME` (separate from the
-    // stash-populating `ZIREN_GPU_DEVICE_FIRST_LAYER` flag) so
-    // operators can opt out of the per-shard cudaFree churn from
-    // draining the handle.
+    // Lazily drain the ziren-gpu device-first-layer stash and install into TLS
+    // for this scope (the stash is populated under the
+    // `ZIREN_GPU_DEVICE_FIRST_LAYER` flag).
     let _device_first_layer_guard = {
         use crate::shard_level::device_first_layer_context as dfl;
         // Drain the device-first-layer stash on each shard's first dispatch

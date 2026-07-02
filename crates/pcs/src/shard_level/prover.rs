@@ -746,17 +746,15 @@ where
     // read).
     //
     // SOUNDNESS GATE: the skip is taken ONLY when that device-handle happy
-    // path is GUARANTEED, i.e. the dense commit hook fires (COMMIT_DENSE),
-    // the V2 reduction consumes the handle (JAGGED_PCS), and the dense
-    // size clears the GPU reduction threshold (handle is only registered
-    // for log_dense >= the GPU min; mirror its env+default here).  If any
-    // condition fails the device handle is NOT registered and the jagged
-    // reduction falls back to a HOST materialize — but the per-shard
-    // provider uses drain-on-lookup, so by reduction time the
-    // device traces are GONE and a late re-materialize cannot recover
-    // them.  In that case we MUST keep the eager early D2H (captured here,
-    // pre-drain) for a correct dense_q.  Kill-switch
-    // ZIREN_GPU_COMMIT_TRACES_D2H=1 forces the eager materialize too.
+    // path is GUARANTEED, i.e. the dense commit fires, the V2 reduction
+    // consumes the handle (JAGGED_PCS), and the dense size clears the GPU
+    // reduction threshold (handle is only registered for log_dense >= the GPU
+    // min; mirror its env+default here).  If any condition fails the device
+    // handle is NOT registered and the jagged reduction falls back to a HOST
+    // materialize — but the per-shard provider uses drain-on-lookup, so by
+    // reduction time the device traces are GONE and a late re-materialize
+    // cannot recover them.  In that case we MUST keep the eager early D2H
+    // (captured here, pre-drain) for a correct dense_q.
     let jagged_on = std::env::var("ZIREN_GPU_JAGGED_PCS")
         .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
@@ -1343,17 +1341,16 @@ where
         // TAIL (chip_cum_tails) — same 14 values, no dependence on the
         // full materialize.  Validated identical via the bf-digest
         // cumulative_sums section canary.
-        // HEIGHT-AGNOSTIC (low-placement): read RAW `main_traces`, NOT
-        // `commit_traces`.  Under the band-cap/low-placement commit,
-        // `commit_traces` are padded to the cluster band height with ZERO high
-        // rows; computing the per-chip global cumulative sum over those zero
-        // rows injects spurious LogUp contributions (e.g. a zero row reads as a
-        // real "address 0" send), so the GLOBAL cumulative sum is non-zero and
-        // the recursion `assert_complete`'s `assert_digest_zero` fails (FIX-off
-        // 680210629 != 0).  `main_traces` hold the real per-chip cells (raw
-        // heights); on the non-band path `commit_traces == main_traces` so this
-        // is byte-identical for FIX-on.  Device-resident chips (width==0, empty
-        // main_trace) still use the provider TAIL below, unaffected.
+        // Read RAW `main_traces` (the real per-chip cells at their raw heights)
+        // for the per-chip global cumulative sum, NOT `commit_traces`.  Under
+        // natural-commit the present chips' `commit_traces == main_traces`, so
+        // this is byte-identical; the distinction matters only if a commit trace
+        // were ever padded above its raw height (zero high rows would inject
+        // spurious LogUp contributions — e.g. a zero row reading as a real
+        // "address 0" send — making the global cumulative sum non-zero and the
+        // recursion `assert_complete`'s `assert_digest_zero` fail).
+        // Device-resident chips (width==0, empty main_trace) still use the
+        // provider TAIL below, unaffected.
         .zip(main_traces.iter())
         .zip(chip_cum_tails.iter())
         .map(|((chip, main_trace), tail)| {

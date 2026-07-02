@@ -2695,10 +2695,10 @@ pub mod jagged {
         // re-materializing from the (about-to-be-drained) provider; off both
         // paths a later cold re-materialize from the drained provider would
         // silently produce an INVALID proof, so we leave the traces in place.
-        // Pure lifetime change, transcript-neutral.  Gated
-        // ZIREN_GPU_FREE_TRACES_PRE_REDUCE (default OFF; orchestrator sets it).
+        // Pure lifetime change, transcript-neutral.  Fires unconditionally on
+        // the device path (a provider being present).
         //
-        // The gate accepts the CARRIED host dense_q path
+        // It accepts the CARRIED host dense_q path
         // (precomputed_host_dense_q.is_some()), not only the DEVICE-commit
         // path (precomputed_dense_handle.is_some()).  On big shards (TM 2^22,
         // log_dense=29) the device commit OOM-DECLINES to host (~6 GiB free)
