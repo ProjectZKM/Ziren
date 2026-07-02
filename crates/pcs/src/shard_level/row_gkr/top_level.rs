@@ -50,6 +50,13 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
         crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
     >,
     drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // #118: the eight GKR-walk device lifecycle fns bundle (were the eight
+    // `GPU_*_HOOK` OnceLocks), distributed below to `build_gkr_circuit`
+    // (init/transition/pull/fit-preflight), `prove_gkr_round`
+    // (v3-fetch-publish), the scope-populate + post-walk drain sites, and the
+    // per-shard `DeviceInputData` (generate-first-layer).  All-`None`
+    // (`Default`) = host walk, byte-identical to the pre-#118 path.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -161,6 +168,9 @@ where
         &betas,
         num_row_variables,
         _device_traces,
+        // #118: init / transition / pull / fit-preflight fns (were the
+        // `GPU_LAYER_*_HOOK` OnceLocks), consulted on the device-fold path.
+        gkr_device_hooks,
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
@@ -187,7 +197,7 @@ where
             && TypeId::of::<EF>() == TypeId::of::<Ef4Local>()
         {
             if let Some(hook) =
-                crate::jagged_pcs::get_gpu_logup_scope_populate_hook()
+                gkr_device_hooks.logup_scope_populate
             {
                 let cid = logup_task_scope.circuit_id();
                 if let Some(payloads) = hook(cid) {
@@ -200,6 +210,12 @@ where
                             // materialized at scope entry, so the
                             // lazy regen arm never fires.
                             input_handle: None,
+                            // #118: the generate-first-layer fn (was
+                            // `GPU_GENERATE_FIRST_LAYER_HOOK`), stashed on the
+                            // circuit's input-data for the lazy `next()` regen
+                            // arm (never fires in this eager path).
+                            generate_first_layer: gkr_device_hooks
+                                .generate_first_layer,
                         };
                     logup_task_scope.install_circuit_from_payloads(
                         payloads, input_data,
@@ -309,6 +325,9 @@ where
             challenger,
             first_round_device_hook,
             drain_hook,
+            // #118: the v3-fetch-publish fn (was `GPU_V3_FETCH_PUBLISH_HOOK`),
+            // consulted per-round on the full-residency V3 hot path.
+            gkr_device_hooks,
         );
 
         // Observe order MUST match verifier: n0, n1, d0, d1.
@@ -340,9 +359,8 @@ where
     // Drain the GPU's per-circuit bucket. No-op on host-only path
     // or when ziren-gpu hasn't registered the drain hook.
     if let Some(circuit_id) = device_circuit_id_to_drain {
-        if let Some(drain_hook) =
-            crate::jagged_pcs::get_gpu_layer_drain_circuit_hook()
-        {
+        // #118: the per-circuit drain fn (was `GPU_LAYER_DRAIN_HOOK`).
+        if let Some(drain_hook) = gkr_device_hooks.layer_drain {
             drain_hook(circuit_id);
         }
     }
@@ -644,6 +662,11 @@ where
 pub(super) fn pull_device_layer_to_host<F, EF>(
     circuit_id: u64,
     handle: u64,
+    // #118: the layer-pull fn (was `GPU_LAYER_PULL_HOOK`), threaded from the
+    // prover's `GkrDeviceHooks` bundle via `prove_gkr_round`.  `None` = a
+    // programmer error (a `Device` layer exists but no pull fn was provided,
+    // impossible once `build_gkr_circuit` gated all three device fns).
+    pull_hook: Option<crate::jagged_pcs::GpuLayerPullFn>,
 ) -> super::layer::GkrCircuitLayer<F, EF>
 where
     F: PrimeField,
@@ -651,7 +674,7 @@ where
 {
     use core::any::TypeId;
 
-    use crate::jagged_pcs::{get_gpu_layer_pull_hook, JaggedChallenge};
+    use crate::jagged_pcs::JaggedChallenge;
 
     assert_eq!(
         TypeId::of::<EF>(),
@@ -659,8 +682,8 @@ where
         "LayerState::Device under EF != JaggedChallenge"
     );
 
-    let pull_hook = get_gpu_layer_pull_hook().expect(
-        "LayerState::Device with no GpuLayerPullFn registered"
+    let pull_hook = pull_hook.expect(
+        "LayerState::Device with no GpuLayerPullFn provided"
     );
 
     // Pass circuit_id so the GPU registry scopes per build call —

@@ -269,6 +269,22 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         None
     }
 
+    /// The eight GKR-walk device lifecycle fns, provided statically by the
+    /// prover (#118 static dispatch of the former eight global
+    /// `GPU_LAYER_*` / `GPU_LOGUP_SCOPE_POPULATE_*` / `GPU_V3_FETCH_PUBLISH_*`
+    /// / `GPU_GENERATE_FIRST_LAYER_*` OnceLocks).  Default = all-`None`
+    /// ([`crate::jagged_pcs::GkrDeviceHooks::default`]) = the host walk.
+    /// [`Self::prove_shard_to_basefold`] reads this and threads the bundle
+    /// down through `prove_shard_logup_gkr_rows`, distributing it to the
+    /// row-GKR firing sites, so no global registry is consulted.  On the CPU
+    /// prover the default yields the exact unregistered-hook (host) path →
+    /// byte-identical.  A `StarkGpuProver` cannot name the device fns (they
+    /// live in `zkm-gpu-basefold`); the `prover` crate instead passes a
+    /// populated bundle at the free-fn `prove_shard_to_basefold` call sites.
+    fn gkr_device_hooks(&self) -> crate::jagged_pcs::GkrDeviceHooks {
+        crate::jagged_pcs::GkrDeviceHooks::default()
+    }
+
     /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
@@ -428,6 +444,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             self.gpu_jagged_precompute_commit_hook(),
             self.first_round_device_hook(),
             self.drain_hook(),
+            self.gkr_device_hooks(),
         )
     }
 

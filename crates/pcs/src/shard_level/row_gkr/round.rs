@@ -3054,6 +3054,11 @@ pub fn prove_gkr_round<F, EF, Challenger>(
         crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
     >,
     drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // #118: the eight GKR-walk device lifecycle fns bundle (were the eight
+    // `GPU_*_HOOK` OnceLocks).  Here the v3-fetch-publish fn drives the
+    // per-round full-residency publish and the layer-pull fn feeds
+    // `pull_device_layer_to_host`.  All-`None` = host round.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> LogupGkrRoundProof<EF>
 where
     F: PrimeField,
@@ -3109,7 +3114,8 @@ where
                 // On success the V3 hook adopts the device buffers directly —
                 // no device→host→device round-trip.
                 let published =
-                    crate::jagged_pcs::get_gpu_v3_fetch_publish_hook()
+                    gkr_device_hooks
+                        .v3_fetch_publish
                         .map(|h| h(*circuit_id, total_vars_state))
                         .unwrap_or(false);
                 if published {
@@ -3146,7 +3152,12 @@ where
     let pulled_owner: Option<GkrCircuitLayer<F, EF>> = match state {
         LayerState::Host(_) => None,
         LayerState::Device { circuit_id, handle, .. } => Some(
-            super::top_level::pull_device_layer_to_host::<F, EF>(*circuit_id, *handle),
+            super::top_level::pull_device_layer_to_host::<F, EF>(
+                *circuit_id,
+                *handle,
+                // #118: layer-pull fn (was `GPU_LAYER_PULL_HOOK`).
+                gkr_device_hooks.layer_pull,
+            ),
         ),
     };
     let circuit: &GkrCircuitLayer<F, EF> = match state {
@@ -4186,9 +4197,10 @@ mod tests {
             d_eval,
             lambda,
             &mut ch,
-            // #118: host-only test → host first round.
+            // #118: host-only test → host first round + host GKR walk.
             None,
             None,
+            crate::jagged_pcs::GkrDeviceHooks::default(),
         );
 
         // Claimed sum = λ · n_eval + d_eval.
@@ -4275,8 +4287,9 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            // #118: host-only test → host first round.
+            // #118: host-only test → host first round + host GKR walk.
             &state, &point, n_eval, d_eval, lambda, &mut ch, None, None,
+            crate::jagged_pcs::GkrDeviceHooks::default(),
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.

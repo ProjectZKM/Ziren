@@ -2120,6 +2120,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // first-layer stash via the device-resident prover's hooks).
                 None,
                 None,
+                // #118: host shrink caller cannot name the ziren-gpu GKR-walk
+                // device lifecycle fns → host walk (byte-identical).
+                zkm_pcs::jagged_pcs::GkrDeviceHooks::default(),
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over

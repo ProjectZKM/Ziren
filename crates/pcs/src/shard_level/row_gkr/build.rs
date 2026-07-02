@@ -45,6 +45,10 @@ pub fn build_gkr_circuit<F, EF, A>(
     betas: &[EF],
     num_row_variables: usize,
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    // #118: the eight GKR-walk device lifecycle fns bundle (were the eight
+    // `GPU_*_HOOK` OnceLocks).  On the device-fold path the init / transition
+    // / pull / fit-preflight fns are consulted; all-`None` = host fold.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
     F: PrimeField,
@@ -102,7 +106,7 @@ where
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
     let device_terminal: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> =
-        try_run_device_path::<F, EF>(&mut last_ef_layer, &mut layers);
+        try_run_device_path::<F, EF>(&mut last_ef_layer, &mut layers, gkr_device_hooks);
 
     // Subsequent transitions stay in EF.  When the device path took
     // over, `last_ef_layer` is `None` here and the loop is a no-op
@@ -168,6 +172,7 @@ fn layer_transition_env_cached() -> bool {
 fn try_run_device_path<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
 where
     F: PrimeField,
@@ -182,12 +187,13 @@ where
     if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
         return None;
     }
-    try_run_device_path_basefold::<F, EF>(last_ef_layer, layers)
+    try_run_device_path_basefold::<F, EF>(last_ef_layer, layers, gkr_device_hooks)
 }
 
 fn try_run_device_path_basefold<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
 where
     F: PrimeField,
@@ -196,9 +202,7 @@ where
     use core::any::TypeId;
 
     use crate::jagged_pcs::{
-        allocate_gpu_layer_circuit_id, get_gpu_layer_fit_preflight_hook, get_gpu_layer_init_hook,
-        get_gpu_layer_pull_hook, get_gpu_layer_transition_hook, HostLayerView, JaggedChallenge,
-        JaggedVal,
+        allocate_gpu_layer_circuit_id, HostLayerView, JaggedChallenge, JaggedVal,
     };
 
     // Need 'static bound on F/EF to use TypeId; the build_gkr_circuit
@@ -206,10 +210,11 @@ where
     // by the standard p3 field bounds), but we re-check via the
     // TypeId comparisons below — `TypeId::of::<F>()` requires F : 'static.
 
-    // Gate 3: hooks registered.
-    let init_hook = get_gpu_layer_init_hook()?;
-    let transition_hook = get_gpu_layer_transition_hook()?;
-    let pull_hook = get_gpu_layer_pull_hook()?;
+    // Gate 3: device fns provided (#118: statically via the `GkrDeviceHooks`
+    // bundle, were the `GPU_LAYER_*_HOOK` OnceLocks).  `None` on any = host.
+    let init_hook = gkr_device_hooks.layer_init?;
+    let transition_hook = gkr_device_hooks.layer_transition?;
+    let pull_hook = gkr_device_hooks.layer_pull?;
 
     // Gate 4: TypeId match (recursion-circuit instantiates over a
     // different field stack — those calls fall through to host).
@@ -259,7 +264,7 @@ where
     // fold runs entirely on host — byte-identical (device fold is a perf
     // optimization; the layer cells are the same) and transcript-neutral.
     // Unregistered hook => proceed as before (no decline).
-    if let Some(preflight) = get_gpu_layer_fit_preflight_hook() {
+    if let Some(preflight) = gkr_device_hooks.layer_fit_preflight {
         if !preflight(&view) {
             drop(view);
             // Put the layer back so the host fall-through loop in

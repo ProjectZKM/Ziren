@@ -248,6 +248,11 @@ pub fn prove_shard_to_basefold<SC, A>(
         crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
     >,
     drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // #118: the eight GKR-walk device lifecycle fns (init / transition /
+    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
+    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
+    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -301,6 +306,7 @@ where
         gpu_jagged_precompute_commit,
         first_round_device_hook,
         drain_hook,
+        gkr_device_hooks,
     )
 }
 
@@ -497,6 +503,11 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
         crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
     >,
     drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // #118: the eight GKR-walk device lifecycle fns (init / transition /
+    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
+    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
+    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -551,6 +562,7 @@ where
         gpu_jagged_precompute_commit,
         first_round_device_hook,
         drain_hook,
+        gkr_device_hooks,
     )
 }
 
@@ -605,6 +617,11 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
         crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
     >,
     drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // #118: the eight GKR-walk device lifecycle fns (init / transition /
+    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
+    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
+    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
+    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1026,6 +1043,10 @@ where
             // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks).
             first_round_device_hook,
             drain_hook,
+            // #118: the eight GKR-walk device lifecycle fns bundle (were the
+            // eight `GPU_*_HOOK` OnceLocks), distributed to the row-GKR
+            // firing sites inside `prove_shard_logup_gkr_rows`.
+            gkr_device_hooks,
         )
     };
     tracing::info!(

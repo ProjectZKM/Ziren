@@ -845,24 +845,11 @@ pub type GpuJaggedReductionFnV2 = fn(
 /// another's intermediate handles).
 pub type GpuLayerTransitionFn = fn(circuit_id: u64, prev_handle: u64) -> u64;
 
-static GPU_LAYER_TRANSITION_HOOK: std::sync::OnceLock<GpuLayerTransitionFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU row-GKR layer-transition driver.  Idempotent;
-/// returns `Err(existing_hook)` when a hook was already registered.
-/// Will be called once by `ziren-gpu`'s `compress_multi_gpu` at
-/// startup once the device layer-transition dispatch is wired in.
-pub fn register_gpu_layer_transition_hook(
-    f: GpuLayerTransitionFn,
-) -> Result<(), GpuLayerTransitionFn> {
-    GPU_LAYER_TRANSITION_HOOK.set(f)
-}
-
-/// Read the registered GPU row-GKR layer-transition hook, if any.
-#[must_use]
-pub fn get_gpu_layer_transition_hook() -> Option<GpuLayerTransitionFn> {
-    GPU_LAYER_TRANSITION_HOOK.get().copied()
-}
+// #118: the `GpuLayerTransitionFn` is provided STATICALLY via
+// [`GkrDeviceHooks::layer_transition`] (threaded from the prover down to
+// `try_run_device_path_basefold`), not a global registry.  The former
+// `GPU_LAYER_TRANSITION_HOOK` OnceLock + its `register_/get_` accessors
+// were removed.
 
 // ─────────────────────────────────────────────────────────────────────
 // Companion hooks for the row-GKR layer-state lifecycle on device:
@@ -924,22 +911,11 @@ pub struct HostLayerView<'a> {
 pub type GpuLayerInitFn =
     for<'a> fn(circuit_id: u64, view: HostLayerView<'a>) -> u64;
 
-static GPU_LAYER_INIT_HOOK: std::sync::OnceLock<GpuLayerInitFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU row-GKR layer-init driver.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.
-pub fn register_gpu_layer_init_hook(
-    f: GpuLayerInitFn,
-) -> Result<(), GpuLayerInitFn> {
-    GPU_LAYER_INIT_HOOK.set(f)
-}
-
-/// Read the registered GPU row-GKR layer-init hook, if any.
-#[must_use]
-pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
-    GPU_LAYER_INIT_HOOK.get().copied()
-}
+// #118: the `GpuLayerInitFn` is provided STATICALLY via
+// [`GkrDeviceHooks::layer_init`] (threaded from the prover down to
+// `try_run_device_path_basefold`), not a global registry.  The former
+// `GPU_LAYER_INIT_HOOK` OnceLock + its `register_/get_` accessors were
+// removed.
 
 // ─────────────────────────────────────────────────────────────────────
 // PIECE3: row-GKR device-fold FIT PREFLIGHT hook.
@@ -972,22 +948,11 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 pub type GpuLayerFitPreflightFn =
     for<'a> fn(view: &HostLayerView<'a>) -> bool;
 
-static GPU_LAYER_FIT_PREFLIGHT_HOOK: std::sync::OnceLock<GpuLayerFitPreflightFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU row-GKR device-fold fit preflight hook.  Idempotent;
-/// returns `Err(existing_hook)` when one was already registered.
-pub fn register_gpu_layer_fit_preflight_hook(
-    f: GpuLayerFitPreflightFn,
-) -> Result<(), GpuLayerFitPreflightFn> {
-    GPU_LAYER_FIT_PREFLIGHT_HOOK.set(f)
-}
-
-/// Read the registered GPU row-GKR device-fold fit preflight hook, if any.
-#[must_use]
-pub fn get_gpu_layer_fit_preflight_hook() -> Option<GpuLayerFitPreflightFn> {
-    GPU_LAYER_FIT_PREFLIGHT_HOOK.get().copied()
-}
+// #118: the `GpuLayerFitPreflightFn` is provided STATICALLY via
+// [`GkrDeviceHooks::layer_fit_preflight`] (threaded from the prover down
+// to `try_run_device_path_basefold`), not a global registry.  The former
+// `GPU_LAYER_FIT_PREFLIGHT_HOOK` OnceLock + its `register_/get_` accessors
+// were removed.
 
 /// Signature of the GPU row-GKR layer-pull driver.  Materializes a
 /// device-resident layer back to host as a
@@ -1010,22 +975,11 @@ pub type GpuLayerPullFn = fn(
     handle: u64,
 ) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>;
 
-static GPU_LAYER_PULL_HOOK: std::sync::OnceLock<GpuLayerPullFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU row-GKR layer-pull driver.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.
-pub fn register_gpu_layer_pull_hook(
-    f: GpuLayerPullFn,
-) -> Result<(), GpuLayerPullFn> {
-    GPU_LAYER_PULL_HOOK.set(f)
-}
-
-/// Read the registered GPU row-GKR layer-pull hook, if any.
-#[must_use]
-pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
-    GPU_LAYER_PULL_HOOK.get().copied()
-}
+// #118: the `GpuLayerPullFn` is provided STATICALLY via
+// [`GkrDeviceHooks::layer_pull`] (threaded from the prover down to
+// `try_run_device_path_basefold` and the terminal-pull site in
+// `top_level.rs`), not a global registry.  The former `GPU_LAYER_PULL_HOOK`
+// OnceLock + its `register_/get_` accessors were removed.
 
 /// Signature of the GPU row-GKR per-circuit drain driver.  Releases
 /// every device-resident layer state still held by the GPU registry
@@ -1048,26 +1002,12 @@ pub fn get_gpu_layer_pull_hook() -> Option<GpuLayerPullFn> {
 /// on a missing bucket is fine (idempotent).
 pub type GpuLayerDrainCircuitFn = fn(circuit_id: u64);
 
-static GPU_LAYER_DRAIN_HOOK: std::sync::OnceLock<GpuLayerDrainCircuitFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU row-GKR per-circuit drain driver.  Idempotent;
-/// returns `Err(existing_hook)` when a hook was already registered.
-pub fn register_gpu_layer_drain_circuit_hook(
-    f: GpuLayerDrainCircuitFn,
-) -> Result<(), GpuLayerDrainCircuitFn> {
-    GPU_LAYER_DRAIN_HOOK.set(f)
-}
-
-/// Read the registered GPU row-GKR per-circuit drain hook, if any.
-/// When `None`, callers MUST be tolerant: the GPU side either has
-/// not registered the hook yet (older ziren-gpu builds) or the host
-/// path is in use (no device state to drain).  In both cases the
-/// row-GKR top-level prover should simply skip the drain call.
-#[must_use]
-pub fn get_gpu_layer_drain_circuit_hook() -> Option<GpuLayerDrainCircuitFn> {
-    GPU_LAYER_DRAIN_HOOK.get().copied()
-}
+// #118: the `GpuLayerDrainCircuitFn` is provided STATICALLY via
+// [`GkrDeviceHooks::layer_drain`] (threaded from the prover down to the
+// post-layer-walk drain site in `top_level.rs`), not a global registry.
+// `None` (CPU prover / host walk) skips the drain call, byte-identical to
+// the pre-#118 unregistered-hook path.  The former `GPU_LAYER_DRAIN_HOOK`
+// OnceLock + its `register_/get_` accessors were removed.
 
 /// populate the per-shard `LogupTaskScope` with
 /// device-resident layer payloads at scope-entry.
@@ -1112,26 +1052,13 @@ pub type GpuLogupScopePopulateFn = fn(
     Vec<crate::shard_level::row_gkr::device_circuit::DeviceCircuitLayerPayload>,
 >;
 
-static GPU_LOGUP_SCOPE_POPULATE_HOOK: std::sync::OnceLock<GpuLogupScopePopulateFn> =
-    std::sync::OnceLock::new();
-
-/// Register the populate-at-scope-entry hook.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.  Called
-/// once at ziren-gpu startup (see  — `basefold/src/
-/// logup_scope_populate.rs` in the ziren-gpu repo).
-pub fn register_gpu_logup_scope_populate_hook(
-    f: GpuLogupScopePopulateFn,
-) -> Result<(), GpuLogupScopePopulateFn> {
-    GPU_LOGUP_SCOPE_POPULATE_HOOK.set(f)
-}
-
-/// Read the registered populate-at-scope-entry hook, if any.  Callers
-/// MUST handle `None` gracefully — see contract on
-/// [`GpuLogupScopePopulateFn`].
-#[must_use]
-pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
-    GPU_LOGUP_SCOPE_POPULATE_HOOK.get().copied()
-}
+// #118: the `GpuLogupScopePopulateFn` is provided STATICALLY via
+// [`GkrDeviceHooks::logup_scope_populate`] (threaded from the prover down
+// to the scope-populate site in `top_level.rs`), not a global registry.
+// `None` (CPU prover / host walk) leaves the scope's `circuit` as `None`,
+// byte-identical to the pre-#118 unregistered-hook path.  The former
+// `GPU_LOGUP_SCOPE_POPULATE_HOOK` OnceLock + its `register_/get_`
+// accessors were removed.
 
 // ─────────────────────────────────────────────────────────────────────
 // Device-resident GKR layer fetch-and-publish hook (full residency).
@@ -1157,23 +1084,13 @@ pub fn get_gpu_logup_scope_populate_hook() -> Option<GpuLogupScopePopulateFn> {
 // the caller then pulls + runs the host/V2 fallback exactly as before.
 pub type GpuV3FetchPublishFn = fn(circuit_id: u64, num_variables: usize) -> bool;
 
-static GPU_V3_FETCH_PUBLISH_HOOK: std::sync::OnceLock<GpuV3FetchPublishFn> =
-    std::sync::OnceLock::new();
-
-/// Register the device-resident GKR layer fetch-and-publish hook.
-/// Idempotent; `Err(existing)` if already registered.  Called once at
-/// ziren-gpu startup.
-pub fn register_gpu_v3_fetch_publish_hook(
-    f: GpuV3FetchPublishFn,
-) -> Result<(), GpuV3FetchPublishFn> {
-    GPU_V3_FETCH_PUBLISH_HOOK.set(f)
-}
-
-/// Read the registered fetch-and-publish hook, if any.
-#[must_use]
-pub fn get_gpu_v3_fetch_publish_hook() -> Option<GpuV3FetchPublishFn> {
-    GPU_V3_FETCH_PUBLISH_HOOK.get().copied()
-}
+// #118: the `GpuV3FetchPublishFn` is provided STATICALLY via
+// [`GkrDeviceHooks::v3_fetch_publish`] (threaded from the prover down to
+// the per-round V3 fetch-and-publish site in `round.rs`), not a global
+// registry.  `None` (CPU prover / host walk) means no publish → the caller
+// pulls + runs the host/V2 fallback, byte-identical to the pre-#118
+// unregistered-hook path.  The former `GPU_V3_FETCH_PUBLISH_HOOK` OnceLock
+// + its `register_/get_` accessors were removed.
 
 // ─────────────────────────────────────────────────────────────────────
 // Device-resident `generate_first_layer` regen hook.
@@ -1205,23 +1122,68 @@ pub type GpuGenerateFirstLayerFn = fn(
     crate::shard_level::row_gkr::device_circuit::DeviceCircuitLayerPayload,
 >;
 
-static GPU_GENERATE_FIRST_LAYER_HOOK: std::sync::OnceLock<GpuGenerateFirstLayerFn> =
-    std::sync::OnceLock::new();
+// #118: the `GpuGenerateFirstLayerFn` is provided STATICALLY via
+// [`GkrDeviceHooks::generate_first_layer`] (threaded from the prover into
+// the per-shard `DeviceInputData` at scope-populate time; read by
+// `DeviceLogupGkrCircuit::next`'s lazy-regen arm), not a global registry.
+// `None` (CPU prover / host walk) makes the lazy-regen arm surface `None`,
+// byte-identical to the pre-#118 unregistered-hook path (production uses
+// `num_virtual_layers == 0`, so the arm never fires regardless).  The
+// former `GPU_GENERATE_FIRST_LAYER_HOOK` OnceLock + its `register_/get_`
+// accessors were removed.
 
-/// Register the regen hook.  Idempotent; returns `Err(existing)` when
-/// a hook was already registered.  Called once at ziren-gpu startup
-/// alongside the other GKR hooks.
-pub fn register_gpu_generate_first_layer_hook(
-    f: GpuGenerateFirstLayerFn,
-) -> Result<(), GpuGenerateFirstLayerFn> {
-    GPU_GENERATE_FIRST_LAYER_HOOK.set(f)
-}
+// ─────────────────────────────────────────────────────────────────────
+// #118: static-dispatch bundle for the eight GKR-walk device lifecycle
+// fns.
+//
+// These fns were formerly eight independent global `OnceLock` registries
+// (`GPU_LAYER_TRANSITION_HOOK`, `GPU_LAYER_INIT_HOOK`, … ,
+// `GPU_GENERATE_FIRST_LAYER_HOOK`), each set once at ziren-gpu startup and
+// read at its firing site via a `get_*` accessor.  #118 replaces that with
+// STATIC provision: the prover exposes the set via
+// [`crate::prover::MachineProver::gkr_device_hooks`] and it is threaded
+// (`prove_shard_to_basefold` → … → `prove_shard_logup_gkr_rows`) and
+// distributed to the row-GKR firing sites (`build_gkr_circuit` /
+// `prove_gkr_round` / the scope-populate + drain sites / the
+// `DeviceInputData` regen arm).
+//
+// `Copy` so it threads with zero ceremony; the all-`None` `Default` is the
+// host walk — byte-identical to the pre-#118 unregistered-hook path.  A
+// `StarkGpuProver` cannot name the device fns (they live in
+// `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the `prover` crate
+// instead passes a bundle whose fields are `Some(device_fn)` at the free-fn
+// `prove_shard_to_basefold` call sites, exactly as the `#130`/`#118`
+// commit/open/reduce/first-round slices do for their fns.
+// ─────────────────────────────────────────────────────────────────────
 
-/// Read the registered regen hook, if any.  Callers MUST handle
-/// `None` gracefully — see the contract on [`GpuGenerateFirstLayerFn`].
-#[must_use]
-pub fn get_gpu_generate_first_layer_hook() -> Option<GpuGenerateFirstLayerFn> {
-    GPU_GENERATE_FIRST_LAYER_HOOK.get().copied()
+/// The eight GKR-walk device lifecycle fns, provided STATICALLY by the
+/// prover.  All-`None` (`Default`) = the host walk (CPU prover / host
+/// free-fn callers), byte-identical to the pre-#118 unregistered-hook path.
+#[derive(Clone, Copy, Default)]
+pub struct GkrDeviceHooks {
+    /// Upload the first EF layer to device (was `GPU_LAYER_INIT_HOOK`).
+    pub layer_init: Option<GpuLayerInitFn>,
+    /// Produce the next device-resident layer state (was
+    /// `GPU_LAYER_TRANSITION_HOOK`).
+    pub layer_transition: Option<GpuLayerTransitionFn>,
+    /// Materialize a device layer handle back to host (was
+    /// `GPU_LAYER_PULL_HOOK`).
+    pub layer_pull: Option<GpuLayerPullFn>,
+    /// Release a circuit's device-resident intermediate layers (was
+    /// `GPU_LAYER_DRAIN_HOOK`).
+    pub layer_drain: Option<GpuLayerDrainCircuitFn>,
+    /// Up-front device-fold VRAM fit preflight (was
+    /// `GPU_LAYER_FIT_PREFLIGHT_HOOK`).
+    pub layer_fit_preflight: Option<GpuLayerFitPreflightFn>,
+    /// Populate the scope with device-resident layer payloads at
+    /// scope-entry (was `GPU_LOGUP_SCOPE_POPULATE_HOOK`).
+    pub logup_scope_populate: Option<GpuLogupScopePopulateFn>,
+    /// Publish a device-resident GKR layer to the V3 TLS slot (was
+    /// `GPU_V3_FETCH_PUBLISH_HOOK`).
+    pub v3_fetch_publish: Option<GpuV3FetchPublishFn>,
+    /// Regenerate the first layer on device for the lazy `next()` arm
+    /// (was `GPU_GENERATE_FIRST_LAYER_HOOK`).
+    pub generate_first_layer: Option<GpuGenerateFirstLayerFn>,
 }
 
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each

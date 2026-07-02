@@ -343,6 +343,8 @@ mod tests {
             // (first-round-prove + drain fns).
             None,
             None,
+            // #118: host-only synthetic witness → host GKR walk.
+            zkm_pcs::jagged_pcs::GkrDeviceHooks::default(),
         )
     }
 
