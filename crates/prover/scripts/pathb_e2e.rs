@@ -1,4 +1,4 @@
-//! #115 Path B — G-HEADLINE / COMPLETENESS validation bin.
+//! End-to-end / COMPLETENESS validation bin.
 //!
 //! [[bin]] copy of examples/e2e_ceremony_verify.rs with the test-artifacts
 //! dependency removed (loads the workload ONLY from `E2E_WORKLOAD=<dir>` =
@@ -15,7 +15,7 @@
 //! without the multi-minute shrink/wrap/gnark tail), printing
 //! VERIFY_COMPRESSED_ACCEPT.
 //!
-//! Run (G-HEADLINE):
+//! Run:
 //!   FIX_CORE_SHAPES=false VERIFY_VK=true ZIREN_HA_NO_FIXSHAPE=1 \
 //!   E2E_WORKLOAD=/data/stephen/ziren-shape-bin/fibonacci-1k SHARD_SIZE=262144 \
 //!   build_compress_vks-style bin (native-gnark feature on by default)

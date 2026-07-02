@@ -33,7 +33,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         chips: &[&MachineChip<SC, A>],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
-        // #125 INC-4b: `true` for the CORE machine (rev shard proofs), `false`
+        // `true` for the CORE machine (rev shard proofs), `false`
         // for recursion / shrink / wrap (LEGACY). Threaded to the host zerocheck.
         core_rev: bool,
     ) -> Result<(), VerificationError<SC>>
@@ -47,7 +47,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                     <SC as StarkGenericConfig>::Challenge,
                 >,
             >,
-        // STAGE-B b1': threaded to the shard-level BaseFold verifier's static
+        // Threaded to the shard-level BaseFold verifier's static
         // OUTER generic verify (former `OUTER_JAGGED_VERIFY_HOOK`). Verify-only,
         // both rings satisfy it.
         SC: crate::BasefoldRing,
@@ -63,9 +63,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         use itertools::izip;
 
         // BaseFold-over-BN254: every shard proof (inner KoalaBear and the OUTER
-        // wrap) now carries a shard-level BaseFold proof.  The legacy
-        // two-adic-quotient FRI/STARK verify path has been retired; a missing
-        // `basefold_shard_proof` is now a hard error.
+        // wrap) carries a shard-level BaseFold proof.  There is no
+        // two-adic-quotient FRI/STARK verify fallback; a missing
+        // `basefold_shard_proof` is a hard error.
         let basefold_proof = proof.basefold_shard_proof.as_ref().ok_or_else(|| {
             VerificationError::BasefoldShardVerifier(
                 "shard proof missing basefold_shard_proof (FRI verify path retired)".to_string(),
@@ -452,8 +452,8 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
 impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
 
 // `try_verify_late_binding_proofs`, `try_verify_jagged_late_binding_proof`,
-// and the per-KB jagged-jagged-PCS helper retired alongside the legacy
-// MIPS verify path.  BaseFold MIPS verification now lives in
+// and the per-KB jagged-jagged-PCS helper have been removed.  BaseFold
+// MIPS verification lives in
 // `BasefoldShardVerifier::verify_shard`
 // (`crates/pcs/src/shard_level/verifier.rs`), dispatched from
 // `Verifier::verify_shard` when `basefold_shard_proof.is_some()`.

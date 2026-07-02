@@ -33,7 +33,7 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     max_log_row_count: usize,
     challenger: &mut Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // #125 INC-2: the shared per-chip analytic trace-MLE (chip-index order),
+    // The shared per-chip analytic trace-MLE (chip-index order),
     // built once at trace-gen over the `max_log_row_count` cube, threaded
     // read-only. When present, the FULL-POINT main-trace opening consumes it
     // (`PaddedMle::eval_at`) instead of re-evaluating the trace on the fly;
@@ -71,10 +71,7 @@ where
     // post-grind state — alpha/beta and the whole GKR transcript — is
     // identical between prover and verifier. Config-aware (see `GkrGrind`):
     // real grind for the Inner challenger, `F::ZERO` no-op for the
-    // Outer/wrap challenger (never recursion-verified). Previously a hard
-    // `F::ZERO` placeholder, so the in-circuit `assert(bit==0)` grinding
-    // check was never satisfiable (and only passed because that assert was
-    // itself unenforced; see compiler.rs base_assert_eq / DivFAssert).
+    // Outer/wrap challenger (never recursion-verified).
     let witness: F = challenger.gkr_grind(GKR_GRINDING_BITS);
 
     // Sample the LogUp challenges [alpha, beta].  `beta_seed_dim` = log2(max_arity
@@ -400,8 +397,8 @@ where
                 }
                 // Parity gate (ZIREN_GPU_EVAL_AT_BATCH_VERIFY=1): re-run the
                 // legacy per-chip eval-at for every batched chip and assert the
-                // batched result is BYTE-IDENTICAL. Proves the batched path is
-                // transcript-neutral before the per-chip path is retired.
+                // batched result is BYTE-IDENTICAL, proving the batched path
+                // is transcript-neutral.
                 if std::env::var("ZIREN_GPU_EVAL_AT_BATCH_VERIFY").is_ok() {
                     for (name, point) in names.iter().zip(points.iter()) {
                         let per_chip =
@@ -531,12 +528,12 @@ where
                     )
                 })
             } else if main_trace.width > 0 {
-                // #125 INC-2: consume the shared analytic trace-MLE at the
+                // Consume the shared analytic trace-MLE at the
                 // FULL point (`num_variables == max_log_row_count ==
                 // full_eval_point.len()`, zero padding) instead of
                 // re-evaluating the trace on the fly.  `PaddedMle::eval_at`
                 // reproduces `evaluate_trace_columns_at_point` bit-for-bit
-                // (INC-1's `eval_at_matches_evaluate_trace_columns`), so this
+                // (see `eval_at_matches_evaluate_trace_columns`), so this
                 // is transcript-neutral.  Falls back to the on-the-fly path
                 // when no shared MLE is threaded (e.g. device loaders).
                 Some(match shared_trace_mles.and_then(|s| s.get(chip_idx)) {

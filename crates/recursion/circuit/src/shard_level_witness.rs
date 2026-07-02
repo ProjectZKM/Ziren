@@ -24,14 +24,14 @@ use crate::witness::{Witnessable, WitnessWriter};
 use crate::CircuitConfig;
 use zkm_pcs::{InnerChallenge, InnerVal};
 
-/// DE-CLAMP GUARD (#88/#82): assert a recursion bundle commits at the FIXED
+/// FIXED-HEIGHT GUARD: assert a recursion bundle commits at the FIXED
 /// `DEFAULT_LOG_STACKING_HEIGHT`.  Enumerability (recursion VK = f(chip-set,
 /// arity)) rests on `pick_log_stacking_height` being unconditional
 /// (jagged_pcs.rs:122): every bundle is honestly 21-round, so the per-proof
 /// verifier rebuild constant-folds to `num_variables = 21`.  A regression that
 /// re-introduced the area-clamp would make `bundle_num_vars` (=
 /// `fri_commitments.len()`) and `log_stacking_height` vary with the trace area
-/// → program-bytes/VK become clamp-dependent again (re-breaking #82) AND the
+/// → program-bytes/VK become clamp-dependent again (breaking enumerability) AND the
 /// masked-tail path Fiat-Shamir-desyncs.  This guard catches that at
 /// program-build time (it runs for both the real proof and the enum dummy,
 /// which take the same branch).  Called from every recursion stage's per-proof
@@ -57,7 +57,7 @@ pub fn assert_recursion_stacking_height_fixed(
     );
 }
 
-// ── Per-chip cumulative sums (swap 1+2) ────────────────
+// ── Per-chip cumulative sums ────────────────
 
 impl<C> Witnessable<C> for ChipCumulativeSums<InnerVal, InnerChallenge>
 where
@@ -190,7 +190,7 @@ where
                 .as_ref()
                 .map(|v| v.read(builder)),
             log_degree: self.log_degree,
-            // #88 Stage 3b: SP1-parity FULL-POINT openings — thread the
+            // Full-point openings — thread the
             // host's `*_full` Ext values into the circuit so the in-circuit
             // LogUp last-layer degree-masked reconstruction can read them.
             main_trace_evaluations_full: self
@@ -209,7 +209,7 @@ where
         if let Some(prep) = self.preprocessed_trace_evaluations.as_ref() {
             prep.write(witness);
         }
-        // #88 Stage 3b: emit the FULL-POINT openings in the SAME order
+        // Emit the FULL-POINT openings in the SAME order
         // `read` consumes them (after main + prep).
         if let Some(main_full) = self.main_trace_evaluations_full.as_ref() {
             main_full.write(witness);
@@ -312,10 +312,10 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         // stream felts).
         modified_commitment: [Felt<C::F>; 8],
     },
-    // P2c-for-outer: the gnark wrap path.  The host carries the outer bundle
+    // The gnark wrap path.  The host carries the outer bundle
     // (`JaggedBasefoldBundleGeneric<OuterValMmcs>`, BN254 commitments) as
     // `EvaluationProof::Bytes`.  Rather than BAKE its proof-specific values in
-    // `lift_jagged_basefold_bundle_outer` (the previous behavior, which made the
+    // `lift_jagged_basefold_bundle_outer` (which would make the
     // gnark R1CS proof-specific → a fresh proof trips `assertIsEqual`), we
     // WITNESS them from the gnark stream here.  Digests are BN254 1-caps
     // (`[Var<C::N>; 1]`, N = Bn254 in the outer config).  This variant is only
@@ -342,13 +342,10 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // ── Top-level: BasefoldShardProof ────────────────────────────────
 //
 // Bridges `zkm_pcs::shard_level::shard_proof::BasefoldShardProof`
-// (host) to a tuple of recursion-variable pieces.  The full
-// `BasefoldShardProofVariable` mapping (which includes
-// chip_height_bits and the jagged-PCS evaluation_proof) lands
-// once those pieces have host-side definitions; this impl
+// (host) to a tuple of recursion-variable pieces.  This impl
 // exposes the typed pieces (logup_gkr_proof, zerocheck_proof)
 // + raw felts (main_commitment, public_values) so call sites
-// can already begin reading them through the witness stream.
+// can read them through the witness stream.
 //
 // Returned tuple shape:
 //   (main_commitment_felts, public_values_felts,
@@ -398,7 +395,7 @@ where
         // program value-independent.  Digests stay raw (rekeyed in the lift;
         // witnessed separately).  Must mirror `write` exactly.
         use zkm_pcs::shard_level::shard_proof::EvaluationProof as HostEvalProof;
-        // P2c-for-outer: for the gnark wrap (OuterConfig), WITNESS the outer
+        // For the gnark wrap (OuterConfig), WITNESS the outer
         // BN254 bundle from the stream HERE (at the eval-proof position) via the
         // config dispatch — value-independent gnark R1CS.  Inner configs return
         // None and fall through to the existing Empty/Bytes/Bundle handling.
@@ -470,13 +467,13 @@ where
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
         self.zerocheck_proof.write(witness);
-        // P2c-for-outer: for the gnark wrap, WRITE the witnessed outer BN254
+        // For the gnark wrap, WRITE the witnessed outer BN254
         // bundle here (mirrors the read dispatch).  Returns true when handled
         // (outer config + outer bundle bytes), so the inner Bundle write below
         // is skipped.  Inner configs return false → fall through.
         let _handled_outer =
             C::write_outer_eval_bundle::<_>(&self.evaluation_proof, witness);
-        // P2c STEP 2: write the Bundle's basefold-proof felt/ext values in
+        // Write the Bundle's basefold-proof felt/ext values in
         // the SAME position `read` consumes them (between zerocheck and
         // opened_values).  Bytes/Empty write nothing (outer wrap bakes).
         if let zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) =
@@ -716,8 +713,8 @@ where
 /// `leaf_values` passes through verbatim.  `merkle_path_bytes` is
 /// left empty — the in-circuit verifier doesn't read these bytes,
 /// it walks the Merkle path through the digest field; bytes are a
-/// legacy carrier the existing recursion-circuit retains for
-/// witness-stream layout compatibility but no longer consumes.
+/// legacy carrier the recursion-circuit retains for
+/// witness-stream layout compatibility but does not consume.
 fn host_component_opening_to_recursive(
     opening: &MerkleOpening<InnerVal, JaggedMmcs>,
 ) -> Vec<RecursiveBasefoldComponentOpening<InnerVal, InnerChallenge>> {
@@ -873,7 +870,7 @@ pub fn host_stacked_basefold_to_recursive(
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// BaseFold-over-BN254 wrap port: OUTER-ring bundle lift.
+// BaseFold-over-BN254 wrap: OUTER-ring bundle lift.
 //
 // The OUTER wrap proof's `EvaluationProof::Bytes` carries a
 // `JaggedBasefoldBundleGeneric<OuterValMmcs>` whose commitments are
@@ -1029,7 +1026,7 @@ fn host_stacked_basefold_to_recursive_outer(
     )
 }
 
-/// P2c-for-outer: WITNESS the OUTER (BN254) jagged-basefold bundle's
+/// WITNESS the OUTER (BN254) jagged-basefold bundle's
 /// proof-specific values from the gnark witness stream (the value-independent
 /// replacement for the const-baking in `lift_jagged_basefold_bundle_outer`).
 ///
@@ -1139,7 +1136,7 @@ where
     true
 }
 
-/// #H (BaseFold-over-BN254 wrap port): lift the OUTER-ring jagged BaseFold
+/// Lift the OUTER-ring jagged BaseFold
 /// bundle into the in-circuit `JaggedPcsProofVariable`.
 ///
 /// Structural mirror of [`lift_jagged_basefold_bundle`] but:
@@ -1158,11 +1155,11 @@ where
 /// `HV` is pinned to `KoalaBearPoseidon2Outer` (the only outer hasher); the
 /// generic param keeps the output type aligned with the dispatch call site.
 ///
-/// P2c-for-outer (value-independence): the proof-specific values
+/// Value-independence: the proof-specific values
 /// (`preread_basefold_proof`, `preread_sumcheck`, `preread_jagged_eval`,
 /// `preread_expected_eval`, `preread_commit_root`) are PRE-READ from the gnark
 /// witness stream (`read_outer_eval_bundle_impl`, routed via
-/// `BasefoldShardProof::read`) — they are NO LONGER baked as `builder.constant`,
+/// `BasefoldShardProof::read`) — witnessed rather than baked as `builder.constant`,
 /// so the gnark R1CS verifies any fresh wrap proof.  Only the SHAPE metadata
 /// (`bundle.packing`, column/row counts) is read here as compile-time constants
 /// (shape-derived, identical across proofs of the same shape).
@@ -1170,7 +1167,7 @@ where
 pub fn lift_jagged_basefold_bundle_outer<C>(
     builder: &mut Builder<C>,
     bundle: &zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundleGeneric<OuterValMmcs>,
-    // P2c-for-outer: witnessed proof-specific values (replace the const-builds).
+    // Witnessed proof-specific values (replace the const-builds).
     preread_basefold_proof: RecursiveBasefoldProof<
         Felt<C::F>,
         Ext<C::F, C::EF>,
@@ -1255,20 +1252,20 @@ where
     let col_prefix_sums_len = padded_cols + 1;
     let num_rounds = column_counts_by_round.len().max(1);
 
-    // #88 increment-1: the baked NUMERIC `row_counts_usize` /
-    // `padding_column_counts` are no longer emitted — the verifier reads only
+    // The baked NUMERIC `row_counts_usize` /
+    // `padding_column_counts` are not emitted — the verifier reads only
     // the WITNESSED `row_counts` (from the opened degree) + the in-circuit
     // `col_prefix_sums`, so the lifted program is height-agnostic.
 
-    // ── P2c-for-outer: sumcheck_proof = the WITNESSED reduction sumcheck ──
+    // ── sumcheck_proof = the WITNESSED reduction sumcheck ──
     let sumcheck_proof: PartialSumcheckProof<Ext<C::F, C::EF>> = preread_sumcheck;
 
-    // ── P2c-for-outer: basefold proof = the WITNESSED proof (BN254 digests) ──
+    // ── basefold proof = the WITNESSED proof (BN254 digests) ──
     // The felt/ext values and the BN254 round/merkle digests came off the gnark
-    // witness stream in `read_outer_eval_bundle_impl` (no more const-bake).
+    // witness stream in `read_outer_eval_bundle_impl` (not const-baked).
     let basefold_proof_var = preread_basefold_proof;
 
-    // ── P2c-for-outer: batch_evaluations = the WITNESSED values (reuse) ──
+    // ── batch_evaluations = the WITNESSED values (reuse) ──
     let batch_evaluations_ext: Vec<Vec<Ext<C::F, C::EF>>> = basefold_proof_var
         .batch_evaluations
         .iter()
@@ -1288,7 +1285,7 @@ where
         pcs_proof: basefold_proof_var,
     };
 
-    // ── P2c-for-outer: original_commitments[0] = WITNESSED BN254 commit root ──
+    // ── original_commitments[0] = WITNESSED BN254 commit root ──
     // `HV::DigestVariable == [Var<Bn254>; 1] == [Var<C::N>; 1]` for the outer
     // ring; the witnessed `preread_commit_root` replaces the baked const_digest.
     let first_commit_digest: <HV as crate::hash::FieldHasherVariable<C>>::DigestVariable =
@@ -1307,10 +1304,10 @@ where
     // modified == original here so the in-circuit assert in
     // `verify_trusted_evaluations` is a no-op (compress([orig,hash])==orig is
     // NOT what runs — the outer path uses its own digest-mix; see hash.rs).
-    // The inner ring (where the de-risk gates run) carries the real modified.
+    // The inner ring (where the validation gates run) carries the real modified.
     let modified_commitments = original_commitments.clone();
 
-    // ── P2c-for-outer: jagged_eval_proof = the WITNESSED sub-sumcheck ──
+    // ── jagged_eval_proof = the WITNESSED sub-sumcheck ──
     let jagged_eval_proof = JaggedSumcheckEvalProof::<Ext<C::F, C::EF>> {
         partial_sumcheck_proof: preread_jagged_eval,
     };
@@ -1404,7 +1401,7 @@ where
         column_counts_by_round.iter().map(|_| heights.clone()).collect()
     };
 
-    // ── P2c-for-outer: expected_eval = the WITNESSED q_at_z ──
+    // ── expected_eval = the WITNESSED q_at_z ──
     let expected_eval: Ext<C::F, C::EF> = preread_expected_eval;
 
     JaggedPcsProofVariable {
@@ -1494,12 +1491,11 @@ where
 /// witness-stream `.read()` — the bundle is host-side data, NOT
 /// witness-stream input.
 ///
-/// Previously called `<host_sumcheck as Witnessable<C>>::read(...)`
-/// which consumed felts from the runtime witness stream that were
-/// never written there (bundle is added separately on
+/// Reading it from the runtime witness stream would consume felts that
+/// were never written there (the bundle rides separately on
 /// `BasefoldShardProof.evaluation_proof_bundle`, outside the
-/// felt-stream).  Empty-stream panic at e2e test time.  Treating
-/// bundle values as IR constants matches their semantics.
+/// felt-stream).  Treating bundle values as IR constants matches their
+/// semantics.
 fn host_sumcheck_to_const_var<C>(
     builder: &mut Builder<C>,
     host: &PartialSumcheckProof<InnerChallenge>,
@@ -1587,7 +1583,7 @@ fn write_sumcheck_to_stream<C>(
 ///   (witnessed as `[Felt<F>; 8]`).
 /// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
 ///
-/// **NOT placeholders (resolved here / by later cutover commits)**:
+/// **Resolved values (not placeholders)**:
 /// * `expected_eval` ← `bundle.reduction.q_at_z` — the verifier's
 ///   closing identity at recursive_jagged_pcs.rs:279 asserts
 ///   `jagged_eval * expected_eval == sumcheck.point_and_eval.1`
@@ -1627,7 +1623,7 @@ fn write_sumcheck_to_stream<C>(
 ///
 /// Output type matches [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// so downstream callers can swap with no shape change.
-/// BaseFold-over-BN254 wrap port: re-key a host BaseFold proof's
+/// BaseFold-over-BN254 wrap: re-key a host BaseFold proof's
 /// raw digests (read as inner KoalaBear `[InnerVal; 8]` roots) onto the
 /// generic `HV::Digest` digest type.  Inner (`HV = KoalaBearPoseidon2`):
 /// identity (`Digest = [KoalaBear; 8]`).  Outer (`HV =
@@ -1712,7 +1708,7 @@ where
 /// const-promote a raw-digest basefold proof
 /// (`RecursiveBasefoldProof<Felt, Ext, HV::Digest>`) into the verifier's
 /// `HV::DigestVariable` digest form via `HV::const_digest`.  The verifier's
-/// `type Proof` now carries `HV::DigestVariable` digests (not the raw host
+/// `type Proof` carries `HV::DigestVariable` digests (not the raw host
 /// `FieldHasher::Digest`), so the const-build (bytes-fallback) inner path and
 /// the OUTER BN254 lift — both of which BAKE digest values — must promote.
 /// (The inner *production* path witnesses its digests in
@@ -1855,7 +1851,7 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // the basefold proof's felt/ext values, PRE-READ from the
     // witness stream in `BasefoldShardProof::read`.  This is what makes the
     // recursion program value-independent: the proof values are witness
-    // inputs, not baked constants.  Digests are now witnessed too ([Felt;8] =
+    // inputs, not baked constants.  Digests are witnessed too ([Felt;8] =
     // inner DigestVariable), so no rekey is needed below.
     preread_basefold_proof: RecursiveBasefoldProof<Felt<C::F>, Ext<C::F, C::EF>, [Felt<C::F>; 8]>,
     // pre-read (witnessed) reduction sumcheck, jagged-eval
@@ -1905,8 +1901,8 @@ where
     // to the next power of two.  This drives `num_col_variables` =
     // the number of z_col challenges the in-circuit verifier samples —
     // it MUST equal the host's `log2(next_pow2(offsets.len()-1))`
-    // (jagged_pcs.rs verify_jagged_basefold_inner).  The previous
-    // `+ (cc[len-2]+1)` heuristic inflated this across a power-of-two
+    // (jagged_pcs.rs verify_jagged_basefold_inner).  A
+    // `+ (cc[len-2]+1)` heuristic inflates this across a power-of-two
     // boundary for some chip sets (keccak shard: 568→1024 vs host 415→512),
     // desyncing the transcript under host-parity enforcement.
     let total_cols_before_pad: usize = column_counts_by_round
@@ -1918,11 +1914,10 @@ where
     let num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
-    // #88 increment-1: the baked NUMERIC `row_counts_usize` /
-    // `padding_column_counts` are no longer emitted — the verifier reads only
+    // The baked NUMERIC `row_counts_usize` /
+    // `padding_column_counts` are not emitted — the verifier reads only
     // the WITNESSED `row_counts` (reconstructed from the opened degree) + the
-    // in-circuit `col_prefix_sums`, so the lifted program is height-agnostic
-    // (the old step-(6.6) pin that baked `2^log_h` constants is gone).
+    // in-circuit `col_prefix_sums`, so the lifted program is height-agnostic.
 
     // ── sumcheck_proof = the PRE-READ (witnessed) reduction
     // sumcheck (read in BasefoldShardProof::read), not a host const. ──
@@ -1981,7 +1976,7 @@ where
     }
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
-    // The host prover now emits SP1's branching-program jagged-eval
+    // The host prover emits SP1's branching-program jagged-eval
     // sub-protocol (jagged_pcs.rs, between the reduction and
     // the BaseFold open).  Lift its `PartialSumcheckProof` to circuit
     // variables via the same const-promotion path as the outer
@@ -2007,7 +2002,7 @@ where
     // For empty bundles all decompositions reduce to zero-felts,
     // preserving byte-for-byte compat with the prior placeholder.
     //
-    // BaseFold-over-BN254 wrap port — CRITICAL: the per-entry bit
+    // BaseFold-over-BN254 wrap — CRITICAL: the per-entry bit
     // width must equal the branching program's `half = proof_point.len()/2`
     // (jagged_eval.rs:223 + compress_basefold.rs:998), which the HOST
     // jagged-eval prover sets to `log_m + 1` = z_trace.len()
@@ -2027,7 +2022,7 @@ where
     };
     let total_values = bundle.packing.total_values;
     if bits_per_entry > 31 {
-        // FIX-off (bug #8): the 32-bit-width col_prefix_sum path is exercised.
+        // The 32-bit-width col_prefix_sum path is exercised.
         eprintln!(
             "LIFT-BUNDLE-DIAG bits_per_entry={bits_per_entry} jagged_eval_point_len={jagged_eval_point_len} \
              total_values={total_values} max_log_row_count={max_log_row_count} \
@@ -2042,7 +2037,7 @@ where
             v
         }
     };
-    // HEIGHT-AGNOSTIC (low-placement) FIX: gate flag for the offset-diff
+    // Low-placement gate flag for the offset-diff
     // row_counts below (so they match the baked band col_prefix_sums under
     // ZIREN_HA_BAKED_COLPS).  The col_prefix_sums path is unchanged (baked when
     // chip_height_felts is None / gated).
@@ -2055,12 +2050,11 @@ where
         // height heights[i] (mirrors pack_traces_jagged jagged.rs:304-309).
         // The artificial-zero + pad columns share the last real offset; the
         // final slot is total_values = the running accumulator.
-        // #88 band-5 (bug #8): `bits_per_entry = log2(total_area)+1` can reach
+        // `bits_per_entry = log2(total_area)+1` can reach
         // 32 when the band-padded total column area lands in [2^30, 2^31)
         // (band-5: ext_alu 2^24 etc. → total_values ≈ 1.28e9 → log_m=31 →
         // bits=32).  This is reachable in BOTH FIX-on and FIX-off (band-5
-        // replaced the old component-opening band, so any program above band-4
-        // lands on it).  Every col_prefix_sum VALUE is < total_values < 2^31,
+        // covers any program above band-4).  Every col_prefix_sum VALUE is < total_values < 2^31,
         // so it genuinely fits in 31 bits — but `num2bits_v2_f` rejects a
         // 32-bit WIDTH (a single KoalaBear felt is < 2^31; modulus
         // 2^31-2^24+1).  Decompose only the low 31 bits (range-checked, valid
@@ -2112,9 +2106,8 @@ where
             }
             // Host parity: no artificial-zero columns (see padding-shape
             // comment above); the pow2 tail-pad below reuses
-            // `current_offset_felt`, identical to what the old added-loop
-            // emitted, so the per-entry values are unchanged where lengths
-            // coincide.
+            // `current_offset_felt`, so the per-entry values are unchanged
+            // where lengths coincide.
         }
         while col_prefix_sums.len() < col_prefix_sums_len - 1 {
             let bits = num2bits_be(builder, current_offset_felt);
@@ -2179,8 +2172,8 @@ where
     // ── row_counts: caller-plumbed if provided, else derived from the bundle ──
     // A caller MAY pass per-chip row counts via row_counts_by_round (parallel
     // to column_counts_by_round).  When None, they are derived from the
-    // packer's `bundle.commit.chip_dims` (see the else-branch) — NOT zeroed,
-    // which was the bug that broke the prefix-sum binding on real proofs.
+    // packer's `bundle.commit.chip_dims` (see the else-branch) — NOT zeroed
+    // (zeroing breaks the prefix-sum binding on real proofs).
     // The verifier reads row_counts[round][chip] as a SINGLE Felt
     // representing the chip's row count (recursive_jagged_pcs.rs:248-260
     // dereferences row as a Felt and repeats it `col` times).  Since
@@ -2207,13 +2200,13 @@ where
         // (2^log_height_padded) from the packer's own `bundle.commit.chip_dims`
         // — exactly the dimensions that produced `bundle.packing.offsets`, so
         // the verifier's prefix-sum consistency check
-        // (recursive_jagged_pcs.rs:248-272) reconciles.  The previous all-zero
-        // fallback made that check assert the real (non-zero) offsets equal 0,
-        // i.e. it FAILED on every non-degenerate proof and only "passed" for
-        // empty bundles.  A chip's preprocessed + main traces share one height,
+        // (recursive_jagged_pcs.rs:248-272) reconciles.  An all-zero
+        // fallback would make that check assert the real (non-zero) offsets
+        // equal 0, failing on every non-degenerate proof.  A chip's
+        // preprocessed + main traces share one height,
         // so the same per-chip heights are reused for every round; chip_dims is
         // in the same (name-sorted) chip order as `column_counts_by_round`.
-        // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, derive the per-chip
+        // Low-placement: when gated, derive the per-chip
         // row counts from the BAND offset DIFFS (the committed slot heights) so
         // they match the baked col_prefix_sums (= bundle.packing.offsets); the
         // default chip_dims path decodes the RAW height, which diverges from the
@@ -2341,8 +2334,8 @@ pub fn jagged_reduction_to_partial_sumcheck(
     // host's final claim `current_claim = jagged_eval_round_poly(round_{n-1},
     // r_{n-1})`. The host's `eval_point` is in REVERSE-sampled order
     // (verify_jagged_reduction asserts `sampled[i] == eval_point[n-1-i]`, so
-    // eval_point[0] = r_{n-1}, eval_point[last] = r_0). The previous code used
-    // `eval_point[last_idx]` = r_0 — the FIRST challenge — making point_and_eval.1
+    // eval_point[0] = r_{n-1}, eval_point[last] = r_0). Using
+    // `eval_point[last_idx]` = r_0 — the FIRST challenge — would make point_and_eval.1
     // = poly[last].eval_at(r_0) != eval_at(r_{n-1}), failing the in-circuit jagged
     // sumcheck final-eval check (gnark wrap step5, n=24 rounds). Use eval_point[0].
     let final_eval = univariate_polys[last_idx].eval_at_point(proof.eval_point[0]);
@@ -2377,8 +2370,8 @@ mod tests {
             <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);
-        // The `EvaluationProof` (formerly a separate `(evbytes, bundle_opt)`
-        // pair) lifts to `LiftedEvalProof::Empty` for an empty proof.
+        // The `EvaluationProof` lifts to `LiftedEvalProof::Empty` for an
+        // empty proof.
         assert!(matches!(evaluation_proof, LiftedEvalProof::Empty));
     }
 
@@ -2759,7 +2752,7 @@ mod tests {
                 column_counts: vec![],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
-            // CP-A per-round split: single-group (G==1) test bundle.
+            // Single-group (G==1) test bundle.
             extra_reduction: vec![],
             extra_basefold_proof: vec![],
             extra_commit: vec![],
@@ -2777,9 +2770,8 @@ mod tests {
 
     /// row_counts_by_round plumbed through produces
     /// non-zero row_counts in the variable (one Felt per chip).
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion —
-    /// the 5-arg lift call needs a full RecursiveBasefoldProof + sumcheck
-    /// fixtures rework.  Compile-gated out, not silently deleted.
+    /// Compile-gated: the current multi-arg lift call needs a full
+    /// RecursiveBasefoldProof + sumcheck fixture rework.
     #[cfg(any())]
     #[test]
     fn lift_jagged_basefold_bundle_with_row_counts() {
@@ -2824,7 +2816,7 @@ mod tests {
                 column_counts: vec![1, 1, 1],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
-            // CP-A per-round split: single-group (G==1) test bundle.
+            // Single-group (G==1) test bundle.
             extra_reduction: vec![],
             extra_basefold_proof: vec![],
             extra_commit: vec![],
@@ -2845,13 +2837,12 @@ mod tests {
 
     /// row_counts=None path: lifting a NON-degenerate bundle with populated
     /// `commit.chip_dims` must succeed and produce the right-shaped
-    /// `row_counts` (one Felt per chip per round) derived from chip_dims —
-    /// the wiring that replaced the all-zero fallback.  (Felt *values* are IR
+    /// `row_counts` (one Felt per chip per round) derived from chip_dims
+    /// (not zeroed).  (Felt *values* are IR
     /// handles, so the numeric binding is asserted by the host-level test
     /// below and exercised in-circuit by the e2e compress gate.)
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion —
-    /// the 5-arg lift call needs RecursiveBasefoldProof + sumcheck fixture
-    /// rework.  Compile-gated out, not silently deleted.
+    /// Compile-gated: the current multi-arg lift call needs a
+    /// RecursiveBasefoldProof + sumcheck fixture rework.
     #[cfg(any())]
     #[test]
     fn lift_jagged_basefold_bundle_none_path_derives_from_chip_dims() {
@@ -2895,7 +2886,7 @@ mod tests {
                 column_counts: vec![1, 1, 1],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
-            // CP-A per-round split: single-group (G==1) test bundle.
+            // Single-group (G==1) test bundle.
             extra_reduction: vec![],
             extra_basefold_proof: vec![],
             extra_commit: vec![],
@@ -2911,11 +2902,11 @@ mod tests {
         assert_eq!(var.params.col_prefix_sums.len(), 9);
     }
 
-    /// NEGATIVE binding guard for the row_counts=None fix: the per-chip
+    /// NEGATIVE binding guard: the per-chip
     /// heights derived from `bundle.commit.chip_dims` (2^log_height_padded)
     /// must reconcile the packer's `packing.offsets` via the verifier's
-    /// prefix-sum accumulation (recursive_jagged_pcs.rs:248-272), and the
-    /// OLD all-zero fallback must NOT (it asserted the real, non-zero offsets
+    /// prefix-sum accumulation (recursive_jagged_pcs.rs:248-272), and an
+    /// all-zero fallback must NOT (it would assert the real, non-zero offsets
     /// equal 0 — failing every non-degenerate proof).  Pure-usize mirror of
     /// the in-circuit check; the e2e compress gate exercises the same logic
     /// in-circuit.
@@ -2928,7 +2919,7 @@ mod tests {
         let offsets: Vec<usize> = vec![0, 16, 32];
         let total_values: usize = 48;
 
-        // The fix: heights from chip_dims (NOT zeros).
+        // heights from chip_dims (NOT zeros).
         let heights: Vec<usize> =
             chip_dims.iter().map(|&(_w, log_h)| 1usize << log_h).collect();
         assert_eq!(heights, vec![16, 16, 16]);
@@ -2954,7 +2945,7 @@ mod tests {
 
         // chip_dims-derived heights reconcile the real offsets.
         assert!(reconciles(&heights), "chip_dims heights must reconcile the offsets");
-        // The old all-zero fallback does NOT — this is the bug it caused.
+        // An all-zero fallback does NOT reconcile.
         assert!(
             !reconciles(&[0usize, 0, 0]),
             "all-zero row_counts must FAIL to reconcile non-zero offsets"
@@ -2964,8 +2955,7 @@ mod tests {
     /// bundle lift produces a structurally valid
     /// JaggedPcsProofVariable with shape matching the existing
     /// lift_evaluation_proof_bytes placeholder for empty bundles.
-    /// STALE FIXTURE: predates the LiftedEvalProof bundle explosion.
-    /// Compile-gated out, not silently deleted.
+    /// Compile-gated: needs a RecursiveBasefoldProof + sumcheck fixture rework.
     #[cfg(any())]
     #[test]
     fn lift_jagged_basefold_bundle_smoke() {
@@ -3012,7 +3002,7 @@ mod tests {
                 column_counts: vec![],
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
-            // CP-A per-round split: single-group (G==1) test bundle.
+            // Single-group (G==1) test bundle.
             extra_reduction: vec![],
             extra_basefold_proof: vec![],
             extra_commit: vec![],

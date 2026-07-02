@@ -33,16 +33,16 @@ use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
-    /// A single-shard normalize/recursion shape (#88/#82).  Carries exactly
-    /// ONE per-shard shape: the production normalize is arity-1 (`compress` →
+    /// A single-shard normalize/recursion shape.  Carries exactly ONE
+    /// per-shard shape: the production normalize is arity-1 (`compress` →
     /// `get_first_layer_inputs` with first_layer_batch_size=1 →
     /// `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
     /// `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
-    /// shard_proofs.len()==1).  The arity≥2 Recursion shapes the enumerator
-    /// once emitted were a PHANTOM VK class no real proof produced;
-    /// cross-shard aggregation lives in COMPRESS.  The `Vec` is retained for
-    /// wire-format/serde stability but the enumerator now emits only
-    /// `vec![one]` and the dummy/in-circuit verifier assert len==1.
+    /// shard_proofs.len()==1).  Arity≥2 Recursion shapes would be a PHANTOM
+    /// VK class no real proof produces; cross-shard aggregation lives in
+    /// COMPRESS.  The `Vec` is retained for wire-format/serde stability but
+    /// the enumerator emits only `vec![one]` and the dummy/in-circuit
+    /// verifier asserts len==1.
     Recursion(Vec<OrderedShape>),
     Compress(Vec<OrderedShape>),
     Deferred(OrderedShape),
@@ -370,12 +370,12 @@ impl ZKMProofShape {
     /// `CoreProofShape`s that, after `to_ordered_shape`'s
     /// uniform-area projection + dedup, collapse to a much smaller
     /// per-chip `OrderedShape` set (~13-30 unique).  This
-    /// replaces Ziren's legacy ~1.25M-shape per-chip cartesian
-    /// (`CoreShapeConfig::all_shapes`); the task commits to
-    /// stacked_shapes as the sole Recursion-shape source.
+    /// replaces the ~1.25M-shape per-chip cartesian
+    /// (`CoreShapeConfig::all_shapes`); stacked_shapes is the sole
+    /// Recursion-shape source.
     ///
     /// The `core_shape_config` argument is retained for API
-    /// stability but is no longer consulted.
+    /// stability but is not consulted.
     pub fn generate<'a>(
         core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
@@ -460,7 +460,7 @@ impl ZKMProofShape {
             }
         };
 
-        // Per-shard normalize shapes — G1 Stage D1 FAITHFUL representatives.
+        // Per-shard normalize shapes — FAITHFUL representatives.
         //
         // The normalize program's VK depends on the child core proof's exact
         // PER-CHIP heights (the jagged bundle's per-chip `(width, log_height)`
@@ -471,7 +471,7 @@ impl ZKMProofShape {
         // cluster's per-chip band-cap shape (present chips at the cluster cap,
         // canonicalize's missing chips at log-1, the fitting Program band).
         //
-        // The earlier uniform-height-by-`log_dense` sweep was NOT faithful: at
+        // A plain uniform-height-by-`log_dense` sweep is NOT faithful: at
         // a matched `(chip_set, log_dense)` its per-chip heights differ from
         // the canonical-cluster shape, so its dummy VK differs from the real
         // VK (pinned by `tests::test_vk_equality_normalize_fib` EQUAL=false on
@@ -479,7 +479,7 @@ impl ZKMProofShape {
         // dummy_faithful=true ONLY at the canonical lift, enum_repr_eq=false at
         // the uniform representative).
         //
-        // FAITHFUL construction (RIGHT DIRECTION; coverage still partial — see
+        // FAITHFUL construction (coverage is partial — see
         // CAVEAT): generate candidate RAW height profiles via the cheap
         // per-cluster uniform-height SWEEP, then LIFT each through
         // `find_canonical_cluster_shape_from_ordered` — the min-area
@@ -491,7 +491,7 @@ impl ZKMProofShape {
         // profile (a few hundred), not the O(clusters²) `enumerate_canonical_
         // cluster_shapes` (~28.5K searches, > 3 min, over-emits ~70K).
         //
-        // ⚠️ CAVEAT (open Stage D2 item): the UNIFORM-height sweep only spans
+        // ⚠️ CAVEAT: the UNIFORM-height sweep only spans
         // raw profiles where every filler chip shares one height, so the lifted
         // canonical shapes have uniform-ish caps.  A real shard's per-chip event
         // counts are NON-uniform (e.g. fib shard1 real canonical = Bitwise:12
@@ -504,19 +504,18 @@ impl ZKMProofShape {
         // collapse over the real reachable per-chip profiles) — neither this
         // sweep (misses) nor `enumerate_canonical_cluster_shapes_fast`
         // (over-emits, no collapse) is the final answer.
-        // ── A-DIRECT (#88/#82): enumerate the per-shard normalize shape at
-        // EVERY integer log_dense L in [L_min, L_max] per cluster, DIRECTLY.
+        // Enumerate the per-shard normalize shape at EVERY integer log_dense
+        // L in [L_min, L_max] per cluster, DIRECTLY.
         //
-        // After increment-1 (recursion VK = f(cluster, arity, log_dense),
-        // height-INDEPENDENT given log_dense) the right key is L itself, not a
-        // particular height profile.  The prior uniform-height SWEEP + LIFT
-        // (find_canonical_cluster_shape_from_ordered) only deduped a SPARSE set
+        // Because the recursion VK = f(cluster, arity, log_dense) is
+        // height-INDEPENDENT given log_dense, the right key is L itself, not a
+        // particular height profile.  A uniform-height SWEEP + LIFT
+        // (find_canonical_cluster_shape_from_ordered) only dedups a SPARSE set
         // of band-quantized L values, so real NON-uniform FIX-off proofs whose
-        // NATURAL log_dense fell between the swept L's were MISSING (Chain A:
-        // only 1/4 real multi-shard VKs in-map; sha3-a1 ld=25 / fib1k-a4 ld=22
-        // / sha2 ld=23 all absent).  We now emit ONE canonical shape per integer
-        // L so any real proof landing at log_dense L hits the map regardless of
-        // how its heights are distributed.
+        // NATURAL log_dense falls between the swept L's are MISSING.  Emitting
+        // ONE canonical shape per integer L means any real proof landing at
+        // log_dense L hits the map regardless of how its heights are
+        // distributed.
         //
         // Per-L construction (value-independent; the VK is height-independent
         // given L so the exact distribution is free): Byte at its 2^16
@@ -586,8 +585,8 @@ impl ZKMProofShape {
                     None
                 }
             };
-        // #115 Path B — FULL reachable per-cluster log_dense range (close the
-        // #112 enumeration-completeness gap WITHOUT core-area padding).
+        // FULL reachable per-cluster log_dense range — covers the enumeration
+        // completeness requirement WITHOUT core-area padding.
         //
         // A cluster's MINIMAL feasible L (all fillers at 1, Byte at its fixed
         // 2^16 lookup-table height) is its natural floor; every real core shard
@@ -597,10 +596,10 @@ impl ZKMProofShape {
         // largest provable shard has `log_dense = ceil(log2(total_values)) <= 30`.
         // We therefore emit EVERY integer L in `[L_min, L_HARD_CAP]` the greedy
         // construction can hit, filtered to `total_values < 2^30` (the provable
-        // set).  The prior windowed `[L_min, L_min+8]` (cap 28) MISSED real
-        // shards whose natural log_dense was 29/30 ("Invalid verification key" /
-        // "vk not allowed", #112).  The complete grid is small: 268 normalize
-        // (+ 6 compress/deferred/shrink) = 274 keys, well under the
+        // set).  A narrower window would MISS real shards whose natural
+        // log_dense is 29/30 ("Invalid verification key" / "vk not allowed").
+        // The complete grid is small: 268 normalize (+ 6
+        // compress/deferred/shrink) = 274 keys, well under the
         // VK_MERKLE_TREE_HEIGHT=11 (2048) ceiling — measured by
         // scripts/pathb_grid.rs; regen-only (vk_root witnessed, no re-ceremony).
         // L_WINDOW is kept generous so the AreaOutOfBounds cap binds for every
@@ -649,7 +648,7 @@ impl ZKMProofShape {
                 let l_max = (l_min + L_WINDOW).min(L_HARD_CAP);
                 for target in l_min..=l_max {
                     if let Some(os) = shape_at_log_dense(&names, &fillers, target) {
-                        // #115 Path B: keep only provable shapes (AreaOutOfBounds).
+                        // Keep only provable shapes (AreaOutOfBounds).
                         if total_values_of(&os) >= MAX_TOTAL_VALUES {
                             continue;
                         }
@@ -663,50 +662,50 @@ impl ZKMProofShape {
         };
         let _ = &log_dense_of;
 
-        // #88/#82 SINGLE-SHARD NORMALIZE: emit ONLY arity-1 normalize shapes.
+        // SINGLE-SHARD NORMALIZE: emit ONLY arity-1 normalize shapes.
         // The production normalize is single-shard (`compress` →
         // `get_first_layer_inputs` with first_layer_batch_size=1 →
         // `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
         // `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
-        // shard_proofs.len()==1).  The arity≥2 Recursion shapes were a PHANTOM
-        // VK class that NO real proof ever produced — only the enumerator
-        // emitted them.  Cross-shard aggregation lives in COMPRESS (arity-4 +
-        // arity-1 tail), which has the full SP1-parity PV chain.  Emitting just
-        // arity-1 makes the enumerated normalize VK set match the runtime
-        // exactly (every real single-shard normalize lands in-map) and shrinks
-        // the map (4× fewer Recursion shapes).
+        // shard_proofs.len()==1).  Arity≥2 Recursion shapes are a PHANTOM
+        // VK class that NO real proof produces.  Cross-shard aggregation lives
+        // in COMPRESS (arity-4 + arity-1 tail), which has the full SP1-parity
+        // PV chain.  Emitting just arity-1 makes the enumerated normalize VK
+        // set match the runtime exactly (every real single-shard normalize
+        // lands in-map) and shrinks the map (4× fewer Recursion shapes).
         let arity_recursion_shapes: Vec<Self> = small_shapes
             .iter()
             .map(|os| Self::Recursion(vec![os.clone()]))
             .collect();
 
         // ───────────────────────────────────────────────────────────────
-        // #88/#82 Stage 3 ENUM RE-KEY: collapse Compress / Deferred / Shrink to
+        // ENUM RE-KEY: collapse Compress / Deferred / Shrink to
         // f(recursion-chip-set, arity) — a SINGLE child class.
         //
         // A compose/deferred/shrink program verifies a BATCH of CHILD proofs,
         // each itself a RECURSION (normalize/compose) proof over the fixed
-        // 7-chip recursion machine (uniform chip-set).  PREVIOUSLY the compose
-        // VK also depended on each child's jagged-bundle `log_dense_size` (it
-        // drives `num_stripes` / `batch_evaluations` / reduction rounds, and the
-        // child's `total_values` drove `jagged_n`), so the enumeration emitted
-        // one class per integer child log_dense L (A-DIRECT `by_ld`).
+        // 7-chip recursion machine (uniform chip-set).  Without the area pin the
+        // compose VK would also depend on each child's jagged-bundle
+        // `log_dense_size` (it drives `num_stripes` / `batch_evaluations` /
+        // reduction rounds, and the child's `total_values` drives `jagged_n`),
+        // forcing one class per integer child log_dense L.
         //
-        // With the RECURSION-LAYER AREA PIN (Stage 1, `RECURSION_LOG_TRACE_AREA`
+        // With the RECURSION-LAYER AREA PIN (`RECURSION_LOG_TRACE_AREA`
         // = 27 — installed by the recursion prover around its commit+open, and
         // mirrored in the dummy via `RecursionAreaPinGuard` in the compress/wrap
         // dummy builders), EVERY recursion child commits at the FIXED area 2^27:
         // num_stripes = 64, reduction L = 27, and (via the pinned jagged-eval,
         // `prove_jagged_evaluation` half = z_trace.len()+1) jagged_n = 56 —
-        // ALL height-INDEPENDENT.  So the per-L `by_ld` sweep collapses to ONE
+        // ALL height-INDEPENDENT.  So the per-L sweep collapses to ONE
         // class, and the compose VK becomes f(chip-set, arity) only.  We emit:
         //   * Compress: ONE shape per arity (1..=reduce_batch_size).
         //   * Deferred / Shrink: ONE shape each.
         // The single representative is a recursion shape with natural log_dense
         // ≤ pin (so the pin raises it to exactly 27) and heights ≤ cube (so the
-        // per-stage cube is 22, matching real children).  Validated by G2 (every
-        // heterogeneous child-L spread → identical compose program+VK) and G3
-        // (the enumerated arity-N compose VK == the real FIX-off proof's VK).
+        // per-stage cube is 22, matching real children).  Validated end-to-end:
+        // every heterogeneous child-L spread yields an identical compose
+        // program+VK, and the enumerated arity-N compose VK equals the real
+        // FIX-off proof's VK.
         let compress_child_classes: Vec<OrderedShape> = {
             use p3_koala_bear::KoalaBear as KB;
             use zkm_pcs::stacked_shapes::types::consts;
@@ -737,19 +736,19 @@ impl ZKMProofShape {
                     total.next_power_of_two().trailing_zeros() as usize
                 }
             };
-            // SINGLE-CLASS COLLAPSE (#88/#82 Stage 3 ENUM RE-KEY): with the
-            // recursion AREA PIN (`RECURSION_LOG_TRACE_AREA`), EVERY recursion
-            // child (normalize / compose output) commits its jagged dense at the
-            // FIXED pinned area `2^27` → num_stripes = 2^(27-21) = 64, reduction
-            // rounds / eval_point L = 27, and (via the pinned jagged-eval, see
+            // SINGLE-CLASS COLLAPSE: with the recursion AREA PIN
+            // (`RECURSION_LOG_TRACE_AREA`), EVERY recursion child (normalize /
+            // compose output) commits its jagged dense at the FIXED pinned area
+            // `2^27` → num_stripes = 2^(27-21) = 64, reduction rounds /
+            // eval_point L = 27, and (via the pinned jagged-eval, see
             // `prove_jagged_evaluation` / `dummy_jagged_basefold_bundle`)
             // jagged_n = 2*(27+1) = 56 — IDENTICAL regardless of the child's
-            // NATURAL heights.  So the prior A-DIRECT per-L `by_ld` sweep (one
-            // class per integer log_dense L) collapses to a SINGLE class: any
-            // recursion shape whose NATURAL log_dense ≤ pin (so the pin raises it
-            // to exactly 27) and whose chip heights ≤ cube (so the per-stage cube
-            // is the base 22, matching the real children).  We greedily pack area
-            // into the recursion chips (cap each ≤ 2^cube) and pick the LARGEST
+            // NATURAL heights.  So the per-L sweep (one class per integer
+            // log_dense L) collapses to a SINGLE class: any recursion shape
+            // whose NATURAL log_dense ≤ pin (so the pin raises it to exactly 27)
+            // and whose chip heights ≤ cube (so the per-stage cube is the base
+            // 22, matching the real children).  We greedily pack area into the
+            // recursion chips (cap each ≤ 2^cube) and pick the LARGEST
             // achievable natural-L ≤ pin representative (closest to the ceiling).
             let cube_rec = consts::CORE_MAX_LOG_ROW_COUNT;
             let rec_shape_at_ld = |target: usize| -> Option<OrderedShape> {
@@ -813,9 +812,9 @@ impl ZKMProofShape {
             .map(|os| Self::Shrink(os.clone()))
             .collect();
 
-        // `recursion_shape_config` is no longer consulted for the
-        // Compress/Deferred/Shrink tail (band cartesian retired); retained in
-        // the signature for API stability and the legacy `generate_maximal_shapes`.
+        // `recursion_shape_config` is not consulted for the
+        // Compress/Deferred/Shrink tail; retained in the signature for API
+        // stability and `generate_maximal_shapes`.
         let _ = recursion_shape_config;
 
         arity_recursion_shapes
@@ -836,9 +835,9 @@ impl ZKMProofShape {
         } else {
             core_shape_config.maximal_core_plus_precompile_shapes(21).into_iter()
         };
-        // #88/#82 single-shard normalize: emit ONLY arity-1 normalize shapes per
+        // single-shard normalize: emit ONLY arity-1 normalize shapes per
         // maximal core shape (matches `generate`; production normalize is
-        // single-shard, and arity>=2 normalize programs now assert len==1).
+        // single-shard, and arity>=2 normalize programs assert len==1).
         core_shape_iter
             .map(move |core_shape| {
                 let os = OrderedShape {
@@ -902,8 +901,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         shape: ZKMCompressProgramShape,
         shrink_shape: Option<RecursionShape>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // Legacy FRI path removed (May 2026); always dispatch to the
-        // basefold program builders.
+        // Always dispatch to the basefold program builders.
         let _ = shrink_shape;
         self.program_from_shape_basefold(shape)
     }
@@ -911,10 +909,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Basefold companion to [`Self::program_from_shape`]. Builds a
     /// recursion program from a cached shape using the basefold-pipeline
     /// program builders (`recursion_program_basefold`,
-    /// `compose_program_basefold`, etc.) instead of the legacy FRI ones.
+    /// `compose_program_basefold`, etc.).
     ///
-    /// step 4. Used by `build_compress_vks` to regenerate
-    /// `vk_map.bin` against the basefold compress programs.
+    /// Used by `build_compress_vks` to regenerate `vk_map.bin` against the
+    /// basefold compress programs.
     pub fn program_from_shape_basefold(
         &self,
         shape: ZKMCompressProgramShape,
@@ -1243,11 +1241,10 @@ mod tests {
         );
     }
 
-    /// ARITY-ENUM coverage (#88/#82 single-shard normalize): generate()
-    /// emits ONLY arity-1 normalize shapes — the production normalize is
-    /// single-shard, so the arity≥2 Recursion shapes were a phantom VK class
-    /// no real proof ever produced.  Every Recursion shape must be exactly one
-    /// per-shard shape.
+    /// ARITY-ENUM coverage: generate() emits ONLY arity-1 normalize shapes —
+    /// the production normalize is single-shard, so arity≥2 Recursion shapes
+    /// would be a phantom VK class no real proof produces.  Every Recursion
+    /// shape must be exactly one per-shard shape.
     #[test]
     fn generate_emits_arity_1_to_reduce_batch_size() {
         use crate::REDUCE_BATCH_SIZE;

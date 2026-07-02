@@ -6,11 +6,9 @@
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
 //!
-//! # Status
-//!
-//! Body port done (the task.4).  Verifies a batch of deferred
-//! recursive proofs: each is a Compress-stage output whose public
-//! values live in `shard_proof.public_values` interpreted as
+//! Verifies a batch of deferred recursive proofs: each is a
+//! Compress-stage output whose public values live in
+//! `shard_proof.public_values` interpreted as
 //! `RecursionPublicValues`.  Asserts merkle membership of the VK,
 //! validity of the proof's recursion-public-values, is_complete,
 //! and rebuilds the `reconstruct_deferred_digest` via poseidon2
@@ -205,13 +203,12 @@ pub fn verify_deferred_basefold<C, SC, A>(
             logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();
 
         // Compute column_counts_by_round BEFORE the
-        // lift_evaluation_proof_bytes call. Previously the lift was
-        // passed an empty placeholder, which made the JaggedPcsParams
-        // see num_cols = 1 (post-padding) → num_col_variables = 0 →
-        // z_col empty. But column_claims (built downstream from real
-        // evaluation_claims) is sized to the REAL padded column count
-        // (~1024 for chip-heavy Deferred shapes), so the MLE
-        // evaluation `evaluate_mle_ext(column_claims, z_col)` panicked
+        // lift_evaluation_proof_bytes call.  An empty placeholder would make
+        // the JaggedPcsParams see num_cols = 1 (post-padding) →
+        // num_col_variables = 0 → z_col empty, while column_claims (built
+        // downstream from real evaluation_claims) is sized to the REAL padded
+        // column count (~1024 for chip-heavy Deferred shapes), so the MLE
+        // evaluation `evaluate_mle_ext(column_claims, z_col)` would panic
         // on `column_claims.len() != 2^z_col.len()` (1024 vs 1).
         // Mirrors the compress_basefold flow at compress_basefold.rs:268-275.
         let mut shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
@@ -237,8 +234,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
         // VERIFY_VK=true: per-chip WITNESSED heights from the
         // opened `degree` — same pattern as core/compress.
-        // HEIGHT-AGNOSTIC (low-placement) FIX: when gated, SKIP the recompose
-        // (its ext2felt asserts base-field and FAILS under FIX-off; unused on
+        // Height-agnostic (low-placement) path: when gated, SKIP the recompose
+        // (its ext2felt asserts base-field and fails under FIX-off; unused on
         // the baked-band path; sound to skip — consumes no Witnessable stream).
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
             if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
@@ -253,7 +250,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
         // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
         // (set to any value) falls back to the bytes lift; preserved
-        // as a forensic kill switch when bundle-lift recursion shape
+        // as a kill switch when bundle-lift recursion shape
         // registration regresses.
         use crate::shard_level_witness::LiftedEvalProof;
         let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
@@ -292,7 +289,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 max_log_row_count,
                 &column_counts_by_round,
             ),
-            // P2c-for-outer: OuterBundle is gnark-wrap-only (OuterConfig);
+            // OuterBundle is gnark-wrap-only (OuterConfig);
             // the deferred path is inner-only → unreachable.
             LiftedEvalProof::OuterBundle { .. } => {
                 unreachable!("deferred path never carries an OUTER (gnark) bundle")
@@ -329,10 +326,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 chip_height_bits,
             );
         // consume real per-chip cumulative_sums.
-        // Assert-enforcement fix: use the CARRIED trace@z openings with REAL
-        // degree bits (mirror of core_basefold.rs:417 and the analogous
-        // fix in compress_basefold.rs) — the chip_openings rebuild emitted
-        // all-zero `degree`, breaking the zerocheck embedding factor.
+        // Use the CARRIED trace@z openings with REAL degree bits (mirror of
+        // core_basefold.rs:417 and compress_basefold.rs) — a chip_openings
+        // rebuild emits all-zero `degree`, breaking the zerocheck embedding
+        // factor.
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
         let cumsums_for_input = chip_cumulative_sums_per_input
             .get(_deferred_i)
@@ -360,9 +357,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // compress_basefold.rs: the host machine verifier seeds
         // the challenger with vk.observe_into + public_values[0..num_pv]
         // BEFORE the shard prologue (crates/pcs/src/machine.rs:693-707).
-        // The deferred path created a fresh challenger and did neither —
-        // same desync class as the compose path, masked before the
-        // VK-enforcement fix landed.
+        // A fresh challenger that skips either step desyncs the transcript
+        // (same class as the compose path); replicate the host seed.
         {
             use crate::challenger::CanObserveVariable;
             let num_pv = machine.num_pv_elts();
@@ -379,7 +375,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
-                // DE-CLAMP GUARD (#88/#82): see core_basefold.
+                // Fixed-height guard: see core_basefold.
                 crate::shard_level_witness::assert_recursion_stacking_height_fixed(
                     bundle_num_vars,
                     host.commit.log_stacking_height,
@@ -406,7 +402,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             &insertion_points,
             &mut challenger,
             machine.num_pv_elts(),
-            // #125 INC-4b: DEFERRED verifies LEGACY recursion proofs -> legacy.
+            // DEFERRED verifies legacy recursion proofs -> legacy.
             false,
             eval_public_values_fn,
             jagged_evaluator_fn,
@@ -488,7 +484,7 @@ impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
             >,
     {
         use p3_field::PrimeCharacteristicRing;
-        // The compress dummy now requires the full ZKMCompressWithVkeyShape so
+        // The compress dummy requires the full ZKMCompressWithVkeyShape so
         // its vk_merkle_data can be sized.  Deferred overrides vk_merkle_data
         // below with its own proof set, so the inner one is throwaway.
         let inner_shape = super::ZKMCompressWithVkeyShape {

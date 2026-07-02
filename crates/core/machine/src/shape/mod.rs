@@ -67,7 +67,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         Ok(())
     }
 
-    /// HEIGHT-AGNOSTIC RECURSION: return the per-chip CLUSTER-MAXIMAL shape (the
+    /// Return the per-chip CLUSTER-MAXIMAL shape (the
     /// band-cap) that a core record with these `heights` lifts to — WITHOUT
     /// mutating any record or padding any trace.
     ///
@@ -105,7 +105,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         minimal_shape
     }
 
-    /// HEIGHT-AGNOSTIC RECURSION (step 5c): read-only computation of the FULL
+    /// Read-only computation of the FULL
     /// canonical CLUSTER shape a core record lifts to — the exact same shape
     /// `fix_shape` + [`canonicalize_shape_to_cluster`] would produce under
     /// `FIX_CORE_SHAPES=true`, but WITHOUT mutating the record or padding any
@@ -142,7 +142,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         let is_packed = has_cpu
             && (!record.global_memory_finalize_events.is_empty()
                 || !record.global_memory_initialize_events.is_empty());
-        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): a no-CPU precompile shard
+        // Precompile sub-family coverage: a no-CPU precompile shard
         // (e.g. an in-guest sha256 output-commit shard carrying ONLY ShaExtend,
         // not ShaCompress) is a SUB-FAMILY of its whole precompile-family
         // cluster.  The core/packed branches below `return None` for no-CPU
@@ -167,7 +167,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
     }
 
-    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): canonical-cluster shape for a
+    /// Precompile sub-family coverage: canonical-cluster shape for a
     /// no-CPU precompile shard.  Mirrors the precompile branch of
     /// [`Self::fix_shape`] (the same `partial_precompile_shapes` +
     /// `get_precompile_shapes` band-cap search), unioned with `prep` and then
@@ -227,7 +227,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         None
     }
 
-    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): NAME-based sibling of
+    /// Precompile sub-family coverage: NAME-based sibling of
     /// [`Self::precompile_canonical_cluster_shape`], for the enum / gate side
     /// (`_from_ordered` / `_from_raw`) which holds a chip NAME -> raw-rows map
     /// rather than a record.  The committed shard pads each PRESENT chip to its
@@ -334,7 +334,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|id| (id, get(&id)))
             .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
-        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): no-CPU precompile shard.
+        // Precompile sub-family coverage: no-CPU precompile shard.
         if !has_cpu
             && get(&MipsAirId::MemoryGlobalInit) == 0
             && get(&MipsAirId::MemoryGlobalFinalize) == 0
@@ -364,7 +364,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
     }
 
-    /// G1 Stage D1b (#88): RAW-event-count sibling of
+    /// RAW-event-count sibling of
     /// [`Self::find_canonical_cluster_shape`] for the VK-enumeration side.
     ///
     /// `find_canonical_cluster_shape_from_ordered` reconstructs heights from a
@@ -391,7 +391,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .map(|id| (id, get(&id)))
             .collect();
         let prep = self.partial_preprocessed_shapes.find_shape(&prep_heights)?;
-        // PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): no-CPU precompile shard.
+        // Precompile sub-family coverage: no-CPU precompile shard.
         if !has_cpu
             && get(&MipsAirId::MemoryGlobalInit) == 0
             && get(&MipsAirId::MemoryGlobalFinalize) == 0
@@ -419,7 +419,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         self.canonical_cluster_from_parts(prep, has_cpu, is_packed, &heights, log2_shard_size)
     }
 
-    /// G1 Stage D1b (#88): enumerate the FULL SET of canonical-cluster shapes
+    /// Enumerate the FULL SET of canonical-cluster shapes
     /// a FIX-off core proof can lift to — config-driven, proof-independent.
     ///
     /// Every real normalize child's jagged commit is padded to
@@ -507,7 +507,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .collect()
     }
 
-    /// G1 Stage D1 (#88) FAST sibling of [`Self::enumerate_canonical_cluster_shapes`].
+    /// FAST sibling of [`Self::enumerate_canonical_cluster_shapes`].
     ///
     /// O(clusters · chips) instead of O(clusters²): the slow variant drives
     /// `find_canonical_cluster_shape_from_raw` per (cluster, prog), each of which
@@ -523,7 +523,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// band-cap shape (~70K, vastly over the 2048 vk_map budget) instead of the
     /// small collapsed set.  It is therefore a building block, NOT a drop-in
     /// enumeration: a faithful fast enumeration still needs to reproduce the
-    /// min-area COLLAPSE (the open Stage D2 item).  Retained for that follow-up
+    /// min-area COLLAPSE.  Retained for that follow-up
     /// and for cheap per-cluster band-cap inspection.
     pub fn enumerate_canonical_cluster_shapes_fast(&self) -> Vec<Shape<MipsAirId>> {
         use std::collections::BTreeSet;
@@ -925,7 +925,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// Legacy per-chip cartesian enumeration of all possible shard
     /// shapes.  Produces ~1.25M shapes for MIPS.  **Superseded** by
     /// `zkm_pcs::stacked_shapes::create_all_input_shapes` (≤ 5,000
-    /// shapes, size-class quantization) which is now the sole path
+    /// shapes, size-class quantization) which is the sole path
     /// used by `ZKMProofShape::generate` for VK generation.
     ///
     /// This function is retained for the pre-existing `#[ignore]`d
@@ -1280,7 +1280,7 @@ pub mod tests {
         prover.open(&pk, main_data, &mut challenger).unwrap();
     }
 
-    /// G1 Stage D1b (#88): the enumerated canonical-cluster set must CONTAIN
+    /// The enumerated canonical-cluster set must CONTAIN
     /// the CPU-shard canonical shape a real FIX-off fib-1k core proof lifts to
     /// (captured via [REALCANON]: `MiscInstrs=1` etc.).  Fast, no proving.
     #[test]
@@ -1329,7 +1329,7 @@ pub mod tests {
         for c in same_set.iter().take(4) {
             eprintln!("[ENUMCANON] cand = {c:?}");
         }
-        // G1 Stage D1b FINDING (REPORT, not a pass/fail gate): the cluster-CAP
+        // FINDING (REPORT, not a pass/fail gate): the cluster-CAP
         // fast enumeration does NOT contain the fib-1k CPU-shard REALCANON.
         // REALCANON's per-chip heights are CLAMPED to the record's per-chip raw
         // counts (e.g. MiscInstrs=1 = canonicalize default for a 0-event chip;
@@ -1348,7 +1348,7 @@ pub mod tests {
         );
     }
 
-    /// G1 Stage D1b (#88): `find_canonical_cluster_shape_from_raw` on the fib-1k
+    /// `find_canonical_cluster_shape_from_raw` on the fib-1k
     /// CPU shard's RAW event counts (from [REALCANON] core_heights_raw) MUST
     /// reproduce the REALCANON canonical shape (MiscInstrs=1 etc.) byte-for-byte
     /// — the RAW path treats a 0-event chip as truly absent (canonicalize -> 1),
@@ -1396,7 +1396,7 @@ pub mod tests {
         eprintln!("[RAWCANON] PASS — raw path reproduces REALCANON");
     }
 
-    /// G1 Stage D1b (#88): does a per-machine-cluster RAW SWEEP (cheap, ~26
+    /// Does a per-machine-cluster RAW SWEEP (cheap, ~26
     /// clusters × heights) that DROPS absent/0-event chips and lifts via
     /// `find_canonical_cluster_shape_from_raw` PRODUCE the fib-1k CPU-shard
     /// REALCANON?  This is the candidate FIX for `generate()`'s `small_shapes`
@@ -1509,13 +1509,13 @@ pub mod tests {
         println!("There are {num_shapes} core shapes");
     }
 
-    /// STEP-0 LINCHPIN PROBE (#88 DivEAssert band-fix): for a FIXED chip-SET,
+    /// Probe: for a FIXED chip-SET,
     /// is the per-chip canonical-cluster BAND-CAP height INVARIANT across
     /// different RAW height profiles (= different program lengths)?  If YES the
     /// targeted DivEAssert fix (round raw height UP to cluster band-cap
     /// in-circuit, keyed on the witnessed chip-set) is enumerability-safe (the
     /// band-cap is f(chip-set) only).  If NO (the band-cap moves with raw
-    /// heights), the fix re-breaks #82 (program-length-dependent VK) and must be
+    /// heights), the fix re-breaks the program-length-dependent VK and must be
     /// abandoned for the SP1-faithful hash-bound port.
     #[test]
     fn step0_bandcap_invariance_for_fixed_chipset() {
@@ -1743,12 +1743,12 @@ pub mod tests {
         assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::AddSub).unwrap().1, 21);
     }
 
-    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): a no-CPU sha256 shard carrying
+    /// Precompile sub-family coverage: a no-CPU sha256 shard carrying
     /// only ShaExtend (+ control) — an in-guest sha256 output-commit splits the
     /// sha256 family across shards — must canonicalize UP to the WHOLE sha256
     /// family cluster (inject ShaCompress + ShaCompressControl), so its FIX-off
-    /// normalize VK lands on the enumerated whole-family cluster VK.  Before the
-    /// fix `find_canonical_cluster_shape_from_raw` returned `None` for this shard
+    /// normalize VK lands on the enumerated whole-family cluster VK.  Without this
+    /// handling `find_canonical_cluster_shape_from_raw` returns `None` for this shard
     /// (the `canonical_cluster_from_parts` no-CPU branch is `return None`),
     /// leaving the sub-family chip-set un-enumerated.
     #[test]
@@ -1824,7 +1824,7 @@ pub mod tests {
         );
     }
 
-    /// PRECOMPILE SUB-FAMILY COVERAGE (#88/#82): the fix is GENERAL across all
+    /// Precompile sub-family coverage is GENERAL across all
     /// precompile families and across ANY sub-family of a family (the SP1
     /// `smallest_cluster`-superset model collapses every sub-family of a family
     /// to the SAME whole-family cluster, so the reachable set is BOUNDED — one

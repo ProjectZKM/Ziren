@@ -1,9 +1,9 @@
-//! UNTRACKED G2 coverage helper (#88/#82): given dumped REAL FIX-off recursion
-//! witnesses (CoreBasefold normalize children and ComposeBasefold composes),
-//! build each one's program, run `compress_prover.setup`, and print the REAL
-//! recursion VK digest (`hash_koalabear()` — the SAME key build_vk_map stores).
-//! Feed these digests to `check_vk_coverage` against the regenerated vk_map to
-//! prove every real single-shard normalize VK + every compress VK is IN-MAP.
+//! Coverage helper: given dumped REAL FIX-off recursion witnesses
+//! (CoreBasefold normalize children and ComposeBasefold composes), build each
+//! one's program, run `compress_prover.setup`, and print the REAL recursion VK
+//! digest (`hash_koalabear()` — the SAME key build_vk_map stores).  Feed these
+//! digests to `check_vk_coverage` against the regenerated vk_map to prove
+//! every real single-shard normalize VK + every compress VK is IN-MAP.
 //!
 //! Run:
 //!   NORM_DUMPS="/tmp/allinput_core_0.bin,/tmp/allinput_core_1.bin,..." \
@@ -37,9 +37,9 @@ fn main() {
                 1,
                 "normalize child must be single-shard (#88/#82)"
             );
-            // DE-CLAMP measurement (G2): the core shard the normalize verifies
-            // commits at fri_commitments.len() == DEFAULT_LOG_STACKING_HEIGHT
-            // (21) when not clamped.  Print it per child.
+            // The core shard the normalize verifies commits at
+            // fri_commitments.len() == DEFAULT_LOG_STACKING_HEIGHT (21) when
+            // not clamped.  Print it per child.
             {
                 use zkm_pcs::shard_level::shard_proof::EvaluationProof;
                 for (si, sp) in input.shard_proofs.iter().enumerate() {

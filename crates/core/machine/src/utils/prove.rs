@@ -126,8 +126,8 @@ where
         // `bincode::deserialize_from`'d it back.  That roundtrip costs ~5 s
         // of wall time on the production reth wrap (per
         // `docs/perf_reth_gpu.md`) and burns inode + page-cache pressure
-        // under `TMPDIR=/dev/shm`.  Mirrors the equivalent change already
-        // landed in `ziren-gpu/prover/src/core_multi_gpu.rs:136-159` for
+        // under `TMPDIR=/dev/shm`.  Mirrors the equivalent implementation
+        // in `ziren-gpu/prover/src/core_multi_gpu.rs:136-159` for
         // the multi-GPU code path; this brings the 1-GPU-fallback /
         // CPU-prover baseline into line.
         //
@@ -606,7 +606,7 @@ where
         #[cfg(feature = "debug")]
         drop(all_records_tx);
 
-        // HEIGHT-AGNOSTIC RECURSION (step 5c): a CoreShapeConfig used ONLY to
+        // A CoreShapeConfig used ONLY to
         // compute the per-shard FULL canonical CLUSTER shape for the jagged
         // commit (`find_canonical_cluster_shape`), INDEPENDENT of
         // `FIX_CORE_SHAPES` (`shape_config`).  With `FIX_CORE_SHAPES=false` the
@@ -618,7 +618,7 @@ where
         // default config the prover constructs at `ZKMProver::new`).
         let band_cap_shape_config = CoreShapeConfig::<SC::Val>::default();
 
-        // HEIGHT-AGNOSTIC RECURSION (step 5c): chip NAME -> trace WIDTH, so the
+        // Chip NAME -> trace WIDTH, so the
         // band-cap can ADD a missing canonical-cluster chip's zero COMMIT trace
         // (width is required to size it).  Machine-static, built once.
         let band_cap_chip_widths: std::collections::BTreeMap<String, usize> = prover
@@ -647,8 +647,7 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // HEIGHT-AGNOSTIC RECURSION (step 5b):
-                                    // compute this shard's per-chip CLUSTER
+                                    // Compute this shard's per-chip CLUSTER
                                     // band-cap from its RAW core heights and
                                     // install it for the scope of commit+open
                                     // (which run on THIS rayon task).  The PCS
@@ -690,7 +689,7 @@ where
                                                     })
                                                     .collect();
 
-                                                // ROLLOUT 1b: generate the
+                                                // Generate the
                                                 // CONSTRAINT-VALID traces of the
                                                 // canonical-cluster chips this raw
                                                 // shard is MISSING, the FIX-on way:
@@ -710,7 +709,7 @@ where
                                                 // injected by `commit_basefold_path`
                                                 // for both `chip_ordering` and the
                                                 // commit.  All-zero injection
-                                                // (rollout 1) matched the VK but
+                                                // matched the VK but
                                                 // tripped the injected chips'
                                                 // constraints in `verify_shard`.
                                                 let missing_traces: std::collections::BTreeMap<
@@ -724,7 +723,7 @@ where
                                                     // takes the BaseFold band-cap path
                                                     // (the gate the injection itself
                                                     // assumes); on any other ring keep
-                                                    // the rollout-1 fallback (empty =>
+                                                    // the fallback (empty =>
                                                     // zero injection) rather than an
                                                     // unsound transmute.
                                                     if TypeId::of::<SC::Val>()
@@ -814,7 +813,7 @@ where
                                                     m
                                                 };
 
-                                                // STAGE 2.5 (#88) LOCKSTEP
+                                                // LOCKSTEP
                                                 // ORIENTATION: compute the per-shard
                                                 // rev(zeta) decision ONCE here (the
                                                 // single source of truth) and install
@@ -833,7 +832,7 @@ where
                                                 // full-openings guard locally where that
                                                 // info is known, so a GPU run (out of
                                                 // scope; flag default-OFF) stays bitrev.
-                                                // #125 INC-4b: rev(zeta) is now
+                                                // rev(zeta) is
                                                 // the CORE DEFAULT.  This carrier is
                                                 // installed ONLY on the CORE prove
                                                 // path (this closure runs iff
@@ -843,11 +842,10 @@ where
                                                 // recursion / shrink / wrap provers
                                                 // never enter here, so their
                                                 // `current_use_rev()` stays `None`
-                                                // (legacy).  The rev-zeta
-                                                // A/B env is RETIRED: a `const true`
-                                                // (not an env read) makes the core
-                                                // orientation a compile-time DEFAULT,
-                                                // not a runtime toggle.
+                                                // (legacy).  The core orientation is a
+                                                // compile-time default (`const true`,
+                                                // not an env read), not a runtime
+                                                // toggle.
                                                 let stage2_use_rev = true;
 
                                                 zkm_pcs::shard_level::band_cap::BandCapGuard::new(
@@ -855,7 +853,7 @@ where
                                                     missing_traces,
                                                     raw_log_heights,
                                                     stage2_use_rev,
-                                                    // #129: vestigial `_zeropad_missing`
+                                                    // vestigial `_zeropad_missing`
                                                     // slot (ZIREN_SP1_ZEROPAD removed;
                                                     // constraint-valid injection is
                                                     // unconditional).
@@ -864,7 +862,7 @@ where
                                             })
                                     };
 
-                                    // #125 INC-4b: a CORE shard that maps to NO
+                                    // A CORE shard that maps to NO
                                     // canonical cluster (`find_canonical_cluster_shape`
                                     // == None — e.g. the no-CPU memory-finalize shard)
                                     // gets no `BandCapGuard`, so without this it would
@@ -1079,7 +1077,7 @@ where
             <SC as StarkGenericConfig>::Challenge,
             <SC as StarkGenericConfig>::Challenge,
         >>
-        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        // The K = F (base-field first round) folder instance.
         + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
             'b,
             Val<SC>,
@@ -1096,7 +1094,7 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     zkm_pcs::ShardProof<SC>: Sync,
-    // STAGE-B b1': required by `StarkMachine::verify` (its static OUTER BaseFold
+    // Required by `StarkMachine::verify` (its static OUTER BaseFold
     // verify threads these challenger capability bounds). Both rings satisfy it.
     SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
@@ -1141,7 +1139,7 @@ where
             <SC as StarkGenericConfig>::Challenge,
             <SC as StarkGenericConfig>::Challenge,
         >>
-        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        // The K = F (base-field first round) folder instance.
         + for<'b> Air<zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
             'b,
             Val<SC>,
@@ -1156,7 +1154,7 @@ where
     Com<SC>: Send + Sync,
     PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
-    // STAGE-B b1: required by `CpuProver: MachineProver` (the impl threads the
+    // Required by `CpuProver: MachineProver` (the impl threads the
     // static outer BaseFold open bound). Both rings satisfy it.
     SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>

@@ -3,13 +3,12 @@
 //! Source-mapped from
 //! `slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:182-243`.
 //!
-//! # Status (scaffolding — May 6 2026)
+//! # Status
 //!
 //! This file lays the **foundation** for the SP1 jagged-eval port.
 //! [`JaggedSumcheckEvalProof`] mirrors the SP1 wire-format struct;
 //! [`prove_jagged_evaluation`] is a stub that returns a structurally-
-//! valid placeholder.  The actual sumcheck body is the day-2 work of
-//! the task.
+//! valid placeholder.  The sumcheck body is not yet implemented.
 //!
 //! # Math (what the real body must compute)
 //!
@@ -72,7 +71,7 @@ pub struct JaggedSumcheckEvalProof<EF> {
 
 impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
     /// Empty placeholder — used by [`prove_jagged_evaluation`] until
-    /// the real sumcheck body lands.
+    /// the real sumcheck body is implemented.
     #[must_use]
     pub fn dummy() -> Self {
         Self { partial_sumcheck_proof: PartialSumcheckProof::dummy() }
@@ -81,9 +80,9 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 
 /// Prove the jagged-evaluation sub-protocol.
 ///
-/// **Scaffolding**: returns a structurally-valid
+/// Returns a structurally-valid
 /// placeholder.  The polynomial construction + sumcheck prover body
-/// is the day-2 work — see this module's "Math" section above.
+/// is not yet implemented — see this module's "Math" section above.
 ///
 /// **Inputs**:
 /// - `prefix_sums` — cumulative offsets (one per chip + final);
@@ -98,7 +97,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// `partial_sumcheck_proof.claimed_sum` equals `jagged_eval` (the
 /// expected value the verifier recomputes from the same inputs).
 ///
-/// # Phase 2 implementation plan (next session)
+/// # Implementation plan
 ///
 /// 1. Build merged_prefix_sums (Vec of bit-decomposed Points, each of
 ///    dimension 2*(log_m+1)).
@@ -449,8 +448,8 @@ impl<'a> StructuralJaggedEvalProver<'a> {
         }
         // SP1 parity: rhos accumulate via add_dimension = insert at FRONT
         // (slop Point::add_dimension = values.insert(0, .)), newest-first.
-        // Ziren previously push()'d (append, oldest-first) → the per-round
-        // full_point + final point_and_eval.0 ordering diverged from SP1's
+        // Appending (push, oldest-first) instead would diverge the per-round
+        // full_point + final point_and_eval.0 ordering from SP1's
         // in-circuit half-split verifier.  Mirror SP1 exactly.
         self.rhos.insert(0, alpha);
         self.round_num += 1;
@@ -525,8 +524,8 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_trace: &[InnerChallenge],
     challenger: &mut C,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
-    // day-2 complete (test fixtures): claimed_sum + naive
-    // sumcheck via materialization for small workloads.
+    // For small workloads: claimed_sum + naive
+    // sumcheck via materialization.
     // Production large workloads still need SP1's structural prover
     // (JaggedAssistSumAsPoly) — fall back to dummy with real
     // claimed_sum when n exceeds NAIVE_SUMCHECK_MAX_N.
@@ -536,20 +535,20 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
         return JaggedSumcheckEvalProof::dummy();
     }
 
-    // half = log_m + 1 = number of bits per prefix sum.  PHASE 2: derive this
+    // half = log_m + 1 = number of bits per prefix sum.  Derive this
     // from the prefix sums (matching full_jagged_evaluation's num_bits), NOT
     // from z_trace.len() (= log_dense_size = log_m), which is one bit SHORT and
-    // truncates the top prefix-sum bit — the SAME off-by-one PHASE 1 fixed in
-    // full_jagged_evaluation but left here.  z_trace.len()=log_m desynced the
+    // truncates the top prefix-sum bit (the same off-by-one as in
+    // full_jagged_evaluation).  z_trace.len()=log_m would desync the
     // structural sumcheck (2*log_m vars) from the closed form (log_m+1 bits) and
-    // broke the in-circuit jagged closing on real data (z_star.len = log_m).
+    // break the in-circuit jagged closing on real data (z_star.len = log_m).
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m = if last <= 1 {
         0
     } else {
         (last - 1).next_power_of_two().trailing_zeros() as usize
     };
-    // RECURSION-LAYER AREA PIN (#88/#82 Stage 2): when the recursion (`compress`)
+    // RECURSION-LAYER AREA PIN: when the recursion (`compress`)
     // prover has installed the area pin on this thread, run the jagged-eval over
     // the PINNED dense rather than the natural column geometry, so its dimension
     // is CONSTANT across heterogeneous recursion children (the precondition for
@@ -631,7 +630,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
             "structural vs naive claimed_sum disagree"
         );
         // NOTE: full point_and_eval comparison would require shared
-        // challenger state — skipped for now; round identity tests
+        // challenger state and is not done here; round identity tests
         // cover correctness independently.
     }
 
@@ -806,7 +805,7 @@ mod tests {
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
-    /// day-2: claimed_sum equals the closed-form expected sum.
+    /// claimed_sum equals the closed-form expected sum.
     /// At z_col=0 (boolean point), z_col_lagrange[0] = 1, others = 0,
     /// so claimed_sum equals BP.eval(t_0, t_1).  At all-zero z_row /
     /// z_trace too, BP eval is the indicator at the zero point.

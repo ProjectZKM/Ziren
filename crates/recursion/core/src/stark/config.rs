@@ -170,9 +170,9 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
     fn prep_commit_via_hook() -> bool {
         // SP1-style: the wrap machine's PREPROCESSED commit goes through the
         // stacked BaseFold (outer_prep_commit hook) — no two-adic coset LDE.
-        // The legacy `pcs.commit` LDE capped prep heights at
-        // 2^(TWO_ADICITY - log_blowup) = 2^20 (blowup 4) and panicked once
-        // the wrap program's tallest prep trace crossed it; its ProverData
+        // The `pcs.commit` LDE path caps prep heights at
+        // 2^(TWO_ADICITY - log_blowup) = 2^20 (blowup 4) and panics once
+        // the wrap program's tallest prep trace crosses it; its ProverData
         // has no consumers on the basefold path.
         true
     }
@@ -197,7 +197,7 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
     }
 }
 
-// #H (BaseFold-over-BN254 wrap port): the OUTER (wrap) impl of `BasefoldRing`.
+// The OUTER (wrap) impl of `BasefoldRing`.
 // Lives here — not in zkm-pcs — because zkm-pcs cannot import OuterSC
 // (recursion-core depends on stark, not vice versa). `Val<OuterSC> = KoalaBear`
 // and `Challenge<OuterSC> = KoalaBear⁴` (same as inner; mirrors SP1's
@@ -228,8 +228,8 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn use_basefold() -> bool {
-        // #H (BaseFold-over-BN254 wrap port): the digest tunnel + the outer
-        // jagged open/verify dispatch (hooks) are now wired, so the wrap STARK
+        // The digest tunnel + the outer
+        // jagged open/verify dispatch (hooks) are wired, so the wrap STARK
         // proves + host-verifies over the BN254 BaseFold jagged-PCS
         // (OuterValMmcs + OuterChallenger). commit_basefold_path builds the BN254
         // commit via precompute_jagged_basefold_commit_generic::<OuterValMmcs>;
@@ -253,7 +253,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<zkm_pcs::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [zkm_pcs::jagged_pcs::JaggedVal; 8] {
-        // #H (BaseFold-over-BN254 wrap port): `commit: Hash<KoalaBear, Bn254, 1>`
+        // `commit: Hash<KoalaBear, Bn254, 1>`
         // is the BN254 wrap commitment. Project it to 8 KoalaBear felts via
         // `split_32` (the same BN254->base primitive the MultiField32 challenger
         // uses) for the host `[F;8]` FS observe. The gnark step observes the BN254
@@ -285,7 +285,7 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 // ── D=5 outer config (128-bit security) ───────────────────────────────────
 
 
-// #H (BaseFold-over-BN254 wrap port) — compile-time proof that the genericized
+// Compile-time proof that the genericized
 // BaseFold jagged-PCS digest path (`zkm_pcs::jagged_pcs::*_generic`) is
 // instantiable over the OUTER ring's BN254 commitment family, i.e. that the
 // BN254 commitment (`OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`)
@@ -400,8 +400,8 @@ mod basefold_over_bn254_generic_typecheck {
 }
 
 
-// #H (BaseFold-over-BN254 wrap port): OUTER-ring jagged BaseFold setup hook.
-// STAGE-B b1/b1' retired the open + verify hook bodies (now static generic calls
+// OUTER-ring jagged BaseFold setup hook.
+// The open + verify hook bodies are static generic calls
 // in `prove_trusted_evaluations` / `verify_jagged_pcs_host` over the `BasefoldRing`
 // associated type). Only `outer_prep_commit` remains — registered into zkm-pcs's
 // process-global hook slot so `StarkMachine::setup` (which cannot name
@@ -412,12 +412,10 @@ pub mod outer_jagged_hooks {
     use p3_matrix::dense::RowMajorMatrix;
     use zkm_pcs::jagged_pcs::JaggedVal;
 
-    // STAGE-B b1/b1': `outer_open` (former `OUTER_JAGGED_OPEN_HOOK` body, b1) and
-    // `outer_verify` (former `OUTER_JAGGED_VERIFY_HOOK` body, b1') were RETIRED —
-    // the shard prover (`prove_trusted_evaluations`) and host verifier
-    // (`verify_jagged_pcs_host`) now name `OuterChallenger`/`OuterValMmcs` via the
+    // The shard prover (`prove_trusted_evaluations`) and host verifier
+    // (`verify_jagged_pcs_host`) name `OuterChallenger`/`OuterValMmcs` via the
     // `BasefoldRing` associated type and call the generic BaseFold open/verify
-    // statically, so the dyn-Any open/verify hooks are dead. Only
+    // statically, so the dyn-Any open/verify hooks are absent. Only
     // `outer_prep_commit` remains (setup/VK-side; a plain crate-dep fn pointer).
 
     /// Register the outer-ring jagged BaseFold prep-commit hook into zkm-pcs.
@@ -425,9 +423,8 @@ pub mod outer_jagged_hooks {
     /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
     /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
     pub fn register_outer_jagged_hooks() {
-        // STAGE-B b1/b1': `register_outer_jagged_open_hook` (b1) and
-        // `register_outer_jagged_verify_hook` (b1') removed — the open + verify
-        // paths are now static generic calls in the shard prover / host verifier.
+        // The open + verify paths are static generic calls in the shard
+        // prover / host verifier, so no open/verify hooks are registered.
         // Only the PREP-COMMIT hook remains (setup/VK-side crate-dep fn pointer).
         let _ = zkm_pcs::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
             outer_prep_commit,
@@ -454,7 +451,7 @@ pub mod outer_jagged_hooks {
     }
 }
 
-// #H (BaseFold-over-BN254 wrap port) — RUNTIME validation that the stacked
+// Runtime validation that the stacked
 // BaseFold jagged-PCS actually commits / opens / verifies over the OUTER ring
 // (Poseidon2-BN254 `OuterValMmcs` + `MultiField32Challenger`). This is the
 // cryptographic heart the wrap shard reuses; an honest proof must verify.

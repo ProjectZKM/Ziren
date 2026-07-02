@@ -52,14 +52,13 @@ where
     let input_var = input.read(&mut builder);
     // Populate per-shard chip_log_heights from each shard's
     // `BasefoldShardProof.chip_log_heights`.  Fed into
-    // `verify_core_basefold` which now drives
+    // `verify_core_basefold` which drives
     // `chip_height_bits_from_log_heights` at the lift site (real
     // Horner-recomposed heights — same value the prover prologue
     // observes via host transcript at
     // `crates/pcs/src/shard_level/prover.rs:260-269`).
     //
-    // NOTE the warning in the previous comment about breaking the
-    // padded-row mask constraint applies to
+    // The padded-row mask constraint applies to
     // `opened_values.chips[*].degree` (the per-chip zerocheck
     // degree bits) — a DIFFERENT consumer.  `chip_height_bits` is
     // the recursion-verifier's transcript prologue input, not the
@@ -165,9 +164,9 @@ where
 /// Build the Wrap (terminal) program.  Verifies a single root
 /// recursive proof and reflects its [`RootPublicValues`] to the
 /// outer ring.
-/// SP1 alignment: wrap (terminal) takes `value_assertions` like
-/// compose to control whether merkle membership proofs are enforced
-/// (true) or only witnessed (false). Mirrors SP1's
+/// Wrap (terminal) takes `value_assertions` like compose to control
+/// whether merkle membership proofs are enforced (true) or only
+/// witnessed (false). Mirrors SP1's
 /// `SP1CompressRootVerifierWithVKey::verify` `value_assertions` flag.
 pub fn build_wrap_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
@@ -329,8 +328,8 @@ mod tests {
             None,
             // CpuProver-equivalent orientation.
             zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
-            // Option B precomputed-commit not used for synthetic
-            // witness builder — legacy in-band commit flow.
+            // Precomputed-commit not used for the synthetic witness
+            // builder — uses the in-band commit flow.
             None,
         )
     }
@@ -379,8 +378,8 @@ mod tests {
     /// at the right type and can be coerced to a function pointer
     /// with the expected signature.  Validates the type bounds on
     /// the public API without actually running the AsmCompiler
-    /// (which needs valid witness fixtures — see the task for the
-    /// runtime end-to-end test).
+    /// (which needs valid witness fixtures for a runtime end-to-end
+    /// test).
     ///
     /// Catches the most common breakage class — generic-bound drift
     /// after upstream changes — without requiring proof fixtures.
@@ -430,14 +429,12 @@ mod tests {
             max_log_row_count,
         );
         // Bare-minimum sanity: program produced, has at least one
-        // instruction.  Tighter bounds + RecursionExecutor::run land
-        // once the dummy witness gains chip_openings entries.
+        // instruction.  Tighter bounds + RecursionExecutor::run can be
+        // added once the dummy witness gains chip_openings entries.
         let _ = program;
     }
 
-    /// MEASUREMENT (height-agnostic increment #1): print the normalize
-    /// program's instruction count so the delta introduced by the
-    /// round-count soundness binding can be quantified vs the base.
+    /// Print the normalize program's instruction count for measurement.
     #[test]
     fn measure_normalize_program_instruction_count() {
         use zkm_core_machine::mips::MipsAir;
@@ -457,11 +454,10 @@ mod tests {
         println!("NORMALIZE_PROGRAM_INSTRUCTION_COUNT={}", program.instruction_count());
     }
 
-    /// ★ HEIGHT-AGNOSTIC-RECURSION (step 2b) — CLAMP-(IN)DEPENDENCE PROBE.
+    /// CLAMP-(IN)DEPENDENCE PROBE.
     ///
-    /// THE headline diagnostic step 2b set out to resolve: for a FIXED
-    /// chip-set, does the normalize program (hence its VK) depend on the
-    /// per-proof `log_stacking_height` *clamp*
+    /// For a FIXED chip-set, does the normalize program (hence its VK)
+    /// depend on the per-proof `log_stacking_height` *clamp*
     /// (`pick_log_stacking_height(total_values)`,
     /// `crates/pcs/src/jagged_pcs.rs:114`)?
     ///
@@ -477,16 +473,15 @@ mod tests {
     /// It then compares `instruction_count()` of the two normalize
     /// programs.
     ///
-    /// STATE (step 3, prover de-clamp LANDED): the two counts are now
-    /// EQUAL — `pick_log_stacking_height` returns a FIXED 21 regardless of
-    /// area, so the build-time-unrolled BaseFold FRI loops
+    /// Because `pick_log_stacking_height` returns a FIXED 21 regardless of
+    /// area, the two counts are EQUAL — the build-time-unrolled BaseFold FRI
+    /// loops
     /// (basefold_verifier.rs rounds/query/merkle), driven by the witness
     /// Vec lengths (`fri_commitments.len() == log_stacking`), build the
     /// SAME 21-round program at every height ⇒ the program — and therefore
     /// the VK — is CLAMP-INDEPENDENT (a function of the chip-SET only).
-    /// This test now ASSERTS that equality (flipped from the step-2b
-    /// assert_ne!), now that the host commit stopped clamping
-    /// (`log_stacking_height` fixed at 21,
+    /// This test ASSERTS that equality, since the host commit does not
+    /// clamp (`log_stacking_height` fixed at 21,
     /// SP1-faithful — see `jagged/src/prover.rs:commit_multilinears` in
     /// the SP1 ref, which pads area UP to a FIXED stacking height and
     /// never clamps).  The verifier-side masking-to-MAX alternative is
@@ -495,8 +490,7 @@ mod tests {
     /// `duplexing`), so a 21-round masked path absorbs a structurally
     /// different number of permutes than an honest k<21-round proof ⇒
     /// Fiat-Shamir desync (no field assignment to padded rounds can make
-    /// the sponge states equal).  See the step-2b report for the full
-    /// argument.
+    /// the sponge states equal).
     #[test]
     #[ignore = "step 5a: dummy now builds at the PASSED per-chip heights (cluster-max \
                 in the enum), not a blanket internal max, so building directly at two RAW \
@@ -562,8 +556,8 @@ mod tests {
              LARGE(log_h={large_log_h} log_stacking={large_stk} instr={large_count})"
         );
 
-        // POST-DE-CLAMP (step 3): the stacking height is FIXED at 21 for
-        // BOTH heights — the prover no longer clamps small commits down
+        // The stacking height is FIXED at 21 for BOTH heights — the
+        // prover does not clamp small commits down
         // (`pick_log_stacking_height` ignores area; the call site pads the
         // area up to 2^21, SP1-faithful).
         assert_eq!(
@@ -575,9 +569,8 @@ mod tests {
             "LARGE height must use the FIXED stacking height (got {large_stk})"
         );
 
-        // ★ HEADLINE (step-3 regression target, FLIPPED to assert_eq!):
-        // clamp-INDEPENDENT — for one chip-set the normalize program (hence
-        // its VK) is now IDENTICAL across heights, since both build at
+        // Clamp-INDEPENDENT — for one chip-set the normalize program (hence
+        // its VK) is IDENTICAL across heights, since both build at
         // num_variables=21.  This is the precondition for a chip-set-keyed
         // vk_map and retiring FIX_CORE_SHAPES.
         assert_eq!(
@@ -598,9 +591,9 @@ mod tests {
         use zkm_pcs::shape::OrderedShape;
 
         let machine = MipsAir::<p3_koala_bear::KoalaBear>::machine(KoalaBearPoseidon2::default());
-        // #88/#82 SINGLE-SHARD NORMALIZE: normalize is arity-1, so the dummy
-        // takes exactly ONE per-shard shape (the multi-shard normalize VK was a
-        // phantom — only the enumerator ever emitted arity≥2 Recursion).
+        // Normalize is arity-1, so the dummy takes exactly ONE per-shard
+        // shape (the multi-shard normalize VK is a phantom — only the
+        // enumerator ever emitted arity≥2 Recursion).
         // Single-shard shape with 2 chips.
         let shape = super::super::core::ZKMRecursionShape {
             proof_shapes: vec![OrderedShape::from_log2_heights(&[

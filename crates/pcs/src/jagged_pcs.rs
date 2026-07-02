@@ -86,7 +86,7 @@ pub type BasefoldLateBindingProverData = BasefoldLateBindingProverDataGeneric<Ja
 /// stacked PCS doesn't end up over-padding past the actual data.
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
-/// SP1-faithful RECURSION-LAYER trace-area pin (#88/#82, Stage 1).
+/// SP1-faithful RECURSION-LAYER trace-area pin.
 ///
 /// SP1's `crates/prover/src/components.rs` pins `RECURSION_LOG_TRACE_AREA = 27`
 /// for the compress/recursion machine: every recursion proof (normalize AND
@@ -119,14 +119,13 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// SP1-faithful FIXED stacking height: ALWAYS `DEFAULT_LOG_STACKING_HEIGHT`
 /// (21), never clamped down for small commits.
 ///
-/// HEIGHT-AGNOSTIC RECURSION (step 3 — prover de-clamp).  Previously this
-/// clamped to `min(21, log2(np2(total))-1)` for tiny commits, making the
-/// prover's `log_stacking_height` depend on the trace AREA.  Because the
+/// Clamping to `min(21, log2(np2(total))-1)` for tiny commits would make
+/// the prover's `log_stacking_height` depend on the trace AREA.  Because the
 /// recursion normalize/compress program is rebuilt per-proof from
 /// `bundle.commit.log_stacking_height` (the value the prover used), that
-/// clamp made the program — hence its VK — CLAMP-DEPENDENT (the VK varied
-/// with chip heights), which is exactly what forces FIX_CORE_SHAPES + a
-/// height-quantized vk_map.
+/// clamp would make the program — hence its VK — CLAMP-DEPENDENT (the VK
+/// varying with chip heights), which is exactly what forces FIX_CORE_SHAPES
+/// + a height-quantized vk_map.
 ///
 /// SP1's `JaggedPcsProver::commit_multilinears` instead FIXES the stacking
 /// height and rounds the trace AREA up to a multiple of `2^21` (each call
@@ -134,17 +133,16 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// commit is honestly 21-round → the per-proof verifier rebuild
 /// constant-folds to `num_variables = 21` → clamp-INDEPENDENCE, with no
 /// transcript masking and no Fiat-Shamir risk (the unsound verifier-side
-/// alternative; see the step-2b report).  The normalize VK then depends on
-/// the chip-SET only — the precondition for retiring FIX_CORE_SHAPES while
-/// keeping VERIFY_VK=true.
+/// alternative).  The normalize VK then depends on the chip-SET only — the
+/// precondition for retiring FIX_CORE_SHAPES while keeping VERIFY_VK=true.
 ///
-/// `total_entries` is retained for call-site/API symmetry but no longer
-/// affects the height (the call-site area padding absorbs it).
+/// `total_entries` is retained for call-site/API symmetry but does not
+/// affect the height (the call-site area padding absorbs it).
 pub fn pick_log_stacking_height(_total_entries: usize) -> u32 {
     DEFAULT_LOG_STACKING_HEIGHT
 }
 
-// BaseFold-over-BN254 port: GC-generic PCS core. Val/Challenge stay
+// BaseFold-over-BN254: GC-generic PCS core. Val/Challenge stay
 // KoalaBear (the outer context keeps the same field for inner and outer);
 // only the Mmcs (hash) + Dft vary by context. Inner uses Poseidon2-KoalaBear
 // Merkle; the wrap (OuterSC) will pass Poseidon2-BN254 Merkle (OuterValMmcs).
@@ -780,13 +778,12 @@ pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
 /// not registered).  Implementations MAY return `None` to signal a
 /// hard fall-through to the host body (e.g. when shape constraints
 /// the GPU path doesn't support are detected).
-/// SP1 re-align (Jun 11 2026): the hook now ALSO receives `z_col` (the
-/// caller-sampled column point — the hook must NOT sample anything
-/// before the round loop; gamma-mixing is retired) and `z_row` (the
-/// full zerocheck-reduced z* driving the row-eq embedding weights).
-/// These mirror `prove_jagged_reduction_owned`'s post-ITEM-12
-/// signature; the pre-ITEM-12 gamma/evals-observe/LSB-fold scaffold
-/// produced INVALID proofs once the host moved (s4 R4 fib rejection).
+/// The hook also receives `z_col` (the caller-sampled column point — the
+/// hook must NOT sample anything before the round loop, and must not
+/// gamma-mix) and `z_row` (the full zerocheck-reduced z* driving the
+/// row-eq embedding weights).  These mirror
+/// `prove_jagged_reduction_owned`'s signature; sampling gamma or
+/// observing evals before the round loop produces INVALID proofs.
 pub type GpuJaggedReductionFn = fn(
     dense_q: alloc::vec::Vec<JaggedVal>,
     packing: &crate::jagged::JaggedPacking<JaggedVal>,
@@ -985,7 +982,7 @@ pub mod jagged_dispatch_diag {
 /// Multi-GPU isolation — `circuit_id` scopes the hook to a single
 /// GKR-circuit build call.  The GPU side keys its registry by
 /// `(device_id, circuit_id)` so concurrent shards on the same GPU
-/// don't share a `next_handle` counter (which previously caused
+/// don't share a `next_handle` counter (which would otherwise cause
 /// "handle not in registry" panics when one shard's pull stepped on
 /// another's intermediate handles).
 pub type GpuLayerTransitionFn = fn(circuit_id: u64, prev_handle: u64) -> u64;
@@ -1102,7 +1099,7 @@ pub fn get_gpu_layer_init_hook() -> Option<GpuLayerInitFn> {
 // layer set fits.  When it returns `false`, `try_run_device_path_basefold`
 // returns `None` so the GKR fold runs entirely on host — byte-identical
 // (the device path is a perf optimization; the layer cells are the same)
-// and transcript-neutral.  Mirrors TMFIT's commit/open pre-fire
+// and transcript-neutral.  Mirrors the commit/open pre-fire
 // preflights.  Opaque to the stark crate; the GPU side owns the VRAM math.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -1737,10 +1734,9 @@ where
 // commit (which would skip even the brief dense materialization) is
 // the next-stage refactor.
 //
-// E1 step 2: this module no longer requires the `whir` feature.  It
-// uses the ungated `jagged.rs` (data structures) and the new
-// `jagged_sumcheck.rs` (PCS-agnostic reduction math) — both moved
-// out of the whir feature gate as part of E1.
+// This module does not require the `whir` feature.  It uses the ungated
+// `jagged.rs` (data structures) and `jagged_sumcheck.rs` (PCS-agnostic
+// reduction math), neither of which is behind the whir feature gate.
 
 pub mod jagged {
     use alloc::vec::Vec;
@@ -1806,8 +1802,8 @@ pub mod jagged {
     /// the prover from `compute_jagged_metadata`.  The verifier reads
     /// this instead of `BaseAir::width(chip)` so the prover can send
     /// `trace.width` (the truly-populated columns) without any
-    /// chip.width() pad.  Restores Apr 30's perf (~24x reduction in
-    /// jagged-PCS data on workloads with sparse-column chips).
+    /// chip.width() pad (~24x reduction in jagged-PCS data on
+    /// workloads with sparse-column chips).
     /// Empty vec on the wire = legacy bundle → caller falls back to
     /// `BaseAir::width(chip)` for backward compat.
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -1987,18 +1983,18 @@ pub mod jagged {
         /// (no host re-materialize, no H2D re-upload).  `None` on the
         /// host build path — behaviour unchanged.
         pub dense_device_handle: Option<u64>,
-        /// #77 (H53 D2H-skip hole fix): the CORRECT host-built dense_q that
-        /// the commit was committed over, carried forward to the step-4
-        /// reduction.  Populated ONLY by the provider-aware HOST fallback
-        /// commit body (`precompute_jagged_basefold_commit_provider`), which
-        /// runs when the #A device commit hook DECLINES (e.g. the H53/TMFIT
-        /// commit-NTT OOM preflight) and re-materializes the device-resident
-        /// chips from the still-live (not-yet-drained) provider.  Without
-        /// this, the reduction would re-materialize the dense_q from the
-        /// per-shard provider — which the zerocheck-prepare `release_by_name`
-        /// (#367 drain-on-lookup) has ALREADY DRAINED by reduction time →
+        /// The CORRECT host-built dense_q that the commit was committed
+        /// over, carried forward to the step-4 reduction.  Populated ONLY
+        /// by the provider-aware HOST fallback commit body
+        /// (`precompute_jagged_basefold_commit_provider`), which runs when
+        /// the device commit hook DECLINES (e.g. the commit-NTT OOM
+        /// preflight) and re-materializes the device-resident chips from
+        /// the still-live (not-yet-drained) provider.  Without this, the
+        /// reduction would re-materialize the dense_q from the per-shard
+        /// provider — which the zerocheck-prepare `release_by_name`
+        /// drain-on-lookup has ALREADY DRAINED by reduction time →
         /// WRONG dense_q → the jagged sumcheck reduction proof is built over
-        /// the wrong data → the verifier REJECTS the bundle (#76 H53INV).
+        /// the wrong data → the verifier REJECTS the bundle.
         /// Carrying the already-correct dense_q makes the decline path
         /// byte-identical to the golden host/device commit.  `None` on the
         /// happy path (the device commit fired → `dense_device_handle` is
@@ -2126,7 +2122,7 @@ pub mod jagged {
         let _t_meta = std::time::Instant::now();
         let _meta_span = tracing::info_span!("jagged_compute_metadata_pre").entered();
         let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN (#88/#82 Stage 1): see the twin in
+        // RECURSION-LAYER AREA PIN: see the twin in
         // `precompute_jagged_basefold_commit_generic`.  Carrier-keyed
         // (recursion-only); `None` on CORE/shrink/wrap → byte-identical.
         if let Some(target) = crate::shard_level::band_cap::current_recursion_area_pin() {
@@ -2165,7 +2161,7 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // FIX A (#116 inc-4): retain the commit's dense_q so EVERY shard —
+        // Retain the commit's dense_q so EVERY shard —
         // including the ones with NO device-trace provider (the dominant
         // big-shard case: only the first `provider_inflight_cap` shards
         // snapshot a provider, the rest get `device_traces = None`) — carries
@@ -2218,15 +2214,14 @@ pub mod jagged {
         if !needs_remat {
             return precompute_jagged_basefold_commit(chip_traces);
         }
-        // #77 (H53 D2H-skip hole fix): this is the DECLINE path — the #A
-        // device commit hook returned `None` (e.g. the H53/TMFIT commit-NTT
-        // OOM preflight) so we re-materialize the device-resident chips from
-        // the per-shard provider HERE, while the provider is still LIVE (the
-        // zerocheck-prepare `release_by_name` #367 drain has NOT run yet at
-        // commit time).  Capture the CORRECT dense_q the commit is built
+        // DECLINE path: the device commit hook returned `None` (e.g. the
+        // commit-NTT OOM preflight) so we re-materialize the device-resident
+        // chips from the per-shard provider HERE, while the provider is still
+        // LIVE (the zerocheck-prepare `release_by_name` drain has NOT run yet
+        // at commit time).  Capture the CORRECT dense_q the commit is built
         // over and carry it forward to the step-4 reduction via
         // `host_dense_q`, so the reduction does NOT re-materialize from the
-        // (by-then DRAINED) provider → no wrong dense_q → no #76 H53INV
+        // (by-then DRAINED) provider → no wrong dense_q → no verifier
         // reject.  Byte-identical to the golden host/device commit by
         // construction (same `materialize_dense_jagged` over the same
         // re-materialized chips that produced the committed digest).
@@ -2264,7 +2259,7 @@ pub mod jagged {
             + 'static,
     {
         let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN (#88/#82 Stage 1, SP1-faithful).  When the
+        // RECURSION-LAYER AREA PIN (SP1-faithful).  When the
         // recursion (`compress`) prover has installed the area pin on this
         // thread, raise `log_dense_size` to the pin floor so the dense
         // materialize + commit run at a FIXED area (`2^pin`) → constant
@@ -2459,7 +2454,7 @@ pub mod jagged {
             .collect()
     }
 
-    /// **INC-2 shared linear core** — the SP1-shaped, path-INDEPENDENT
+    /// **Shared linear core** — the SP1-shaped, path-INDEPENDENT
     /// challenger sequence at the heart of every jagged-BaseFold prove.
     ///
     /// Mirrors SP1 `JaggedProver::prove_trusted_evaluations`
@@ -2472,7 +2467,7 @@ pub mod jagged {
     ///
     /// The `reduce` and `open` closures are the ONLY per-path variation
     /// (host-owned vs device-hook reduction; concrete vs BN254 open; the
-    /// DROPLDES / PIECE2 device-memory frees) and NEITHER may run any
+    /// pre-reduce / pre-open device-memory frees) and NEITHER may run any
     /// challenger op outside its documented reduction/open — so every caller
     /// (single-group concrete, per-group multi-group, BN254 generic) lands its
     /// `z_col` / reduction / jagged-eval / point-extend / open challenger ops
@@ -2619,11 +2614,11 @@ pub mod jagged {
                 chips = n_chips,
                 "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
             );
-            // #77: `pre.host_dense_q` is `Some` ONLY on the H53/TMFIT
-            // device-commit DECLINE path (the provider-aware host fallback
-            // body captured the correct dense_q while the provider was live).
-            // It carries the dense_q forward so the reduction below does not
-            // re-materialize from the (drained) provider.
+            // `pre.host_dense_q` is `Some` ONLY on the device-commit DECLINE
+            // path (the provider-aware host fallback body captured the correct
+            // dense_q while the provider was live).  It carries the dense_q
+            // forward so the reduction below does not re-materialize from the
+            // (drained) provider.
             (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle, pre.host_dense_q)
         } else {
             // No precompute → this path materializes the dense commit on
@@ -2678,8 +2673,8 @@ pub mod jagged {
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
-        // Phase 4 perf fix (Apr 25 2026): parallelize across chips
-        // AND across columns within each chip. The triple-nested loop
+        // Parallelize across chips AND across columns within each chip.
+        // The triple-nested loop
         // (chip × col × row) is O(N_chips · max_w · max_h) which for
         // a 22-chip MIPS shard padded to 2^19 rows hits ~10M+ EF
         // multiply-adds. Each chip × column reduction is independent.
@@ -2712,7 +2707,7 @@ pub mod jagged {
             // happy path takes the `pre` branch above).
             let rematerialized_for_y =
                 rematerialize_chip_traces_via_provider(chip_traces, provider);
-            // STAGE 2.5 (#88): read the rev(zeta) orientation ONCE on THIS thread
+            // Read the rev(zeta) orientation ONCE on THIS thread
             // (the carrier is thread-local, installed by `BandCapGuard` only on
             // the worker that runs commit+open); the per-chip / per-column
             // reductions below run on RAYON worker threads where `current_use_
@@ -2753,7 +2748,7 @@ pub mod jagged {
                     let _ = r_row_c;
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // STAGE 2.5 (#88): the rev(zeta) orientation (single source of
+                    // The rev(zeta) orientation (single source of
                     // truth, set by `BandCapGuard` for the whole commit+open
                     // scope).  Under rev, the COMMIT (`materialize_dense_jagged`)
                     // places the data in NATURAL row order, so the column claim
@@ -2831,8 +2826,8 @@ pub mod jagged {
         // semantics with `None` collapse to V1 behaviour; the signature
         // is in place for future Ziren-side wiring (e.g. GPU-resident
         // chip-trace materialization) to skip the H→D upload.
-        // ── INC-2: the jagged reduction (DROPLDES pre-free + hook dispatch +
-        // PIECE2 post-free) packaged as the `reduce` closure threaded through
+        // ── The jagged reduction (drop-LDEs pre-free + hook dispatch +
+        // post-free) packaged as the `reduce` closure threaded through
         // the shared `prove_jagged_basefold_linear_core`.  The core samples
         // `z_col` at the SP1 transcript position (after the commit observe,
         // immediately before the reduction) and passes it in.  This closure
@@ -2846,11 +2841,11 @@ pub mod jagged {
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
-        // DROPLDES (#74): free the prior-phase device residency BEFORE
+        // Free the prior-phase device residency BEFORE
         // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
         // model.  The reduce reads ONLY dense_q (either the device-resident
         // buffer registered via precomputed_dense_handle, OR the CARRIED host
-        // dense_q the #77 commit-decline path captured into
+        // dense_q the commit-decline path captured into
         // precomputed_host_dense_q), NOT the per-chip device traces held by
         // the provider.  Freeing the provider traces is sound on EITHER
         // device-happy path -- the reduce has its dense_q without
@@ -2860,16 +2855,15 @@ pub mod jagged {
         // Pure lifetime change, transcript-neutral.  Gated
         // ZIREN_GPU_FREE_TRACES_PRE_REDUCE (default OFF; orchestrator sets it).
         //
-        // #116: the original gate required precomputed_dense_handle.is_some()
-        // (the DEVICE-commit path).  On big shards (TM 2^22, log_dense=29)
-        // the device commit OOM-DECLINES to host (TMFIT/H53 preflight, ~6 GiB
-        // free) so the handle is None and the dense_q is the CARRIED host
-        // buffer -- the gate skipped, the ~16 GiB of traces stayed resident,
-        // and the device reduce host-fell-back.  Adding
-        // precomputed_host_dense_q.is_some() to the gate fires the free on
-        // that carried path too (the dominant big-shard case): the reduce
-        // uploads/folds the carried dense_q and never touches the provider,
-        // so freeing it here is sound and lets the reduce go device.
+        // The gate accepts the CARRIED host dense_q path
+        // (precomputed_host_dense_q.is_some()), not only the DEVICE-commit
+        // path (precomputed_dense_handle.is_some()).  On big shards (TM 2^22,
+        // log_dense=29) the device commit OOM-DECLINES to host (~6 GiB free)
+        // so the handle is None and the dense_q is the CARRIED host buffer;
+        // firing the free on that carried path too (the dominant big-shard
+        // case) lets the reduce upload/fold the carried dense_q and never
+        // touch the provider, so freeing it here is sound and lets the reduce
+        // go device.
         if let Some(p) = provider {
             let free_pre_reduce = std::env::var("ZIREN_GPU_FREE_TRACES_PRE_REDUCE")
                 .map(|v| v != "0")
@@ -2917,35 +2911,27 @@ pub mod jagged {
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            // History: an earlier invalid proof at the fib packed shard
-            // (log_dense=27, 22 chips) was root-caused to a stale GPU
-            // scaffold: it implemented an OLDER reduction (y-observe +
-            // gamma column mixing, LSB pair fold, evals-observe, push
-            // point order) while this host had moved to caller-sampled
-            // z_col Lagrange weights + full row_eq(rev(z_row)) embedding +
-            // MSB fold + coeff observe + insert(0, r).  Fixed by passing
-            // z_col/z_row through the hook signatures and re-aligning the
+            // The GPU reduction MUST match this host reduction exactly:
+            // caller-sampled z_col Lagrange weights + full row_eq(rev(z_row))
+            // embedding + MSB fold + coeff observe + insert(0, r).  An older
+            // reduction shape (y-observe + gamma column mixing, LSB pair
+            // fold, evals-observe, push point order) produces INVALID proofs;
+            // z_col/z_row are passed through the hook signatures so the
             // ziren-gpu scaffold + CUDA kernels (jagged_sumcheck_kernels.cu
-            // MSB).  Validated byte-identical vs pure host (fib core both
-            // the V2 device-handle and host-dense legs, tendermint core
-            // shards, fib full chain + wrap).
+            // MSB) stay byte-identical vs pure host (fib core both the V2
+            // device-handle and host-dense legs, tendermint core shards, fib
+            // full chain + wrap).
             //
-            // DEFAULT ON (=0/false to opt out).  History: an earlier
-            // default-ON window hit an armed in-circuit trip in MULTI-GPU
-            // tendermint COMPRESS (a compose rejected a hook-on first-layer
-            // recursion proof) while the identical hook-off run was green.
-            // Root cause was a TRANSCRIPT-POISON window in the ziren-gpu
-            // round-0 device path: the fold-output buffers (2 x 4 GiB at
-            // log_dense=29) were allocated AFTER the round-0 observe+sample;
-            // an OOM there (peaked at ~29.5 GiB VRAM) returned None and the
-            // caller re-ran round 0 on host, double-advancing the transcript
-            // and emitting a (log_n+1)-round proof.  NOT a cross-GPU race:
-            // dump-replay of the same shards hook-on verified GREEN at low
-            // VRAM pressure, and fault-injecting the alloc failure
-            // reproduced the compose rejection exactly (point.len()=
-            // log_n+1).  Fixed in ziren-gpu jagged_sumcheck.rs by hoisting
-            // ALL fallible allocs before any transcript interaction and
-            // resuming (not restarting) on host for mid-loop failures.
+            // DEFAULT ON (=0/false to opt out).  All fallible allocs MUST be
+            // hoisted before any transcript interaction: allocating the
+            // round-0 fold-output buffers (2 x 4 GiB at log_dense=29) AFTER
+            // the round-0 observe+sample risks an OOM there (peaks ~29.5 GiB
+            // VRAM) that returns None and makes the caller re-run round 0 on
+            // host, double-advancing the transcript and emitting a
+            // (log_n+1)-round proof a downstream compose rejects (a
+            // TRANSCRIPT-POISON).  The ziren-gpu jagged_sumcheck.rs hoists
+            // all fallible allocs before any transcript interaction and
+            // resumes (not restarts) on host for mid-loop failures.
             let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true);
@@ -2965,7 +2951,7 @@ pub mod jagged {
             let skip_host_dense = precomputed_dense_handle.is_some()
                 && try_gpu
                 && hook_v2.is_some();
-            // #77: true when `dense_q` below is the CARRIED host dense_q from
+            // True when `dense_q` below is the CARRIED host dense_q from
             // the device-commit-decline fallback — the provider is DRAINED by
             // reduction time so this is the ONLY correct source; the V2/V1
             // hook None-fallback edges below must reuse it (not the drained
@@ -2975,16 +2961,15 @@ pub mod jagged {
                 Vec::new()
             } else if let Some(carried) = precomputed_host_dense_q.take() {
                 dense_q_is_carried = true;
-                // #77 (H53 D2H-skip hole fix): the device commit DECLINED
-                // (e.g. H53/TMFIT OOM preflight) and the provider-aware host
-                // fallback body carried forward the CORRECT dense_q it
-                // committed over (captured while the provider was still
-                // live, BEFORE the zerocheck-prepare #367 drain).  Use it
-                // directly instead of re-materializing from the now-DRAINED
-                // provider (which would yield a WRONG dense_q → the jagged
-                // sumcheck reduction proof would be built over wrong data →
-                // the verifier REJECTS — the #76 H53INV bug).  Byte-identical
-                // to the golden commit by construction.
+                // The device commit DECLINED (e.g. OOM preflight) and the
+                // provider-aware host fallback body carried forward the
+                // CORRECT dense_q it committed over (captured while the
+                // provider was still live, BEFORE the zerocheck-prepare
+                // drain).  Use it directly instead of re-materializing from
+                // the now-DRAINED provider (which would yield a WRONG dense_q
+                // → the jagged sumcheck reduction proof would be built over
+                // wrong data → the verifier REJECTS).  Byte-identical to the
+                // golden commit by construction.
                 debug_assert_eq!(carried.len(), 1usize << packing.log_dense_size);
                 carried
             } else {
@@ -3058,10 +3043,10 @@ pub mod jagged {
                     }
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
-                    // #A: with the device-handle skip, `dense_q` is an
+                    // With the device-handle skip, `dense_q` is an
                     // empty placeholder — never save it as a fallback
                     // source (the None edge below re-materializes).
-                    // #77: when `dense_q` is the CARRIED host dense_q (device
+                    // When `dense_q` is the CARRIED host dense_q (device
                     // commit declined), ALWAYS save it — the provider is
                     // drained so the None-fallback's re-materialize would be
                     // wrong; the carried buffer is the only correct source.
@@ -3144,10 +3129,10 @@ pub mod jagged {
                     // across the call.  On a hard fall-through (None
                     // returned by the hook) we lose ownership — the
                     // host fallback below re-materializes dense_q in
-                    // that case, mirroring the pre-G1 behaviour.
+                    // that case.
                     let r_row = r_row_per_chip.to_vec();
                     let y_clone = y_per_chip.clone();
-                    // #77: see the V2 twin — always save the carried dense_q
+                    // See the V2 twin — always save the carried dense_q
                     // (drained provider can't be re-materialized correctly).
                     let saved_dense = if dense_q_is_carried {
                         Some(dense_q.clone())
@@ -3220,7 +3205,7 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // ── PIECE2: free the device-resident main traces BEFORE the
+        // ── Free the device-resident main traces BEFORE the
         // BaseFold open.  The reduce is the LAST phase that reads the raw
         // per-chip traces (commit + GKR first-layer + reduce all done);
         // the jagged-eval sub-protocol below operates on `packing.offsets`
@@ -3256,12 +3241,12 @@ pub mod jagged {
             reduction
         };
 
-        // ── INC-2: the BaseFold open packaged as the `open` closure.  Moves
+        // ── The BaseFold open packaged as the `open` closure.  Moves
         // `prover_data` in; captures `n_chips` by copy.  Runs NO challenger op
         // outside `open_jagged_pcs`, so the point-extend (sampled by the core
         // immediately before) lands identically across all paths.
         //
-        // (5) SP1-port: the jagged sumcheck reduces over `dense_q` (2^log_dense
+        // (5) The jagged sumcheck reduces over `dense_q` (2^log_dense
         // cells) but the BaseFold commit covers `prover_data.area` cells
         // (num_stripes × batch_size × stack_height), which can exceed
         // 2^log_dense_size; the core extends z* to log2(area) with extra
@@ -3433,7 +3418,7 @@ pub mod jagged {
             // (3) per-chip per-column y_{c,j} for this group: reuse the
             // shard-wide pre_y_per_chip when supplied, else recompute via the
             // shared host helper.
-            // STAGE 2.5 (#88): hoist the rev(zeta) orientation onto THIS thread
+            // Hoist the rev(zeta) orientation onto THIS thread
             // (thread-local carrier; the per-chip rayon closures below would see
             // `None`).
             let use_rev_y =
@@ -3454,7 +3439,7 @@ pub mod jagged {
                         let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(
                             &z_row_rev,
                         );
-                        // STAGE 2.5 (#88): same rev(zeta) orientation as the
+                        // Same rev(zeta) orientation as the
                         // production y site — the no-observe verify recompute must
                         // read NATURAL rows under rev so the round-0 identity holds
                         // on BOTH prove and no-observe verify.  `use_rev_y` is
@@ -3488,7 +3473,7 @@ pub mod jagged {
                 y_per_chip[i] = y_g[slot].clone();
             }
 
-            // ── INC-2: group-LOCAL reduce + open threaded through the shared
+            // ── Group-LOCAL reduce + open threaded through the shared
             // `prove_jagged_basefold_linear_core` (the core samples `z_col_g`
             // at the group's SP1 transcript position, then runs jagged-eval_g
             // + point-extend_g).  Group-local host reduction (no device hooks
@@ -3594,8 +3579,8 @@ pub mod jagged {
         let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _ } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
-        // the host path including the ITEM-12 embedding factor + empty-chip skip).
-        // STAGE 2.5 (#88): hoist the rev(zeta) orientation onto THIS thread
+        // the host path including the row-eq embedding factor + empty-chip skip).
+        // Hoist the rev(zeta) orientation onto THIS thread
         // (thread-local carrier; the per-chip rayon closures below would see
         // `None`).  On the wrap/BN254 path no `BandCapGuard` is installed, so
         // this is `None` => legacy bitrev (byte-identical).
@@ -3623,7 +3608,7 @@ pub mod jagged {
                     // eq_mle_table's LSB-first bitrev), matching build_weight_table.
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // STAGE 2.5 (#88): same rev(zeta) orientation (single source
+                    // Same rev(zeta) orientation (single source
                     // of truth) — NATURAL rows under rev so the round-0 identity
                     // holds on this no-observe verify recompute too; legacy bitrev
                     // (`y_per_chip == MLE of bitrev(trace)`) otherwise.
@@ -3653,7 +3638,7 @@ pub mod jagged {
                 .collect()
         };
 
-        // ── INC-2: the HOST reduction (no device hooks on the BN254 wrap
+        // ── The HOST reduction (no device hooks on the BN254 wrap
         // path) + the BN254 BaseFold open as the `reduce` / `open` closures
         // threaded through the shared `prove_jagged_basefold_linear_core`.
         // The core samples `z_col` at the SP1 transcript position and runs the
@@ -3714,7 +3699,7 @@ pub mod jagged {
     pub fn verify_jagged_basefold(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
+        z_row: &[InnerChallenge], // full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> bool {
@@ -3723,7 +3708,7 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             bundle,
-            // #121: synthetic-bundle callers (unit tests) carry no shard
+            // Synthetic-bundle callers (unit tests) carry no shard
             // openings — the cross-bind is a no-op here.
             None,
             challenger,
@@ -3740,9 +3725,9 @@ pub mod jagged {
     pub fn verify_jagged_basefold_no_observe(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
+        z_row: &[InnerChallenge], // full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
-        // #121 cross-bind: per-chip `opened_values.chips[].main.local` (index-
+        // Cross-bind: per-chip `opened_values.chips[].main.local` (index-
         // aligned with `chip_infos` / `bundle.y_per_chip`); `None` disables the bind.
         opened_main: Option<&[Vec<InnerChallenge>]>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
@@ -3762,9 +3747,9 @@ pub mod jagged {
     fn verify_jagged_basefold_inner(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge], // ITEM-12: full z* for embedding factor
+        z_row: &[InnerChallenge], // full z* for embedding factor
         bundle: &JaggedBasefoldBundle,
-        // #121 cross-bind: per-chip `opened_values.chips[].main.local` trace
+        // Cross-bind: per-chip `opened_values.chips[].main.local` trace
         // openings (index-aligned with `chip_infos` / `bundle.y_per_chip`), or
         // `None` for synthetic-bundle unit tests with no shard openings.
         opened_main: Option<&[Vec<InnerChallenge>]>,
@@ -3825,7 +3810,7 @@ pub mod jagged {
                 grp.iter().map(|&i| r_row_per_chip[i].clone()).collect();
             let y_per_chip_g: Vec<Vec<InnerChallenge>> =
                 grp.iter().map(|&i| bundle.y_per_chip[i].clone()).collect();
-            // #121: slice this group's opened main.local columns in the SAME
+            // Slice this group's opened main.local columns in the SAME
             // membership order as `y_per_chip_g` so the cross-bind k-walk lines up.
             let opened_main_g: Option<Vec<Vec<InnerChallenge>>> = opened_main
                 .map(|om| grp.iter().map(|&i| om[i].clone()).collect());
@@ -3867,7 +3852,7 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         y_per_chip: &[Vec<InnerChallenge>],
-        // #121 cross-bind: this group's per-chip `opened_values.chips[].main.local`
+        // Cross-bind: this group's per-chip `opened_values.chips[].main.local`
         // trace openings (index-aligned with `y_per_chip`), or `None` for callers
         // (unit tests) that verify a synthetic bundle with no shard openings.
         opened_main: Option<&[Vec<InnerChallenge>]>,
@@ -3901,7 +3886,7 @@ pub mod jagged {
             return false;
         };
 
-        // ── #121 CROSS-BIND (host analog of recursive_jagged_pcs.rs:247) ─────
+        // ── CROSS-BIND (host analog of recursive_jagged_pcs.rs:247) ─────
         //
         // The recursion CIRCUIT ties the jagged sumcheck's claimed sum to the
         // TRACE OPENINGS: it forms `column_claims = opened_values.chips[].main.local`
@@ -3915,7 +3900,7 @@ pub mod jagged {
         // `y_per_chip` against the openings.  So a malicious host proof could ship
         // `y_per_chip ≠ opened_values.main.local` and be accepted by BOTH the
         // zerocheck (which consumes `opened_values`) and this jagged phase (which
-        // consumes `y_per_chip`) independently — the soundness-parity gap #121.
+        // consumes `y_per_chip`) independently — the soundness-parity gap.
         //
         // Close it exactly as the circuit does: recompute the OPENED-VALUES column
         // MLE at the SAME `z_col` and require it to equal the y-derived claimed sum
@@ -3990,7 +3975,7 @@ pub mod jagged {
         // Both sides sample from the same transcript state at the same
         // point in the protocol so the coords match.
         // Capture the reduced (pre-extension) length BEFORE the extend
-        // loop: that is the de-clamped log_stacking-equivalent height of
+        // loop: that is the fixed log_stacking-equivalent height of
         // this (per-group) commit, used below to gate the sub-stripe
         // Π(1-r) claim adjustment.
         let z_star_orig_len = z_star.len();
@@ -4201,7 +4186,7 @@ pub mod jagged {
         res.is_ok()
     }
 
-    // ── #121 cross-bind forgery-rejection test ───────────────────────────
+    // ── Cross-bind forgery-rejection test ───────────────────────────
     // Lives inside `mod jagged` so it can drive the private
     // `verify_jagged_basefold_inner` (skip_commit_observe=false) with the
     // SAME transcript `prove_jagged_basefold` produced, and inject the
@@ -4228,13 +4213,13 @@ pub mod jagged {
         }
 
         /// The recursion circuit binds the jagged claimed sum to the trace
-        /// openings (recursive_jagged_pcs.rs:247); #121 mirrors that on the
+        /// openings (recursive_jagged_pcs.rs:247); this mirrors that on the
         /// host.  This test proves the bind is load-bearing:
         ///   (1) honest openings (== y_per_chip) verify;
         ///   (2) a bundle whose column claims DIVERGE from the openings is
         ///       REJECTED once the openings are threaded in (`Some`);
         ///   (3) the SAME divergent proof is (wrongly) ACCEPTED with the bind
-        ///       disabled (`None`) — i.e. exactly the pre-#121 host behaviour.
+        ///       disabled (`None`) — i.e. the host behaviour with the bind removed.
         #[test]
         fn crossbind_rejects_divergent_openings() {
             let mut rng = StdRng::seed_from_u64(0x0121_0BAD_C0DE);
@@ -4458,14 +4443,14 @@ mod test {
         assert!(ok, "jagged-basefold pipeline should accept honest proof");
     }
 
-    /// **INC-2 byte-identity gate for the MULTI-GROUP path.**  Forces the
+    /// **Byte-identity gate for the MULTI-GROUP path.**  Forces the
     /// `groups.len() > 1` dispatch via [`with_test_round_threshold`] (the
     /// production trigger — total dense area >= 2^30 with `ZIREN_JAGGED_GROUPS`
     /// set — is not host-reproducible in a unit test), proves + verifies an
-    /// honest bundle, and prints a stable FNV-1a digest of the serialized
-    /// bundle.  Run BEFORE and AFTER the `prove_jagged_basefold_inner`
-    /// de-dup: the digest MUST be identical (the multi-group per-group body
-    /// is a literal instance of the shared linear core).
+    /// honest bundle, and asserts a stable FNV-1a digest of the serialized
+    /// bundle.  The digest is a byte-identity lock: the multi-group
+    /// per-group body is a literal instance of the shared linear core, so
+    /// the digest MUST stay identical across refactors of it.
     #[test]
     fn test_jagged_basefold_multigroup_digest() {
         use crate::jagged::with_test_round_threshold;
@@ -4516,11 +4501,11 @@ mod test {
                 h = h.wrapping_mul(0x0000_0100_0000_01b3);
             }
             println!("MG_DIGEST groups={} bytes={} fnv1a=0x{:016x}", bundle.groups.len(), bytes.len(), h);
-            // Byte-identity lock: captured from the PRE-de-dup impl (HEAD
-            // 91d450bd).  The multi-group per-group body is a literal instance
-            // of `prove_jagged_basefold_linear_core`; any future increment that
-            // deliberately moves this transcript (e.g. the SP1-explicit lift)
-            // must re-baseline these values consciously.
+            // Byte-identity lock over the serialized bundle.  The multi-group
+            // per-group body is a literal instance of
+            // `prove_jagged_basefold_linear_core`; any future change that
+            // deliberately moves this transcript must re-baseline these
+            // values consciously.
             assert_eq!(bundle.groups.len(), 2, "expected G=2");
             assert_eq!(bytes.len(), 2_488_120, "multi-group bundle byte length drifted");
             assert_eq!(h, 0xf921_3854_cb16_156e, "multi-group bundle digest drifted");

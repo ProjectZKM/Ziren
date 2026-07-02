@@ -5,9 +5,7 @@
 //! data carriers and verifier-shape definitions for the jagged
 //! protocol.
 //!
-//! # Status
-//!
-//! This iteration lands the proof-data type hierarchy:
+//! This module defines the proof-data type hierarchy:
 //!   - [`RecursiveStackedPcsProof`]: thin wrapper around the
 //!     underlying BaseFold proof + per-round batch evaluations
 //!   - [`JaggedSumcheckEvalProof`]: carrier for the jagged-eval
@@ -16,9 +14,8 @@
 //!     bundling the stacked-PCS proof, sumcheck reduction proof,
 //!     jagged-eval sub-proof, and per-chip dimension metadata
 //!
-//! The full `verify_trusted_evaluations` orchestrator (~487 LOC of
-//! sumcheck + jagged-eval composition) lands in subsequent steps —
-//! see [`docs/recursion_verifier_port.md`](../../../../docs/recursion_verifier_port.md).
+//! The `verify_trusted_evaluations` orchestrator that consumes these
+//! types lives in [`crate::recursive_jagged_pcs`].
 //!
 //! # Reference
 //!
@@ -107,13 +104,13 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// the opened `degree`).  Used by the step-(7) prefix-sum / area
     /// consistency check.
     ///
-    /// #88 increment-1: the previously-coexisting baked NUMERIC forms
-    /// `row_counts_usize` / `padding_column_counts` were REMOVED — they
-    /// were the compile-time height anchor that made the recursion VK
-    /// program-length-dependent (the old step-(6.6) pin asserted
-    /// `row_count_felt == constant(2^log_h)`).  The verifier now bounds
-    /// per-chip heights via witnessed binds (`assert_row_count_le_cube`
-    /// + the SP1 main-padding-column bit-bound) instead of baking them.
+    /// There are no baked NUMERIC `row_counts_usize` /
+    /// `padding_column_counts` fields: those would be a compile-time
+    /// height anchor that makes the recursion VK program-length-dependent
+    /// (a numeric pin asserting `row_count_felt == constant(2^log_h)`).
+    /// The verifier bounds per-chip heights via witnessed binds
+    /// (`assert_row_count_le_cube` + the SP1 main-padding-column
+    /// bit-bound) instead of baking them.
     pub row_counts: Vec<Vec<Felt<F>>>,
     /// Per-round original commitment digests (before any
     /// chip-info-hash mix-in).  The BaseFold opening binds against THESE

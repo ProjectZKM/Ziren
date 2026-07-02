@@ -28,7 +28,7 @@ struct Args {
     start: Option<usize>,
     #[clap(short, long)]
     end: Option<usize>,
-    /// #88 height-agnostic FIX-off discovery: instead of the slow chip-by-chip
+    /// Height-agnostic FIX-off discovery: instead of the slow chip-by-chip
     /// reduction, measure the per-chip MAXIMAL *natural* (pre-`fix_shape`)
     /// recursion heights across all enumerated shapes in ONE pass and print the
     /// resulting maximal band.
@@ -58,7 +58,7 @@ fn main() {
     // shape".
     let mut candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
 
-    // #88 --measure: one-pass measurement of the per-chip MAXIMAL *natural*
+    // --measure: one-pass measurement of the per-chip MAXIMAL *natural*
     // (pre-`fix_shape`) recursion heights across all enumerated shapes.
     //
     // The slow chip-by-chip reduction below recompiles the huge recursion

@@ -2,9 +2,9 @@
 //! the Ziren basefold port.
 //!
 //! Source-mapped from SP1's `slop_multilinear::Mle`.  Like SP1 this type
-//! is now **backend-generic** over a [`Backend`]: it holds a
-//! [`Tensor<F, A>`] rather than a `RowMajorMatrix<F>` directly (#125
-//! INC-6).  Ziren has only the CPU backend today, so `A` defaults to
+//! is **backend-generic** over a [`Backend`]: it holds a
+//! [`Tensor<F, A>`] rather than a `RowMajorMatrix<F>` directly.  Ziren
+//! has only the CPU backend today, so `A` defaults to
 //! [`CpuBackend`] — which makes every existing `Mle<F>` / `Arc<Mle<F>>`
 //! annotation keep compiling unchanged (SP1's default-type-param trick).
 //!
@@ -164,7 +164,7 @@ impl<F: Field> Mle<F, CpuBackend> {
         // Allocator opt: skip vec![EF::ZERO; half*width] zero-init; every
         // slot is written by the for_each closure below.
         let new_len = half * width;
-        // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
+        // See round.rs note about KoalaBear u32 serde.
         let mut folded: Vec<EF> = vec![EF::ZERO; new_len];
         if width > 0 {
             use p3_maybe_rayon::prelude::*;

@@ -19,12 +19,10 @@
 //! This is the single `PaddedMle` in the crate: the SP1-shaped
 //! *analytic* multilinear (`eval_at` / `fix_last_variable` over an
 //! arbitrary point) used to build the shared trace-MLE once at
-//! trace-gen and thread it to the shard prover.  (A second, never-
-//! integrated GKR-round `PaddedMle` in `basefold::padded` — `fold_row_msb`
-//! only — was removed as dead code, #125; the LogUp-GKR layers use
-//! `RowMajorTable`.)
+//! trace-gen and thread it to the shard prover.  (The LogUp-GKR layers
+//! use `RowMajorTable`, not a `PaddedMle`.)
 //!
-//! ## #125 INC-1
+//! ## Integration
 //!
 //! This type is *additive*: the shared trace-MLE built from it is
 //! threaded read-only to the three shard stages but consumed by NONE of
@@ -32,8 +30,7 @@
 //! The unit tests below prove `eval_at` reproduces the existing
 //! [`crate::shard_level::logup_gkr_prover::evaluate_trace_columns_at_point`]
 //! value bit-for-bit, and that `fix_last_variable` composes with
-//! `eval_at` — validating the type BEFORE any transcript consumer is
-//! switched (INC-2+).
+//! `eval_at` — validating the type before it has any transcript consumer.
 //!
 //! ## Conventions
 //!
@@ -143,8 +140,7 @@ impl<T: Field> PaddedMle<T> {
 
     /// Wrap `inner` with `num_variables` variables, zero-padding the
     /// rows beyond `inner`'s real height.  This is the trace-MLE
-    /// constructor used by #125 INC-1.  Mirrors SP1
-    /// `PaddedMle::padded_with_zeros`.
+    /// constructor.  Mirrors SP1 `PaddedMle::padded_with_zeros`.
     pub fn padded_with_zeros(inner: Arc<Mle<T>>, num_variables: u32) -> Self {
         let num_polys = inner.num_polynomials();
         Self::padded(inner, num_variables, Padding::Constant(T::ZERO, num_polys))
@@ -370,9 +366,9 @@ mod tests {
         (0..n).map(|_| rand_ef(rng)).collect()
     }
 
-    /// #125 INC-1 CORE TEST: `PaddedMle::eval_at` on a zero-padded trace
-    /// MLE reproduces `evaluate_trace_columns_at_point` bit-for-bit, for
-    /// several (real height, padded log-height) shapes and columns.
+    /// `PaddedMle::eval_at` on a zero-padded trace MLE reproduces
+    /// `evaluate_trace_columns_at_point` bit-for-bit, for several (real
+    /// height, padded log-height) shapes and columns.
     #[test]
     fn eval_at_matches_evaluate_trace_columns() {
         let mut rng = StdRng::seed_from_u64(101);
@@ -398,7 +394,7 @@ mod tests {
         }
     }
 
-    /// #125 INC-1: `fix_last_variable(point[0])` then `eval_at(point[1..])`
+    /// `fix_last_variable(point[0])` then `eval_at(point[1..])`
     /// reproduces `eval_at(point)` exactly (the fold composes with eval),
     /// including the base-field -> extension-field lift of the folded MLE.
     #[test]
@@ -476,12 +472,11 @@ mod tests {
         assert_eq!(full_geq(&threshold, &point), EF::ONE);
     }
 
-    /// #125 INC-3 CORE INVARIANT: `main_cells` sourced from the shared
-    /// trace-MLE's inner cells (`PaddedMle::inner`) reproduce the
-    /// raw-trace-derived `main_cells` bit-for-bit — the SAME base->EF lift
-    /// (`EF::from`) over the SAME row-major cells, followed by the SAME
-    /// legacy `bitrev_rows`.  This is exactly what
-    /// `prove_shard_zerocheck` now relies on: the inner Mle is
+    /// `main_cells` sourced from the shared trace-MLE's inner cells
+    /// (`PaddedMle::inner`) reproduce the raw-trace-derived `main_cells`
+    /// bit-for-bit — the SAME base->EF lift (`EF::from`) over the SAME
+    /// row-major cells, followed by the SAME `bitrev_rows`.  This is
+    /// exactly what `prove_shard_zerocheck` relies on: the inner Mle is
     /// `Mle::new(raw trace)`, so `guts().values == raw.values`, and the
     /// zerocheck's downstream lift+bitrev then yields identical cells.
     #[test]
@@ -500,8 +495,8 @@ mod tests {
                     trace.values.iter().map(|v| EF::from(*v)).collect();
                 let raw_cells = bitrev_rows(&raw_lift, width, height);
 
-                // Shared-MLE path (INC-3): lift the PaddedMle inner cells,
-                // then the SAME bitrev.
+                // Shared-MLE path: lift the PaddedMle inner cells, then
+                // the SAME bitrev.
                 let padded = PaddedMle::padded_with_zeros(
                     Arc::new(Mle::from_row_major(trace.clone())),
                     l as u32,

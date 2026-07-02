@@ -1,4 +1,4 @@
-//! Per-shard CORE jagged commit band-cap (height-agnostic recursion, step 5b).
+//! Per-shard CORE jagged commit band-cap for height-agnostic recursion.
 //!
 //! The core STARK proves at the ACTUAL chip heights (the perf win of
 //! `FIX_CORE_SHAPES=false`), but the jagged-PCS commit (and the jagged
@@ -39,7 +39,7 @@ thread_local! {
     static CURRENT_BAND_CAP: std::cell::RefCell<Option<(u64, BTreeMap<String, (usize, usize)>)>> =
         const { std::cell::RefCell::new(None) };
 
-    /// HEIGHT-AGNOSTIC RECURSION (rollout 1b): the CONSTRAINT-VALID committed
+    /// The CONSTRAINT-VALID committed
     /// traces of the canonical-cluster chips this raw (event-driven) shard is
     /// MISSING — generated FIX-on-faithfully at the core prove site (each
     /// chip's own `MachineAir::generate_trace` over the canonical-shaped
@@ -53,7 +53,7 @@ thread_local! {
         Option<(u64, BTreeMap<String, RowMajorMatrix<InnerVal>>)>,
     > = const { std::cell::RefCell::new(None) };
 
-    /// HEIGHT-AGNOSTIC RECURSION (low-placement commit): chip name -> the
+    /// Low-placement commit: chip name -> the
     /// chip's RAW log-height (the ACTUAL trace height before the band-cap
     /// pad).  Set by the core prover's band-pad loop for the shard currently
     /// committing on this thread; read by `materialize_dense_jagged` so it can
@@ -67,7 +67,7 @@ thread_local! {
     static CURRENT_RAW_LOG_HEIGHTS: std::cell::RefCell<Option<BTreeMap<String, usize>>> =
         const { std::cell::RefCell::new(None) };
 
-    /// STAGE 2.5 (#88) LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
+    /// LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
     /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
     /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
     /// no-observe verify recompute, the zerocheck residual, and the
@@ -87,7 +87,7 @@ thread_local! {
     static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
         const { std::cell::RefCell::new(None) };
 
-    /// RECURSION-LAYER trace-area pin (#88/#82 Stage 1, SP1-faithful).  When
+    /// RECURSION-LAYER trace-area pin (SP1-faithful).  When
     /// `Some(target_log)`, the jagged dense commit on this thread is pinned to
     /// `log_dense_size = max(natural, target_log)` (= a FIXED `2^target_log`
     /// committed area → constant `num_stripes`), so every recursion proof
@@ -120,11 +120,10 @@ impl BandCapGuard {
     /// injects them instead of all-zero matrices so the FIX-off proof verifies.
     ///
     /// `_zeropad_missing` is a VESTIGIAL parameter (always `None`): the
-    /// ZIREN_SP1_ZEROPAD all-zero missing-chip experiment was removed (#129,
-    /// constraint-valid injection is now unconditional).  The slot is retained
+    /// ZIREN_SP1_ZEROPAD all-zero missing-chip experiment was removed
+    /// (constraint-valid injection is unconditional).  The slot is retained
     /// only so the ziren-gpu device caller (`core_multi_gpu.rs`, 5-arg call)
-    /// keeps compiling; its removal is deferred to the device follow-up
-    /// (#130/#118).
+    /// keeps compiling; its removal is deferred to the device follow-up.
     #[must_use]
     pub fn new(
         band_cap: BTreeMap<String, (usize, usize)>,
@@ -148,7 +147,7 @@ impl BandCapGuard {
         CURRENT_RAW_LOG_HEIGHTS.with(|c| {
             *c.borrow_mut() = Some(raw_log_heights);
         });
-        // STAGE 2.5: the per-shard rev(zeta) orientation decision, the single
+        // The per-shard rev(zeta) orientation decision, the single
         // source of truth installed for the whole commit+open scope so the
         // jagged commit (materialize), the y recompute, and the zerocheck
         // residual all read ONE boolean (no lockstep drift).
@@ -204,7 +203,7 @@ pub fn current_band_cap() -> Option<BTreeMap<String, (usize, usize)>> {
 /// Clone of the currently-stashed MISSING-chip traces for the calling thread,
 /// or `None` when no guard is installed.  `commit_basefold_path` uses these
 /// constraint-valid traces to inject the canonical-cluster chips a raw FIX-off
-/// shard is missing (rollout 1b), so the proof verifies.
+/// shard is missing, so the proof verifies.
 #[must_use]
 pub fn current_missing_chip_traces() -> Option<BTreeMap<String, RowMajorMatrix<InnerVal>>> {
     CURRENT_MISSING_TRACES.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
@@ -251,7 +250,7 @@ pub fn current_use_rev() -> Option<bool> {
     CURRENT_USE_REV.with(|c| *c.borrow())
 }
 
-/// #125 INC-4b: RAII guard that installs ONLY the rev(zeta) orientation carrier
+/// RAII guard that installs ONLY the rev(zeta) orientation carrier
 /// (`CURRENT_USE_REV = Some(use_rev)`) for its scope, WITHOUT any band-cap /
 /// missing-chip / raw-log machinery.  Used by the CORE prover for shards that do
 /// NOT map to a canonical cluster (e.g. the no-CPU memory-finalize shard, where
@@ -280,7 +279,7 @@ impl Drop for UseRevGuard {
 }
 
 /// RAII guard that pins the RECURSION-LAYER jagged commit area for its scope on
-/// the calling thread (#88/#82 Stage 1).  The recursion (`compress`) prover
+/// the calling thread.  The recursion (`compress`) prover
 /// installs it around its per-shard `commit` + `open` (which run on the same
 /// worker thread) so the jagged dense commit is pinned to
 /// `log_dense_size = max(natural, target_log)` — a FIXED committed area, hence a

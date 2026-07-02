@@ -38,21 +38,17 @@
 //!   - `Mle::from(col_claims)` → flat Vec passed to
 //!     [`crate::logup_gkr::evaluate_mle_ext`].
 //!   - `self.jagged_evaluator.jagged_evaluation(...)` → closure
-//!     parameter `jagged_evaluator_fn` (decouples from the not-
-//!     yet-ported `RecursiveJaggedEvalSumcheckConfig`).
-//!   - SP1's `SC::hash` / `SC::compress` chip-info mix-in is
-//!     deferred — the KoalaBearPoseidon2 hash scaffolding lands in
-//!     a follow-up step.  Until then, the orchestrator asserts
-//!     `commitments == original_commitments` up to dimension match
-//!     rather than recomputing the mixed digest.
+//!     parameter `jagged_evaluator_fn` (decouples from the
+//!     `RecursiveJaggedEvalSumcheckConfig`).
+//!   - SP1's `SC::hash` / `SC::compress` chip-info mix-in is not
+//!     recomputed here; the main commitment is bound in the shard-level
+//!     prologue, and `commitments` / `original_commitments` carry the
+//!     digest only for the per-round Merkle-binding checks.
 //!
-//! # Status
-//!
-//! Structurally complete; the jagged-eval sub-protocol is
-//! abstracted behind the `jagged_evaluator_fn` closure parameter so
-//! the orchestrator can land without blocking on porting the full
-//! `RecursiveJaggedEvalSumcheckConfig`.  Construction smoke tests
-//! cover the type composition.
+//! The jagged-eval sub-protocol is abstracted behind the
+//! `jagged_evaluator_fn` closure parameter, decoupling the
+//! orchestrator from the full `RecursiveJaggedEvalSumcheckConfig`.
+//! Construction smoke tests cover the type composition.
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, Felt, SymbolicExt};
@@ -160,7 +156,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             &mut FC,
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
-        // #H (BaseFold-over-BN254 wrap port): the main jagged-PCS
+        // The main jagged-PCS
         // commitment is bound in the SHARD-LEVEL Phase-1 prologue
         // (shard_basefold.rs observes the 8-felt main_commitment digest),
         // matching the host shard verifier (shard_level/verifier.rs:168).
@@ -181,14 +177,11 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             row_counts,
             original_commitments,
             expected_eval,
-            // #88 increment-1 (height-agnostic): the witnessed NUMERIC
-            // `row_counts_usize` / `padding_column_counts` fields have been
-            // REMOVED from `JaggedPcsProofVariable`.  They were a
-            // compile-time-baked height anchor: the old step-(6.6) pin asserted
-            // `row_count_felt == constant(2^log_h)`, which baked the per-chip
-            // HEIGHT VALUE into the recursion program bytes and made the VK
-            // program-length-dependent.  The soundness role of that pin is now
-            // carried entirely by WITNESSED binds:
+            // `JaggedPcsProofVariable` carries no baked numeric
+            // `row_counts_usize` / `padding_column_counts` height fields
+            // (which would bake per-chip HEIGHT VALUES into the recursion
+            // program bytes and make the VK program-length-dependent).  The
+            // per-chip height soundness is carried entirely by WITNESSED binds:
             //   * each per-chip `row_count` (reconstructed from the opened
             //     `degree`, which zerocheck/GKR consume) is bounded
             //     `<= 2^cube_log` by `assert_row_count_le_cube` (step 6.5);
@@ -225,15 +218,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // (the dense vector's stripe-alignment padding extends the LAST
         // column's tail entries, it does not add columns), and the host
         // claim is the FLAT `Σ z_col_lagrange[k]·y[k]` walk
-        // (jagged_sumcheck.rs verify_jagged_reduction).  The previous
-        // `cc[len-2]+1` per-round zero-insertion was an SP1-ism: it
-        // inflated the padded column count, and whenever
-        // `next_pow2(flat+added) != next_pow2(flat)` (e.g. the keccak
-        // 415-column shard: 1024 vs 512) the circuit sampled a different
-        // number of z_col challenges than the host → transcript desync →
-        // the claim assert below trips once assert enforcement is armed.  Zeros now
-        // appear only as the power-of-two tail padding (weight-orthogonal
-        // to the real claims, matching the host's missing-column tail).
+        // (jagged_sumcheck.rs verify_jagged_reduction).  An SP1-style
+        // `cc[len-2]+1` per-round zero-insertion would inflate the padded
+        // column count, and whenever `next_pow2(flat+added) !=
+        // next_pow2(flat)` (e.g. the keccak 415-column shard: 1024 vs 512)
+        // the circuit would sample a different number of z_col challenges
+        // than the host → transcript desync → the claim assert below trips.
+        // Zeros appear only as the power-of-two tail padding
+        // (weight-orthogonal to the real claims, matching the host's
+        // missing-column tail).
         let _ = insertion_points;
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
 
@@ -298,12 +291,10 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             }
         }
 
-        // (6.6) MAIN-PADDING-COLUMN HEIGHT BIT-BOUND (#88 increment-1, gap G4).
+        // (6.6) MAIN-PADDING-COLUMN HEIGHT BIT-BOUND.
         //
-        // This REPLACES the old baked numeric↔consumed pin (which asserted
-        // `row_count_felt == constant(2^log_h)` and was the height anchor that
-        // made the recursion VK program-length-dependent).  Ported from SP1's
-        // jagged shard verifier (crates/recursion/circuit/src/shard.rs:363-378):
+        // Ported from SP1's jagged shard verifier
+        // (crates/recursion/circuit/src/shard.rs:363-378):
         // the "main padding column" is the final jagged column whose height fills
         // the last real prefix sum up to the committed total area.  Its height
         // equals the gap between the last two `col_prefix_sums` entries
@@ -571,7 +562,7 @@ mod tests {
         assert_eq!(machine_jagged.column_counts_by_round.len(), 2);
     }
 
-    // ── HEIGHT-BINDING GUARD (Deliverable 2) executed-circuit tests ──
+    // ── HEIGHT-BINDING GUARD executed-circuit tests ──
     //
     // These compile + RUN the DSL through the recursion runtime
     // (`run_test_recursion`), so the in-circuit `assert_felt_eq` in
@@ -625,14 +616,12 @@ mod tests {
         run_guard(32, 4);
     }
 
-    // ── MAIN-PADDING-COLUMN BIT-BOUND (#88 increment-1, gap G4) tests ──
+    // ── MAIN-PADDING-COLUMN BIT-BOUND tests ──
     //
-    // GATE 3 (FORGERY REJECTED), recursion-circuit level.  The baked
-    // step-(6.6) numeric↔consumed pin (`row_count_felt == constant(2^log_h)`)
-    // was REMOVED — it baked the per-chip height into the program bytes and
-    // made the VK program-length-dependent.  Its soundness role for the LAST
-    // (main padding) column is now carried by the SP1-ported bit-bound: decode
-    // the padding column height = `recompose(col_prefix_sums.last()) −
+    // Forgery-rejection at the recursion-circuit level.  The soundness role
+    // of the main (padding) column height bound is carried by the SP1-ported
+    // bit-bound: decode the padding column height =
+    // `recompose(col_prefix_sums.last()) −
     // recompose(col_prefix_sums[last-1])`, bit-decompose to `L+1` bits, and
     // assert the high bit forces the low bits to zero ⇒ height ∈ [0, 2^L].
     //
@@ -673,7 +662,7 @@ mod tests {
         run_padding_bit_bound(16, max_log); // full cube == 2^max_log (inclusive)
     }
 
-    /// NEGATIVE (GATE 3): an AREA-PRESERVING over-claim that inflates the main
+    /// NEGATIVE: an AREA-PRESERVING over-claim that inflates the main
     /// padding column past the cube (`height = 2^max_log + 1 = 17 > 16`, the
     /// open interval the bit-bound forbids) is REJECTED — the runtime trips the
     /// `(height - low)*low == 0` assert.  Total area can be kept constant by a
@@ -685,7 +674,7 @@ mod tests {
         run_padding_bit_bound(17, 4);
     }
 
-    /// NEGATIVE (GATE 3): a doubled over-claim (`height = 2*2^max_log = 32 >
+    /// NEGATIVE: a doubled over-claim (`height = 2*2^max_log = 32 >
     /// 16`) — the boundary case where the high bit is exactly set with nonzero
     /// low bits absent — note `32 == 2^{max_log+1}` would overflow num2bits;
     /// `24 = 16 + 8` is inside `(2^L, 2^{L+1})` with low bits set, the sharp

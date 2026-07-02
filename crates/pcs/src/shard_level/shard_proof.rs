@@ -47,7 +47,7 @@ pub struct ChipCumulativeSums<F, EF> {
 ///   In-circuit consumers lift via `lift_evaluation_proof_bytes`.
 /// * `Bundle(_)` — host path emits a structured bundle. Preferred in
 ///   the bundle-lift recursion shape because it skips rmp varint
-///   reparsing (the original determinism fix).
+///   reparsing, keeping the lifted bytes deterministic.
 #[derive(Clone, Serialize, Deserialize)]
 pub enum EvaluationProof {
     Empty,
@@ -70,7 +70,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub public_values: Vec<F>,
     /// Commitment digest to the main trace.
     ///
-    /// SP1-faithful jagged hash-bind (#88): this is the **MODIFIED** digest
+    /// SP1-faithful jagged hash-bind: this is the **MODIFIED** digest
     /// `compress([raw_root, hash(once(len) ++ row_counts ++ column_counts)])`
     /// — the value the Fiat-Shamir transcript observes (so the per-chip
     /// geometry is cryptographically tied to the commitment).  The RAW
@@ -102,13 +102,12 @@ pub struct BasefoldShardProof<F, EF> {
     /// env-var the CpuProver binary cannot see.
     #[serde(default)]
     pub fold_orientation: FoldOrientation,
-    /// Height-agnostic jagged-verifier groundwork (Stages 1-3):
+    /// Height-agnostic jagged-verifier groundwork:
     /// witnessed per-round, per-chip **actual row counts** (column
     /// heights, pre-padding) -- the NUMERIC counterpart SP1 carries in
     /// `row_counts_and_column_counts`.  Ziren still derives the same
     /// values from `evaluation_proof`'s packing offsets at lift time;
-    /// these are PURE DATA carried alongside (no verifier reads them
-    /// yet -- Stage 4 wires the checks).  Empty on older proof bytes.
+    /// these are PURE DATA carried alongside.  Empty on older proof bytes.
     #[serde(default)]
     pub row_counts: Vec<Vec<usize>>,
     /// Height-agnostic groundwork: witnessed per-round
@@ -118,7 +117,7 @@ pub struct BasefoldShardProof<F, EF> {
     /// proof bytes.
     #[serde(default)]
     pub padding_column_counts: Vec<usize>,
-    /// SP1-faithful jagged hash-bind (#88): the **RAW** BaseFold cap root
+    /// SP1-faithful jagged hash-bind: the **RAW** BaseFold cap root
     /// (pre-hash-bind) — the value the BaseFold opening binds against and
     /// the recursion lift populates `original_commitments` from.  The
     /// FS-observed [`Self::main_commitment`] is the MODIFIED digest
@@ -184,7 +183,7 @@ mod tests {
         assert_eq!(back.opened_values.chips.len(), 0);
     }
 
-    /// Height-agnostic groundwork (Stage 1) BACKWARD-COMPAT: an
+    /// Height-agnostic groundwork BACKWARD-COMPAT: an
     /// OLD-format proof serialized WITHOUT the new `row_counts` /
     /// `padding_column_counts` fields must still deserialize into the
     /// NEW struct, with those fields defaulting to empty (the

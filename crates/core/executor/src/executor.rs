@@ -186,10 +186,10 @@ pub struct Executor<'a> {
     /// (clk, pc, registers) so a subsequent parallel `TracingVM` can
     /// replay each shard independently. `None` (default) preserves
     /// the legacy path with zero overhead. The JIT-side emit path
-    /// will populate the same field directly once landed.
+    /// will populate the same field directly.
     pub minimal_trace_collector: Option<crate::minimal_trace::MinimalTrace>,
 
-    /// (lifter port step 1): skip replay-irrelevant
+    /// Skip replay-irrelevant
     /// bookkeeping in `execute_operation`. When set, the executor:
     ///   - skips `report.opcode_counts` increments (per cycle)
     ///   - skips `local_counts.event_counts` increments (per cycle)
@@ -202,7 +202,7 @@ pub struct Executor<'a> {
     /// Default false; TracingVM workers set true.
     pub skip_replay_bookkeeping: bool,
 
-    /// Option B: in-flight buffer for the current
+    /// In-flight buffer for the current
     /// chunk's mem_reads oracle. Populated by `mr()` whenever the
     /// `minimal_trace_collector` is `Some`. Drained at `bump_record()`
     /// when the chunk closes — the accumulated entries become the
@@ -1315,7 +1315,7 @@ impl<'a> Executor<'a> {
     }
 
     /// Emit an ALU event.
-    /// Intentionally NO `#[inline]` — measured Apr 2026: forcing inline
+    /// Intentionally NO `#[inline]` — forcing inline
     /// here regressed ed25519 by +41%, biguint by +30%, u256x2048 by
     /// +14%. emit_alu_event is large (constructs CompAluEvent +
     /// AluEvent, hi_record branching); inlining bloats execute_alu's

@@ -87,13 +87,12 @@ impl BasefoldShardVerifier {
     /// Production default (max_log_row_count = 22).  The BaseFold codeword
     /// two-adicity bound is over the STACKED poly's `log_stacking_height`
     /// (≤ DEFAULT_LOG_STACKING_HEIGHT = 21), NOT max_log_row_count: the
-    /// LDE domain is `2^(log_stacking + log_blowup)`.  At the #57 inner
+    /// LDE domain is `2^(log_stacking + log_blowup)`.  At the inner
     /// default `log_blowup = 2` (`basefold/config.rs::default_fri_config`),
     /// `log_stacking(≤21) + 2 ≤ 23 ≤ KoalaBear TWO_ADICITY = 24`, so the
     /// recursion-circuit verifier's `two_adic_generator(log_codeword_size)`
     /// does not panic (one bit of headroom; the wrap stage at blowup=3 sits
-    /// at exactly 24).  Previous cap of 20 was tied to the legacy
-    /// `log_blowup = 4`.
+    /// at exactly 24).
     #[must_use]
     pub const fn production_default() -> Self {
         // BASE floor (22).  PER-STAGE cube override lives in the prover
@@ -103,9 +102,9 @@ impl BasefoldShardVerifier {
         // log-height / input-proof zerocheck dim)`.  22 stays the floor, so any
         // proof whose tallest chip is ≤ 2^22 (core; recursion landing on bands
         // 1-4, ≤ 2^21) stays at cube=22 → BYTE-IDENTICAL.  Only proofs landing
-        // on the #88 band-5 (ext_alu 2^24 / base_alu 2^23) get cube=24 — those
+        // on the band-5 (ext_alu 2^24 / base_alu 2^23) get cube=24 — those
         // are reachable in FIX-on too (band-5 REPLACED the old component-opening
-        // band) and were already changed by #88; the per-stage cube is what
+        // band); the per-stage cube is what
         // makes them provable.  Two-adic-safe: the BaseFold codeword bound is
         // over log_stacking_height (fixed 21), NOT max_log_row_count.
         Self { max_log_row_count: 22 }
@@ -132,7 +131,7 @@ impl BasefoldShardVerifier {
         proof: &BasefoldShardProof<Val<SC>, Challenge<SC>>,
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
-        // #125 INC-4b: `true` for the CORE machine (rev shard proofs); `false`
+        // `true` for the CORE machine (rev shard proofs); `false`
         // for recursion / shrink / wrap (LEGACY). Drives the zerocheck host
         // orientation (collapsed/no-embed claim + rev(z_gkr) eq-bridge anchor).
         core_rev: bool,
@@ -143,7 +142,7 @@ impl BasefoldShardVerifier {
             + for<'b> Air<BasefoldConstraintFolder<'b, Val<SC>, Challenge<SC>, Challenge<SC>>>,
         Val<SC>: PrimeField,
         Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-        // STAGE-B b1': threaded to `verify_jagged_pcs_host`'s static OUTER
+        // Threaded to `verify_jagged_pcs_host`'s static OUTER
         // generic BaseFold verify (see its where-clause). Verify-only, both
         // rings satisfy it.
         SC::Challenger: 'static
@@ -271,12 +270,12 @@ impl BasefoldShardVerifier {
             })
         });
 
-        // ── PER-STAGE CUBE (bug #9) ──────────────────────────────
+        // ── PER-STAGE CUBE ──────────────────────────────
         //
         // `self.max_log_row_count` is only the BASE floor (22).  The prover
         // sizes the zerocheck cube PER PROOF (`cube = base.max(tallest
         // band-padded chip log-height)`); FIX-off multi-shard compress shards
-        // land on the #88 band-5 (ext_alu 2^24) → cube 24 (24 GKR rounds, a
+        // land on the band-5 (ext_alu 2^24) → cube 24 (24 GKR rounds, a
         // 24-dim zerocheck point), which a fixed 22 rejects at the round-count
         // / point-dim checks.  Derive the effective cube from the PROOF the
         // same way `build_outer_circuit` (crates/prover/src/build.rs:257-265)
@@ -421,11 +420,11 @@ impl BasefoldShardVerifier {
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
             chips,
-            // ITEM-12: jagged verified at the zerocheck-reduced z*.
+            // Jagged verified at the zerocheck-reduced z*.
             &proof.zerocheck_proof.point_and_eval.0,
             &proof.evaluation_proof,
             &proof.logup_gkr_proof.logup_evaluations,
-            // #121: the trace openings the recursion circuit cross-binds to the
+            // The trace openings the recursion circuit cross-binds to the
             // jagged claimed sum; index-aligned with `chips`.
             &proof.opened_values,
             challenger,
@@ -435,19 +434,19 @@ impl BasefoldShardVerifier {
     }
 }
 
-/// PER-STAGE cube ceiling (bug #9): the tallest reachable FIX-off recursion
-/// band (#88 band-5: `ext_alu 2^24`) at the KoalaBear two-adicity (24).  A
+/// PER-STAGE cube ceiling: the tallest reachable FIX-off recursion
+/// band (band-5: `ext_alu 2^24`) at the KoalaBear two-adicity (24).  A
 /// proof claiming a larger cube cannot correspond to any admitted recursion
 /// shape and is rejected outright.  See `BasefoldShardVerifier::production_default`
 /// and `crates/recursion/core/src/shape.rs:262`.
 pub(crate) const MAX_PERSTAGE_CUBE: usize = 24;
 
-/// Derive the per-shard effective `max_log_row_count` (bug #9).
+/// Derive the per-shard effective `max_log_row_count`.
 ///
 /// The host shard verifier's `base` (`production_default().max_log_row_count`,
 /// 22) is only the FLOOR.  The prover sizes the zerocheck cube PER PROOF —
 /// `cube = base.max(tallest band-padded chip log-height)` — and FIX-off
-/// multi-shard compress shards land on the #88 band-5 (`ext_alu 2^24`), so
+/// multi-shard compress shards land on the band-5 (`ext_alu 2^24`), so
 /// their recorded cube is 24 (24 GKR rounds, a 24-dim zerocheck point).  This
 /// mirrors `build_outer_circuit` (crates/prover/src/build.rs:257-265) and
 /// `ZKMProver::perstage_cube_from_input_proofs` (crates/prover/src/lib.rs):
@@ -492,7 +491,7 @@ fn derive_effective_max_log_row_count(
 
 /// Host-side jagged-PCS opening verification (Stage 4).
 ///
-/// Deserialises the bundle bytes and delegates to the long-standing
+/// Deserialises the bundle bytes and delegates to the
 /// host-side verifier at
 /// [`crate::jagged_pcs::jagged::verify_jagged_basefold`].
 /// This is much shorter than the recursion-circuit port because the
@@ -506,7 +505,7 @@ fn verify_jagged_pcs_host<SC, A>(
     shared_eval_point: &[Challenge<SC>],
     evaluation_proof: &super::shard_proof::EvaluationProof,
     _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
-    // #121 cross-bind: the shard's trace openings.  `opened_values.chips[i]`
+    // Cross-bind: the shard's trace openings.  `opened_values.chips[i]`
     // is index-aligned with `chips[i]` and the bundle's `y_per_chip[i]`
     // (all three share the machine's name-sorted chip order); we pass each
     // chip's `main.local` into the jagged verifier so it can mirror the
@@ -521,10 +520,10 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>> + Copy + 'static,
-    // STAGE-B b1': `SC::Challenger` drives the generic jagged BaseFold VERIFIER
+    // `SC::Challenger` drives the generic jagged BaseFold VERIFIER
     // directly on the OUTER (wrap) branch — the static monomorphization of the
     // former `OUTER_JAGGED_VERIFY_HOOK`. Same capability bounds the prover
-    // threads (b1); both rings satisfy them (inner `JaggedChallenger`, wrap
+    // threads; both rings satisfy them (inner `JaggedChallenger`, wrap
     // `OuterChallenger`). Verify-only: no VK / committed-byte impact.
     SC::Challenger: 'static
         + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -544,13 +543,13 @@ where
     use crate::{InnerChallenge, InnerVal};
 
     // Type gate (same as prover-side prove_trusted_evaluations).
-    // BaseFold-over-BN254 wrap port: this verifier-side FIELD gate is kept as a
+    // This verifier-side FIELD gate is kept as a
     // TypeId transmute-safety guard for the unsafe `InnerChallenge`
     // reinterpretation below (rather than `BasefoldRing::use_basefold()`). It is
     // functionally equivalent: it is reached only when the prover emitted a
     // BaseFold bundle (i.e. the config proved via BaseFold), and the TypeId check
-    // is exactly the identity that makes the transmute sound. STAGE-B b1' DID
-    // thread the `BasefoldRing` bound through the host-verify API
+    // is exactly the identity that makes the transmute sound. The
+    // `BasefoldRing` bound is threaded through the host-verify API
     // (`Verifier::verify_shard` -> `StarkMachine::verify` -> generic test/util
     // callers) so the OUTER (wrap) branch can call the generic BaseFold verify
     // statically; only the field/challenger TypeId gates remain (transmute +
@@ -562,11 +561,11 @@ where
         return Ok(());
     }
 
-    // BaseFold-over-BN254 wrap port: OUTER ring dispatch. Val/Challenge are
+    // OUTER (wrap) ring dispatch. Val/Challenge are
     // KoalaBear / KoalaBear^4 here, but the challenger is OuterChallenger (not
     // JaggedChallenger).
     //
-    // STAGE-B b1': STATIC monomorphization of the former
+    // STATIC monomorphization of the former
     // `OUTER_JAGGED_VERIFY_HOOK`.  recursion-core's `outer_verify` body WAS
     // exactly this deserialize + `build_jagged_verify_inputs` +
     // `verify_jagged_basefold_inner_generic` sequence over
@@ -662,11 +661,11 @@ where
         }
     };
 
-    // fix (May 2 2026): read per-chip `column_count` from the
+    // Read per-chip `column_count` from the
     // bundle's PackingMeta (written by the prover) instead of
     // `BaseAir::width(chip)`.  This eliminates the prover-side width
-    // pad — the verifier now agrees with the *actually-exercised*
-    // column count, restoring Apr 30's perf on workloads with
+    // pad — the verifier agrees with the *actually-exercised*
+    // column count, avoiding inflated jagged-PCS data on workloads with
     // sparse-column chips.  Falls back to `BaseAir::width(chip)` for
     // legacy bundles (column_counts vec is empty when serde-default
     // populated from older wire format).
@@ -750,7 +749,7 @@ where
         })
         .collect();
 
-    // ITEM-12: the full z* point as InnerChallenge for the jagged embedding factor.
+    // The full z* point as InnerChallenge for the jagged embedding factor.
     // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
     let z_row_inner: Vec<InnerChallenge> = {
         let cloned: Vec<Challenge<SC>> = shared_eval_point.to_vec();
@@ -767,7 +766,7 @@ where
         .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
         .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
 
-    // #121 cross-bind: reinterpret each chip's `main.local` opening as
+    // Cross-bind: reinterpret each chip's `main.local` opening as
     // `InnerChallenge` (sound under the TypeId gate above: Challenge<SC> ==
     // InnerChallenge on this inner KoalaBear ring) and hand it to the jagged
     // verifier index-aligned with `chip_infos` / `bundle.y_per_chip`.  The
@@ -792,7 +791,7 @@ where
 
     // Delegate to the existing host-side verifier.
     //
-    // Option B single-main-commit: the prover's transcript prologue
+    // Single-main-commit: the prover's transcript prologue
     // already observed the BaseFold commit's 8-felt digest as
     // `main_commitment` (this verifier mirrors that at lines 152-153).
     // Use the `_no_observe` variant so the verifier doesn't observe
@@ -930,8 +929,8 @@ fn verify_zerocheck_host<SC, A>(
     gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     public_values: &[Val<SC>],
     max_log_row_count: usize,
-    // #125 INC-4b: `true` for the CORE machine (rev shard proofs); `false` for
-    // recursion / shrink / wrap (LEGACY). Replaces the retired rev-zeta A/B env.
+    // `true` for the CORE machine (rev shard proofs); `false` for
+    // recursion / shrink / wrap (LEGACY).
     core_rev: bool,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
@@ -958,16 +957,16 @@ where
     // gkr_batch_open, lambda), the GKR point and the zerocheck-reduced
     // point — and BIND it to the proof's claimed `point_and_eval.1`.
     //
-    // This is the cross-chip constraint-RLC half the host previously
-    // DEFERRED (the `verify_zerocheck_cryptographic_identity_host` comment
+    // This is the cross-chip constraint-RLC half not covered by the
+    // structural sumcheck alone (the `verify_zerocheck_cryptographic_identity_host` comment
     // below).  Without it the structural sumcheck only ties
     // `point_and_eval.1` back to `claimed_sum` (telescoping) and the GKR
     // openings — nothing forces it to equal the constraint-RLC of
-    // the commitment-bound openings@z*.  This omission was proven to be a
+    // the commitment-bound openings@z*.  This omission is a
     // real soundness hole: a prover (e.g. the racing GPU compress
     // device-fold) can emit a proof the in-circuit `verify_shard` correctly
     // rejects
-    // at zerocheck.rs:613 yet the host accepted.  Verifier-only,
+    // at zerocheck.rs:613 yet the host would otherwise accept.  Verifier-only,
     // transcript-neutral (only already-sampled challenges + opened values),
     // no vk regen.  Set S8J_RLC=1 for the per-shard diagnostic print.
     let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
@@ -1035,7 +1034,7 @@ where
             acc_pow = acc_pow * gkr_batch_open;
             gkr_batch_open_powers.push(acc_pow);
         }
-        // ── STAGE 2 (#88): SHARD-UNIFORM convention decision (mirror prover) ─
+        // ── SHARD-UNIFORM convention decision (mirror prover) ─
         // The prover decides rev(zeta)+collapsed-claim per SHARD (every chip
         // shares the eq-anchor orientation).  Mirror that here: use the
         // collapsed (full-opening, no embed) seed iff EVERY chip carries the
@@ -1045,9 +1044,9 @@ where
         // the same boolean from `gkr_evaluations`).  CAVEAT: a GPU device-fold
         // proof emits `*_full` yet uses the legacy `zeta` anchor — that path is
         // out of scope for this CPU stage (needs the GPU prepare-hook port).
-        // #125 INC-4b: the rev/collapsed convention is now the per-machine
-        // `core_rev` flag (true for the CORE machine, false for recursion / wrap)
-        // — NOT the retired rev-zeta env.  A core proof is verified
+        // The rev/collapsed convention is the per-machine
+        // `core_rev` flag (true for the CORE machine, false for recursion / wrap).
+        // A core proof is verified
         // rev; a recursion / wrap proof legacy (its embed-loop untouched).
         let verifier_use_rev = core_rev
             && !gkr_evaluations.chip_openings.is_empty()
@@ -1059,11 +1058,11 @@ where
             .chip_openings
             .values()
             .map(|chip_evaluation| {
-                // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────
                 // When the SHARD uses the collapsed convention, seed the
                 // per-chip claimed_sum term DIRECTLY from the FULL-POINT
                 // openings (`*_full`) with NO embed_factor — mirroring the
-                // prover (zerocheck_prover.rs Stage-2 collapse).  The full-point
+                // prover (zerocheck_prover.rs).  The full-point
                 // opening already carries the mixed-height padding factor
                 //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
                 //               zeta[0..log_h])
@@ -1185,7 +1184,7 @@ where
 ///     (the zerocheck-reduced point, the SAME values the circuit batches).
 ///   * `opened_values.chips[i].quotient[0]` = the per-chip big-endian
 ///     `degree` bits (length `max_log_row_count + 1`) the circuit feeds to
-///     `full_geq` (= prover.rs E1d, real-height bits).
+///     `full_geq` (real-height bits).
 ///   * `(alpha, gkr_batch_open, lambda)` = the three transcript samples,
 ///     in the prover/verifier order.
 ///   * `gkr_evaluations.point` = z_gkr; `zerocheck_proof.point_and_eval.0`
@@ -1200,8 +1199,8 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     gkr_batch_open: Challenge<SC>,
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    // #125 INC-4b: `true` for the CORE machine (rev eq-bridge anchor rev(z_gkr)),
-    // `false` for recursion / shrink / wrap (LEGACY). Replaces the retired rev-zeta env.
+    // `true` for the CORE machine (rev eq-bridge anchor rev(z_gkr)),
+    // `false` for recursion / shrink / wrap (LEGACY).
     core_rev: bool,
 ) -> Challenge<SC>
 where
@@ -1216,15 +1215,15 @@ where
     let z_star = &zerocheck_proof.point_and_eval.0;
     let z_gkr = &gkr_evaluations.point;
 
-    // ── STAGE 2 (#88): rev(zeta) eq-bridge anchor ──────────────────────────
+    // ── rev(zeta) eq-bridge anchor ──────────────────────────
     // Under the collapsed convention the prover anchors every chip's zerocheck
     // poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the batched
     // reduced value carries `eq(rev(z_gkr), z*)`.  Mirror that here by feeding
     // the eq-bridge the reversed GKR point.  The decision is SHARD-UNIFORM and
     // derived from the SAME signal as the claimed_sum block (every chip carries
     // `*_full`).  Legacy shards keep `eq(z_gkr, z*)`.
-    // #125 INC-4b: the eq-bridge anchor orientation follows the per-machine
-    // `core_rev` flag (NOT the retired rev-zeta env). Core => rev.
+    // The eq-bridge anchor orientation follows the per-machine
+    // `core_rev` flag. Core => rev.
     let conv_use_rev = core_rev
         && !gkr_evaluations.chip_openings.is_empty()
         && gkr_evaluations
@@ -1603,8 +1602,8 @@ where
     // challenger. Without this the verifier's alpha/beta diverge from the
     // prover's and the G1 PV-balance below fails. Config-aware: a real check
     // for the Inner core proof, a no-op for the Outer/wrap (whose prover
-    // grind is itself a no-op). Replaces the previous "omits the
-    // grinding-witness check" gap — now both soundness AND consistency.
+    // grind is itself a no-op). This provides both soundness AND
+    // consistency (the grinding witness is checked, not omitted).
     if !crate::logup_gkr::GkrGrind::gkr_check_witness(
         challenger,
         crate::logup_gkr::GKR_GRINDING_BITS,
@@ -1787,7 +1786,7 @@ where
         denominator_eval = d0 + (d1 - d0) * line;
     }
 
-    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION (#88 height anchor) ──
+    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION (height anchor) ──
     //
     // Port of SP1's LogUp-GKR last-layer reconstruction
     // (/data/felicity/sp1/crates/hypercube/src/logup_gkr/verifier.rs:247-353).
@@ -1815,17 +1814,17 @@ where
     // raw openings with no factor, exactly matching SP1 (whose padding mask
     // is carried by `full_geq`, not by an embed_factor).
     //
-    // GATING (#88 deep VK-identity port, Stage 1 — UN-GATED): the degree-
-    // masked reconstruction is now ACTIVE BY DEFAULT.  It is the host
+    // GATING: the degree-
+    // masked reconstruction is ACTIVE BY DEFAULT.  It is the host
     // substrate that binds per-chip height once heights leave `vk.hash`
-    // (Stage 1 drops the per-prep-domain height loop) — a degree-only lie
+    // — a degree-only lie
     // (transcript honest, `degree` bits forged) is caught HERE and ONLY
     // here on the host path, so it must run by default for soundness.
-    // Honest proofs pass (num_eq/den_eq=true, validated by the Stage-0
-    // forgery harness + the degree-only-survives-when-off baseline).  It
+    // Honest proofs pass (num_eq/den_eq=true, validated by the
+    // forgery harness).  It
     // samples / observes nothing, so toggling it is transcript- and
     // proof-byte-neutral.  Escape hatch: `ZIREN_LOGUP_RECONSTRUCTION=0`
-    // disables it (e.g. to reproduce the pre-port baseline).
+    // disables it (e.g. to reproduce the pre-reconstruction baseline).
     if std::env::var("ZIREN_LOGUP_RECONSTRUCTION").as_deref() != Ok("0") {
         let log_num_interactions = initial_num_variables - 1;
 
@@ -1875,10 +1874,10 @@ where
         // `threshold.rev()` with `point.rev()`, i.e. degree-bit i with
         // point[len-1-i]; feeding the REVERSED trace_point (plus the SP1
         // `add_dimension(zero)` high coord) makes degree-bit k align with
-        // `trace_point[k]`, reproducing the LSB-first leaf mask.  (The previous
-        // `[0, ...trace_point]` ordering was the zerocheck's bit-REVERSED
+        // `trace_point[k]`, reproducing the LSB-first leaf mask.  (The
+        // `[0, ...trace_point]` ordering is the zerocheck's bit-REVERSED
         // convention — correct for the zerocheck's `bitrev_rows` poly but the
-        // OPPOSITE of the GKR leaf, which is why honest reconstruction failed.)
+        // OPPOSITE of the GKR leaf, so it would make honest reconstruction fail.)
         let mut point_extended: Vec<Challenge<SC>> = Vec::with_capacity(max_log_row_count + 1);
         point_extended.push(Challenge::<SC>::ZERO);
         point_extended.extend(trace_point.iter().rev().copied());
@@ -2091,7 +2090,7 @@ mod tests {
         assert_eq!(v.max_log_row_count, 3);
     }
 
-    /// bug #9 — per-stage cube derivation. At the production base (22):
+    /// Per-stage cube derivation. At the production base (22):
     ///   * cube-22 proofs (round_proofs.len()+1 == 22) are a NO-OP → 22
     ///     (BYTE-IDENTICAL verify path for core / FIX-on / single-shard);
     ///   * a cube-24 proof (the FIX-off band-5 multi-shard case, 23

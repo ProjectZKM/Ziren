@@ -17,15 +17,14 @@ pub trait MainTraceLoader<F> {
     /// this multiple times per chip, so implementations may cache.
     fn get(&self, i: usize) -> RowMajorMatrix<F>;
 
-    /// #125 INC-1 (read-only seam): the shared analytic trace-MLE for
+    /// Read-only seam: the shared analytic trace-MLE for
     /// chip `i`, built once at trace-gen, when this loader carries one.
     ///
     /// Default `None`; only [`EagerHostLoader`] (host CPU path)
-    /// populates it via [`EagerHostLoader::with_padded`].  In INC-1 the
-    /// three shard stages do NOT read this yet (dead-but-threaded), so
-    /// it is byte-neutral; INC-2+ switches a consumer over.  Adding it as
-    /// a defaulted method keeps every existing implementor (including
-    /// ziren-gpu's device loaders) source-compatible.
+    /// populates it via [`EagerHostLoader::with_padded`].  Sourcing a
+    /// stage's cells from this shared MLE is byte-identical to re-evaluating
+    /// the raw trace.  Adding it as a defaulted method keeps every existing
+    /// implementor (including ziren-gpu's device loaders) source-compatible.
     #[allow(unused_variables)]
     fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>>
     where
@@ -34,7 +33,7 @@ pub trait MainTraceLoader<F> {
         None
     }
 
-    /// #125 INC-2: the whole shared trace-MLE slice (chip-index order),
+    /// The whole shared trace-MLE slice (chip-index order),
     /// when this loader carries one.  Lets the LogUp-GKR stage consume the
     /// per-chip analytic trace-MLE built once at trace-gen instead of
     /// re-evaluating each chip's trace on the fly.
@@ -50,7 +49,7 @@ pub trait MainTraceLoader<F> {
         None
     }
 
-    /// #127: borrow the whole per-chip main-trace slice read-only, when this
+    /// Borrow the whole per-chip main-trace slice read-only, when this
     /// loader already holds it on the host.
     ///
     /// Default `None`; only [`EagerHostLoader`] (host CPU path) returns
@@ -76,12 +75,12 @@ pub trait MainTraceLoader<F> {
 
 /// Loader backed by a borrowed slice of host `RowMajorMatrix`s.
 ///
-/// Optionally carries the #125 INC-1 shared analytic trace-MLE
+/// Optionally carries the shared analytic trace-MLE
 /// (`padded`), a per-chip `PaddedMle<F>` slice parallel to `traces`,
 /// threaded read-only to the shard prover.
 pub struct EagerHostLoader<'a, F: p3_field::Field> {
     traces: &'a [RowMajorMatrix<F>],
-    /// #125 INC-1: per-chip shared trace-MLE (chip-index order), or
+    /// Per-chip shared trace-MLE (chip-index order), or
     /// `None` when the caller does not supply one.
     padded: Option<&'a [crate::multilinear::PaddedMle<F>]>,
 }
@@ -91,10 +90,9 @@ impl<'a, F: p3_field::Field> EagerHostLoader<'a, F> {
         Self { traces, padded: None }
     }
 
-    /// Construct a loader that also carries the #125 INC-1 shared
+    /// Construct a loader that also carries the shared
     /// trace-MLE (`padded[i]` = chip `i`'s analytic trace-MLE, parallel
-    /// to `traces`).  Read-only; consumed by no transcript stage in
-    /// INC-1.
+    /// to `traces`).  Read-only.
     pub fn with_padded(
         traces: &'a [RowMajorMatrix<F>],
         padded: &'a [crate::multilinear::PaddedMle<F>],
@@ -132,7 +130,7 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
         self.padded
     }
 
-    /// #127: the host loader carries the traces read-only, so hand back a
+    /// The host loader carries the traces read-only, so hand back a
     /// borrow — `materialize_all` above is a pure per-chip `values.clone()`,
     /// so `&self.traces` is byte-identical to its output and lets the caller
     /// skip the full-trace copy.

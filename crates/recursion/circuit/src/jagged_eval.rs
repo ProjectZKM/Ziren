@@ -17,10 +17,9 @@
 //!
 //! This module hosts the trait abstraction over both strategies +
 //! the trivial implementation.  The sumcheck-based implementation
-//! depends on the BranchingProgram in-circuit eval and the
-//! `prefix_sum_checks` recursion-compiler primitive; both are
-//! tracked as follow-up work in
-//! [`docs/recursion_verifier_port.md`].
+//! delegates the BranchingProgram in-circuit eval and the
+//! `prefix_sum_checks` recursion-compiler primitive to caller-
+//! supplied callbacks.
 //!
 //! # Reference
 //!
@@ -73,8 +72,8 @@ pub trait RecursiveJaggedEvalConfig<C: CircuitConfig, Chal>: Sized {
 /// Trivial jagged-eval configuration — emits zero plus an empty
 /// prefix-sum witness.  Sound only when the outer caller does not
 /// rely on the jagged-eval claim or supplies a separate consistency
-/// check elsewhere.  Useful for shape-test fixtures and as a
-/// stand-in until the sumcheck-based evaluator lands.
+/// check elsewhere.  Useful for shape-test fixtures and where a
+/// full sumcheck-based evaluator is not needed.
 #[derive(Clone, Default, Debug)]
 pub struct RecursiveTrivialJaggedEvalConfig;
 
@@ -114,7 +113,7 @@ impl<C: CircuitConfig> RecursiveJaggedEvalConfig<C, ()> for RecursiveTrivialJagg
 /// jagged evaluation plus the per-column prefix-sum witness.
 ///
 /// Two primitives are delegated to callbacks because Ziren does
-/// not yet have in-circuit ports of them:
+/// not have in-circuit ports of them:
 ///
 ///   * `branching_program_eval` — computes the value of the
 ///     branching program `BranchingProgram(z_row, z_trace)` at

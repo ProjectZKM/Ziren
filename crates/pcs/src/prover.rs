@@ -154,10 +154,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error>;
 
-    /// STAGE-B b2 (#118): the jagged trusted-evaluations open — the b3
+    /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
-    /// byte-identical).  b3's `StarkGpuProver` overrides this with a device
+    /// byte-identical).  A `StarkGpuProver` overrides this with a device
     /// body that reads its OWN provider.  `device_traces` is kept on the seam
     /// (CpuProver's `prove_shard_to_basefold` passes `None`) so the free-fn
     /// callers + the CPU path are unchanged; the override is free to ignore the
@@ -202,14 +202,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         )
     }
 
-    /// STAGE-B b2 (#118): the shard-level BaseFold producer as a trait method.
+    /// The shard-level BaseFold producer as a trait method.
     /// Default routes the loader pipeline through
     /// [`crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch`]
     /// with the jagged open dispatched via `self.prove_trusted_evaluations`
-    /// (`ProverJaggedEval(self)`), so a `StarkGpuProver` (b3) that overrides
+    /// (`ProverJaggedEval(self)`), so a `StarkGpuProver` that overrides
     /// `prove_trusted_evaluations` has its device body picked up here.  On
-    /// `CpuProver` every step delegates to the free-fn → BYTE-IDENTICAL to the
-    /// pre-b2 `prove_shard_to_basefold` free-fn path.
+    /// `CpuProver` every step delegates to the free-fn → byte-identical to the
+    /// free-fn `prove_shard_to_basefold` path.
     #[allow(clippy::too_many_arguments)]
     fn prove_shard_to_basefold(
         &self,
@@ -239,7 +239,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                     crate::Challenge<SC>,
                 >,
             >
-            // #125 INC-4a: the K = F (base-field first round) folder instance.
+            // The K = F (base-field first round) folder instance.
             + for<'b> Air<
                 crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                     'b,
@@ -262,15 +262,15 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
-        // #125 INC-1: build the shared analytic trace-MLE ONCE, per chip,
+        // Build the shared analytic trace-MLE once, per chip,
         // in chip-index order, from the materialized main traces and the
         // per-stage cube `max_log_row_count` (the same cube the zerocheck /
         // LogUp-GKR stages open over).  Threaded read-only into the shard
-        // prover via the `EagerHostLoader` seam.  In INC-1 NONE of the three
-        // stages consume it (they still run their current code), so it never
-        // reaches the Fiat-Shamir transcript — additive + byte-neutral by
-        // construction.  A width-0 chip (device-resident / unexercised) has
-        // no host cells to wrap, so it maps to a fully-virtual `dummy`.
+        // prover via the `EagerHostLoader` seam.  Sourcing a stage's cells
+        // from this shared MLE is byte-identical to re-lifting the raw trace,
+        // so it never perturbs the Fiat-Shamir transcript.  A width-0 chip
+        // (device-resident / unexercised) has no host cells to wrap, so it
+        // maps to a fully-virtual `dummy`.
         let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
             .iter()
             .map(|t| {
@@ -392,7 +392,7 @@ where
                 SC::Challenge,
             >,
         >
-        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        // The K = F (base-field first round) folder instance.
         + for<'a> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'a,
@@ -407,7 +407,7 @@ where
     PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
     OpeningProof<SC>: Send + Sync,
     SC::Challenger: Clone,
-    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -465,18 +465,17 @@ where
 
         let pcs = self.config().pcs();
 
-        // Single-main-commit gate — KoalaBear/JaggedChallenger
+        // Single-main-commit gate — the KoalaBear/JaggedChallenger
         // config skips the legacy FRI `pcs.commit(main_traces)` and
         // instead computes the BaseFold jagged-PCS commit up-front
         // (the same commit the shard-level prover's jagged-PCS body would
         // otherwise produce).  Its 8-felt digest becomes the `main_commitment`
         // observed in the prologue, eliminating the
         // double-commit (FRI + BaseFold) on the same trace data.
-        // BaseFold-over-BN254: both the inner (KoalaBear / JaggedChallenger) and
-        // the OUTER wrap (BN254 / MultiField32) rings now commit via the BaseFold
-        // jagged-PCS up-front — its 8-felt digest becomes the `main_commitment`
-        // observed in the prologue.  The legacy two-adic-quotient FRI
-        // commit path has been retired.  Name-order the commit (SP1 BTreeMap chip
+        // Both the inner (KoalaBear / JaggedChallenger) and
+        // the OUTER wrap (BN254 / MultiField32) rings commit via the BaseFold
+        // jagged-PCS up-front; the two-adic-quotient FRI commit path is not
+        // used.  Name-order the commit (SP1 BTreeMap chip
         // order) so the recursion verifier's compile-time name-order
         // column_counts / opened_values match the committed column order.
         named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
@@ -537,10 +536,10 @@ where
         // Obtain the challenges used for the local permutation argument.
         let mut local_permutation_challenges: Vec<SC::Challenge> = Vec::new();
         for _ in 0..2 {
-            // STAGE-B b1: UFCS-disambiguate `F = Val<SC>` — the impl now also
+            // UFCS-disambiguate `F = Val<SC>` — the impl also
             // carries `SC::Challenger: FieldChallenger<JaggedVal>` (threaded to
             // the static outer BaseFold open), so bare `sample_algebra_element`
-            // is ambiguous. `Val<SC>` preserves the pre-b1 resolution exactly.
+            // is ambiguous. `Val<SC>` preserves the original resolution exactly.
             local_permutation_challenges.push(
                 <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
                     challenger,
@@ -553,29 +552,14 @@ where
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
 
-        // === BASEFOLD FAST PATH (KoalaBear/JaggedChallenger default) ===
-        // BaseFold + jagged jagged-PCS + zerocheck + LogUp-GKR is the
-        // default proof system whenever the generic config is the
-        // KoalaBear/JaggedChallenger stack.
+        // === BaseFold fast path (KoalaBear/JaggedChallenger default) ===
+        // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the default proof
+        // system whenever the generic config is the KoalaBear/JaggedChallenger
+        // stack.  The path still uses `TwoAdicFriPcs` for the prep + main
+        // commit/open placeholders, with soundness carried by the BaseFold
+        // per-shard proof generated below.
         //
-        // (Historical note: this path was originally named "WHIR fast
-        // path" while the WHIR PCS was the planned soundness pillar.
-        // The Apr 2026 BaseFold migration replaced WHIR PCS with
-        // BaseFold; the path itself still uses `TwoAdicFriPcs` for the
-        // prep + main commit/open, with soundness now carried by the
-        // BaseFold per-shard proof generated below.)
-        //
-        // The older dispatch keyed off the MIPS-only "Program" chip:
-        // MIPS shards took BaseFold, recursion shards stayed on FRI, and
-        // Cpu-less memory shards used a side-channel BaseFold proof.  That
-        // path is retired.  Dispatch is now purely TypeId-based, so the
-        // KoalaBear/JaggedChallenger stack takes BaseFold for MIPS and
-        // recursion shards alike.
-        //
-        // === BaseFold for recursion is the default (May 19 2026) ===
-        // The env-gated `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` switch retired
-        // (commit e3569c6b on lib.rs side, this commit on prover.rs side).
-        // Dispatch is now TypeId-based: inner rings take BaseFold for all
+        // Dispatch is purely TypeId-based: inner rings take BaseFold for all
         // shards, the OuterSC wrap stays on FRI:
         //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
         //     + Challenger=JaggedChallenger)  → basefold path for ALL shards,
@@ -586,13 +570,10 @@ where
         //     `try_prove_shard_to_basefold_boxed` has the same TypeId
         //     guard so this outer check matches its assumption.
         //
-        // Smoke validation (test_e2e_compress_fibonacci, 38.12s VERIFY_VK=false)
-        // confirmed the recursion-AIR basefold variant prior to this flip.
         // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
-        // BaseFold-over-BN254: every ring (inner KoalaBear/JaggedChallenger and
-        // the OUTER wrap BN254/MultiField32) opens via the shard-level BaseFold
-        // jagged-PCS.  The legacy two-adic-quotient FRI open path has been
-        // retired; this is now the only path.
+        // Every ring (inner KoalaBear/JaggedChallenger and the OUTER wrap
+        // BN254/MultiField32) opens via the shard-level BaseFold jagged-PCS;
+        // the two-adic-quotient FRI open path is not used.
         {
             let t_basefold_path = std::time::Instant::now();
 
@@ -622,8 +603,8 @@ where
             }
 
             // Sample alpha (constraint mixing challenge).
-            // STAGE-B b1: UFCS-disambiguate `F = Val<SC>` (see the perm-challenge
-            // sample above) — preserves the pre-b1 resolution byte-for-byte.
+            // UFCS-disambiguate `F = Val<SC>` (see the perm-challenge
+            // sample above) — preserves the original resolution byte-for-byte.
             let _alpha: SC::Challenge =
                 <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
                     challenger,
@@ -639,7 +620,7 @@ where
                     challenger,
                 );
 
-            // === Option B single-main-commit: placeholder pcs.open ===
+            // === Single-main-commit: placeholder pcs.open ===
             //
             // The basefold verifier dispatches via
             // `basefold_shard_proof.is_some()` at the top of
@@ -721,7 +702,7 @@ where
             // prover, which routes it to the jagged-PCS body to
             // skip the in-band commit step + observe.
             let precomputed_basefold_taken = data.precomputed_basefold;
-            // STAGE-B b2 (#118): pass `self` so the basefold producer routes
+            // Pass `self` so the basefold producer routes
             // through the trait-method seam (`self.prove_shard_to_basefold` ->
             // `self.prove_trusted_evaluations`).  CpuProver path byte-identical.
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A, _>(
@@ -866,10 +847,10 @@ impl Error for CpuProverError {}
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn try_prove_shard_to_basefold_boxed<SC, A, P>(
-    // STAGE-B b2 (#118): the prover, so the inner
+    // The prover, so the inner
     // `prove_shard_to_basefold` call routes through `prover`'s trait method
     // (`prover.prove_shard_to_basefold` -> `self.prove_trusted_evaluations`),
-    // exposing the b3 override seam.  On `CpuProver` every step delegates to
+    // exposing the override seam.  On `CpuProver` every step delegates to
     // the free-fn → byte-identical.
     prover: &P,
     chips: &[&MachineChip<SC, A>],
@@ -900,7 +881,7 @@ where
                 <SC as StarkGenericConfig>::Challenge,
             >,
         >
-        // #125 INC-4a: the K = F (base-field first round) folder instance.
+        // The K = F (base-field first round) folder instance.
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
                 'b,
@@ -914,7 +895,7 @@ where
     Val<SC>: 'static,
     <SC as StarkGenericConfig>::Challenge:
         p3_field::BasedVectorSpace<Val<SC>> + 'static,
-    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -927,7 +908,7 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // BaseFold-over-BN254 wrap port: gate via `BasefoldRing::use_basefold()`
+    // Gate via `BasefoldRing::use_basefold()`
     // (the trait dispatch authority) instead of the open-coded TypeId check.
     // For every config returning `true` today (the inner KoalaBear stack) the
     // Val/Challenge/Challenger identities below hold, which keeps the
@@ -954,7 +935,7 @@ where
         })
         .collect();
 
-    // Option B: the precomputed BaseFold jagged-PCS commit produced
+    // The precomputed BaseFold jagged-PCS commit produced
     // up-front by `commit_basefold_path`.  Always present on this path:
     // the helper's sole caller (`open()`) reaches it only inside the
     // `use_basefold_path` branch, whose gate is byte-identical to the
@@ -965,7 +946,7 @@ where
             "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
              basefold path (commit_basefold_path always sets it under the same TypeId gate)",
         );
-    // BaseFold-over-BN254 wrap port: recover the precomputed commit from
+    // Recover the precomputed commit from
     // the type-erased box as PrecomputedJaggedCommitGeneric<SC::BfMmcs> — works
     // for BOTH rings (inner BfMmcs=JaggedMmcs, outer BfMmcs=OuterValMmcs). The
     // shard prover threads it generically; prove_trusted_evaluations dispatches the
@@ -991,7 +972,7 @@ where
     let digest_jv_raw: [crate::jagged_pcs::JaggedVal; 8] =
         <SC as BasefoldRing>::digest_felts(&precomputed.commit.commitment);
 
-    // ── SP1-faithful jagged HASH-BIND (#88) — THE FS-observed digest ─────
+    // ── SP1-faithful jagged HASH-BIND — THE FS-observed digest ─────
     // This `digest` is what the transcript prologue observes as
     // `main_commitment` (prover.rs `digest` -> prove_shard_to_basefold ->
     // shard_level prologue).  Fold the per-chip (row_count, column_count)
@@ -1031,13 +1012,12 @@ where
 
     // BaseFold is the unconditional inner-shard path (SP1-aligned):
     // prove the shard directly, with no panic-catch / legacy fallback.
-    // (The former `catch_unwind` masked a row-only LogUp-GKR
-    // shape-handling gap that no longer exists; a panic here now is a
-    // genuine bug to surface, exactly as SP1 does.)
+    // A panic here is a genuine bug to surface, exactly as SP1 does; there
+    // is no `catch_unwind` fallback masking a LogUp-GKR shape-handling gap.
     // PER-STAGE cube: `cube = max(BASE, max over chips of log2(resolved
     // height))` where BASE=22 (= BasefoldShardVerifier production default).
     // The zerocheck cube (`max_log_row_count`) MUST cover the tallest chip
-    // trace; #88's FIX-off recursion bands (ext_alu:24, base_alu:23) can pad
+    // trace; the FIX-off recursion bands (ext_alu:24, base_alu:23) can pad
     // a chip above 22, so a fixed 22 underflows the zerocheck embed-factor
     // slice.  The prover-computed cube here MUST equal the cube the
     // verifier-circuit was BUILT with (recursion `build_*_basefold_program`
@@ -1087,10 +1067,10 @@ where
     let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
         main_traces.iter().map(|arc| (**arc).clone()).collect();
 
-    // STAGE-B b2 (#118): route through the prover's trait method so the jagged
-    // open is dispatched via `prover.prove_trusted_evaluations` (b3 override
+    // Route through the prover's trait method so the jagged
+    // open is dispatched via `prover.prove_trusted_evaluations` (the override
     // seam).  On `CpuProver` this delegates step-for-step to the same free-fns
-    // as the pre-b2 `prove_shard_to_basefold` call → byte-identical.
+    // as the free-fn `prove_shard_to_basefold` call → byte-identical.
     let proof = prover.prove_shard_to_basefold(
         &chips_reborrow,
         &preprocessed_traces,
@@ -1165,7 +1145,7 @@ where
         )
     };
 
-    // HEIGHT-AGNOSTIC RECURSION (step 5b): the CPU host path precomputes the
+    // Height-agnostic recursion: the CPU host path precomputes the
     // jagged commit HERE (inside `commit()`), so the per-chip CLUSTER band-cap
     // pad must be applied to the traces THIS commit packs -- NOT only later in
     // `prove_shard_to_basefold_with_loader` (which would be ignored on this
@@ -1180,7 +1160,7 @@ where
     // thread-local band-cap installed by the core prove site).  `None` (no
     // guard) => unchanged own-height commit (recursion / shrink / wrap).
     //
-    // HEIGHT-AGNOSTIC RECURSION (step 5c): the band-cap is now the FULL
+    // The band-cap is the FULL
     // canonical CLUSTER (chip name -> (width, log_height)), so besides padding
     // PRESENT chips it must ADD a zero trace for each canonical chip that this
     // raw (event-driven) shard is MISSING — exactly as FIX_CORE_SHAPES=true
@@ -1195,13 +1175,13 @@ where
     // lifted in `commit_named_inner`; the injected chips already arrive at
     // their band-cap height.
     //
-    // ROLLOUT 1b: the injected missing-chip traces are now the CONSTRAINT-VALID
+    // The injected missing-chip traces are the CONSTRAINT-VALID
     // traces the core prove site generated FIX-on-faithfully (each chip's own
     // `MachineAir::generate_trace` over the canonical-shaped record, so the
     // padding rows satisfy that chip's AIR sanity constraints — e.g. CloClz's
     // `padded_row_template` sets `a=32, is_bb_zero=1` so its SRL send has zero
-    // multiplicity).  All-zero injection (rollout 1) made the VK match but a
-    // real FIX-off proof's injected chips FAILED their constraints / lookups.
+    // multiplicity).  An all-zero injection would make the VK match but a
+    // real FIX-off proof's injected chips would FAIL their constraints / lookups.
     // We pull those generated traces from the same thread-local the band-cap
     // arrives on, and only synthesize a zero matrix as a defensive fallback for
     // a missing chip whose generated trace is (unexpectedly) absent.
@@ -1218,9 +1198,9 @@ where
                     named_traces_inner.push((name.clone(), t.clone()));
                 } else {
                     // Defensive fallback: a canonical chip with no generated
-                    // trace — synthesize a zero matrix at the band height (this
-                    // is the rollout-1 behaviour; if it ever fires, that chip's
-                    // constraints may not hold, which `verify_shard` will catch).
+                    // trace — synthesize a zero matrix at the band height; if it
+                    // ever fires, that chip's constraints may not hold, which
+                    // `verify_shard` will catch.
                     let w = (*width).max(1);
                     let h = 1usize << *log_h;
                     named_traces_inner.push((
@@ -1234,7 +1214,7 @@ where
         // the recursion `opened_values.chips` BTreeMap expect).
         named_traces_inner.sort_by(|(a, _), (b, _)| a.cmp(b));
     }
-    // PRODUCTION (#88 Option A): keep PRESENT chips at their natural raw height
+    // Keep PRESENT chips at their natural raw height
     // (no band-pad) so the committed packing offsets are raw-keyed — DEFAULT-ON
     // for FIX-off (the `Some(_)` band-cap arm IS the FIX-off predicate; FIX-on
     // reaches `None` and is byte-identical).  Missing chips were already
@@ -1268,7 +1248,7 @@ where
                 .collect(),
         };
 
-    // BaseFold-over-BN254: build the commit over the ring's BfMmcs
+    // Build the commit over the ring's BfMmcs
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
     let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
         <SC as BasefoldRing>::BfMmcs,

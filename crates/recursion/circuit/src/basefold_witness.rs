@@ -151,9 +151,9 @@ where
                 .preprocessed_trace_evaluations
                 .as_ref()
                 .map(|v| v.read(builder)),
-            // #88 Stage 3b: thread the FULL-POINT openings (same read/write
-            // order as the host `st::ChipEvaluation` impl in
-            // shard_level_witness.rs — main, prep, main_full, prep_full).
+            // Thread the FULL-POINT openings (same read/write order as the
+            // host `st::ChipEvaluation` impl in shard_level_witness.rs —
+            // main, prep, main_full, prep_full).
             main_trace_evaluations_full: self
                 .main_trace_evaluations_full
                 .as_ref()
@@ -260,11 +260,10 @@ where
         // prefix — witness/mod.rs:119 — so read/write order, not just
         // length, must agree).  `write` emits in struct-declaration
         // order: preprocessed, main, degree, local_cumulative_sum,
-        // THEN the 7+7 septic global-cumsum felts.  A previous version
-        // read x/y FIRST, shifting every chip's openings by 14 felts:
-        // `main.local[0]` then read what `write` placed at
-        // `main.local[14]`, breaking `rlc_eval == point_and_eval.1`
-        // (zerocheck.rs:585).
+        // THEN the 7+7 septic global-cumsum felts.  Reading x/y FIRST would
+        // shift every chip's openings by 14 felts (`main.local[0]` reading
+        // what `write` placed at `main.local[14]`), breaking
+        // `rlc_eval == point_and_eval.1` (zerocheck.rs:585).
         use zkm_pcs::septic_curve::SepticCurve;
         use zkm_pcs::septic_extension::SepticExtension;
         let preprocessed = self.preprocessed.read(builder);
@@ -318,11 +317,10 @@ where
     }
 }
 
-// Per-chip zerocheck and LogUp-GKR Witnessable impls retired alongside
-// the legacy `ShardProofVariable.basefold_logup_gkr_proofs` /
-// `basefold_zerocheck_proofs` fields.  The per-chip recursion
-// verifiers (`crate::per_chip_zerocheck` / `crate::per_chip_logup_gkr`)
-// went with them.
+// No per-chip zerocheck or LogUp-GKR Witnessable impls exist here: the
+// shard proof carries no per-chip `basefold_logup_gkr_proofs` /
+// `basefold_zerocheck_proofs` fields, and there are no matching per-chip
+// recursion verifiers.
 
 // ── Jagged-PCS proof types ───────────────────────────────────────
 
@@ -363,8 +361,7 @@ where
 // internally — they are in-circuit variable types, not host types.
 // Witnessable impls would require defining parallel host-side
 // structs whose fields use raw `EF` / `F` and map through to the
-// variable versions.  Tracked as follow-up — the host-side struct
-// definitions land alongside the prover integration.
+// variable versions, which are not defined here.
 
 // ── Recursive BaseFold proof types ───────────────────────────────
 
@@ -373,12 +370,11 @@ impl<C, Dig: Clone> Witnessable<C>
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    // Behavior-preserving re-type: the variable now carries `Ext`
-    // circuit variables for `uni_poly` (the const-promotion moves here
-    // from the verifier body).  `commitment` stays the raw `Dig`
-    // (digest witnessing happens at the stream read/write pair below).
-    // The stream-based variant swaps `builder.constant` for
-    // `.read(builder)` + a real `write`.
+    // The variable carries `Ext` circuit variables for `uni_poly`
+    // (const-promotion happens here rather than in the verifier body).
+    // `commitment` stays the raw `Dig` (digest witnessing happens at the
+    // stream read/write pair below).  The stream-based variant swaps
+    // `builder.constant` for `.read(builder)` + a real `write`.
     type WitnessVariable = RecursiveBasefoldRound<Felt<C::F>, Ext<C::F, C::EF>, Dig>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -393,7 +389,7 @@ where
     }
 
     fn write(&self, _witness: &mut impl WitnessWriter<C>) {
-        // Still const-constructed in `read`; no stream writes.
+        // Const-constructed in `read`; no stream writes.
     }
 }
 
@@ -500,13 +496,11 @@ where
             final_poly: builder.constant(self.final_poly),
             pow_witness: builder.constant(self.pow_witness),
             batch_grinding_witness: builder.constant(self.batch_grinding_witness),
-            // `component_openings` (and its `leaf_values`) are UNUSED by the
-            // verifier — `verify_untrusted_evaluations` explicitly discards
-            // them (`let _ = &proof.component_openings`, basefold_verifier.rs:936).
-            // The legacy raw-valued proof carried them for free (never
-            // promoted); promoting them here added ~25MB of dead consts to the
-            // program.  Emit empty so they stay out of the circuit entirely
-            // (also keeps them value-independent — nothing to witness).
+            // On this const-built path the verifier's component-opening
+            // branch is not taken, and promoting the (large) `leaf_values`
+            // here would add ~25MB of dead consts to the program.  Emit
+            // empty so they stay out of the circuit entirely (also keeps
+            // them value-independent — nothing to witness).
             component_openings: Vec::new(),
             query_phase_openings: self.query_phase_openings.read(builder),
             batch_evaluations: self
@@ -552,7 +546,7 @@ where
     let final_poly = host.final_poly.read(builder);
     let pow_witness = host.pow_witness.read(builder);
     let batch_grinding_witness = host.batch_grinding_witness.read(builder);
-    // Component openings are now CONSUMED by the verifier
+    // Component openings are CONSUMED by the verifier
     // (batched initial_eval + Merkle binding vs the original
     // commitments) — witness the leaf values and path digests.
     // Element counts are shape-determined (stripe widths x queries x
@@ -673,16 +667,15 @@ pub fn write_basefold_proof_to_stream<C>(
 
 // ── OUTER (BN254) value-independent (witness-stream) basefold proof ───
 //
-// P2c-for-outer: the gnark wrap path previously BAKED the outer bundle's
-// proof-specific values as `builder.constant` (in
-// `lift_jagged_basefold_bundle_outer`).  This pair witnesses them from the
-// gnark witness stream instead, so the R1CS is value-INDEPENDENT (a fresh
-// wrap proof feeds new witness values rather than tripping a baked
-// `assertIsEqual`).  It mirrors `read_/write_basefold_proof_from_stream`
-// but the digests are BN254 1-caps (`[Bn254; 1]`) read as `[Var<N>; 1]`
+// The gnark wrap path witnesses the outer bundle's proof-specific values
+// from the gnark witness stream (rather than baking them as
+// `builder.constant` in `lift_jagged_basefold_bundle_outer`), so the R1CS
+// is value-INDEPENDENT (a fresh wrap proof feeds new witness values rather
+// than tripping a baked `assertIsEqual`).  It mirrors
+// `read_/write_basefold_proof_from_stream` but the digests are BN254
+// 1-caps (`[Bn254; 1]`) read as `[Var<N>; 1]`
 // (`Bn254: Witnessable<C, WitnessVariable = Var<Bn254>>`, N = Bn254).
-// `component_openings` are dropped (the verifier discards them, identical
-// to the inner pair).
+// `component_openings` are dropped (the verifier discards them here).
 pub fn read_basefold_proof_outer_from_stream<C>(
     host: &RecursiveBasefoldProof<InnerVal, InnerChallenge, [p3_bn254_fr::Bn254; 1]>,
     builder: &mut Builder<C>,
@@ -739,7 +732,7 @@ where
         final_poly,
         pow_witness,
         batch_grinding_witness,
-        // verifier discards component_openings (basefold_verifier.rs:936).
+        // verifier discards component_openings on this path.
         component_openings: Vec::new(),
         query_phase_openings,
         batch_evaluations,

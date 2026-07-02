@@ -1,4 +1,4 @@
-//! #115 Path B — STEP 1 grid computation.
+//! Normalize-shape grid computation.
 //! Replicates the EXACT `shape_at_log_dense` / `log_dense_of` logic from
 //! `ZKMProofShape::generate` (shapes.rs small_shapes loop) to compute, per
 //! cluster, l_min and the FULL achievable L range up to a cap, and the total
@@ -171,7 +171,7 @@ fn main() {
     println!("clusters (non-empty) = {}", clusters.len());
     println!();
 
-    // Baseline: the SHIPPED window=8, hard_cap=28.
+    // Baseline: window=8, hard_cap=28.
     let (n_base, lmin_b, lmax_b) = count_grid(8, 28, false);
     println!(
         "BASELINE  window=8  hard_cap=28 : normalize_shapes={} (global l_min={} l_max={})  +6 (compress4+def1+shr1) = TOTAL {}",

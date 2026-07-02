@@ -1,6 +1,6 @@
-//! Stage 0 (#88 deep VK-identity port) — HEIGHT-FORGERY DE-RISK HARNESS.
+//! HEIGHT-FORGERY DE-RISK HARNESS.
 //!
-//! The deep VK-identity port will DROP the per-prep-domain height loop
+//! The VK-identity change drops the per-prep-domain height loop
 //! from `vk.hash` (crates/prover/src/types.rs:92-99) so that `VK =
 //! f(chip-SET)` instead of `f(chip-SET, per-chip-heights)`.  That change
 //! is IRREVERSIBLE (it re-keys the recursion vk_map).  Its safety rests
@@ -14,7 +14,7 @@
 //!
 //! This module PROVES that claim EMPIRICALLY, BEFORE the hash change, by
 //! FORGING a height in a real FIX-off shard proof and confirming the
-//! honest verify path REJECTS it.  The hash is left UNTOUCHED in Stage 0
+//! honest verify path REJECTS it.  The hash is left UNTOUCHED here
 //! (`vk.hash` still loops the heights) — these tests show the rejection
 //! does NOT come from the hash loop (the host `verify_shard` path does
 //! not even recompute the VK hash; it re-derives the transcript from the
@@ -241,7 +241,7 @@ fn stage0_control_fixon_honest_verifies() {
 /// `recon`: when `true`, runs the verify under
 /// `ZIREN_LOGUP_RECONSTRUCTION=1` so the degree-masked last-layer
 /// reconstruction (the height anchor) is exercised.  When `false`, the
-/// reconstruction is GATED OFF (the production default at Stage 0).
+/// reconstruction is GATED OFF (explicitly disabled).
 ///
 /// `expect_reject`: the de-risk assertion — `true` means the forgery
 /// MUST be rejected (heights redundantly bound on this path); `false`
@@ -260,7 +260,7 @@ fn run_forgery(
     // the whole prove+verify of this call.  Single-threaded test runner
     // (--test-threads=1) makes the process-global env var safe here.
     //
-    // #88 deep VK-identity port (Stage 1): the reconstruction is now
+    // The reconstruction is
     // ACTIVE BY DEFAULT (verifier.rs un-gated — runs unless the var is
     // explicitly "0").  So `recon=false` here means EXPLICITLY DISABLE it
     // (`="0"`, the escape hatch) to reproduce the pre-port baseline; the
@@ -381,8 +381,8 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 /// `chip_log_heights` and `log_degree` HONEST.  This is the SHARPEST
 /// de-risk probe: it isolates the NON-TRANSCRIPT height-binding
 /// substrate (the `full_geq` padding mask over the degree bits → the
-/// LogUp-GKR reconstruction identity), the exact substrate the deep
-/// VK-identity port relies on once heights leave both `vk.hash` AND the
+/// LogUp-GKR reconstruction identity), the exact substrate the
+/// VK-identity change relies on once heights leave both `vk.hash` AND the
 /// transcript framing.  If THIS rejects, the degree-bit binding is
 /// load-bearing on its own.  Over-claim: set a higher bit (taller chip).
 fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
@@ -461,11 +461,10 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 //       feed `full_geq`, the per-chip padding mask; the last-layer
 //       reconstruction re-derives num/den from the trace openings masked
 //       by `full_geq(degree, ·)` and asserts equality with the GKR round
-//       walk (verifier.rs:1861-1880).  This is the SUBSTRATE the deep
-//       VK-identity port relies on once heights leave both the hash and
-//       the transcript framing.  It is GATED behind
-//       `ZIREN_LOGUP_RECONSTRUCTION=1` (Phase-1 status) and is therefore
-//       OFF in the Stage-0 production default.
+//       walk (verifier.rs:1861-1880).  This is the SUBSTRATE the
+//       VK-identity change relies on once heights leave both the hash and
+//       the transcript framing.  It runs by default and is disabled only
+//       with `ZIREN_LOGUP_RECONSTRUCTION=0` (the escape hatch).
 // ─────────────────────────────────────────────────────────────────────
 
 // (A) TRANSCRIPT-COUPLED forgeries — reject via the transcript bind even
@@ -553,9 +552,9 @@ fn stage0_forge_degree_only_underclaim_fibonacci_recon_on() {
 // (B') DEGREE-ONLY forgery with the reconstruction EXPLICITLY DISABLED
 //      (`ZIREN_LOGUP_RECONSTRUCTION=0`, the escape hatch) — DOCUMENTS that
 //      a degree-only lie SURVIVES only when the degree anchor is turned OFF
-//      on purpose.  After the #88 Stage-1 un-gate the reconstruction is ON
+//      on purpose.  The reconstruction is ON
 //      by default, so this case requires the explicit `=0` override (which
-//      `run_forgery(recon=false)` now sets).  It pins the cause (the gate)
+//      `run_forgery(recon=false)` sets).  It pins the cause (the gate)
 //      and proves the escape hatch still disables the check.
 
 #[test]
@@ -577,11 +576,11 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
     );
 }
 
-// (B'') #88 Stage-1 UN-GATE GATE-(c): the SAME degree-only forgery, but on
-//       the TRUE PRODUCTION DEFAULT (env var UNSET) — the reconstruction now
+// (B'') the SAME degree-only forgery, but on
+//       the TRUE PRODUCTION DEFAULT (env var UNSET) — the reconstruction
 //       runs by default, so the lie MUST be REJECTED.  This is the headline
-//       soundness assertion of the un-gate: with heights out of `vk.hash`,
-//       the un-gated degree-masked reconstruction is the host check that
+//       soundness assertion: with heights out of `vk.hash`,
+//       the degree-masked reconstruction is the host check that
 //       still binds height.  Does NOT use `run_forgery` (which forces the
 //       var) — it removes the var to exercise the real default.
 #[test]
@@ -669,7 +668,7 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// G3b/G3c — SP1-faithful jagged HASH-BIND forgeries (#88 hash-bind port).
+// SP1-faithful jagged HASH-BIND forgeries.
 //
 // The hash-bind ties the per-chip (row_count, column_count) geometry to the
 // FS-observed commitment via
@@ -683,7 +682,7 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 // lacked entirely (a prover could witness any geometry).
 // ─────────────────────────────────────────────────────────────────────
 
-/// G3b — COLUMN-count tamper: bump a chip's `column_count` in the bundle's
+/// COLUMN-count tamper: bump a chip's `column_count` in the bundle's
 /// packing (leaving the committed raw root untouched).  The host re-check
 /// recomputes hash(counts) over the tampered count → != observed
 /// main_commitment → reject.
@@ -710,7 +709,7 @@ fn forge_count_tamper_column(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {
     }
 }
 
-/// G3b' — ROW-count tamper: shift a packing OFFSET so one chip's derived
+/// ROW-count tamper: shift a packing OFFSET so one chip's derived
 /// row_count (= offsets[i+1]-offsets[i]) changes.  Same effect: the hash over
 /// the (now different) row_counts diverges from the observed main_commitment.
 fn forge_count_tamper_row(sp: &mut ShardProof<SC>, _ci: usize, _name: &str) {

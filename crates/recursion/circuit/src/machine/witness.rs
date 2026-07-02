@@ -115,11 +115,10 @@ where
         let chip_information = self.chip_information.iter().map(|(name, ser_domain, dims)| {
             (name.clone(), ser_domain.to_coset(), p3_matrix::Dimensions { width: dims.0, height: dims.1 })
         }).collect();
-        // #88 deep VK-identity port (Stage 1): WITNESS the per-prep-chip
-        // [name_digest, prep_width] vk.hash inputs (replacing the dropped
-        // per-domain HEIGHT block) so the in-circuit hash is VALUE-INDEPENDENT
-        // — a FIXED 2 reads per prep chip regardless of the core vk's heights
-        // / name lengths / sort order.  Read order MUST mirror `write` below.
+        // WITNESS the per-prep-chip [name_digest, prep_width] vk.hash
+        // inputs so the in-circuit hash is VALUE-INDEPENDENT — a FIXED
+        // 2 reads per prep chip regardless of the core vk's heights /
+        // name lengths / sort order.  Read order MUST mirror `write` below.
         let prep_name_width_hash_inputs: Vec<[Felt<C::F>; 2]> = self
             .chip_information
             .iter()
@@ -144,9 +143,8 @@ where
         self.commit.write(witness);
         self.pc_start.write(witness);
         self.initial_global_cumulative_sum.write(witness);
-        // #88 deep VK-identity port (Stage 1): write the per-prep-chip
-        // [name_digest, prep_width] vk.hash inputs in the same order `read`
-        // consumes them.
+        // Write the per-prep-chip [name_digest, prep_width] vk.hash
+        // inputs in the same order `read` consumes them.
         for (name, _ser_domain, dims) in self.chip_information.iter() {
             zkm_primitives::prep_chip_name_digest(name).write(witness);
             InnerVal::from_usize(dims.0).write(witness);
@@ -330,7 +328,7 @@ mod basefold_witness {
         fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
             let vk = self.vk.read(builder);
             let shard_proof_tuples = self.shard_proofs.read(builder);
-            // swap 1+2: read per-shard chip_cumulative_sums.
+            // Read per-shard chip_cumulative_sums.
             // Order: outer = shard_proofs iteration (Vec); inner = BTreeMap iter (sorted by key).
             let chip_cumulative_sums_per_shard: Vec<_> = self
                 .shard_proofs
@@ -358,7 +356,7 @@ mod basefold_witness {
         fn write(&self, witness: &mut impl WitnessWriter<C>) {
             self.vk.write(witness);
             self.shard_proofs.write(witness);
-            // swap 1+2: write per-shard chip_cumulative_sums in matching order.
+            // Write per-shard chip_cumulative_sums in matching order.
             for sp in self.shard_proofs.iter() {
                 for (_name, sums) in sp.chip_cumulative_sums.iter() {
                     sums.write(witness);
@@ -530,8 +528,8 @@ mod basefold_witness {
                 .iter()
                 .map(|(_, sp)| sp.chip_log_heights.clone())
                 .collect();
-            // SP1 alignment: read vk-merkle witness so verify_wrap_basefold
-            // can bind the input VK hash against vk_merkle_data.root.
+            // Read vk-merkle witness so verify_wrap_basefold can bind
+            // the input VK hash against vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
@@ -549,14 +547,14 @@ mod basefold_witness {
                     sums.write(witness);
                 }
             }
-            // SP1 alignment: write vk-merkle witness in matching order.
+            // Write vk-merkle witness in matching order.
             self.vk_merkle_data.write(witness);
         }
     }
 
-    // #H (BaseFold-over-BN254 wrap port): Witnessable for the OUTER wrap witness
-    // (gnark layer). Mirrors the inner impl above but for KoalaBearPoseidon2Outer
-    // over an outer-config builder (Bit = Var<N>). vk_merkle_data is read for
+    // Witnessable for the OUTER wrap witness (gnark layer). Mirrors the
+    // inner impl above but for KoalaBearPoseidon2Outer over an
+    // outer-config builder (Bit = Var<N>). vk_merkle_data is read for
     // witness-shape symmetry; the gnark wrap verifier skips verifying it
     // (skip_vk_merkle=true) — binding is the build_outer_circuit commit/pc_start
     // constraint + the public vkey_hash, mirroring SP1WrapVerifier (no merkle).

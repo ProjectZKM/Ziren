@@ -1,8 +1,8 @@
-//! UNTRACKED G1 measurement (#88/#82): build the SINGLE-SHARD normalize program
-//! from a dummy and print a stable content digest of the serialized program.
-//! Run on the current tree AND at HEAD (git stash) to prove the normalize
-//! program is BYTE-IDENTICAL (the single-shard collapse removed only dead
-//! multi-shard branches).
+//! Measurement: build the SINGLE-SHARD normalize program from a dummy and
+//! print a stable content digest of the serialized program.  Run on the
+//! current tree AND at HEAD (git stash) to prove the normalize program is
+//! BYTE-IDENTICAL (the single-shard collapse removed only dead multi-shard
+//! branches).
 use std::hash::{Hash, Hasher};
 
 use zkm_core_machine::mips::MipsAir;

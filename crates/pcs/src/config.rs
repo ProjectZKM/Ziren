@@ -116,7 +116,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254) paths
 /// — mirrors SP1's `BNGC<KoalaBear, KoalaBear⁴>`, where only the
 /// challenger + Merkle-commitment hash vary by context.  This trait is the
-/// single source of truth for the dispatch that was previously open-coded as a
+/// single source of truth for the dispatch, replacing an open-coded
 /// `TypeId::of::<SC::Challenger>() == TypeId::of::<JaggedChallenger>()` gate in
 /// `prover.rs` / `shard_level/*`.
 ///
@@ -141,7 +141,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
     /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
     ///
-    /// STAGE-B b1: `Commitment`/`Proof` carry `Serialize + Deserialize` so the
+    /// `Commitment`/`Proof` carry `Serialize + Deserialize` so the
     /// generic bundle's `to_bytes()` is callable directly from the shard prover
     /// (the wrap `EvaluationProof::Bytes` path).  These are associated-type
     /// bounds (implied at every `SC: BasefoldRing` site).  The `SC::Challenger`
@@ -197,7 +197,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 }
 
-/// STAGE-B b1: the BaseFold jagged-PCS commitment type for a `BasefoldRing`
+/// The BaseFold jagged-PCS commitment type for a `BasefoldRing`
 /// config — `<SC::BfMmcs as Mmcs<JaggedVal>>::Commitment`.  Exposed so
 /// downstream crates (e.g. `zkm-core-machine`, which does not depend on
 /// `p3-commit`) can name the `CanObserve<..>` bound the static outer BaseFold

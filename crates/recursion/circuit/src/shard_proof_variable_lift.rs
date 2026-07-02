@@ -8,9 +8,9 @@
 //! that [`crate::shard_basefold::BasefoldShardProofVariable`] consumes.
 //!
 //! Both sets are structurally identical (the recursion-circuit
-//! types were ported from SP1's hypercube proof types ahead of
-//! time during the E4 work, and the stark-side types mirror SP1
-//! identically).  The "conversion" is field-by-field copy.
+//! types were ported from SP1's hypercube proof types, and the
+//! stark-side types mirror SP1 identically).  The "conversion" is
+//! field-by-field copy.
 //!
 
 use std::collections::BTreeMap;
@@ -79,7 +79,7 @@ pub fn lift_chip_evaluation<K: Clone>(src: &st::ChipEvaluation<K>) -> rc::ChipEv
     rc::ChipEvaluation {
         main_trace_evaluations: src.main_trace_evaluations.clone(),
         preprocessed_trace_evaluations: src.preprocessed_trace_evaluations.clone(),
-        // #88 Stage 3b: thread the FULL-POINT openings through so the
+        // Thread the FULL-POINT openings through so the
         // in-circuit LogUp last-layer reconstruction can read them.
         main_trace_evaluations_full: src.main_trace_evaluations_full.clone(),
         preprocessed_trace_evaluations_full: src.preprocessed_trace_evaluations_full.clone(),
@@ -126,10 +126,7 @@ pub fn lift_logup_gkr_proof<F: Clone, K: Clone>(
 /// - `zerocheck_proof`: stark-side proof, converted internally
 /// - `evaluation_proof`: lifted by [`crate::jagged_pcs_lift::lift_evaluation_proof_bytes`]
 /// - `chip_height_bits`: per-chip name + bit-decomposed height
-///   coordinates.  Currently must be supplied by the caller; a
-///   future iteration derives this from per-chip
-///   `ShardOpenedValues.chips[i].log_degree` once the
-///   opened_values flow is wired.
+///   coordinates, supplied by the caller.
 pub fn assemble_basefold_shard_proof_variable<C, HV>(
     main_commitment: [Felt<C::F>; 8],
     public_values: Vec<Felt<C::F>>,
@@ -224,8 +221,8 @@ pub fn build_basefold_shard_verifier<HV>(
 /// by the jagged-bundle path: when a bundle is present, the
 /// verifier's num_variables must match `bundle.basefold_proof
 /// .basefold_proof.fri_commitments.len()` (the prover-emitted FRI
-/// round count) rather than `max_log_row_count`.  This closes a
-/// chain of prover/verifier param mismatches.
+/// round count) rather than `max_log_row_count`, keeping the
+/// verifier's num_variables aligned with the prover's FRI params.
 pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     max_log_row_count: usize,
     log_stacking_height: u32,
@@ -347,15 +344,14 @@ where
     crate::basefold_chip_opened_values::BasefoldShardOpenedValues { chips }
 }
 
-/// swap 1+2: variant of [`build_opened_values_from_chip_openings`]
+/// Variant of [`build_opened_values_from_chip_openings`]
 /// that consumes a per-chip `chip_cumulative_sums` map (witnessed from
 /// the host BasefoldShardProof) and uses real values for
 /// `local_cumulative_sum` and `global_cumulative_sum` per chip.
 ///
 /// When the map is missing an entry for a given chip name, falls back to
 /// zero placeholders (preserves legacy behavior for chips without
-/// populated sums).  `degree` bits remain zero placeholders pending
-/// Swap 4.
+/// populated sums).  `degree` bits remain zero placeholders.
 pub fn build_opened_values_from_chip_openings_with_cumsums<C>(
     builder: &mut Builder<C>,
     chip_openings: &std::collections::BTreeMap<
@@ -479,8 +475,8 @@ where
             // `basefold_opened_values_from_host`.  This is the VirtualGeq
             // threshold (zerocheck_prover.rs:487 `VirtualGeq::new(main_height)`)
             // the recursion `full_geq` (zerocheck.rs:517) compares against.
-            // Recomputing from `log_h` here was the off-by-encoding bug
-            // (bits of the log-height value 17 instead of the real height).
+            // Recomputing from `log_h` here would be an off-by-encoding
+            // error (bits of the log-height value 17 instead of the real height).
             let _ = (&chip_log_heights, bit_len);
 
             // Real per-chip cumulative sums when present.
@@ -498,7 +494,7 @@ where
 }
 
 /// Build empty `chip_height_bits` placeholder of the given size.
-/// Used while the opened_values-based derivation is being wired.
+/// Used where the opened_values-based derivation is not applied.
 pub fn empty_chip_height_bits<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
@@ -562,16 +558,15 @@ where
         .collect();
     // Sort by NAME (ascending). The host prologue iterates
     // `shard_chips_ordered(chip_ordering)` (machine.rs:704) and the
-    // prover's `chip_ordering` is the BTreeMap/name order — EMPIRICALLY
-    // confirmed via host-vs-circuit transcript probes on the wrap shard:
-    // the host observes per-chip metadata in
+    // prover's `chip_ordering` is the BTreeMap/name order: the host
+    // observes per-chip metadata in
     // [BaseAlu, ExtAlu, MemoryConst, MemoryVar, Poseidon2WideDeg9,
-    //  PublicValues, Select] = alphabetical, NOT height-descending. The
-    // previous `Reverse(log_h), name` sort reordered the per-chip observe
+    //  PublicValues, Select] = alphabetical, NOT height-descending. A
+    // `Reverse(log_h), name` sort would reorder the per-chip observe
     // (Poseidon2WideDeg9 is tall but 5th alphabetically) → the prologue
-    // sponge diverged from the prover at the per-chip stage → every
-    // post-prologue GKR/zerocheck/jagged squeeze was wrong (in the gnark
-    // wrap this first surfaced at the GKR round-0 claimed sum). Name order also
+    // sponge would diverge from the prover at the per-chip stage → every
+    // post-prologue GKR/zerocheck/jagged squeeze would be wrong (in the gnark
+    // wrap this surfaces at the GKR round-0 claimed sum). Name order also
     // aligns the height bits positionally with the name-ordered
     // `chip_openings`/`opened_values` (both BTreeMap).
     entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -605,7 +600,7 @@ where
         .collect()
 }
 
-/// VALUE-INDEPENDENT `chip_height_bits` derivation (VERIFY_VK=true fix).
+/// VALUE-INDEPENDENT `chip_height_bits` derivation.
 ///
 /// [`chip_height_bits_from_log_heights`] BAKES each height bit as a
 /// `builder.constant()` from the COMPILE-TIME `chip_log_heights`, so the
@@ -642,7 +637,7 @@ pub fn chip_height_bits_from_opened_degrees<C>(
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
-    // Bound relaxed from `Bit = Felt<InnerVal>` so the
+    // The trait bound avoids `Bit = Felt<InnerVal>` so the
     // SC-generic compose/deferred/wrap verifiers can call this too —
     // the body uses `num2bits_v2_f` directly (what both InnerConfig's
     // and WrapConfig's `C::num2bits` delegate to), so no `C::Bit`.
@@ -715,7 +710,7 @@ pub fn chip_height_felts_from_opened_degrees<C>(
     opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
 ) -> Vec<Felt<C::F>>
 where
-    // Bound relaxed (no `C::Bit` use in the body) so the
+    // The trait bound omits `C::Bit` (unused in the body) so the
     // SC-generic compose/deferred/wrap verifiers can call this too.
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
@@ -1001,8 +996,8 @@ mod tests {
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        // #57: inner production default is now SP1-faithful (2, 124, 16) =
-        // provable 100-bit (was the ~55-bit (1, 94, 16) hole).
+        // Inner production default is SP1-faithful (2, 124, 16) =
+        // provable 100-bit soundness.
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 2);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 124);
     }
@@ -1051,12 +1046,9 @@ mod tests {
     }
 
     /// chip_height_bits_from_log_heights: sort by NAME (ascending) and
-    /// emit big-endian bit decomposition.  (The sort was changed from the
-    /// old `Reverse(log_h), name` height-descending order to name-ascending
-    /// as a transcript-ordering soundness fix — see the doc on
-    /// `chip_height_bits_from_log_heights`; this test asserted the stale
-    /// height-descending order and was a PRE-EXISTING failure on the base
-    /// commit, independent of the height-agnostic increments.)
+    /// emit big-endian bit decomposition.  Name-ascending (not
+    /// height-descending) ordering is a transcript-ordering soundness
+    /// requirement — see the doc on `chip_height_bits_from_log_heights`.
     #[test]
     fn chip_height_bits_from_log_heights_sort_and_decompose() {
         use std::collections::BTreeMap;

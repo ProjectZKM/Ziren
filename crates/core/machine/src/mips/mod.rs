@@ -193,7 +193,7 @@ pub enum MipsAir<F: PrimeField32> {
 impl<F: PrimeField32> MipsAir<F> {
     pub fn machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         let chips = Self::chips();
-        // #125 INC-4b: the CORE machine's shard proofs use the rev(zeta) CORE
+        // The CORE machine's shard proofs use the rev(zeta) CORE
         // orientation, so host verify picks the collapsed/no-embed claim.
         StarkMachine::new_core_rev(config, chips, ZKM_PROOF_NUM_PV_ELTS)
     }
@@ -1241,55 +1241,38 @@ pub mod tests {
         .unwrap();
     }
 
-    // HEIGHT-AGNOSTIC RECURSION (rollout 1b): the unfakeable gate — a
+    // The unfakeable gate — a
     // FIX_CORE_SHAPES=false core proof of a PARTIALLY-FILLED shard must VERIFY
     // end-to-end.  With FIX-off the records keep RAW heights
     // (`shape_config = None`), so the per-shard canonical-cluster band-cap path
     // INJECTS the missing canonical chips (DivRem / MiscInstrs / SyscallCore
-    // for this fibonacci shard) into the commit + chip_ordering.  Rollout 1b
+    // for this fibonacci shard) into the commit + chip_ordering.  This test
     // injects each chip's REAL constraint-valid generated trace (FIX-on-faithful
     // `MachineAir::generate_trace` over the canonical-shaped record) instead of
-    // rollout-1's all-zero matrices.
+    // all-zero matrices.
     //
-    // STATUS: #[ignore]d — currently FAILS at the jagged-PCS reduction with
-    //   "BasefoldShardVerifier: jagged-PCS: verify_jagged_basefold_no_observe
-    //    rejected the bundle".
+    // The band-cap path pads the PRESENT chips' COMMIT traces up to the cluster
+    // band heights (`shard_level::prover.rs` ~431) while the zerocheck /
+    // LogUp-GKR / openings stay at the RAW heights (`shard_level::prover.rs`
+    // ~833 sources `chip_log_heights` from `main_traces`).  A band-height jagged
+    // reduction over raw-height evaluation claims would mismatch by the
+    // embed_factor Π_{log_raw<=k<log_band}(1-z[k]); the prover therefore declines
+    // the raw zerocheck residual (`trace_at_z`, embedded at raw log_h) whenever a
+    // band-cap is installed and RECOMPUTES `y_per_chip` from the band-padded
+    // commit traces (band-embedded by construction), so the jagged reduction
+    // agrees.  Core prove + HOST verify_shard pass end-to-end.
     //
-    // ROOT CAUSE (proven by the two siblings below + a probe — NOT the injected
-    // chips' content): the all-zero baseline AND the rollout-1b real-trace
-    // injection FAIL IDENTICALLY, while (a) the FIX-ON control verifies and
-    // (b) a pure-raw FIX-off run (band-cap disabled, no canonicalization/pad/
-    // injection) verifies.  The blocker is the STEP-5B band-cap design itself:
-    // it pads the PRESENT chips' COMMIT traces up to the cluster band heights
-    // (`shard_level::prover.rs` ~431) while the zerocheck / LogUp-GKR / openings
-    // stay at the RAW heights (`shard_level::prover.rs` ~833 sources
-    // `chip_log_heights` from `main_traces`).  The jagged-PCS then commits
-    // band-height column MLEs but the evaluation claims are raw-height MLEs, so
-    // the reduction correctly rejects the inconsistency — independent of the
-    // missing-chip injection.  Making FIX-off verify needs the deeper
-    // height-agnostic recursion port (jagged-native variable heights, the SP1
-    // hypercube approach), not a 1b injection change.  Rollout-1b's
-    // constraint-valid injection is necessary (all-zero is definitely wrong:
-    // e.g. CloClz's padding-row template `a=32, is_bb_zero=1` zeroes its SRL
-    // send; an all-zero row leaves that send at multiplicity 1 -> unbalanced
-    // lookup) but insufficient on its own.
-    // STAGE 4 UPDATE (height-agnostic embed_factor, prover side): the round-0
-    // jagged reduction REJECTION is now FIXED. Root cause was that the band-cap
-    // path fed the RAW zerocheck residual (`trace_at_z`, embedded at raw log_h)
-    // into a BAND-height jagged reduction, while the prover's band-dense round-0
-    // sum is the BAND-embedded value — a mismatch by the embed_factor
-    // Π_{log_raw<=k<log_band}(1-z[k]). Fix (shard_level/prover.rs): decline the
-    // raw residual whenever a band-cap is installed so the prover RECOMPUTES
-    // `y_per_chip` from the band-padded commit traces (band-embedded by
-    // construction). This core prove + HOST verify_shard now PASSES end-to-end.
+    // The injected chips must carry each chip's REAL constraint-valid generated
+    // trace, not all-zero matrices (all-zero is unsound: e.g. CloClz's
+    // padding-row template `a=32, is_bb_zero=1` zeroes its SRL send, leaving that
+    // send at multiplicity 1 -> unbalanced lookup).
     //
-    // REMAINING (next increment, recursion verify only): the in-circuit
-    // recursion verifier derives the jagged claim from `opened_values` (RAW,
-    // shard_basefold.rs:536) rather than `bundle.y_per_chip` (BAND), so its
-    // step-4 assert (sumcheck_claim == claimed_sum) needs the SAME embed_factor
-    // applied to the evaluation_claims to lift RAW->BAND. The host verify
-    // (this test) uses bundle.y_per_chip directly and so does not exercise that
-    // linkage. Un-ignored now that the host-verify half is green.
+    // Full recursion (in-circuit) verify additionally needs the same embed_factor
+    // applied to the evaluation_claims: the in-circuit recursion verifier derives
+    // the jagged claim from `opened_values` (RAW, shard_basefold.rs:536) rather
+    // than `bundle.y_per_chip` (BAND), so its step-4 assert (sumcheck_claim ==
+    // claimed_sum) must lift RAW->BAND.  The host verify (this test) uses
+    // `bundle.y_per_chip` directly and so does not exercise that linkage.
     #[test]
     fn test_fix_off_core_verify_injected_chips_rollout1b() {
         use zkm_core_executor::Executor;
@@ -1311,12 +1294,12 @@ pub mod tests {
         utils::run_test_core::<CpuProver<_, _>>(runtime, ZKMStdin::new(), None).unwrap();
     }
 
-    // FIX-ON control for the rollout-1b gate (PASSES): the SAME fibonacci /
+    // FIX-ON control for the injected-chips gate: the SAME fibonacci /
     // shard-size run, but FIX_CORE_SHAPES=true (`Some(shape_config)`).  Here ALL
     // chips (present + injected) are generated at the canonical band heights, so
     // the zerocheck / commit / reduction all agree on heights and the proof
     // verifies.  This passing while the FIX-off sibling fails localizes the
-    // blocker to FIX-off's raw-STARK-vs-band-commit height divergence (step 5b),
+    // blocker to FIX-off's raw-STARK-vs-band-commit height divergence,
     // NOT the injected chips' content (which is identical to FIX-on's here).
     #[test]
     fn test_fix_on_core_verify_control_rollout1b() {
@@ -1334,14 +1317,14 @@ pub mod tests {
             .unwrap();
     }
 
-    // ── #88 GATE-(b)+(c): degree-masked LogUp last-layer reconstruction (the
+    // Degree-masked LogUp last-layer reconstruction (the
     // height-soundness anchor).
     //
-    // GATE-(b) — ADDITIVE / NON-REGRESSION: with the reconstruction in its
+    // (b) NON-REGRESSION: with the reconstruction in its
     // default state, an HONEST FIX-on proof still verifies (the new code path is
     // additive and transcript-neutral).
     //
-    // GATE-(c) — SOUNDNESS: with `ZIREN_LOGUP_RECONSTRUCTION=1` the reconstruction
+    // (c) SOUNDNESS: with `ZIREN_LOGUP_RECONSTRUCTION=1` the reconstruction
     // becomes the ACTIVE last-layer assert; an area-preserving per-chip height
     // forgery — tamper a chip's `degree` (quotient[0], the `full_geq` threshold
     // the LogUp last-layer padding mask reads) without touching `circuit_output`
@@ -1349,12 +1332,12 @@ pub mod tests {
     // reconstruction, demonstrating the reconstruction reads + binds the degree
     // bits the round walk alone ignores.
     //
-    // PHASE-1 STATUS: the reconstruction is gated `ZIREN_LOGUP_RECONSTRUCTION=1`
+    // The reconstruction is gated `ZIREN_LOGUP_RECONSTRUCTION=1`
     // (default OFF) because the exact interaction-axis MLE convention that makes
     // it numerically match the GKR leaf on HONEST proofs is still being pinned
     // (the per-chip embed lift + degree mask are verified; the residual is the
     // leaf assembly orientation — see the crate REPORT).  So this test asserts
-    // the ACHIEVED Phase-1 contract: (b) default honest verify is OK; the
+    // the contract: (b) default honest verify is OK; the
     // reconstruction-on soundness gate is exercised under the flag.
     //
     // Run serially (`--test-threads=1`): the flag is a process-wide env var,
@@ -1402,7 +1385,7 @@ pub mod tests {
         eprintln!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
     }
 
-    // GATE-(b)/(b-ON)/(c) — the #88 height-soundness anchor.  (b) honest
+    // Height-soundness anchor.  (b) honest
     // verify OK on the default path; (b-ON) honest verify OK with the
     // reconstruction enabled (the degree-masked last-layer asserts hold);
     // (c) an area-preserving per-chip height forgery is REJECTED by the
@@ -1561,7 +1544,7 @@ pub mod tests {
     }
 
     // ───────────────────────────────────────────────────────────────────────
-    // #88 STAGE 0 — fast validation harness for the single-FIELD-collapse
+    // Fast validation harness for the single-FIELD-collapse
     // height-soundness restructure.  TEST-ONLY: these add NO production logic;
     // they wrap the existing FIX-off prove + machine.verify path so the later
     // restructure stages are iterable, and they ESTABLISH THE FORGERY-SURVIVES
@@ -1569,8 +1552,8 @@ pub mod tests {
     //
     // All four prove at RAW heights (FIX-off, `shape_config = None`) — no shape
     // padding => the zerocheck shape-padding tax is removed => fast.  The honest
-    // cases must verify GREEN on the current (unmodified) tree; the forgery
-    // cases must currently VERIFY (the forgery SURVIVES) with the reconstruction
+    // cases must verify GREEN; the forgery
+    // cases must VERIFY (the forgery SURVIVES) with the reconstruction
     // OFF (default) — that survival is the baseline this restructure closes.
     // ───────────────────────────────────────────────────────────────────────
 
@@ -1686,9 +1669,9 @@ pub mod tests {
         ))
     }
 
-    // STAGE 0.1 — FAST honest harness: a RAW-height FIX-off prove+verify of the
+    // Fast honest harness: a RAW-height FIX-off prove+verify of the
     // 3-instruction `simple_program`.  Target ~<20s (no shape padding).  GREEN
-    // = honest FIX-off verifies on the current tree.
+    // = honest FIX-off verifies.
     #[test]
     fn stage0_tiny_honest_fixoff() {
         setup_logger();
@@ -1699,7 +1682,7 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off tiny proof must verify (stage-0 fast harness)");
     }
 
-    // STAGE 0.2 — MIXED-HEIGHT honest gate: a RAW-height FIX-off prove+verify of
+    // Mixed-height honest gate: a RAW-height FIX-off prove+verify of
     // fibonacci.  The forgery only manifests with a short chip beside a tall one
     // (mixed heights), which the 3-instruction program may not exercise — so
     // this fibonacci honest case is the mixed-height honest control.  GREEN.
@@ -1713,7 +1696,7 @@ pub mod tests {
         assert_eq!(r, "OK", "honest FIX-off fibonacci proof must verify (mixed-height gate)");
     }
 
-    // STAGE 0.3a — FORGERY-SURVIVES BASELINE on the TINY program.  Apply the
+    // Forgery-survives baseline on the TINY program.  Apply the
     // area-preserving height forgery to a RAW-height FIX-off tiny proof and,
     // with the reconstruction OFF (default), CONFIRM THE FORGERY SURVIVES — the
     // forged-height proof still VERIFIES.  This documents the hole the
@@ -1764,11 +1747,11 @@ pub mod tests {
     }
 
     // Shared helper: FIX-off prove a single-shard program at RAW heights.
-    // #125 INC-4b: rev(zeta) is now the CORE DEFAULT (the core prove path
+    // rev(zeta) is the CORE DEFAULT (the core prove path
     // installs the `Some(true)` orientation carrier unconditionally), so the
     // emitted core proof is rev without any env toggle — commit+y+weight all
-    // natural, claim seeded from `*_full`.  (The rev-zeta A/B env
-    // is RETIRED.)
+    // natural, claim seeded from `*_full` (no rev-zeta A/B env
+    // toggle).
     #[cfg(test)]
     fn stage3_prove_fixoff_rev(
         program: Program,
@@ -1785,7 +1768,7 @@ pub mod tests {
     }
 
     // Shared helper: run the FULL machine.verify with the reconstruction in the
-    // requested state, returning the error string (or "OK").  #125 INC-4b: the
+    // requested state, returning the error string (or "OK").  The
     // CORE (MIPS) machine host-verifies rev by construction (`core_rev` flag), so
     // no env toggle is needed.  Self-contained recon-env management (the stage0_*
     // baselines remove ZIREN_LOGUP_RECONSTRUCTION, so Stage 3 needs its own driver).
@@ -1905,7 +1888,7 @@ pub mod tests {
         ))
     }
 
-    // STAGE 3.0 — A/B transcript-neutrality probe.  Prove ONE honest fib proof,
+    // A/B transcript-neutrality probe.  Prove ONE honest fib proof,
     // then verify the SAME proof recon-OFF and recon-ON under rev, printing
     // item-12 EQUAL for each (via S8J_RLC).  If recon-ON flips item-12 EQUAL on
     // the SAME proof, the reconstruction is NOT transcript-neutral.
@@ -1927,7 +1910,7 @@ pub mod tests {
         std::env::remove_var("S8J_RLC");
     }
 
-    // ── STAGE 3 (#88 host flip) — THE FORGERY FLIP under rev ──────────────────
+    // The forgery flip under rev.
     // Under the rev/natural core path AND
     // ZIREN_LOGUP_RECONSTRUCTION=1 (reconstruction ON):
     //   (a) the HONEST proof still ACCEPTS (anti-confound: the flip is only real
@@ -1938,7 +1921,7 @@ pub mod tests {
     //       at the COMMITMENT/claim binding, since `*_full` is bound through the
     //       rev claim-collapse (zerocheck_sum_mod == claimed_sum).
     //
-    // STAGE 3.1 — TINY honest+degree-forgery flip under rev.
+    // TINY honest+degree-forgery flip under rev.
     #[test]
     fn stage3_rev_tiny_flip() {
         setup_logger();
@@ -1982,7 +1965,7 @@ pub mod tests {
         }
     }
 
-    // STAGE 3.2 — FIBONACCI (mixed-height) honest+degree-forgery flip under rev.
+    // FIBONACCI (mixed-height) honest+degree-forgery flip under rev.
     // This is the binding gate (fib hosts a genuine mixed-height forgery).
     #[test]
     fn stage3_rev_fib_flip() {
@@ -2018,7 +2001,7 @@ pub mod tests {
         );
     }
 
-    // STAGE 3.3 — ADAPTIVE forgery under rev: forge degree AND tamper the trace
+    // ADAPTIVE forgery under rev: forge degree AND tamper the trace
     // openings the reconstruction consumes (`*_full`).  MUST reject under FULL
     // verify.  Reports the rejection site: if it rejects at the COMMITMENT/claim
     // binding (the rev claim-collapse reads `*_full` and binds it to
@@ -2107,7 +2090,7 @@ pub mod tests {
         );
     }
 
-    // STAGE 3.4 — *_full BINDING PROBE: tamper ONLY `*_full` (leave degree and
+    // *_full BINDING PROBE: tamper ONLY `*_full` (leave degree and
     // everything else honest).  If `*_full` is bound (via the rev claim-collapse)
     // the FULL verify rejects even with recon OFF.  This is the cleanest test of
     // "is *_full a free variable for the adversary".
@@ -2144,7 +2127,7 @@ pub mod tests {
         );
     }
 
-    // STAGE 3.5 — ATTRIBUTABILITY (independent validation).  Apply the degree
+    // ATTRIBUTABILITY (independent validation).  Apply the degree
     // forgery to an honest fib proof, confirm recon-ON REJECTS, then revert ONLY
     // the two tampered degree bits (restore quotient[0][rb]=0, quotient[0][lb]=1)
     // and confirm recon-ON ACCEPTS again.  Proves the reconstruction reject is
@@ -2210,9 +2193,9 @@ pub mod tests {
         );
     }
 
-    // STAGE 0.3b — FORGERY-SURVIVES BASELINE on FIBONACCI (mixed-height).  The
+    // Forgery-survives baseline on FIBONACCI (mixed-height).  The
     // KEY deliverable: a genuinely area-preserving per-chip height forgery on a
-    // RAW-height FIX-off fibonacci proof must currently VERIFY (the forgery
+    // RAW-height FIX-off fibonacci proof must VERIFY (the forgery
     // SURVIVES) with the reconstruction OFF.  This is the make-or-break baseline
     // — Stage 3 of the restructure must flip this RED case accept->reject.
     #[test]

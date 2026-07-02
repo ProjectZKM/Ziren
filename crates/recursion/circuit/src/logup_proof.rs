@@ -100,7 +100,7 @@ pub struct ChipEvaluation<EF> {
     /// `trace_point` (LSB-first / natural-row).  Mirrors the host
     /// `zkm_pcs::shard_level::types::ChipEvaluation::main_trace_evaluations_full`.
     /// This is the convention the in-circuit LogUp last-layer
-    /// degree-masked reconstruction (#88 Stage 3b) consumes (the GKR
+    /// degree-masked reconstruction consumes (the GKR
     /// leaf is LSB-first natural-row); the trailing-`log_h`
     /// `main_trace_evaluations` above stays for the zerocheck's
     /// bit-reversed sum-modification path.  `None` on legacy proof

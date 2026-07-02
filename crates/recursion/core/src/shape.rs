@@ -147,8 +147,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
 
         // Specify allowed shapes.
         let allowed_shapes = [
-            // The three legacy tiny bands (pre-basefold programs, ~10s of K
-            // instructions) were removed: every basefold recursion program
+            // No tiny bands below 2^17 (pre-basefold, ~10s-of-K-instruction
+            // programs): every basefold recursion program
             // is >= 2^17 per chip, so they never matched and only emitted
             // unreachable vks into the enumeration.
             // Basefold normalize-sized shape.  The basefold normalize
@@ -157,11 +157,11 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // ExtAlu≈70969, Poseidon2WideDeg3≈2012,
             // ExpReverseBitsLen≈24, PublicValues≈4.  Powers-of-two
             // log_heights with headroom: BaseAlu/ExtAlu→17,
-            // MemoryConst→16, MemoryVar→14 (rounded up to legacy
+            // MemoryConst→16, MemoryVar→14 (rounded up to a
             // minimum of 18 to share with smaller shapes).  This entry
-            // lets `fix_shape` succeed for basefold programs once
-            // that path is enabled; today the basefold
-            // builder skips fix_shape entirely.
+            // lets `fix_shape` succeed for basefold programs when
+            // that path is enabled; the basefold
+            // builder otherwise skips fix_shape entirely.
             [
                 (mem_var.clone(), 18),
                 (select.clone(), 18),
@@ -173,8 +173,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Bundle-lift compose level h=0. After the stacked-PCS
-            // contract block was lifted, tendermint bundle-lift's
+            // Bundle-lift compose level h=0. Tendermint bundle-lift's
             // first compose level (lift outputs → arity-4 compose)
             // panics shape.rs:91 with chip heights none of the above
             // shapes fit. Observed:
@@ -229,7 +228,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // DR28 soundness compose band (TM + goat).  The 100-bit
+            // Soundness compose band (TM + goat).  The 100-bit
             // BaseFold params (inner blowup 1->2, 94->124 queries, +1
             // Merkle level) grew the compose-tree verify circuit past the
             // component-opening band: every compose level (height 1..n)
@@ -248,21 +247,21 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // Placed LAST so smaller programs (fib/first-layer/reth/geth
             // shallow compose) still prefer the smaller bands above and
             // pay less padding; only Select>2^20 compose programs reach it.
-            // #88 / #79 height-agnostic FIX-off band. REPLACES the prior
-            // component-opening band (it is a strict superset: ExtAlu 24>=21,
+            // Height-agnostic FIX-off band, a strict superset of the
+            // component-opening band (ExtAlu 24>=21,
             // Select 21=21, MemoryVar/MemoryConst 22>=20, BaseAlu 23>=20,
             // Poseidon2WideDeg3 20>=19) so we keep FIVE bands total — adding a
             // 6th blew the Compress cartesian product (bands^REDUCE_BATCH = 6^4
             // = 1296) past the VK_MERKLE_TREE_HEIGHT 2^11 pre-flight at
             // shapes.rs:197 (2762 > 2048); 5 bands -> 5^4 -> 1986 < 2048 fits.
             // Per-chip maxima of the NATURAL recursion heights measured across
-            // all 1202 FIX-off shapes (`find_recursion_shapes --measure`, Jun22):
+            // all 1202 FIX-off shapes (`find_recursion_shapes --measure`):
             // ExtAlu 24, BaseAlu 23, MemoryConst/MemoryVar 22, Select 21,
             // Poseidon2WideDeg3 20 (BatchFRI/ExpReverseBitsLen measured 0/unused,
-            // kept at legacy 21/18). Capped at ExtAlu 2^24 = KoalaBear
+            // kept at 21/18). Capped at ExtAlu 2^24 = KoalaBear
             // two-adicity. This band is what lets `fix_shape` accept FIX-off
             // (`FIX_CORE_SHAPES=false`) proofs, whose recursion heights reach
-            // ExtAlu ~2^24 (the old max band ExtAlu 2^21 rejected them at
+            // ExtAlu ~2^24 (a max band of ExtAlu 2^21 would reject them at
             // shape.rs:91 "no shape found").
             [
                 (mem_var.clone(), 22),

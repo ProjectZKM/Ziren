@@ -11,11 +11,9 @@
 //!     extension-field points of the same dimension.  Used to check
 //!     the GKR-evaluation point matches the sumcheck-reduced point.
 //!
-//! The full `verify_zerocheck` orchestrator (which composes these
-//! helpers with [`crate::sumcheck::verify_sumcheck`], constraint
-//! folding, and per-chip openings batching) lands in a subsequent
-//! step of the in-circuit BaseFold verifier rewrite — see
-//! [`docs/recursion_verifier_port.md`](../../../../docs/recursion_verifier_port.md).
+//! The full `verify_zerocheck` orchestrator composes these helpers
+//! with [`crate::sumcheck::verify_sumcheck`], constraint folding, and
+//! per-chip openings batching.
 //!
 //! # Reference
 //!
@@ -437,10 +435,8 @@ where
     /// Substitutions:
     ///   - `BTreeSet<Chip>` → ordered `&[&MachineChip<SC, A>]`.
     ///   - `openings.degree` (SP1's per-opening field) →
-    ///     separate `chip_degrees` parameter (Ziren's
-    ///     `ChipOpenedValues` doesn't yet carry this BaseFold-
-    ///     pipeline field; introduce
-    ///     `BasefoldChipOpenedValues` in a follow-up step).
+    ///     separate `chip_degrees` parameter (Ziren carries this
+    ///     BaseFold-pipeline field on `BasefoldChipOpenedValues`).
     ///   - `Mle::full_lagrange_eval` → [`eq_eval`].
     ///   - `Point::add_dimension` → `Vec::push`.
     ///   - `observe_variable_length_extension_slice` →
@@ -472,8 +468,8 @@ where
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
         let one_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ONE);
 
-        // ── #125 INC-4b: PER-PROGRAM rev/collapsed convention decision ──────
-        // rev(zeta) is now scoped to the CORE commit + the NORMALIZE
+        // ── PER-PROGRAM rev/collapsed convention decision ──────
+        // rev(zeta) is scoped to the CORE commit + the NORMALIZE
         // recursion-verify.  `core_layer_rev` is a CIRCUIT-CONSTRUCTION-TIME
         // flag passed by the caller: it is `true` ONLY for the NORMALIZE program
         // (`core_basefold`, which verifies the rev core shard proof) and `false`
@@ -481,11 +477,10 @@ where
         // the recursion prover never installs the rev carrier, so those proofs
         // are legacy).  This keeps the recursion rings' in-circuit verify on the
         // legacy embed-loop (section (6) below), so the WRAP R1CS is UNCHANGED
-        // and the gnark ceremony STANDS.  The rev-zeta A/B env is
-        // RETIRED (a global env-flip would have leaked rev into the wrap ring
-        // because recursion proofs also carry `*_full`).  The witnessed `*_full`
-        // presence is still required (the NORMALIZE program's core-proof
-        // openings always carry it).
+        // and the gnark ceremony STANDS.  A global rev-zeta env-flip is avoided
+        // because it would leak rev into the wrap ring (recursion proofs also
+        // carry `*_full`).  The witnessed `*_full` presence is still required
+        // (the NORMALIZE program's core-proof openings always carry it).
         let verifier_use_rev = core_layer_rev
             && !gkr_evaluations.chip_openings.is_empty()
             && gkr_evaluations
@@ -501,7 +496,7 @@ where
 
         // (2) eq(zerocheck reduced point, GKR-emitted point).
         //
-        // ── STAGE 2 (#88): rev(zeta) eq-bridge anchor ──────────────────────
+        // ── rev(zeta) eq-bridge anchor ──────────────────────
         // Under the collapsed convention the prover anchors every chip's
         // zerocheck poly on `rev(z_gkr)` (natural cells, dropped bitrev), so the
         // batched reduced value carries `eq(rev(z_gkr), z*)`.  Mirror the host
@@ -664,12 +659,12 @@ where
             .values()
             .zip(opened_values.chips.iter())
             .map(|(chip_evaluation, opening)| {
-                // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────
+                // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────
                 // When the SHARD uses the collapsed convention, seed the
                 // per-chip claimed_sum term DIRECTLY from the FULL-POINT
                 // openings (`*_full`) with NO embed_factor — mirroring the host
                 // (verifier.rs:877-892) and the prover (zerocheck_prover.rs
-                // Stage-2 collapse).  The full-point opening already carries the
+                // collapse path).  The full-point opening already carries the
                 // mixed-height padding factor
                 //   main_full = Π_{k=log_h}^{N-1}(1 − zeta[k]) · MLE(trace @
                 //               zeta[0..log_h])
@@ -781,12 +776,12 @@ where
         // verify_zerocheck_host (verifier.rs:862-885) iterates
         // `gkr_evaluations.chip_openings` (BTreeMap name order) and observes,
         // per chip, preprocessed_trace_evaluations (if present) THEN
-        // main_trace_evaluations. The previous body observed
+        // main_trace_evaluations. Observing
         // `opened_values.chips[].{preprocessed,main}.local` (the trace@z
-        // openings), but the GKR openings are evaluated @z_gkr (≠ z*), so the
-        // VALUES differ and the in-circuit challenger desynced from the prover
-        // — invisible to the zerocheck's own asserts, surfacing only as the
-        // jagged-PCS z_col mismatch (gnark wrap step4 = round-0 identity
+        // openings) instead would desync the in-circuit challenger from the
+        // prover: the GKR openings are evaluated @z_gkr (≠ z*), so the VALUES
+        // differ — invisible to the zerocheck's own asserts, surfacing only as
+        // the jagged-PCS z_col mismatch (gnark wrap step4 = round-0 identity
         // failure). The host comment at verifier.rs:866-871 documents exactly
         // this failure mode. Mirror the host source + order to stay in lockstep.
         for chip_evaluation in gkr_evaluations.chip_openings.values() {
@@ -858,7 +853,7 @@ mod tests {
         let _result = eq_eval::<C>(&a, &b);
     }
 
-    // ── #88 Stage 3b: in-circuit *_full → claimed_sum CLAIM-BINDING ──
+    // ── in-circuit *_full → claimed_sum CLAIM-BINDING tests ──
     //
     // These EXECUTED-CIRCUIT tests (`run_test_recursion`) drive the EXACT
     // section-(6)/(7) claim-binding arithmetic that `verify_zerocheck` computes
@@ -873,8 +868,8 @@ mod tests {
     // this harness.  The reconstruction lives in `verify_logup_gkr`, a SEPARATE
     // phase; here we exercise ONLY the zerocheck claim-binding.  So a forged
     // `*_full` that trips `run_full_claim_binding` proves the binding rejects
-    // INDEPENDENTLY of the reconstruction — exactly the property the Stage-3b
-    // port is meant to add (forging `*_full` must trip an INDEPENDENT in-circuit
+    // INDEPENDENTLY of the reconstruction — exactly the property this
+    // claim-binding adds (forging `*_full` must trip an INDEPENDENT in-circuit
     // claim-binding assert, not just the reconstruction).
 
     /// Off-circuit replica of the rev-path per-chip seed (no embed): the

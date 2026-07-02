@@ -76,7 +76,7 @@ pub fn prove_shard_zerocheck<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // #125 INC-3: the shared per-chip analytic trace-MLE (chip-index order),
+    // The shared per-chip analytic trace-MLE (chip-index order),
     // built once at trace-gen over the `max_log_row_count` cube, threaded
     // read-only. When present, each chip's `main_cells` are sourced from the
     // shared MLE's real inner cells (`PaddedMle::inner`, `= Mle::new(raw
@@ -102,7 +102,7 @@ where
                 Challenge<SC>,
             >,
         >
-        // #125 INC-4a — K = F instance: the pure-host base-field first round
+        // K = F instance: the pure-host base-field first round
         // evaluates the AIR at base-field cells (no up-front `EF` lift of the
         // widest round).
         + for<'b> Air<
@@ -137,7 +137,7 @@ where
     // (alpha, gkr_batch_open, lambda).  Without sampling
     // gkr_batch_open here, every subsequent challenge is shifted by
     // one EF squeeze and downstream sumcheck/jagged-PCS round 0
-    // checks will desync (audit D1, May 1 2026).
+    // checks will desync.
     let alpha: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
     let gkr_batch_open: Challenge<SC> =
         challenger.sample_algebra_element::<Challenge<SC>>();
@@ -145,8 +145,7 @@ where
 
     // ── SP1-aligned per-chip ZeroCheckPoly path ──────────────────────
     //
-    // Replaces the legacy dense pad+RLC+combined sumcheck below (now
-    // dead code, removed in a follow-up).  Builds one lazy
+    // Builds one lazy
     // `ZeroCheckPoly` per chip — summing only over the chip's real rows
     // with the padded tail handled analytically by `VirtualGeq` — and a
     // per-chip claim `Σ (main ++ prep GKR-openings) · β^(1..)`.  The
@@ -190,12 +189,12 @@ where
                 .unwrap_or(false)
         })
     };
-    // #125 INC-4b: the orientation is now driven SOLELY by the core-scoped
+    // The orientation is driven SOLELY by the core-scoped
     // `current_use_rev()` carrier (installed `Some(true)` only on the CORE prove
-    // path; `None` on every recursion / shrink / wrap prove).  The
-    // rev-zeta A/B env is RETIRED — `None` (no carrier) is LEGACY
+    // path; `None` on every recursion / shrink / wrap prove).  There is no
+    // rev-zeta A/B env — `None` (no carrier) is the legacy arm
     // (byte-identical to the recursion rings today).
-    // #118 DEVICE-REV: the `_device_traces.is_none()` guard is DROPPED so the GPU
+    // The `_device_traces.is_none()` guard is DROPPED so the GPU
     // CORE device-fold path (which carries a per-shard device trace provider) also
     // honours the rev(zeta) carrier. Core-scoped: only the CORE prover installs the
     // carrier (`Some(true)`), so compress/shrink/wrap (carrier `None`) still take the
@@ -208,7 +207,7 @@ where
         None => false,
     };
 
-    // #125 INC-4a: run the FIRST sumcheck round in the BASE field (K = F) on
+    // Run the FIRST sumcheck round in the BASE field (K = F) on
     // the pure-host CPU path (no device provider) — dropping the up-front
     // whole-trace `EF` lift of the widest round.  Every other path (device
     // residency / GPU y-tuple hook) keeps the `EF` cell field (K = EF).  The
@@ -356,7 +355,7 @@ where
             }
         }
 
-        // ── STAGE 2 (#88): SINGLE-FIELD CLAIM COLLAPSE ──────────────────
+        // ── SINGLE-FIELD CLAIM COLLAPSE ──────────────────
         // Seed the per-chip zerocheck claim from the FULL-POINT openings
         // (`main_trace_evaluations_full` ++ `preprocessed_trace_evaluations
         // _full`) with NO embed_factor.  Under the rev(zeta) convention
@@ -368,15 +367,15 @@ where
         //                  = embed_TRAILING · MLE(trace @ zeta[0..log_h])
         //   embed_TRAILING = Π_{k=log_h}^{N-1}(1 − zeta[k])
         // (rows ≥ height are zero, so the high coords contribute the
-        // padding factor).  This REPLACES the old `claim_gkr · embed_LEAD`
-        // (trailing-`log_h` opening lifted by Π over the LEADING zeta
+        // padding factor).  This differs from the `claim_gkr · embed_LEAD`
+        // form (trailing-`log_h` opening lifted by Π over the LEADING zeta
         // coords) — a bitrev-conjugate that is a GENUINELY different value
-        // (the old claim is NOT verifier-form; see the Stage-1 finding).
+        // (that claim is NOT verifier-form).
         // Validated by `orientation_sweep_revzeta` (zerocheck_poly tests):
         // the rev(zeta) poly cube-sum == this collapsed claim across every
         // mixed-height config, and the reduced value matches the rev(zeta)
         // eq-bridge.  The verifier seeds the SAME collapsed claim with no
-        // embed (verifier.rs G2-b) — kept in lockstep.
+        // embed (verifier.rs) — kept in lockstep.
         //
         // FALLBACK: if the GKR phase did not emit `*_full` (older proof
         // bytes / non-core stages), fall back to the legacy trailing
@@ -404,8 +403,8 @@ where
         // orientation — required because the verifier binds the single
         // reduced value with one global eq-bridge.
         //
-        // #118 DEVICE-REV: `use_rev` and `df_dims` (device-fold) are NO LONGER
-        // mutually exclusive — the GPU CORE path now runs the device fold under the
+        // `use_rev` and `df_dims` (device-fold) are not
+        // mutually exclusive — the GPU CORE path runs the device fold under the
         // rev(zeta) convention. Under rev the device chips keep EMPTY host cells (the
         // device prepare hook feeds NATURAL cells) and the eq-anchor below is
         // `rev(zeta)`; the claim is seeded from the full-point opening
@@ -441,8 +440,8 @@ where
         // Lift real trace rows to the challenge field. Device-fold chips keep
         // host cells EMPTY (the device cells carry the trace).
         //
-        // #125 INC-3: source the raw base-field cells from the shared
-        // trace-MLE (INC-1's `PaddedMle`, chip-index order) when it is
+        // Source the raw base-field cells from the shared
+        // trace-MLE (the per-chip `PaddedMle`, chip-index order) when it is
         // threaded AND this chip carries real inner cells.  The inner Mle
         // is `Mle::new(raw trace)`, so `guts().values` equals
         // `main_trace.values` bit-for-bit (same row-major layout) — the
@@ -473,8 +472,8 @@ where
             None
         };
 
-        // ── STAGE 2 (#88): rev(zeta) CONVENTION CONVERGENCE ─────────────
-        // NEW (use_rev): feed NATURAL trace rows and anchor the poly on
+        // ── rev(zeta) CONVENTION CONVERGENCE ─────────────
+        // use_rev: feed NATURAL trace rows and anchor the poly on
         // `rev(zeta)` (built at the poly construction below).  The poly's
         // big-endian fold over rev(zeta) then computes the LSB-first
         // natural-row value — its boolean-cube sum equals the FULL-POINT
@@ -484,7 +483,7 @@ where
         // reversal of the eq-anchor), so reversing zeta subsumes the row
         // bit-reversal.  Validated by `orientation_sweep_revzeta`.
         //
-        // LEGACY (!use_rev): keep the bit-reversed rows + `zeta` anchor.
+        // Legacy (!use_rev): keep the bit-reversed rows + `zeta` anchor.
         // Device-fold cells are bit-reversed by the GPU prepare hook (the
         // device path is always !use_rev here); only host cells bitrev.
         let main_cells = if use_rev || df_dims.is_some() {

@@ -81,10 +81,10 @@ where
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // #88 deep VK-identity port (Stage 1): VK = f(chip-SET) — the
-        // per-prep-domain HEIGHT block (log_size / 2^log_size / shift /
-        // generator) is DROPPED so the digest no longer depends on the
-        // verified program's preprocessed (Program/Byte) trace heights.
+        // VK = f(chip-SET): the per-prep-domain HEIGHT block (log_size /
+        // 2^log_size / shift / generator) is DROPPED so the digest does not
+        // depend on the verified program's preprocessed (Program/Byte) trace
+        // heights.
         // To keep the chip-SET discriminant (different prep chip-sets must
         // not collide) we fold, per prep chip in order, the chip NAME-DIGEST
         // (`prep_chip_name_digest`, a single fixed-width felt) and the

@@ -616,7 +616,7 @@ where
         // original fused loop (validated by `orientation_sweep` inv1/inv2 and
         // `sum_as_poly_matches_spec_reference`).
         //
-        // eq-root HALF trick (#122-zc): the finalize reconstructs `p(3)`
+        // eq-root HALF trick: the finalize reconstructs `p(3)`
         // analytically from the eq-factor root, so the host skips the entire
         // `X = 3` per-pair constraint eval — EXCEPT for the degenerate
         // coordinates where the reconstruction is ill posed, in which case the
@@ -1029,7 +1029,7 @@ where
     /// retains `finalize_round_poly`.  `partial = partial_lagrange(zeta[..dim-1])`.
     /// Caller guarantees `num_real_entries > 0`.
     ///
-    /// eq-root HALF trick (#122-zc): when `compute_y3 == false` the `X = 3`
+    /// eq-root HALF trick: when `compute_y3 == false` the `X = 3`
     /// sample is skipped entirely (the expensive per-pair `eval_air_at_row`
     /// among them) and `y_3` is returned as `ZERO` — `finalize_round_poly`
     /// then reconstructs `p(3)` from the eq-factor root.  `compute_y3` is
@@ -1123,7 +1123,7 @@ where
     /// needs, pre-resolved by the caller so the device-eq path can skip
     /// materializing the host table (via [`eq_at_index`]).
     ///
-    /// eq-root HALF trick (#122-zc): the corrected round poly
+    /// eq-root HALF trick: the corrected round poly
     /// `p(X) = elf_X · h(X)` has the eq factor `elf_X = (2X − 1)·last − (X − 1)`
     /// baked in, so it vanishes at `eq_root(last)`.  Combined with the sumcheck
     /// identity `p(0) + p(1) = claim`, five DISTINCT nodes
@@ -1417,7 +1417,7 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
 /// Bit-reverse the rows of a row-major cell buffer over `log2(height)` bits
 /// (row `r` -> row `bitrev(r)`).  `height` must be a power of two.
 ///
-/// ORIENTATION FIX: the GKR per-chip opening (`evaluate_trace_columns_at_point`
+/// The GKR per-chip opening (`evaluate_trace_columns_at_point`
 /// -> `eq_mle_table`) is LSB-first (`point[0]` <-> row-LSB), while this module's
 /// zerocheck poly is big-endian (`partial_lagrange` / `fold_cells` peel
 /// `zeta[dim-1]` <-> row-LSB, matching SP1).  Feeding the bit-reversed trace to
@@ -1481,7 +1481,7 @@ where
                         crate::shard_level::sumcheck_poly::get_gpu_zerocheck_extract_final_hook()
                     {
                         // np>0: the device buffer is the COMBINED [main ++ prep]
-                        // col-major block (prep columns FOLLOW main, e051ffd), so
+                        // col-major block (prep columns FOLLOW main), so
                         // extract num_main_cols + num_prep_cols residuals and emit
                         // them prep-then-main (the host/SP1 trace@z order below).
                         // np==0 chips extract exactly num_main_cols (unchanged).
@@ -1633,7 +1633,7 @@ mod tests {
         acc
     }
 
-    /// #122-zc — the eq-root reconstruction reproduces the direct
+    /// The eq-root reconstruction reproduces the direct
     /// `{0,1,2,3,4}` sweep of the corrected degree-4 zerocheck round poly
     /// `p(X) = elf_X · g(X)` (bit-identically) for a non-degenerate binding
     /// coordinate, and declines (`None`) for the degenerate coordinates
@@ -2024,7 +2024,7 @@ mod tests {
         );
     }
 
-    /// #125 INC-4a — the base-field first round.  Build the SAME chip's
+    /// The base-field first round.  Build the SAME chip's
     /// round-0 `ZeroCheckPoly` twice: once with base-field cells (`K = F`,
     /// no up-front `EF` lift) and once with the cells lifted to `EF`
     /// (`K = EF`, the legacy widest-round lift), then assert the round-0
@@ -2627,7 +2627,7 @@ mod tests {
         (inv1, inv2)
     }
 
-    /// STAGE-2 PROBE: the rev(zeta) convention.  Mirror of [`run_sweep_case_z`]
+    /// Probe for the rev(zeta) convention.  Mirror of [`run_sweep_case_z`]
     /// but instead of bit-reversing the trace rows and anchoring on `zeta`, it
     /// feeds the poly the NATURAL trace rows and anchors on `rev(zeta)` (the
     /// reversed GKR point).  The claim seed is byte-identical to the bitrev
@@ -2635,8 +2635,8 @@ mod tests {
     /// where inv2 is checked against the UNCHANGED verifier identity
     /// `eq_pt(zeta_ORIGINAL, z) · (C+batch)@z` — i.e. the verifier eq-bridge
     /// stays anchored on the ORIGINAL `zeta`.  GREEN here proves the rev(zeta)
-    /// convention is value- AND verifier-identity-preserving (the Stage-2
-    /// convention-convergence gate), so dropping bitrev_rows + feeding rev(zeta)
+    /// convention is value- AND verifier-identity-preserving,
+    /// so dropping bitrev_rows + feeding rev(zeta)
     /// in the production prover keeps the existing verifier correct.
     fn run_sweep_case_z_rev(
         num_vars: u32,
@@ -2703,14 +2703,14 @@ mod tests {
             eval_air_constraints_at_row::<InnerVal, EF, EF, MockAir>(&chip, alpha, &pv, &[], main_row)
         };
 
-        // Claim seed — the STAGE-2 COLLAPSED claim: seed from the FULL-POINT
+        // Claim seed — the COLLAPSED claim: seed from the FULL-POINT
         // opening `main_trace_evaluations_full` with NO embed_factor.  Under
         // the rev(zeta) anchor the poly's cube-sum equals the full-point
         // opening, which (Stage-1 transform) is `embed_TRAILING · MLE_lead`:
         //   MLE_lead     = MLE(trace @ zeta[0..log_h])   (LEADING coords)
         //   embed_TRAIL  = Π_{k=log_h}^{N-1}(1 − zeta[k]) (TRAILING coords)
-        // This is the bitrev-conjugate of the OLD claim (`MLE_trailing ·
-        // embed_LEAD`) and is GENUINELY a different value (the old claim is
+        // This is the bitrev-conjugate of the alternative claim (`MLE_trailing ·
+        // embed_LEAD`) and is GENUINELY a different value (that claim is
         // NOT verifier-form, see zerocheck_prover comment) — the rev(zeta)
         // convention is inseparable from this collapsed seed.
         let log_h = real_vars as usize;
@@ -2780,7 +2780,7 @@ mod tests {
         (inv1, inv2)
     }
 
-    /// STAGE-2 GATE: the rev(zeta) convention keeps invariant (2) — the
+    /// The rev(zeta) convention keeps invariant (2) — the
     /// reduced value equals the UNCHANGED verifier identity `eq(zeta,z)·(C+
     /// batch)@z` — across the same mixed-height sweep the bitrev convention
     /// passes.  If GREEN, feeding rev(zeta)+dropping bitrev_rows in the
@@ -3159,7 +3159,7 @@ mod tests {
             0, num_real, num_vars, EF::ONE, EF::ZERO, pra, vg,
         );
 
-        // #122-zc: `sum_as_poly` reconstructs the round poly via the eq-root
+        // `sum_as_poly` reconstructs the round poly via the eq-root
         // trick, which assumes the HONEST sumcheck claim `p(0)+p(1)=claim` (so
         // the corrected poly factors through `eq_root`).  An arbitrary claim
         // would legitimately diverge from the direct reference.  The honest
@@ -3178,7 +3178,7 @@ mod tests {
         // Degenerate `last` (here `1/2`, where `eq_root` is undefined) forces
         // the direct `{0,1,2,3,4}` sweep FALLBACK, which is byte-identical to
         // the reference for ANY claim (incl. this arbitrary one) — i.e. the
-        // exact pre-#122-zc behavior.
+        // exact direct-sweep behavior.
         let mut zeta_deg = zeta.clone();
         let nz = zeta_deg.len();
         zeta_deg[nz - 1] = EF::from_u64(2).inverse(); // last = 1/2 => no finite eq_root

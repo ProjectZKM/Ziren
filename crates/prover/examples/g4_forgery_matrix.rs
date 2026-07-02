@@ -1,4 +1,4 @@
-//! UNTRACKED G4 FORGERY MATRIX (#88/#82 single-shard-normalize restructure).
+//! FORGERY MATRIX for the single-shard-normalize design.
 //!
 //! Loads a REAL honest compose (ComposeBasefold) witness + a REAL honest
 //! normalize (CoreBasefold) witness dumped by a FIX-off `compress` run
@@ -237,7 +237,7 @@ fn main() {
             core_honest.shard_proofs.len(),
             core_honest.is_first_shard
         );
-        // single-shard invariant (the restructure):
+        // single-shard invariant:
         assert_eq!(
             core_honest.shard_proofs.len(),
             1,

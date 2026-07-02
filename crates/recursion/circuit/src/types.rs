@@ -20,10 +20,10 @@ pub struct VerifyingKeyVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriP
     pub initial_global_cumulative_sum: SepticDigest<Felt<C::F>>,
     pub chip_information: Vec<(String, TwoAdicMultiplicativeCoset<C::F>, Dimensions)>,
     pub chip_ordering: HashMap<String, usize>,
-    /// #88 deep VK-identity port (Stage 1): the per-preprocessed-chip
+    /// The per-preprocessed-chip
     /// `vk.hash` inputs `[name_digest, prep_width]`, WITNESSED (read in the
     /// `StarkVerifyingKey` Witnessable) rather than baked from the
-    /// compile-time `chip_information`.  Replaces the dropped per-prep-domain
+    /// compile-time `chip_information`, in place of a per-prep-domain
     /// HEIGHT block (`[log_n, 2^log_n, shift, generator]`).  WITNESSING (not
     /// baking) is load-bearing for VALUE-INDEPENDENCE: the recursion program
     /// must emit a FIXED number of reads per prep chip (2 here) regardless of
@@ -121,9 +121,9 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> Verif
     /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum ||
     ///            prep[N].{name_digest, prep_width} )
     ///
-    /// #88 deep VK-identity port (Stage 1): VK = f(chip-SET).  The
+    /// VK = f(chip-SET).  The
     /// per-prep-domain HEIGHT block (log_n / 2^log_n / shift / generator) is
-    /// DROPPED so the recursion program's vk no longer depends on the
+    /// NOT folded, so the recursion program's vk does not depend on the
     /// verified core vk's preprocessed trace heights.  Instead fold, per
     /// prep chip, the chip NAME-DIGEST and preprocessed WIDTH — read from the
     /// WITNESSED `prep_name_width_hash_inputs` (a FIXED 2 felts per prep

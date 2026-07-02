@@ -1,4 +1,4 @@
-//! BaseFold proof verifier for the recursion circuit (D2 — host-shape + emit hooks).
+//! BaseFold proof verifier for the recursion circuit (host-shape + emit hooks).
 //!
 //! Mirror of [`crate::whir_verifier`]'s scaffold pattern but for
 //! BaseFold-based shard proofs emitted by `prove_jagged_basefold`.
@@ -46,8 +46,7 @@
 //! | Recursion cost (per round) | ~50 constraints | ~30 constraints (no STIR overhead) |
 //!
 //! All `p3_whir` references in `whir_verifier.rs` are *comment-only* —
-//! the actual code uses only `zkm_recursion_compiler` primitives, so
-//! D2 doesn't need to drop p3-whir to land.
+//! the actual code uses only `zkm_recursion_compiler` primitives.
 
 #![allow(unused_variables)]
 
@@ -72,7 +71,7 @@ pub struct BasefoldVerifierParams {
 impl BasefoldVerifierParams {
     /// Inner-stage production default — the in-circuit twin of
     /// `zkm_pcs::basefold::config::FriConfig::default_fri_config`:
-    /// `(log_blowup=2, num_queries=124, pow_bits=16)` (#57).  This is the
+    /// `(log_blowup=2, num_queries=124, pow_bits=16)`.  This is the
     /// verifier the recursion programs use for EVERY inner KoalaBear child:
     /// compress→core, shrink→compress, AND wrap→shrink (the shrink proof is
     /// a KoalaBear inner-Mmcs proof verified through this arm, NOT the BN254
@@ -81,12 +80,12 @@ impl BasefoldVerifierParams {
     /// param matches the committed codeword rate for all of them.
     ///
     /// **Soundness.** `124 · (-log2(0.5 + (1/4)/2)) + 16 = 124 · 0.6781 + 16
-    /// ≈ 100.08` bits (vs the old `(1, 94, 16)` = ~55 bits, the inner hole
-    /// #57 closes).  The component-opening Merkle path is `log_stacking + 2`
-    /// levels and the query index span is `num_variables + 2` bits — both
-    /// keyed off `log_blowup`, so they MUST match the host `blowup=2`.
+    /// ≈ 100.08` bits (a `(1, 94, 16)` config gives only ~55 bits).  The
+    /// component-opening Merkle path is `log_stacking + 2` levels and the
+    /// query index span is `num_variables + 2` bits — both keyed off
+    /// `log_blowup`, so they MUST match the host `blowup=2`.
     ///
-    /// Two-adicity: `num_variables(≤21) + 2 ≤ 24`.  Was `(1, 94)` ≈ 55 bits.
+    /// Two-adicity: `num_variables(≤21) + 2 ≤ 24`.
     pub const fn production_default(num_variables: usize) -> Self {
         Self {
             log_blowup: 2,
@@ -265,7 +264,7 @@ pub struct RecursiveBasefoldProof<F, EF, Dig = [F; 8]> {
 
 /// Top-level recursion verifier for a BaseFold shard proof.
 ///
-/// #H (BaseFold-over-BN254 wrap port): generic over the Merkle hasher
+/// Generic over the Merkle hasher
 /// `HV: FieldHasherVariable<C>` so the gnark OUTER wrap layer verifies
 /// BN254 (Poseidon2-BN254) commitments. `HV` defaults to the inner
 /// `KoalaBearPoseidon2` (DigestVariable = `[Felt;8]`) so every existing
@@ -566,9 +565,6 @@ where
             core::array::from_fn(|_| builder.uninit());
         // Tuple order is (dst, src) — see compiler.rs dispatch which
         // calls `poseidon2_permute(data.0 as dst, data.1 as src)`.
-        // This was previously `(input, output)` (backwards) but the
-        // bug stayed latent because the merkle binding loop's
-        // is_empty() guard short-circuited every call.
         builder.push_op(DslIr::CircuitV2Poseidon2PermuteKoalaBear(Box::new((output, input))));
         current = core::array::from_fn(|i| output[i]);
     }
@@ -577,7 +573,7 @@ where
 
 /// **In-circuit BaseFold round-count soundness binding — TIGHT integer `<=`.**
 ///
-/// Height-agnostic-recursion (step 2).  Binds a (soon-to-be) WITNESSED
+/// On the height-agnostic recursion path, binds a WITNESSED
 /// `actual_num_vars` to the closed integer interval `[0, max_num_vars]`,
 /// where `max_num_vars` is the compile-time loop ceiling
 /// (`DEFAULT_LOG_STACKING_HEIGHT`).
@@ -595,12 +591,12 @@ where
 ///     committed codeword does not exist;
 ///   * the mask logic only makes sense for a count in range.
 ///
-/// # The tight integer `<=` (replaces step-1's power-of-two FLOOR)
+/// # The tight integer `<=`
 ///
-/// Step 1 left a documented FLOOR: it bound the felt VALUE into
+/// A power-of-two FLOOR would bind the felt VALUE into
 /// `[0, 2^{max_num_vars}]` (a power-of-two bound, not a direct
-/// `<= max_num_vars`), which over-accepts every value in
-/// `(max_num_vars, 2^{max_num_vars}]`.  This is now a TIGHT
+/// `<= max_num_vars`), over-accepting every value in
+/// `(max_num_vars, 2^{max_num_vars}]`.  Instead this uses a TIGHT
 /// `actual_num_vars <= max_num_vars` via two sound bit-decompositions:
 ///
 /// Let `nbits = ceil(log2(max_num_vars + 1))` be the number of bits to
@@ -627,7 +623,7 @@ where
 /// On the current fixed path `actual_num_vars` is the compile-time
 /// constant `max_num_vars`, so `diff == 0` and both decompositions
 /// trivially bind.  The emitted constraints are inert (the asserts never
-/// trip), exactly like step-1 and the row-count guard — it only ADDS
+/// trip), exactly like the row-count guard — it only ADDS
 /// soundness constraints, never changes a verification outcome on an
 /// honest proof.
 ///
@@ -742,9 +738,9 @@ where
         //   xs = [x, -x]   if bit == 0   (current at +x)
         //   xs = [-x, x]   if bit == 1   (current at -x)
         //   folded' = eval0 + (beta - xs[0]) * (eval1 - eval0) / (xs[1] - xs[0])
-        // The previous code hardcoded xs = [x, -x] (the bit==0 case), so
-        // every odd query index folded through swapped points → the final
-        // `folded == final_poly` assert failed in gnark.
+        // Hardcoding xs = [x, -x] (the bit==0 case) would fold every odd
+        // query index through swapped points, failing the final
+        // `folded == final_poly` assert in gnark.
         let zero: zkm_recursion_compiler::prelude::Felt<C::F> = builder.constant(C::F::ZERO);
         let neg_x: zkm_recursion_compiler::prelude::Felt<C::F> = builder.uninit();
         builder.push_op(DslIr::SubF(neg_x, zero, x));
@@ -794,25 +790,16 @@ where
 ///
 /// # Body scope
 ///
-/// This iteration lands the **transcript-replay + structural
-/// validation** portion of the untrusted-evaluation verification:
-///   - Observe per-round commitments into the challenger.
-///   - Observe the untrusted `batch_evaluations` claims.
-///   - Walk `proof.rounds`, observing each round's Merkle commit
-///     and sampling a per-round beta (same cadence the prover uses).
-///
-/// The **full FRI query-phase verification** (Merkle-path opening
-/// checks + per-query fold-chain traversal) is deferred to a
-/// follow-up step: porting it requires in-circuit Merkle-tree
-/// opening variables (`RecursiveMerkleTreeTcs`) that aren't yet
-/// scaffolded in Ziren's circuit layer.  The
-/// [`emit_basefold_query_chain`] helper in this module is the
-/// fold-chain emission primitive the follow-up will wrap.
-///
-/// Until the query phase lands, the impl is a structurally-correct
-/// architecture that type-checks the shard-verifier call path
-/// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
-/// but does not run the full PCS soundness chain.
+/// [`verify_untrusted_evaluations`] performs the transcript replay,
+/// structural validation, and FRI query-phase verification:
+///   - Observe per-round commitments into the challenger (via the JAGGED
+///     layer) and walk `proof.rounds` sampling a per-round beta with the
+///     same cadence the prover uses.
+///   - When component openings are present, recompute each query's
+///     batched initial evaluation from them and Merkle-verify it against
+///     the original commitments.
+///   - Walk the commit-phase fold chain ([`emit_basefold_query_chain`])
+///     and bind each round's reconstructed root to its committed root.
 impl<C, FC, HV> crate::recursive_stacked_pcs::RecursiveMultilinearPcsVerifier<C, FC>
     for RecursiveBasefoldVerifier<HV>
 where
@@ -823,7 +810,7 @@ where
 {
     type Commitment = HV::DigestVariable;
     // The proof carries `Felt`/`Ext` circuit variables for its
-    // base/extension values (const-promotion moved into the Witnessable
+    // base/extension values (const-promotion happens in the Witnessable
     // `read`); the digest type stays the raw `HV::Digest` (witnessed below).
     type Proof = RecursiveBasefoldProof<
         zkm_recursion_compiler::prelude::Felt<C::F>,
@@ -855,19 +842,15 @@ where
         use crate::logup_gkr::observe_ext_element;
         use p3_field::PrimeCharacteristicRing;
 
-        // #H (BaseFold-over-BN254 wrap port): the in-circuit transcript
-        // is now a byte-for-byte mirror of the HOST basefold open
-        // verifier `verify_mle_evaluations` (crates/pcs/src/basefold/
-        // verifier.rs:91+).  The original per-round commitments are
+        // The in-circuit transcript is a byte-for-byte mirror of the HOST
+        // basefold open verifier `verify_mle_evaluations` (crates/pcs/src/
+        // basefold/verifier.rs:91+).  The original per-round commitments are
         // observed by the JAGGED layer BEFORE z_col is sampled (mirror of
         // host verify_jagged_basefold_inner_generic's leading
         // `challenger.observe(commit)`), so they are NOT re-observed here,
-        // and the prover never observes the untrusted batch_evaluations
-        // into the transcript.  The previous spurious observes desync'd
-        // every downstream challenge; masked by vacuous recursion-VM
-        // asserts, ENFORCED (and thus failing) in the gnark OUTER wrap.
-        // `commitments` + `batch_evaluations` are now consumed by the
-        // per-query component binding below (no longer discarded).
+        // and the untrusted batch_evaluations are never observed into the
+        // transcript.  `commitments` + `batch_evaluations` are consumed by
+        // the per-query component binding below.
 
         // (1) Verify batch grinding (host step 1):
         //   check_witness(BATCH_GRINDING_BITS, batch_grinding_witness).
@@ -933,9 +916,8 @@ where
             self.params.num_variables,
         );
 
-        // (3a) HEIGHT-AGNOSTIC-RECURSION (step 2) — round-count soundness
-        // binding, TIGHT integer `<=` (NO-OP on the current fixed-height
-        // path).
+        // (3a) Round-count soundness binding, TIGHT integer `<=` (NO-OP on
+        // the fixed-height path).
         //
         // On the fixed path the BaseFold FRI round count is baked into the
         // program as the compile-time `self.params.num_variables` (= the
@@ -948,15 +930,14 @@ where
         // `actual_num_vars` against the compile-time loop ceiling
         // `MAX_NUM_VARS = DEFAULT_LOG_STACKING_HEIGHT`), this binding is
         // what PREVENTS a prover from claiming a round count OUTSIDE
-        // `[0, MAX_NUM_VARS]` — now a TIGHT integer `<=` (no power-of-two
-        // slack; see `assert_num_vars_le_max`).  Exercised end-to-end now
-        // so it is sound before it is load-bearing.
+        // `[0, MAX_NUM_VARS]` — a TIGHT integer `<=` (no power-of-two
+        // slack; see `assert_num_vars_le_max`).
         #[cfg(not(ha_measure_base))]
         {
             use p3_field::PrimeCharacteristicRing;
             let actual_num_vars: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(C::F::from_usize(self.params.num_variables));
-            // #88 Phase 1 — bind against the GLOBAL ceiling
+            // Bind against the GLOBAL ceiling
             // `DEFAULT_LOG_STACKING_HEIGHT` (= 21) rather than the per-proof
             // `self.params.num_variables`, so the round-count bound is
             // height-AGNOSTIC.  Verdict-neutral on every path: the fixed
@@ -965,7 +946,7 @@ where
             // and both `num2bits` recompositions still bind inertly (no honest
             // proof's verdict changes; it only widens the accepted interval
             // from `{num_variables}` to `[0, 21]`, which is the height-agnostic
-            // invariant Phase 2 relies on once `actual_num_vars` is witnessed).
+            // invariant relied on once `actual_num_vars` is witnessed).
             assert_num_vars_le_max::<C>(
                 builder,
                 actual_num_vars,
@@ -979,11 +960,9 @@ where
         //   observe(num_variables);
         //   per round: observe(uni_poly[0]); observe(uni_poly[1]);
         //              observe(commitment); sample beta.
-        // The previous replay observed ONLY the commitment, diverging
-        // the sampled betas from the prover's.  In the recursion VM the
-        // downstream FRI-fold asserts are vacuous so this was masked; the
-        // gnark OUTER wrap ENFORCES them, surfacing the divergence as an
-        // AssertEqE failure on the fold-chain.  This aligns both rings.
+        // Observing only the commitment (omitting the univariate message)
+        // would diverge the sampled betas from the prover's, surfacing as an
+        // AssertEqE failure on the fold-chain in the gnark OUTER wrap.
         {
             let nvar_felt: zkm_recursion_compiler::prelude::Felt<C::F> =
                 builder.constant(C::F::from_usize(self.params.num_variables));
@@ -1050,19 +1029,19 @@ where
                 // opening leaf values batched with the Lagrange coefficients
                 // (host verifier.rs:208-246, step 8), and each leaf is
                 // Merkle-verified against the round's ORIGINAL commitment
-                // (host step 9).  The previous `sibling_pairs[0][0]` read
-                // was prover-supplied and unbound.  Empty component
-                // openings (legacy/outer placeholder paths) keep the old
-                // fallback — structurally decided at program build.
+                // (host step 9); a bare `sibling_pairs[0][0]` read would be
+                // prover-supplied and unbound.  Empty component openings
+                // (outer placeholder paths) use the fallback below —
+                // structurally decided at program build.
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
                     // Accumulate the step-8 inner product SYMBOLICALLY across the
                     // whole leaf loop and materialize it ONCE per query (mirrors
                     // SP1 basefold/mod.rs:250-266: `*batch_eval += coeff*value`
-                    // then a single `builder.eval` per query).  The previous code
-                    // called `builder.eval` per leaf value (O(queries x rounds x
-                    // widths) materialized adds); keeping `acc` a SymbolicExt and
-                    // letting the DSL CSE the single downstream eval is
-                    // value-identical (pure deferred materialization).
+                    // then a single `builder.eval` per query).  Keeping `acc` a
+                    // SymbolicExt and letting the DSL CSE the single downstream
+                    // eval avoids an O(queries x rounds x widths) blowup of
+                    // materialized adds and is value-identical (pure deferred
+                    // materialization).
                     let mut acc: zkm_recursion_compiler::ir::SymbolicExt<C::F, C::EF> =
                         zkm_recursion_compiler::ir::SymbolicExt::<C::F, C::EF>::ZERO;
                     let mut batch_idx = 0usize;
@@ -1117,7 +1096,7 @@ where
                                 leaf_digest,
                                 commitments[round_idx],
                             );
-                            // HEIGHT-AGNOSTIC-RECURSION (step 2) binding (2),
+                            // Round-count binding (2),
                             // Ziren-faithful — SP1's `index == 0` RESIDUAL
                             // assert (slop merkle tcs.rs:165): after walking
                             // `path_len` Merkle levels, EVERY remaining (higher)
@@ -1196,9 +1175,9 @@ where
                 //   * path direction at level `k` = bit `k` of the pair
                 //     index `index_pair = orig_query >> (round_idx+1)`,
                 //     i.e. `query_indices[query_idx][round_idx + 1 + k]`
-                //     (LSB-first).  The previous code hard-coded the bit to
-                //     0 (always-left), so every right-child step compressed
-                //     in the wrong order → wrong root.
+                //     (LSB-first).  Hard-coding the direction bit to 0
+                //     (always-left) would compress every right-child step in
+                //     the wrong order and yield the wrong root.
                 //   * p3 MerkleTreeMmcs compares the reconstructed root
                 //     DIRECTLY to the commitment (no SP1-style dims-compress).
                 for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
@@ -1229,7 +1208,7 @@ where
                         );
                         leaf_digest = HV::compress(builder, pair);
                     }
-                    // HEIGHT-AGNOSTIC-RECURSION (step 2) binding (2),
+                    // Round-count binding (2),
                     // Ziren-faithful — SP1's `index == 0` RESIDUAL assert
                     // (slop merkle tcs.rs:165), applied to the commit-phase
                     // codeword walk.  After walking `path_len` levels every
@@ -1285,8 +1264,7 @@ mod tests {
         // log_codeword_size = num_variables + log_blowup = 20 + 2 = 22.
         // `production_default` uses log_blowup = 2 (rate 1/4) for the
         // provable-100-bit inner query-phase soundness posture (see
-        // `BasefoldVerifierParams::production_default` and the soundness
-        // memo); the old "aligned to 1 -> 21" comment was stale.
+        // `BasefoldVerifierParams::production_default`).
         assert_eq!(p.log_codeword_size(), 22);
         assert!(p.estimated_recursion_constraints() > 0);
     }
@@ -1314,7 +1292,7 @@ mod tests {
         assert_eq!(result, 28);
     }
 
-    // ── HEIGHT-AGNOSTIC-RECURSION round-count binding (step 2) ──
+    // ── Round-count binding tests ──
     //
     // These compile + RUN the DSL through the recursion runtime
     // (`run_test_recursion`), so the in-circuit `assert_felt_eq` inside
@@ -1323,10 +1301,10 @@ mod tests {
     // (the wrapped `diff`'s recomposition can't match), captured by
     // `#[should_panic]`; honest counts run clean.
     //
-    // Step 2 TIGHTENED the bound from step-1's power-of-two FLOOR to a
-    // TIGHT integer `actual <= max`: the accepted set is EXACTLY
-    // `[0, max_num_vars]`.  These tests pin the tight boundary — values
-    // in `(max, 2^nbits)` (which step-1 over-accepted) are now REJECTED.
+    // The bound is a TIGHT integer `actual <= max`: the accepted set is
+    // EXACTLY `[0, max_num_vars]`.  These tests pin the tight boundary —
+    // values in `(max, 2^nbits)` (which a power-of-two floor would
+    // over-accept) are REJECTED.
 
     use p3_field::PrimeCharacteristicRing as _PrimeCharRing;
     use zkm_recursion_compiler::config::InnerConfig;
@@ -1375,17 +1353,17 @@ mod tests {
         run_numvars_bind(21, max); // == max (inclusive high, fixed path)
     }
 
-    /// NEGATIVE (tightness): a value in `(max, 2^nbits)` that step-1's
-    /// power-of-two FLOOR would have ACCEPTED is now REJECTED.  For
-    /// max=21, nbits=5 (2^5=32); step-1 accepted everything in `[0, 32]`,
-    /// the tight bound rejects `22..=31`.
+    /// NEGATIVE (tightness): a value in `(max, 2^nbits)` that a power-of-two
+    /// FLOOR would have ACCEPTED is REJECTED.  For max=21, nbits=5 (2^5=32);
+    /// a floor accepts everything in `[0, 32]`, the tight bound rejects
+    /// `22..=31`.
     #[test]
     #[should_panic]
     fn numvars_bind_rejects_value_in_old_floor_slack_22() {
         run_numvars_bind(22, 21); // 22 > 21: was accepted by the floor, now rejected
     }
 
-    /// NEGATIVE (tightness): top of the old power-of-two slack
+    /// NEGATIVE (tightness): top of the power-of-two slack
     /// (`2^nbits - 1 = 31 > 21`) is REJECTED.
     #[test]
     #[should_panic]
@@ -1416,8 +1394,8 @@ mod tests {
         run_numvars_bind(32, 4);
     }
 
-    // ── HEIGHT-AGNOSTIC-RECURSION binding (2): Merkle-walk `index == 0`
-    //    RESIDUAL assert (Ziren-faithful port of SP1 slop tcs.rs:165) ──
+    // ── Merkle-walk `index == 0` residual-assert tests
+    //    (Ziren-faithful port of SP1 slop tcs.rs:165) ──
     //
     // The production residual binding lives inside
     // `verify_untrusted_evaluations` after each in-circuit Merkle walk:

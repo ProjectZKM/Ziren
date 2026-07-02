@@ -157,9 +157,8 @@ impl StarkVerifier {
 impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2>
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // #88 deep VK-identity port (Stage 1): VK = f(chip-SET).  The
-        // per-prep-domain HEIGHT block is DROPPED; instead fold, per prep
-        // chip in order, the chip NAME-DIGEST (`prep_chip_name_digest`) and
+        // VK = f(chip-SET): no per-prep-domain HEIGHT block; instead fold, per
+        // prep chip in order, the chip NAME-DIGEST (`prep_chip_name_digest`) and
         // the preprocessed WIDTH (chip_information tuple = (width, height)).
         // MUST stay byte-identical to the host (prover/src/types.rs) and
         // in-circuit (recursion/circuit/src/types.rs) folds — order:

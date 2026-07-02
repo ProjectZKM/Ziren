@@ -117,12 +117,10 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
 /// program) AND the runtime tree commit (`ZKMProver::new`) use this
-/// constant.  Previously each side derived a height from its own
-/// cardinality (enumerated-shape count vs vk_map size) — after the
-/// witnessed-heights change collapsed the vk space (1566 compose vks
-/// dedup to ~348), the two derivations diverged (11 vs 9) and the
-/// witnessed merkle paths would desync from the program shape.  A fixed
-/// ceiling kills the circularity permanently.
+/// constant.  If each side instead derived a height from its own
+/// cardinality (enumerated-shape count vs vk_map size), the two
+/// derivations could diverge and the witnessed merkle paths would desync
+/// from the program shape.  A fixed ceiling kills that circularity.
 pub const VK_MERKLE_TREE_HEIGHT: usize = 11;
 
 const COMPRESS_DEGREE: usize = 3;
@@ -226,16 +224,12 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// instruction count must equal the next input's witness stream
     /// length).
     ///
-    /// **History**: Before May 21 2026 (`feat/upgrade-plonky3-program-cache-fix`)
-    /// the key was just `arity` (mirroring SP1's
-    /// `crates/prover/src/worker/prover/recursion.rs:446`).
-    /// That was unsound for Ziren because per-input shapes vary
-    /// widely across calls of the same arity (lift heights span
-    /// 5K..328K vs SP1's tight clustering — see
-    /// `project_256_cache_perf_reverted.md` and
-    /// `project_tendermint_speedup_proposals.md` §6).  Re-using a
-    /// program built for shape A with shape B's witness stream
-    /// triggered `RuntimeError::EmptyWitnessStream` panics under
+    /// **Rationale**: keying on `arity` alone (as SP1 does at
+    /// `crates/prover/src/worker/prover/recursion.rs:446`) is unsound for
+    /// Ziren because per-input shapes vary widely across calls of the same
+    /// arity (lift heights span 5K..328K vs SP1's tight clustering).
+    /// Re-using a program built for shape A with shape B's witness stream
+    /// triggers `RuntimeError::EmptyWitnessStream` panics under
     /// `ZIREN_PROGRAM_CACHE=1` / `ZIREN_GPU_RESIDENCY=full`.
     ///
     /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
@@ -280,17 +274,17 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
         .expect("PROVER_CORE_CACHE_SIZE must be a non-zero usize");
 
-        // #79 DEFAULT FLIP: FIX-off (height-agnostic natural-commit) is now the
-        // production DEFAULT.  Unset / not "true" => `None` => core shards prove
-        // at their NATURAL per-shard heights (no band padding), the faster
-        // height-agnostic path that the recursion area-pin + count-hash-bind make
-        // enumerable + VERIFY_VK=true-verifying (240-key vk_map).  FIX-on stays
-        // SELECTABLE as a fallback: `FIX_CORE_SHAPES=true` => `Some(..)` => the
-        // legacy band-padded core shapes (byte-identical to the pre-flip default).
+        // FIX-off (height-agnostic natural-commit) is the production DEFAULT.
+        // Unset / not "true" => `None` => core shards prove at their NATURAL
+        // per-shard heights (no band padding), the faster height-agnostic path
+        // that the recursion area-pin + count-hash-bind make enumerable +
+        // VERIFY_VK=true-verifying (240-key vk_map).  FIX-on stays SELECTABLE as
+        // a fallback: `FIX_CORE_SHAPES=true` => `Some(..)` => the band-padded
+        // core shapes.
         // NOTE: the offline vk_map regen tooling (`build_compress_vks` ->
         // `shapes::{check_shapes,build_vk_map}`) still `.expect()`s a core shape
-        // config, so it MUST be run with `FIX_CORE_SHAPES=true` explicitly after
-        // this flip (the prove path no longer requires it).
+        // config, so it MUST be run with `FIX_CORE_SHAPES=true` explicitly (the
+        // prove path does not require it).
         let core_shape_config = env::var("FIX_CORE_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
@@ -341,11 +335,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         leaves.resize(1 << VK_MERKLE_TREE_HEIGHT, [KoalaBear::ZERO; DIGEST_SIZE]);
         let (root, merkle_tree) = MerkleTree::commit(leaves);
 
-        // Legacy FRI compress-program registry removed (May 2026): the
-        // basefold path is now the only path. Compose / deferred / shrink
-        // / wrap programs are all built lazily per witness via the
-        // `*_basefold` builders. The upfront FRI build was 4 ^ REDUCE_BATCH_SIZE
-        // programs (256 at arity-4) at >5 min/program with vk_verification.
+        // Compose / deferred / shrink / wrap programs are all built lazily per
+        // witness via the `*_basefold` builders (the basefold path is the only
+        // path).  An upfront FRI build would be 4 ^ REDUCE_BATCH_SIZE programs
+        // (256 at arity-4) at >5 min/program with vk_verification.
         let _ = core_cache_size;
 
         let prover = Self {
@@ -645,12 +638,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// PER-STAGE zerocheck cube for a recursion verifier-circuit.
     ///
-    /// G1 Stage A (#88): the cube is now PINNED to the FIXED base (22 =
-    /// SP1's core cap) for EVERY stage — it is NO LONGER floated up to a
-    /// FIX-off input proof's zerocheck dim.  The recursion program's cube
-    /// axis is HEIGHT-INDEPENDENT: the same cube=BASE program is reused for
-    /// FIX-on and FIX-off alike, so it stays BYTE-IDENTICAL and preserves
-    /// the production vk_map invariant.
+    /// The cube is PINNED to the FIXED base (22 = SP1's core cap) for EVERY
+    /// stage — it is NOT floated up to a FIX-off input proof's zerocheck dim.
+    /// The recursion program's cube axis is HEIGHT-INDEPENDENT: the same
+    /// cube=BASE program is reused for FIX-on and FIX-off alike, so it stays
+    /// BYTE-IDENTICAL and preserves the production vk_map invariant.
     ///
     /// The in-circuit checks still assert the cube against the input proof's
     /// zerocheck dim and LogUp-GKR round count (`verify_zerocheck`
@@ -687,19 +679,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .map(|p| p.zerocheck_proof.point_and_eval.0.len())
             .max()
             .unwrap_or(0);
-        // G1 Stage A (#88): PIN the recursion cube to the FIXED base (22 =
-        // SP1's core cap).  We no longer FLOAT the cube up to a FIX-off input
-        // proof's zerocheck dim — the recursion program's cube axis is now
-        // HEIGHT-INDEPENDENT.  An over-tall FIX-off chip is WITNESSED under the
-        // full_geq degree mask (logup_gkr.rs:637), carried by the degree
-        // bit-length at fixed-cube+1 (shard_proof_variable_lift.rs:328/393/
-        // 461-468) — NOT grown into the circuit.  This preserves the
-        // cube=BASE program (byte-identical, vk_map-stable) for ALL stages.
+        // PIN the recursion cube to the FIXED base (22 = SP1's core cap).  The
+        // cube is NOT floated up to a FIX-off input proof's zerocheck dim — the
+        // recursion program's cube axis is HEIGHT-INDEPENDENT.  An over-tall
+        // FIX-off chip is WITNESSED under the full_geq degree mask
+        // (logup_gkr.rs:637), carried by the degree bit-length at fixed-cube+1
+        // (shard_proof_variable_lift.rs:328/393/461-468) — NOT grown into the
+        // circuit.  This preserves the cube=BASE program (byte-identical,
+        // vk_map-stable) for ALL stages.
         //
-        // The diagnostic is now a WARN: if an input proof's dim exceeds the
-        // fixed cube, that surfaces a genuine over-cap chip (AXIS-1b: SP1
-        // HEIGHT_THRESHOLD shard-splitting territory) — it must be reported,
-        // not silently absorbed by growing the circuit.
+        // The diagnostic is a WARN: if an input proof's dim exceeds the fixed
+        // cube, that surfaces a genuine over-cap chip (SP1 HEIGHT_THRESHOLD
+        // shard-splitting territory) — it must be reported, not silently
+        // absorbed by growing the circuit.
         if in_dim > base {
             eprintln!(
                 "PERSTAGE-CUBE build[{stage}]: WARN base={base} input_zc_dim={in_dim} \
@@ -726,27 +718,28 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
-    /// G1 Stage C (#88): should the recursion PROVE path band-snap (`fix_shape`)
-    /// the program, or build it at its NATURAL per-(cluster,arity) heights?
+    /// Should the recursion PROVE path band-snap (`fix_shape`) the program, or
+    /// build it at its NATURAL per-(cluster,arity) heights?
     ///
     /// HEIGHT-AGNOSTIC default (`ZIREN_HA_NO_FIXSHAPE` unset / ≠ 0): `false` —
-    /// `fix_shape` is RETIRED, the program keeps its organic chip heights.  The
+    /// `fix_shape` is disabled, the program keeps its organic chip heights.  The
     /// recursion compose/normalize area is height-independent PER (cluster,
-    /// arity) (loop counts derive from `num_variables`/the de-clamp, the cube,
+    /// arity) (loop counts derive from `num_variables`/the fixed stacking
+    /// height, the cube,
     /// the chip-set, and arity — NONE a child height), so the dummy that built
     /// the program (which never `fix_shape`s) and a real proof land on the SAME
     /// program for a fixed (cluster, arity).  The soundness substrate (full_geq
     /// LogUp reconstruction + `*_full` binding) makes the in-circuit verifier
-    /// ACCEPT arbitrary witnessed heights — so band-snapping is no longer needed
+    /// ACCEPT arbitrary witnessed heights — so band-snapping is not needed
     /// for correctness, and dropping it kills the band over-padding.  This is the
     /// height-agnostic PROVE path (VERIFY_VK=false; the enum/vk_map re-key +
-    /// regen are Stage D, since the VK legitimately changes band→natural).
+    /// regen change the VK band→natural).
     ///
-    /// Legacy band-snap (`ZIREN_HA_NO_FIXSHAPE=0`): `true` when a
-    /// `compress_shape_config` is installed — the pre-Stage-C behavior, kept
-    /// A/B-able on the same binary so the natural-vs-band change can be
-    /// isolated.  Returns `false` whenever `compress_shape_config` is `None`
-    /// (`FIX_RECURSION_SHAPES=false`), which already skips `fix_shape`.
+    /// Band-snap (`ZIREN_HA_NO_FIXSHAPE=0`): `true` when a
+    /// `compress_shape_config` is installed — kept A/B-able on the same binary
+    /// so the natural-vs-band change can be isolated.  Returns `false` whenever
+    /// `compress_shape_config` is `None` (`FIX_RECURSION_SHAPES=false`), which
+    /// already skips `fix_shape`.
     fn recursion_fix_shape_enabled(&self) -> bool {
         if self.compress_shape_config.is_none() {
             return false;
@@ -760,20 +753,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// G1 Stage C (#88): `fix_shape` band-snapping is RETIRED on the prove path
-    /// by default ([`Self::recursion_fix_shape_enabled`]) — the program is built
-    /// at its NATURAL per-(cluster,arity) heights (the height-agnostic prove
-    /// path), so a FIX-off program never panics in `fix_shape` ("no shape found")
-    /// when its organic heights exceed every band.  Set `ZIREN_HA_NO_FIXSHAPE=0`
-    /// to restore the legacy band-snap (A/B control).
+    /// `fix_shape` band-snapping is disabled on the prove path by default
+    /// ([`Self::recursion_fix_shape_enabled`]) — the program is built at its
+    /// NATURAL per-(cluster,arity) heights (the height-agnostic prove path), so
+    /// a FIX-off program never panics in `fix_shape` ("no shape found") when its
+    /// organic heights exceed every band.  Set `ZIREN_HA_NO_FIXSHAPE=0` to
+    /// restore the band-snap (A/B control).
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // PER-STAGE cube PINNED to the fixed base (G1 Stage A, #88) — the
-        // normalize circuit verifies its input core-shard proofs at this
-        // fixed `max_log_row_count`.  FIX-off over-tall core heights are
-        // witnessed under the full_geq mask, not floated into the cube.
+        // PER-STAGE cube PINNED to the fixed base — the normalize circuit
+        // verifies its input core-shard proofs at this fixed
+        // `max_log_row_count`.  FIX-off over-tall core heights are witnessed
+        // under the full_geq mask, not floated into the cube.
         let base = Self::perstage_base_cube();
         let max_log_row_count = Self::perstage_cube_from_input_proofs(
             input.shard_proofs.iter(),
@@ -785,7 +778,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             input,
             max_log_row_count,
         );
-        // G1 Stage C (#88): band-snap RETIRED by default — build at natural
+        // Band-snap disabled by default — build at natural
         // per-(cluster,arity) heights (height-agnostic prove path).
         if self.recursion_fix_shape_enabled() {
             if let Some(recursion_shape_config) = &self.compress_shape_config {
@@ -796,9 +789,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         program
     }
 
-    /// G1 Stage D1b (#88): the `OrderedShape` of a recursion/core child proof
-    /// from its `chip_log_heights` (= `log2(main_trace.height)` per chip),
-    /// matching `ShardProof::shape()` (chip name -> log_degree).
+    /// The `OrderedShape` of a recursion/core child proof from its
+    /// `chip_log_heights` (= `log2(main_trace.height)` per chip), matching
+    /// `ShardProof::shape()` (chip name -> log_degree).
     fn basefold_proof_ordered_shape(
         sp: &zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, Challenge<InnerSC>>,
     ) -> zkm_pcs::shape::OrderedShape {
@@ -827,11 +820,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         let cache_enabled = crate::residency::program_cache_enabled();
         let verify_cache = crate::residency::program_cache_audit_enabled();
-        // May 21 2026 fix: cache key is now a structural shape signature
-        // covering every variable-length collection in the witness
-        // write traversal (not just arity).  This makes the cache sound
-        // for Ziren's heterogeneous-shape workloads — see
-        // `compose_programs_basefold_cache` field docs and
+        // The cache key is a structural shape signature covering every
+        // variable-length collection in the witness write traversal (not just
+        // arity).  This makes the cache sound for Ziren's heterogeneous-shape
+        // workloads — see `compose_programs_basefold_cache` field docs and
         // `ZKMCompressBasefoldWitnessValues::shape_key`.
         let arity = input.vks_and_proofs.len();
         let cache_key = input.shape_key();
@@ -891,10 +883,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             base,
             "compose",
         );
-        // basefold-for-recursion is now the default. The
-        // `ZIREN_FORCE_BASEFOLD_FOR_RECURSION` env toggle and the legacy
-        // `build_compose_basefold_program` branch have been retired —
-        // the `_recursion` variant is the sole production path.
+        // The `_recursion` variant is the sole production path for
+        // basefold-for-recursion.
         let mut program = build_compose_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
@@ -902,7 +892,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
-        // G1 Stage C (#88): band-snap RETIRED by default — build at natural
+        // Band-snap disabled by default — build at natural
         // per-(cluster,arity) heights (height-agnostic prove path).
         if self.recursion_fix_shape_enabled() {
             if let Some(recursion_shape_config) = &self.compress_shape_config {
@@ -925,15 +915,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             base,
             "deferred",
         );
-        // basefold-for-recursion is now the default. Mirrors the
-        // cutover on `build_compose_program_basefold_uncached`.
+        // basefold-for-recursion, mirroring
+        // `build_compose_program_basefold_uncached`.
         let mut program = build_deferred_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
         );
-        // G1 Stage C (#88): band-snap RETIRED by default — build at natural
+        // Band-snap disabled by default — build at natural
         // per-(cluster,arity) heights (height-agnostic prove path).
         if self.recursion_fix_shape_enabled() {
             if let Some(recursion_shape_config) = &self.compress_shape_config {
@@ -946,7 +936,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Wrap (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::shrink_program`] / [`Self::wrap_program`].
     /// Skips `fix_shape` for the same reason as `recursion_program_basefold`
-    /// — basefold programs are sized differently from legacy.
+    /// — basefold programs are sized differently from the FRI path.
     pub fn shrink_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
@@ -1077,18 +1067,18 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut core_inputs = Vec::new();
         for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
-            // #88/#82 SINGLE-SHARD NORMALIZE: the production normalize path is
+            // SINGLE-SHARD NORMALIZE: the production normalize path is
             // arity-1 (`compress` calls `get_first_layer_inputs` with
             // `first_layer_batch_size = 1` → this function is reached with
             // `batch_size = 1`, one shard per `ZKMCoreBasefoldWitnessValues`).
-            // The multi-shard normalize VK was a PHANTOM (only the enumerator
-            // ever emitted arity≥2 Recursion shapes), so the in-circuit
-            // aggregate loop + the multi-shard dummy were dead weight on a path
+            // A multi-shard normalize VK is a PHANTOM (only the enumerator
+            // would emit arity≥2 Recursion shapes), so an in-circuit
+            // aggregate loop + multi-shard dummy would be dead weight on a path
             // SP1 likewise forbids (core.rs:118 asserts shard_proofs.len()==1).
             // Hard-assert the single-shard invariant so any caller that batches
             // core shards into the normalize stage (a regression) is caught at
             // input construction rather than silently building a normalize proof
-            // whose VK the enumerator no longer covers.
+            // whose VK the enumerator does not cover.
             assert_eq!(
                 batch.len(),
                 1,
@@ -1553,8 +1543,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                // RECURSION-LAYER AREA PIN (#88/#82 Stage 1,
-                                // SP1-faithful, REAL DEFAULT — no env flag):
+                                // RECURSION-LAYER AREA PIN (SP1-faithful,
+                                // always on — no env flag):
                                 // pin this recursion proof's (normalize AND
                                 // compose) jagged dense commit to a FIXED area
                                 // 2^RECURSION_LOG_TRACE_AREA so every recursion
@@ -1659,8 +1649,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                     // BUFFER (`pending[h]`, keyed by index) plus the layer's
                     // expected index order (`expected_order[h]`): items move
                     // to `ready[h]` only in chain order, and chunks are cut
-                    // from `ready`.  (The previous arrival-order `Vec` was
-                    // "tolerant" only while the chain asserts were vacuous
+                    // from `ready`.  (A plain arrival-order `Vec` is
+                    // "tolerant" only while the chain asserts are vacuous
                     // DivFs — armed, an out-of-order batch like [s1,s3,s2]
                     // honestly trips the runtime at the continuity assert.)
                     let mut pending: Vec<std::collections::BTreeMap<usize, Item>> =
@@ -1951,9 +1941,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 None
             };
             // Pin this thread's GPU-pool TLS to the provider's device so
-            // the device-keyed dispatch hooks (gate 1b in
-            // try_run_device_path) see a worker context, exactly like the
-            // pipeline dispatch does before driving the basefold prove.
+            // the device-keyed dispatch hooks in try_run_device_path see a
+            // worker context, exactly like the pipeline dispatch does before
+            // driving the basefold prove.
             let _shrink_gpu_guard = device_provider
                 .as_ref()
                 .map(|(_, dev)| zkm_pcs::gpu_worker_context::GpuPoolWorkerGuard::new(*dev));
@@ -3326,13 +3316,13 @@ pub mod tests {
         )
     }
 
-    /// MILESTONE harness: FIX-off MULTI-SHARD compress PROVE + host VERIFY.
+    /// FIX-off MULTI-SHARD compress PROVE + host VERIFY harness.
     /// Loads the fibonacci-1k corpus (program.bin + bincode ZKMStdin
     /// stdin.bin) from FIXOFF_PROGRAM_DIR (default
     /// /data/stephen/ziren-shape-bin/fibonacci-1k), proves core, compresses,
     /// and host-verifies the compressed proof (`verify_compressed`, the
-    /// recursion-shard crypto verify that previously failed with
-    /// `StackingMismatch` for sub-stripe FIX-off commits).
+    /// recursion-shard crypto verify that is sensitive to `StackingMismatch`
+    /// for sub-stripe FIX-off commits).
     ///
     /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
@@ -3381,15 +3371,15 @@ pub mod tests {
         let compressed_proof = prover.compress(&vk, core_proof, vec![], opts)?;
         eprintln!("[FIXOFF-MS] compress done; verify_compressed (THE MILESTONE) ...");
 
-        // G1 Stage C (#88) GATE instrumentation: NATURAL-HEIGHT report.
-        // fix_shape is now RETIRED on the prove path (the program keeps its
+        // NATURAL-HEIGHT report.
+        // fix_shape is disabled on the prove path (the program keeps its
         // organic per-(cluster,arity) heights — no band-snap, no floor-pin).
         // Report the ROOT recursion commit's area-derived axes (log_dense_size,
-        // area, num_stripes) at their NATURAL value — there is no longer a
-        // fixed floor/band to compare against.  GATE (c) dummy==real per
-        // (cluster,arity) is asserted directly in the build path via
-        // `ZIREN_VERIFY_PROGRAM_CACHE`; this report shows the actual natural
-        // area the height-agnostic prove path produced.
+        // area, num_stripes) at their NATURAL value — there is no fixed
+        // floor/band to compare against.  dummy==real per (cluster,arity) is
+        // asserted directly in the build path via `ZIREN_VERIFY_PROGRAM_CACHE`;
+        // this report shows the actual natural area the height-agnostic prove
+        // path produced.
         {
             use zkm_pcs::shard_level::shard_proof::EvaluationProof;
             let root_eval_proof = compressed_proof
@@ -3425,13 +3415,13 @@ pub mod tests {
         Ok(())
     }
 
-    /// MILESTONE harness: FIX-off MULTI-SHARD FULL inner chain PROVE +
-    /// host VERIFY through compress -> shrink -> wrap_bn254.  Same corpus
-    /// and env as `fixoff_multishard_compress_verify`, but continues past
-    /// compress into shrink (verifies the compress proof) and wrap_bn254
-    /// (verifies the shrink proof), host-verifying each stage.  This is the
-    /// final inner-chain soundness gate before the (owner-gated) vk_map
-    /// regen.  Returns BEFORE the heavy PLONK/Groth16 artifact build.
+    /// FIX-off MULTI-SHARD FULL inner chain PROVE + host VERIFY through
+    /// compress -> shrink -> wrap_bn254 harness.  Same corpus and env as
+    /// `fixoff_multishard_compress_verify`, but continues past compress into
+    /// shrink (verifies the compress proof) and wrap_bn254 (verifies the
+    /// shrink proof), host-verifying each stage.  This is the inner-chain
+    /// soundness gate before the vk_map regen.  Returns BEFORE the heavy
+    /// PLONK/Groth16 artifact build.
     ///
     /// Set `SHARD_SIZE=<small, e.g. 262144>` to force >=2 core shards.  Run:
     ///   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
@@ -3561,13 +3551,13 @@ pub mod tests {
         )
     }
 
-    /// P2c-for-outer VALUE-INDEPENDENCE GATE: build the gnark outer circuit
-    /// (R1CS constraints) from wrap proof A, then SOLVE it with the witness
-    /// built from a DIFFERENT fresh wrap proof B.  Before the fix the outer
-    /// lift BAKED proof-A's q_at_z / jagged-eval / sumcheck as `builder.constant`,
-    /// so B's witness tripped `assertIsEqual` (the constraint-#6246887 failure).
-    /// After the fix those values are WITNESS inputs, so the A-shaped circuit
-    /// accepts B's witness — the gnark verifier verifies ANY fresh proof.
+    /// VALUE-INDEPENDENCE GATE: build the gnark outer circuit (R1CS
+    /// constraints) from wrap proof A, then SOLVE it with the witness built
+    /// from a DIFFERENT fresh wrap proof B.  If the outer lift BAKED proof-A's
+    /// q_at_z / jagged-eval / sumcheck as `builder.constant`, B's witness would
+    /// trip `assertIsEqual`.  Those values are WITNESS inputs, so the A-shaped
+    /// circuit accepts B's witness — the gnark verifier verifies ANY fresh
+    /// proof.
     ///
     /// Reuses the same shrink proof for both wraps (the grind `find_any` nonce
     /// re-rolls per wrap, so the two wrap proofs carry DIFFERENT q_at_z /
@@ -3691,7 +3681,7 @@ pub mod tests {
         test_e2e_with_deferred_proofs_prover::<DefaultProverComponents>(ZKMProverOpts::default())
     }
 
-    /// Phase-1-perf-comparison fixture: prove_core only (Test::Core) on
+    /// Perf-comparison fixture: prove_core only (Test::Core) on
     /// keccak-sponge ELF.  Multi-shard sha-cluster workload — exercises
     /// the basefold side channel population path in `prove_shard_to_basefold`
     /// without invoking the compose tree.
@@ -3756,7 +3746,7 @@ pub mod tests {
         let (_, pk_d, program, vk) = prover.setup(elf);
         let core_proof = prover.prove_core(&pk_d, program, &ZKMStdin::default(), opts, context)?;
         let machine = prover.core_prover.machine();
-        // G1 Stage D1 (#88): FIX-off-safe — under FIX_CORE_SHAPES=false /
+        // FIX-off-safe: under FIX_CORE_SHAPES=false /
         // FIX_RECURSION_SHAPES=false the prover's `*_shape_config` are `None`,
         // so fall back to local defaults for the ENUMERATION probe (the enum
         // is config-independent for the normalize re-key: it derives classes
@@ -4368,28 +4358,28 @@ pub mod tests {
         let machine = prover.core_prover.machine();
 
         // Enumerated normalize shapes (whole batch, so we can inspect
-        // arity) — what build_compress_vks walks.  After feat/machineshape-
-        // arity-enum, ZKMProofShape::Recursion carries Vec<OrderedShape>
-        // (the batch); generate() emits arity 1..=REDUCE_BATCH_SIZE.
-        // HEIGHT-AGNOSTIC RECURSION (step 5b): with FIX_CORE_SHAPES=false the
-        // prover's `core_shape_config` is None, so build a local default for
-        // the enumeration probe AND the band-cap lift.  The band-cap config is
-        // the SAME `CoreShapeConfig::default()` the prover uses at step 5b to
-        // pad the real jagged commit, so the dummy built at this band-cap must
-        // reproduce the real proof's jagged shape (= the gate).
+        // arity) — what build_compress_vks walks.  `ZKMProofShape::Recursion`
+        // carries Vec<OrderedShape> (the batch); generate() emits arity
+        // 1..=REDUCE_BATCH_SIZE.
+        // With FIX_CORE_SHAPES=false the prover's `core_shape_config` is None,
+        // so build a local default for the enumeration probe AND the band-cap
+        // lift.  The band-cap config is the SAME `CoreShapeConfig::default()`
+        // the prover uses to pad the real jagged commit, so the dummy built at
+        // this band-cap must reproduce the real proof's jagged shape (= the
+        // gate).
         let core_cfg_owned = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg_owned = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
         let core_cfg = prover.core_shape_config.as_ref().unwrap_or(&core_cfg_owned);
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap_or(&rec_cfg_owned);
         let band_cap_cfg = CoreShapeConfig::<KoalaBear>::default();
-        // HEIGHT-AGNOSTIC RECURSION (step 5c): lift a raw per-shard
+        // HEIGHT-AGNOSTIC RECURSION: lift a raw per-shard
         // `sp.shape()` (= the proof's `opened_values` chip-set, present chips at
         // RAW STARK heights) to the FULL canonical CLUSTER shape the FIX-off
         // jagged COMMIT actually packed — the SAME shape the prover computes via
         // `CoreShapeConfig::find_canonical_cluster_shape` at the band-cap install
         // site (chip-SET + per-chip band-cap heights, incl. the missing
         // event-driven chips).  The dummy bundle is packed from THIS shape, so
-        // `vk_dummy == vk_real` (the real proof's normalize VK now equals the
+        // `vk_dummy == vk_real` (the real proof's normalize VK equals the
         // FIX-on canonical cluster VK).  Falls back to the raw shape if no
         // cluster fits (then dummy_faithful would flag the mismatch, not hide it).
         let lift_to_band_cap = |os: &OrderedShape| -> OrderedShape {
@@ -4479,7 +4469,7 @@ pub mod tests {
             let vk_real = prover.compress_prover.setup(&prog_real).1.hash_koalabear();
 
             // The real proof's jagged commit is padded to the per-chip
-            // CLUSTER band-cap (step 5b), so the dummy must be built at the
+            // CLUSTER band-cap, so the dummy must be built at the
             // SAME band-cap shape (NOT the raw sp.shape()) for vk_real ==
             // vk_dummy.  This is the unfakeable gate: an own-height/next_pow2
             // dummy (raw sp.shape()) would FAIL under FIX_CORE_SHAPES=false.
@@ -4849,7 +4839,7 @@ pub mod tests {
         Ok(())
     }
 
-    /// G1 Stage D1b (#88) CRUX (compose): does the COMPOSE vk depend on the
+    /// Compose VK height-sensitivity: does the COMPOSE vk depend on the
     /// child recursion proof's EXACT per-chip heights, or only the chip-SET /
     /// log_dense?  `generate()`'s `compress_child_classes` emits a UNIFORM
     /// child (all recursion chips at one `h`), but a REAL compose child is the
@@ -4905,8 +4895,8 @@ pub mod tests {
         );
     }
 
-    /// G1 Stage D1b (#88) CRUX: does the NORMALIZE vk depend on the EXACT
-    /// per-chip canonical heights, or only the (chip-SET[, log_dense])?
+    /// Normalize VK height-sensitivity: does the NORMALIZE vk depend on the
+    /// EXACT per-chip canonical heights, or only the (chip-SET[, log_dense])?
     /// No proving — builds dummy normalize programs from hardcoded shapes and
     /// compares VKs.  Decides whether the enum can use a coarse cluster-cap
     /// representative (O(N)) or must reproduce the per-chip clamped heights.
@@ -4964,9 +4954,9 @@ pub mod tests {
         );
     }
 
-    /// G1 Stage D1b (#88) localizer: prove fib-1k core (FIX-off) and, for
-    /// each shard, print the REAL canonical-cluster shape ([REALCANON], from
-    /// prove.rs) next to the ORDERED reconstruction
+    /// Localizer: prove fib-1k core (FIX-off) and, for each shard, print the
+    /// REAL canonical-cluster shape ([REALCANON], from prove.rs) next to the
+    /// ORDERED reconstruction
     /// (`find_canonical_cluster_shape_from_ordered(chip_log_heights)`) so the
     /// normalize-lift divergence (CPU shard) can be localized chip-by-chip.
     #[test]
@@ -5175,9 +5165,10 @@ pub mod tests {
         );
 
         // Third leg: the EXACT enumeration path — the allowed-shape combo
-        // (which may carry retired chip names) whose machine-filtered
-        // heights match the real proof.  This is the true map-membership
-        // predicate: vk_enum is what `build_compress_vks` would store.
+        // (which may carry chip names not present in the current machine)
+        // whose machine-filtered heights match the real proof.  This is the
+        // true map-membership predicate: vk_enum is what `build_compress_vks`
+        // would store.
         use zkm_pcs::air::MachineAir;
         let machine_names: std::collections::BTreeSet<String> = prover
             .compress_prover
@@ -6126,11 +6117,11 @@ pub mod tests {
         let mut fib_vk: Option<[u32; 8]> = None;
         for (tag, hs) in &alts {
             let (vk, tv, ld, prog) = build(hs);
-            // After the chip_height_bits witnessing fix the program changes,
-            // so vk no longer matches the OLD baked vk_real; the correct
-            // success criterion is chip_set-DETERMINISM: every same-chip_set
-            // shape (fib + alts) must produce the SAME vk (== fib's vk this
-            // run).  vk_eq_real is kept for reference only.
+            // With chip_height_bits witnessed the program changes, so vk does
+            // not match the OLD baked vk_real; the correct success criterion is
+            // chip_set-DETERMINISM: every same-chip_set shape (fib + alts) must
+            // produce the SAME vk (== fib's vk this run).  vk_eq_real is kept
+            // for reference only.
             eprintln!(
                 "[EQUIV] {tag}: total_values={tv} log_dense={ld} vk_eq_real={} vk_eq_fib={} vk={vk:?}",
                 vk == vk_real,
@@ -6141,12 +6132,12 @@ pub mod tests {
                 fib_vk = Some(vk);
                 continue;
             }
-            // #88 increment-1 GATE 1 (ENUMERABILITY): after cutting the baked
-            // height anchors (the step-(6.6) `row_count_felt == constant(2^log_h)`
-            // pin + `row_counts_usize` threading), every same-chip-set shape MUST
-            // produce the SAME normalize VK regardless of per-chip heights, i.e.
-            // VK = f(chip-set, arity) = f(cluster, arity) ⇒ enumerable.  Enforce
-            // it loudly so a future regression that re-bakes a height fails here.
+            // ENUMERABILITY: with the baked height anchors cut (the
+            // `row_count_felt == constant(2^log_h)` pin + `row_counts_usize`
+            // threading), every same-chip-set shape MUST produce the SAME
+            // normalize VK regardless of per-chip heights, i.e. VK =
+            // f(chip-set, arity) = f(cluster, arity) ⇒ enumerable.  Enforce it
+            // loudly so a future regression that re-bakes a height fails here.
             assert_eq!(
                 Some(vk),
                 fib_vk,
@@ -6155,8 +6146,8 @@ pub mod tests {
                  height anchor was reintroduced",
             );
             // Localize ANY residual per-chip-height dependence: diff fib's
-            // program vs this alt's (same chip_set, different heights).  After
-            // the fix this should show NO diff (vk == fib's vk).
+            // program vs this alt's (same chip_set, different heights).  This
+            // should show NO diff (vk == fib's vk).
             if Some(vk) != fib_vk {
                 let fp = fib_prog.as_ref().unwrap();
                 let rb = bincode::serialize(&**fp).unwrap();
@@ -6341,7 +6332,7 @@ pub mod tests {
         Ok(())
     }
 
-    /// Phase-1-perf-comparison fixture: prove_core only on
+    /// Perf-comparison fixture: prove_core only on
     /// sha2-test ELF (hashes "hello world" literal — needs no stdin).
     /// Third workload to triangulate per-MLE-size cost.
     #[test]
@@ -6361,10 +6352,10 @@ pub mod tests {
         )
     }
 
-    /// Stage 0 (#88 deep VK-identity port) — MEMBERSHIP BASELINE.
+    /// MEMBERSHIP BASELINE.
     ///
-    /// Records the DETERMINISTIC, no-prove baselines the deep VK-identity
-    /// port (Stage 2) must collapse / flip:
+    /// Records the DETERMINISTIC, no-prove baselines for the VK-identity
+    /// work:
     ///
     ///   * the CURRENT height-specific recursion `vk_map` size (the
     ///     baseline to collapse once `VK = f(chip-SET)` instead of
@@ -6379,7 +6370,7 @@ pub mod tests {
     ///     canonical-cluster lift reproduces the real normalize VK) but
     ///     `enum_repr_eq=false` for normalize (the enumerated UNIFORM
     ///     representative does NOT, because the normalize VK is keyed on
-    ///     per-chip heights — the exact D1b gap the hash change closes).
+    ///     per-chip heights — the gap the hash change closes).
     ///
     /// CHEAP (no proving): just loads the baked `vk_map.bin` and runs the
     /// shape enumeration.  Run:

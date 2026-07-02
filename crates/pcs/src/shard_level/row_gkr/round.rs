@@ -400,8 +400,8 @@ fn poly_coefficients_from_evals<EF: Field>(evals: [EF; 4]) -> [EF; 4] {
 
 /// Evaluate a coefficient-form polynomial at a point via Horner's.
 ///
-/// Retained for tests after the refactor moved the production
-/// driver into `crate::shard_level::sumcheck_poly`.
+/// Retained for tests; the production driver lives in
+/// `crate::shard_level::sumcheck_poly`.
 #[allow(dead_code)]
 fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
     let mut acc = EF::ZERO;
@@ -798,11 +798,10 @@ fn reconstruct_round_evals_from_eqroot<EF: Field>(
     ])
 }
 
-/// Dedicated rayon pool — dedicated rayon pool for the GPU first-round marshal.
+/// Dedicated rayon pool for the GPU first-round marshal.
 ///
-/// The marshal's `n_chips`-wide par_iter previously ran on the rayon
-/// global pool, contending with concurrent shards' rayon work on
-/// multi-GPU (project_270_step8_summary.md showed +11s on 2-GPU).
+/// Running the marshal's `n_chips`-wide par_iter on the rayon global
+/// pool contends with concurrent shards' rayon work on multi-GPU.
 /// The dedicated pool caps per-marshal parallelism so M concurrent
 /// shards stay within `M * num_threads` cores rather than oversubscribing
 /// every available core via the global pool.
@@ -813,9 +812,9 @@ fn marshal_thread_pool() -> &'static std::sync::Arc<rayon::ThreadPool> {
         // Pool size policy:
         //   1) Honor ZIREN_GPU_MARSHAL_THREADS if set (operator override).
         //   2) Otherwise auto-size: max(4, available_parallelism / num_gpus).
-        //      This keeps 1-GPU at full host parallelism (matches global
-        //      pool, no regression vs pre-dedicated pool) while capping multi-GPU
-        //      total marshal threads at host parallelism (no oversubscription).
+        //      This keeps 1-GPU at full host parallelism (matches the
+        //      global pool) while capping multi-GPU total marshal threads
+        //      at host parallelism (no oversubscription).
         //   GPU count is read from ZKM_GPU_DEVICES (comma-separated) to
         //   avoid taking a CUDA dep in this stark crate.
         let threads = std::env::var("ZIREN_GPU_MARSHAL_THREADS")
@@ -892,13 +891,12 @@ where
         return None;
     }
 
-    // Lazy lazily drain the ziren-gpu device-first-layer
+    // Lazily drain the ziren-gpu device-first-layer
     // stash and install into TLS for this scope.  Gated by
-    // `ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME=1` (separate from the
+    // `ZIREN_GPU_DEVICE_FIRST_LAYER_CONSUME` (separate from the
     // stash-populating `ZIREN_GPU_DEVICE_FIRST_LAYER` flag) so
-    // operators don't pay the per-shard cudaFree churn until the
-    // device-side first-round kernel ships and actually USES the
-    // handle.  Default OFF preserves stash-only behavior.
+    // operators can opt out of the per-shard cudaFree churn from
+    // draining the handle.
     let _device_first_layer_guard = {
         static CONSUME_GATE: OnceLock<bool> = OnceLock::new();
         let consume = *CONSUME_GATE.get_or_init(|| {
@@ -944,10 +942,7 @@ where
     // per chip writes directly to its slice.  Eliminates per-chip
     // intermediate Vec<Vec> overhead.
     //
-    // ROI probe: time the marshal so we can validate whether the
-    // device-resident dispatch refactor delivers its
-    // estimated savings.  Aggregate across shards to compare against
-    // baseline wall.
+    // Time the marshal (aggregated across shards) to track its cost.
     let _marshal_start = std::time::Instant::now();
     let mut chip_pair_counts: Vec<usize> = Vec::with_capacity(n_chips);
     let mut chip_cell_counts: Vec<usize> = Vec::with_capacity(n_chips);
@@ -973,8 +968,6 @@ where
     }
     // Detect padding chips (real=0) — compute their contribution
     // analytically on host, skip them from GPU upload + kernel work.
-    // Env-gated: default OFF until per-shard validation extends beyond
-    // the first-dispatch COEFFS_MATCH check.
     // Default-on: skip zero-row padding chips from GPU dispatch (bandwidth savings).
     // Opt-out via ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE=1 (or legacy =0/false).
     let skip_padding_enabled = !std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE")
@@ -1323,11 +1316,9 @@ where
         });
         // Threshold gate: skip device dispatch when first_layer.num_row_variables
         // is below `ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS` (default 0 = no
-        // threshold).  Mirrors the V3 LogUp-GKR threshold scaffold (threshold /
-        // commit 52d96570) — per-shard dispatch overhead exceeds GPU speedup
-        // on small layers (~700µs/call vs ~10µs host).  May 20 tendermint
-        // bench: PHASE3_DISPATCH=1 alone is +14% vs OFF, motivating a
-        // size threshold for default-on consideration.
+        // threshold).  Per-shard dispatch overhead exceeds GPU speedup
+        // on small layers (~700µs/call vs ~10µs host), so a size
+        // threshold guards default-on.
         static PHASE3_THRESHOLD: OnceLock<u32> = OnceLock::new();
         let phase3_threshold = *PHASE3_THRESHOLD.get_or_init(|| {
             std::env::var("ZIREN_GPU_PHASE3_DISPATCH_THRESHOLD_VARS")
@@ -2456,22 +2447,13 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             total_vars,
         );
 
-        // first_round scaffold: env-gated GPU first-round
-        // pre-computation hook.  When ZIREN_GPU_FUSED_FIRST_ROUND=1 AND
-        // we're processing a FirstLayer (not an intermediate GKR layer),
-        // attempt to pre-compute the first sumcheck round on GPU using
-        // the SP1-aligned fixAndSumFirstCircuitLayer kernel (validated
-        // byte-equiv in first_round).  This sits BEFORE
-        // `build_chip_state` so we have raw FELT numerators (matching
-        // SP1's layer-0 type signature) — option B2 from
-        // `project_270_caller_migration_scope.md`.
-        //
-        // SCAFFOLD: returns None unconditionally for now.  The body
-        // (extract raw layer data → flatten to SP1 layout → call
-        // kernel via TypeId-gated downcast → store result for
-        // sum_as_poly_in_last_t_variables) is a separate commit.
-        // Wired here so the dispatch point exists for future work
-        // without changing any current behavior.
+        // Env-gated GPU first-round pre-computation hook.  When
+        // ZIREN_GPU_FUSED_FIRST_ROUND=1 AND we're processing a FirstLayer
+        // (not an intermediate GKR layer), pre-compute the first sumcheck
+        // round on GPU using the SP1-aligned fixAndSumFirstCircuitLayer
+        // kernel (byte-equivalent to the host first round).  This sits
+        // BEFORE `build_chip_state` so we have raw FELT numerators
+        // (matching SP1's layer-0 type signature).
         let chip_state: ChipLayerState<EF> = match circuit {
             GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
@@ -3023,11 +3005,11 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 ///
 /// ## Trait-driven sumcheck
 ///
-/// The body now constructs a `LogupRoundPolynomial` and dispatches to
+/// The body constructs a `LogupRoundPolynomial` and dispatches to
 /// the generic [`reduce_sumcheck_to_evaluation`] driver.  The
 /// transcript bytes (round polynomials, openings, final eval) are
-/// byte-identical to the earlier chip-structured prover; only the dispatch
-/// shape changes (manual loop → trait-driven driver).
+/// byte-identical to a manual chip-structured loop; only the dispatch
+/// shape differs (manual loop → trait-driven driver).
 ///
 /// The caller must sample `lambda` via the challenger BEFORE calling
 /// this function — it is passed in explicitly so the caller can use
@@ -3059,8 +3041,7 @@ where
     // Only the first layer of a shard (no handle yet) or a V3 *decline*
     // (e.g. the 28-var first layer above the device-vars cap) falls through
     // to the host pull below, which feeds V2/V1/host.  Pull-on-decline keeps
-    // the fallback correct — vs the earlier eager-pull / shape-only-proxy
-    // that either always copied or panicked on empty cells when V3 declined.
+    // the fallback correct.
     //
     // Dims come from the layer STATE — no pull needed to compute them.
     let env_logup_device_on = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
@@ -3143,7 +3124,7 @@ where
             .expect("Device variant always populates pulled_owner above"),
     };
 
-    // C-full H2 — device-resident per-layer LogUp-GKR sumcheck.
+    // Device-resident per-layer LogUp-GKR sumcheck.
     //
     // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
     // registered via `register_gpu_logup_round_hook` AND `EF` is the
@@ -3160,12 +3141,11 @@ where
     // LogUp-GKR path is the only path).  SP1 reference: sp1-gpu/.../
     // logup_gkr/src/tracegen.rs (no `if env_var` wrapper).
     //
-    // Expected workload impact (per project_379_combined_incompatible.md
-    // and project_validation_may20_findings.md May 20 bench data):
+    // Expected workload impact:
     //   * reth (large shards, total_vars >= 17): -56% wall — best lever
     //   * tendermint (small shards): +40-94% wall — small-layer dispatch
     //     overhead dominates; SP1 amortizes via TaskScope-persisted state
-    //     that Ziren doesn't have yet (filed for future async pipeline port).
+    //     that Ziren doesn't have yet.
     //
     // Opt-OUT with ZIREN_GPU_LOGUP_GKR_DEVICE=0 as kill-switch.
     if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
@@ -3176,23 +3156,17 @@ where
         type Ef4 = p3_field::extension::BinomialExtensionField<
             p3_koala_bear::KoalaBear, 4>;
 
-        // (threshold scaffold): scaffold
-        // for the "per-layer size threshold" fix path proposed by the
-        // comment block above.  Skip the GPU dispatch entirely (including
-        // all of try_logup_round_gpu_v3's host marshalling — flatten_layer,
-        // build_eq_table, vec conversions) when this layer's total_vars is
-        // below the env-configured threshold.  Default = 0 (preserves
-        // pre-scaffold behavior: every dispatch runs, whether the inner
-        // hook will accept or decline based on its own
-        // MIN_DEVICE_TOTAL_VARS=8 gate).
+        // Per-layer size threshold: skip the GPU dispatch entirely
+        // (including all of try_logup_round_gpu_v3's host marshalling —
+        // flatten_layer, build_eq_table, vec conversions) when this
+        // layer's total_vars is below the env-configured threshold.
+        // Default = 0 runs every dispatch, whether the inner hook will
+        // accept or decline based on its own MIN_DEVICE_TOTAL_VARS=8 gate.
         //
         // Set ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS=N (recommend
-        // N in [14,20] per project_v3_regression_analysis.md) to avoid
-        // routing tiny layers through V3.  When the guard fires, control
-        // falls straight to the host trait-driven driver below.
-        //
-        // Validation deferred to next session (bench requires clean GPU
-        // box).  See the memory file for the matrix.
+        // N in [14,20]) to avoid routing tiny layers through V3.  When
+        // the guard fires, control falls straight to the host
+        // trait-driven driver below.
         let v3_threshold_vars: usize = {
             static THRESH: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
             *THRESH.get_or_init(|| {
@@ -3221,7 +3195,7 @@ where
             // hook" via its log presence.
         } else {
 
-        // V2 dispatch: V2 dispatch (preferred when challenger is
+        // V2 dispatch (preferred when challenger is
         // InnerChallenger).  V2 takes &mut InnerChallenger directly —
         // the eventual fused round-finalize kernel will use device-
         // resident DuplexChallenger state to eliminate per-round
@@ -3231,13 +3205,13 @@ where
         if TypeId::of::<EF>() == TypeId::of::<Ef4>()
             && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
         {
-            // step 1: V3 dispatch (preferred over V2 when registered).
+            // V3 dispatch (preferred over V2 when registered).
             // V3 hook accepts an opaque device-layer handle (Option<...>); first
             // call passes None and the hook marshals from `*_flat` host vecs,
             // subsequent calls within the same shard pass the stashed handle
             // from the prior layer's output so flatten_layer is skipped.
-            // Handle threading is via TLS (per project_368_369 design) — this
-            // dispatch site stays signature-compatible with V2.
+            // Handle threading is via TLS — this dispatch site stays
+            // signature-compatible with V2.
             if let (false, Some(gpu_hook_v3)) = (
                 lazy_v3_attempted,
                 crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3(),
@@ -3553,7 +3527,7 @@ where
     })
 }
 
-/// V2 dispatch: V2 dispatch helper.  Same input prep as
+/// V2 dispatch helper.  Same input prep as
 /// `try_logup_round_gpu` but forwards to the V2 hook with a direct
 /// `&mut InnerChallenger` instead of observe/sample closures.
 ///
@@ -3762,26 +3736,18 @@ where
         return None;
     }
 
-    // consult the per-shard LogupTaskScope first.
+    // Consult the per-shard LogupTaskScope first.
     //
-    // When the scope has a pre-materialized device circuit installed
-    // (sub-step 2 will wire the populator), `next_layer()` pops the
-    // bottom-most `DeviceCircuitLayer` and we bridge its handle to the
-    // V3 hook's untyped `Option<DeviceLayerHandle>` parameter — skipping
-    // `flatten_layer` + `cast_vec_ef_to_ef4` for n0/d0/n1/d1 (the
-    // dominant ~500 µs of the per-call host overhead per
-    // `project_383_taskscope_logup.md` accounting table).
+    // When the scope has a pre-materialized device circuit installed,
+    // `next_layer()` pops the bottom-most `DeviceCircuitLayer` and we
+    // bridge its handle to the V3 hook's untyped
+    // `Option<DeviceLayerHandle>` parameter — skipping `flatten_layer`
+    // + `cast_vec_ef_to_ef4` for n0/d0/n1/d1 (the dominant ~500 µs of
+    // the per-call host overhead).
     //
-    // **Today**: the scope's `circuit` field is always `None` (no
-    // `install_circuit` caller until sub-step 2), so this lookup
-    // returns `None` and we fall through to the legacy TLS path
-    // (`take_logup_v3_next_handle`).  Byte-equivalent to pre-
-    // behavior.
-    //
-    // **Sub-step 2 (next session)**: populator installs the circuit
-    // during `build_gkr_circuit`, this lookup becomes the hot path,
-    // and the TLS fallback only fires for the very first V3 call of
-    // a shard whose populator declined (e.g. CUDA error).
+    // The scope's `circuit` field is currently always `None` (no
+    // `install_circuit` caller), so this lookup returns `None` and we
+    // fall through to the TLS path (`take_logup_v3_next_handle`).
     let scope_layer: Option<crate::shard_level::sumcheck_poly::DeviceLayerHandle> = {
         use core::any::TypeId;
         type Ef4Local = p3_field::extension::BinomialExtensionField<
@@ -3804,16 +3770,15 @@ where
         }
     };
 
-    // Pull pull stashed device handle from prior layer's output, if any.
+    // Pull the stashed device handle from prior layer's output, if any.
     // First call in a shard's circuit walk returns None and the hook marshals
     // from `*_flat` host vecs. Subsequent calls reuse device buffers.
     //
     // Resolution order:
-    //   1. scope_layer (from  LogupTaskScope) — preferred when
-    //      sub-step 2 populator is wired and the scope has the
-    //      pre-materialized layer for this round.
-    //   2. legacy TLS handle (`take_logup_v3_next_handle`) — the
-    //      pre- path; still fires when the scope is empty.
+    //   1. scope_layer (from LogupTaskScope) — preferred when the scope
+    //      has the pre-materialized layer for this round.
+    //   2. legacy TLS handle (`take_logup_v3_next_handle`) — fires when
+    //      the scope is empty.
     let input_handle = scope_layer.or_else(
         crate::shard_level::sumcheck_poly::take_logup_v3_next_handle,
     );
@@ -4307,7 +4272,7 @@ mod tests {
     }
 
     // ───────────────────────────────────────────────────────────────
-    // #122 eq-root HALF-trick bit-identity tests.
+    // eq-root HALF-trick bit-identity tests.
     //
     // These assert the SP1 {0, 1/2}+claim+eq_root reconstruction produces
     // the SAME degree-3 round polynomial (bit-for-bit) as the direct

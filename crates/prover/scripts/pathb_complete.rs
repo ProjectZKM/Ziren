@@ -1,7 +1,7 @@
-//! #115 Path B — COMPLETENESS probe (cheap; no heavy proving).
+//! COMPLETENESS probe (cheap; no heavy proving).
 //!
-//! Proves the #112 enumeration gap is closed for a real, arbitrary-height
-//! shard at L = 29 (which the OLD windowed enum, cap 28, missed):
+//! Proves the enumeration gap is closed for a real, arbitrary-height
+//! shard at L = 29 (which a windowed enum with cap 28 misses):
 //!   1. Build the normalize VK for the GREEDY enum shape at (cluster, L=29)
 //!      [= what generate() emits] and for a DIFFERENT height distribution at the
 //!      SAME (cluster, L=29) [= a "real" shard the enum did NOT explicitly

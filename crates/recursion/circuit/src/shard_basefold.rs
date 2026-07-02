@@ -243,17 +243,16 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|interaction| interaction.values.len() + 1)
             .max()
             .unwrap_or(1);
-        // BUG FIX: the host's `first_layer::generate_first_layer`
-        // computes `total_padded_interactions = Σ chip.interactions.next_power_of_two()`
+        // The host's `first_layer::generate_first_layer` computes
+        // `total_padded_interactions = Σ chip.interactions.next_power_of_two()`
         // and uses `log2(total_padded.next_power_of_two())` as the
-        // global `num_interaction_variables`.  This verifier
-        // previously summed RAW per-chip counts and took log2_ceil of
-        // that, which under-counts when chip widths aren't already
-        // powers of two — e.g. chips = [3, 5, 7] gives raw_sum=15
-        // → log2_ceil=4 (16 cols), but host pads to 4+8+8=20
-        // → 32 cols.  The shape mismatch panicked the in-circuit
-        // verifier at `evaluate_mle_ext: left=1024 right=512` for
-        // fibonacci.  Mirror the host's per-chip-padded calculation
+        // global `num_interaction_variables`.  Summing RAW per-chip
+        // counts and taking log2_ceil of that under-counts when chip
+        // widths aren't already powers of two — e.g. chips = [3, 5, 7]
+        // gives raw_sum=15 → log2_ceil=4 (16 cols), but host pads to
+        // 4+8+8=20 → 32 cols, and the shape mismatch fails the
+        // in-circuit verifier at `evaluate_mle_ext: left=1024 right=512`
+        // for fibonacci.  Mirror the host's per-chip-padded calculation
         // exactly to keep `circuit_output.numerator.len()` aligned
         // with the verifier's expected dimension.
         let total_padded_interactions: usize = chips
@@ -290,24 +289,6 @@ impl<P> BasefoldShardVerifier<P> {
 }
 
 impl<P> BasefoldShardVerifier<P> {
-    /// Verify a BaseFold-pipeline shard proof.
-    ///
-    /// Implements the four-phase verification flow described at
-    /// the module level.  Phases 2-4 currently emit
-    /// [`unimplemented!`] panics with explicit pointers to the
-    /// reference source — they require infrastructure (public-values
-    /// constraint folder, full zerocheck verifier, multilinear-PCS
-    /// trait integration) that lands in follow-up iterations.
-    ///
-    /// # Phase 1 — Transcript prologue
-    ///
-    /// Observes:
-    ///   - public values (skip the trailing zero-padding bits)
-    ///   - main trace commitment digest
-    ///   - per-chip count (as a single felt)
-    ///   - per-chip (height_felt, name_bytes) for each chip
-    ///
-    /// This phase is fully implemented in this iteration.
     /// Verify a BaseFold-pipeline shard proof, end-to-end.
     ///
     /// The four-phase verification flow:
@@ -361,11 +342,11 @@ impl<P> BasefoldShardVerifier<P> {
         insertion_points: &[usize],
         challenger: &mut FC,
         num_pv_elts: usize,
-        // #125 INC-4b PER-PROGRAM rev flag: `true` ONLY for the NORMALIZE program
+        // Per-program rev flag: `true` ONLY for the NORMALIZE program
         // (`core_basefold`, verifies the rev core proof); `false` for
-        // COMPRESS / SHRINK / WRAP (verify LEGACY recursion proofs). Keeps the
+        // COMPRESS / SHRINK / WRAP (verify legacy recursion proofs). Keeps the
         // recursion rings' in-circuit verify_zerocheck on the legacy embed-loop
-        // (WRAP R1CS unchanged → gnark ceremony STANDS).
+        // (WRAP R1CS unchanged, so the gnark ceremony stands).
         core_layer_rev: bool,
         eval_public_values_fn: EVPV,
         jagged_evaluator_fn: JE,
@@ -377,10 +358,10 @@ impl<P> BasefoldShardVerifier<P> {
         FC: FieldChallengerVariable<C, C::Bit>
             + crate::challenger::CanObserveVariable<C, HV::DigestVariable>,
         SymbolicExt<C::F, C::EF>: Algebra<C::EF>,
-        // #H (BaseFold-over-BN254 wrap port): the digest hasher (inner
-        // KoalaBearPoseidon2 / outer KoalaBearPoseidon2Outer). The PCS
-        // verifier P opens commitments of type HV::DigestVariable and a
-        // BaseFold proof whose raw digests are HV::Digest.
+        // The digest hasher (inner KoalaBearPoseidon2 / outer
+        // KoalaBearPoseidon2Outer). The PCS verifier P opens commitments
+        // of type HV::DigestVariable and a BaseFold proof whose raw
+        // digests are HV::Digest.
         HV: crate::hash::FieldHasherVariable<C>
             + crate::hash::FieldHasher<p3_koala_bear::KoalaBear>,
         HV::DigestVariable: Copy,
@@ -388,9 +369,9 @@ impl<P> BasefoldShardVerifier<P> {
                 C,
                 FC,
                 Commitment = HV::DigestVariable,
-                // The BaseFold proof's digests are now circuit
+                // The BaseFold proof's digests are circuit
                 // variables (witnessed/const-promoted), matching the verifier's
-                // re-typed `type Proof` (basefold_verifier.rs).
+                // `type Proof` (basefold_verifier.rs).
                 Proof = RecursiveBasefoldProof<
                     Felt<C::F>,
                     Ext<C::F, C::EF>,
@@ -537,35 +518,28 @@ impl<P> BasefoldShardVerifier<P> {
         // from phase 3 as its `point` argument.  Evaluation claims
         // are flattened from the GKR emission: one row per chip,
         // consisting of (main_trace_evaluations ++ preprocessed_trace_evaluations).
-        // Item-12 @z*: source the jagged evaluation claims from the trace@z
+        // Source the jagged evaluation claims from the trace@z
         // openings (opened_values, name-order, MAIN-ONLY) that Phase-3
         // zerocheck consumed and reduced to point z -- NOT the GKR openings
-        // @z_gkr.  The host commits main-only, so the jagged opening now binds
+        // @z_gkr.  The host commits main-only, so the jagged opening binds
         // the COMMITTED main trace at the zerocheck-reduced point z.
-        // ── STAGE 4b FINDING (height-agnostic recursion / FIX_CORE_SHAPES=false) ──
+        // This site sources each chip's RAW residual claim
+        // (`chip.main.local` = raw-bitrev MLE @ z_row, opened over the
+        // un-padded `main_traces`) directly, rather than lifting it to the
+        // BAND-embedded claim a band-padded host reduction would expect
+        // (= band-bitrev MLE @ z_row over the cluster-band-padded
+        // `commit_traces`) via a per-chip scalar
+        // `embed_factor = Π_{log_raw <= k < log_band}(1 - z[k])`.
         //
-        // GOAL was: lift each chip's RAW residual claim (`chip.main.local`, =
-        // raw-bitrev MLE @ z_row, opened over the un-padded `main_traces`) to the
-        // BAND-embedded claim the Stage-4a host reduction expects (= band-bitrev
-        // MLE @ z_row, over the cluster-band-padded `commit_traces`), by a per-chip
-        // scalar `embed_factor = Π_{log_raw <= k < log_band}(1 - z[k])`, so that the
-        // jagged step-4 assert `evaluate_mle_ext(claims, z_col) == claimed_sum`
-        // (recursive_jagged_pcs.rs:234) holds for a FIX-off proof.
-        //
-        // DECISIVE NEGATIVE RESULT (proven, real KoalaBear): NO per-chip scalar can
-        // perform this lift.  The production jagged y formula bit-reverses the trace
-        // row index over the STORED height's `log_h = trailing_zeros(height)`
-        // (jagged_pcs.rs:2251, materialize_dense_jagged jagged.rs:279).  Raw-y uses
-        // `bitrev_log_raw`; band-y uses `bitrev_log_band`.  Because bit-reversal at
-        // different widths is a DATA PERMUTATION (the same trace cell lands on a
-        // different boolean-cube vertex when the cube grows), band-y is NOT raw-y
-        // times any scalar — the per-column band/raw ratio VARIES across the columns
-        // of a single chip.  Gate (host-math proxy, identical field ops to the
-        // in-circuit assert): `zkm_pcs::jagged_sumcheck` test
-        // `stage4b_gate_scalar_embed_cannot_lift_raw_to_band` shows BASELINE (raw, no
-        // embed) FAILS, candidates A/B/C (leading-coords, [raw,band)-coords, and the
-        // inverse) ALL FAIL, while the band claims themselves PASS — and prints the
-        // non-uniform per-column ratios.
+        // No per-chip scalar can perform that lift.  The production jagged y
+        // formula bit-reverses the trace row index over the STORED height's
+        // `log_h = trailing_zeros(height)` (jagged_pcs.rs:2251,
+        // materialize_dense_jagged jagged.rs:279).  Raw-y uses
+        // `bitrev_log_raw`; band-y uses `bitrev_log_band`.  Because
+        // bit-reversal at different widths is a DATA PERMUTATION (the same
+        // trace cell lands on a different boolean-cube vertex when the cube
+        // grows), band-y is NOT raw-y times any scalar — the per-column
+        // band/raw ratio VARIES across the columns of a single chip.
         //
         // Two further structural blockers (independent of the scalar question):
         //   1. `log_band` is NOT in `verify_shard` scope — `chip_height_bits` and
@@ -578,13 +552,13 @@ impl<P> BasefoldShardVerifier<P> {
         //      constant-fold to nothing for log_raw==log_band; the masked
         //      per-coordinate product over max_log_row is emitted unconditionally).
         //
-        // CONCLUSION: Stage 4b is NOT a scalar embed_factor.  The faithful fix is the
-        // deep height-agnostic (hypercube/jagged-native) port — make commit AND
-        // zerocheck open at the SAME (variable) height so the recursion never has to
-        // reconcile two bitrev layouts (mirrors SP1's height-agnostic recursion).
-        // Until then this site keeps sourcing the raw residual UNCHANGED (FIX-on
-        // byte-identical; FIX-off recursion-verify remains gated behind that port +
-        // the chip-set vk_map regen).  See the Stage-4b report.
+        // The faithful alternative is the deep height-agnostic
+        // (hypercube/jagged-native) port — make commit AND zerocheck open at
+        // the SAME (variable) height so the recursion never has to reconcile
+        // two bitrev layouts (mirrors SP1's height-agnostic recursion).
+        // Sourcing the raw residual keeps FIX-on byte-identical; FIX-off
+        // recursion-verify is gated behind that port plus the chip-set
+        // vk_map regen.
         let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = opened_values
             .chips
             .iter()
@@ -613,7 +587,7 @@ impl<P> BasefoldShardVerifier<P> {
         // verify_trusted_evaluations).
         //
         // Skipped when modified == original byte-for-byte per round (the
-        // hash-bind-off A/B path: then this would assert
+        // hash-bind-off path: then this would assert
         // compress([orig,hash]) == orig which is false; the lift sets
         // modified == original ONLY on the outer ring whose re-bind runs in its
         // own hook — guard by env so the inner default path always runs it).
@@ -718,9 +692,9 @@ impl<P> BasefoldShardVerifier<P> {
 /// fixtures, witness-stream sizing, and circuit compilation tests.
 ///
 /// The corresponding host-side BaseFold proof type would be the
-/// concrete-types analog of [`BasefoldShardProofVariable`]; until
-/// that type lands, this helper produces an in-circuit dummy that
-/// the [`BasefoldShardVerifier::verify_shard`] flow can be exercised
+/// concrete-types analog of [`BasefoldShardProofVariable`]; this
+/// helper produces an in-circuit dummy that the
+/// [`BasefoldShardVerifier::verify_shard`] flow can be exercised
 /// against without a real prover run.
 ///
 /// # Reference
@@ -759,9 +733,8 @@ pub struct BasefoldProofShape {
 /// of each MLE) matches a real proof so the recursion compiler's
 /// witness-stream layout work can use this as a placeholder.
 ///
-/// BaseFold-pipeline analog of SP1's legacy FRI-shaped
-/// `dummy_vk_and_shard_proof` (Ziren's equivalent was retired
-/// when the legacy FRI compress path was removed). Used by:
+/// BaseFold-pipeline analog of SP1's FRI-shaped
+/// `dummy_vk_and_shard_proof`. Used by:
 ///
 ///   - Recursion-circuit harness tests that compile the verifier
 ///     against a stable proof-shape fixture.
@@ -841,7 +814,7 @@ where
         let dummy_chip_evaluation = ChipEvaluation::<Ext<C::F, C::EF>> {
             main_trace_evaluations: vec![zero_ext(builder); 1],
             preprocessed_trace_evaluations: None,
-            // #88 Stage 3b: this coarse IR-side shape fixture
+            // This coarse IR-side shape fixture
             // (construction smoke test only — NOT the witness-stream
             // VK-regen dummy, which is `dummy::basefold_shard_proof`)
             // carries None; the production reconstruction reads the

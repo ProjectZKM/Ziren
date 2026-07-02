@@ -11,12 +11,9 @@
 //!     each Ext into its `D` base-field components and feed them
 //!     into the challenger
 //!
-//! The full `verify_logup_gkr` orchestrator (which composes these
-//! helpers with the [`crate::sumcheck::verify_sumcheck`] inner-loop
-//! and a `RecursiveVerifierPublicValuesConstraintFolder` not yet
-//! ported) lands in a subsequent step of the in-circuit BaseFold
-//! verifier rewrite — see [`docs/recursion_verifier_port.md`](../../../../docs/recursion_verifier_port.md)
-//! for the porting plan.
+//! The full `verify_logup_gkr` orchestrator composes these helpers
+//! with the [`crate::sumcheck::verify_sumcheck`] inner loop and the
+//! public-values constraint folder.
 //!
 //! # Reference
 //!
@@ -515,7 +512,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         denominator_eval = d0_sym + (d1_sym - d0_sym) * last_coord_sym;
     }
 
-    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION (#88 Stage 3b) ──
+    // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION ──
     //
     // In-circuit mirror of the host `verify_logup_gkr_host` reconstruction
     // (crates/pcs/src/shard_level/verifier.rs:1628-1881) and SP1's
@@ -800,7 +797,7 @@ mod tests {
         );
     }
 
-    // ── #88 Stage 3b: in-circuit LogUp degree-masked reconstruction ──
+    // ── in-circuit LogUp degree-masked reconstruction tests ──
     //
     // The full `verify_logup_gkr` transcript replay is exercised end-to-end by
     // the `test_e2e_compress_fibonacci` integration test (a real FIX-off proof
@@ -810,7 +807,7 @@ mod tests {
     // (Var=Ext, Expr=SymbolicExt), `full_geq` over the reversed `point_extended`,
     // and the degree-masked `num = real − pad·geq` / `den = real + (1−pad)·geq`
     // — and assert it equals an OFF-CIRCUIT host re-computation of the same
-    // formula (the round-walk eval).  This proves both directions of the Stage-3b
+    // formula (the round-walk eval).  This proves both directions of the
     // soundness contract WITHOUT a full GKR proof:
     //   * honest (degree, *_full) → reconstruction == round-walk eval (accepts);
     //   * forged `degree` (height) → `geq` mask shifts → reconstruction diverges
@@ -886,7 +883,7 @@ mod tests {
 
     /// Build + EXECUTE the in-circuit single-send reconstruction for one chip,
     /// asserting the reconstructed `(num, den)` equal the supplied round-walk
-    /// `(rw_num, rw_den)` constants — the exact Stage-3b height-soundness
+    /// `(rw_num, rw_den)` constants — the exact height-soundness
     /// `assert_ext_eq` (logup_gkr.rs step (8)).  Runs the DSL so the assert
     /// fires at runtime.
     fn run_single_send_reconstruction(

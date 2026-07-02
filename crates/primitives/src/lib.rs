@@ -1126,9 +1126,9 @@ pub fn poseidon2_hash(input: Vec<KoalaBear>) -> [KoalaBear; 8] {
     POSEIDON2_HASHER.hash_iter(input)
 }
 
-/// #88 deep VK-identity port (Stage 1): the canonical single-felt digest of a
+/// The canonical single-felt digest of a
 /// preprocessed chip NAME, folded into `vk.hash` (alongside the preprocessed
-/// width) in place of the dropped per-prep-domain height block.  Used by the
+/// width) in place of the per-prep-domain height block.  Used by the
 /// host (prover/src/types.rs), the host-verifier (verifier/src/stark/mod.rs),
 /// and WITNESSED for the in-circuit fold (recursion witness) — all three MUST
 /// agree, so the encoding lives here.  `poseidon2(name bytes as felts)[0]`.

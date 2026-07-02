@@ -157,7 +157,7 @@ where
                         // `BasefoldShardProof.chip_log_heights`
                         // (see [`dummy_basefold_shard_proof`]).
                         log_degree: 0,
-                        // #88 Stage 3b: SP1-parity FULL-POINT openings.  The
+                        // SP1-parity FULL-POINT openings.  The
                         // VK-enumeration dummy MUST carry these with the SAME
                         // shape the real prover emits (top_level.rs:517-538) so
                         // the recursion AIR / witness layout (and thus the
@@ -186,9 +186,9 @@ where
 }
 
 /// Allocator for [`BasefoldShardProof`] — zero-filled, no real
-/// prove call.  Top-level entry replacing the previous slow
-/// `prove_shard_to_basefold` path inside
-/// [`crate::stark::dummy_basefold_vk_and_shard_proof`].
+/// prove call.  Top-level entry used by
+/// [`crate::stark::dummy_basefold_vk_and_shard_proof`] in place of
+/// the slow `prove_shard_to_basefold` path.
 ///
 /// # Inputs
 ///
@@ -264,9 +264,9 @@ where
                 // quotient[0] carries the big-endian bits
                 // of the chip HEIGHT (2^log_h, the VirtualGeq threshold), MSB at
                 // index 0 — the SAME encoding the real prover emits
-                // (shard_level/prover.rs:486-507).  Zeroing it (the old dummy)
-                // made the recursion program's full_geq emit fewer ops than the
-                // real-input program (the 452B tail residual).
+                // (shard_level/prover.rs:486-507).  Zeroing it would make the
+                // recursion program's full_geq emit fewer ops than the
+                // real-input program.
                 let height: u64 = 1u64 << log_h;
                 let degree_bits: Vec<EF> = (0..bit_len)
                     .map(|i| {
@@ -363,12 +363,12 @@ where
         )
     };
 
-    // ── Height-agnostic groundwork (Stage 3): dummy emits the SAME
-    // numeric row_counts / padding_column_counts the real prover does
-    // for this shape, derived from the SAME jagged packing
-    // (`dummy_jagged_basefold_bundle` builds it via `pack_traces_jagged`
-    // on zero matrices -> exact offsets/column_counts/total_values), so
-    // dummy == real on the new fields by construction.  PURE DATA.
+    // ── Dummy emits the SAME numeric row_counts / padding_column_counts
+    // the real prover does for this shape, derived from the SAME jagged
+    // packing (`dummy_jagged_basefold_bundle` builds it via
+    // `pack_traces_jagged` on zero matrices -> exact
+    // offsets/column_counts/total_values), so dummy == real on these
+    // fields by construction.  PURE DATA.
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
         match &evaluation_proof {
             zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -448,17 +448,17 @@ pub fn dummy_jagged_basefold_bundle(
     type EF = InnerChallenge;
     const D: usize = 4; // InnerChallenge = BinomialExtensionField<InnerVal, 4>
 
-    // ── HEIGHT-AGNOSTIC RECURSION (step 5a): build the JAGGED shape at the
-    // PASSED per-chip heights.  In the VK enumeration these are the cluster
-    // MAXIMAL-shape heights (normalize via `maximal_core_shapes`, compress via
-    // `RecursionShapeConfig::allowed_shapes`), so the dummy is already built at
-    // the per-chip-set cluster-max — the correct, BOUNDED max (caps ≤21, never
-    // overflows num2bits).  Step 4's blanket `1 << max_log_row_count` for EVERY
-    // chip was WRONG: it over-padded the wide COMPRESS chip-set to
-    // total_values > 2^31 → the `num2bits` 31-bit panic in `ZKMProver::new()`.
-    // The real prover pads its jagged commit to the SAME cluster-max via
-    // `CoreShapeConfig::find_core_shape` (step 5b), so vk_real == vk_dummy with
-    // the core STARK still proving at the ACTUAL heights.
+    // ── Build the JAGGED shape at the PASSED per-chip heights.  In the VK
+    // enumeration these are the cluster MAXIMAL-shape heights (normalize via
+    // `maximal_core_shapes`, compress via `RecursionShapeConfig::allowed_shapes`),
+    // so the dummy is already built at the per-chip-set cluster-max — the
+    // correct, BOUNDED max (caps ≤21, never overflows num2bits).  A blanket
+    // `1 << max_log_row_count` for EVERY chip would be WRONG: it would over-pad
+    // the wide COMPRESS chip-set to total_values > 2^31 → the `num2bits` 31-bit
+    // panic in `ZKMProver::new()`.  The real prover pads its jagged commit to
+    // the SAME cluster-max via `CoreShapeConfig::find_core_shape`, so
+    // vk_real == vk_dummy with the core STARK still proving at the ACTUAL
+    // heights.
     //
     // pack_traces_jagged uses only height/width, so zero data gives the exact
     // offsets / total_values / log_dense_size / column_counts.
@@ -477,7 +477,7 @@ pub fn dummy_jagged_basefold_bundle(
         .collect();
     let packing = pack_traces_jagged::<F>(&traces);
     let total_values = packing.total_values;
-    // ── RECURSION-LAYER AREA PIN (#88/#82 Stage 2 DUMMY MIRROR) ──
+    // ── RECURSION-LAYER AREA PIN (DUMMY MIRROR) ──
     // Mirror EXACTLY the host pin in
     // `zkm_pcs::jagged_pcs::precompute_jagged_basefold_commit_generic`:
     // when the recursion (`compress`) prover has installed the area pin on
@@ -518,8 +518,8 @@ pub fn dummy_jagged_basefold_bundle(
     // batch width all key off log_stacking_height (the prover's clamped value),
     // NOT max_log_row_count.  pick_log_stacking_height = min(21, log2(np2(total))-1).
     //
-    // ★ HEIGHT-AGNOSTIC-RECURSION (step 2b): this CLAMP is THE source of the
-    // recursion program's clamp-dependence — `log_stacking` (hence the
+    // This CLAMP is THE source of the recursion program's clamp-dependence
+    // — `log_stacking` (hence the
     // BaseFold round count = `fri_commitments` len, the query/Merkle path
     // lengths, and `num_stripes`) varies with `total_values`, which varies
     // with chip HEIGHTS for a FIXED chip-set.  The dummy faithfully mirrors
@@ -534,14 +534,14 @@ pub fn dummy_jagged_basefold_bundle(
     let num_stripes = 1usize << l.saturating_sub(log_stacking); // batch_evaluations width
     let inner_fri = lb_fri_config();
     let num_queries = inner_fri.num_queries;
-    // #57: the component-opening Merkle path length keys off the codeword
+    // The component-opening Merkle path length keys off the codeword
     // height = 2^(log_stacking + log_blowup).  At the SP1-faithful inner
-    // default this is blowup=2 (was 1), so the dummy path length must track
+    // default this is blowup=2, so the dummy path length must track
     // the config, not a hardcoded `+1`.
     let inner_log_blowup = inner_fri.log_blowup();
     // jagged-eval sub-sumcheck dimension `jagged_n = 2*(log_m+1)`.
     //
-    // RECURSION-LAYER AREA PIN (#88/#82 Stage 2): when the area pin is active,
+    // RECURSION-LAYER AREA PIN: when the area pin is active,
     // the real prover's `prove_jagged_evaluation` runs the jagged-eval over the
     // PINNED dense (it sets `half = z_trace.len() + 1` where `z_trace` is the
     // reduction's eval_point of the pinned `2^log_dense_size` dense), so
@@ -576,16 +576,16 @@ pub fn dummy_jagged_basefold_bundle(
     // codeword once per round; commit-phase round `r` (0-indexed) opens at a
     // codeword of height 2^(num_variables + log_blowup - 1 - r), so its Merkle
     // path length is `num_variables + log_blowup - 1 - r` where
-    // `num_variables == log_stacking`.  The previous `log_stacking - r` assumed
-    // `log_blowup == 1`; the SP1-faithful inner default is `log_blowup == 2`
-    // (#57 soundness), so each path was ONE level too short.  In-circuit the
-    // path Select-loop count = `leaf.proof.len()`
+    // `num_variables == log_stacking`.  A `log_stacking - r` length would
+    // assume `log_blowup == 1`; the SP1-faithful inner default is
+    // `log_blowup == 2`, so such a path would be ONE level too short.
+    // In-circuit the path Select-loop count = `leaf.proof.len()`
     // (basefold_verifier.rs:555-561 via the lift's
-    // `merkle_path_digests = leaf.proof.clone()`), so this under-count emitted
-    // `log_stacking * (log_blowup-1) * num_queries` fewer Merkle Select+Poseidon2
-    // ops than the real program (measured 46872-instr deficit at log_blowup=2,
-    // log_stacking=21, num_queries=124 → the normalize VK diverged from the real
-    // proof's VK).  Tracking `inner_log_blowup` makes the dummy faithful.
+    // `merkle_path_digests = leaf.proof.clone()`), so an under-count would
+    // emit `log_stacking * (log_blowup-1) * num_queries` fewer Merkle
+    // Select+Poseidon2 ops than the real program, diverging the normalize VK
+    // from the real proof's VK.  Tracking `inner_log_blowup` keeps the dummy
+    // faithful.
     let query_phase_openings_and_proofs: Vec<MerkleOpening<F, JaggedMmcs>> = (0..log_stacking)
         .map(|r| {
             let path_len = log_stacking + inner_log_blowup - 1 - r;
@@ -598,12 +598,12 @@ pub fn dummy_jagged_basefold_bundle(
             MerkleOpening { leaves }
         })
         .collect();
-    // Component openings are now WITNESSED + consumed (the
+    // Component openings are WITNESSED + consumed (the
     // bound initial_eval + the component Merkle binding), so the dummy
     // must carry the shape-correct zero-filled structure: ONE round (the
     // single stacked commit), `num_queries` leaves, each leaf = one
     // matrix row of `num_stripes` values with a full-height Merkle path
-    // (codeword height = 2^(log_stacking + log_blowup); #57 default
+    // (codeword height = 2^(log_stacking + log_blowup); default
     // log_blowup = 2).
     let component_openings_dummy: Vec<MerkleOpening<F, JaggedMmcs>> = vec![MerkleOpening {
         leaves: (0..num_queries)

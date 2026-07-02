@@ -93,7 +93,7 @@ pub struct JaggedPacking<F> {
     /// Per-chip metadata (row count, column count).
     pub chip_infos: Vec<JaggedChipInfo>,
     /// Cumulative offsets: `offsets[k]` is the starting index of the
-    /// k-th column in `dense_values`.  For SP1 parity (May 28 2026):
+    /// k-th column in `dense_values`.  For SP1 parity:
     /// the slice carries `total_cols + 1` entries with
     /// the final sentinel `offsets[total_cols] = total_values`,
     /// matching SP1's `JaggedLittlePolynomialProverParams::col_prefix_sums_usize`
@@ -146,11 +146,11 @@ pub fn compute_jagged_metadata<F: Field>(
 /// but driven by an explicit per-chip `(name, height, width)` list instead
 /// of materialized `RowMajorMatrix` traces.
 ///
-/// Commit-traces D2H removal: the device commit hook resolves a
+/// The device commit hook resolves a
 /// device-resident chip's dims from the per-shard provider (the on-device
 /// `ColMajorMatrixDevice` carries its height/width) and packs its cells
 /// D2D — so it never needs the host trace values that the eager
-/// `commit_traces` D2H used to supply purely for these dims.
+/// `commit_traces` D2H would supply purely for these dims.
 pub fn compute_jagged_metadata_from_dims<F: Field>(
     dims: &[(String, usize, usize)],
 ) -> JaggedPacking<F> {
@@ -268,7 +268,7 @@ pub fn materialize_dense_jagged<F: Field>(
         // reduction's column value equals the zerocheck's raw opening exactly
         // (band_y == raw_y).  See `stage5_gate_lowplace_band_equals_raw`.
         let raw_logs = crate::shard_level::band_cap::current_raw_log_heights();
-        // STAGE 2.5 (#88): the per-shard rev(zeta) orientation, the single
+        // The per-shard rev(zeta) orientation, the single
         // source of truth installed by `BandCapGuard` for the whole commit+open
         // scope.  `Some(true)` => commit the dense column in NATURAL row order
         // (matching the rev(zeta) zerocheck residual + the natural-indexed
@@ -316,7 +316,7 @@ pub fn materialize_dense_jagged<F: Field>(
                         Some(raw_log) => {
                             // LOW-PLACEMENT: write only the low 2^raw_log data
                             // rows; the high rows of the band slot stay zero
-                            // (pre-init).  Under rev(zeta) (Stage 2.5) place the
+                            // (pre-init).  Under rev(zeta) place the
                             // data in NATURAL row order (`dst[r] = trace[r]`) so
                             // the committed column value equals the rev(zeta)
                             // zerocheck residual (band_y == raw_y, natural); else
@@ -336,7 +336,7 @@ pub fn materialize_dense_jagged<F: Field>(
                         }
                         None => {
                             // Own-height packing (FIX-on / recursion / shrink /
-                            // wrap).  Under rev(zeta) (Stage 2.5) NATURAL row
+                            // wrap).  Under rev(zeta) NATURAL row
                             // order (`dst[row] = trace[row]`); else LEGACY
                             // bit-reversed (byte-identical).
                             for row in 0..height {
@@ -444,9 +444,9 @@ pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
 /// Derive the witnessed per-chip **row counts** (column heights) and the
 /// **padding-column count** from a single round's jagged packing.
 ///
-/// Height-agnostic jagged-verifier groundwork (Stages 1-3): SP1 witnesses
+/// Height-agnostic jagged-verifier support: SP1 witnesses
 /// `(row_count, column_count)` pairs plus a `padding_column_count` per round in
-/// the proof; Ziren today derives the same quantities from `offsets` /
+/// the proof; Ziren derives the same quantities from `offsets` /
 /// `column_counts` / `total_values` at lift time.  This helper hoists that
 /// derivation into one place so the real prover, the dummy, and the recursion
 /// lift all agree on the numbers (dummy == real on the new fields by
@@ -630,7 +630,7 @@ pub fn fold_tables_local<F: Field>(
 
 /// Phase 2: Pack folded per-table polynomials into a jagged dense vector.
 ///
-/// Each table is now a single-column polynomial of height `table.height`.
+/// Each table is a single-column polynomial of height `table.height`.
 /// These are concatenated into one dense vector (with padding to power of 2)
 /// for a single WHIR commit.
 ///
@@ -874,7 +874,7 @@ mod tests {
     type F = KoalaBear;
 
     /// Band-5 FIX-off compress chip set (name-sorted), with the PADDED band
-    /// log-heights from `crates/recursion/core/src/shape.rs` (the #88/#79
+    /// log-heights from `crates/recursion/core/src/shape.rs` (the
     /// catch-all band) and the compile-time `Cols<u8>` widths from the plan.
     /// `(width, log_height)` in alphabetical name order.
     fn band5_compress_chips() -> Vec<(usize, u32)> {
@@ -1012,7 +1012,7 @@ mod tests {
         println!("  padded size: {}", stats.padded_size);
         println!("  padding ratio: {:.2}x", stats.padding_ratio);
 
-        // Fan-in is now 3 (tables), not 271 (columns).
+        // Fan-in is 3 (tables), not 271 (columns).
         assert_eq!(stats.total_columns, 3);
         // Total values = 1024 + 256 + 16 = 1296 (not 1024*70 + 256*31 + 16*170 = 82,616)
         assert_eq!(stats.total_real_values, 1024 + 256 + 16);

@@ -19,15 +19,15 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// dispatch path. `device_traces` is per-shard per-worker and never
 /// shared across pool workers.
 ///
-/// `precomputed_commit` (Option B single-main-commit flow): when
+/// `precomputed_commit` (single-main-commit flow): when
 /// `Some`, the BaseFold jagged-PCS commit was produced up-front by
 /// the orchestrator and its 8-felt digest IS `main_commitment`.  The
 /// jagged-PCS opening body skips its own commit step and the in-band
 /// commit observe; the verifier counterpart
 /// (`verify_jagged_basefold_no_observe`) matches.  When `None`, the
-/// legacy two-commit flow runs (FRI commit upstream, jagged-PCS
+/// two-commit flow runs (FRI commit upstream, jagged-PCS
 /// re-commits during opening).
-/// Option B auto-precompute helper (GPU pipeline path).
+/// Auto-precompute helper (GPU pipeline path).
 ///
 /// When `precomputed_commit` is already `Some` (the host CPU path,
 /// which precomputes in `commit_basefold_path`) or the config is not
@@ -69,7 +69,7 @@ where
 
     // Host path already supplied a precompute, or this config does not prove
     // via BaseFold (`use_basefold() == false`, e.g. the OuterSC wrap on FRI):
-    // pass through untouched. BaseFold-over-BN254 wrap port: the dispatch
+    // pass through untouched. The dispatch
     // boolean is the `BasefoldRing` trait; the Val/Challenge/Challenger
     // identities (which keep the KoalaBear transmutes below sound) are then
     // asserted in debug builds.
@@ -140,7 +140,7 @@ where
     let raw_root_inner: [InnerVal; 8] =
         crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
-    // ── SP1-faithful jagged HASH-BIND (#88) ──────────────────────────────
+    // ── SP1-faithful jagged HASH-BIND ──────────────────────────────
     // Tie the per-chip (row_count, column_count) geometry to the commitment:
     //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
     // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
@@ -228,7 +228,7 @@ where
                 Challenge<SC>,
             >,
         >
-        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // The K = F (base-field first round) folder instance,
         // required by the pure-host zerocheck round-0 path.
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
@@ -240,7 +240,7 @@ where
         > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -266,14 +266,14 @@ where
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// STAGE-B b2 (#118): the jagged trusted-evaluations open as a static-dispatch
+// The jagged trusted-evaluations open as a static-dispatch
 // PRODUCER seam.
 //
-// `prove_shard_to_basefold_with_loader` used to hard-call the free-fn
-// `prove_trusted_evaluations` at Stage 4.  b3 needs a device-resident prover
-// (`StarkGpuProver`) to OVERRIDE that open (its device hooks #2/#3 become an
-// inherent `MachineProver::prove_trusted_evaluations`), so the loader body now
-// calls `D::produce` instead of the free-fn directly.  Two producers exist:
+// `prove_shard_to_basefold_with_loader` calls `D::produce` rather than the
+// free-fn `prove_trusted_evaluations` at Stage 4, so a device-resident prover
+// (`StarkGpuProver`) can OVERRIDE that open (its device hooks become an
+// inherent `MachineProver::prove_trusted_evaluations`); the free-fn path calls
+// the free-fn directly.  Two producers exist:
 //   * `FreeFnJaggedEval` — the free-fn path (ziren-gpu + the host free-fn
 //     callers: `prover/lib.rs` shrink, `basefold_programs.rs` dummy).  Calls
 //     the free-fn `prove_trusted_evaluations` verbatim → BYTE-IDENTICAL.
@@ -282,10 +282,10 @@ where
 //     picked up.  On `CpuProver` the trait method delegates to the same
 //     free-fn → BYTE-IDENTICAL.
 // The producer indirection is a zero-cost generic: with `FreeFnJaggedEval` it
-// monomorphizes to the exact pre-b2 call.
+// monomorphizes to the exact direct free-fn call.
 // ───────────────────────────────────────────────────────────────────────
 
-/// The jagged trusted-evaluations open producer — the b3 static-dispatch
+/// The jagged trusted-evaluations open producer — the static-dispatch
 /// override point (see the block comment above).  `produce` mirrors the
 /// [`prove_trusted_evaluations`] free-fn signature exactly.
 pub trait JaggedEvalProducer<SC, A>
@@ -311,7 +311,7 @@ where
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
 
-/// Free-fn producer: the pre-b2 host path (ziren-gpu + the host free-fn
+/// Free-fn producer: the host path (ziren-gpu + the host free-fn
 /// callers).  Byte-identical to calling [`prove_trusted_evaluations`] directly.
 pub struct FreeFnJaggedEval;
 
@@ -358,7 +358,7 @@ where
 
 /// Prover-routed producer: dispatches the open through
 /// `prover.prove_trusted_evaluations` so a [`crate::prover::MachineProver`]
-/// override (b3 `StarkGpuProver`, reading its own provider) is picked up.  On
+/// override (`StarkGpuProver`, reading its own provider) is picked up.  On
 /// `CpuProver` the trait method delegates to the free-fn → byte-identical.
 pub struct ProverJaggedEval<'a, P>(pub &'a P);
 
@@ -405,9 +405,9 @@ where
 }
 
 /// Loader-based entry point (free-fn form for ziren-gpu + the host free-fn
-/// callers).  STAGE-B b2: thin shim over
+/// callers).  Thin shim over
 /// [`prove_shard_to_basefold_with_loader_dispatch`] with the free-fn jagged
-/// open producer — signature + bytes IDENTICAL to the pre-b2 body.
+/// open producer — signature + bytes IDENTICAL to a direct-dispatch call.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     chips: &[&Chip<Val<SC>, A>],
@@ -437,7 +437,7 @@ where
                 Challenge<SC>,
             >,
         >
-        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // The K = F (base-field first round) folder instance,
         // required by the pure-host zerocheck round-0 path.
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
@@ -450,7 +450,7 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     L: MainTraceLoader<Val<SC>>,
-    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -476,7 +476,7 @@ where
 }
 
 /// Loader-based entry point, generic over the jagged trusted-evaluations open
-/// [`JaggedEvalProducer`] (STAGE-B b2 seam — see the block comment above).
+/// [`JaggedEvalProducer`] (see the block comment above).
 /// Materializes all traces upfront via `MainTraceLoader::materialize_all`
 /// because every downstream phase (cumulative sums, batched pre-pass,
 /// jagged-PCS clone) reads every chip's host trace today.
@@ -496,7 +496,7 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    // STAGE-B b2: the jagged trusted-evaluations open producer.  Free-fn path
+    // The jagged trusted-evaluations open producer.  Free-fn path
     // passes `&FreeFnJaggedEval`; a prover routes `&ProverJaggedEval(self)`.
     jagged_eval_producer: &D,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
@@ -512,7 +512,7 @@ where
                 Challenge<SC>,
             >,
         >
-        // #125 INC-4a: the K = F (base-field first round) folder instance,
+        // The K = F (base-field first round) folder instance,
         // required by the pure-host zerocheck round-0 path.
         + for<'b> Air<
             crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
@@ -526,7 +526,7 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
     L: MainTraceLoader<Val<SC>>,
     D: JaggedEvalProducer<SC, A>,
-    // STAGE-B b1: threaded through to `prove_trusted_evaluations`'s static
+    // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
@@ -542,8 +542,8 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    // #127: `main_traces` is read-only for the rest of this scope (#129
-    // removed the last mutation — the zeropad zeroing).  On the host path the
+    // `main_traces` is read-only for the rest of this scope (no mutation
+    // remains — the zeropad zeroing was removed).  On the host path the
     // `EagerHostLoader` already holds the traces, so borrow them instead of
     // cloning via `materialize_all` (a pure per-chip `values.clone()`).  The
     // device `LazyDeviceLoader` returns `None` (it pulls each chip on demand)
@@ -558,11 +558,11 @@ where
         }
     };
 
-    // Option B auto-precompute (GPU pipeline path). The host CPU prover
+    // Auto-precompute (GPU pipeline path). The host CPU prover
     // supplies `Some(precomputed)` from `commit_basefold_path` / `open()`;
     // the GPU pipeline cannot (it has no host-side commit step) and passes
     // `None`.  Because the verifier ALWAYS uses
-    // `verify_jagged_basefold_no_observe` (Option B), a `None` here would
+    // `verify_jagged_basefold_no_observe`, a `None` here would
     // make the prover observe the BaseFold commit in-band while the
     // verifier skips it → transcript desync.  So when no precomputed
     // commit was supplied and this is the KoalaBear jagged-PCS config, run
@@ -580,7 +580,7 @@ where
     // chips' traces from the provider into a commit-only trace set; the
     // empty `main_traces` continue to drive the device GKR/zerocheck paths.
     // Host-path behaviour is unchanged (no empty+provider chips there).
-    // Commit-traces D2H removal: on the GPU happy path the dense
+    // Commit-traces D2H skip: on the GPU happy path the dense
     // commit is built by the device hook (resident chips D2D, dims
     // resolved from the provider) and the jagged reduction consumes the
     // registered device dense handle — so the per-chip FULL-trace D2H here
@@ -673,7 +673,7 @@ where
             t.clone()
         })
         .collect();
-    // Commit-traces D2H removal: capture the cumulative-sum TAILS
+    // Commit-traces D2H skip: capture the cumulative-sum TAILS
     // (last 14 row-major values) for device-resident chips via a
     // ~56-byte provider gather, EARLY — before the zerocheck prepare's
     // release_by_name (drain-on-lookup) can drop the provider entry.
@@ -697,7 +697,7 @@ where
             )
         })
         .collect();
-    // -- HEIGHT-AGNOSTIC RECURSION (step 5b): pad the per-chip COMMIT
+    // -- HEIGHT-AGNOSTIC RECURSION: pad the per-chip COMMIT
     // traces UP to the per-shard CLUSTER band-cap before packing.  The
     // band-cap (chip name -> log_height) is installed by the CORE prove
     // site (`zkm_core_machine::utils::prove::prove_with_context` phase-2
@@ -716,14 +716,14 @@ where
     // device-side); the GPU commit-dense hook owns their packing, so the
     // band-cap device pad is a separate (out-of-scope) GPU concern -- this
     // host pad is the CPU `FIX_CORE_SHAPES=false` correctness path.
-    // OPTION-A EXPERIMENT (ZIREN_FIXOFF_NATURAL_COMMIT): when set, do NOT
+    // NATURAL-COMMIT (ZIREN_FIXOFF_NATURAL_COMMIT): when set, do NOT
     // band-pad the PRESENT chips' commit traces — keep them at their NATURAL
     // raw height so the host packing offsets == the raw degree heights == the
     // in-circuit RAW col_prefix_sums reconstruction.  Missing chips are still
     // injected (in commit_basefold_path) at band height to preserve the
     // chip-SET / VK.
     //
-    // PRODUCTION (#88 Option A): natural-height commit is now the DEFAULT for
+    // Natural-height commit is the DEFAULT for
     // FIX-off (the verifying + enumerable path the SP1 hash-bind makes sound) —
     // the band cap is only ever installed under FIX-off recursion, so
     // `current_band_cap().is_some()` IS the FIX-off predicate (no separate
@@ -777,7 +777,7 @@ where
             _device_traces,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
-    // #127: `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed
+    // `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed
     // from the loader above), so no reborrow is needed here.
 
     let n_chips = chips.len();
@@ -871,7 +871,7 @@ where
             max_log_row_count,
             challenger,
             _device_traces,
-            // #125 INC-2: the shared per-chip trace-MLE built once at the
+            // The shared per-chip trace-MLE built once at the
             // loader-construction seam (`with_padded`); `None` for loaders
             // that do not carry one (device path falls back to on-the-fly).
             main_trace_loader.padded_slice(),
@@ -900,7 +900,7 @@ where
             max_log_row_count,
             challenger,
             _device_traces,
-            // #125 INC-3: the shared per-chip trace-MLE built once at the
+            // The shared per-chip trace-MLE built once at the
             // loader-construction seam (`with_padded`); `None` for loaders
             // that do not carry one (device path falls back to on-the-fly).
             main_trace_loader.padded_slice(),
@@ -965,8 +965,7 @@ where
     // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
     // natural-row conventions diverge.
     let residual_y: Option<Vec<Vec<Challenge<SC>>>> = {
-        // HEIGHT-AGNOSTIC RECURSION (LOW-PLACEMENT commit — supersedes the
-        // Stage-4a band-y recompute, which is now unnecessary).
+        // HEIGHT-AGNOSTIC RECURSION (LOW-PLACEMENT commit).
         //
         // The band-cap path commits at the per-chip-set CLUSTER BAND heights
         // (so the recursion VK is keyed by the chip-SET), but the LOW-PLACEMENT
@@ -981,24 +980,23 @@ where
         // (the high zero rows contribute nothing).  So the fast raw residual
         // (`trace_at_z`) IS reduction-consistent — the round-0 identity
         // `p0+p1 == Σ z_col·y` holds — and we DO NOT decline it under a
-        // band-cap.  Stage 4b proved no scalar embed_factor could reconcile
+        // band-cap.  No scalar embed_factor can reconcile
         // the OLD band layout (bitrev over log_band permutes the data); the
         // low-placement layout removes the mismatch at the source, so the
         // recursion verifier needs no embed_factor at all.
         //
         // Kill-switch unchanged: ZIREN_ZC_RESIDUAL_Y=0 → legacy host recompute
         // (which, with low-placement materialize, also yields raw_y).
-        // ── STAGE 2 (#88): rev(zeta) convention gate (default OFF) ──────────
+        // ── rev(zeta) convention gate ──────────
         // Under the rev(zeta) convention the zerocheck residual (`trace_at_z`)
         // is in a DIFFERENT orientation than the legacy bitrev opening, so it
         // must NOT be reused as the jagged `y_per_chip`; force a fresh recompute
         // (the residual fast path is a legacy-convention-only optimization).
-        // Same env gate + shard-uniform signal the zerocheck uses (see
+        // Shard-uniform signal the zerocheck uses (see
         // zerocheck_prover.rs).  NOTE: even fresh recompute does not reconcile
         // the FIX-off band-cap LOW-PLACEMENT commit under rev (documented
-        // there); the gate is OFF by default so the legacy fast path + GREEN
-        // FIX-off baseline are preserved.
-        // STAGE 2.5 (#88) LOCKSTEP: read the per-shard rev(zeta) decision from
+        // there); the legacy fast path + FIX-off baseline are preserved.
+        // LOCKSTEP: read the per-shard rev(zeta) decision from
         // the SAME single source of truth (`current_use_rev`) the commit + the
         // zerocheck use, re-applying the local device + full-openings guard.
         // Under rev the residual is in a different orientation than the legacy
@@ -1011,14 +1009,14 @@ where
                 .chip_openings
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
-        // #125 INC-4b: orientation driven solely by the core-scoped
-        // `current_use_rev()` carrier; the rev-zeta env is RETIRED.
+        // Orientation driven solely by the core-scoped
+        // `current_use_rev()` carrier.
         // `None` (every recursion / shrink / wrap prove) => LEGACY (byte-identical).
-        // #118 DEVICE-REV: drop the `_device_traces.is_none()` guard so the GPU CORE
-        // path (device provider present) also declines the zerocheck-residual reuse
-        // under rev — forcing the fresh jagged step-3 recompute (natural rows under
-        // rev), matching the host CPU rev path. Core-scoped: only the CORE prover
-        // installs the carrier, so compress/shrink/wrap stay legacy.
+        // DEVICE-REV: the GPU CORE path (device provider present) also declines
+        // the zerocheck-residual reuse under rev, forcing the fresh jagged
+        // step-3 recompute (natural rows under rev), matching the host CPU rev
+        // path. Core-scoped: only the CORE prover installs the carrier, so
+        // compress/shrink/wrap stay legacy.
         let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
             Some(carrier) => carrier && full_openings_ok,
             None => false,
@@ -1095,7 +1093,7 @@ where
     let _t_phase4 = std::time::Instant::now();
     let evaluation_proof = {
         let _span = tracing::info_span!("phase_jagged_pcs").entered();
-        // STAGE-B b2: dispatch the jagged open through the producer (free-fn
+        // Dispatch the jagged open through the producer (free-fn
         // path == `FreeFnJaggedEval` → byte-identical; a prover routes through
         // its own `prove_trusted_evaluations`).
         jagged_eval_producer.produce(
@@ -1104,7 +1102,7 @@ where
             // materialized) — MUST be the same traces the precompute
             // committed, or the openings won't bind.
             commit_traces,
-            // ITEM-12: open jagged at the zerocheck-reduced z*.
+            // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
             _device_traces,
@@ -1248,7 +1246,7 @@ where
         // TAIL (chip_cum_tails) — same 14 values, no dependence on the
         // full materialize.  Validated identical via the bf-digest
         // cumulative_sums section canary.
-        // HEIGHT-AGNOSTIC (low-placement) FIX: read RAW `main_traces`, NOT
+        // HEIGHT-AGNOSTIC (low-placement): read RAW `main_traces`, NOT
         // `commit_traces`.  Under the band-cap/low-placement commit,
         // `commit_traces` are padded to the cluster band height with ZERO high
         // rows; computing the per-chip global cumulative sum over those zero
@@ -1280,15 +1278,15 @@ where
         })
         .collect();
 
-    // ── Height-agnostic jagged-verifier groundwork (Stage 2) ──
+    // ── Height-agnostic jagged-verifier groundwork ──
     // Emit the witnessed per-round per-chip row_counts + the per-round
     // padding_column_count, derived from the host jagged packing the
     // commit already produced.  Ziren's single-stacked main commit is
     // exactly ONE round, so both outer vecs have length 1 (or 0 when
     // there is no host bundle to derive from -- GPU `Bytes` / `Empty`
     // paths, where the lift derives the same values from the witnessed
-    // packing).  PURE DATA: nothing branches on these (Stage 4 wires
-    // the verifier checks).
+    // packing).  PURE DATA: nothing branches on these (the verifier
+    // checks read them separately).
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
         match &evaluation_proof {
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -1302,7 +1300,7 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
-    // SP1-faithful jagged hash-bind (#88): carry the RAW BaseFold root (the
+    // SP1-faithful jagged hash-bind: carry the RAW BaseFold root (the
     // value the BaseFold opening binds against) so the recursion lift can
     // populate `original_commitments` from it while the FS-observed
     // `main_commitment` is the MODIFIED digest.  Recover the raw root from the
@@ -1351,7 +1349,7 @@ where
 /// jagged-PCS transcript stays bound to the shard's outer state.
 ///
 /// When `precomputed_commit` is `Some`, the BaseFold commit was
-/// produced up-front by the orchestrator (Option B single-main-commit
+/// produced up-front by the orchestrator (single-main-commit
 /// flow); steps (1)+(2) of the jagged-PCS pipeline are skipped and
 /// the in-band commit observe is suppressed — the commit's 8-felt
 /// digest was already observed in the transcript prologue as
@@ -1373,9 +1371,9 @@ where
 /// opening `:412` — over the SAME `opened_values` Vec zerocheck constrains, so
 /// the trusted evals cannot diverge from the committed trace.
 ///
-/// STAGE-B b2 (#118): `pub` so the `MachineProver::prove_trusted_evaluations`
+/// `pub` so the `MachineProver::prove_trusted_evaluations`
 /// default (CpuProver) + the [`FreeFnJaggedEval`] producer can delegate to this
-/// host body.  b3's `StarkGpuProver` override lives in ziren-gpu and reads its
+/// host body.  The `StarkGpuProver` override lives in ziren-gpu and reads its
 /// own provider; this stays the CPU body.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -1399,7 +1397,7 @@ where
     A: MachineAir<Val<SC>>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
-    // STAGE-B b1: `SC::Challenger` drives the generic jagged BaseFold prover
+    // `SC::Challenger` drives the generic jagged BaseFold prover
     // directly on the OUTER (wrap) branch — the capability bounds
     // `prove_jagged_basefold_inner_generic` requires. Both rings satisfy them
     // (inner `JaggedChallenger`, wrap `OuterChallenger`); NOT expressible as a
@@ -1421,7 +1419,7 @@ where
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // BaseFold-over-BN254 wrap port: dispatch via `BasefoldRing`. Configs
+    // Dispatch via `BasefoldRing`. Configs
     // that don't prove via BaseFold (OuterSC wrap on FRI) emit `Empty`. The
     // KoalaBear identities that make the transmute + challenger downcast below
     // sound are asserted in debug builds (they hold for every config that
@@ -1435,15 +1433,15 @@ where
         "prove_trusted_evaluations: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
     );
 
-    // SP1-port scaffold (INC1): one reviewed reinterpret for the three
+    // One reviewed reinterpret for the three
     // KoalaBear Val/Challenge `Vec` transmutes below (chip-trace cells,
     // per-chip `r_row`, and the zerocheck-residual column claims / SP1
     // `evaluation_claims`).  Under the TypeId gate asserted above,
     // `Val<SC> == InnerVal` and `Challenge<SC> == InnerChallenge`, so each
     // conversion is a zero-copy relabel with identical layout.  Folding the
     // three copies of `ManuallyDrop` + `from_raw_parts` into one helper
-    // shrinks the unsafe surface (soundness audit, task #119) and is exactly
-    // the boilerplate the device-native `JaggedTraceMle` port (port stage c)
+    // shrinks the unsafe surface (soundness audit) and is exactly
+    // the boilerplate the device-native `JaggedTraceMle` port
     // deletes once the traces stop round-tripping through host `Vec`s.
     //
     // SAFETY: every caller passes `A`/`B` that are the SAME KoalaBear type
@@ -1474,8 +1472,8 @@ where
     // Per-chip `r_row` = trailing log(chip_height) coords of the
     // shared eval_point.
     // Width-0 (device-resident, un-materialized) chips resolve
-    // their REAL height via the per-shard provider.  As of the D2H
-    // removal, `commit_traces` no longer eagerly materializes device
+    // their REAL height via the per-shard provider.  With the D2H
+    // skip, `commit_traces` does not eagerly materialize device
     // chips, so width-0 here is the NORMAL device-resident case — the
     // dense commit packed them D2D and the reduction reads the device
     // handle; only the host fallback re-materializes from the provider.
@@ -1514,7 +1512,7 @@ where
         )
     };
 
-    // BaseFold-over-BN254 wrap port: OUTER ring dispatch. When the
+    // OUTER (wrap) ring dispatch. When the
     // config's challenger is NOT the inner JaggedChallenger (i.e.
     // OuterChallenger), the jagged BaseFold open runs over the outer MMCS
     // (OuterValMmcs) via a hook registered by recursion-core (zkm-pcs
@@ -1523,17 +1521,17 @@ where
     if TypeId::of::<SC::Challenger>()
         != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
     {
-        // STAGE-B b1: STATIC monomorphization of the former
+        // STATIC monomorphization of the former
         // `OUTER_JAGGED_OPEN_HOOK`.  The recursion-core hook body
         // (`outer_open`) WAS exactly this generic call over
-        // `OuterChallenger`/`OuterValMmcs`; b1 removes the dyn-Any
+        // `OuterChallenger`/`OuterValMmcs`; this removes the dyn-Any
         // indirection.  On this branch `SC::Challenger == OuterChallenger`
         // and `SC::BfMmcs == OuterValMmcs` (the wrap ring is the only
         // non-`JaggedChallenger` ring), so naming them via the `BasefoldRing`
         // associated type + trait-level challenger bounds is byte-identical
         // BY CONSTRUCTION.  `pre_y_per_chip = None` mirrors the hook (its
         // own legacy step-3 y_per_chip recompute — identical values), so the
-        // serialized bundle bytes match the pre-b1 hook output exactly.
+        // serialized bundle bytes match the hook output exactly.
         let precomputed = precomputed_commit.expect(
             "prove_trusted_evaluations: outer BaseFold path requires a precomputed \
              commit (commit_basefold_path sets it under the same use_basefold gate)",
@@ -1570,11 +1568,11 @@ where
             .collect()
     });
 
-    // Option B single-main-commit fast path: when the orchestrator
+    // Single-main-commit fast path: when the orchestrator
     // pre-computed the BaseFold commit, drive the host
     // `prove_jagged_basefold_with_precomputed` body directly.  GPU
     // hooks own their own commit, so they're bypassed in this mode to
-    // avoid double-committing — the GPU-driven Option B path is a
+    // avoid double-committing — the GPU-driven single-main-commit path is a
     // separate (future) concern.
     if let Some(precomputed) = precomputed_commit {
         let precomputed_inner: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {

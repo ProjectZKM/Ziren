@@ -5,13 +5,9 @@
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
-//!
-//! # Status
-//!
-//! Body port done (the task.5).  Wrap is the terminal stage: it
-//! verifies a single recursive proof (the root of the recursion
-//! tree), asserts its root public values are valid, and commits
-//! them to the output stream.
+//! Wrap is the terminal stage: it verifies a single recursive proof
+//! (the root of the recursion tree), asserts its root public values
+//! are valid, and commits them to the output stream.
 
 use std::{borrow::Borrow, marker::PhantomData};
 
@@ -108,12 +104,11 @@ pub fn verify_wrap_basefold<C, SC, A>(
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
 ) where
-    // #H (BaseFold-over-BN254 wrap port): genericized over the config's
-    // challenger + Bit type so the gnark OUTER layer (OuterConfig, Bit=Var<BN254>,
+    // Genericized over the config's challenger + Bit type so the gnark
+    // OUTER layer (OuterConfig, Bit=Var<BN254>,
     // MultiField32ChallengerVariable) can reuse this verifier, not just the inner
     // recursion layer (InnerConfig/WrapConfig, Bit=Felt<KoalaBear>,
-    // DuplexChallengerVariable). The recursion call infers DuplexChallenger as
-    // before (non-breaking).
+    // DuplexChallengerVariable). The recursion call infers DuplexChallenger.
     SC: KoalaBearFriParametersVariable<
             C,
             DigestVariable = [Felt<p3_koala_bear::KoalaBear>; 8],
@@ -152,8 +147,8 @@ pub fn verify_wrap_basefold<C, SC, A>(
     );
 }
 
-/// #H (BaseFold-over-BN254 wrap port): the merkle-free shard-verify core, generic
-/// over the challenger + Bit + vk-digest type. The recursion layer reaches it via
+/// The merkle-free shard-verify core, generic over the challenger +
+/// Bit + vk-digest type. The recursion layer reaches it via
 /// `verify_wrap_basefold` (which prepends the vk-merkle bind); the gnark OUTER
 /// layer (`build_outer_circuit`, OuterConfig/OuterSC) calls it directly — no
 /// merkle (mirrors SP1WrapVerifier; binding is commit/pc_start + public vkey_hash).
@@ -249,16 +244,14 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &proof_opened_values,
         );
 
-    // Bundle lift is the production path since the witness-stream
-    // symmetry fix that closed the multi-GPU determinism cascade.
-    // ZIREN_LEGACY_NONBUNDLE_LIFT (set to any value) falls back to
-    // the placeholder per-shard lift; preserved as a kill switch for
-    // forensics when bundle-lift recursion shape registration
-    // regresses.  Default unset = bundle path.
+    // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
+    // (set to any value) falls back to the placeholder per-shard lift;
+    // preserved as a kill switch for forensics when bundle-lift recursion
+    // shape registration regresses.  Default unset = bundle path.
     use crate::shard_level_witness::LiftedEvalProof;
     let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
     let evaluation_proof_var = match &evaluation_proof {
-        // P2c-for-outer: the gnark wrap path — WITNESSED outer BN254 bundle.
+        // The gnark wrap path — WITNESSED outer BN254 bundle.
         // Routed via the ring dispatch (OUTER impl lifts it value-independently;
         // the INNER impl's arm is dead — inner never produces OuterBundle).
         LiftedEvalProof::OuterBundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root } => {
@@ -301,13 +294,13 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &column_counts_by_round,
         ),
         LiftedEvalProof::Bytes(bytes) => {
-            // BaseFold-over-BN254 wrap port: ring-aware dispatch.
-            // SC is the field hasher (HV); its impl deserializes the OUTER
-            // bundle (JaggedBasefoldBundleGeneric<OuterValMmcs>, BN254
+            // Ring-aware dispatch.  SC is the field hasher (HV); its impl
+            // deserializes the OUTER bundle
+            // (JaggedBasefoldBundleGeneric<OuterValMmcs>, BN254
             // commitments) for the gnark wrap and the INNER bundle for the
             // recursion wrap. The OUTER path lifts the real BN254 round
-            // commitments (was an all-zero placeholder -> Groth16 setup
-            // constraint failure).
+            // commitments (an all-zero placeholder would fail Groth16 setup
+            // constraints).
             <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
                 builder,
                 bytes,
@@ -360,9 +353,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // Use the trace@z openings CARRIED from the host proof and
     // finalize (overwrites the placeholder `degree` with the REAL big-endian
     // height bits so `full_geq` masks padded rows correctly), matching
-    // core_basefold.rs:378.  The previous
-    // build_opened_values_from_chip_openings_with_cumsums left `degree` all-zero
-    // → full_geq=1 always → wrong padded-row mask → in-circuit zerocheck
+    // core_basefold.rs:378.  A `degree` left all-zero would make
+    // full_geq=1 always → wrong padded-row mask → in-circuit zerocheck
     // closing mismatch in the gnark wrap.
     let opened_values =
         crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
@@ -391,11 +383,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // EVERY post-prologue squeeze (alpha/beta/eval_point + the whole GKR/
     // zerocheck/jagged sumcheck) diverges from the prover's transcript. The
     // wrap prover DID observe the vk (MachineProver::prove mirrors verify), so
-    // the proof's challenges are bound to a vk-seeded transcript. This is the
-    // identical fix already applied to the core path at core_basefold.rs:418-428
-    // (it was simply never ported to the wrap path) and was masked everywhere
-    // else because the wrap outer circuit only ever runs in gnark, where the
-    // asserts are real (not the vacuous recursion-runtime DivFAssert).
+    // the proof's challenges are bound to a vk-seeded transcript. Same seeding
+    // as the core path at core_basefold.rs:418-428; the wrap outer circuit
+    // only runs in gnark, where the asserts are real (not the vacuous
+    // recursion-runtime DivFAssert).
     {
         use crate::challenger::CanObserveVariable;
         let num_pv = machine.num_pv_elts();
@@ -425,10 +416,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 );
             &per_proof_verifier
         }
-        // P2c-for-outer: the OUTER wrap proof is now WITNESSED as OuterBundle.
+        // The OUTER wrap proof is WITNESSED as OuterBundle.
         // The verifier's num_variables / log_stacking_height come from the
-        // witnessed outer bundle's `host` (shape metadata) — identical to the
-        // former Bytes-deserialize override below (#244/#56 blowup=3 rate).
+        // witnessed outer bundle's `host` (shape metadata) — same as the
+        // Bytes-deserialize override below (blowup=3 rate).
         LiftedEvalProof::OuterBundle { host, .. } => {
             let bundle_num_vars =
                 host.basefold_proof.basefold_proof.fri_commitments.len();
@@ -440,8 +431,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 );
             &per_proof_verifier
         }
-        // #H (BaseFold-over-BN254 wrap port): the OUTER wrap proof carries
-        // its bundle as Bytes (JaggedBasefoldBundleGeneric<OuterValMmcs>).
+        // The OUTER wrap proof carries its bundle as Bytes
+        // (JaggedBasefoldBundleGeneric<OuterValMmcs>).
         // The verifier's num_variables must match the OUTER bundle's FRI
         // round count (== fri_commitments.len()), not max_log_row_count,
         // and its log_stacking_height must match the OUTER commit — same
@@ -456,7 +447,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             {
                 let bundle_num_vars =
                     outer_bundle.basefold_proof.basefold_proof.fri_commitments.len();
-                // #56 soundness: the OUTER (wrap) proof was committed at the
+                // Soundness: the OUTER (wrap) proof was committed at the
                 // WRAP rate (log_blowup=3, pow=22 — `wrap_fri_config`), so the
                 // in-circuit verifier MUST read it at blowup=3 too (component
                 // Merkle path = log_stacking+3, query span = num_vars+3).  Using
@@ -486,7 +477,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         &insertion_points,
         &mut challenger,
         machine.num_pv_elts(),
-        // #125 INC-4b: WRAP verifies the LEGACY shrink/recursion proof -> legacy
+        // WRAP verifies the LEGACY shrink/recursion proof -> legacy
         // (keeps the BN254 wrap R1CS UNCHANGED so the gnark ceremony STANDS).
         false,
         eval_public_values_fn,
@@ -507,8 +498,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // intermediate recursion digest reflected from the input proof.
             // Recompute and set it so the committed digest matches both the
             // in-circuit `root_public_values_digest` and the host
-            // `is_root_public_values_valid` check. (Previously the recursion
-            // digest was reflected unchanged, so the host root check failed.)
+            // `is_root_public_values_valid` check.
             inner.digest = root_public_values_digest::<C, SC>(builder, &inner);
         }
         PublicValuesOutputDigest::Reduce => {
@@ -520,12 +510,9 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // the reflected digest to the reflected fields and re-emit it
             // (SP1 parity: compress.rs:468-472 recomputes the Reduce-kind
             // output digest; root digest validity is only asserted by the
-            // HOST on the final wrap output).  The previous
-            // `assert_root_public_values_valid` demanded
-            // `digest == root_digest(pv)` of an honest compress output —
-            // honestly UNSATISFIABLE, masked while recursion asserts were
-            // vacuous (before the DivFAssert flip), and tripping the armed
-            // DivFAssert at the shrink program tail.
+            // HOST on the final wrap output).  Asserting
+            // `digest == root_digest(pv)` here would be UNSATISFIABLE for an
+            // honest compress output.
             let expected = recursion_public_values_digest::<C, SC>(builder, &inner);
             for (value, recomputed) in inner.digest.iter().copied().zip(expected) {
                 builder.assert_felt_eq(value, recomputed);
@@ -569,12 +556,12 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 >,
             >,
     {
-        // RECURSION-LAYER AREA PIN (#88/#82 Stage 2 DUMMY MIRROR): the shrink
-        // program (built from this wrap dummy) verifies a single CHILD that is
-        // a RECURSION (compress) proof committed at the FIXED pinned area
-        // `2^RECURSION_LOG_TRACE_AREA`.  Install the same thread-local pin so
-        // the dummy child bundle matches the real pinned compress proof
-        // (constant num_stripes / L), keeping the shrink VK enumerable.
+        // RECURSION-LAYER AREA PIN: the shrink program (built from this wrap
+        // dummy) verifies a single CHILD that is a RECURSION (compress) proof
+        // committed at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`.
+        // Install the same thread-local pin so the dummy child bundle matches
+        // the real pinned compress proof (constant num_stripes / L), keeping
+        // the shrink VK enumerable.
         let _recursion_area_pin = zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
             zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
         );

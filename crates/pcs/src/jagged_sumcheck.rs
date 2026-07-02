@@ -49,7 +49,7 @@ fn build_weight_table(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     z_col_lagrange: &[InnerChallenge],
-    // SP1 re-align (PHASE 1): the FULL zerocheck-reduced z* (max_log_row_count
+    // The FULL zerocheck-reduced z* (max_log_row_count
     // dims).  The per-chip row weight is the full row_eq over z_row indexed by
     // the natural row (0..h_c) — NO trailing slice, NO Pi_high embedding (the
     // full row_eq subsumes the height factor since high bits of any row <
@@ -81,14 +81,14 @@ fn build_weight_table(
         let eq_c = &eq_per_chip[c_idx];
         for _j in 0..info.column_count {
             let off = packing.offsets[k];
-            // Bounds guard (May 2 2026): catches the case
+            // Bounds guard: catches the case
             // where a chip's column_count (from verifier-side
             // chip.width()) exceeds the per-chip column_count the
-            // prover committed (from main_trace.width).  This used to
-            // overflow with an opaque 'index out of bounds'; now caught
-            // here with chip name + offsets context.  The
-            // prove_trusted_evaluations width-pad fix is what should keep
-            // this from firing in production.
+            // prover committed (from main_trace.width), surfacing it
+            // here with chip name + offsets context instead of an
+            // opaque 'index out of bounds'.  The
+            // prove_trusted_evaluations width-pad keeps this from
+            // firing in production.
             // Kept as a release-mode bounds guard to avoid silent OOBs.
             assert!(
                 off.saturating_add(h_c) <= n,
@@ -666,9 +666,8 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
 /// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
 /// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
 /// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
-/// of re-deriving the (retired) gamma-mixing weights, which were the
-/// original invalid-proof root cause.  Keep in lockstep with the host body; any
-/// weight-table change MUST update both.
+/// of re-deriving the gamma-mixing weights.  Keep in lockstep with the
+/// host body; any weight-table change MUST update both.
 pub fn build_weight_table_sp1(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
@@ -679,7 +678,7 @@ pub fn build_weight_table_sp1(
     build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row)
 }
 
-/// FOOTPRINT (#73): the two SEPARABLE factors of `build_weight_table_sp1`'s
+/// The two SEPARABLE factors of `build_weight_table_sp1`'s
 /// weight table, exposed `pub` so the ziren-gpu fused jagged-reduction hook
 /// can DERIVE `w[off_k + row] = z_col_lagrange[k] * row_eq[row]` on the GPU
 /// from the resident `dense_q` without ever materializing the full
@@ -783,7 +782,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 
 // ZIREN_PHASE1_ACCEPTANCE_GATE
 //
-// PHASE-1 (jagged/zerocheck SP1 re-alignment) acceptance gate.
+// Acceptance gate for the jagged/zerocheck SP1 alignment.
 //
 // For a MIXED-HEIGHT packing, the host jagged reduction's closing weight
 // value `w_at_z` (= the dense weight-MLE evaluated at the reduction's
@@ -800,9 +799,9 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 // for mixed heights, while the host chain remains internally consistent
 // (so `test_e2e_wrap_fibonacci` passes but gnark wrap step-8 fails).
 //
-// PHASE 1 is COMPLETE when `gate_weight_table_matches_branching_program`
-// passes for all mixed-height shapes AND `test_e2e_wrap_fibonacci` is
-// still green under the re-aligned convention.
+// The gate passes when `gate_weight_table_matches_branching_program`
+// holds for all mixed-height shapes AND `test_e2e_wrap_fibonacci` is
+// still green.
 #[cfg(test)]
 mod phase1_acceptance_gate {
     use super::*;
@@ -877,11 +876,11 @@ mod phase1_acceptance_gate {
         // dense column in bit-reversed row order (`y_per_chip == opened_values
         // == MLE of bitrev(trace)`), and `build_weight_table` weights that same
         // bit-reversed dense layout with `eq_c[row]`.  Using the NATURAL row
-        // index here (the previous stale form) makes the verifier's claimed
+        // index here makes the verifier's claimed
         // sum `t = Σ z_col_lagrange·y` diverge from the true sumcheck sum
         // `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity fails even
         // for equal heights.
-        // STAGE 2.5 (#88): mirror the production y orientation off the SAME
+        // Mirror the production y orientation off the SAME
         // single source of truth (`current_use_rev`) as the companion
         // `materialize_dense_jagged` above, so this test's commit and y stay
         // consistent under either convention.  No `BandCapGuard` is installed in
@@ -990,7 +989,7 @@ mod phase1_acceptance_gate {
         );
     }
 
-    // ── STAGE 4b GATE (host-math proxy for the in-circuit step-4 assert) ──
+    // ── Host-math proxy for the in-circuit step-4 assert ──
     //
     // The in-circuit recursion step-4 assert (recursive_jagged_pcs.rs:234) is
     //   assert_ext_eq( evaluate_mle_ext(column_claims, z_col), claimed_sum )
@@ -1147,8 +1146,8 @@ mod phase1_acceptance_gate {
         assert!(band_eval == claimed_sum, "band claims must satisfy the step-4 assert");
     }
 
-    // Stage 5 POSITIVE gate (the bitrev-preserving / low-placement commit).
-    // The 4b finding: band_y (bitrev over log_band) != raw_y * scalar because
+    // Positive gate for the bitrev-preserving / low-placement commit.
+    // band_y (bitrev over log_band) != raw_y * scalar because
     // bitrev_lb(s) = bitrev_lr(s) << (lb-lr) puts the data bits on DIFFERENT
     // coordinates than raw.  The fix: store each chip's RAW-bitrev'd data (bitrev
     // over the RAW log height) in the LOW rows of a BAND-length column slot,

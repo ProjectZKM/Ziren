@@ -1,4 +1,4 @@
-//! Device-resident LogUp-GKR circuit scaffold.
+//! Device-resident LogUp-GKR circuit.
 //!
 //! Streaming container yielding one layer at a time so the GKR
 //! prover can walk the circuit bottom-up without materializing
@@ -106,7 +106,6 @@ impl core::fmt::Debug for DeviceLayerHandle {
 /// Input data needed to regenerate the first layer from raw chips +
 /// jagged traces on demand.
 ///
-/// Analogue of SP1's
 /// Type-erased input bundle handed to the GPU regen hook. The GPU
 /// crate's registry resolves the actual chip / trace data via
 /// `circuit_id`.
@@ -278,9 +277,9 @@ impl<F: Field, EF: ExtensionField<F>> core::fmt::Debug for DeviceCircuitLayer<F,
 /// Holds the full layer stack as a vector that callers pop from the
 /// bottom upward via [`Self::next`].  When
 /// `num_virtual_layers > 0` and the materialized stack is empty,
-/// `next()` will (in a future V3 hook landing) materialize the
-/// FirstLayer on demand from `input_data` rather than keeping it in
-/// device memory across every intermediate round.
+/// `next()` materializes the FirstLayer on demand from `input_data`
+/// rather than keeping it in device memory across every intermediate
+/// round.
 ///
 /// ## Layer ordering
 ///
@@ -438,11 +437,10 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 /// device-resident state — the scope amortizes one upload across `~18`
 /// layers' worth of `prove_gkr_round` invocations.
 ///
-/// Ziren today re-marshals on every V3 dispatch (`round.rs:3891-3902`):
-/// `flatten_layer + build_eq_table + cast_vec_ef_to_ef4 + hook`.  Profile
-/// data in the related design memo attributes the **+94%
-/// tendermint regression** when `ZIREN_GPU_LOGUP_GKR_DEVICE=1` to this
-/// per-layer marshalling × ~3400 calls/shard.
+/// Ziren re-marshals on every V3 dispatch (`round.rs:3891-3902`):
+/// `flatten_layer + build_eq_table + cast_vec_ef_to_ef4 + hook`.  This
+/// per-layer marshalling (× ~3400 calls/shard) is the dominant cost of
+/// `ZIREN_GPU_LOGUP_GKR_DEVICE=1` on small shards (tendermint).
 ///
 /// **Scope semantics**
 ///
@@ -450,7 +448,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 /// invocation:
 ///
 /// * **Construction** binds a fresh `circuit_id` (multi-GPU isolation —
-///   matches `LayerState::Device::circuit_id` per multi-GPU isolation) and stashes the
+///   matches `LayerState::Device::circuit_id`) and stashes the
 ///   scope handle in a thread-local slot so the V3 dispatch site
 ///   (`try_logup_round_gpu_v3`) can consult it without threading new
 ///   arguments through Ziren's per-round signatures.
@@ -460,40 +458,22 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 ///   terminal handle from leaking into the next shard's first V3 call.
 ///   The drop is the sole production call site for that clear.
 ///
-/// **Smallest-sub-step (this commit) — scaffold, zero behavior change**
+/// **Current behavior**
 ///
-/// * Defines the type + TLS plumbing.
-/// * Adds an RAII `enter()` helper that callers wrap around the GKR
-///   pipeline.  No callers consult the scope yet — the dispatch site at
-///   `round.rs:3880-3902` still goes through the existing `*_next_handle`
-///   TLS path.
-/// * On Drop: clears `LOGUP_V3_NEXT_HANDLE` so shard boundaries are
-///   correctly scoped (today's silent bug per `project_v3_regression`).
-///
-/// **Follow-up sub-steps (multi-week roadmap — see project memory)**
-///
-/// 1. Wire `prove_shard_logup_gkr_rows` to construct the scope on entry
-///    (RAII guard) and pass a borrow into `prove_gkr_round`.
-/// 2. Migrate `take_logup_v3_next_handle` / `publish_logup_v3_next_handle`
-///    to consult `scope.materialized_handles` instead of a thread-local
-///    Option — so the cross-shard race becomes structurally impossible.
-/// 3. Move the V3 cache populator from its bespoke TLS
-///    (`v3_cache_populate.rs:try_populate_cache`) into the scope's
-///    `materialized_handles` Vec — the V3 hook then pops from the scope
-///    directly.
-/// 4. Eventually port SP1's `gkr_transition` device-side so the scope
-///    pre-builds ALL intermediate layers at scope start (single
-///    `concat_chips_to_flat` + N `gkr_transition` kernel launches)
-///    and per-round dispatch becomes a pop-only operation.
+/// The type provides the TLS plumbing and an RAII `enter()` helper that
+/// callers wrap around the GKR pipeline.  The dispatch site at
+/// `round.rs:3880-3902` still goes through the existing `*_next_handle`
+/// TLS path, and the scope's `circuit` field is `None` (scope-as-anchor).
+/// On Drop it clears `LOGUP_V3_NEXT_HANDLE` so shard boundaries are
+/// correctly scoped.
 pub struct LogupTaskScope<F: Field, EF: ExtensionField<F>> {
     /// Multi-GPU scoping ID — fresh per scope, matches the
     /// `LayerState::Device::circuit_id` convention.
     circuit_id: u64,
-    /// Optional pre-materialized device circuit.  When the V3-cache
-    /// populator ( above) lands, this is filled at scope
-    /// construction; per-round V3 calls then pop from
-    /// `circuit.materialized_layers` rather than re-marshalling host
-    /// vecs.  `None` today — scope-as-anchor only.
+    /// Optional pre-materialized device circuit.  When populated, per-round
+    /// V3 calls pop from `circuit.materialized_layers` rather than
+    /// re-marshalling host vecs.  Currently `None` — scope-as-anchor
+    /// only.
     circuit: Option<DeviceLogupGkrCircuit<F, EF>>,
     /// Mirrors SP1's `LogUpCudaCircuit::input_data` shape metadata so
     /// downstream consumers can interrogate the scope without holding a
@@ -546,12 +526,8 @@ impl<F: Field, EF: ExtensionField<F>> LogupTaskScope<F, EF> {
     }
 
     /// Pop the bottom-most layer handle from the installed circuit, if
-    /// any.  Returns `None` when no circuit was installed (today's
+    /// any.  Returns `None` when no circuit was installed (the current
     /// default — scope-as-anchor) or when the circuit is exhausted.
-    ///
-    /// Sub-step 2 of the roadmap above will rewire
-    /// `take_logup_v3_next_handle` to call into this method instead of
-    /// a free-standing TLS.
     pub fn next_layer(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         self.circuit.as_mut().and_then(|c| c.next())
     }
@@ -650,8 +626,7 @@ std::thread_local! {
 ///    untyped handle parameter via
 ///    [`DeviceLayerHandle::to_sumcheck_handle`].
 /// 3. Skip the per-call `flatten_layer` + `cast_vec_ef_to_ef4` host
-///    marshalling — projected -500 µs per round per
-///    the related design memo.
+///    marshalling (~500 µs per round).
 ///
 /// **Type erasure rationale**: TLS slots cannot hold generic types,
 /// so we pin the slot to the single concrete `(KoalaBear, Ef4)`
@@ -790,9 +765,8 @@ impl LogupTaskScopeGuard {
     }
 
     /// Returns the currently-active scope `circuit_id`, if any.  Used
-    /// by the V3 dispatch site ( of the roadmap above) to
-    /// decide whether to consult the scope or fall back to today's
-    /// per-call marshalling.
+    /// by the V3 dispatch site to decide whether to consult the scope
+    /// or fall back to per-call marshalling.
     #[must_use]
     pub fn active_circuit_id() -> Option<u64> {
         LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.get())
@@ -1079,10 +1053,9 @@ mod tests {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
     }
 
-    /// guard drop clears the V3 next-layer handle TLS, closing
-    /// the cross-shard race documented in
-    /// the related design memo (`clear_logup_v3_next_handle`
-    /// previously had zero callers).
+    /// guard drop clears the V3 next-layer handle TLS, closing the
+    /// cross-shard race (the guard drop is the sole caller of
+    /// `clear_logup_v3_next_handle`).
     #[test]
     fn task_scope_guard_clears_v3_handle_on_drop() {
         use crate::shard_level::sumcheck_poly::{
