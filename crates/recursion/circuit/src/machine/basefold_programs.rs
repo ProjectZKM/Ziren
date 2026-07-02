@@ -339,6 +339,10 @@ mod tests {
             None,
             // #118: host-only synthetic witness → host precompute.
             None,
+            // #118: host-only synthetic witness → host first round
+            // (first-round-prove + drain fns).
+            None,
+            None,
         )
     }
 

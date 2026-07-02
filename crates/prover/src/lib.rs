@@ -2114,6 +2114,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // #118: host shrink caller cannot name the ziren-gpu
                 // precompute-commit fn → host precompute (byte-identical).
                 None,
+                // #118: host shrink caller cannot name the ziren-gpu
+                // first-round-prove / drain fns → host first round
+                // (byte-identical; on GPU this shrink path uses the device
+                // first-layer stash via the device-resident prover's hooks).
+                None,
+                None,
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over

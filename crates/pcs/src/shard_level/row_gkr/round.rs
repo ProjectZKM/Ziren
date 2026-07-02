@@ -856,6 +856,7 @@ fn marshal_thread_pool() -> &'static std::sync::Arc<rayon::ThreadPool> {
 ///
 /// Inner Option `None` preserves legacy behavior: caller falls back
 /// to `PolynomialLayer::Chip(chip_state)` + cached round-0 poly.
+#[allow(clippy::too_many_arguments)]
 fn try_first_round_on_gpu<F, EF>(
     circuit: &GkrCircuitLayer<F, EF>,
     eval_point: &[EF],
@@ -865,6 +866,15 @@ fn try_first_round_on_gpu<F, EF>(
     eq_row: &[EF],
     pad_eq_int_sum: EF,
     claimed_sum: EF,
+    // #118: device first-round-prove fn + TLS-stash drain fn, provided
+    // statically by the prover (were the `REGISTERED_FIRST_ROUND_HOOK` /
+    // `REGISTERED_DRAIN_HOOK` OnceLocks).  `None` = host first round
+    // (CPU prover / host free-fn callers), byte-identical to the pre-#118
+    // unregistered-hook path.
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> Option<(UnivariatePolynomial<EF>, Option<Box<ChipLayerState<EF>>>)>
 where
     F: Field + Into<EF> + Copy + Sync,
@@ -914,7 +924,8 @@ where
         // shards would reuse shard 1's stale handle. Drain unconditionally
         // when CONSUME=1: each call replaces the slot with fresh data.
         if consume {
-            dfl::drain_via_hook().map(dfl::DeviceFirstLayerGuard::new)
+            // #118: drain fn threaded from the prover (was `REGISTERED_DRAIN_HOOK`).
+            dfl::drain_via_hook(drain_hook).map(dfl::DeviceFirstLayerGuard::new)
         } else {
             None
         }
@@ -1330,7 +1341,9 @@ where
         let under_threshold = phase3_threshold > 0 && total_vars_u < phase3_threshold;
         use crate::shard_level::device_first_layer_context as dfl;
         if env_on && !under_threshold && dfl::current_device_first_layer().is_some() {
-            if let Some(device_hook) = dfl::get_first_round_device_hook() {
+            // #118: first-round fn threaded from the prover (was
+            // `REGISTERED_FIRST_ROUND_HOOK`).
+            if let Some(device_hook) = first_round_device_hook {
                 let target_rows = 1usize << first_layer.num_row_variables;
                 let row_half_u = (target_rows / 2) as u32;
                 let mut per_chip_cols_v: Vec<u32> = Vec::with_capacity(n_chips);
@@ -2423,12 +2436,20 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
     /// `num_row_variables + num_interaction_variables`; its lower
     /// `num_interaction_variables` coords are the interaction-axis
     /// random point, the upper coords are the row-axis random point.
+    #[allow(clippy::too_many_arguments)]
     pub fn new<F>(
         circuit: &GkrCircuitLayer<F, EF>,
         eval_point: &[EF],
         numerator_eval: EF,
         denominator_eval: EF,
         lambda: EF,
+        // #118: device first-round-prove + drain fns, threaded down to
+        // `try_first_round_on_gpu` (were the `REGISTERED_FIRST_ROUND_HOOK` /
+        // `REGISTERED_DRAIN_HOOK` OnceLocks).  `None` = host first round.
+        first_round_device_hook: Option<
+            crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+        >,
+        drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
     ) -> Self
     where
         F: Field + Into<EF> + Copy + Sync,
@@ -2483,6 +2504,8 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             &eq_row,
             pad_eq_int_sum,
             claimed_sum,
+            first_round_device_hook,
+            drain_hook,
         );
 
         // When GPU returns a fully-built post-fix
@@ -3015,6 +3038,7 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 /// this function — it is passed in explicitly so the caller can use
 /// the same challenger state for downstream layers.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn prove_gkr_round<F, EF, Challenger>(
     state: &LayerState<F, EF>,
     eval_point: &[EF],
@@ -3022,6 +3046,14 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
+    // #118: device first-round-prove + drain fns, threaded down to
+    // `LogupRoundPolynomial::new` → `try_first_round_on_gpu` (were the
+    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks).
+    // `None` = host first round (CPU prover / host free-fn callers).
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> LogupGkrRoundProof<EF>
 where
     F: PrimeField,
@@ -3283,6 +3315,8 @@ where
         numerator_eval,
         denominator_eval,
         lambda,
+        first_round_device_hook,
+        drain_hook,
     );
     let claimed_sum = poly.claimed_sum();
 
@@ -4152,6 +4186,9 @@ mod tests {
             d_eval,
             lambda,
             &mut ch,
+            // #118: host-only test → host first round.
+            None,
+            None,
         );
 
         // Claimed sum = λ · n_eval + d_eval.
@@ -4238,7 +4275,8 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            &state, &point, n_eval, d_eval, lambda, &mut ch,
+            // #118: host-only test → host first round.
+            &state, &point, n_eval, d_eval, lambda, &mut ch, None, None,
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.

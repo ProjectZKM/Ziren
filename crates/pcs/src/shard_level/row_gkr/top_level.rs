@@ -42,6 +42,14 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     // consumes the inner via `PaddedMle::eval_at` (== the on-the-fly
     // `evaluate_trace_columns_at_point`, unit-tested).
     shared_trace_mles: &[PaddedMle<F>],
+    // #118: device first-round-prove + drain fns, threaded down to
+    // `prove_gkr_round` → `LogupRoundPolynomial::new` → `try_first_round_on_gpu`
+    // (were the `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK`
+    // OnceLocks).  `None` = host first round (CPU prover / host free-fn callers).
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -299,6 +307,8 @@ where
             denominator_eval,
             lambda,
             challenger,
+            first_round_device_hook,
+            drain_hook,
         );
 
         // Observe order MUST match verifier: n0, n1, d0, d1.

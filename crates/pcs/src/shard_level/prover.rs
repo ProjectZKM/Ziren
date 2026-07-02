@@ -240,6 +240,14 @@ pub fn prove_shard_to_basefold<SC, A>(
     // (core/compress) provides the device precompute-commit statically, `None`
     // on host callers = host precompute.
     gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
+    // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
+    // the GPU callers (core/compress) provide them statically, `None` on host
+    // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
+    // `REGISTERED_DRAIN_HOOK` OnceLocks).
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -291,6 +299,8 @@ where
         gpu_basefold_commit,
         gpu_basefold_open,
         gpu_jagged_precompute_commit,
+        first_round_device_hook,
+        drain_hook,
     )
 }
 
@@ -479,6 +489,14 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // (core/compress) provides the device precompute-commit statically, `None`
     // on host callers = host precompute.
     gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
+    // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
+    // the GPU callers (core/compress) provide them statically, `None` on host
+    // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
+    // `REGISTERED_DRAIN_HOOK` OnceLocks).
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -531,6 +549,8 @@ where
         gpu_basefold_commit,
         gpu_basefold_open,
         gpu_jagged_precompute_commit,
+        first_round_device_hook,
+        drain_hook,
     )
 }
 
@@ -576,6 +596,15 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // path) and threaded into `maybe_auto_precompute_basefold`'s device
     // precompute-commit dispatch.
     gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
+    // The device first-round-prove fn + TLS-stash drain fn (#118), read from
+    // the prover's `first_round_device_hook()` / `drain_hook()` (or `None` on
+    // the free-fn / CPU path) and threaded into `prove_shard_logup_gkr_rows`'s
+    // row-GKR first-round dispatch (`try_first_round_on_gpu`).  Were the
+    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks.
+    first_round_device_hook: Option<
+        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
+    >,
+    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -993,6 +1022,10 @@ where
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
+            // #118: device first-round-prove + drain fns (were the
+            // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks).
+            first_round_device_hook,
+            drain_hook,
         )
     };
     tracing::info!(

@@ -119,38 +119,33 @@ pub type FirstRoundDeviceHook = fn(
     alpha: Ef4,
 ) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
 
-/// Drain the device-first-layer stash via the registered hook.
+/// The device TLS-stash drain fn. Real implementation lives in
+/// ziren-gpu; absent here.
+pub type DrainHook = fn() -> Option<Arc<dyn Any + Send + Sync>>;
+
+/// Drain the device-first-layer stash via the statically-provided drain
+/// fn.  #118: the drain fn is threaded from the prover
+/// (`MachineProver::drain_hook`) down to the row-GKR first-round dispatch,
+/// not read from a global registry.  `None` (CPU prover / host free-fn
+/// callers) = no device stash to drain → `None`, byte-identical to the
+/// pre-#118 unregistered-hook path.
 #[must_use]
-pub fn drain_via_hook() -> Option<DeviceFirstLayerHandle> {
-    let drain = REGISTERED_DRAIN_HOOK.get().copied()?;
+pub fn drain_via_hook(drain: Option<DrainHook>) -> Option<DeviceFirstLayerHandle> {
+    let drain = drain?;
     let payload = drain()?;
     Some(DeviceFirstLayerHandle::new(payload))
 }
 
-#[must_use]
-pub fn get_first_round_device_hook() -> Option<FirstRoundDeviceHook> {
-    REGISTERED_FIRST_ROUND_HOOK.get().copied()
-}
-
-pub type FirstRoundDeviceHookRegistration = FirstRoundDeviceHook;
-
-static REGISTERED_FIRST_ROUND_HOOK: std::sync::OnceLock<FirstRoundDeviceHook> =
-    std::sync::OnceLock::new();
-
-pub fn register_first_round_device_hook(
-    f: FirstRoundDeviceHook,
-) -> Result<(), FirstRoundDeviceHook> {
-    REGISTERED_FIRST_ROUND_HOOK.set(f)
-}
-
-/// Hook ziren-gpu registers to drain its TLS-stashed device handle.
-pub type DrainHook = fn() -> Option<Arc<dyn Any + Send + Sync>>;
-
-static REGISTERED_DRAIN_HOOK: std::sync::OnceLock<DrainHook> = std::sync::OnceLock::new();
-
-pub fn register_drain_hook(f: DrainHook) -> Result<(), DrainHook> {
-    REGISTERED_DRAIN_HOOK.set(f)
-}
+// #118: the device first-round-prove fn (`FirstRoundDeviceHook`) and the
+// TLS-stash drain fn (`DrainHook`) are provided STATICALLY (threaded from
+// the prover down to the row-GKR first-round dispatch in
+// `try_first_round_on_gpu`), not via global registries.  The former
+// `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks + their
+// `register_/get_` accessors were removed; ziren-gpu's prover exposes the
+// two fns for the `prover` crate to pass into the free-fn
+// `prove_shard_to_basefold` (which threads them through
+// `prove_shard_logup_gkr_rows` → `prove_gkr_round` →
+// `LogupRoundPolynomial::new` → `try_first_round_on_gpu`).
 
 #[cfg(test)]
 mod tests {
