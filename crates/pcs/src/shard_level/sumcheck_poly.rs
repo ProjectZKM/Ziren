@@ -665,98 +665,22 @@ pub type GpuInteractionEvalFn = fn(
 gpu_hook_accessors!(GPU_INTERACTION_EVAL_HOOK: GpuInteractionEvalFn
     => register_gpu_interaction_eval_hook, get_gpu_interaction_eval_hook);
 
-// Whole-pipeline GPU jagged-PCS driver: commit, y-evals, sumcheck
-// reduction, BaseFold open. Concrete-typed on `(KoalaBear, Ef4,
-// JaggedChallenger)`; generic-EF callers take the host orchestrator.
-mod jagged_orchestration_hook {
-    use super::Ef4;
-    use alloc::string::String;
-    use alloc::vec::Vec;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::dense::RowMajorMatrix;
-
-    /// Returns rmp-serde `JaggedBasefoldBundle` bytes. Hook owns
-    /// commit + observe + per-chip y-evals + sumcheck reduction +
-    /// BaseFold open + serialize. `r_row_per_chip` lengths must
-    /// equal `log2(padded_height)` per chip.
-    ///
-    /// `z_row` is the full shared zerocheck eval point used by the
-    /// zerocheck-stage branching-program jagged-eval sub-protocol (matches
-    /// the host `prove_jagged_basefold` 3rd param).
-    pub type GpuJaggedOrchestrationFn = fn(
-        chip_traces: &[(String, RowMajorMatrix<KoalaBear>)],
-        r_row_per_chip: &[Vec<Ef4>],
-        z_row: &[Ef4],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-    ) -> Vec<u8>;
-
-    static GPU_JAGGED_ORCHESTRATION_HOOK: std::sync::OnceLock<GpuJaggedOrchestrationFn> =
-        std::sync::OnceLock::new();
-
-    pub fn register_gpu_jagged_orchestration_hook(
-        f: GpuJaggedOrchestrationFn,
-    ) -> Result<(), GpuJaggedOrchestrationFn> {
-        GPU_JAGGED_ORCHESTRATION_HOOK.set(f)
-    }
-
-    #[must_use]
-    pub fn get_gpu_jagged_orchestration_hook() -> Option<GpuJaggedOrchestrationFn> {
-        GPU_JAGGED_ORCHESTRATION_HOOK.get().copied()
-    }
-}
-
-pub use jagged_orchestration_hook::{
-    GpuJaggedOrchestrationFn, get_gpu_jagged_orchestration_hook,
-    register_gpu_jagged_orchestration_hook,
-};
-
-// Device-trace variant of the jagged-PCS orchestration hook: takes
-// chip names instead of host traces and consults the per-shard
-// `DeviceTraceProvider`, avoiding the per-chip device→host pull.
-mod jagged_pcs_device_hook {
-    use super::Ef4;
-    use alloc::string::String;
-    use alloc::vec::Vec;
-    use p3_koala_bear::KoalaBear;
-    use p3_matrix::dense::RowMajorMatrix;
-
-    /// Hook reads per-chip device-resident traces from `device_traces`.
-    /// `host_chip_traces`, when index-aligned to `chip_names`, lets
-    /// the hook drive the per-chip y-eval host fallback against the
-    /// orchestrator-built trace — required when device snapshot
-    /// heights can exceed `1 << r_row.len()` (would OOB the eq table).
-    ///
-    /// `z_row` is the full shared zerocheck eval point used by the
-    /// zerocheck-stage branching-program jagged-eval sub-protocol (matches
-    /// the host `prove_jagged_basefold` 3rd param).
-    pub type GpuJaggedPcsDeviceFn = fn(
-        chip_names: &[String],
-        r_row_per_chip: &[Vec<Ef4>],
-        z_row: &[Ef4],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        host_chip_traces: Option<&[(String, RowMajorMatrix<KoalaBear>)]>,
-    ) -> Vec<u8>;
-
-    static GPU_JAGGED_PCS_DEVICE_HOOK: std::sync::OnceLock<GpuJaggedPcsDeviceFn> =
-        std::sync::OnceLock::new();
-
-    pub fn register_gpu_jagged_pcs_device_hook(
-        f: GpuJaggedPcsDeviceFn,
-    ) -> Result<(), GpuJaggedPcsDeviceFn> {
-        GPU_JAGGED_PCS_DEVICE_HOOK.set(f)
-    }
-
-    #[must_use]
-    pub fn get_gpu_jagged_pcs_device_hook() -> Option<GpuJaggedPcsDeviceFn> {
-        GPU_JAGGED_PCS_DEVICE_HOOK.get().copied()
-    }
-}
-
-pub use jagged_pcs_device_hook::{
-    GpuJaggedPcsDeviceFn, get_gpu_jagged_pcs_device_hook,
-    register_gpu_jagged_pcs_device_hook,
-};
+// #118: the two whole-pipeline jagged-PCS GPU orchestration hooks —
+// `GPU_JAGGED_ORCHESTRATION_HOOK` (host-trace variant) and
+// `GPU_JAGGED_PCS_DEVICE_HOOK` (device-trace variant) — were REMOVED,
+// not static-dispatched.  Both were dead: ziren-gpu never registered
+// either (verified: no `register_*`/`get_*`/`GpuJagged*Fn` reference in
+// the device crate), so their dispatch sites in
+// `crate::shard_level::prover::prove_trusted_evaluations` always fell
+// through to the host `prove_jagged_basefold_with_y_per_chip`.  Device
+// notes confirm they are architecturally retired: the host-trace
+// orchestration's "emit dispatch is statically dead under the
+// precomputed-commit path" (step-3 y_per_chip now comes from the
+// zerocheck residual — openings-for-free), and the device-trace variant
+// was "retired by the openings-for-free".  With no live consumer there
+// is nothing to thread a `Some(..)` into, so removing the OnceLock
+// registries outright (rather than threading a perpetual `None`) both
+// kills the global dispatch state and keeps the host path byte-identical.
 
 // Stateful device-resident per-layer LogUp-GKR sumcheck. Layer
 // state stays on device across all rounds; only the per-round

@@ -1704,49 +1704,16 @@ where
         return EvaluationProof::Bundle(bundle);
     }
 
-    // Device jagged-PCS dispatch: the `_device_traces.is_some()`
-    // guard is load-bearing — off-pool basefold workers pass `None`
-    // (no CUDA context) and must not dispatch to the wrong GPU.
-    let provider_present_jagged = _device_traces.is_some();
-    if provider_present_jagged {
-        if let Some(hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_jagged_pcs_device_hook()
-        {
-            let chip_names: Vec<alloc::string::String> =
-                chip_traces.iter().map(|(name, _)| name.clone()).collect();
-            // Pass the already-materialized host `chip_traces` so the
-            // hook can drive per-chip y-eval host fallback on the
-            // orchestrator-built trace (avoids OOB on
-            // `host_eval_chip_columns_at_point` when device snapshot
-            // lookup-by-name resolves to a height-mismatched trace).
-            //
-            // SAFETY: `InnerVal == KoalaBear` under the TypeId gate.
-            let host_chip_traces_kb: &[(alloc::string::String,
-                RowMajorMatrix<p3_koala_bear::KoalaBear>)] = unsafe {
-                core::mem::transmute::<
-                    &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
-                    &[(alloc::string::String,
-                       RowMajorMatrix<p3_koala_bear::KoalaBear>)],
-                >(chip_traces.as_slice())
-            };
-            return EvaluationProof::Bytes(hook(
-                &chip_names,
-                &r_row_per_chip,
-                z_row,
-                lb_challenger,
-                _device_traces,
-                Some(host_chip_traces_kb),
-            ));
-        }
-    }
-
-    // Whole-pipeline GPU orchestrator: when registered, owns commit,
-    // y-evals, sumcheck reduction, BaseFold open.
-    if let Some(hook) =
-        crate::shard_level::sumcheck_poly::get_gpu_jagged_orchestration_hook()
-    {
-        return EvaluationProof::Bytes(hook(&chip_traces, &r_row_per_chip, z_row, lb_challenger));
-    }
+    // #118: the two whole-pipeline jagged-PCS GPU orchestration dispatch
+    // sites (`get_gpu_jagged_pcs_device_hook` device-trace variant, guarded
+    // by `_device_traces.is_some()`, and `get_gpu_jagged_orchestration_hook`
+    // host-trace variant) were REMOVED with their OnceLock registries: both
+    // were dead (ziren-gpu never registered either — the device-trace hook
+    // is "retired by the openings-for-free", the host-trace orchestration's
+    // emit dispatch is "statically dead under the precomputed-commit path"),
+    // so this always fell through to the host jagged-basefold path below.
+    // `_device_traces` is still consumed by the precomputed-commit provider
+    // path above; the legacy (no-precompute) flow is host-only.
 
     // Openings-for-free: thread the zerocheck-residual openings into the
     // legacy (no-precompute) flow too — `None` keeps the host step-3 recompute.

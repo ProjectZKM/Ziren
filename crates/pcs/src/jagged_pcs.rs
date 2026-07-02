@@ -706,9 +706,7 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 // ─────────────────────────────────────────────────────────────────────
 // GPU BaseFold commit dispatch hook.
 //
-// Mirror of the jagged-PCS device-trace hook pattern
-// in `crate::shard_level::sumcheck_poly::jagged_pcs_device_hook`.  The
-// hook receives the same inputs as `commit_jagged_pcs` and
+// The hook receives the same inputs as `commit_jagged_pcs` and
 // returns a byte-identical `(commit, prover_data)` — the device side
 // is responsible for:
 //
