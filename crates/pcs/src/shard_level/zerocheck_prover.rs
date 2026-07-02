@@ -70,20 +70,20 @@ use crate::{Challenge, Chip, StarkGenericConfig, Val};
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-    main_traces: &[RowMajorMatrix<Val<SC>>],
     public_values: &[Val<SC>],
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // The shared per-chip analytic trace-MLE (chip-index order),
-    // built once at trace-gen over the `max_log_row_count` cube, threaded
-    // read-only. When present, each chip's `main_cells` are sourced from the
-    // shared MLE's real inner cells (`PaddedMle::inner`, `= Mle::new(raw
-    // trace)`) instead of re-lifting the raw trace; `None` (or a dummy /
-    // device-materialized chip whose inner is `None`) falls back to the raw
-    // trace path (byte-identical either way).
-    shared_trace_mles: Option<&[crate::multilinear::PaddedMle<Val<SC>>]>,
+    // The shared per-chip analytic main-trace MLE (chip-index order),
+    // built once in the shard dispatch over the `max_log_row_count` cube and
+    // threaded read-only — the SOLE host main-trace source for this stage.
+    // A host chip's `PaddedMle` carries a real inner (`PaddedMle::inner`, `=
+    // Mle::new(raw trace)`), so its `main_cells` come from
+    // `inner().guts()` (byte-for-byte the raw trace).  A device-resident /
+    // unexercised chip is a `dummy` (inner `None`, width 0): its cells come
+    // from the device fold / provider-materialize fallback below.
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,
     std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
@@ -235,6 +235,12 @@ where
 
     for &chip_idx in name_order.iter() {
         let chip = chips[chip_idx];
+        // The shared per-chip main-trace MLE.  Host chips carry a real inner
+        // (`guts == the raw trace`); device-resident / unexercised chips are a
+        // `dummy` (inner `None`, width 0).  `inner().is_none()` is the exact
+        // "empty host trace" test the raw `main_traces[chip_idx].width == 0`
+        // check used to be.
+        let pm = &shared_trace_mles[chip_idx];
         let name = chip.name().to_string();
         let opening =
             logup_evaluations.chip_openings.get(&name).unwrap_or_else(|| {
@@ -256,7 +262,7 @@ where
             .map(|v| v != "0")
             .unwrap_or(true);
         let device_cells_opt: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
-            if main_traces[chip_idx].width == 0 && device_fold_on {
+            if pm.inner().is_none() && device_fold_on {
                 _device_traces.and_then(|p| {
                     let prep_hook =
                         crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;
@@ -325,7 +331,7 @@ where
         // Materialize fallback (host cells via D2H) only when device-fold is
         // unavailable for this empty-host chip.
         let materialized_dev: Option<RowMajorMatrix<Val<SC>>> =
-            if device_cells_opt.is_none() && main_traces[chip_idx].width == 0 {
+            if device_cells_opt.is_none() && pm.inner().is_none() {
                 _device_traces.and_then(|p| {
                     crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
                         &name, p,
@@ -335,14 +341,22 @@ where
             } else {
                 None
             };
-        let main_trace: &RowMajorMatrix<Val<SC>> =
-            materialized_dev.as_ref().unwrap_or(&main_traces[chip_idx]);
         let prep_trace = &preprocessed_traces[chip_idx];
-        let main_width = df_dims.map(|(w, _)| w).unwrap_or(main_trace.width);
         let prep_width = prep_trace.width;
-        let main_height = df_dims.map(|(_, h)| h).unwrap_or(
-            if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width },
-        );
+        // Main-trace dims, in the SAME precedence the raw path used
+        // (`df_dims` device-fold > device-materialize D2H > host trace):
+        //   * device-fold chip → dims from `df_dims`.
+        //   * device-materialize fallback → dims from the D2H'd matrix.
+        //   * host (or unexercised) chip → dims from the shared MLE
+        //     (`num_polynomials`/`num_real_entries`; a `dummy` yields (0, 0),
+        //     matching an empty raw trace).
+        let (main_width, main_height): (usize, usize) = if let Some((w, h)) = df_dims {
+            (w, h)
+        } else if let Some(md) = materialized_dev.as_ref() {
+            (md.width, if md.width == 0 { 0 } else { md.values.len() / md.width })
+        } else {
+            (pm.num_polynomials(), pm.num_real_entries())
+        };
 
         // GKR-opening batch powers [β¹ .. β^(main+prep)].
         let combined_width = main_width + prep_width;
@@ -440,30 +454,21 @@ where
         // Lift real trace rows to the challenge field. Device-fold chips keep
         // host cells EMPTY (the device cells carry the trace).
         //
-        // Source the raw base-field cells from the shared
-        // trace-MLE (the per-chip `PaddedMle`, chip-index order) when it is
-        // threaded AND this chip carries real inner cells.  The inner Mle
-        // is `Mle::new(raw trace)`, so `guts().values` equals
-        // `main_trace.values` bit-for-bit (same row-major layout) — the
-        // SAME lift (`Challenge::from`) and the SAME downstream bitrev then
-        // reproduce IDENTICAL `main_cells`.  A dummy / device-materialized
-        // chip has `inner() == None` (width-0 host trace), so it falls back
-        // to the raw `main_trace.values` — the only case where those cells
-        // differ from a `padded_with_zeros(main_traces[chip_idx])` inner.
-        // `None` slice (unthreaded loaders) also falls back.  Byte-neutral.
+        // The shared trace-MLE is the SOLE host main-trace source: a host
+        // chip's inner Mle is `Mle::new(raw trace)`, so `inner().guts()`
+        // equals the raw trace bit-for-bit (same row-major layout) — the SAME
+        // lift (`Challenge::from`) and the SAME downstream bitrev reproduce
+        // IDENTICAL `main_cells`.  There is NO raw-trace fallback: a chip with
+        // no MLE inner is device-resident, and its cells come EITHER from the
+        // device fold (`df_dims`, empty host cells) OR the provider-materialize
+        // D2H (`materialized_dev`).  Byte-neutral.
         let main_cells: Vec<$K> = if df_dims.is_some() {
             Vec::new()
         } else {
-            let cells_src: &[Val<SC>] = shared_trace_mles
-                .and_then(|s| s.get(chip_idx))
-                .and_then(|pm| pm.inner().as_ref())
-                .map(|mle| mle.guts().as_slice())
-                .unwrap_or(&main_trace.values);
-            debug_assert_eq!(
-                cells_src.len(),
-                main_trace.values.len(),
-                "INC-3: shared-MLE main_cells len must equal the raw trace",
-            );
+            let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
+                Some(mle) => mle.guts().as_slice(),
+                None => materialized_dev.as_ref().map(|md| md.values.as_slice()).unwrap_or(&[]),
+            };
             cells_src.iter().map(|v| <$K>::from(*v)).collect()
         };
         let prep_cells: Option<Vec<$K>> = if df_dims.is_none() && prep_width > 0 {

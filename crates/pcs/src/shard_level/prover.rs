@@ -577,6 +577,47 @@ where
         }
     };
 
+    // The shared per-chip analytic main-trace MLE, covering ALL chips in
+    // chip-index order — the SOLE host main-trace source for the LogUp-GKR +
+    // zerocheck stages (they no longer take `main_traces`).  Reuse the loader's
+    // slice when it carries one (the GPU-prover trait path builds it at the
+    // `EagerHostLoader::with_padded` seam); otherwise build it locally here —
+    // this closes the None-gap on the free-fn path (`EagerHostLoader::new`:
+    // shrink prover + the recursion VK-witness builder), which previously fell
+    // back to `main_traces` inside those callees.  A width-0 chip
+    // (device-resident / unexercised) maps to a fully-virtual `dummy`; a host
+    // chip wraps its raw trace via `padded_with_zeros(Mle::from_row_major(t))`.
+    // Construction is byte-identical to the trait method (crates/pcs/src/
+    // prover.rs) and to the raw-trace path, so it never perturbs the transcript.
+    // No new D2H: device main_traces are already width-0 → `dummy`.
+    let _built_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>>;
+    let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] =
+        match main_trace_loader.padded_slice() {
+            Some(p) => p,
+            None => {
+                _built_trace_mles = main_traces
+                    .iter()
+                    .map(|t| {
+                        let width = t.width;
+                        if width == 0 {
+                            return crate::multilinear::PaddedMle::dummy(
+                                max_log_row_count as u32,
+                                crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
+                            );
+                        }
+                        let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                            RowMajorMatrix::new(t.values.clone(), width),
+                        ));
+                        crate::multilinear::PaddedMle::padded_with_zeros(
+                            mle,
+                            max_log_row_count as u32,
+                        )
+                    })
+                    .collect();
+                &_built_trace_mles
+            }
+        };
+
     // Auto-precompute (GPU pipeline path). The host CPU prover
     // supplies `Some(precomputed)` from `commit_basefold_path` / `open()`;
     // the GPU pipeline cannot (it has no host-side commit step) and passes
@@ -886,14 +927,12 @@ where
         prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
             chips,
             preprocessed_traces,
-            main_traces,
             max_log_row_count,
             challenger,
             _device_traces,
-            // The shared per-chip trace-MLE built once at the
-            // loader-construction seam (`with_padded`); `None` for loaders
-            // that do not carry one (device path falls back to on-the-fly).
-            main_trace_loader.padded_slice(),
+            // The shared per-chip trace-MLE built once above (covers ALL
+            // chips) — the SOLE host main-trace source for this stage.
+            shared_trace_mles,
         )
     };
     tracing::info!(
@@ -913,16 +952,14 @@ where
         prove_shard_zerocheck::<SC, A>(
             chips,
             preprocessed_traces,
-            main_traces,
             &public_values,
             &logup_gkr_proof.logup_evaluations,
             max_log_row_count,
             challenger,
             _device_traces,
-            // The shared per-chip trace-MLE built once at the
-            // loader-construction seam (`with_padded`); `None` for loaders
-            // that do not carry one (device path falls back to on-the-fly).
-            main_trace_loader.padded_slice(),
+            // The shared per-chip trace-MLE built once above (covers ALL
+            // chips) — the SOLE host main-trace source for this stage.
+            shared_trace_mles,
         )
     };
     tracing::info!(

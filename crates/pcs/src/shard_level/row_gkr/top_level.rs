@@ -29,16 +29,19 @@ use crate::Chip;
 pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
-    main_traces: &[RowMajorMatrix<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
     _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // The shared per-chip analytic trace-MLE (chip-index order),
-    // built once at trace-gen over the `max_log_row_count` cube, threaded
-    // read-only. When present, the FULL-POINT main-trace opening consumes it
-    // (`PaddedMle::eval_at`) instead of re-evaluating the trace on the fly;
-    // `None` falls back to `evaluate_trace_columns_at_point` (byte-identical).
-    shared_trace_mles: Option<&[PaddedMle<F>]>,
+    // The shared per-chip analytic main-trace MLE (chip-index order),
+    // built once in the shard dispatch over the `max_log_row_count` cube and
+    // threaded read-only — the SOLE host main-trace source for this stage.
+    // A host chip's `PaddedMle` carries a real inner (`guts == the raw
+    // trace`, byte-for-byte); a device-resident / unexercised chip is a
+    // `dummy` (inner `None`, width 0) whose real cells come from the
+    // per-shard device provider (`_device_traces`).  The FULL-POINT opening
+    // consumes the inner via `PaddedMle::eval_at` (== the on-the-fly
+    // `evaluate_trace_columns_at_point`, unit-tested).
+    shared_trace_mles: &[PaddedMle<F>],
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -116,14 +119,14 @@ where
         {
             let max_height = chips
                 .iter()
-                .zip(main_traces.iter())
-                .map(|(chip, t)| {
-                    if t.width == 0 {
+                .zip(shared_trace_mles.iter())
+                .map(|(chip, pm)| {
+                    if pm.inner().is_none() {
                         _device_traces
                             .and_then(|p| p.chip_height(&chip.name()))
                             .unwrap_or(0)
                     } else {
-                        t.values.len() / t.width
+                        pm.num_real_entries()
                     }
                 })
                 .max()
@@ -145,7 +148,7 @@ where
     let (output, mut circuit) = build_gkr_circuit::<F, EF, A>(
         chips,
         preprocessed_traces,
-        main_traces,
+        shared_trace_mles,
         alpha,
         &betas,
         num_row_variables,
@@ -366,9 +369,11 @@ where
         if let (true, Some(provider)) = (batch_enabled, _device_traces) {
             let mut names: Vec<String> = Vec::new();
             let mut points: Vec<Vec<EF>> = Vec::new();
-            for (chip, main_trace) in chips.iter().zip(main_traces.iter()) {
+            for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
                 let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
-                if main_trace.width != 0 || chip_main_width == 0 {
+                // Only device-only chips (dummy MLE = empty host trace) with a
+                // non-zero declared width are batched via the provider.
+                if pm.inner().is_some() || chip_main_width == 0 {
                     continue;
                 }
                 let main_height = provider.chip_height(&chip.name()).unwrap_or(1);
@@ -430,11 +435,17 @@ where
 
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
         .par_iter()
-        .zip(main_traces.par_iter())
+        .zip(shared_trace_mles.par_iter())
         .zip(preprocessed_traces.par_iter())
-        .enumerate()
-        .map(|(chip_idx, ((chip, main_trace), prep_trace))| {
-            let main_height = if main_trace.width == 0 {
+        .map(|((chip, pm), prep_trace)| {
+            // Host main-trace cells come from the shared MLE inner
+            // (`guts == the raw trace`); a device-resident chip is a `dummy`
+            // (inner `None`) → empty cells sourced from the provider below.
+            let (mt_values, mt_width): (&[F], usize) = match pm.inner().as_ref() {
+                Some(mle) => (mle.guts().as_slice(), pm.num_polynomials()),
+                None => (&[], 0),
+            };
+            let main_height = if pm.inner().is_none() {
                 // Device-only chip — its real height lives in the
                 // per-shard provider (host trace empty). Falls back to 1
                 // (legacy unexercised-chip) when no provider entry.
@@ -442,7 +453,7 @@ where
                     .and_then(|p| p.chip_height(&chip.name()))
                     .unwrap_or(1)
             } else {
-                main_trace.values.len() / main_trace.width
+                pm.num_real_entries()
             };
             let log_main_height =
                 main_height.max(1).next_power_of_two().trailing_zeros() as usize;
@@ -465,7 +476,7 @@ where
             // chip.width()`, so an unexercised chip must still emit a
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
-            let main_evals = if main_trace.width == 0 && chip_main_width > 0 {
+            let main_evals = if pm.inner().is_none() && chip_main_width > 0 {
                 // Device-only chip — eval its device-resident trace
                 // (from the provider) at the GKR point on device, instead of
                 // emitting a zero vector (which breaks the zerocheck GKR
@@ -486,9 +497,12 @@ where
                     })
                     .unwrap_or_else(|| vec![EF::ZERO; chip_main_width])
             } else {
+                // Host chip (or width-0 unexercised) — evaluate the shared
+                // MLE's real inner cells (`mt_values`/`mt_width`, == the raw
+                // trace) at the trailing-`log_h` point.
                 evaluate_trace_columns_at_point::<F, EF>(
-                    &main_trace.values,
-                    main_trace.width,
+                    mt_values,
+                    mt_width,
                     main_eval_point,
                 )
             };
@@ -519,7 +533,7 @@ where
             // needs.  Host path: `evaluate_trace_columns_at_point` over the full
             // coords.  Device-only chips: per-chip provider hook at the full
             // point (no batch map for this point); falls back to None.
-            let main_evals_full: Option<Vec<EF>> = if main_trace.width == 0 && chip_main_width > 0 {
+            let main_evals_full: Option<Vec<EF>> = if pm.inner().is_none() && chip_main_width > 0 {
                 _device_traces.and_then(|p| {
                     crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
                         &chip.name(),
@@ -527,23 +541,15 @@ where
                         p,
                     )
                 })
-            } else if main_trace.width > 0 {
+            } else if pm.inner().is_some() {
                 // Consume the shared analytic trace-MLE at the
                 // FULL point (`num_variables == max_log_row_count ==
                 // full_eval_point.len()`, zero padding) instead of
                 // re-evaluating the trace on the fly.  `PaddedMle::eval_at`
                 // reproduces `evaluate_trace_columns_at_point` bit-for-bit
                 // (see `eval_at_matches_evaluate_trace_columns`), so this
-                // is transcript-neutral.  Falls back to the on-the-fly path
-                // when no shared MLE is threaded (e.g. device loaders).
-                Some(match shared_trace_mles.and_then(|s| s.get(chip_idx)) {
-                    Some(pm) => pm.eval_at::<EF>(full_eval_point),
-                    None => evaluate_trace_columns_at_point::<F, EF>(
-                        &main_trace.values,
-                        main_trace.width,
-                        full_eval_point,
-                    ),
-                })
+                // is transcript-neutral.
+                Some(pm.eval_at::<EF>(full_eval_point))
             } else {
                 None
             };

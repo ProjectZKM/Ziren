@@ -18,6 +18,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use super::layer::{LogUpGkrCpuLayer, RowMajorTable};
 use crate::air::MachineAir;
 use crate::lookup::Lookup;
+use crate::multilinear::PaddedMle;
 use crate::Chip;
 
 /// `denominator = α + Σ β_k · v_k` with `v_0 = argument_index` and
@@ -53,17 +54,19 @@ pub fn generate_interaction_vals<F: Field, EF: ExtensionField<F>>(
 /// Build a chip's per-row interaction tables.
 ///
 /// Returns `(numer, denom)` row-major matrices of shape
-/// `height × num_interactions`.  `height` must equal the chip's main
-/// trace height (rows-stored count).  When `preprocessed_trace` is
+/// `height × num_interactions`.  `height` is derived from
+/// `main_values.len() / main_width` (the chip's main-trace rows sourced
+/// from the shared trace-MLE inner).  When `preprocessed_trace` is
 /// `None`, the per-row preprocessed slice is treated as empty.
 pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionField<F> + Send + Sync>(
     interactions: &[(&Lookup<F>, bool)],
-    main_trace: &RowMajorMatrix<F>,
+    main_values: &[F],
+    main_width: usize,
     preprocessed_trace: Option<&RowMajorMatrix<F>>,
     alpha: EF,
     betas: &[EF],
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
-    let height = if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width };
+    let height = if main_width == 0 { 0 } else { main_values.len() / main_width };
     let num_interactions = interactions.len();
 
     // FLAKE FIX: see round.rs::flatten_layer note about KoalaBear
@@ -80,7 +83,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
     // alone leaves a single core doing the work for the largest chip.
     if height > 0 && num_interactions > 0 {
         use p3_maybe_rayon::prelude::*;
-        let main_w = main_trace.width;
+        let main_w = main_width;
         let prep_w = preprocessed_trace.map(|pt| pt.width).unwrap_or(0);
         let prep_values: Option<&[F]> = preprocessed_trace.map(|pt| pt.values.as_slice());
         numer_evals
@@ -88,7 +91,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
             .zip(denom_evals.par_chunks_exact_mut(num_interactions))
             .enumerate()
             .for_each(|(row_idx, (numer_row, denom_row))| {
-                let main_row = &main_trace.values[row_idx * main_w..(row_idx + 1) * main_w];
+                let main_row = &main_values[row_idx * main_w..(row_idx + 1) * main_w];
                 let prep_row: &[F] = match prep_values {
                     Some(pv) if prep_w > 0 => &pv[row_idx * prep_w..(row_idx + 1) * prep_w],
                     _ => &[],
@@ -199,8 +202,13 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 /// Inputs:
 /// - `chips`: per-chip (sends + receives) lookup specs (in BTreeSet
 ///   iteration order on the host side).
-/// - `preprocessed_traces`, `main_traces`: per-chip raw traces.
+/// - `preprocessed_traces`: per-chip raw preprocessed traces.
 ///   `preprocessed_traces[i]` may be empty (`width == 0`).
+/// - `shared_trace_mles`: the shared per-chip analytic main-trace MLE
+///   (chip-index order).  A host chip's `PaddedMle` carries a real inner
+///   (`guts == the raw trace`); a device-resident / unexercised chip is a
+///   `dummy` (inner `None`, width 0) whose real cells come from the
+///   per-shard device provider via the GPU hook.
 /// - `alpha`, `betas`: post-commit challenges.  `betas` length must be
 ///   `1 + max_interaction_arity` (slot 0 is for `argument_index`,
 ///   slots 1..=arity are for the per-column values).
@@ -217,7 +225,7 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 pub fn generate_first_layer<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
-    main_traces: &[RowMajorMatrix<F>],
+    shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
@@ -231,7 +239,7 @@ where
     A: MachineAir<F>,
 {
     assert!(num_row_variables >= 1, "num_row_variables must be >= 1");
-    assert_eq!(chips.len(), main_traces.len(), "chip count vs main trace count");
+    assert_eq!(chips.len(), shared_trace_mles.len(), "chip count vs main trace count");
     assert_eq!(
         chips.len(),
         preprocessed_traces.len(),
@@ -252,9 +260,17 @@ where
     // when chips have padded widths > raw widths.
     let mut total_padded_interactions: usize = 0;
 
-    for ((chip, main_trace), prep_trace) in
-        chips.iter().zip(main_traces.iter()).zip(preprocessed_traces.iter())
+    for ((chip, pm), prep_trace) in
+        chips.iter().zip(shared_trace_mles.iter()).zip(preprocessed_traces.iter())
     {
+        // Host main-trace cells come from the shared MLE inner
+        // (`guts == the raw trace`, byte-for-byte); a device-resident /
+        // unexercised chip is a `dummy` → empty cells, width 0 (its real
+        // cells are served by the GPU hook / provider below).
+        let (mt_values, mt_width): (&[F], usize) = match pm.inner().as_ref() {
+            Some(mle) => (mle.guts().as_slice(), pm.num_polynomials()),
+            None => (&[], 0),
+        };
         let interactions: Vec<(&Lookup<F>, bool)> = chip
             .sends()
             .iter()
@@ -286,19 +302,19 @@ where
                     use p3_air::BaseAir;
                     let chip_main_width = <_ as BaseAir<F>>::width(&chip.air);
                     let chip_prep_width = chip.preprocessed_width();
-                    let main_height = if main_trace.width == 0 { 0 } else { main_trace.values.len() / main_trace.width };
-                    let main_padded: Vec<F> = if main_trace.width == chip_main_width || main_trace.width == 0 {
-                        main_trace.values.clone()
-                    } else if main_trace.width < chip_main_width {
+                    let main_height = if mt_width == 0 { 0 } else { mt_values.len() / mt_width };
+                    let main_padded: Vec<F> = if mt_width == chip_main_width || mt_width == 0 {
+                        mt_values.to_vec()
+                    } else if mt_width < chip_main_width {
                         let mut padded = vec![F::ZERO; main_height * chip_main_width];
                         for r in 0..main_height {
-                            let src = &main_trace.values[r * main_trace.width..(r + 1) * main_trace.width];
-                            let dst = &mut padded[r * chip_main_width..r * chip_main_width + main_trace.width];
+                            let src = &mt_values[r * mt_width..(r + 1) * mt_width];
+                            let dst = &mut padded[r * chip_main_width..r * chip_main_width + mt_width];
                             dst.copy_from_slice(src);
                         }
                         padded
                     } else {
-                        main_trace.values.clone()
+                        mt_values.to_vec()
                     };
                     let prep_height = if prep_trace.width == 0 { 0 } else { prep_trace.values.len() / prep_trace.width };
                     let prep_padded: Vec<F> = if prep_trace.width == chip_prep_width || prep_trace.width == 0 {
@@ -314,7 +330,7 @@ where
                     } else {
                         prep_trace.values.clone()
                     };
-                    let main_padded_width = if main_trace.width == 0 { 0 } else { chip_main_width };
+                    let main_padded_width = if mt_width == 0 { 0 } else { chip_main_width };
                     let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
                     // SAFETY: TypeId equality guarantees F == Kb and
                     // EF == Ef4; slice/value reinterp is sound.
@@ -385,7 +401,8 @@ where
         } else {
             build_chip_interaction_tables::<F, EF>(
                 &interactions,
-                main_trace,
+                mt_values,
+                mt_width,
                 if prep_trace.width > 0 { Some(prep_trace) } else { None },
                 alpha,
                 betas,

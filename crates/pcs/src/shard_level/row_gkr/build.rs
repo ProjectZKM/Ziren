@@ -11,6 +11,7 @@ use super::first_layer::generate_first_layer;
 use super::layer::{GkrCircuitLayer, LayerState, LogupGkrCpuCircuit};
 use super::transition::layer_transition;
 use crate::air::MachineAir;
+use crate::multilinear::PaddedMle;
 use crate::Chip;
 
 /// Build the full GKR circuit (data side) and return the unified
@@ -18,7 +19,10 @@ use crate::Chip;
 ///
 /// **Inputs:**
 /// - `chips`: per-chip lookup specs
-/// - `preprocessed_traces`, `main_traces`: per-chip raw traces
+/// - `preprocessed_traces`: per-chip raw preprocessed traces
+/// - `shared_trace_mles`: the shared per-chip analytic main-trace MLE
+///   (chip-index order); a host chip carries a real inner (`guts == the
+///   raw trace`), a device-resident chip is a `dummy`
 /// - `alpha`, `betas`: post-commit challenges (`betas[0]` covers the
 ///   `argument_index` slot, `betas[1..]` cover per-column values)
 /// - `num_row_variables`: log₂ of padded row count
@@ -36,7 +40,7 @@ use crate::Chip;
 pub fn build_gkr_circuit<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
-    main_traces: &[RowMajorMatrix<F>],
+    shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
@@ -52,7 +56,7 @@ where
     let first = generate_first_layer::<F, EF, A>(
         chips,
         preprocessed_traces,
-        main_traces,
+        shared_trace_mles,
         alpha,
         betas,
         num_row_variables,
