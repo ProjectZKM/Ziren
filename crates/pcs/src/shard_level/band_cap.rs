@@ -73,7 +73,7 @@ thread_local! {
     /// no-observe verify recompute, the zerocheck residual, and the
     /// `prove_shard_to_basefold` residual fast-path.  Computed ONCE per shard at
     /// `BandCapGuard::new` (same predicate the zerocheck uses on the host path:
-    /// `ZIREN_STAGE2_REVZETA=1` AND no device trace provider — on the pure-host
+    /// rev enabled AND no device trace provider — on the pure-host
     /// FIX-off path every chip then carries `main_trace_evaluations_full`, so
     /// this equals the zerocheck's full predicate) and installed for the WHOLE
     /// guard scope (`prover.commit` + `prover.open`, the SAME rayon task), so the
@@ -81,8 +81,8 @@ thread_local! {
     /// shard.  `Some(use_rev)` when a guard set it (the core FIX-off path);
     /// `None` (every non-core path, e.g. FIX-on `test_simple_prove`,
     /// recursion / shrink / wrap) == no carrier => readers fall back to their
-    /// own legacy predicate (byte-identical to today).  Flag OFF
-    /// (`ZIREN_STAGE2_REVZETA` unset) => `Some(false)` on the core path, which is
+    /// own legacy predicate (byte-identical to today).  Rev OFF
+    /// => `Some(false)` on the core path, which is
     /// the legacy bitrev branch (byte-identical).
     static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
         const { std::cell::RefCell::new(None) };

@@ -645,12 +645,6 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             shape.extend(minimal_shape?);
         } else if has_cpu {
             // Plain-core branch: min-area shape over partial_core_shapes range.
-            if std::env::var("ZIREN_CANON_DEBUG").is_ok() {
-                let mut hs: Vec<(String, usize)> =
-                    heights.iter().map(|(a, h)| (a.to_string(), *h)).collect();
-                hs.sort();
-                eprintln!("[ORDCANON] log2_shard_size={log2_shard_size} heights_in={hs:?}");
-            }
             let mut minimal_shape = None;
             let mut minimal_area = usize::MAX;
             for (_, clusters) in self.partial_core_shapes.range(log2_shard_size..) {

@@ -675,33 +675,6 @@ where
                                         band_cap_shape_config
                                             .find_canonical_cluster_shape(&record)
                                             .map(|shape| {
-                                                // G1 Stage D1b (#88) gate probe:
-                                                // dump the REAL canonical-cluster
-                                                // shape the FIX-off jagged commit
-                                                // pads to, so the membership gate
-                                                // can compare it against the
-                                                // ordered reconstruction.
-                                                if std::env::var("ZIREN_VK_SHAPE_CAPTURE").is_ok() {
-                                                    let mut sh: Vec<(String, usize)> = shape
-                                                        .iter()
-                                                        .map(|(a, h)| (a.to_string(), *h))
-                                                        .collect();
-                                                    sh.sort();
-                                                    let mut ch: Vec<(String, usize)> =
-                                                        crate::mips::MipsAir::<SC::Val>::core_heights(&record)
-                                                            .into_iter()
-                                                            .map(|(a, h)| (a.to_string(), h))
-                                                            .collect();
-                                                    ch.sort();
-                                                    eprintln!(
-                                                        "[REALCANON] shard={} canonical={:?}",
-                                                        record.public_values.shard, sh
-                                                    );
-                                                    eprintln!(
-                                                        "[REALCANON] shard={} core_heights_raw={:?}",
-                                                        record.public_values.shard, ch
-                                                    );
-                                                }
                                                 let map: std::collections::BTreeMap<
                                                     String,
                                                     (usize, usize),
@@ -921,7 +894,7 @@ where
                                                 // recursion / shrink / wrap provers
                                                 // never enter here, so their
                                                 // `current_use_rev()` stays `None`
-                                                // (legacy).  The `ZIREN_STAGE2_REVZETA`
+                                                // (legacy).  The rev-zeta
                                                 // A/B env is RETIRED: a `const true`
                                                 // (not an env read) makes the core
                                                 // orientation a compile-time DEFAULT,

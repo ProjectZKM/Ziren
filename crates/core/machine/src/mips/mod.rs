@@ -1361,8 +1361,7 @@ pub mod tests {
     // set/cleared around each verify.
     #[test]
     // FAST diagnostic harness: prove one honest FIX-on fibonacci shard and run
-    // ONLY a recon-ON verify (no gate-B/C). Use with ZIREN_LOGUP_RECON_DEBUG=1
-    // to read the orientation / embed sweep and the walk-vs-reconstruction
+    // ONLY a recon-ON verify (no gate-B/C) — reads the walk-vs-reconstruction
     // numbers in ~one prove + one verify. `#[ignore]` so it never runs in CI.
     #[test]
     #[ignore]
@@ -1768,7 +1767,7 @@ pub mod tests {
     // #125 INC-4b: rev(zeta) is now the CORE DEFAULT (the core prove path
     // installs the `Some(true)` orientation carrier unconditionally), so the
     // emitted core proof is rev without any env toggle — commit+y+weight all
-    // natural, claim seeded from `*_full`.  (The `ZIREN_STAGE2_REVZETA` A/B env
+    // natural, claim seeded from `*_full`.  (The rev-zeta A/B env
     // is RETIRED.)
     #[cfg(test)]
     fn stage3_prove_fixoff_rev(
@@ -1929,7 +1928,7 @@ pub mod tests {
     }
 
     // ── STAGE 3 (#88 host flip) — THE FORGERY FLIP under rev ──────────────────
-    // Under ZIREN_STAGE2_REVZETA=1 (the natural/rev path) AND
+    // Under the rev/natural core path AND
     // ZIREN_LOGUP_RECONSTRUCTION=1 (reconstruction ON):
     //   (a) the HONEST proof still ACCEPTS (anti-confound: the flip is only real
     //       if honest is green with the reconstruction on);

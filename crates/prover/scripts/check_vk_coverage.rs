@@ -8,7 +8,7 @@
 //!
 //! Each `--digest` is 8 comma-separated u32 values (the canonical
 //! KoalaBear repr, exactly as printed by the `vk not allowed: [...]`
-//! panic and the `ZIREN_VK_COVERAGE_PROBE` `[VKCOV-MERKLE]` line).
+//! panic).
 //!
 //! Usage:
 //!   cargo run --release --bin check_vk_coverage -- \

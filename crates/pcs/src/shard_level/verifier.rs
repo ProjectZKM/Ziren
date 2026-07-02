@@ -402,20 +402,6 @@ impl BasefoldShardVerifier {
                         )
                     };
                     if recomputed != observed_inner {
-                        if std::env::var("ZIREN_HASHBIND_DBG").is_ok() {
-                            let (rc, cc) =
-                                crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing);
-                            let raw8 = raw_inner;
-                            eprintln!(
-                                "[HASHBIND-DBG] MISMATCH\n  raw_root={raw8:?}\n  \
-                                 recomputed={recomputed:?}\n  observed={observed_inner:?}\n  \
-                                 len={} row_counts={rc:?}\n  col_counts={cc:?}\n  \
-                                 offsets.len={} total_values={}",
-                                cc.len(),
-                                bundle.packing.offsets.len(),
-                                bundle.packing.total_values,
-                            );
-                        }
                         return Err(BasefoldVerifyError::JaggedPcs(
                             "jagged hash-bind mismatch: recomputed \
                              compress([raw_root, hash(counts)]) != observed \
@@ -945,7 +931,7 @@ fn verify_zerocheck_host<SC, A>(
     public_values: &[Val<SC>],
     max_log_row_count: usize,
     // #125 INC-4b: `true` for the CORE machine (rev shard proofs); `false` for
-    // recursion / shrink / wrap (LEGACY). Replaces the retired ZIREN_STAGE2_REVZETA.
+    // recursion / shrink / wrap (LEGACY). Replaces the retired rev-zeta A/B env.
     core_rev: bool,
     challenger: &mut SC::Challenger,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
@@ -1061,7 +1047,7 @@ where
         // out of scope for this CPU stage (needs the GPU prepare-hook port).
         // #125 INC-4b: the rev/collapsed convention is now the per-machine
         // `core_rev` flag (true for the CORE machine, false for recursion / wrap)
-        // — NOT the retired ZIREN_STAGE2_REVZETA env.  A core proof is verified
+        // — NOT the retired rev-zeta env.  A core proof is verified
         // rev; a recursion / wrap proof legacy (its embed-loop untouched).
         let verifier_use_rev = core_rev
             && !gkr_evaluations.chip_openings.is_empty()
@@ -1215,7 +1201,7 @@ fn recompute_zerocheck_rlc_eval_host<SC, A>(
     lambda: Challenge<SC>,
     opened_values: &ShardOpenedValues<Val<SC>, Challenge<SC>>,
     // #125 INC-4b: `true` for the CORE machine (rev eq-bridge anchor rev(z_gkr)),
-    // `false` for recursion / shrink / wrap (LEGACY). Replaces ZIREN_STAGE2_REVZETA.
+    // `false` for recursion / shrink / wrap (LEGACY). Replaces the retired rev-zeta env.
     core_rev: bool,
 ) -> Challenge<SC>
 where
@@ -1238,7 +1224,7 @@ where
     // derived from the SAME signal as the claimed_sum block (every chip carries
     // `*_full`).  Legacy shards keep `eq(z_gkr, z*)`.
     // #125 INC-4b: the eq-bridge anchor orientation follows the per-machine
-    // `core_rev` flag (NOT the retired ZIREN_STAGE2_REVZETA env). Core => rev.
+    // `core_rev` flag (NOT the retired rev-zeta env). Core => rev.
     let conv_use_rev = core_rev
         && !gkr_evaluations.chip_openings.is_empty()
         && gkr_evaluations
@@ -2061,17 +2047,6 @@ where
         let reconstructed_numerator = evaluate_mle_host(&numerator_values, interaction_point);
         let reconstructed_denominator =
             evaluate_mle_host(&denominator_values, interaction_point);
-
-        if std::env::var("ZIREN_LOGUP_RECON_DEBUG").as_deref() == Ok("1") {
-            eprintln!(
-                "[RECON-DBG] num_eq={} den_eq={} chips={} L={} M={}",
-                numerator_eval == reconstructed_numerator,
-                denominator_eval == reconstructed_denominator,
-                chips.len(),
-                interaction_point.len(),
-                trace_point.len(),
-            );
-        }
 
         // (6) The GKR round walk's reduced final evals MUST equal the
         // reconstruction from the chips' trace openings.  This is the assert

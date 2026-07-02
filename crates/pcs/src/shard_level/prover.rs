@@ -1020,7 +1020,7 @@ where
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
         // #125 INC-4b: orientation driven solely by the core-scoped
-        // `current_use_rev()` carrier; the `ZIREN_STAGE2_REVZETA` env is RETIRED.
+        // `current_use_rev()` carrier; the rev-zeta env is RETIRED.
         // `None` (every recursion / shrink / wrap prove) => LEGACY (byte-identical).
         // #118 DEVICE-REV: drop the `_device_traces.is_none()` guard so the GPU CORE
         // path (device provider present) also declines the zerocheck-residual reuse
@@ -1097,88 +1097,6 @@ where
             }
         }
     };
-
-    // Residual cross-check: ZIREN_ZC_RESIDUAL_XCHECK=1 recomputes the legacy
-    // jagged step-3 y values from the commit traces (the exact formula at
-    // jagged_pcs.rs step 3: eq table over rev(z), bit-reversed row source)
-    // and asserts they equal the zerocheck residual per chip per column.
-    if std::env::var("ZIREN_ZC_RESIDUAL_XCHECK").map(|v| v == "1").unwrap_or(false) {
-        match residual_y.as_ref() {
-            None => tracing::warn!(
-                "#33 S0 xcheck: residual_y is None (kill-switched or declined) — \
-                 nothing to check"
-            ),
-            Some(resid) => {
-                let z = &zerocheck_proof.point_and_eval.0;
-                let z_rev: Vec<Challenge<SC>> = z.iter().rev().copied().collect();
-                let eq_c = crate::zerocheck_prover::eq_mle_table::<Challenge<SC>>(&z_rev);
-                let mut n_chips_checked = 0usize;
-                let mut n_vals_checked = 0usize;
-                for ((chip, ctrace), pre) in
-                    chips.iter().zip(commit_traces.iter()).zip(resid.iter())
-                {
-                    let name = MachineAir::<Val<SC>>::name(*chip);
-                    // This DIAGNOSTIC recomputes the legacy step-3 y
-                    // from raw cells.  When the commit trace is empty
-                    // (device-resident under the default D2H skip), pull the
-                    // chip's full cells from the provider so the xcheck can
-                    // still validate it.  XCHECK is off by default, so this
-                    // re-materialize is paid only on validation runs.
-                    let owned_dev: Option<(Vec<Val<SC>>, usize)> = if ctrace.width == 0 {
-                        _device_traces.and_then(|p| {
-                            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
-                                &name, p,
-                            )
-                        })
-                    } else {
-                        None
-                    };
-                    let (cells, w): (&[Val<SC>], usize) = match &owned_dev {
-                        Some((vals, w)) => (vals.as_slice(), *w),
-                        None => (ctrace.values.as_slice(), ctrace.width),
-                    };
-                    let h = if w == 0 { 0 } else { cells.len() / w };
-                    if h == 0 || w == 0 {
-                        assert!(
-                            pre.is_empty(),
-                            "#33 S0: empty chip must map to empty y (chip={})",
-                            name,
-                        );
-                        continue;
-                    }
-                    assert_eq!(pre.len(), w, "#33 S0: y width mismatch");
-                    let log_h2 = (h as u32).trailing_zeros();
-                    for col in 0..w {
-                        let mut acc = Challenge::<SC>::ZERO;
-                        for row in 0..h {
-                            let src = if h <= 1 {
-                                row
-                            } else {
-                                ((row as u32).reverse_bits() >> (32 - log_h2)) as usize
-                            };
-                            acc += eq_c[row]
-                                * Challenge::<SC>::from(cells[src * w + col]);
-                        }
-                        assert_eq!(
-                            acc,
-                            pre[col],
-                            "#33 S0 xcheck FAILED chip={} col={col} \
-                             (legacy step-3 recompute vs zerocheck residual)",
-                            name,
-                        );
-                        n_vals_checked += 1;
-                    }
-                    n_chips_checked += 1;
-                }
-                tracing::info!(
-                    chips = n_chips_checked,
-                    values = n_vals_checked,
-                    "#33 S0 xcheck PASSED: zerocheck residual == legacy jagged \
-                     step-3 y_per_chip"
-                );
-            }
-        }
-    }
 
     // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
     // log(chip_height) coords of the LogUp-GKR final eval_point.

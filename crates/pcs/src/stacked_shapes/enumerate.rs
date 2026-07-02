@@ -161,8 +161,8 @@ pub fn build_mips_machine_shape() -> MachineShape {
     let memory = extend_cluster(&core_base, memory_cluster_extras());
 
     // Multi-shard runs partition the work into SHARD-TYPE chip sets that
-    // differ from the single-shard union (observed via
-    // ZIREN_VK_COVERAGE_PROBE on the keccak deferred e2e):
+    // differ from the single-shard union (observed
+    // on the keccak deferred e2e):
     //   * main execution shards carry `Global` but NOT the
     //     MemoryGlobalInit/Finalize pair;
     //   * memory shards are MINIMAL: preprocessed + Global + the

@@ -375,9 +375,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         );
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
     let wrap_real_num_cols: usize = column_counts_by_round.iter().flatten().sum();
-    if std::env::var("ZIREN_GKR_DBG").is_ok() {
-        eprintln!("[CWRAP] real_num_cols(main_widths sum)={wrap_real_num_cols}");
-    }
     let jagged_evaluator_fn =
         super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
             builder,

@@ -51,7 +51,7 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     /// are LEGACY (the recursion prover never installs the carrier).  Threaded
     /// to the host `verify_zerocheck_host` / `recompute_zerocheck_rlc_eval_host`
     /// so a core proof is host-verified rev and a recursion/wrap proof legacy
-    /// (the `ZIREN_STAGE2_REVZETA` env is RETIRED).
+    /// (the rev-zeta env is RETIRED).
     core_rev: bool,
 }
 
@@ -484,11 +484,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
-        if std::env::var("ZIREN_SETUP_HEIGHTS").is_ok() {
-            for (name, _, trace) in named_preprocessed_traces.iter() {
-                eprintln!("[SETUP-H] {} h={} log={}", name, trace.height(), trace.height().next_power_of_two().trailing_zeros());
-            }
-        }
         let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
             .iter()
             .map(|(name, _, trace)| {

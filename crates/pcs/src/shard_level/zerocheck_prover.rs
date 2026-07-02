@@ -193,7 +193,7 @@ where
     // #125 INC-4b: the orientation is now driven SOLELY by the core-scoped
     // `current_use_rev()` carrier (installed `Some(true)` only on the CORE prove
     // path; `None` on every recursion / shrink / wrap prove).  The
-    // `ZIREN_STAGE2_REVZETA` A/B env is RETIRED — `None` (no carrier) is LEGACY
+    // rev-zeta A/B env is RETIRED — `None` (no carrier) is LEGACY
     // (byte-identical to the recursion rings today).
     // #118 DEVICE-REV: the `_device_traces.is_none()` guard is DROPPED so the GPU
     // CORE device-fold path (which carries a per-shard device trace provider) also

@@ -2271,26 +2271,10 @@ pub mod jagged {
         // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
         // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
         let pin = crate::shard_level::band_cap::current_recursion_area_pin();
-        let natural_log_dense = packing.log_dense_size;
         if let Some(target) = pin {
             if packing.log_dense_size < target {
                 packing.log_dense_size = target;
             }
-        }
-        // STAGE-1 AREA-PIN PROBE (#88/#82, env ZIREN_AREA_PIN_DBG=1, default
-        // OFF): show that CORE commits read pin=None (natural area, untouched)
-        // while RECURSION commits read pin=Some(27) → log_dense pinned to 27.
-        if std::env::var("ZIREN_AREA_PIN_DBG").is_ok() {
-            let stack = crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
-            let final_area = (1usize << packing.log_dense_size)
-                .next_multiple_of(1usize << stack);
-            eprintln!(
-                "[APIN] pin={pin:?} natural_log_dense={natural_log_dense} \
-                 final_log_dense={} final_area=2^{} num_stripes={}",
-                packing.log_dense_size,
-                (final_area as u64).trailing_zeros(),
-                final_area >> stack as usize,
-            );
         }
         let (commit, prover_data) = {
             let dense_q =
@@ -2541,18 +2525,6 @@ pub mod jagged {
             &z_trace_be,
             challenger,
         );
-
-        // Gated host replica of the recursion's jagged-eval closing (localizes
-        // the FIX-off compress div-by-zero).  Read-only, no challenger touch.
-        if std::env::var("ZIREN_JE_SELFCHECK").is_ok() {
-            crate::jagged_eval_sumcheck::debug_jagged_eval_closing(
-                offsets,
-                z_row,
-                &z_col,
-                &z_trace_be,
-                &jagged_eval,
-            );
-        }
 
         // (5) Ziren point-extend (SP1 opens at `final_eval_point` directly):
         // the BaseFold commit covers `area` cells (num_stripes × batch_size ×
@@ -3906,79 +3878,6 @@ pub mod jagged {
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         g: usize,
     ) -> bool {
-        // [STEP7] gated diagnostic (single-group prefix-sum consistency).
-        if std::env::var("ZIREN_STEP7_DBG").is_ok() {
-            let pcc: Vec<usize> = packing.chip_infos.iter().map(|ci| ci.column_count).collect();
-            let offsets = &packing.offsets;
-            let tv = packing.total_values;
-            // packing_row_counts (offset-walk, shard_level_witness.rs:874-895)
-            let mut prc: Vec<usize> = Vec::with_capacity(pcc.len());
-            {
-                let mut col_idx = 0usize;
-                for &cc in pcc.iter() {
-                    if cc == 0 { prc.push(0); continue; }
-                    let h = if col_idx + 1 < offsets.len() {
-                        offsets[col_idx + 1].saturating_sub(offsets[col_idx])
-                    } else if col_idx < offsets.len() {
-                        tv.saturating_sub(offsets[col_idx])
-                    } else { 0 };
-                    prc.push(h);
-                    col_idx += cc;
-                }
-            }
-            let ccbr: Vec<Vec<usize>> = if pcc.is_empty() { vec![] } else { vec![pcc.clone()] };
-            let total_cols_before_pad: usize = ccbr.iter().map(|cc| {
-                let flat = cc.iter().sum::<usize>();
-                let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-                flat + added
-            }).sum();
-            let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
-            let col_prefix_sums_len = padded_cols + 1;
-            let jagged_pt_len = jagged_eval.partial_sumcheck_proof.point_and_eval.0.len();
-            let bits_per_entry = if jagged_pt_len >= 2 { jagged_pt_len / 2 } else { 0 };
-            let clamp = if bits_per_entry < 63 { (1usize << bits_per_entry) - 1 } else { usize::MAX };
-            let cap = |v: usize| -> usize { if bits_per_entry < 63 { v.min(clamp) } else { v } };
-            // col_prefix_sums (shard_level_witness.rs:994-1039)
-            let mut cps: Vec<usize> = vec![0usize];
-            let mut oi = 0usize; let mut co = 0usize;
-            for cc in ccbr.iter() {
-                let real = cc.iter().sum::<usize>();
-                for _ in 0..real {
-                    if oi < offsets.len() { co = offsets[oi]; oi += 1; }
-                    if cps.len() >= col_prefix_sums_len { break; }
-                    cps.push(cap(co));
-                }
-                let added = if cc.len() >= 2 { cc[cc.len() - 2] + 1 } else { 1 };
-                for _ in 0..added { if cps.len() >= col_prefix_sums_len { break; } cps.push(cap(co)); }
-            }
-            while cps.len() < col_prefix_sums_len - 1 { cps.push(cap(co)); }
-            if cps.len() < col_prefix_sums_len { cps.push(cap(tv)); }
-            let prefix_sum: Vec<usize> = cps.iter().skip(1).copied().collect();
-            let mut repeated: Vec<usize> = Vec::new();
-            for (round_rc, round_cc) in std::iter::repeat(&prc).zip(ccbr.iter()) {
-                for (&rc, &cc) in round_rc.iter().zip(round_cc.iter()) {
-                    for _ in 0..cc { repeated.push(rc); }
-                }
-            }
-            let max_off = offsets.iter().copied().max().unwrap_or(0);
-            eprintln!("[STEP7] group={} chips={} pcc.len={} offsets.len={} total_values={} log_dense={} jagged_pt_len={} bits_per_entry={} clamp={} max_off={} CLAMP_HIT={} padded_cols={} prefix_sum.len={} repeated.len={}",
-                g, packing.chip_infos.len(), pcc.len(), offsets.len(), tv, packing.log_dense_size,
-                jagged_pt_len, bits_per_entry, clamp, max_off, max_off > clamp || tv > clamp,
-                padded_cols, prefix_sum.len(), repeated.len());
-            eprintln!("[STEP7] column_counts={:?}", pcc);
-            eprintln!("[STEP7] row_counts={:?}", prc);
-            eprintln!("[STEP7] offsets head={:?} tail={:?}", &offsets[..offsets.len().min(10)], &offsets[offsets.len().saturating_sub(6)..]);
-            let mut acc = 0usize; let mut found = false;
-            for (k, (rc, expected)) in repeated.iter().zip(prefix_sum.iter()).enumerate() {
-                if acc != *expected && !found {
-                    found = true;
-                    eprintln!("[STEP7] FIRST DIVERGENCE k={} acc={} prefix_sum[k]={} diff={} | offsets[k]={}",
-                        k, acc, *expected, acc as i64 - *expected as i64, offsets.get(k).copied().unwrap_or(tv));
-                }
-                acc += *rc;
-            }
-            if !found { eprintln!("[STEP7] NO divergence over {} pairs (acc==prefix_sum)", repeated.len().min(prefix_sum.len())); }
-        }
         // SP1-aligned: sample z_col at the matching transcript position
         // (after the commit observe, before the reduction), mirroring
         // the prover.

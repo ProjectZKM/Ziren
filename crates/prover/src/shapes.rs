@@ -192,35 +192,6 @@ pub fn build_vk_map<C: ZKMProverComponents>(
         let num_shapes = all_shapes.len();
         tracing::info!("number of shapes: {}", num_shapes);
 
-        // Fast shape listing (no setup): print index→summary in the
-        // BTreeSet-sorted order that --indices selects on, then return.
-        // Lets a targeted regen pick a program's exact shape indices.
-        if std::env::var("ZIREN_LIST_SHAPES").is_ok() {
-            let summ = |oss: &[OrderedShape]| -> String {
-                let maxh =
-                    oss.iter().flat_map(|o| o.inner.iter()).map(|(_, h)| *h).max().unwrap_or(0);
-                let extalu = oss
-                    .iter()
-                    .flat_map(|o| o.inner.iter())
-                    .filter(|(n, _)| n == "ExtAlu")
-                    .map(|(_, h)| *h)
-                    .max()
-                    .unwrap_or(0);
-                let nchips = oss.first().map(|o| o.inner.len()).unwrap_or(0);
-                format!("arity={} nchips={} maxlogh={} extalu={}", oss.len(), nchips, maxh, extalu)
-            };
-            for (i, s) in all_shapes.iter().enumerate() {
-                let (kind, info) = match s {
-                    ZKMProofShape::Recursion(v) => ("Recursion", summ(v)),
-                    ZKMProofShape::Compress(v) => ("Compress", summ(v)),
-                    ZKMProofShape::Deferred(o) => ("Deferred", summ(std::slice::from_ref(o))),
-                    ZKMProofShape::Shrink(o) => ("Shrink", summ(std::slice::from_ref(o))),
-                };
-                println!("[SHAPELIST] {i} {kind} {info}");
-            }
-            return (BTreeSet::new(), vec![], crate::VK_MERKLE_TREE_HEIGHT);
-        }
-
         // Fixed-height ceiling (see crate::VK_MERKLE_TREE_HEIGHT): the
         // enumeration and the runtime tree must agree on the height
         // regardless of how many shapes/vks survive dedup.

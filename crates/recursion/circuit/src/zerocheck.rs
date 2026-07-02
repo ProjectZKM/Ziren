@@ -481,7 +481,7 @@ where
         // the recursion prover never installs the rev carrier, so those proofs
         // are legacy).  This keeps the recursion rings' in-circuit verify on the
         // legacy embed-loop (section (6) below), so the WRAP R1CS is UNCHANGED
-        // and the gnark ceremony STANDS.  The `ZIREN_STAGE2_REVZETA` A/B env is
+        // and the gnark ceremony STANDS.  The rev-zeta A/B env is
         // RETIRED (a global env-flip would have leaked rev into the wrap ring
         // because recursion proofs also carry `*_full`).  The witnessed `*_full`
         // presence is still required (the NORMALIZE program's core-proof
