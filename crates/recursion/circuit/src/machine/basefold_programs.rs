@@ -333,6 +333,8 @@ mod tests {
             None,
             // #130: host-only synthetic witness → host reduction.
             None,
+            // #118: host-only synthetic witness → host commit.
+            None,
         )
     }
 

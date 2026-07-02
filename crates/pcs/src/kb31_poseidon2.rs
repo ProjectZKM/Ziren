@@ -581,6 +581,7 @@ pub mod koala_bear_poseidon2 {
             &chip_traces,
             mmcs,
             fri,
+            None,
         );
         bincode::serialize(&pre.commit.commitment)
             .expect("inner_prep_commit: serialize commitment")

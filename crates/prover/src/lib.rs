@@ -2104,6 +2104,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // name → host reduction (byte-identical; the device fn
                 // declines sub-threshold shards anyway).
                 None,
+                // #118: host shrink caller cannot name the ziren-gpu commit fn
+                // → host commit (byte-identical; on GPU this shrink path uses
+                // the device precompute-commit hook, not this basefold hook).
+                None,
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over

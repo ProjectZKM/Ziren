@@ -52,6 +52,10 @@ fn maybe_auto_precompute_basefold<SC, A>(
         >,
     >,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // #118: the device BaseFold commit fn, threaded into the host-fallback
+    // precompute (`precompute_jagged_basefold_commit_provider`).  `None` =
+    // host commit (CPU prover); `Some` on the GPU free-fn callers.
+    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
@@ -134,6 +138,7 @@ where
             None => crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
                 &named_inner,
                 device_traces,
+                gpu_basefold_commit,
             ),
         }
     };
@@ -219,6 +224,10 @@ pub fn prove_shard_to_basefold<SC, A>(
     // callers (core/compress) provides the device reduction
     // statically, `None` on host callers = host reduction.
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    // #118: device BaseFold commit fn; `Some(..)` on the GPU callers
+    // (core/compress) provides the device commit statically, `None` on host
+    // callers = host commit.
+    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -267,6 +276,7 @@ where
         orientation,
         precomputed_commit,
         gpu_jagged_reduction,
+        gpu_basefold_commit,
     )
 }
 
@@ -438,6 +448,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // callers (core/compress) provides the device reduction
     // statically, `None` on host callers = host reduction.
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    // #118: device BaseFold commit fn; `Some(..)` on the GPU callers
+    // (core/compress) provides the device commit statically, `None` on host
+    // callers = host commit.
+    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -487,6 +501,7 @@ where
         precomputed_commit,
         &FreeFnJaggedEval,
         gpu_jagged_reduction,
+        gpu_basefold_commit,
     )
 }
 
@@ -518,6 +533,10 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // `gpu_jagged_reduction_v2()` (or `None` on the free-fn path) and
     // threaded into the producer's `prove_trusted_evaluations`.
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    // The device BaseFold commit fn (#118), read from the prover's
+    // `gpu_basefold_commit_hook()` (or `None` on the free-fn / CPU path) and
+    // threaded into `maybe_auto_precompute_basefold`'s host-fallback commit.
+    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -835,6 +854,7 @@ where
             main_commitment,
             precomputed_commit,
             _device_traces,
+            gpu_basefold_commit,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
     // `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed

@@ -444,7 +444,12 @@ pub mod outer_jagged_hooks {
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
-            &chip_traces, mmcs, fri,
+            &chip_traces,
+            mmcs,
+            fri,
+            // #118: setup-time preprocessed commit → host (device BN254
+            // wrap commit is opt-in via the wrap prover under ZIREN_GPU_WRAP_DEVICE).
+            None,
         );
         bincode::serialize(&pre.commit.commitment)
             .expect("outer_prep_commit: serialize commitment")
@@ -549,6 +554,7 @@ mod basefold_over_bn254_roundtrip_test {
             &traces,
             mmcs.clone(),
             fri.clone(),
+            None,
         );
         let commitment = precompute.commit.commitment.clone();
 

@@ -275,20 +275,25 @@ pub fn chips_to_mles_owned(
 /// side effect) and prover-side state for later opening.
 ///
 /// GPU commit dispatch — when `ZIREN_GPU_BASEFOLD=1` is
-/// set AND ziren-gpu has registered the device commit hook (via
-/// [`register_gpu_basefold_commit_hook`]), the commit dispatches
+/// set AND the prover statically provided `gpu_basefold_commit`
+/// (`Some(GpuBasefoldCommitFn)`), the commit dispatches
 /// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
 /// device.  Output `(commit, prover_data)` must be byte-identical to
 /// the host path (the device hook host-side observes the same digest
 /// into the same `JaggedChallenger`).  Falls through to the host
-/// implementation on any of: env unset, hook unregistered, hook
-/// returns `Err` (shape unsupported / device error).
+/// implementation on any of: env unset, `gpu_basefold_commit == None`,
+/// hook returns `Err` (shape unsupported / device error).
 pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
+    // #118: the device BaseFold commit fn, provided statically by the
+    // prover (was the global `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  `None`
+    // = host commit (CPU prover / free-fn callers), byte-identical to the
+    // pre-#118 unregistered-hook path.
+    gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = get_gpu_basefold_commit_hook() {
+        if let Some(hook) = gpu_basefold_commit {
             // The hook signature returns `Result` so the device side
             // can tunnel its host-input back to us on shape-unsupported
             // / runtime errors (we then run the host path with the
@@ -374,9 +379,13 @@ where
 /// unset, the hook is unregistered, or the hook returns `Err`.
 pub fn commit_jagged_pcs_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
+    // #118: the device BaseFold commit fn, provided statically by the
+    // prover (was the global `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  `None`
+    // = host commit, byte-identical to the pre-#118 unregistered-hook path.
+    gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = get_gpu_basefold_commit_hook() {
+        if let Some(hook) = gpu_basefold_commit {
             let mut throwaway: JaggedChallenger =
                 JaggedChallenger::new(zkm_primitives::poseidon2_init());
             match hook(chip_traces, &mut throwaway) {
@@ -738,23 +747,12 @@ pub type GpuBasefoldCommitFn = fn(
     Vec<(String, RowMajorMatrix<JaggedVal>)>,
 >;
 
-static GPU_BASEFOLD_COMMIT_HOOK: std::sync::OnceLock<GpuBasefoldCommitFn> =
-    std::sync::OnceLock::new();
-
-/// Register the GPU BaseFold commit driver.  Idempotent; returns
-/// `Err(existing_hook)` when a hook was already registered.  Called
-/// once by `ziren-gpu`'s `compress_multi_gpu` at startup.
-pub fn register_gpu_basefold_commit_hook(
-    f: GpuBasefoldCommitFn,
-) -> Result<(), GpuBasefoldCommitFn> {
-    GPU_BASEFOLD_COMMIT_HOOK.set(f)
-}
-
-/// Read the registered GPU BaseFold commit hook, if any.
-#[must_use]
-pub fn get_gpu_basefold_commit_hook() -> Option<GpuBasefoldCommitFn> {
-    GPU_BASEFOLD_COMMIT_HOOK.get().copied()
-}
+// #118: the GPU BaseFold commit fn is provided STATICALLY (threaded from
+// the prover down to the commit dispatch), not via a global registry.  The
+// former `GPU_BASEFOLD_COMMIT_HOOK` OnceLock + `register_/get_` accessors
+// were removed; the `prover` crate passes `Some(device_fn)` into the
+// `prove_shard_to_basefold` free-fn (which threads it through the
+// auto-precompute path to `commit_jagged_pcs_no_observe`).
 
 // ─────────────────────────────────────────────────────────────────────
 // GPU jagged-reduction sumcheck dispatch hook.
@@ -1949,21 +1947,13 @@ pub mod jagged {
         dense_traces: &[(alloc::string::String, RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
     ) -> Option<alloc::boxed::Box<dyn core::any::Any + Send>>;
 
-    static GPU_BN254_COMMIT_HOOK: std::sync::OnceLock<GpuBn254CommitFn> =
-        std::sync::OnceLock::new();
-
-    /// Register the device BN254 wrap-commit hook (idempotent).
-    pub fn register_gpu_bn254_commit_hook(
-        f: GpuBn254CommitFn,
-    ) -> Result<(), GpuBn254CommitFn> {
-        GPU_BN254_COMMIT_HOOK.set(f)
-    }
-
-    /// Read the registered device BN254 wrap-commit hook, if any.
-    #[must_use]
-    pub fn get_gpu_bn254_commit_hook() -> Option<GpuBn254CommitFn> {
-        GPU_BN254_COMMIT_HOOK.get().copied()
-    }
+    // #118: the device BN254 wrap-commit fn is provided STATICALLY (threaded
+    // from the prover's `gpu_bn254_commit_hook()` through `commit_basefold_path`
+    // into `precompute_jagged_basefold_commit_generic`), not via a global
+    // registry.  The former `GPU_BN254_COMMIT_HOOK` OnceLock + `register_/get_`
+    // accessors were removed.  `WrapGpuProver` provides `Some(device_fn)` only
+    // under `ZIREN_GPU_WRAP_DEVICE`; every other prover returns `None` (host
+    // wrap commit, byte-identical).
 
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
@@ -1978,6 +1968,9 @@ pub mod jagged {
     /// verifier observes it.
     pub fn precompute_jagged_basefold_commit(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        // #118: the device BaseFold commit fn, threaded down to the inner
+        // `commit_jagged_pcs_no_observe` dispatch.  `None` = host commit.
+        gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
     ) -> PrecomputedJaggedCommit {
         let n_chips = chip_traces.len();
 
@@ -2012,6 +2005,7 @@ pub mod jagged {
             )];
             crate::jagged_pcs::commit_jagged_pcs_no_observe(
                 dense_traces,
+                gpu_basefold_commit,
             )
         };
         drop(_commit_span);
@@ -2068,13 +2062,16 @@ pub mod jagged {
     pub fn precompute_jagged_basefold_commit_provider(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // #118: the device BaseFold commit fn, threaded down to
+        // `precompute_jagged_basefold_commit`.  `None` = host commit.
+        gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
     ) -> PrecomputedJaggedCommit {
         // No empty entry / no provider → identical to the plain path
         // (a cheap clone-through when nothing needs re-materializing).
         let needs_remat =
             provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
         if !needs_remat {
-            return precompute_jagged_basefold_commit(chip_traces);
+            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit);
         }
         // DECLINE path: the device commit hook returned `None` (e.g. the
         // commit-NTT OOM preflight) so we re-materialize the device-resident
@@ -2088,7 +2085,7 @@ pub mod jagged {
         // construction (same `materialize_dense_jagged` over the same
         // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        let mut pre = precompute_jagged_basefold_commit(&full);
+        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit);
         let dense_q =
             materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size);
         debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
@@ -2106,6 +2103,11 @@ pub mod jagged {
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         mmcs: MT,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
+        // #118: the device BN254 wrap-commit fn, provided statically by the
+        // prover (was the global `GPU_BN254_COMMIT_HOOK` OnceLock).  `None`
+        // = host commit (every non-device-wrap caller), byte-identical to the
+        // pre-#118 unregistered-hook path.
+        gpu_bn254_commit: Option<GpuBn254CommitFn>,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
         // `'static` bounds (Commitment + ProverData) are required by the
@@ -2143,8 +2145,8 @@ pub mod jagged {
             )];
 
             // Device BN254 wrap Merkle commit.  When
-            // ziren-gpu has registered the hook AND `MT` is the BN254
-            // OuterValMmcs AND `ZIREN_GPU_BASEFOLD_BN254_COMMIT != 0`, the
+            // the prover statically provided `gpu_bn254_commit` AND `MT` is the
+            // BN254 OuterValMmcs AND `ZIREN_GPU_BASEFOLD_BN254_COMMIT != 0`, the
             // Merkle leaf-hash + compress-layers run on the device (the
             // host DFT encode is still consumed by the open path).  Output
             // is byte-identical to the host commit (transcript-neutral).
@@ -2154,7 +2156,7 @@ pub mod jagged {
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true)
             {
-                if let Some(hook) = get_gpu_bn254_commit_hook() {
+                if let Some(hook) = gpu_bn254_commit {
                     hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
                         boxed
                             .downcast::<(
@@ -2533,7 +2535,10 @@ pub mod jagged {
                     alloc::string::String::from("<jagged-dense>"),
                     RowMajorMatrix::new(dense_q, 1),
                 )];
-                commit_jagged_pcs(dense_traces, challenger)
+                // #118: in-band commit (precomputed=None) — reached only on
+                // the non-precompute path (host synthetic / tests); the
+                // device-live commit flows through the auto-precompute path.
+                commit_jagged_pcs(dense_traces, challenger, None)
             };
             drop(_commit_span);
             tracing::info!(
@@ -3158,7 +3163,9 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            let (commit_g, prover_data_g) = commit_jagged_pcs(dense_traces, challenger);
+            // #118: multi-group (CP-A) host path — device reduction is not
+            // threaded here either (see #130), so host commit.
+            let (commit_g, prover_data_g) = commit_jagged_pcs(dense_traces, challenger, None);
             group_commits.push(commit_g);
             group_prover_data.push(prover_data_g);
         }
@@ -4107,7 +4114,7 @@ mod test {
 
         let mut p_chal = build_challenger();
         let (commit, prover_data) =
-            commit_jagged_pcs(traces.clone(), &mut p_chal);
+            commit_jagged_pcs(traces.clone(), &mut p_chal, None);
 
         // Compute the eval point + claim for the stacked PCS.  Claim
         // is the multilinear-extension of the *flattened*
