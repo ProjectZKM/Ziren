@@ -1,31 +1,40 @@
-//! Minimal, backend-generic **tensor** primitives for the Ziren basefold
-//! port (#125 INC-6).
+//! Backend-generic **tensor** primitives for the Ziren basefold port
+//! (#125 INC-6), now a **full-fidelity port of SP1's `slop-alloc` crate**.
 //!
-//! This is a Ziren-native, dependency-free re-modeling of SP1's
-//! `slop`-crate tensor stack (`Backend` / `Buffer` / `Dimensions` /
-//! `Tensor`).  We deliberately do **not** vendor SP1's `slop_*` crates —
-//! only the ~4 small types [`crate::basefold::Mle`] actually needs are
-//! reproduced here, and only the CPU backend is implemented.
+//! Layering (mirrors SP1 `slop/crates/alloc/src`):
+//!   * [`Allocator`] / [`AllocError`] — the raw allocate/deallocate contract.
+//!   * [`mem`] — [`mem::CopyDirection`] / [`mem::CopyError`] / [`mem::DeviceMemory`],
+//!     the device memcpy/memset contract.
+//!   * [`Backend`] / [`CpuBackend`] — a memory space = `Allocator + DeviceMemory`
+//!     (+ [`GlobalBackend`] / [`HasBackend`] and the `io` cross-backend copy traits).
+//!   * [`RawBuffer`] — allocator-backed raw storage (ptr + cap).
+//!   * [`Slice`] / [`Init`] — allocator-tagged slice / element views.
+//!   * [`Buffer`] — fixed-capacity `RawBuffer` + `len`; the storage for [`crate::basefold::Mle`].
+//!   * [`Dimensions`] — a 2D `[rows, cols]` row-major shape (Ziren-specific).
+//!   * [`Tensor`] — `Buffer` + `Dimensions` (Ziren-specific).
 //!
-//! Layering:
-//!   * [`Backend`] / [`CpuBackend`] — the memory-space marker.
-//!   * [`Buffer`] — backend-generic linear storage (CPU = thin `Vec<T>`).
-//!   * [`Dimensions`] — a 2D `[rows, cols]` row-major shape.
-//!   * [`Tensor`] — `Buffer` + `Dimensions`; the storage for `Mle`.
-//!
-//! The whole point is that `Mle<F, A: Backend = CpuBackend>` becomes
-//! backend-generic *without* any change to the CPU proving path: because
-//! `A` defaults to `CpuBackend`, every existing `Mle<F>` / `Arc<Mle<F>>`
-//! annotation keeps compiling, and the CPU accessors stay zero-copy so
-//! the hot loops are byte- and perf-neutral.
+//! Only the **CPU backend** is implemented here, so the host `zkm-pcs` crate
+//! stays device-dependency-free and every existing `Mle<F>` / `Buffer<F>`
+//! annotation keeps compiling (the CPU accessors are zero-copy, so the hot
+//! loops stay byte- and perf-neutral). `ziren-gpu` implements a `CudaBackend`
+//! against the [`Backend`] / [`Allocator`] / [`mem::DeviceMemory`] traits.
 
+mod allocator;
 mod backend;
 mod buffer;
 mod dimensions;
+mod init;
+pub mod mem;
+mod raw_buffer;
+mod slice;
 #[allow(clippy::module_inception)]
 mod tensor;
 
-pub use backend::{Backend, CpuBackend};
+pub use allocator::*;
+pub use backend::*;
 pub use buffer::Buffer;
 pub use dimensions::Dimensions;
+pub use init::Init;
+pub use raw_buffer::{RawBuffer, TryReserveError};
+pub use slice::Slice;
 pub use tensor::Tensor;
