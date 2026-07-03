@@ -46,6 +46,43 @@ pub const DEFAULT_PC_INC: u32 = 4;
 /// A valid pc should be divisible by 4, so we use 1 to indicate that the pc is not used.
 pub const UNUSED_PC: u32 = 1;
 
+/// A valid core shard must satisfy TWO hard bounds, both of which the default `SHARD_SIZE`
+/// (a cycle budget) happens to respect but a larger one does not:
+///
+///  1. Every chip's trace height must fit the recursion's per-chip cube cap
+///     `2^CORE_MAX_LOG_ROW_COUNT` — see [`CORE_SHARD_HEIGHT_THRESHOLD`].
+///  2. Every per-shard `clk` (timestamp) must fit 24 bits (`clk < 2^24`), which the CPU AIR
+///     range-checks for the memory-access timestamp argument — see
+///     `crates/core/machine/src/cpu/air/mod.rs::eval_shard_clk` and `verify_mem_access_ts`.
+///     See [`CORE_SHARD_CLK_24BIT_LIMIT`].
+///
+/// The default `SHARD_SIZE = 2^22` cycles closes a shard at `clk >= shard_size * 4 = 2^24`,
+/// i.e. it is calibrated so bound (2) holds; at that size bound (1) also holds naturally
+/// (`clk < 2^24` ⇒ `< ~2^24/5` CPU rows `< 2^22`). A larger `SHARD_SIZE` lifts the cycle exit
+/// past both bounds, so we enforce them directly here.
+const CORE_MAX_LOG_ROW_COUNT: usize = zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
+
+/// The per-chip height at which the executor forces a new core shard, mirroring SP1's
+/// `HEIGHT_THRESHOLD` (sp1 crates/core/executor/src/opts.rs:14 = `1 << 22`) and its
+/// `ShapeChecker::check_shard_limit` height branch (sp1 crates/core/executor/src/vm/shapes.rs:240).
+///
+/// Tied to the recursion's per-chip cube cap so the two stay consistent: splitting once the
+/// tallest chip reaches this height keeps every chip within `2^CORE_MAX_LOG_ROW_COUNT` rows —
+/// exactly the cube the base-cube recursion (and hence vk_map / the gnark ceremony) is pinned
+/// to verify. The `CORE_SHARD_HEIGHT_HEADROOM` band below the cube keeps the tallest chip
+/// strictly under it (>= 1 padding row) and absorbs the coarseness of the mid-shard height
+/// estimate, which is refreshed only every `shape_check_frequency` cycles and omits some
+/// dependency rows, so the real trace height cannot overshoot the cube between checks.
+const CORE_SHARD_HEIGHT_HEADROOM: u64 = 1 << 16;
+const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SHARD_HEIGHT_HEADROOM;
+
+/// The `clk` (timestamp) ceiling for a single core shard: the CPU AIR range-checks `clk` to 24
+/// bits, so it must stay below `2^24`. Enforced alongside the cycle budget so a large
+/// `SHARD_SIZE` cannot push a shard's `clk` past the range check (which would break the
+/// memory-access timestamp argument and fail the shard verifier). Equal to the default
+/// `SHARD_SIZE=2^22`'s cycle exit (`shard_size * 4`), so it is a no-op at the default size.
+const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Whether to verify deferred proofs during execution.
 pub enum DeferredProofVerification {
@@ -2923,10 +2960,23 @@ impl<'a> Executor<'a> {
         // If there's not enough cycles left for another instruction, move to the next shard.
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
 
+        // Hard timestamp bound: keep every shard's `clk` within the CPU AIR's 24-bit range
+        // check (`clk < 2^24`) regardless of `SHARD_SIZE`. The cycle exit above only enforces
+        // this at the default `SHARD_SIZE=2^22` (where `shard_size == 2^24`); a larger cycle
+        // budget would otherwise let `clk` run past the range check and fail verification.
+        let clk_exit = self.max_syscall_cycles + self.state.clk >= CORE_SHARD_CLK_24BIT_LIMIT;
+
         // Every N cycles, check if there exists at least one shape that fits.
         //
         // If we're close to not fitting, early stop the shard to ensure we don't OOM.
         let mut shape_match_found = true;
+        // Height-based shard split (mirrors SP1's `ShapeChecker::check_shard_limit` height
+        // branch, sp1 crates/core/executor/src/vm/shapes.rs:240): start a new shard as soon
+        // as the tallest chip's estimated height reaches the per-chip cube cap, so no chip
+        // ever exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows no matter how large `SHARD_SIZE`
+        // (a cycle budget) is. This keeps every split shard inside the base-cube recursion's
+        // fixed per-chip height, so recursion / vk_map / the gnark ceremony are untouched.
+        let mut height_split = false;
         if self.state.global_clk.is_multiple_of(self.shape_check_frequency) {
             // Estimate the number of events in the trace.
             let event_counts = estimate_mips_event_counts(
@@ -2935,6 +2985,17 @@ impl<'a> Executor<'a> {
                 self.local_counts.syscalls_sent as u64,
                 *self.local_counts.event_counts,
             );
+
+            // Ziren refreshes this estimate only every `shape_check_frequency` cycles, so pad
+            // each chip by its worst-case growth over that window (SP1's
+            // `pad_mips_event_counts`) before comparing against the cap. This guarantees no
+            // chip crosses `2^CORE_MAX_LOG_ROW_COUNT` between two consecutive checks. `EnumMap`
+            // is `Copy`, so `event_counts` stays usable by the checks below.
+            let padded_heights = pad_mips_event_counts(event_counts, self.shape_check_frequency);
+            let max_chip_height = padded_heights.iter().map(|(_, h)| *h).max().unwrap_or(0);
+            if max_chip_height >= CORE_SHARD_HEIGHT_THRESHOLD {
+                height_split = true;
+            }
 
             // Check if the LDE size is too large.
             if self.lde_size_check {
@@ -3009,7 +3070,7 @@ impl<'a> Executor<'a> {
             }
         }
 
-        if cpu_exit || !shape_match_found {
+        if cpu_exit || clk_exit || !shape_match_found || height_split {
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
