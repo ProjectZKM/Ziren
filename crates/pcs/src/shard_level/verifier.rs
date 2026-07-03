@@ -1924,6 +1924,9 @@ where
                     point_extended.len()
                 )));
             }
+            // #P2S0: a genuine height-0 missing chip has all-zero degree bits
+            // => full_geq == 1 => identity fraction (0,1) => excluded from the
+            // reconstruction.
             let geq_eval = full_geq_host::<Challenge<SC>>(degree, &point_extended);
 
             // Trace openings at the GKR point, looked up by chip NAME (the

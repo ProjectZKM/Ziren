@@ -763,3 +763,153 @@ fn stage0_forge_count_tamper_row_fibonacci() {
     );
     eprintln!("[STAGE0][VERDICT] fibonacci ROW-count tamper (hash-bind) => {tag}");
 }
+
+// ═════════════════════════════════════════════════════════════════════
+// STAGE 1 (band-cap retirement Phase 2) — ZERO-DEGREE MODEL SOUNDNESS.
+//
+// Phase 2 replaces the Phase-1 constraint-valid band-height-1 synthesized
+// missing-chip trace with a GENUINE HEIGHT-0 (0-row, full-width, zero)
+// commit: a canonical-cluster chip a raw FIX-off shard lacks is committed
+// with `row_count = 0`, so its `degree` bits (`quotient[0]`) are ALL ZERO
+// (=> `full_geq == 1` => identity fraction (0,1) => excluded from the
+// LogUp-GKR sum).  These two forgeries PROVE that model is sound — that the
+// live degree-mask substrate cannot be fooled into (a) treating a genuinely
+// missing (height-0) chip as active, nor (b) treating a real present active
+// chip as missing.  Both forge ONLY the `degree` bits (`quotient[0]`) and
+// LEAVE the transcript (`log_degree`, `chip_log_heights`) HONEST, so the
+// rejection can only come from the degree-masked substrate (the
+// `LogupGkr`/`Zerocheck` reconstruction), NOT the Fiat-Shamir transcript
+// bind.  Run under the un-gated production default (reconstruction ON).
+// ═════════════════════════════════════════════════════════════════════
+
+/// Find the first shard+chip committed at genuine HEIGHT 0 — a missing
+/// canonical-cluster chip: its `degree` bits (`quotient[0]`) are a NON-EMPTY
+/// vector of ALL ZEROS (height 0 => every big-endian bit clear; a present
+/// height-1 chip instead has the LSB set, and taller chips have a higher bit
+/// set).  Returns `(shard_idx, chip_idx, chip_name)`.  Reports every height-0
+/// chip it sees (the direct evidence that the band-cap injects missing chips
+/// at h=0/degree=0).  Panics if NONE exist (which would itself mean the
+/// injection is not firing — a validation failure).
+fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, String) {
+    let mut found: Vec<(usize, String)> = Vec::new();
+    let mut first: Option<(usize, usize, String)> = None;
+    for (si, sp) in proof.shard_proofs.iter().enumerate() {
+        let Some(bf) = sp.basefold_shard_proof.as_ref() else { continue };
+        // Name-sorted chip names (the order `opened_values.chips` uses).
+        let mut sorted_names: Vec<String> = sp.chip_ordering.keys().cloned().collect();
+        sorted_names.sort();
+        for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
+            let Some(degree) = opening.quotient.first() else { continue };
+            if degree.is_empty() {
+                continue;
+            }
+            // ALL-ZERO degree bits <=> real height 0 (a missing chip).
+            if degree.iter().all(|b| *b == Challenge::ZERO) {
+                let name =
+                    sorted_names.get(ci).cloned().unwrap_or_else(|| format!("chip{ci}"));
+                found.push((si, name.clone()));
+                first.get_or_insert((si, ci, name));
+            }
+        }
+    }
+    eprintln!(
+        "[STAGE1] HEIGHT-0/degree-0 missing chips in FIX-off proof: {} -> {:?}",
+        found.len(),
+        found,
+    );
+    first.expect(
+        "no HEIGHT-0 missing chip in FIX-off proof — band-cap injection is NOT firing \
+         (the whole zero-degree model is untested)",
+    )
+}
+
+/// (a) A genuinely-MISSING chip committed at HEIGHT 0 (degree bits all zero)
+/// forged to CLAIM ACTIVITY: set a single degree bit non-zero (claim height
+/// 2^1).  Transcript LEFT HONEST.
+fn forge_height0_claim_active(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
+    let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
+    let degree = &mut bf.opened_values.chips[ci].quotient[0];
+    let bit_len = degree.len();
+    // Ensure a clean all-zero start (it already is — height 0), then set the
+    // bit for 2^1: big-endian index `bit_len - 1 - 1`.
+    for b in degree.iter_mut() {
+        *b = Challenge::ZERO;
+    }
+    let new_shift = 1usize.min(bit_len.saturating_sub(1));
+    let new_idx = bit_len - 1 - new_shift;
+    degree[new_idx] = Challenge::ONE;
+    eprintln!(
+        "[STAGE1][FORGE] HEIGHT-0 chip='{name}': degree 0 (missing) -> claims 2^{new_shift} \
+         ACTIVE (transcript log_height LEFT HONEST)"
+    );
+}
+
+/// (b) A real PRESENT active chip forged to CLAIM IT IS MISSING: zero ALL its
+/// degree bits (claim height 0).  Transcript LEFT HONEST.
+fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
+    let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
+    let degree = &mut bf.opened_values.chips[ci].quotient[0];
+    let real_h = degree_bits_to_height(degree);
+    for b in degree.iter_mut() {
+        *b = Challenge::ZERO;
+    }
+    eprintln!(
+        "[STAGE1][FORGE] PRESENT chip='{name}': real_height={real_h:?} -> degree ALL-ZERO \
+         (claims missing/height-0, transcript log_height LEFT HONEST)"
+    );
+}
+
+/// ★ FORGERY GATE (a): a genuinely-missing HEIGHT-0 chip forged to claim
+/// activity MUST be rejected by the degree-masked substrate.  Uses the
+/// un-gated production default (reconstruction ON).
+#[test]
+#[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
+fn stage1_forge_height0_missing_claims_active_rejected() {
+    setup_logger();
+    // TRUE production default: the reconstruction runs unless explicitly "0".
+    std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
+    let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
+    let honest = verify(&machine, &vk, &proof);
+    assert!(
+        honest.is_ok(),
+        "[stage1-a] honest FIX-off proof must verify before forging (got {})",
+        reject_tag(&honest)
+    );
+    let (si, ci, name) = pick_height0_missing_target(&proof);
+    eprintln!(
+        "[STAGE1][FORGE][height0-claims-active] target shard={si} chip_idx={ci} chip='{name}'"
+    );
+    let mut forged = proof.clone();
+    forge_height0_claim_active(&mut forged.shard_proofs[si], ci, &name);
+    let res = verify(&machine, &vk, &forged);
+    let tag = reject_tag(&res);
+    eprintln!("[STAGE1][FORGE][height0-claims-active] forged verify = {tag}");
+    assert!(
+        res.is_err(),
+        "[stage1-a] HEIGHT-0 missing chip forged to ACTIVE SURVIVED — the zero-degree \
+         model is UNSOUND (SOUNDNESS HOLE / BLOCKER): {tag}"
+    );
+    eprintln!(
+        "[STAGE1][VERDICT] (a) HEIGHT-0 missing chip claiming activity REJECTED => {tag}"
+    );
+}
+
+/// ★ FORGERY GATE (b): a real present active chip forged to claim it is
+/// missing (degree=0) MUST be rejected.  Uses `run_forgery` (which picks a
+/// present, height-varied chip) with the reconstruction ON.
+#[test]
+#[ignore = "proves a real FIX-off core proof (multi-second); run with --ignored"]
+fn stage1_forge_present_active_claims_missing_rejected() {
+    setup_logger();
+    let tag = run_forgery(
+        "present-claims-missing",
+        fibonacci_program(),
+        ZKMStdin::new(),
+        true, // recon ON — exercise the degree anchor
+        true, // MUST reject
+        forge_present_claim_missing,
+    );
+    eprintln!(
+        "[STAGE1][VERDICT] (b) PRESENT active chip claiming missing (degree=0) REJECTED => {tag}"
+    );
+}

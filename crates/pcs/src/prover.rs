@@ -649,15 +649,37 @@ where
 
         let degrees = traces.iter().map(|trace| trace.height()).collect::<Vec<_>>();
 
-        let log_degrees =
-            degrees.iter().map(|degree| log2_strict_usize(*degree)).collect::<Vec<_>>();
+        // #P2S0 (band-cap retirement Phase 2): a genuinely-missing
+        // canonical-cluster chip is committed as a 0-row matrix (height 0, not a
+        // power of two), so `log2_strict_usize` would panic.  This legacy
+        // `log_degree` field feeds ONLY the envelope `ShardProof.opened_values`
+        // (built below at the `log_degrees.iter()` zip) which the BaseFold
+        // verifier IGNORES entirely (it reads opening evidence from
+        // `basefold_shard_proof`); a 0-height chip maps to log_degree 0.
+        // ALL-STAGE SOUNDNESS: a height-0 chip only ever exists on the CORE
+        // FIX-off path (the only path that installs a `Height0MissingGuard` and
+        // hence injects 0-row missing chips); compress/shrink/wrap never produce
+        // a height-0 trace, so this guard is a strict no-op (byte-identical)
+        // there.
+        let log_degrees = degrees
+            .iter()
+            .map(|degree| if *degree == 0 { 0 } else { log2_strict_usize(*degree) })
+            .collect::<Vec<_>>();
 
         let log_quotient_degrees =
             chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
-        let trace_domains =
-            degrees.iter().map(|degree| pcs.natural_domain_for_degree(*degree)).collect::<Vec<_>>();
+        // #P2S0 (band-cap retirement Phase 2): `natural_domain_for_degree(0)`
+        // would panic (not-a-power-of-two).  `trace_domains` is legacy-FRI
+        // scaffolding that is NEVER read after this point on the BaseFold path
+        // (confirmed: no consumer in `open()`), so a 0-height chip maps to the
+        // degree-1 domain — a discarded placeholder purely to avoid the panic.
+        // Same all-stage no-op guarantee as `log_degrees` above.
+        let trace_domains = degrees
+            .iter()
+            .map(|degree| pcs.natural_domain_for_degree(if *degree == 0 { 1 } else { *degree }))
+            .collect::<Vec<_>>();
 
         // Observe the public values and the main commitment.
         challenger.observe_slice(&data.public_values[0..self.num_pv_elts()]);
@@ -732,7 +754,18 @@ where
             // But cumulative sums are always observed (verifier does this unconditionally).
             for i in 0..chips.len() {
                 let local_sum = SC::Challenge::ZERO;
-                let global_sum = if chips[i].commit_scope() == LookupScope::Local {
+                // #P2S0 (band-cap retirement Phase 2): a 0-row missing chip has
+                // no last row to read the septic digest from — it contributes the
+                // ZERO digest (no events, no cumulative-sum contribution).  Guard
+                // on `values.len() < 14` (NOT just `height() == 0`) so the guard is
+                // the EXACT mirror of `chip_global_cumulative_sum` (which returns
+                // zero for `sz < 14`): identical for every present global-scope
+                // chip (their traces are always >= 14 values wide), strictly safer
+                // than the raw `values[len-14..]` slice for any under-14 trace, and
+                // drift-free against the shard-level cumulative-sum path.
+                let global_sum = if chips[i].commit_scope() == LookupScope::Local
+                    || traces[i].values.len() < 14
+                {
                     SepticDigest::<Val<SC>>::zero()
                 } else {
                     let main_trace = &traces[i];
@@ -811,7 +844,13 @@ where
                 .enumerate()
                 .map(|(i, (chip, log_degree))| {
                     // Extract cumulative sums matching what was observed into the transcript.
-                    let global_cumulative_sum = if chip.commit_scope() == LookupScope::Local {
+                    // #P2S0 (band-cap retirement Phase 2): 0-row missing chip =>
+                    // ZERO digest.  `values.len() < 14` is the EXACT mirror of
+                    // `chip_global_cumulative_sum` (`sz < 14 => zero`) — byte-identical
+                    // for present global chips, panic-safe for any under-14 trace.
+                    let global_cumulative_sum = if chip.commit_scope() == LookupScope::Local
+                        || traces[i].values.len() < 14
+                    {
                         SepticDigest::<Val<SC>>::zero()
                     } else {
                         let main_trace = &traces[i];
@@ -1299,68 +1338,58 @@ where
     };
 
     // Height-agnostic recursion: the CPU host path precomputes the
-    // jagged commit HERE (inside `commit()`), so the per-chip CLUSTER band-cap
-    // pad must be applied to the traces THIS commit packs -- NOT only later in
-    // `prove_shard_to_basefold_with_loader` (which would be ignored on this
-    // path because `maybe_auto_precompute_basefold` returns early when a commit
-    // is already precomputed).  Build a band-cap-padded CLONE for the commit
-    // ONLY; the original `named_traces` (returned as `data.traces`) stays at
-    // ACTUAL heights so the zerocheck / LogUp-GKR STARK proves at the real
-    // heights (the `FIX_CORE_SHAPES=false` perf win).  The matching pad in
-    // `prove_shard_to_basefold_with_loader` re-pads the per-chip traces the
-    // jagged REDUCTION reads (y_per_chip / r_row), so the reduction's per-chip
-    // heights agree with this commit's `packing` (both keyed off the SAME
-    // thread-local band-cap installed by the core prove site).  `None` (no
-    // guard) => unchanged own-height commit (recursion / shrink / wrap).
+    // jagged commit HERE (inside `commit()`), so the canonical-CLUSTER
+    // missing-chip injection must be applied to the traces THIS commit packs --
+    // NOT only later in `prove_shard_to_basefold_with_loader` (which would be
+    // ignored on this path because `maybe_auto_precompute_basefold` returns early
+    // when a commit is already precomputed).  PRESENT chips stay at their ACTUAL
+    // raw heights (the `FIX_CORE_SHAPES=false` perf win); the STARK / jagged
+    // reduction prove at those raw heights.  `None` (no guard) => unchanged
+    // own-chip-set commit (recursion / shrink / wrap).
     //
-    // The band-cap is the FULL
-    // canonical CLUSTER (chip name -> (width, log_height)), so besides padding
-    // PRESENT chips it must ADD a zero trace for each canonical chip that this
-    // raw (event-driven) shard is MISSING — exactly as FIX_CORE_SHAPES=true
-    // does (where `canonicalize_shape_to_cluster` extends `record.shape` so
-    // tracegen emits the missing chips at log-height 1).  The missing chips are
-    // injected into `named_traces_inner` ITSELF (NOT only the commit clone) so
-    // they propagate to `data.traces` -> `chip_ordering` -> `open`'s
-    // `opened_values`: the recursion normalize verifier iterates
+    // The carrier is the FULL canonical CLUSTER chip NAME -> width, so besides
+    // the present chips it must ADD a trace for each canonical chip that this raw
+    // (event-driven) shard is MISSING — so the FIX-off chip-SET equals the FIX-on
+    // canonical cluster (which `canonicalize_shape_to_cluster` produces under
+    // FIX-on).  The missing chips are injected into `named_traces_inner` ITSELF
+    // (so they propagate to `data.traces` -> `chip_ordering` -> `open`'s
+    // `opened_values`): the recursion normalize verifier iterates
     // `opened_values.chips`, so the proof's chip-SET (and hence its VK) MUST be
     // the canonical cluster, matching the enum/vk_map dummy built from
-    // `sp.shape()` (= opened_values).  Present-chip COMMIT heights are then
-    // lifted in `commit_named_inner`; the injected chips already arrive at
-    // their band-cap height.
+    // `sp.shape()` (= opened_values).
     //
-    // The injected missing-chip traces are the CONSTRAINT-VALID
-    // traces the core prove site generated FIX-on-faithfully (each chip's own
-    // `MachineAir::generate_trace` over the canonical-shaped record, so the
-    // padding rows satisfy that chip's AIR sanity constraints — e.g. CloClz's
-    // `padded_row_template` sets `a=32, is_bb_zero=1` so its SRL send has zero
-    // multiplicity).  An all-zero injection would make the VK match but a
-    // real FIX-off proof's injected chips would FAIL their constraints / lookups.
-    // We pull those generated traces from the same thread-local the band-cap
-    // arrives on, and only synthesize a zero matrix as a defensive fallback for
-    // a missing chip whose generated trace is (unexpectedly) absent.
-    if let Some(band_cap) = crate::shard_level::band_cap::current_band_cap() {
+    // Each missing chip is injected as a genuine HEIGHT-0 (0-row, full-width,
+    // zero) `RowMajorMatrix` at its canonical width: the chip is PRESENT in the
+    // committed set (VK intact) but commits NOTHING (no real cells), so the
+    // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
+    // identity fraction (0,1)) — no constraint-valid padding-row synthesis is
+    // needed.
+    if let Some(cluster_widths) = crate::shard_level::band_cap::current_h0_cluster_widths() {
         use std::collections::BTreeSet;
-        let missing_traces =
-            crate::shard_level::band_cap::current_missing_chip_traces().unwrap_or_default();
+        // #P2S0 band-cap retirement: inject a genuine HEIGHT-0 (0-row,
+        // FULL-WIDTH, zero) representation for each canonical-cluster chip this
+        // raw shard is MISSING (canonical cluster minus present), derived
+        // directly from the cluster chip-SET + widths (`current_h0_cluster_
+        // widths`, keyed off the chip-SET — not any band value).
+        // A 0-row `RowMajorMatrix` of the chip's canonical width keeps the
+        // chip-SET (VK) intact (still present in `data.traces` ->
+        // `chip_ordering` -> `opened_values.chips`) while committing NOTHING
+        // (no real cells): pack_traces_jagged emits `row_count:0`, the shared
+        // trace-MLE becomes an empty inner (`num_real_entries()==0`), the
+        // zerocheck `main_height` reads 0 (=> `initial_geq=1`), the degree
+        // bits are all-zero, and the host degree-masked reconstruction
+        // excludes it (degree=0 => full_geq=1 => identity fraction (0,1)).
         let present: BTreeSet<String> =
             named_traces_inner.iter().map(|(n, _)| n.clone()).collect();
-        for (name, (width, log_h)) in band_cap.iter() {
+        for (name, width) in cluster_widths.iter() {
             if !present.contains(name) {
-                if let Some(t) = missing_traces.get(name) {
-                    // Constraint-valid generated trace (FIX-on-faithful).
-                    named_traces_inner.push((name.clone(), t.clone()));
-                } else {
-                    // Defensive fallback: a canonical chip with no generated
-                    // trace — synthesize a zero matrix at the band height; if it
-                    // ever fires, that chip's constraints may not hold, which
-                    // `verify_shard` will catch.
-                    let w = (*width).max(1);
-                    let h = 1usize << *log_h;
-                    named_traces_inner.push((
-                        name.clone(),
-                        RowMajorMatrix::new(vec![crate::InnerVal::ZERO; w * h], w),
-                    ));
-                }
+                let w = (*width).max(1);
+                // 0 rows at full canonical width: `values` empty, `width==w`
+                // => `RowMajorMatrix::height()==0`.
+                named_traces_inner.push((
+                    name.clone(),
+                    RowMajorMatrix::new(Vec::<crate::InnerVal>::new(), w),
+                ));
             }
         }
         // Keep name order stable (matches the name-order sort the commit and

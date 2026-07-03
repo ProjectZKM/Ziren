@@ -883,7 +883,7 @@ mod phase1_acceptance_gate {
         // Mirror the production y orientation off the SAME
         // single source of truth (`current_use_rev`) as the companion
         // `materialize_dense_jagged` above, so this test's commit and y stay
-        // consistent under either convention.  No `BandCapGuard` is installed in
+        // consistent under either convention.  No `UseRevGuard` is installed in
         // this unit test => `current_use_rev()` is `None` => both stay LEGACY
         // bitrev (the test's existing convention), byte-identical.
         let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);

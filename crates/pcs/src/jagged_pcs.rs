@@ -2551,7 +2551,7 @@ pub mod jagged {
             let rematerialized_for_y =
                 rematerialize_chip_traces_via_provider(chip_traces, provider);
             // Read the rev(zeta) orientation ONCE on THIS thread
-            // (the carrier is thread-local, installed by `BandCapGuard` only on
+            // (the carrier is thread-local, installed by `UseRevGuard` only on
             // the worker that runs commit+open); the per-chip / per-column
             // reductions below run on RAYON worker threads where `current_use_
             // rev()` would return `None`, so it MUST be hoisted here and captured
@@ -2564,20 +2564,22 @@ pub mod jagged {
                 .map(|((_name, trace), r_row_c)| {
                     let h = trace.values.len() / trace.width.max(1);
                     let w = trace.width;
-                    //  empty-chip skip: for an empty-trace
-                    // chip (h == 0 || w == 0) there are no columns to
-                    // reduce; return an empty Vec.  The original
-                    // assertion `h_padded.trailing_zeros() ==
-                    // r_row_c.len()` fires for h=0 (h_padded=1,
-                    // trailing_zeros=0) but r_row_c is sized to
-                    // max_log_row_count (e.g. 4), so the chip would
-                    // panic before reaching the inner reduction.
-                    // This matches the device-fusion path's behavior
-                    // (Vec::new() per empty chip) above and the
-                    // downstream consumers tolerate empty per-chip
-                    // y slots.
-                    if h == 0 || w == 0 {
+                    // #P2S0 band-cap retirement: a genuine HEIGHT-0 (0-row) but
+                    // FULL-WIDTH missing chip
+                    // must still emit ONE column claim PER COLUMN (all zero),
+                    // NOT an empty Vec.  `build_weight_table` and the verifier's
+                    // `verify_jagged_reduction` k-walk advance `k` through EVERY
+                    // committed column (chip_info.column_count) including the
+                    // 0-row chip's `w` empty columns; skipping them here would
+                    // misalign the `z_col_lagrange[k]` index for every later
+                    // chip => the round-0 / final reduction identity fails.  An
+                    // empty column's row-MLE claim is 0 (Σ over 0 rows), so emit
+                    // `w` zeros.  Only a truly width-0 chip (no columns) skips.
+                    if w == 0 {
                         return Vec::new();
+                    }
+                    if h == 0 {
+                        return vec![InnerChallenge::ZERO; w];
                     }
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
@@ -2592,7 +2594,7 @@ pub mod jagged {
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
                     // The rev(zeta) orientation (single source of
-                    // truth, set by `BandCapGuard` for the whole commit+open
+                    // truth, set by `UseRevGuard` for the whole commit+open
                     // scope).  Under rev, the COMMIT (`materialize_dense_jagged`)
                     // places the data in NATURAL row order, so the column claim
                     // must read NATURAL rows too (`src = row`) — together with the
@@ -3316,7 +3318,7 @@ pub mod jagged {
         // the host path including the row-eq embedding factor + empty-chip skip).
         // Hoist the rev(zeta) orientation onto THIS thread
         // (thread-local carrier; the per-chip rayon closures below would see
-        // `None`).  On the wrap/BN254 path no `BandCapGuard` is installed, so
+        // `None`).  On the wrap/BN254 path no `UseRevGuard` is installed, so
         // this is `None` => legacy bitrev (byte-identical).
         let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);
         let y_per_chip: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip {

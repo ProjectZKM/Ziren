@@ -261,8 +261,9 @@ pub fn materialize_dense_jagged<F: Field>(
         }
 
         // The per-shard rev(zeta) orientation, the single
-        // source of truth installed by `BandCapGuard` for the whole commit+open
-        // scope.  `Some(true)` => commit the dense column in NATURAL row order
+        // source of truth installed by the core prover (`UseRevGuard`) for the
+        // whole commit+open scope.  `Some(true)` => commit the dense column in
+        // NATURAL row order
         // (matching the rev(zeta) zerocheck residual + the natural-indexed
         // `build_weight_table`), so the jagged round-0 identity `Σ z_col·y ==
         // Σ_b q·w` holds.  `Some(false)` (flag OFF on the core path) or `None`

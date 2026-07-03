@@ -1147,10 +1147,25 @@ where
                     let w = ctrace.width;
                     (w, ctrace.values.len() / w)
                 };
-                if h == 0 || w == 0 {
-                    // Jagged step-3 convention for empty chips: empty Vec
-                    // (the downstream reduction skips empty y slots).
+                // #P2S0 (band-cap retirement Phase 2): mirror the `y_per_chip`
+                // guard in jagged_pcs.rs.  A genuine HEIGHT-0 (0-row) but
+                // FULL-WIDTH missing chip must still emit ONE zero column claim
+                // PER COLUMN (the verifier's `verify_jagged_reduction` k-walk
+                // advances `k` through EVERY committed column, incl. the 0-row
+                // chip's `w` empty columns; an empty Vec here would misalign the
+                // `z_col_lagrange[k]` index for every later chip => reject).  An
+                // empty column's row-MLE claim is 0 (Σ over 0 rows), so emit
+                // `w` zeros.  Only a truly width-0 chip (no columns) skips.
+                // NOTE: this residual fast path is DECLINED under `shard_use_rev`
+                // (the CORE FIX-off path, which is the only path that injects
+                // 0-row chips), so this branch is currently inactive; the fix
+                // keeps it CORRECT should the non-rev / device path ever take it.
+                if w == 0 {
                     out.push(Vec::new());
+                    continue;
+                }
+                if h == 0 {
+                    out.push(vec![Challenge::<SC>::ZERO; w]);
                     continue;
                 }
                 if !h.is_power_of_two() {
@@ -1229,13 +1244,20 @@ where
         // host-trace path). Mirrors the Phase-1 prologue observe above —
         // both MUST agree with what the verifier re-observes from
         // `proof.chip_log_heights`.
+        // #P2S0 SPIKE (WIP, band-cap retirement Phase 2, Stage 0): do NOT
+        // clamp the host-trace height to 1.  A canonical-cluster chip this
+        // shard is MISSING is committed as a genuine 0-row matrix (see
+        // `commit_basefold_path`), so its real height is 0 => log_h 0 =>
+        // all-zero degree bits => the host reconstruction excludes it.  The
+        // device branch keeps its `.max(1)` (a device-resident chip with no
+        // provider height still defaults to 1 as before).
         let h = if trace.width == 0 {
             _device_traces
                 .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
                 .unwrap_or(0)
                 .max(1)
         } else {
-            trace.height().max(1)
+            trace.height()
         };
         let log_h = if h <= 1 {
             0u8

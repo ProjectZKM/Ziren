@@ -1,64 +1,62 @@
-//! Per-shard CORE jagged commit band-cap for height-agnostic recursion.
+//! Per-shard CORE commit carriers for height-agnostic recursion.
 //!
 //! The core STARK proves at the ACTUAL chip heights (the perf win of
 //! `FIX_CORE_SHAPES=false`), but the jagged-PCS commit (and the jagged
 //! reduction / BaseFold open it drives) is build-time-unrolled and NOT
-//! verifier-maskable under Fiat-Shamir — so its shape MUST be the per-chip-set
-//! CLUSTER band-cap for the recursion normalize VK to be a function of the
-//! chip-SET only.  This module carries that band-cap (chip name ->
-//! `(width, band-cap log_height)`, over the FULL canonical cluster) from the core prove site
+//! verifier-maskable under Fiat-Shamir — so its chip-SET MUST be the per-chip-set
+//! CLUSTER for the recursion normalize VK to be a function of the chip-SET only.
+//! A raw (event-driven) shard that is MISSING some canonical-cluster chips has
+//! those chips injected at genuine HEIGHT 0 (0-row, full-width, zero) by the
+//! commit path, so the committed chip-SET (and hence the VK) equals the FIX-on
+//! canonical cluster while committing NOTHING for the missing chips.
+//!
+//! This module carries the two remaining per-shard signals across the generic
+//! `MachineProver::open` trait boundary from the core prove site
 //! (`zkm_core_machine::utils::prove::prove_with_context`, which has the
-//! `CoreShapeConfig` + per-shard heights) ACROSS the generic
-//! `MachineProver::open` trait boundary down to
-//! `prove_shard_to_basefold_with_loader`, which pads the per-chip commit
-//! traces to `1 << band_cap[name]` before packing.
+//! `CoreShapeConfig` + per-shard heights):
+//!
+//!   * [`Height0MissingGuard`] / [`current_h0_cluster_widths`] — the FULL
+//!     canonical-cluster chip NAME -> trace WIDTH map, from which the commit path
+//!     derives the missing set (canonical cluster minus present) and injects a
+//!     0-row full-width trace for each.  (Formerly the band-cap value map; the
+//!     band `log_height` was retired — the injection keys off the chip-SET and a
+//!     0-row commit, not any band value.)
+//!   * [`UseRevGuard`] / [`current_use_rev`] — the per-shard rev(zeta)
+//!     orientation decision (see below).
+//!   * [`RecursionAreaPinGuard`] / [`current_recursion_area_pin`] — the
+//!     recursion-layer committed-area pin (see below).
 //!
 //! Transport is a per-thread stash (same pattern as
-//! `gpu_worker_context` / `device_first_layer_context`): the phase-2
-//! prover computes the band-cap, installs a [`BandCapGuard`] for the
-//! scope of `prover.commit(...)` + `prover.open(...)` (which run on the
-//! SAME rayon task), and the PCS commit reads it via
-//! [`current_band_cap`].  The generation counter defends against nested
-//! guards on a reused worker thread (a stale Drop must not clear a newer
-//! install).
+//! `gpu_worker_context` / `device_first_layer_context`): the core prover installs
+//! the guard for the scope of `prover.commit(...)` + `prover.open(...)` (which run
+//! on the SAME rayon task), and the PCS commit reads it via the accessors below.
+//! A generation counter defends against nested guards on a reused worker thread
+//! (a stale Drop must not clear a newer install).
 //!
-//! `None` (no guard installed) == legacy behaviour: the recursion /
-//! shrink / wrap stages and any caller that doesn't set a band-cap keep
-//! own-height packing.  Only the CORE prove path sets it.
+//! `None` (no guard installed) == legacy behaviour: the recursion / shrink / wrap
+//! stages and any caller that doesn't set the carrier keep own-chip-set,
+//! own-height packing.  Only the CORE prove path sets them.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::InnerVal;
+use std::collections::BTreeMap;
 
 thread_local! {
-    /// Chip name -> band-cap `log_height` for the shard currently being
-    /// committed on this thread.  `None` when no [`BandCapGuard`] is
-    /// installed (every non-core path).
-    static CURRENT_BAND_CAP: std::cell::RefCell<Option<(u64, BTreeMap<String, (usize, usize)>)>> =
+    /// FULL canonical-CLUSTER chip NAME -> trace WIDTH for the shard currently
+    /// being committed on this thread.  `None` when no [`Height0MissingGuard`]
+    /// is installed (every non-core path == legacy own-chip-set commit).  The
+    /// commit path injects a genuine HEIGHT-0 (0-row, full-width, zero) trace for
+    /// each cluster chip this raw shard is MISSING (canonical cluster minus
+    /// present), keeping the chip-SET (VK) intact while committing nothing.
+    /// Paired with a generation tag so a stale Drop on a reused worker thread
+    /// never serves the wrong shard's widths.
+    static CURRENT_H0_CLUSTER: std::cell::RefCell<Option<(u64, BTreeMap<String, usize>)>> =
         const { std::cell::RefCell::new(None) };
-
-    /// The CONSTRAINT-VALID committed
-    /// traces of the canonical-cluster chips this raw (event-driven) shard is
-    /// MISSING — generated FIX-on-faithfully at the core prove site (each
-    /// chip's own `MachineAir::generate_trace` over the canonical-shaped
-    /// record, so the padding rows satisfy the chip's AIR sanity constraints,
-    /// e.g. CloClz `a=32, is_bb_zero=1`).  `commit_basefold_path` injects these
-    /// REAL traces instead of synthesizing all-zero matrices, so a FIX-off
-    /// proof's injected chips VERIFY.  Keyed by chip NAME, paired by generation
-    /// with `CURRENT_BAND_CAP` so a stale Drop never serves the wrong shard's
-    /// traces.
-    static CURRENT_MISSING_TRACES: std::cell::RefCell<
-        Option<(u64, BTreeMap<String, RowMajorMatrix<InnerVal>>)>,
-    > = const { std::cell::RefCell::new(None) };
 
     /// LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
     /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
     /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
     /// no-observe verify recompute, the zerocheck residual, and the
     /// `prove_shard_to_basefold` residual fast-path.  Computed ONCE per shard at
-    /// `BandCapGuard::new` (same predicate the zerocheck uses on the host path:
+    /// the core prove site (same predicate the zerocheck uses on the host path:
     /// rev enabled AND no device trace provider — on the pure-host
     /// FIX-off path every chip then carries `main_trace_evaluations_full`, so
     /// this equals the zerocheck's full predicate) and installed for the WHOLE
@@ -90,99 +88,61 @@ thread_local! {
 
 static GUARD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// RAII guard that installs a per-shard band-cap map into the per-thread
-/// stash for its scope; on Drop clears the stash only when the slot
-/// still holds this guard's generation (nested-guard safe).
-pub struct BandCapGuard {
+/// RAII guard that installs the FULL canonical-CLUSTER chip NAME -> width map
+/// into the per-thread stash for its scope, so the commit path can inject a
+/// HEIGHT-0 (0-row, full-width, zero) trace for each canonical-cluster chip this
+/// raw FIX-off shard is MISSING (canonical cluster minus present).  On Drop it
+/// clears the stash only when the slot still holds this guard's generation
+/// (nested-guard safe).  `None` (no install) == own-chip-set commit
+/// (recursion / shrink / wrap / FIX-on), byte-identical to legacy.
+pub struct Height0MissingGuard {
     gen: u64,
 }
 
-impl BandCapGuard {
-    /// Install `band_cap` (chip name -> `(width, band-cap log_height)`) plus
-    /// the generated MISSING-chip traces for the calling thread and return a
-    /// guard that clears both on drop.  `missing_traces` carries the
-    /// constraint-valid (FIX-on-faithful) committed traces of the
-    /// canonical-cluster chips this raw shard lacks; `commit_basefold_path`
-    /// injects them instead of all-zero matrices so the FIX-off proof verifies.
-    ///
-    /// `_zeropad_missing` is a VESTIGIAL parameter (always `None`): the
-    /// ZIREN_SP1_ZEROPAD all-zero missing-chip experiment was removed
-    /// (constraint-valid injection is unconditional).  The slot is retained
-    /// only so the ziren-gpu device caller (`core_multi_gpu.rs`, 5-arg call)
-    /// keeps compiling; its removal is deferred to the device follow-up.
+impl Height0MissingGuard {
+    /// Install `cluster_widths` (FULL canonical cluster chip NAME -> width) for
+    /// the calling thread and return a guard that clears it on drop.  The commit
+    /// path (`commit_basefold_path` on the host; the GPU core `commit` on the
+    /// device) iterates this map, skips the chips already present, and injects a
+    /// 0-row full-width matrix for the rest — so the committed chip-SET (and
+    /// hence the normalize VK) is the canonical cluster.
     #[must_use]
-    pub fn new(
-        band_cap: BTreeMap<String, (usize, usize)>,
-        missing_traces: BTreeMap<String, RowMajorMatrix<InnerVal>>,
-        use_rev: bool,
-        _zeropad_missing: Option<BTreeSet<String>>,
-    ) -> Self {
+    pub fn new(cluster_widths: BTreeMap<String, usize>) -> Self {
         let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        CURRENT_BAND_CAP.with(|c| {
-            *c.borrow_mut() = Some((gen, band_cap));
-        });
-        CURRENT_MISSING_TRACES.with(|c| {
-            *c.borrow_mut() = Some((gen, missing_traces));
-        });
-        // The per-shard rev(zeta) orientation decision, the single
-        // source of truth installed for the whole commit+open scope so the
-        // jagged commit (materialize), the y recompute, and the zerocheck
-        // residual all read ONE boolean (no lockstep drift).
-        CURRENT_USE_REV.with(|c| {
-            *c.borrow_mut() = Some(use_rev);
+        CURRENT_H0_CLUSTER.with(|c| {
+            *c.borrow_mut() = Some((gen, cluster_widths));
         });
         Self { gen }
     }
 }
 
-impl Drop for BandCapGuard {
+impl Drop for Height0MissingGuard {
     fn drop(&mut self) {
-        CURRENT_BAND_CAP.with(|c| {
+        CURRENT_H0_CLUSTER.with(|c| {
             let mut slot = c.borrow_mut();
             if let Some((gen, _)) = slot.as_ref() {
                 if *gen == self.gen {
                     *slot = None;
                 }
             }
-        });
-        CURRENT_MISSING_TRACES.with(|c| {
-            let mut slot = c.borrow_mut();
-            if let Some((gen, _)) = slot.as_ref() {
-                if *gen == self.gen {
-                    *slot = None;
-                }
-            }
-        });
-        // The rev decision is likewise rewritten fresh every guard install and
-        // cleared on drop so no stale orientation outlives the scope on a
-        // reused worker thread (a non-core path then reads `None` and keeps its
-        // own legacy predicate).
-        CURRENT_USE_REV.with(|c| {
-            *c.borrow_mut() = None;
         });
     }
 }
 
-/// Clone of the currently-stashed band-cap map for the calling thread,
-/// or `None` when no guard is installed (legacy own-height packing).
+/// Clone of the currently-stashed FULL canonical-cluster chip NAME -> width map
+/// for the calling thread, or `None` when no [`Height0MissingGuard`] is installed
+/// (legacy own-chip-set packing).  The commit path derives the missing set
+/// (cluster minus present) from it and injects each missing chip at HEIGHT 0.
 #[must_use]
-pub fn current_band_cap() -> Option<BTreeMap<String, (usize, usize)>> {
-    CURRENT_BAND_CAP.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
-}
-
-/// Clone of the currently-stashed MISSING-chip traces for the calling thread,
-/// or `None` when no guard is installed.  `commit_basefold_path` uses these
-/// constraint-valid traces to inject the canonical-cluster chips a raw FIX-off
-/// shard is missing, so the proof verifies.
-#[must_use]
-pub fn current_missing_chip_traces() -> Option<BTreeMap<String, RowMajorMatrix<InnerVal>>> {
-    CURRENT_MISSING_TRACES.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
+pub fn current_h0_cluster_widths() -> Option<BTreeMap<String, usize>> {
+    CURRENT_H0_CLUSTER.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
 }
 
 /// Install (or clear, with `None`) the per-shard rev(zeta) orientation decision
-/// for the calling thread.  `BandCapGuard::new` calls it with `Some(use_rev)`;
-/// also exposed standalone so a future GPU / non-guard path can set the same
-/// single signal.  Passing `None` restores the legacy per-reader fallback.
+/// for the calling thread.  The core prover installs it (via [`UseRevGuard`])
+/// with `Some(use_rev)`; also exposed standalone so a future GPU / non-guard path
+/// can set the same single signal.  Passing `None` restores the legacy per-reader
+/// fallback.
 pub fn set_use_rev(decision: Option<bool>) {
     CURRENT_USE_REV.with(|c| {
         *c.borrow_mut() = decision;
@@ -202,16 +162,14 @@ pub fn current_use_rev() -> Option<bool> {
 }
 
 /// RAII guard that installs ONLY the rev(zeta) orientation carrier
-/// (`CURRENT_USE_REV = Some(use_rev)`) for its scope, WITHOUT any band-cap /
-/// missing-chip / raw-log machinery.  Used by the CORE prover for shards that do
-/// NOT map to a canonical cluster (e.g. the no-CPU memory-finalize shard, where
-/// `find_canonical_cluster_shape` returns `None`): those shards still commit at
-/// their own (raw) height — `current_band_cap()` stays `None`, so the natural
-/// raw commit is byte-geometry-identical to legacy — but MUST carry the rev
-/// orientation so the CORE proof is uniformly rev (every core shard rev), keeping
-/// the host `core_rev=true` verify and the in-circuit NORMALIZE `core_layer_rev`
-/// consistent.  On drop it clears the carrier (`None`) so no stale orientation
-/// outlives the scope on a reused worker thread.
+/// (`CURRENT_USE_REV = Some(use_rev)`) for its scope, WITHOUT any missing-chip /
+/// area-pin machinery.  The CORE prover installs it for EVERY core shard so the
+/// whole CORE proof is uniformly rev (mapping to a canonical cluster or not — the
+/// no-CPU memory-finalize shard commits at its own raw height but must still
+/// carry the rev orientation so the host `core_rev=true` verify and the
+/// in-circuit NORMALIZE `core_layer_rev` stay consistent).  On drop it clears the
+/// carrier (`None`) so no stale orientation outlives the scope on a reused worker
+/// thread.
 pub struct UseRevGuard;
 
 impl UseRevGuard {
@@ -271,7 +229,7 @@ impl Drop for RecursionAreaPinGuard {
 
 thread_local! {
     /// Generation tag for the currently-installed [`RecursionAreaPinGuard`] on
-    /// this thread (nested-guard safe; mirrors `CURRENT_BAND_CAP`'s gen tag).
+    /// this thread (nested-guard safe; mirrors the `Height0MissingGuard` gen tag).
     static RECURSION_AREA_PIN_GEN: std::cell::RefCell<u64> = const { std::cell::RefCell::new(0) };
 }
 

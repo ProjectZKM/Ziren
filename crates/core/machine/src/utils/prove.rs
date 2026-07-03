@@ -616,12 +616,12 @@ where
         // produce under FIX-on, so the recursion normalize VK = f(chip-SET) and
         // matches the production vk_map.  Built once per prove call (the same
         // default config the prover constructs at `ZKMProver::new`).
-        let band_cap_shape_config = CoreShapeConfig::<SC::Val>::default();
+        let cluster_shape_config = CoreShapeConfig::<SC::Val>::default();
 
-        // Chip NAME -> trace WIDTH, so the
-        // band-cap can ADD a missing canonical-cluster chip's zero COMMIT trace
-        // (width is required to size it).  Machine-static, built once.
-        let band_cap_chip_widths: std::collections::BTreeMap<String, usize> = prover
+        // Chip NAME -> trace WIDTH, so the commit path can ADD a missing
+        // canonical-cluster chip's HEIGHT-0 zero COMMIT trace (width is required
+        // to size it).  Machine-static, built once.
+        let cluster_chip_widths: std::collections::BTreeMap<String, usize> = prover
             .machine()
             .chips()
             .iter()
@@ -647,213 +647,73 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // Compute this shard's per-chip CLUSTER
-                                    // band-cap from its RAW core heights and
-                                    // install it for the scope of commit+open
-                                    // (which run on THIS rayon task).  The PCS
-                                    // commit (`prove_shard_to_basefold_with_loader`)
-                                    // reads it via `band_cap::current_band_cap`
-                                    // and pads the jagged commit traces to it,
-                                    // while the STARK stays at raw heights.
-                                    // Keyed by chip NAME (the PCS layer cannot
-                                    // depend on `MipsAirId`).  A shard whose
-                                    // heights overflow every cluster yields
-                                    // `None` (no pad/add, legacy own-height).
-                                    let _band_cap_guard = {
-                                        // Compute the FULL canonical CLUSTER shape
-                                        // this raw record lifts to — the SAME shape
-                                        // `fix_shape` + `canonicalize_shape_to_cluster`
-                                        // produce under FIX_CORE_SHAPES=true (chip-SET
-                                        // AND per-chip band-cap heights, incl. the
-                                        // missing event-driven chips at log-height 1).
-                                        // The map carries (width, log_height) so the
-                                        // PCS commit can both PAD present chips and ADD
-                                        // a trace for each MISSING canonical chip,
-                                        // so the FIX-off normalize VK = the FIX-on
-                                        // canonical cluster VK (production vk_map).
-                                        band_cap_shape_config
-                                            .find_canonical_cluster_shape(&record)
-                                            .map(|shape| {
-                                                let map: std::collections::BTreeMap<
-                                                    String,
-                                                    (usize, usize),
-                                                > = shape
+                                    // #P2S0 band-cap retirement (Stage 5): derive
+                                    // the FULL canonical CLUSTER this raw FIX-off
+                                    // shard lifts to (the SAME shape `fix_shape` +
+                                    // `canonicalize_shape_to_cluster` produce under
+                                    // FIX_CORE_SHAPES=true) and install its chip
+                                    // NAME -> width map for the scope of commit+open
+                                    // (which run on THIS rayon task).  The PCS commit
+                                    // (`commit_basefold_path`) reads it via
+                                    // `band_cap::current_h0_cluster_widths`, derives
+                                    // the missing set (canonical cluster minus
+                                    // present), and injects a genuine HEIGHT-0 (0-row,
+                                    // full-width, zero) trace for each missing chip —
+                                    // so the FIX-off normalize VK = the FIX-on
+                                    // canonical-cluster VK (production vk_map) while
+                                    // the STARK proves at RAW heights.  Keyed by chip
+                                    // NAME (the PCS layer cannot depend on
+                                    // `MipsAirId`).  A shard whose heights overflow
+                                    // every cluster yields `None` (no inject, legacy
+                                    // own-chip-set commit).  The band `log_height` is
+                                    // retired — the injection keys off the chip-SET
+                                    // and a 0-row commit, not any band value.
+                                    let _h0_guard = cluster_shape_config
+                                        .find_canonical_cluster_shape(&record)
+                                        .map(|shape| {
+                                            let widths: std::collections::BTreeMap<String, usize> =
+                                                shape
                                                     .iter()
-                                                    .map(|(air, log_h)| {
+                                                    .map(|(air, _log_h)| {
                                                         let name = air.to_string();
-                                                        let width = band_cap_chip_widths
+                                                        let width = cluster_chip_widths
                                                             .get(&name)
                                                             .copied()
                                                             .unwrap_or(1);
-                                                        (name, (width, *log_h))
+                                                        (name, width)
                                                     })
                                                     .collect();
+                                            zkm_pcs::shard_level::band_cap::Height0MissingGuard::new(
+                                                widths,
+                                            )
+                                        });
 
-                                                // Generate the
-                                                // CONSTRAINT-VALID traces of the
-                                                // canonical-cluster chips this raw
-                                                // shard is MISSING, the FIX-on way:
-                                                // set the canonical shape on a CLONE
-                                                // of the record and run the machine's
-                                                // normal tracegen, so each chip's own
-                                                // `MachineAir::generate_trace` lays
-                                                // down its padding rows (dummy_row /
-                                                // padded_row_template) that satisfy
-                                                // that chip's AIR sanity constraints
-                                                // (e.g. CloClz `a=32, is_bb_zero=1`).
-                                                // The STARK keeps the PRESENT chips at
-                                                // ACTUAL heights (`main_traces`); only
-                                                // the MISSING chips (absent from
-                                                // `main_traces`) are taken from this
-                                                // canonical-shaped tracegen, then
-                                                // injected by `commit_basefold_path`
-                                                // for both `chip_ordering` and the
-                                                // commit.  All-zero injection
-                                                // matched the VK but
-                                                // tripped the injected chips'
-                                                // constraints in `verify_shard`.
-                                                let missing_traces: std::collections::BTreeMap<
-                                                    String,
-                                                    p3_matrix::dense::RowMajorMatrix<
-                                                        zkm_pcs::InnerVal,
-                                                    >,
-                                                > = {
-                                                    use core::any::TypeId;
-                                                    // Only the KoalaBear inner ring
-                                                    // takes the BaseFold band-cap path
-                                                    // (the gate the injection itself
-                                                    // assumes); on any other ring keep
-                                                    // the fallback (empty =>
-                                                    // zero injection) rather than an
-                                                    // unsound transmute.
-                                                    if TypeId::of::<SC::Val>()
-                                                        == TypeId::of::<zkm_pcs::InnerVal>()
-                                                    {
-                                                        let present: std::collections::BTreeSet<
-                                                            String,
-                                                        > = main_traces
-                                                            .iter()
-                                                            .map(|(n, _)| n.clone())
-                                                            .collect();
-                                                        // Canonical-shaped clone (shares
-                                                        // the program Arc); FIX-on path.
-                                                        let mut gen_record = record.clone();
-                                                        gen_record.shape = Some(shape.clone());
-                                                        match prover.generate_traces(&gen_record) {
-                                                            Ok(all_canonical) => {
-                                                                // SC::Val == InnerVal here
-                                                                // (TypeId-gated): reinterpret
-                                                                // Vec<(String,
-                                                                // RowMajorMatrix<SC::Val>)> as
-                                                                // Vec<(String,
-                                                                // RowMajorMatrix<InnerVal>)>,
-                                                                // the same gate the commit
-                                                                // injection relies on.
-                                                                let inner: Vec<(
-                                                                    String,
-                                                                    p3_matrix::dense::RowMajorMatrix<
-                                                                        zkm_pcs::InnerVal,
-                                                                    >,
-                                                                )> = unsafe {
-                                                                    let mut v =
-                                                                        core::mem::ManuallyDrop::new(
-                                                                            all_canonical,
-                                                                        );
-                                                                    let ptr = v.as_mut_ptr();
-                                                                    let len = v.len();
-                                                                    let cap = v.capacity();
-                                                                    Vec::from_raw_parts(
-                                                                        ptr as *mut (
-                                                                            String,
-                                                                            p3_matrix::dense::RowMajorMatrix<
-                                                                                zkm_pcs::InnerVal,
-                                                                            >,
-                                                                        ),
-                                                                        len,
-                                                                        cap,
-                                                                    )
-                                                                };
-                                                                inner
-                                                                    .into_iter()
-                                                                    .filter(|(n, _)| {
-                                                                        !present.contains(n)
-                                                                    })
-                                                                    .collect()
-                                                            }
-                                                            Err(_) => Default::default(),
-                                                        }
-                                                    } else {
-                                                        Default::default()
-                                                    }
-                                                };
-
-                                                // LOCKSTEP
-                                                // ORIENTATION: compute the per-shard
-                                                // rev(zeta) decision ONCE here (the
-                                                // single source of truth) and install
-                                                // it for the whole commit+open scope,
-                                                // so the jagged COMMIT (materialize),
-                                                // the `y_per_chip` recompute, and the
-                                                // zerocheck residual all read ONE
-                                                // boolean and can never drift.  On this
-                                                // CPU core prove path there is no device
-                                                // trace provider, so on the host every
-                                                // chip carries `main_trace_evaluations_
-                                                // full` and this equals the zerocheck's
-                                                // full predicate (`_device_traces.is_
-                                                // none()` + all-full-openings); the
-                                                // zerocheck re-applies the device-none /
-                                                // full-openings guard locally where that
-                                                // info is known, so a GPU run (out of
-                                                // scope; flag default-OFF) stays bitrev.
-                                                // rev(zeta) is
-                                                // the CORE DEFAULT.  This carrier is
-                                                // installed ONLY on the CORE prove
-                                                // path (this closure runs iff
-                                                // `find_canonical_cluster_shape`
-                                                // returned Some), so `Some(true)` is
-                                                // CORE-SCOPED by construction — the
-                                                // recursion / shrink / wrap provers
-                                                // never enter here, so their
-                                                // `current_use_rev()` stays `None`
-                                                // (legacy).  The core orientation is a
-                                                // compile-time default (`const true`,
-                                                // not an env read), not a runtime
-                                                // toggle.
-                                                let stage2_use_rev = true;
-
-                                                zkm_pcs::shard_level::band_cap::BandCapGuard::new(
-                                                    map,
-                                                    missing_traces,
-                                                    stage2_use_rev,
-                                                    // vestigial `_zeropad_missing`
-                                                    // slot (ZIREN_SP1_ZEROPAD removed;
-                                                    // constraint-valid injection is
-                                                    // unconditional).
-                                                    None,
-                                                )
-                                            })
-                                    };
-
-                                    // A CORE shard that maps to NO
-                                    // canonical cluster (`find_canonical_cluster_shape`
-                                    // == None — e.g. the no-CPU memory-finalize shard)
-                                    // gets no `BandCapGuard`, so without this it would
-                                    // carry no rev carrier and be proven LEGACY while
-                                    // the CORE machine host-verifies it rev
-                                    // (core_rev=true) => an item-12 mismatch, and the
-                                    // in-circuit NORMALIZE (core_layer_rev=true) would
-                                    // likewise reject it.  Install the rev orientation
-                                    // for EVERY core shard so the whole CORE proof is
-                                    // uniformly rev; these shards still commit at own
-                                    // (raw) height (`current_band_cap()` stays None =>
-                                    // geometry byte-identical to legacy), only the
-                                    // orientation flips (regen-only VK-value change).
-                                    let _rev_only_guard = if _band_cap_guard.is_none() {
-                                        Some(zkm_pcs::shard_level::band_cap::UseRevGuard::new(true))
-                                    } else {
-                                        None
-                                    };
+                                    // LOCKSTEP ORIENTATION: install the per-shard
+                                    // rev(zeta) decision (the single source of truth)
+                                    // for the whole commit+open scope, so the jagged
+                                    // COMMIT (materialize), the `y_per_chip` recompute,
+                                    // and the zerocheck residual all read ONE boolean
+                                    // and can never drift.  Installed for EVERY core
+                                    // shard — whether or not it maps to a canonical
+                                    // cluster — so the whole CORE proof is uniformly
+                                    // rev (the no-CPU memory-finalize shard, which maps
+                                    // to no cluster and commits at its own raw height,
+                                    // must still carry rev so the host `core_rev=true`
+                                    // verify and the in-circuit NORMALIZE
+                                    // `core_layer_rev` stay consistent).  On this CPU
+                                    // core prove path there is no device trace
+                                    // provider, so every chip carries
+                                    // `main_trace_evaluations_full` and this equals the
+                                    // zerocheck's full predicate; the zerocheck
+                                    // re-applies the device-none / full-openings guard
+                                    // locally where that info is known, so a GPU run
+                                    // (out of scope; flag default-OFF) stays bitrev.
+                                    // rev(zeta) is a compile-time CORE DEFAULT
+                                    // (`const true`, not an env read).  The recursion /
+                                    // shrink / wrap provers never enter here, so their
+                                    // `current_use_rev()` stays `None` (legacy).
+                                    let _rev_guard =
+                                        zkm_pcs::shard_level::band_cap::UseRevGuard::new(true);
 
                                     let t_commit = std::time::Instant::now();
                                     let main_data = prover.commit(&record, main_traces);
@@ -866,8 +726,8 @@ where
                                         .unwrap();
                                     let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
-                                    drop(_band_cap_guard);
-                                    drop(_rev_only_guard);
+                                    drop(_h0_guard);
+                                    drop(_rev_guard);
 
                                     tracing::info!(
                                         "PCS timing: commit={}ms open={}ms total={}ms",
