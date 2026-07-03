@@ -1721,14 +1721,14 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     let row_half = state.chip_rows / 2;
 
     // : GPU dispatch hook for chip-structured round-poly
-    // compute. Default OFF (`ZIREN_GPU_CHIP_SUMCHECK=1` enables).
+    // compute. SP1-parity default-ON (kill-switch `ZIREN_GPU_CHIP_SUMCHECK=0`).
     // Hook impl lives in ziren-gpu/basefold/chip_sumcheck_dispatch.rs;
     // when registered + env on + EF == Ef4 production type, route to
     // GPU. Returns [p(0), p(1), p(2), p(3)] same shape as the host
-    // fallback.
+    // fallback (host-only builds have no hook => host path, byte-identical).
     if std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
-        .map(|v| v == "1")
-        .unwrap_or(false)
+        .map(|v| v != "0")
+        .unwrap_or(true)
     {
         if let Some(gpu_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_hook()
@@ -2785,11 +2785,11 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 // cross-round layer cache and applies the fold kernel
                 // in place. Falls through to host on None.
                 let try_device = std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
-                    .map(|v| v == "1")
-                    .unwrap_or(false)
+                    .map(|v| v != "0")
+                    .unwrap_or(true)
                     && std::env::var("ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE")
-                        .map(|v| v == "1")
-                        .unwrap_or(false);
+                        .map(|v| v != "0")
+                        .unwrap_or(true);
                 if try_device {
                     if let Some(dev_hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_device_hook()
@@ -2880,8 +2880,8 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 // (test code, non-production paths) always take the
                 // host fallback.
                 if std::env::var("ZIREN_GPU_SUMCHECK")
-                    .map(|v| v == "1")
-                    .unwrap_or(false)
+                    .map(|v| v != "0")
+                    .unwrap_or(true)
                 {
                     if let Some(gpu_hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_sumcheck_hook()
