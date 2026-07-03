@@ -54,6 +54,7 @@ use std::marker::PhantomData;
 use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
+use rayon::prelude::*;
 
 use crate::air::MachineAir;
 use crate::folder::PairWindow;
@@ -993,15 +994,6 @@ where
         let np = self.num_prep_cols;
         let num_pairs = num_real.div_ceil(2);
 
-        let (mut y_0, mut y_2, mut y_3, mut y_4) = (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO);
-
-        // Scratch buffers reused across pairs, in the cell field `K`.
-        let mut m0 = vec![K::ZERO; nm];
-        let mut m2 = vec![K::ZERO; nm];
-        let mut m4 = vec![K::ZERO; nm];
-        let mut p0 = vec![K::ZERO; np];
-        let mut p2 = vec![K::ZERO; np];
-        let mut p4 = vec![K::ZERO; np];
         // The `X = 3` scratch + its 1/2 factors are only needed on the
         // degenerate fallback path; skip their allocation on the common
         // eq-root path.  Sample point 3 lies on the row-pair line midway
@@ -1010,53 +1002,88 @@ where
         // (`half_cell`), the GKR-batch interpolation in `EF` (`half`); for
         // `K = F`, `ι(1/2_F) = 1/2_EF` (ring-hom), so the two agree
         // byte-for-byte with the all-`EF` fold.
-        let (mut m3, mut p3) = if compute_y3 {
-            (vec![K::ZERO; nm], vec![K::ZERO; np])
-        } else {
-            (Vec::new(), Vec::new())
-        };
         let half = EF::from_u64(2).inverse();
         let half_cell = K::from_u64(2).inverse();
+        let prep_cells = self.prep_cells.as_ref();
 
-        for pair in 0..num_pairs {
-            let eq = partial[pair];
-            let row0 = 2 * pair;
-            let row1 = 2 * pair + 1;
+        // Each pair `(row0 = 2·pair, row1 = 2·pair+1)` contributes an
+        // INDEPENDENT degree-4 `(Δy_0, Δy_2, Δy_3, Δy_4)`, so the hypercube
+        // sum is parallelized across pairs — SP1 parity with the CPU
+        // `sum_as_poly` (`hypercube::prover::zerocheck::sum_as_poly` par_bridge
+        // over pair chunks / `slop` `mle.rs` `par_iter().step_by(2)`).  Field
+        // addition is associative + commutative, so rayon's tree-reduction of
+        // the per-pair tuples is byte-identical to the serial left-fold.
+        // `map_init` reuses the cell-field scratch buffers per WORKER THREAD
+        // (SP1's per-chunk scratch), so the reinterpolation allocations are
+        // amortized across pairs rather than re-allocated each pair.
+        (0..num_pairs)
+            .into_par_iter()
+            .map_init(
+                || {
+                    let (m3, p3) = if compute_y3 {
+                        (vec![K::ZERO; nm], vec![K::ZERO; np])
+                    } else {
+                        (Vec::new(), Vec::new())
+                    };
+                    (
+                        vec![K::ZERO; nm], // m0
+                        vec![K::ZERO; nm], // m2
+                        vec![K::ZERO; nm], // m4
+                        vec![K::ZERO; np], // p0
+                        vec![K::ZERO; np], // p2
+                        vec![K::ZERO; np], // p4
+                        m3,
+                        p3,
+                    )
+                },
+                |(m0, m2, m4, p0, p2, p4, m3, p3), pair| {
+                    let eq = partial[pair];
+                    let row0 = 2 * pair;
+                    let row1 = 2 * pair + 1;
 
-            interp_pair(&self.main_cells, nm, num_real, row0, row1, &mut m0, &mut m2, &mut m4);
-            if np > 0 {
-                let prep = self.prep_cells.as_ref().expect("prep_cells present when np > 0");
-                interp_pair(prep, np, num_real, row0, row1, &mut p0, &mut p2, &mut p4);
-            }
+                    interp_pair(&self.main_cells, nm, num_real, row0, row1, m0, m2, m4);
+                    if np > 0 {
+                        let prep = prep_cells.expect("prep_cells present when np > 0");
+                        interp_pair(prep, np, num_real, row0, row1, p0, p2, p4);
+                    }
 
-            let g0 = self.gkr_batch(&m0, &p0);
-            let g2 = self.gkr_batch(&m2, &p2);
-            let g4 = g2 + g2 - g0; // gkr is linear in the row values
+                    let g0 = self.gkr_batch(m0, p0);
+                    let g2 = self.gkr_batch(m2, p2);
+                    let g4 = g2 + g2 - g0; // gkr is linear in the row values
 
-            let c0 = if is_first_round { EF::ZERO } else { self.eval_air_at_row(&p0, &m0) };
-            let c2 = self.eval_air_at_row(&p2, &m2);
-            let c4 = self.eval_air_at_row(&p4, &m4);
+                    let c0 =
+                        if is_first_round { EF::ZERO } else { self.eval_air_at_row(p0, m0) };
+                    let c2 = self.eval_air_at_row(p2, m2);
+                    let c4 = self.eval_air_at_row(p4, m4);
 
-            y_0 += (c0 + g0) * eq;
-            y_2 += (c2 + g2) * eq;
-            y_4 += (c4 + g4) * eq;
+                    let dy_0 = (c0 + g0) * eq;
+                    let dy_2 = (c2 + g2) * eq;
+                    let dy_4 = (c4 + g4) * eq;
 
-            // eq-root HALF trick: the X = 3 sample is derived analytically in
-            // finalize on the common path, so only compute it on the
-            // degenerate fallback.
-            if compute_y3 {
-                for c in 0..nm {
-                    m3[c] = (m2[c] + m4[c]) * half_cell;
-                }
-                for c in 0..np {
-                    p3[c] = (p2[c] + p4[c]) * half_cell;
-                }
-                let g3 = (g2 + g4) * half; // linear interpolant at 3
-                let c3 = self.eval_air_at_row(&p3, &m3);
-                y_3 += (c3 + g3) * eq;
-            }
-        }
-        (y_0, y_2, y_3, y_4)
+                    // eq-root HALF trick: the X = 3 sample is derived
+                    // analytically in finalize on the common path, so only
+                    // compute it on the degenerate fallback.
+                    let dy_3 = if compute_y3 {
+                        for c in 0..nm {
+                            m3[c] = (m2[c] + m4[c]) * half_cell;
+                        }
+                        for c in 0..np {
+                            p3[c] = (p2[c] + p4[c]) * half_cell;
+                        }
+                        let g3 = (g2 + g4) * half; // linear interpolant at 3
+                        let c3 = self.eval_air_at_row(p3, m3);
+                        (c3 + g3) * eq
+                    } else {
+                        EF::ZERO
+                    };
+
+                    (dy_0, dy_2, dy_3, dy_4)
+                },
+            )
+            .reduce(
+                || (EF::ZERO, EF::ZERO, EF::ZERO, EF::ZERO),
+                |(a0, a2, a3, a4), (b0, b2, b3, b4)| (a0 + b0, a2 + b2, a3 + b3, a4 + b4),
+            )
     }
 
     /// Analytic finalize (host-only, transcript-critical): scale the per-pair
