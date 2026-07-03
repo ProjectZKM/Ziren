@@ -218,35 +218,6 @@ pub fn prove_shard_to_basefold<SC, A>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    // #130: device jagged-reduction fn; `Some(..)` on the GPU
-    // callers (core/compress) provides the device reduction
-    // statically, `None` on host callers = host reduction.
-    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-    // #118: device BaseFold commit fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device commit statically, `None` on host
-    // callers = host commit.
-    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
-    // #118: device BaseFold open fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device open statically, `None` on host
-    // callers = host open.
-    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
-    // #118: device jagged precompute-commit fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device precompute-commit statically, `None`
-    // on host callers = host precompute.
-    gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
-    // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
-    // the GPU callers (core/compress) provide them statically, `None` on host
-    // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
-    // `REGISTERED_DRAIN_HOOK` OnceLocks).
-    first_round_device_hook: Option<
-        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-    >,
-    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
-    // #118: the eight GKR-walk device lifecycle fns (init / transition /
-    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
-    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
-    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -283,6 +254,9 @@ where
         >,
 {
     let loader = EagerHostLoader::new(main_traces);
+    // Pure host-path entry (the shrink + dummy callers): no device fns.  The
+    // device sites (core/compress/wrap) supply these via the
+    // `MachineProver::prove_shard_to_basefold` override, not this free fn.
     prove_shard_to_basefold_with_loader::<SC, A, _>(
         chips,
         preprocessed_traces,
@@ -294,13 +268,13 @@ where
         device_traces,
         orientation,
         precomputed_commit,
-        gpu_jagged_reduction,
-        gpu_basefold_commit,
-        gpu_basefold_open,
-        gpu_jagged_precompute_commit,
-        first_round_device_hook,
-        drain_hook,
-        gkr_device_hooks,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        crate::jagged_pcs::GkrDeviceHooks::default(),
     )
 }
 

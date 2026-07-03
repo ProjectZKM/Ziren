@@ -331,20 +331,6 @@ mod tests {
             // Precomputed-commit not used for the synthetic witness
             // builder — uses the in-band commit flow.
             None,
-            // #130: host-only synthetic witness → host reduction.
-            None,
-            // #118: host-only synthetic witness → host commit.
-            None,
-            // #118: host-only synthetic witness → host open.
-            None,
-            // #118: host-only synthetic witness → host precompute.
-            None,
-            // #118: host-only synthetic witness → host first round
-            // (first-round-prove + drain fns).
-            None,
-            None,
-            // #118: host-only synthetic witness → host GKR walk.
-            zkm_pcs::jagged_pcs::GkrDeviceHooks::default(),
         )
     }
 

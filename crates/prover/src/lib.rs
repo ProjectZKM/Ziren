@@ -2100,29 +2100,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,
-                // #130: host shrink caller has no ziren-gpu reduction fn to
-                // name → host reduction (byte-identical; the device fn
-                // declines sub-threshold shards anyway).
-                None,
-                // #118: host shrink caller cannot name the ziren-gpu commit fn
-                // → host commit (byte-identical; on GPU this shrink path uses
-                // the device precompute-commit hook, not this basefold hook).
-                None,
-                // #118: host shrink caller cannot name the ziren-gpu open fn
-                // → host open (byte-identical).
-                None,
-                // #118: host shrink caller cannot name the ziren-gpu
-                // precompute-commit fn → host precompute (byte-identical).
-                None,
-                // #118: host shrink caller cannot name the ziren-gpu
-                // first-round-prove / drain fns → host first round
-                // (byte-identical; on GPU this shrink path uses the device
-                // first-layer stash via the device-resident prover's hooks).
-                None,
-                None,
-                // #118: host shrink caller cannot name the ziren-gpu GKR-walk
-                // device lifecycle fns → host walk (byte-identical).
-                zkm_pcs::jagged_pcs::GkrDeviceHooks::default(),
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over
