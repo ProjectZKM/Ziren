@@ -153,15 +153,19 @@ where
             // re-executing memory state from scratch.
             Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
         )>(opts.checkpoints_channel_capacity);
-        // opt-in. When set, producer collects MinimalTrace
-        // chunks during Checkpoint-mode execution and sends them alongside
-        // each ExecutionState batch. Consumer may then prefer `trace_chunk`
-        // (which uses the chunks' mem_reads oracle) over `trace_checkpoint`
-        // (which re-executes from scratch). Default OFF — production path
-        // unchanged.
+        // SP1-parity DEFAULT-ON: the producer collects MinimalTrace chunks
+        // during Checkpoint-mode execution and sends them alongside each
+        // ExecutionState batch; the consumer then drives the parallel
+        // `trace_chunk` fan-out (the chunks' mem_reads oracle) instead of the
+        // sequential `trace_checkpoint` re-execution. SP1's trace-generation
+        // replay is parallel-by-default — Ziren's sequential `trace_checkpoint`
+        // was the regression. Byte-identical to the sequential path (validated
+        // byte-exact across the program surface: crypto precompiles,
+        // multi-shard/multi-batch, and the 2^24 #141 height/clk-split).
+        // Kill-switch: ZIREN_USE_MINIMAL_TRACE=0 restores the legacy path.
         let use_minimal_trace = std::env::var("ZIREN_USE_MINIMAL_TRACE")
-            .map(|v| v == "1")
-            .unwrap_or(false);
+            .map(|v| v != "0")
+            .unwrap_or(true);
         if use_minimal_trace {
             runtime.minimal_trace_collector =
                 Some(zkm_core_executor::minimal_trace::MinimalTrace::default());

@@ -584,11 +584,15 @@ impl MemoryInstructions for TranspilerBackend {
         // pop rax, pop mem, pop aligned_vaddr) — disproportionate cost
         // for a rare instruction.
         //
-        // Until we have a use case that requires LWL/LWR oracle capture,
-        // callers that opt into ZIREN_USE_MINIMAL_TRACE=1 must restrict
-        // themselves to programs that don't use unaligned loads. The
-        // bench programs (fibonacci/hello-world/tendermint) all avoid
-        // LWL/LWR. Reth uses some; flag that in step 6 plumbing.
+        // This gap is in the JIT-CAPTURE oracle path ONLY — i.e. the D.4
+        // JIT producer (ZIREN_JIT_MINIMAL_TRACE), the sole caller that runs
+        // this backend recorder. It does NOT affect the default
+        // ZIREN_USE_MINIMAL_TRACE consumer: that path captures the oracle in
+        // the INTERPRETER's word-access layer (mr_cpu -> mr), which records
+        // EVERY load uniformly — LWL/LWR included. Validated byte-exact on
+        // ssz-withdrawals (66,668 cross-shard LWL/LWR) == default core sha.
+        // So a JIT-capture caller must still restrict to programs without
+        // unaligned loads until this recorder lowers LWL/LWR/SWL/SWR.
         //
         // MIPS LWL semantics, mirroring `executor.rs::execute_load`'s
         // Opcode::LWL arm:
