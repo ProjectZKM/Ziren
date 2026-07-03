@@ -65,6 +65,17 @@ pub struct MemValue {
     pub addr: u32,
     /// Value observed by the JIT (= oracle answer for the TracingVM).
     pub value: u32,
+    /// full memory record: the `shard` field of the
+    /// `MemoryRecord` at this address *before* the access (i.e. the
+    /// shard of the last prior write). Load-bearing: the memory
+    /// argument's `prev_shard` for the first cross-shard touch is
+    /// reconstructed from this. `0` on the JIT-recorder path (the JIT
+    /// does not track per-address shard bookkeeping — see D.4 gap).
+    pub shard: u32,
+    /// full memory record: the `timestamp` field of the
+    /// pre-access `MemoryRecord`. Feeds `prev_timestamp`. `0` on the
+    /// JIT-recorder path.
+    pub timestamp: u32,
 }
 
 /// One per-shard checkpoint emitted by the Stage-1 fast runner.
@@ -85,12 +96,50 @@ pub struct TraceChunk {
     /// because serde Deserialize is not derived for fixed arrays > 32
     /// without `serde-big-array`; len is invariantly 36.
     pub start_registers: Vec<u32>,
+    /// full register memory records at shard start:
+    /// `(value, shard, timestamp)` per slot (len 36 when populated).
+    /// Unlike `start_registers` (value only) this carries the `shard` /
+    /// `timestamp` bookkeeping the memory argument needs so a Stage-2
+    /// register access reconstructs `prev_shard` / `prev_timestamp`
+    /// byte-exactly. Empty on the JIT-recorder path (JIT doesn't track
+    /// per-register shard/timestamp — the D.4 gap); Stage 2 then falls
+    /// back to `start_registers` with shard/timestamp 0.
+    pub start_register_records: Vec<(u32, u32, u32)>,
     /// PC at which Stage 2 should begin re-executing this shard.
     pub pc_start: u32,
     /// Global clock at the start of this shard.
     pub clk_start: u64,
     /// Global clock at the end of this shard (exclusive).
     pub clk_end: u64,
+    /// full byte-exact reconstruction: the executor's
+    /// `state.current_shard` at the start of this shard. The memory
+    /// argument's `shard` field for every access in this shard derives
+    /// from it, so the Stage-2 sub-executor must seed
+    /// `state.current_shard = current_shard` to match the sequential
+    /// run byte-for-byte. `0` means "unset" (legacy chunks).
+    pub current_shard: u32,
+    /// stream cursors at the start of this shard, so the
+    /// Stage-2 sub-executor can service `HINT_READ` / proof-verify /
+    /// public-value syscalls from the shared streams at the exact
+    /// position the sequential run was at when this shard began.
+    pub input_stream_ptr: u32,
+    /// see `input_stream_ptr`.
+    pub proof_stream_ptr: u32,
+    /// see `input_stream_ptr`.
+    pub public_values_stream_ptr: u32,
+    /// full final-memory carry for the LAST shard only.
+    /// The global memory init/finalize argument (`postprocess`)
+    /// iterates *every* touched address, so the terminal shard's
+    /// sub-executor needs the whole memory image (with full records)
+    /// + the uninitialized-memory (hint) image — data the sparse
+    /// `mem_reads` oracle cannot supply. Populated by the producer at
+    /// program halt; empty for every non-terminal chunk. Entries are
+    /// `(addr, value, shard, timestamp)`.
+    pub final_memory: Vec<(u32, u32, u32, u32)>,
+    /// full final-memory carry: the uninitialized-memory
+    /// (hint) image `(addr, value)`, needed for `initialize` events of
+    /// hint-written addresses. Terminal chunk only.
+    pub final_uninit_memory: Vec<(u32, u32)>,
     /// Oracle of memory reads observed by Stage 1. May be empty when the
     /// JIT emit path was not configured to record memory; in that case
     /// Stage 2 falls back to direct guest-memory reads.
@@ -112,9 +161,16 @@ impl TraceChunk {
         Self {
             shard_index,
             start_registers: vec![0; 36],
+            start_register_records: Vec::new(),
             pc_start,
             clk_start,
             clk_end: clk_start,
+            current_shard: 0,
+            input_stream_ptr: 0,
+            proof_stream_ptr: 0,
+            public_values_stream_ptr: 0,
+            final_memory: Vec::new(),
+            final_uninit_memory: Vec::new(),
             mem_reads: Arc::from(Vec::<MemValue>::new()),
         }
     }
@@ -221,8 +277,8 @@ mod tests {
         c.clk_end = 200;
         c.start_registers[5] = 0xdead_beef;
         c.mem_reads = Arc::from(vec![
-            MemValue { clk: 110, addr: 0x8000, value: 0x1111 },
-            MemValue { clk: 120, addr: 0x8004, value: 0x2222 },
+            MemValue { clk: 110, addr: 0x8000, value: 0x1111, shard: 0, timestamp: 0 },
+            MemValue { clk: 120, addr: 0x8004, value: 0x2222, shard: 0, timestamp: 0 },
         ]);
         trace.push_chunk(c);
         trace.public_values = vec![1, 2, 3, 4];

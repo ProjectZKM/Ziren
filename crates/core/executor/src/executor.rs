@@ -245,6 +245,19 @@ pub struct Executor<'a> {
     /// when the chunk closes — the accumulated entries become the
     /// previous chunk's `mem_reads` field (Arc<[MemValue]>).
     pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
+
+    /// D.4 producer: when set, the JIT fast-path
+    /// (`try_run_fast_jit`) captures a whole-program
+    /// [`crate::minimal_trace::TraceChunk`] via
+    /// `jit_runner::run_jit_capture_trace_chunk` instead of the plain
+    /// `run_jit`. The captured chunk lands in `d4_captured_chunk`.
+    /// Default false — zero effect on the production JIT path.
+    pub d4_capture_chunk: bool,
+
+    /// D.4 producer: the whole-program chunk captured
+    /// by the last `run_fast` under `d4_capture_chunk`. `None` unless a
+    /// capture just ran (or the program fell back to the interpreter).
+    pub d4_captured_chunk: Option<crate::minimal_trace::TraceChunk>,
 }
 
 /// dispatch helper that picks the
@@ -494,6 +507,8 @@ impl<'a> Executor<'a> {
             minimal_trace_collector: None,
             skip_replay_bookkeeping: false,
             recording_chunk_mem_reads: Vec::new(),
+            d4_capture_chunk: false,
+            d4_captured_chunk: None,
         }
     }
 
@@ -712,7 +727,15 @@ impl<'a> Executor<'a> {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
-                value: record.value,
+                // full record: the PRE-access record (value +
+                // shard + timestamp). The consumer keeps the FIRST entry
+                // per address = the shard-start memory state, so the
+                // Stage-2 sub-executor's first touch reconstructs the
+                // exact `prev_shard`/`prev_timestamp`. (Read leaves value
+                // unchanged, so prev_record.value == record.value.)
+                value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
             });
         }
 
@@ -930,7 +953,10 @@ impl<'a> Executor<'a> {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
+                // full pre-access record (value + shard + timestamp).
                 value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
             });
         }
 
@@ -1032,7 +1058,10 @@ impl<'a> Executor<'a> {
             self.recording_chunk_mem_reads.push(crate::minimal_trace::MemValue {
                 clk: self.state.global_clk,
                 addr,
+                // full pre-access record (value + shard + timestamp).
                 value: prev_record.value,
+                shard: prev_record.shard,
+                timestamp: prev_record.timestamp,
             });
         }
 
@@ -2382,11 +2411,27 @@ impl<'a> Executor<'a> {
             use crate::minimal_trace::TraceChunk;
             let next_chunk_pc = self.state.pc;
             let next_chunk_clk = self.state.global_clk;
+            // full record: capture the register file as
+            // (value, shard, timestamp) so Stage 2 seeds byte-exact
+            // register memory records (prev_shard/prev_timestamp of the
+            // first per-shard register touch must match the sequential
+            // run). start_registers keeps the value-only view for the
+            // JIT path + backward compat.
             let mut next_registers = vec![0u32; 36];
+            let mut next_register_records = vec![(0u32, 0u32, 0u32); 36];
             for i in 0..36u32 {
-                next_registers[i as usize] =
-                    self.state.memory.registers.get(i).map(|r| r.value).unwrap_or(0);
+                if let Some(r) = self.state.memory.registers.get(i) {
+                    next_registers[i as usize] = r.value;
+                    next_register_records[i as usize] = (r.value, r.shard, r.timestamp);
+                }
             }
+            // current_shard + stream cursors are already advanced to the
+            // NEXT shard's start at this point (inc_shard_if_need ran
+            // before bump_record), so they describe the chunk we open.
+            let next_current_shard = self.state.current_shard;
+            let next_input_ptr = self.state.input_stream_ptr as u32;
+            let next_proof_ptr = self.state.proof_stream_ptr as u32;
+            let next_pv_ptr = self.state.public_values_stream_ptr as u32;
             // Patch the previous chunk's clk_end (if any) to seal it.
             if let Some(prev) = trace.chunks.last_mut() {
                 prev.clk_end = next_chunk_clk;
@@ -2408,9 +2453,16 @@ impl<'a> Executor<'a> {
             trace.chunks.push(TraceChunk {
                 shard_index: trace.chunks.len() as u32,
                 start_registers: next_registers,
+                start_register_records: next_register_records,
                 pc_start: next_chunk_pc,
                 clk_start: next_chunk_clk,
                 clk_end: u64::MAX,  // sealed at next bump or finalize
+                current_shard: next_current_shard,
+                input_stream_ptr: next_input_ptr,
+                proof_stream_ptr: next_proof_ptr,
+                public_values_stream_ptr: next_pv_ptr,
+                final_memory: Vec::new(),
+                final_uninit_memory: Vec::new(),
                 mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
             });
             trace.total_cycles = next_chunk_clk;
@@ -2447,6 +2499,47 @@ impl<'a> Executor<'a> {
         let public_values = removed_record.public_values;
         self.record.public_values = public_values;
         self.records.push(removed_record);
+    }
+
+    /// D.4 consumer support: seal the collected `MinimalTrace`
+    /// at program halt — finalize the last chunk's `clk_end`, drop
+    /// degenerate empty chunks, and stamp the FULL final memory image
+    /// (page_table + registers, with records) plus the uninitialized
+    /// (hint) image onto the terminal chunk so the Stage-2 consumer can
+    /// emit the global memory init/finalize argument (which iterates
+    /// every touched address). No-op when the collector is disabled.
+    pub fn seal_minimal_trace_final_memory(&mut self) {
+        let final_clk = self.state.global_clk;
+        // Snapshot the full memory FIRST (immutable borrow) so we don't
+        // hold self.state + the collector borrow simultaneously.
+        let mut final_memory: Vec<(u32, u32, u32, u32)> = Vec::new();
+        for addr in 0..NUM_REGISTERS as u32 {
+            if let Some(r) = self.state.memory.registers.get(addr) {
+                final_memory.push((addr, r.value, r.shard, r.timestamp));
+            }
+        }
+        for addr in self.state.memory.page_table.keys() {
+            let r = self.state.memory.page_table.get(addr).unwrap();
+            final_memory.push((addr, r.value, r.shard, r.timestamp));
+        }
+        let mut final_uninit: Vec<(u32, u32)> = Vec::new();
+        for addr in 0..NUM_REGISTERS as u32 {
+            if let Some(v) = self.state.uninitialized_memory.registers.get(addr) {
+                final_uninit.push((addr, *v));
+            }
+        }
+        for addr in self.state.uninitialized_memory.page_table.keys() {
+            let v = self.state.uninitialized_memory.page_table.get(addr).unwrap();
+            final_uninit.push((addr, *v));
+        }
+
+        if let Some(trace) = self.minimal_trace_collector.as_mut() {
+            trace.finalize(final_clk);
+            if let Some(last) = trace.chunks.last_mut() {
+                last.final_memory = final_memory;
+                last.final_uninit_memory = final_uninit;
+            }
+        }
     }
 
     /// Execute up to `self.shard_batch_size` cycles, returning the events emitted and whether the
@@ -2549,16 +2642,27 @@ impl<'a> Executor<'a> {
             if trace.chunks.is_empty() {
                 use crate::minimal_trace::TraceChunk;
                 let mut start_regs = vec![0u32; 36];
+                let mut start_reg_records = vec![(0u32, 0u32, 0u32); 36];
                 for i in 0..36u32 {
-                    start_regs[i as usize] =
-                        self.state.memory.registers.get(i).map(|r| r.value).unwrap_or(0);
+                    if let Some(r) = self.state.memory.registers.get(i) {
+                        start_regs[i as usize] = r.value;
+                        start_reg_records[i as usize] = (r.value, r.shard, r.timestamp);
+                    }
                 }
                 trace.chunks.push(TraceChunk {
                     shard_index: 0,
                     start_registers: start_regs,
+                    start_register_records: start_reg_records,
                     pc_start: self.state.pc,
                     clk_start: 0,
+                    // chunk 0 starts at the program's first shard.
+                    current_shard: self.state.current_shard,
+                    input_stream_ptr: self.state.input_stream_ptr as u32,
+                    proof_stream_ptr: self.state.proof_stream_ptr as u32,
+                    public_values_stream_ptr: self.state.public_values_stream_ptr as u32,
                     clk_end: u64::MAX,
+                    final_memory: Vec::new(),
+                    final_uninit_memory: Vec::new(),
                     mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
                 });
             }
@@ -2596,6 +2700,70 @@ impl<'a> Executor<'a> {
         }
         while !self.execute()? {}
         Ok(())
+    }
+
+    /// D.4 producer: run the whole program on the JIT
+    /// (`run_fast`) while capturing a whole-program
+    /// [`crate::minimal_trace::TraceChunk`]. This is the fast
+    /// "checkpoint pass" replacement — it fast-forwards execution on the
+    /// JIT (populating `state.public_values_stream` + the final cycle
+    /// count) and returns the chunk describing the run
+    /// (`start_registers` / `pc_start` / `clk_start=0` / `clk_end=total`).
+    ///
+    /// The returned chunk is the Stage-1 MinimalTrace product: today the
+    /// pipeline routes byte-equivalent record reconstruction through the
+    /// from-start `trace_checkpoint` (which needs the executor's
+    /// `input_stream` / `proof_stream` — state the per-shard
+    /// `trace_chunk` consumer does not yet carry). The chunk's
+    /// `mem_reads` oracle is captured for diagnostics but not consumed.
+    ///
+    /// Falls back to the interpreter transparently for JIT-ineligible
+    /// programs; in that case a best-effort chunk header is synthesised
+    /// from the executor's pre/post state.
+    pub fn run_fast_capture_whole_program_chunk(
+        &mut self,
+    ) -> Result<crate::minimal_trace::TraceChunk, ExecutionError> {
+        // Load the program image + seed registers so the pre-run
+        // snapshot (used only on the interpreter-fallback path) is
+        // meaningful. run_fast re-runs initialize() idempotently while
+        // global_clk is still 0.
+        if self.state.global_clk == 0 {
+            self.initialize();
+        }
+        let pc_start = self.state.pc;
+        let clk_start = self.state.global_clk;
+        let mut start_registers = vec![0u32; 36];
+        for (i, slot) in start_registers.iter_mut().enumerate() {
+            *slot = self.register(Register::from(i as u8));
+        }
+
+        self.d4_capture_chunk = true;
+        self.d4_captured_chunk = None;
+        let res = self.run_fast();
+        self.d4_capture_chunk = false;
+        res?;
+
+        let clk_end = self.state.global_clk;
+        let chunk = self.d4_captured_chunk.take().unwrap_or_else(|| {
+            // Interpreter-fallback: no JIT capture ran. Synthesise the
+            // header from the pre/post snapshot; mem_reads stays empty.
+            crate::minimal_trace::TraceChunk {
+                shard_index: 0,
+                start_registers,
+                start_register_records: Vec::new(),
+                pc_start,
+                clk_start,
+                clk_end,
+                current_shard: 0,
+                input_stream_ptr: 0,
+                proof_stream_ptr: 0,
+                public_values_stream_ptr: 0,
+                final_memory: Vec::new(),
+                final_uninit_memory: Vec::new(),
+                mem_reads: std::sync::Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
+            }
+        });
+        Ok(chunk)
     }
 
     /// Attempt to run the program through the JIT (`run_fast` semantics
@@ -2741,7 +2909,20 @@ impl<'a> Executor<'a> {
                 None
             };
 
-            unsafe { run_jit(&jit_fn, &mut ctx) };
+            // D.4 producer: capture a whole-program TraceChunk
+            // (start registers + pc + clk bounds) via
+            // run_jit_capture_trace_chunk when the caller opted in;
+            // otherwise the byte-identical plain run_jit. The chunk's
+            // clk_start/start_registers come from `ctx` at call time
+            // (= the program-entry snapshot on the first-cycle run_fast).
+            if self.d4_capture_chunk {
+                let chunk = unsafe {
+                    crate::jit_runner::run_jit_capture_trace_chunk(&jit_fn, &mut ctx, 0)
+                };
+                self.d4_captured_chunk = Some(chunk);
+            } else {
+                unsafe { run_jit(&jit_fn, &mut ctx) };
+            }
 
             #[cfg(target_os = "linux")]
             drop(_segv_guard);

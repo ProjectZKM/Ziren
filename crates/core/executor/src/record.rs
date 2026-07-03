@@ -436,6 +436,7 @@ impl MachineRecord for ExecutionRecord {
         self.memory_instr_events.append(&mut other.memory_instr_events);
         self.branch_events.append(&mut other.branch_events);
         self.jump_events.append(&mut other.jump_events);
+        self.movcond_events.append(&mut other.movcond_events);
         self.misc_events.append(&mut other.misc_events);
         self.syscall_events.append(&mut other.syscall_events);
 

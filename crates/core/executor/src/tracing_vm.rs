@@ -107,50 +107,84 @@ impl<'a> TracingVM<'a> {
         &mut self,
         chunk: &TraceChunk,
     ) -> Result<(), ExecutionError> {
-        // Rebuild a minimal ExecutionState from the chunk header.
-        // will replace this with a hot-path-friendly seed.
+        self.execute_from_chunk_with_streams(chunk, &[], &[])
+    }
+
+    /// full byte-exact seed. Same as
+    /// [`Self::execute_from_chunk`] but additionally seeds the shared
+    /// `input_stream` / `proof_stream` (positioned via the chunk's
+    /// cursors) so hint-read / proof-verify syscalls service byte-exact.
+    #[allow(clippy::type_complexity)]
+    pub fn execute_from_chunk_with_streams(
+        &mut self,
+        chunk: &TraceChunk,
+        input_stream: &[Vec<u8>],
+        proof_stream: &[(
+            crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+            zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        )],
+    ) -> Result<(), ExecutionError> {
+        use crate::events::MemoryRecord;
+        // Rebuild an ExecutionState from the chunk header. For byte-exact
+        // reconstruction we mirror EVERY piece of shard-start state the
+        // sequential run had: pc, global_clk, current_shard, register
+        // records (value+shard+timestamp), the touched-memory records,
+        // and the stream cursors.
         let mut state =
             ExecutionState::new(chunk.pc_start, chunk.pc_start.wrapping_add(4));
         state.global_clk = chunk.clk_start;
-        // Seed the register file; HI/LO/BRK/HEAP are part of the 36-slot
-        // snapshot per `crate::jit_runner::JitContext::registers`.
-        use crate::events::MemoryRecord;
-        for (i, &v) in chunk.start_registers.iter().enumerate() {
-            state.memory.registers.insert(
-                i as u32,
-                MemoryRecord { value: v, shard: 0, timestamp: 0 },
-            );
+        if chunk.current_shard != 0 {
+            state.current_shard = chunk.current_shard;
         }
+        // Seed the register file. Prefer the full records (with
+        // shard/timestamp) so the first per-shard register access
+        // reconstructs prev_shard/prev_timestamp; fall back to value-only
+        // (JIT path) with shard/timestamp 0.
+        if chunk.start_register_records.len() == 36 {
+            for (i, &(v, sh, ts)) in chunk.start_register_records.iter().enumerate() {
+                state.memory.registers.insert(
+                    i as u32,
+                    MemoryRecord { value: v, shard: sh, timestamp: ts },
+                );
+            }
+        } else {
+            for (i, &v) in chunk.start_registers.iter().enumerate() {
+                state.memory.registers.insert(
+                    i as u32,
+                    MemoryRecord { value: v, shard: 0, timestamp: 0 },
+                );
+            }
+        }
+        // Seed the shared streams at the chunk-start cursor positions.
+        if !input_stream.is_empty() {
+            state.input_stream = input_stream.to_vec();
+            state.input_stream_ptr = chunk.input_stream_ptr as usize;
+        }
+        if !proof_stream.is_empty() {
+            state.proof_stream = proof_stream.to_vec();
+            state.proof_stream_ptr = chunk.proof_stream_ptr as usize;
+        }
+        state.public_values_stream_ptr = chunk.public_values_stream_ptr as usize;
 
-        // Spawn the sub-Executor and let it walk the chunk. We re-use
-        // the existing trace-mode loop rather than reimplementing it
-        // here — the win comes from running many of these in parallel,
-        // not from making any single one faster.
+        // Spawn the sub-Executor and let it walk the chunk.
         let program = (*self.program).clone();
         let mut sub = Executor::recover(program, state, self.opts);
 
-        // Option B: seed sub-Executor memory from the
-        // chunk's mem_reads oracle. Each entry was captured by the
-        // sequential producer at the moment the address was read or
-        // written, so pre-loading them recovers the memory state
-        // produced by earlier shards. Falls back to the program image
-        // (already loaded by initialize()) for any addresses NOT in
-        // the oracle — equivalent to "this address wasn't touched by
-        // any earlier shard's writes that this shard reads from".
+        // Seed sub-Executor memory from the chunk's mem_reads oracle. Each
+        // entry carries the FULL pre-access record (value+shard+timestamp)
+        // captured by the sequential producer; the FIRST entry per address
+        // = the memory state at shard start, so the first touch replays
+        // prev_shard/prev_timestamp byte-exactly. `or_insert` keeps
+        // first-seen. For the terminal chunk, the full final memory is
+        // also seeded below so postprocess can finalize every address.
         if !chunk.mem_reads.is_empty() {
-            use crate::events::MemoryRecord;
-            // Use the FIRST entry per address (state at chunk start).
-            // `entry().or_insert(...)` is no-op if the address is
-            // already present, which gives first-seen semantics with
-            // a single hash per addr (vs the HashSet+insert version
-            // which paid 2 hashes per addr).
             for mv in chunk.mem_reads.iter() {
                 sub.state.memory.page_table
                     .entry(mv.addr)
                     .or_insert(MemoryRecord {
                         value: mv.value,
-                        shard: 0,
-                        timestamp: 0,
+                        shard: mv.shard,
+                        timestamp: mv.timestamp,
                     });
             }
         }
@@ -169,9 +203,17 @@ impl<'a> TracingVM<'a> {
         sub.max_cycles = Some(chunk.clk_end);
         // skip replay-irrelevant
         // bookkeeping (opcode_counts, local_counts, syscall_counts).
-        // These were already populated in the original checkpoint-gen
-        // pass; recomputing them here is pure waste.
+        // These are estimation/report counters, not trace events, so
+        // they don't affect the reconstructed records' bytes.
         sub.skip_replay_bookkeeping = true;
+        // The global memory init/finalize argument iterates EVERY touched
+        // address at program halt — data the sparse per-shard oracle
+        // can't supply. So we suppress the sub-executor's own
+        // (necessarily incomplete) finalize pass and inject the
+        // producer-captured full-memory events below for the terminal
+        // chunk. Non-terminal chunks never reach postprocess (they exit
+        // via ExceededCycleLimit, not `done`), so this is a no-op there.
+        sub.emit_global_memory_events = false;
         loop {
             match sub.execute() {
                 Ok(true) => break,  // natural halt within the chunk
@@ -190,6 +232,18 @@ impl<'a> TracingVM<'a> {
             sub.bump_record();
         }
 
+        // Capture the shard-end public-value inputs BEFORE draining: the
+        // sub-executor exits this single shard via `ExceededCycleLimit`
+        // (or natural halt), so `Executor::execute`'s trailing
+        // public-values finalization loop — which normally stamps
+        // execution_shard / start_pc / next_pc / timestamps — is skipped.
+        // We replicate it below (a chunk == exactly one CPU shard, so the
+        // per-shard values are self-contained; empty/no-CPU shards are
+        // produced by the deferred-memory path in prove.rs, not here).
+        let shard_last_timestamp = sub.state.clk;
+        let committed_value_digest = sub.record.public_values.committed_value_digest;
+        let deferred_proofs_digest = sub.record.public_values.deferred_proofs_digest;
+
         // The Executor pushes finished records into `sub.records` via
         // `bump_record()`; the live `sub.record` is empty at this
         // point. Merge everything from `sub.records` into `self.record`
@@ -198,6 +252,74 @@ impl<'a> TracingVM<'a> {
         use zkm_pcs::MachineRecord;
         for mut other in sub.records.drain(..) {
             self.record.append(&mut other);
+        }
+
+        // Replicate `Executor::execute`'s per-shard public-values stamp
+        // (executor.rs finalization loop) so prove.rs reads byte-exact
+        // execution_shard / pc / timestamp fields off this record.
+        if !self.record.cpu_events.is_empty() {
+            let first_pc = self.record.cpu_events[0].pc;
+            let first_next_pc = self.record.cpu_events[0].next_pc;
+            let last = self.record.cpu_events.last().unwrap();
+            let last_next_pc = last.next_pc;
+            let last_next_next_pc = last.next_next_pc;
+            let last_exit_code = last.exit_code;
+            let pv = &mut self.record.public_values;
+            if chunk.current_shard != 0 {
+                pv.execution_shard = chunk.current_shard;
+            }
+            pv.initial_timestamp = 0;
+            pv.last_timestamp = shard_last_timestamp;
+            pv.committed_value_digest = committed_value_digest;
+            pv.deferred_proofs_digest = deferred_proofs_digest;
+            pv.start_pc = first_pc;
+            pv.next_pc = last_next_pc;
+            pv.exit_code = last_exit_code;
+            pv.start_next_pc = first_next_pc;
+            pv.next_next_pc = last_next_next_pc;
+        }
+
+        // Terminal chunk: inject the global memory init/finalize events
+        // the producer captured from the FULL final memory (postprocess
+        // over every touched address, which the sub-executor's partial
+        // memory can't reproduce). Mirrors `Executor::postprocess` so the
+        // event SET matches byte-for-byte (they're addr-sorted before the
+        // memory shards are split, so push order is irrelevant).
+        if !chunk.final_memory.is_empty() {
+            use crate::events::{MemoryInitializeFinalizeEvent, MemoryRecord};
+            let image = &self.program.image;
+            let uninit: std::collections::HashMap<u32, u32> =
+                chunk.final_uninit_memory.iter().copied().collect();
+
+            // addr = 0 is constrained first in the finalize table.
+            let addr0 = chunk
+                .final_memory
+                .iter()
+                .find(|(a, _, _, _)| *a == 0)
+                .map(|&(_, v, s, t)| MemoryRecord { value: v, shard: s, timestamp: t })
+                .unwrap_or(MemoryRecord { value: 0, shard: 0, timestamp: 1 });
+            self.record
+                .global_memory_finalize_events
+                .push(MemoryInitializeFinalizeEvent::finalize_from_record(0, &addr0));
+            self.record
+                .global_memory_initialize_events
+                .push(MemoryInitializeFinalizeEvent::initialize(0, 0));
+
+            for &(addr, value, shard, timestamp) in chunk.final_memory.iter() {
+                if addr == 0 {
+                    continue;
+                }
+                if !image.contains_key(&addr) {
+                    let initial_value = uninit.get(&addr).copied().unwrap_or(0);
+                    self.record
+                        .global_memory_initialize_events
+                        .push(MemoryInitializeFinalizeEvent::initialize(addr, initial_value));
+                }
+                let record = MemoryRecord { value, shard, timestamp };
+                self.record
+                    .global_memory_finalize_events
+                    .push(MemoryInitializeFinalizeEvent::finalize_from_record(addr, &record));
+            }
         }
         Ok(())
     }
@@ -230,6 +352,25 @@ pub fn drive_tracing_vm_parallel(
     opts: ZKMCoreOpts,
     trace: &MinimalTrace,
 ) -> Result<Vec<ExecutionRecord>, ExecutionError> {
+    drive_tracing_vm_parallel_with_streams(program, opts, trace, &[], &[])
+}
+
+/// byte-exact driver: same as
+/// [`drive_tracing_vm_parallel`] but threads the shared read-only
+/// `input_stream` / `proof_stream` so each worker can service
+/// hint-read / proof-verify syscalls at the exact cursor its chunk
+/// began at.
+#[allow(clippy::type_complexity)]
+pub fn drive_tracing_vm_parallel_with_streams(
+    program: Arc<Program>,
+    opts: ZKMCoreOpts,
+    trace: &MinimalTrace,
+    input_stream: &[Vec<u8>],
+    proof_stream: &[(
+        crate::ZKMReduceProof<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+        zkm_pcs::StarkVerifyingKey<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2>,
+    )],
+) -> Result<Vec<ExecutionRecord>, ExecutionError> {
     use p3_maybe_rayon::prelude::*;
 
     // Pre-allocate one record per chunk so the parallel section can
@@ -252,7 +393,7 @@ pub fn drive_tracing_vm_parallel(
         .zip(records.par_iter_mut())
         .map(|(chunk, record)| {
             let mut vm = TracingVM::new(program.clone(), opts, record);
-            vm.execute_from_chunk(chunk)
+            vm.execute_from_chunk_with_streams(chunk, input_stream, proof_stream)
         })
         .collect();
     results?;
@@ -573,9 +714,16 @@ mod tests {
         let chunk = TraceChunk {
             shard_index: 0,
             start_registers: vec![0u32; 36],
+            start_register_records: Vec::new(),
             pc_start: pc_base,
             clk_start: 0,
             clk_end: 100, // bounds worker to ~20 ADDs (5 clk each)
+            current_shard: 0,
+            input_stream_ptr: 0,
+            proof_stream_ptr: 0,
+            public_values_stream_ptr: 0,
+            final_memory: Vec::new(),
+            final_uninit_memory: Vec::new(),
             mem_reads: Arc::from(Vec::<crate::minimal_trace::MemValue>::new()),
         };
         // Bound MUST trigger ExceededCycleLimit which execute_from_chunk

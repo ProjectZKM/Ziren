@@ -1409,15 +1409,29 @@ mod platform {
                     clk: r.clk,
                     addr: r.addr,
                     value: r.value,
+                    // the JIT recorder does not track per-address
+                    // shard/timestamp bookkeeping — the D.4 gap that
+                    // prevents a JIT-produced oracle from driving a
+                    // byte-exact trace. Left 0 here.
+                    shard: 0,
+                    timestamp: 0,
                 })
                 .collect();
 
         crate::minimal_trace::TraceChunk {
             shard_index,
             start_registers,
+            // JIT path carries value-only registers (no shard/timestamp).
+            start_register_records: Vec::new(),
             pc_start,
             clk_start,
             clk_end: ctx.global_clk,
+            current_shard: 0,
+            input_stream_ptr: 0,
+            proof_stream_ptr: 0,
+            public_values_stream_ptr: 0,
+            final_memory: Vec::new(),
+            final_uninit_memory: Vec::new(),
             mem_reads: std::sync::Arc::from(mem_reads),
         }
     }
