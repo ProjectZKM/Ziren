@@ -153,29 +153,31 @@ where
             // re-executing memory state from scratch.
             Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
         )>(opts.checkpoints_channel_capacity);
-        // SP1-parity DEFAULT-ON: the producer collects MinimalTrace chunks
-        // during Checkpoint-mode execution and sends them alongside each
-        // ExecutionState batch; the consumer then drives the parallel
-        // `trace_chunk` fan-out (the chunks' mem_reads oracle) instead of the
-        // sequential `trace_checkpoint` re-execution. SP1's trace-generation
-        // replay is parallel-by-default — Ziren's sequential `trace_checkpoint`
-        // was the regression. Byte-identical to the sequential path (validated
-        // byte-exact across the program surface: crypto precompiles,
-        // multi-shard/multi-batch, and the 2^24 #141 height/clk-split).
-        // Kill-switch: ZIREN_USE_MINIMAL_TRACE=0 restores the legacy path.
+        // D.4 parallel trace-replay consumer — OPT-IN (default OFF). When set,
+        // the producer collects MinimalTrace chunks during Checkpoint-mode
+        // execution and the consumer drives the parallel `trace_chunk` fan-out
+        // (the chunks' mem_reads oracle) instead of the sequential
+        // `trace_checkpoint` re-execution — SP1's parallel replay, ~1.84-2.0x.
+        // Byte-identical to the sequential path (validated byte-exact across
+        // the program surface incl. multi-shard/batch + the 2^24 #141 split).
+        // The JIT checkpoint (below) is the DEFAULT accelerator; the two are
+        // mutually exclusive (the JIT's value-only log can't feed this
+        // consumer — see #143), so enable this with ZIREN_USE_MINIMAL_TRACE=1.
         let use_minimal_trace = std::env::var("ZIREN_USE_MINIMAL_TRACE")
-            .map(|v| v != "0")
-            .unwrap_or(true);
+            .map(|v| v == "1")
+            .unwrap_or(false);
         if use_minimal_trace {
             runtime.minimal_trace_collector =
                 Some(zkm_core_executor::minimal_trace::MinimalTrace::default());
         }
-        // D.4 producer opt-in (default OFF): drive the "checkpoint pass"
-        // on the JIT (fast, single whole-program run) instead of the
-        // interpreter `execute_state` loop (the first of the two slow
-        // interpreter passes). The consumer still reconstructs records
-        // byte-identically via the from-start `trace_checkpoint`, so the
-        // core proof is unchanged. See `minimal_trace::ENV_MINIMAL_TRACE`.
+        // D.4 JIT checkpoint pass — DEFAULT ON (minimal_trace_enabled). Drive
+        // the "checkpoint pass" on the JIT (fast, single whole-program run)
+        // instead of the interpreter `execute_state` loop (the first of the
+        // two slow interpreter passes). The consumer reconstructs records
+        // byte-identically via the from-start `trace_checkpoint`, so the core
+        // proof is unchanged (b26f9b47). Disabled by ZIREN_JIT_MINIMAL_TRACE=0
+        // or when the parallel consumer is opted in (they don't stack).
+        // See `minimal_trace::ENV_MINIMAL_TRACE`.
         let d4_jit_producer =
             zkm_core_executor::minimal_trace::minimal_trace_enabled() && !use_minimal_trace;
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =

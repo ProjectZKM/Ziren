@@ -25,11 +25,10 @@
 //! and `TraceChunk` (`risc.rs:316`) — adapted to MIPS register width and the
 //! Ziren executor's state layout.
 //!
-//! (this file) lands the format only. The JIT-side emit path is
-//! gated behind the `ZIREN_JIT_MINIMAL_TRACE=1` environment variable so
-//! callers can opt in without disturbing the existing JIT fast-path
-//! (`run_fast` / `try_run_fast_jit`). a future revision will add a `TracingVM` that
-//! consumes these traces and produces full `ExecutionRecord`s.
+//! The JIT-side emit path is DEFAULT-ON (`ZIREN_JIT_MINIMAL_TRACE`, opt out
+//! with =0): the D.4 checkpoint pass runs on the JIT
+//! (`run_fast_capture_whole_program_chunk`) and the consumer reconstructs
+//! full `ExecutionRecord`s byte-identically via `trace_checkpoint`.
 //!
 //! Differences from SP1's TraceChunk:
 //! - MIPS has 32 GPRs plus HI / LO / BRK / HEAP (36 slots in
@@ -228,19 +227,17 @@ impl MinimalTrace {
     }
 }
 
-/// Environment variable that opts the JIT runner into emitting a
-/// `MinimalTrace` alongside its normal output. Default off.
-///
-/// While  only ships the format, callers can already test the
-/// plumbing by setting `ZIREN_JIT_MINIMAL_TRACE=1` — the JIT runner will
-/// observe the flag in 's follow-up patch and start populating
-/// `TraceChunk` shells, even before a future revision wires the consumer.
+/// Environment variable gating the JIT MinimalTrace checkpoint pass.
+/// DEFAULT ON (opt out with `ZIREN_JIT_MINIMAL_TRACE=0`): the JIT runner
+/// emits a whole-program `MinimalTrace` chunk that the consumer replays
+/// byte-identically. Mutually exclusive with the parallel trace consumer
+/// (`ZIREN_USE_MINIMAL_TRACE=1`) — they don't stack (#143).
 pub const ENV_MINIMAL_TRACE: &str = "ZIREN_JIT_MINIMAL_TRACE";
 
 /// Is the minimal-trace emit path enabled for this process?
 #[must_use]
 pub fn minimal_trace_enabled() -> bool {
-    std::env::var(ENV_MINIMAL_TRACE).map(|v| v == "1").unwrap_or(false)
+    std::env::var(ENV_MINIMAL_TRACE).map(|v| v != "0").unwrap_or(true)
 }
 
 #[cfg(test)]
