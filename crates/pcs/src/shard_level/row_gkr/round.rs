@@ -961,21 +961,12 @@ where
         chip_pair_counts.push(chip_cells / 2);
         chip_cell_counts.push(chip_cells);
     }
-    // Detect padding chips (real=0) — compute their contribution
-    // analytically on host, skip them from GPU upload + kernel work.
-    // Default-on: skip zero-row padding chips from GPU dispatch (bandwidth savings).
-    // Opt-out via ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE=1 (or legacy =0/false).
-    let skip_padding_enabled = !std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS_DISABLE")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-        && !std::env::var("ZIREN_GPU_SKIP_PADDING_CHIPS")
-            .map(|v| v == "0" || v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false);
-    let is_padding_chip: Vec<bool> = if skip_padding_enabled {
-        (0..n_chips).map(|c| first_layer.numerator_0[c].num_real_rows == 0).collect()
-    } else {
-        vec![false; n_chips]
-    };
+    // Detect padding chips (real=0) — compute their contribution analytically
+    // on host, skip them from GPU upload + kernel work. SP1-static: zero-row
+    // padding chips are always skipped from GPU dispatch (bandwidth savings).
+    // Env gate removed (was ZIREN_GPU_SKIP_PADDING_CHIPS / _DISABLE, default-on).
+    let is_padding_chip: Vec<bool> =
+        (0..n_chips).map(|c| first_layer.numerator_0[c].num_real_rows == 0).collect();
     // Reduce chip_cell_counts to ZERO for padding chips (skip from concat).
     let mut effective_chip_cell_counts = chip_cell_counts.clone();
     for c in 0..n_chips {
@@ -1726,9 +1717,9 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     // when registered + env on + EF == Ef4 production type, route to
     // GPU. Returns [p(0), p(1), p(2), p(3)] same shape as the host
     // fallback (host-only builds have no hook => host path, byte-identical).
-    if std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
-        .map(|v| v != "0")
-        .unwrap_or(true)
+    // SP1-static: chip-structured sumcheck GPU dispatch always attempted
+    // (host-only builds have no hook => byte-identical host path). Env gate
+    // removed (was ZIREN_GPU_CHIP_SUMCHECK, default-on).
     {
         if let Some(gpu_hook) =
             crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_hook()
@@ -2776,21 +2767,13 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         };
         let evals = match &self.state {
             PolynomialLayer::Chip(state) => {
-                // Device-resident: optional device-resident dispatch.
-                // Gated on ZIREN_GPU_CHIP_SUMCHECK=1 (engages the
-                // existing host SP1 hook path) AND
-                // ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE=1 (engages the
-                // device-resident hook). Threads sumcheck_id +
-                // round_idx + alpha_prev so the device hook keeps a
-                // cross-round layer cache and applies the fold kernel
-                // in place. Falls through to host on None.
-                let try_device = std::env::var("ZIREN_GPU_CHIP_SUMCHECK")
-                    .map(|v| v != "0")
-                    .unwrap_or(true)
-                    && std::env::var("ZIREN_GPU_CHIP_SUMCHECK_SP1_DEVICE")
-                        .map(|v| v != "0")
-                        .unwrap_or(true);
-                if try_device {
+                // SP1-static: device-resident chip-sumcheck dispatch always
+                // attempted; threads sumcheck_id + round_idx + alpha_prev so
+                // the device hook keeps a cross-round layer cache and applies
+                // the fold kernel in place. Falls through to host on None.
+                // Env gates removed (were ZIREN_GPU_CHIP_SUMCHECK / _SP1_DEVICE,
+                // default-on).
+                {
                     if let Some(dev_hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_device_hook()
                     {
@@ -2879,9 +2862,9 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 // same concrete type at runtime.  Generic-EF callers
                 // (test code, non-production paths) always take the
                 // host fallback.
-                if std::env::var("ZIREN_GPU_SUMCHECK")
-                    .map(|v| v != "0")
-                    .unwrap_or(true)
+                // SP1-static: packed-round GPU sumcheck dispatch always
+                // attempted (host fallback when no hook / non-Ef4). Env gate
+                // removed (was ZIREN_GPU_SUMCHECK, default-on).
                 {
                     if let Some(gpu_hook) =
                         crate::shard_level::sumcheck_poly::get_gpu_sumcheck_hook()
@@ -3042,9 +3025,8 @@ where
     // the fallback correct.
     //
     // Dims come from the layer STATE — no pull needed to compute them.
-    let env_logup_device_on = std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-        .unwrap_or(true);
+    // SP1-static: LogUp-GKR device dispatch always on (V3 lazy-residency
+    // path). Env gate removed (was ZIREN_GPU_LOGUP_GKR_DEVICE, default-on).
     let dims = (state.num_row_variables(), state.num_interaction_variables());
     let total_vars_state = dims.0 + dims.1;
     let v3_threshold_vars: usize = {
@@ -3059,7 +3041,7 @@ where
     let v3_threshold_ok = !(v3_threshold_vars > 0 && total_vars_state < v3_threshold_vars);
 
     let mut lazy_v3_attempted = false;
-    if env_logup_device_on && v3_threshold_ok {
+    if v3_threshold_ok {
         use core::any::TypeId;
         type Ef4Lazy =
             p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
@@ -3152,9 +3134,8 @@ where
     //     that Ziren doesn't have yet.
     //
     // Opt-OUT with ZIREN_GPU_LOGUP_GKR_DEVICE=0 as kill-switch.
-    if std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE")
-        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-        .unwrap_or(true)
+    // SP1-static: LogUp-GKR device dispatch always on (host trait driver on
+    // decline). Env gate removed (was ZIREN_GPU_LOGUP_GKR_DEVICE, default-on).
     {
         use core::any::TypeId;
         type Ef4 = p3_field::extension::BinomialExtensionField<

@@ -1921,25 +1921,19 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
             let data = self.shrink_prover.commit(&bf_record, traces.clone());
 
-            // Shrink device routing (kill-switch ZIREN_GPU_SHRINK_DEVICE=0):
-            // when the shrink prover keeps the committed main traces
-            // device-resident (StarkGpuProver), hand prove_shard_to_basefold
-            // the same per-shard DeviceTraceProvider snapshot the GPU
-            // compress pipeline uses, and skip the host rehydrate of the
-            // device-only RecursionAir chips below — the interaction-eval
-            // hook + device-fold zerocheck resolve them from the provider
-            // (mirrors ziren-gpu pipeline/prover.rs, the device-resident
-            // zerocheck pattern).
-            // On the CPU prover `shard_device_trace_provider` returns None
-            // and this whole block is a no-op (legacy path, bit-for-bit).
-            let shrink_device_enabled = std::env::var("ZIREN_GPU_SHRINK_DEVICE")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
-            let device_provider = if shrink_device_enabled {
-                self.shrink_prover.shard_device_trace_provider(&data)
-            } else {
-                None
-            };
+            // Shrink device-resident routing: when the shrink prover keeps the
+            // committed main traces device-resident (StarkGpuProver), hand
+            // prove_shard_to_basefold the same per-shard DeviceTraceProvider
+            // snapshot the GPU compress pipeline uses, and skip the host
+            // rehydrate of the device-only RecursionAir chips below — the
+            // interaction-eval hook + device-fold zerocheck resolve them from
+            // the provider (mirrors ziren-gpu pipeline/prover.rs, the
+            // device-resident zerocheck pattern).
+            // SP1-static: always on — on the CPU prover
+            // `shard_device_trace_provider` returns None and this whole block
+            // is a no-op (legacy path, bit-for-bit). Env gate removed
+            // (was ZIREN_GPU_SHRINK_DEVICE, default-on).
+            let device_provider = self.shrink_prover.shard_device_trace_provider(&data);
             // Pin this thread's GPU-pool TLS to the provider's device so
             // the device-keyed dispatch hooks in try_run_device_path see a
             // worker context, exactly like the pipeline dispatch does before
