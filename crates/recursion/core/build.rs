@@ -152,6 +152,7 @@ mod sys {
             .include_item("Poseidon2PreprocessedColsSkinny")
             .include_item("Poseidon2PreprocessedColsWide")
             .include_item("MemoryAccessColsChips")
+            .exclude_item("GLOBAL_CPU_BACKEND")
             .with_namespace("zkm_recursion_core_sys")
             .with_crate(crate_dir)
             .generate()
