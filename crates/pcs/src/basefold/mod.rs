@@ -14,7 +14,7 @@
 //!   * `stacked` — interleaves heterogeneous batches into stripes of
 //!     fixed `log_stacking_height`, then commits via this protocol.
 //!   * `jagged_pcs` — jagged jagged-PCS adapter
-//!     (replaces `whir_late_binding.rs`).
+//!     (the BaseFold replacement for the removed WHIR late-binding commit).
 //!
 //! Per-round protocol shape (much simpler than WHIR):
 //!   * one univariate sumcheck poly (degree-1, two coefficients)

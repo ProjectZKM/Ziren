@@ -311,7 +311,7 @@ mod basefold_over_bn254_generic_typecheck {
     use zkm_pcs::jagged_pcs::{
         commit_jagged_pcs_host_generic, commit_jagged_pcs_no_observe_generic,
         open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
-        BasefoldLateBindingCommitGeneric, BasefoldLateBindingProverDataGeneric,
+        JaggedCommitGeneric, JaggedProverDataGeneric,
         JaggedChallenge, JaggedMmcs, JaggedVal,
     };
     use p3_matrix::dense::RowMajorMatrix;
@@ -329,8 +329,8 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> (
-        BasefoldLateBindingCommitGeneric<OuterValMmcs>,
-        BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+        JaggedCommitGeneric<OuterValMmcs>,
+        JaggedProverDataGeneric<OuterValMmcs>,
     ) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
@@ -345,8 +345,8 @@ mod basefold_over_bn254_generic_typecheck {
         mmcs: OuterValMmcs,
         dft: Arc<OuterDft>,
     ) -> (
-        BasefoldLateBindingCommitGeneric<OuterValMmcs>,
-        BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+        JaggedCommitGeneric<OuterValMmcs>,
+        JaggedProverDataGeneric<OuterValMmcs>,
     ) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
@@ -356,7 +356,7 @@ mod basefold_over_bn254_generic_typecheck {
 
     // open over the BN254 MMCS.
     fn _open(
-        pd: BasefoldLateBindingProverDataGeneric<OuterValMmcs>,
+        pd: JaggedProverDataGeneric<OuterValMmcs>,
         eval_point: std::vec::Vec<JaggedChallenge>,
         ch: &mut OuterChallenger,
         mmcs: OuterValMmcs,
@@ -451,7 +451,7 @@ pub mod outer_jagged_hooks {
             // wrap commit is opt-in via the wrap prover under ZIREN_GPU_WRAP_DEVICE).
             None,
         );
-        bincode::serialize(&pre.commit.commitment)
+        bincode::serialize(&pre.commit.original_commitment)
             .expect("outer_prep_commit: serialize commitment")
     }
 }
@@ -556,7 +556,7 @@ mod basefold_over_bn254_roundtrip_test {
             fri.clone(),
             None,
         );
-        let commitment = precompute.commit.commitment.clone();
+        let commitment = precompute.commit.original_commitment.clone();
 
         let mut p_chal = make_challenger();
         p_chal.observe(commitment.clone());

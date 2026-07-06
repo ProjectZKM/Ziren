@@ -1,18 +1,10 @@
 //! PCS-agnostic jagged sumcheck reduction.
 //!
-//! Extracted from [`crate::jagged_late_binding`] for E1 (drop p3-whir).
-//! The math here is field-typed via `InnerVal`/`InnerChallenge` from
-//! [`crate::kb31_poseidon2`] — those aliases are identical to the
-//! `WhirVal`/`WhirChallenge` aliases in `whir_config.rs`, so swapping
-//! between them is a no-op at the type level.  This module exists so
-//! the BaseFold path can call the reduction without depending on the
-//! `whir` feature.
-//!
-//! Source-of-truth for the algorithm lives at
-//! [`crate::jagged_late_binding::prove_jagged_reduction`] (kept for
-//! the WHIR path until E1 fully removes that module).  Any change
-//! here must mirror the WHIR copy and vice versa until the WHIR copy
-//! is deleted.
+//! Originally extracted from the (now-removed) WHIR jagged late-binding
+//! prover for E1 (drop p3-whir).  The math here is field-typed via
+//! `InnerVal`/`InnerChallenge` from [`crate::kb31_poseidon2`].  This module
+//! exists so the BaseFold path can call the reduction without depending on
+//! the `whir` feature.
 
 
 use alloc::string::String;

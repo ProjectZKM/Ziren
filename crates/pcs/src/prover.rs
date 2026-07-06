@@ -1155,7 +1155,7 @@ where
     // [JaggedVal;8] as [Val<SC>;8] (JaggedVal == Val<SC> == KoalaBear for both
     // rings — the only reinterpretation left).
     let digest_jv_raw: [crate::jagged_pcs::JaggedVal; 8] =
-        <SC as BasefoldRing>::digest_felts(&precomputed.commit.commitment);
+        <SC as BasefoldRing>::digest_felts(&precomputed.commit.original_commitment);
 
     // ── SP1-faithful jagged HASH-BIND — THE FS-observed digest ─────
     // This `digest` is what the transcript prologue observes as

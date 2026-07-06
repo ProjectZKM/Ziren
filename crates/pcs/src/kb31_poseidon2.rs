@@ -583,7 +583,7 @@ pub mod koala_bear_poseidon2 {
             fri,
             None,
         );
-        bincode::serialize(&pre.commit.commitment)
+        bincode::serialize(&pre.commit.original_commitment)
             .expect("inner_prep_commit: serialize commitment")
     }
 

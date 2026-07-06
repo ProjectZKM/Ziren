@@ -320,7 +320,7 @@ where
         // wired one level up at `jagged_pcs::open_jagged_pcs`
         // (statically-provided `GpuBasefoldOpenFn`) — the
         // sister hook intercepts at the jagged-PCS entry so it can
-        // see the full `BasefoldLateBindingProverData` (including the
+        // see the full `JaggedProverData` (including the
         // commit-time metadata it needs to drive the device prove).
         // No dispatch logic at this `stacked.rs` site; this comment
         // stays as a navigation marker.

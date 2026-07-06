@@ -438,7 +438,7 @@ pub fn dummy_jagged_basefold_bundle(
     use zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof;
     use zkm_pcs::jagged_pcs::jagged::{JaggedBasefoldBundle, PackingMeta};
     use zkm_pcs::jagged_pcs::{
-        lb_fri_config, pick_log_stacking_height, BasefoldLateBindingCommit, JaggedMmcs,
+        lb_fri_config, pick_log_stacking_height, JaggedCommit, JaggedMmcs,
     };
     use zkm_pcs::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
     use zkm_pcs::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
@@ -652,8 +652,8 @@ pub fn dummy_jagged_basefold_bundle(
         // y_per_chip / commit.chip_dims / commit.area are NOT read by the inner
         // lift or the witness stream, so leave them empty/zero.
         y_per_chip: Vec::new(),
-        commit: BasefoldLateBindingCommit {
-            commitment: zero_cap(),
+        commit: JaggedCommit {
+            original_commitment: zero_cap(),
             // The late-binding commit is over the DENSE stacked poly as a
             // single column: chip_dims = [(width=1, log_h=log_dense_size)] (NOT
             // the per-chip dims).  The lift derives row_counts from this single

@@ -115,7 +115,7 @@ where
             // (HV::DigestVariable == [Felt;8]); a degenerate / empty-cap bundle
             // yields all-zero (re-bind skipped on empty rounds).
             use p3_field::PrimeCharacteristicRing;
-            let cap_roots = bundle.commit.commitment.roots();
+            let cap_roots = bundle.commit.original_commitment.roots();
             let mc: [Felt<C::F>; 8] = if cap_roots.is_empty() {
                 core::array::from_fn(|_| builder.constant(C::F::ZERO))
             } else {

@@ -1,7 +1,7 @@
 //! Per-chip BaseFold jagged-PCS adapter.
 //!
-//! Replaces [`crate::whir_late_binding`] / [`crate::jagged_late_binding`]
-//! for the OOM-blocker chip-trace commit step.  The structural win:
+//! The BaseFold replacement for the (now-removed) WHIR late-binding
+//! commit for the OOM-blocker chip-trace commit step.  The structural win:
 //! each chip trace becomes one MLE that goes through
 //! [`crate::basefold::StackedPcsProver`], so the BaseFold encoder
 //! materializes one stripe at a time (`1 << log_stacking_height`
@@ -43,7 +43,7 @@ pub type JaggedChallenger = InnerChallenger;
 /// the inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254)
 /// commit paths share one struct.  `Val`/`Challenge` stay KoalaBear /
 /// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear,KoalaBear⁴>`); only
-/// the commitment hash varies.  The concrete [`BasefoldLateBindingCommit`]
+/// the commitment hash varies.  The concrete [`JaggedCommit`]
 /// alias below pins `MT = JaggedMmcs` so every existing caller (incl.
 /// serde wire-format + the ziren-gpu hooks) compiles unchanged.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -51,8 +51,12 @@ pub type JaggedChallenger = InnerChallenger;
     serialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Serialize",
     deserialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Deserialize<'de>"
 ))]
-pub struct BasefoldLateBindingCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
-    pub commitment: <MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
+pub struct JaggedCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+    /// SP1 names this `original_commitment`. The `#[serde(rename = "commitment")]`
+    /// pins the *serialized* field name to the historical `commitment` so the
+    /// (positional) proof wire format is byte-identical across the rename.
+    #[serde(rename = "commitment")]
+    pub original_commitment: <MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
     /// Per-chip `(width, log_height_padded)` so the verifier can
     /// reconstruct the same Mle shapes when checking openings.
     pub chip_dims: Vec<(usize, u32)>,
@@ -67,9 +71,9 @@ pub struct BasefoldLateBindingCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
 /// Concrete inner (Poseidon2-KoalaBear) commit — the type every current
 /// caller uses.  Transparent alias to the generic struct so struct
 /// literals / field access compile unchanged.
-pub type BasefoldLateBindingCommit = BasefoldLateBindingCommitGeneric<JaggedMmcs>;
+pub type JaggedCommit = JaggedCommitGeneric<JaggedMmcs>;
 
-pub struct BasefoldLateBindingProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
+pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
     pub stacked_data: StackedBasefoldProverData<JaggedVal, MT>,
     pub chip_dims: Vec<(usize, u32)>,
     pub area: usize,
@@ -77,7 +81,7 @@ pub struct BasefoldLateBindingProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> 
 }
 
 /// Concrete inner prover-data alias (`MT = JaggedMmcs`).
-pub type BasefoldLateBindingProverData = BasefoldLateBindingProverDataGeneric<JaggedMmcs>;
+pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 
 /// Defaults chosen to match the perf-results sweet spot:
 /// `log_stacking_height=14` → 16K rows per stripe, well below the
@@ -291,7 +295,7 @@ pub fn commit_jagged_pcs(
     // = host commit (CPU prover / free-fn callers), byte-identical to the
     // pre-#118 unregistered-hook path.
     gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
-) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+) -> (JaggedCommit, JaggedProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = gpu_basefold_commit {
             // The hook signature returns `Result` so the device side
@@ -325,7 +329,7 @@ pub fn commit_jagged_pcs(
 pub fn commit_jagged_pcs_host(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
-) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+) -> (JaggedCommit, JaggedProverData) {
     let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
     let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
@@ -355,8 +359,8 @@ pub fn commit_jagged_pcs_host_generic<Challenger, MT, D>(
     dft: Arc<D>,
     fri: FriConfig<JaggedVal>,
 ) -> (
-    BasefoldLateBindingCommitGeneric<MT>,
-    BasefoldLateBindingProverDataGeneric<MT>,
+    JaggedCommitGeneric<MT>,
+    JaggedProverDataGeneric<MT>,
 )
 where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -365,7 +369,7 @@ where
 {
     let (commit, prover_data) =
         commit_jagged_pcs_no_observe_generic::<MT, D>(chip_traces, mmcs, dft, fri);
-    challenger.observe(commit.commitment.clone());
+    challenger.observe(commit.original_commitment.clone());
     (commit, prover_data)
 }
 
@@ -383,7 +387,7 @@ pub fn commit_jagged_pcs_no_observe(
     // prover (was the global `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  `None`
     // = host commit, byte-identical to the pre-#118 unregistered-hook path.
     gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
-) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+) -> (JaggedCommit, JaggedProverData) {
     if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
         if let Some(hook) = gpu_basefold_commit {
             let mut throwaway: JaggedChallenger =
@@ -409,13 +413,13 @@ pub fn commit_jagged_pcs_no_observe(
 /// observing again here would desync the prover transcript vs the
 /// verifier.
 ///
-/// Callers MUST observe `commit.commitment` separately into the
+/// Callers MUST observe `commit.original_commitment` separately into the
 /// challenger at the same transcript position as the verifier.  The
 /// verifier counterpart is
 /// [`jagged::verify_jagged_basefold_no_observe`].
 pub fn commit_jagged_pcs_host_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-) -> (BasefoldLateBindingCommit, BasefoldLateBindingProverData) {
+) -> (JaggedCommit, JaggedProverData) {
     let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
     let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
@@ -442,8 +446,8 @@ pub fn commit_jagged_pcs_no_observe_generic<MT, D>(
     dft: Arc<D>,
     fri: FriConfig<JaggedVal>,
 ) -> (
-    BasefoldLateBindingCommitGeneric<MT>,
-    BasefoldLateBindingProverDataGeneric<MT>,
+    JaggedCommitGeneric<MT>,
+    JaggedProverDataGeneric<MT>,
 )
 where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
@@ -457,13 +461,13 @@ where
     let (prover, _verifier) = build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft, fri);
     let (commitment, stacked_data) = prover.commit_multilinears(mles);
 
-    let commit = BasefoldLateBindingCommitGeneric::<MT> {
-        commitment: commitment.clone(),
+    let commit = JaggedCommitGeneric::<MT> {
+        original_commitment: commitment.clone(),
         chip_dims: chip_dims.clone(),
         area,
         log_stacking_height,
     };
-    let prover_data = BasefoldLateBindingProverDataGeneric::<MT> {
+    let prover_data = JaggedProverDataGeneric::<MT> {
         stacked_data,
         chip_dims,
         area,
@@ -472,7 +476,7 @@ where
     (commit, prover_data)
 }
 
-/// Extract the 8-felt MMCS digest from a [`BasefoldLateBindingCommit`].
+/// Extract the 8-felt MMCS digest from a [`JaggedCommit`].
 /// The digest is the value the verifier's Phase 1 prologue observes as
 /// `main_commitment` in the single-main-commit flow.
 ///
@@ -487,15 +491,15 @@ pub fn basefold_commit_digest_felts(
     commitment: &<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment,
 ) -> [JaggedVal; 8] {
     let roots = commitment.roots();
-    assert!(!roots.is_empty(), "BasefoldLateBindingCommit MerkleCap must have at least one root");
+    assert!(!roots.is_empty(), "JaggedCommit MerkleCap must have at least one root");
     roots[0]
 }
 
-pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal; 8] {
-    let roots = commit.commitment.roots();
+pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
+    let roots = commit.original_commitment.roots();
     assert!(
         !roots.is_empty(),
-        "BasefoldLateBindingCommit MerkleCap must have at least one root",
+        "JaggedCommit MerkleCap must have at least one root",
     );
     roots[0]
 }
@@ -505,12 +509,12 @@ pub fn basefold_commit_digest(commit: &BasefoldLateBindingCommit) -> [JaggedVal;
 /// (OuterSC) carries the BN254 `MT::Commitment` directly via this generic
 /// accessor -- the seam the digest tunnel observes / serializes.
 pub fn basefold_commit_digest_generic<MT: p3_commit::Mmcs<JaggedVal>>(
-    commit: &BasefoldLateBindingCommitGeneric<MT>,
+    commit: &JaggedCommitGeneric<MT>,
 ) -> <MT as p3_commit::Mmcs<JaggedVal>>::Commitment
 where
     <MT as p3_commit::Mmcs<JaggedVal>>::Commitment: Clone,
 {
-    commit.commitment.clone()
+    commit.original_commitment.clone()
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -718,7 +722,7 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 //   * observing the resulting commitment into the supplied
 //     `JaggedChallenger` (so the transcript stays in lock-step with the
 //     host path),
-//   * assembling a `BasefoldLateBindingProverData` whose
+//   * assembling a `JaggedProverData` whose
 //     `stacked_data.pcs_batch_data.prover_data` is shape-compatible
 //     with the host `MerkleTreeMmcs::ProverData` consumed downstream by
 //     `open_jagged_pcs`.  Because that prover-data shape compatibility
@@ -741,7 +745,7 @@ pub type GpuBasefoldCommitFn = fn(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
 ) -> Result<
-    (BasefoldLateBindingCommit, BasefoldLateBindingProverData),
+    (JaggedCommit, JaggedProverData),
     Vec<(String, RowMajorMatrix<JaggedVal>)>,
 >;
 
@@ -1235,7 +1239,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// unsupported / device error — `Err` returns ownership of the
 /// `prover_data` so the host fallback can run without losing it).
 pub fn open_jagged_pcs(
-    prover_data: BasefoldLateBindingProverData,
+    prover_data: JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
     // #118: the device BaseFold open fn, provided statically by the
@@ -1283,7 +1287,7 @@ pub fn open_jagged_pcs(
 /// dispatch loop.  Always runs the CPU StackedPcsProver
 /// `prove_trusted_evaluation` body.
 pub fn open_jagged_pcs_host(
-    prover_data: BasefoldLateBindingProverData,
+    prover_data: JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
@@ -1311,7 +1315,7 @@ pub fn open_jagged_pcs_host(
 /// KoalaBear⁴ for both (the eval-point is over `JaggedChallenge`).
 #[allow(clippy::type_complexity)]
 pub fn open_jagged_pcs_host_generic<Challenger, MT, D>(
-    prover_data: BasefoldLateBindingProverDataGeneric<MT>,
+    prover_data: JaggedProverDataGeneric<MT>,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut Challenger,
     mmcs: MT,
@@ -1365,12 +1369,12 @@ where
 /// error returns the original `(prover_data, eval_point)` so the host
 /// fallback can run without losing ownership.
 pub type GpuBasefoldOpenFn = fn(
-    prover_data: BasefoldLateBindingProverData,
+    prover_data: JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
 ) -> Result<
     StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
-    (BasefoldLateBindingProverData, Vec<JaggedChallenge>),
+    (JaggedProverData, Vec<JaggedChallenge>),
 >;
 
 // #118: the GPU BaseFold open fn is provided STATICALLY (threaded from
@@ -1526,9 +1530,9 @@ where
     );
 
     let mut v_chal = make_challenger();
-    v_chal.observe(commit.commitment.clone());
+    v_chal.observe(commit.original_commitment.clone());
     verify_jagged_pcs_generic::<Challenger, MT, D>(
-        &commit.commitment,
+        &commit.original_commitment,
         commit.area,
         commit.log_stacking_height,
         &eval_point,
@@ -1543,7 +1547,7 @@ where
 
 // ─── Jagged-sumcheck integration ──────────
 //
-// Mirrors [`crate::jagged_late_binding::prove_jagged_late_binding`] but
+// Mirrors the (now-removed) WHIR jagged late-binding prover but
 // commits via BaseFold instead of WHIR.  The dense polynomial is still
 // materialized for the sumcheck reduction (the OOM win is in the
 // commit phase: BaseFold streams stripes through dft_batch instead of
@@ -1568,7 +1572,7 @@ pub mod jagged {
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
     use super::{
-        BasefoldLateBindingCommit,
+        JaggedCommit,
         FriConfig,
         commit_jagged_pcs, open_jagged_pcs,
         verify_jagged_pcs,
@@ -1635,7 +1639,7 @@ pub mod jagged {
     // BaseFold-over-BN254: generic over the Mmcs so the wrap (OuterSC)
     // bundle holds the BN254 commitment + proof; inner alias below keeps every
     // caller + the rmp wire-format unchanged. serde(bound) mirrors the
-    // BasefoldLateBindingCommitGeneric pattern (commitment + proof must serde).
+    // JaggedCommitGeneric pattern (commitment + proof must serde).
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
     #[serde(bound(
         serialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Serialize, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Serialize",
@@ -1667,7 +1671,7 @@ pub mod jagged {
         /// across all groups.
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
         /// Group-0 BaseFold commit.
-        pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
+        pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
         /// Group-0 packing metadata (group-LOCAL offsets / prefix-sums).
         pub packing: PackingMeta,
         /// Group-0 jagged-eval sub-protocol proof.
@@ -1687,7 +1691,7 @@ pub mod jagged {
         pub extra_basefold_proof: Vec<StackedBasefoldProof<InnerVal, InnerChallenge, MT>>,
         /// BaseFold commits for groups 1..G.
         #[serde(default)]
-        pub extra_commit: Vec<crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>>,
+        pub extra_commit: Vec<crate::jagged_pcs::JaggedCommitGeneric<MT>>,
         /// Packing metadata for groups 1..G.
         #[serde(default)]
         pub extra_packing: Vec<PackingMeta>,
@@ -1729,7 +1733,7 @@ pub mod jagged {
         pub fn commit_g(
             &self,
             g: usize,
-        ) -> &crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT> {
+        ) -> &crate::jagged_pcs::JaggedCommitGeneric<MT> {
             if g == 0 { &self.commit } else { &self.extra_commit[g - 1] }
         }
         /// Packing metadata for group `g`.
@@ -1785,13 +1789,13 @@ pub mod jagged {
     /// Phase 1 prologue, then consumed by
     /// [`prove_jagged_basefold_with_precomputed`] in Phase 4.
     ///
-    /// The 8-felt digest of `commit.commitment` (via
+    /// The 8-felt digest of `commit.original_commitment` (via
     /// [`crate::jagged_pcs::basefold_commit_digest`]) is the
     /// `main_commitment` that the prologue + verifier observe.
     pub struct PrecomputedJaggedCommitGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
-        pub commit: crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
-        pub prover_data: crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
+        pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
+        pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
         /// Single shard-wide commit buffer: opaque handle to the
         /// device-resident dense polynomial the commit was built from,
         /// registered in ziren-gpu's `dense_q_device_registry`.  When
@@ -1887,8 +1891,8 @@ pub mod jagged {
     /// matches it against `TypeId::of::<OuterValMmcs>()`.  On a match it
     /// builds the device BN254 Merkle commit over the supplied dense traces
     /// and returns a boxed
-    /// `(BasefoldLateBindingCommitGeneric<OuterValMmcs>,
-    ///   BasefoldLateBindingProverDataGeneric<OuterValMmcs>)`.
+    /// `(JaggedCommitGeneric<OuterValMmcs>,
+    ///   JaggedProverDataGeneric<OuterValMmcs>)`.
     pub type GpuBn254CommitFn = fn(
         mt_type_id: core::any::TypeId,
         dense_traces: &[(alloc::string::String, RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
@@ -1909,7 +1913,7 @@ pub mod jagged {
     /// [`prove_jagged_basefold_with_precomputed`] to skip the in-band
     /// commit and run steps (3)+(4)+(5) against an aligned transcript.
     ///
-    /// Caller MUST surface `commit.commitment` (or its 8-felt digest)
+    /// Caller MUST surface `commit.original_commitment` (or its 8-felt digest)
     /// to the verifier (via the shard-level proof's
     /// `main_commitment` field) at the same transcript position the
     /// verifier observes it.
@@ -2062,7 +2066,7 @@ pub mod jagged {
     where
         // `'static` bounds (Commitment + ProverData) are required by the
         // device BN254 commit hook's `Box<dyn Any>` downcast back to
-        // `BasefoldLateBindingCommitGeneric<MT>`.  Both rings (JaggedMmcs /
+        // `JaggedCommitGeneric<MT>`.  Both rings (JaggedMmcs /
         // OuterValMmcs) are concrete `'static` types, so this is a no-op
         // tightening for every existing caller.
         MT: p3_commit::Mmcs<
@@ -2110,8 +2114,8 @@ pub mod jagged {
                     hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
                         boxed
                             .downcast::<(
-                                crate::jagged_pcs::BasefoldLateBindingCommitGeneric<MT>,
-                                crate::jagged_pcs::BasefoldLateBindingProverDataGeneric<MT>,
+                                crate::jagged_pcs::JaggedCommitGeneric<MT>,
+                                crate::jagged_pcs::JaggedProverDataGeneric<MT>,
                             )>()
                             .ok()
                             .map(|b| *b)
@@ -2158,7 +2162,7 @@ pub mod jagged {
 
     /// Single-main-commit variant: run steps (3)+(4)+(5)
     /// using a `precompute_jagged_basefold_commit` result.  Does NOT
-    /// observe `precomputed.commit.commitment` into the challenger —
+    /// observe `precomputed.commit.original_commitment` into the challenger —
     /// the orchestrator/Phase 1 prologue already observed the 8-felt
     /// digest as `main_commitment`, and the verifier counterpart
     /// [`verify_jagged_basefold_no_observe`] also skips the in-band
@@ -2443,7 +2447,7 @@ pub mod jagged {
         // BaseFold-stacked.  When `precomputed` is `Some`, both steps
         // were run up-front by the orchestrator's single-main-commit
         // path, which has already observed the 8-felt
-        // digest of `commit.commitment` as `main_commitment` in the
+        // digest of `commit.original_commitment` as `main_commitment` in the
         // shard-level Phase 1 prologue.  Skip the in-band commit
         // observe in that case to keep transcripts aligned with the
         // verifier (which uses `verify_jagged_basefold_no_observe`).
@@ -3106,9 +3110,9 @@ pub mod jagged {
 
         // STEP 1 (transcript): commit every group, observing ALL G commits
         // up-front in partition order BEFORE any z_col is sampled.
-        let mut group_commits: Vec<crate::jagged_pcs::BasefoldLateBindingCommit> =
+        let mut group_commits: Vec<crate::jagged_pcs::JaggedCommit> =
             Vec::with_capacity(g_count);
-        let mut group_prover_data: Vec<crate::jagged_pcs::BasefoldLateBindingProverData> =
+        let mut group_prover_data: Vec<crate::jagged_pcs::JaggedProverData> =
             Vec::with_capacity(g_count);
         for (g, traces_g) in group_traces.iter().enumerate() {
             let dense_q =
@@ -3529,7 +3533,7 @@ pub mod jagged {
         // current Option B path; multi-commit Option B is CP-B/CP-C.)
         if !skip_commit_observe {
             for g in 0..g_count {
-                challenger.observe(bundle.commit_g(g).commitment.clone());
+                challenger.observe(bundle.commit_g(g).original_commitment.clone());
             }
         }
 
@@ -3594,7 +3598,7 @@ pub mod jagged {
         opened_main: Option<&[Vec<InnerChallenge>]>,
         reduction: &crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge>,
         jagged_eval: &crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
-        commit: &crate::jagged_pcs::BasefoldLateBindingCommit,
+        commit: &crate::jagged_pcs::JaggedCommit,
         basefold_proof: &crate::basefold::StackedBasefoldProof<InnerVal, InnerChallenge, crate::jagged_pcs::JaggedMmcs>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         g: usize,
@@ -3746,7 +3750,7 @@ pub mod jagged {
         // Verify the BaseFold opening: claim is q_at_z (sub-stripe adjusted),
         // point is the extended z*.
         let res = verify_jagged_pcs(
-            &commit.commitment,
+            &commit.original_commitment,
             commit.area,
             commit.log_stacking_height,
             &extended_z_star,
@@ -3852,7 +3856,7 @@ pub mod jagged {
             "wrap verify expects a single-round (G==1) bundle",
         );
         if !skip_commit_observe {
-            challenger.observe(bundle.commit.commitment.clone());
+            challenger.observe(bundle.commit.original_commitment.clone());
         }
         let packing = JaggedPacking {
             dense_values: Vec::new(),
@@ -3905,7 +3909,7 @@ pub mod jagged {
             }
         }
         let res = crate::jagged_pcs::verify_jagged_pcs_generic::<Challenger, MT, D>(
-            &bundle.commit.commitment,
+            &bundle.commit.original_commitment,
             bundle.commit.area,
             bundle.commit.log_stacking_height,
             &extended_z_star,
@@ -4114,9 +4118,9 @@ mod test {
         let proof = open_jagged_pcs(prover_data, eval_point.clone(), &mut p_chal, None);
 
         let mut v_chal = build_challenger();
-        v_chal.observe(commit.commitment.clone());
+        v_chal.observe(commit.original_commitment.clone());
         verify_jagged_pcs(
-            &commit.commitment,
+            &commit.original_commitment,
             commit.area,
             commit.log_stacking_height,
             &eval_point,

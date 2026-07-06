@@ -1077,7 +1077,7 @@ where
     );
     let expected_eval = bundle.reduction.q_at_z.read(builder);
     // BN254 commit cap root (original_commitments[0]).
-    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.original_commitment);
     let commit_root: [zkm_recursion_compiler::ir::Var<C::N>; 1] =
         core::array::from_fn(|i| first_root[i].read(builder));
 
@@ -1129,7 +1129,7 @@ where
         witness,
     );
     bundle.reduction.q_at_z.write(witness);
-    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.commitment);
+    let first_root: OuterDigestRaw = outer_cap_root(&bundle.commit.original_commitment);
     for v in first_root.iter() {
         v.write(witness);
     }
@@ -1140,12 +1140,12 @@ where
 /// bundle into the in-circuit `JaggedPcsProofVariable`.
 ///
 /// Structural mirror of [`lift_jagged_basefold_bundle`] but:
-///   * `original_commitments[0]` ← the REAL BN254 `bundle.commit.commitment`
+///   * `original_commitments[0]` ← the REAL BN254 `bundle.commit.original_commitment`
 ///     1-cap root, lifted to `[Var<Bn254>; 1]` via
 ///     `KoalaBearPoseidon2Outer::const_digest`.  This is the digest the
 ///     in-circuit `RecursiveBasefoldVerifier::verify_untrusted_evaluations`
 ///     step (1) observes, matching the host's
-///     `challenger.observe(bundle.commit.commitment)`.
+///     `challenger.observe(bundle.commit.original_commitment)`.
 ///   * the inner BaseFold proof's per-round `commitment` + per-query
 ///     `merkle_path_digests` carry the real BN254 digests (read via
 ///     `host_stacked_basefold_to_recursive_outer`), so the commit-phase
@@ -1460,7 +1460,7 @@ where
         // Bytes-path: const-build the MODIFIED (hash-bound) digest from the
         // bundle's raw root + packing (mirror of jagged_pcs_lift bytes path).
         use p3_field::PrimeCharacteristicRing;
-        let cap_roots = bundle.commit.commitment.roots();
+        let cap_roots = bundle.commit.original_commitment.roots();
         let mc: [Felt<C::F>; 8] = if cap_roots.is_empty() {
             core::array::from_fn(|_| builder.constant(C::F::ZERO))
         } else {
@@ -1579,7 +1579,7 @@ fn write_sumcheck_to_stream<C>(
 ///   `bundle.basefold_proof.batch_evaluations`.
 /// * `pcs_proof.pcs_proof` ← [`host_stacked_basefold_to_recursive`] on
 ///   `bundle.basefold_proof` (rounds, openings, scalar fields).
-/// * `original_commitments[0]` ← `bundle.commit.commitment` 1-cap root
+/// * `original_commitments[0]` ← `bundle.commit.original_commitment` 1-cap root
 ///   (witnessed as `[Felt<F>; 8]`).
 /// * `column_counts` ← caller-supplied `column_counts_by_round` (verbatim).
 ///
@@ -1836,7 +1836,7 @@ where
     let ee = builder.constant(bundle.reduction.q_at_z);
     // const-build the commit cap root ([Felt;8]) for the bytes-fallback
     // path (this legacy path bakes; the production inline path witnesses it).
-    let cap_roots = bundle.commit.commitment.roots();
+    let cap_roots = bundle.commit.original_commitment.roots();
     let cr: [Felt<C::F>; 8] = if cap_roots.is_empty() {
         core::array::from_fn(|_| builder.constant(C::F::ZERO))
     } else {
@@ -1951,7 +1951,7 @@ where
     // ── REAL: original_commitments[0] = the witnessed commit cap root ──
     // original_commitments[0] is the BaseFold commit cap
     // root.  For the single-main-commit flow it EQUALS `main_commitment`
-    // (basefold_commit_digest(commit) = commit.commitment.roots()[0]), which
+    // (basefold_commit_digest(commit) = commit.original_commitment.roots()[0]), which
     // is already witnessed in BasefoldShardProof::read.  Reuse that witnessed
     // value (`preread_commit_root`) instead of BAKING the proof-specific root
     // via const_digest — this is the final value-dependence in the lift, and
@@ -2714,7 +2714,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
         use zkm_pcs::jagged_pcs::jagged::PackingMeta;
-        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::JaggedCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2739,8 +2739,8 @@ mod tests {
                 batch_evaluations: vec![],
             },
             y_per_chip: vec![],
-            commit: BasefoldLateBindingCommit {
-                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+            commit: JaggedCommit {
+                original_commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
                 chip_dims: vec![],
                 area: 0,
                 log_stacking_height: 0,
@@ -2778,7 +2778,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
         use zkm_pcs::jagged_pcs::jagged::PackingMeta;
-        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::JaggedCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2803,8 +2803,8 @@ mod tests {
                 batch_evaluations: vec![],
             },
             y_per_chip: vec![],
-            commit: BasefoldLateBindingCommit {
-                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+            commit: JaggedCommit {
+                original_commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
                 chip_dims: vec![],
                 area: 0,
                 log_stacking_height: 0,
@@ -2849,7 +2849,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
         use zkm_pcs::jagged_pcs::jagged::PackingMeta;
-        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::JaggedCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let cap_digest: [InnerVal; 8] = [InnerVal::ZERO; 8];
@@ -2872,8 +2872,8 @@ mod tests {
                 batch_evaluations: vec![],
             },
             y_per_chip: vec![],
-            commit: BasefoldLateBindingCommit {
-                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+            commit: JaggedCommit {
+                original_commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
                 // 3 single-column chips, each padded height 16 = 2^4.
                 chip_dims: vec![(1, 4), (1, 4), (1, 4)],
                 area: 0,
@@ -2962,7 +2962,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         use p3_symmetric::MerkleCap;
         use zkm_pcs::jagged_pcs::jagged::PackingMeta;
-        use zkm_pcs::jagged_pcs::BasefoldLateBindingCommit;
+        use zkm_pcs::jagged_pcs::JaggedCommit;
 
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         // Minimal-but-valid bundle: one reduction round, empty
@@ -2989,8 +2989,8 @@ mod tests {
                 batch_evaluations: vec![],
             },
             y_per_chip: vec![],
-            commit: BasefoldLateBindingCommit {
-                commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
+            commit: JaggedCommit {
+                original_commitment: MerkleCap::<InnerVal, [InnerVal; 8]>::new(vec![cap_digest]),
                 chip_dims: vec![],
                 area: 0,
                 log_stacking_height: 0,
