@@ -60,4 +60,15 @@ fn main() {
         .unwrap_or_else(|_| "/tmp/core_proof.bin".to_string());
     std::fs::write(&out, &bytes).expect("write core proof bytes");
     eprintln!("[BASE] wrote core proof bytes to {out}");
+
+    // #157 SP1-parity VK-only verify: persist the SMALL StarkVerifyingKey next
+    // to the dumped core proof so a standalone verifier can LOAD it and call
+    // `machine.verify(&vk, &proof)` directly — never re-running `setup()` (whose
+    // dense preprocessed coset-LDE is the ~659GB OOM). SP1's
+    // `MachineVerifier::verify(vk, proof)` takes only this tiny struct.
+    if let Ok(vk_out) = std::env::var("ZIREN_CORE_VK_OUT") {
+        let vk_bytes = bincode::serialize(&vk).expect("serialize vk");
+        std::fs::write(&vk_out, &vk_bytes).expect("write vk bytes");
+        eprintln!("[BASE] wrote vk bytes = {} to {vk_out}", vk_bytes.len());
+    }
 }
