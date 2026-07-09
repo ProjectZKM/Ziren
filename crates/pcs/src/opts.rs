@@ -231,17 +231,18 @@ pub struct ZKMCoreOpts {
 impl Default for ZKMCoreOpts {
     fn default() -> Self {
         let cpu_ram_gb = System::new_all().total_memory() / (1024 * 1024 * 1024);
-        let (default_log2_shard_size, default_shard_batch_size, default_log2_divisor) =
+        let (_default_log2_shard_size, default_shard_batch_size, default_log2_divisor) =
             ZKMProverOpts::get_memory_opts(cpu_ram_gb as usize);
 
         let mut opts = Self {
-            // User directive: default core shard_size = 2^24 (was the
-            // memory-derived `1 << default_log2_shard_size`, ~2^22). The
-            // memory heuristic still governs shard_batch_size + the split
-            // divisor below; only the shard cycle budget is pinned to 2^24.
+            // Default core shard_size = 2^24 (was the memory-derived
+            // `1 << default_log2_shard_size`, ~2^22). The SHARD_SIZE env still
+            // OVERRIDES it (parse arm below); only the no-env / unparseable
+            // default is pinned to 2^24. The memory heuristic still governs
+            // shard_batch_size + the split divisor below.
             shard_size: env::var("SHARD_SIZE").map_or_else(
                 |_| 1 << 24,
-                |s| s.parse::<usize>().unwrap_or(1 << default_log2_shard_size),
+                |s| s.parse::<usize>().unwrap_or(1 << 24),
             ),
             shard_batch_size: env::var("SHARD_BATCH_SIZE").map_or_else(
                 |_| default_shard_batch_size,
