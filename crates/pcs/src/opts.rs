@@ -126,7 +126,11 @@ impl ZKMProverOpts {
             // V3 + LT default-on when small-card mode doesn't fire;
             // catching at ≤36 enables the shard-size halving + the
             // matching mempool/recompute companions on ziren-gpu.
-            if gpu_ram_gb <= 36 {
+            // User directive: 32 GB prod boxes get the full 2^24 default
+            // (validated single-GPU), so the halving reverts to SP1's
+            // original ≤30 — 24 GB cards (28) still protected, 32 GB (36)
+            // and up run large-card (un-halved).
+            if gpu_ram_gb <= 30 {
                 let small_card_enabled = std::env::var("ZIREN_GPU_SMALL_CARD")
                     .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
                     .unwrap_or(true);
@@ -231,8 +235,12 @@ impl Default for ZKMCoreOpts {
             ZKMProverOpts::get_memory_opts(cpu_ram_gb as usize);
 
         let mut opts = Self {
+            // User directive: default core shard_size = 2^24 (was the
+            // memory-derived `1 << default_log2_shard_size`, ~2^22). The
+            // memory heuristic still governs shard_batch_size + the split
+            // divisor below; only the shard cycle budget is pinned to 2^24.
             shard_size: env::var("SHARD_SIZE").map_or_else(
-                |_| 1 << default_log2_shard_size,
+                |_| 1 << 24,
                 |s| s.parse::<usize>().unwrap_or(1 << default_log2_shard_size),
             ),
             shard_batch_size: env::var("SHARD_BATCH_SIZE").map_or_else(
