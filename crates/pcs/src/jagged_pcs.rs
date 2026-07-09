@@ -2720,7 +2720,6 @@ pub mod jagged {
             let hook_v2_present = gpu_jagged_reduction.is_some();
             let device_happy = (precomputed_dense_handle.is_some()
                 || precomputed_host_dense_q.is_some())
-                && try_gpu_pr
                 && hook_v2_present;
             if device_happy {
                 let _rel_span =

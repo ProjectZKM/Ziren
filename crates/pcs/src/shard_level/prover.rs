@@ -1084,14 +1084,14 @@ where
         // step-3 recompute (natural rows under rev), matching the host CPU rev
         // path. Core-scoped: only the CORE prover installs the carrier, so
         // compress/shrink/wrap stay legacy.
-        let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
+        let _shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
             Some(carrier) => carrier && full_openings_ok,
             None => false,
         };
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
             .unwrap_or(true);
-        if !on || shard_use_rev {
+        if !on || !full_openings_ok {
             None
         } else {
             let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
