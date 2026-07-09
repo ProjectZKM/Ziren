@@ -813,7 +813,7 @@ fn normalize_constraint(
 }
 
 fn postprocess_module(chip_name: &str, module: &mut PicusModule) {
-    if matches!(chip_name, "BooleanCircuitGarble" | "SysLinux" | "MemoryInstrs") {
+    if matches!(chip_name, "SysLinux" | "MemoryInstrs") {
         let protected_vars = collect_interface_vars(module);
         loop {
             // The guarded-width simplifier is only sound when the target variable is

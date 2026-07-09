@@ -1,4 +1,3 @@
-use crate::syscall::precompiles::boolean_circuit_garble::BooleanCircuitGarbleChip;
 use crate::{
     global::GlobalChip,
     memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
@@ -145,8 +144,6 @@ pub enum MipsAir<F: PrimeField32> {
     Secp256r1Double(WeierstrassDoubleAssignChip<SwCurve<Secp256r1Parameters>>),
     /// A precompile for the Poseidon2 permutation
     Poseidon2Permute(Poseidon2PermuteChip),
-    /// A precompile for the Boolean Circuit Garble
-    BooleanCircuitGarble(BooleanCircuitGarbleChip),
     /// A precompile for the Keccak Sponge
     KeccakSponge(KeccakSpongeChip),
     /// A precompile for addition on the Elliptic curve bn254.
@@ -440,11 +437,6 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(movcond_instrs.name(), movcond_instrs.cost());
         chips.push(movcond_instrs);
 
-        let boolean_circuit_garble =
-            Chip::new(MipsAir::<F>::BooleanCircuitGarble(BooleanCircuitGarbleChip::default()));
-        costs.insert(boolean_circuit_garble.name(), boolean_circuit_garble.cost());
-        chips.push(boolean_circuit_garble);
-
         (chips, costs)
     }
 
@@ -498,7 +490,6 @@ impl<F: PrimeField32> MipsAir<F> {
             .map(|events| {
                 let events_len = match self {
                     Self::KeccakSponge(_) => self.keccak_permutation_in_record(record),
-                    Self::BooleanCircuitGarble(_) => self.boolean_circuit_garble_in_record(record),
                     _ => events.len(),
                 };
                 let num_rows = events_len * self.rows_per_event();
@@ -615,25 +606,6 @@ impl<F: PrimeField32> MipsAir<F> {
             .unwrap_or(0)
     }
 
-    fn boolean_circuit_garble_in_record(&self, record: &ExecutionRecord) -> usize {
-        record
-            .precompile_events
-            .get_events(SyscallCode::BOOLEAN_CIRCUIT_GARBLE)
-            .map(|events| {
-                events
-                    .iter()
-                    .map(|(_, pre_e)| {
-                        if let PrecompileEvent::BooleanCircuitGarble(event) = pre_e {
-                            event.num_gates() + 1
-                        } else {
-                            unreachable!()
-                        }
-                    })
-                    .sum::<usize>()
-            })
-            .unwrap_or(0)
-    }
-
     pub(crate) fn syscall_code(&self) -> SyscallCode {
         match self {
             Self::Bls12381Add(_) => SyscallCode::BLS12381_ADD,
@@ -660,7 +632,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Bls12381Fp2Mul(_) => SyscallCode::BLS12381_FP2_MUL,
             Self::Bls12381Fp2AddSub(_) => SyscallCode::BLS12381_FP2_ADD,
             Self::Poseidon2Permute(_) => SyscallCode::POSEIDON2_PERMUTE,
-            Self::BooleanCircuitGarble(_) => SyscallCode::BOOLEAN_CIRCUIT_GARBLE,
             Self::KeccakSponge(_) => SyscallCode::KECCAK_SPONGE,
             Self::SysLinux(_) => SyscallCode::SYS_LINUX,
             Self::Add(_) => unreachable!("Invalid for core chip"),

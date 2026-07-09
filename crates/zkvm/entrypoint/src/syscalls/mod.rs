@@ -1,8 +1,6 @@
 mod bigint;
 mod bls12381;
 mod bn254;
-mod boolean_circuit_garble;
-
 mod ed25519;
 mod fptower;
 mod halt;
@@ -23,7 +21,6 @@ mod verify;
 pub use bigint::*;
 pub use bls12381::*;
 pub use bn254::*;
-pub use boolean_circuit_garble::*;
 pub use ed25519::*;
 pub use fptower::*;
 pub use halt::*;
@@ -164,6 +161,3 @@ pub const BN254_FP2_MUL: u32 = 0x01_01_00_2B;
 
 /// Executes the `POSEIDON2_PERMUTE` precompile.
 pub const POSEIDON2_PERMUTE: u32 = 0x00_01_00_30;
-
-/// Executes the `BOOLEAN_CIRCUIT_GARBLE` precompile.
-pub const BOOLEAN_CIRCUIT_GARBLE: u32 = 0x00_01_00_31;

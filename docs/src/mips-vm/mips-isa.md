@@ -218,7 +218,6 @@ The support instructions are as follows:
 | SECP256R1_DOUBLE = 0x00_01_002D,       | Executes the `SECP256R1_DOUBLE` precompile.        |
 | SECP256R1_DECOMPRESS = 0x00_01_002E,   | Executes the `SECP256R1_DECOMPRESS` precompile.    |
 | POSEIDON2_PERMUTE = 0x00_01_0030,      | Executes the `POSEIDON2_PERMUTE` precompile.       |
-| BOOLEAN_CIRCUIT_GARBLE = 0x00_01_0031, | Executes the `BOOLEAN_CIRCUIT_GARBLE` precompile.  |
 | SYS_MMAP = 4210,                       | Executes the `Linux MMAP API` precompile.          |
 | SYS_MMAP2 = 4090,                      | Executes the `Linux MMAP2 API` precompile.         |
 | SYS_BRK = 4045,                        | Executes the `Linux BRK API` precompile.           |

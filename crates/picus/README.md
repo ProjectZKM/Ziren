@@ -85,14 +85,6 @@ Rule of thumb:
   check determinism of that successor state. If the next-row value is padding-only,
   phase-local, or intentionally existential, do not expose it.
 
-Concrete example:
-
-- In `BooleanCircuitGarble`, `delta` and `checks` are carried across gate rows, so
-  they are marked with `#[picus(transition_input, transition_output)]`.
-- That tells Picus to treat the current row's `delta` / `checks` as inputs and the
-  immediate next row's `delta` / `checks` as outputs in the phases where successor
-  state is part of the interface.
-
 ## Picus Projections
 
 `PicusAnnotations` describe concrete trace storage fields on a chip row.

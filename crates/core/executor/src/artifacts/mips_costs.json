@@ -16,7 +16,6 @@
   "Program": 31,
   "Global": 115,
   "Secp256k1AddAssign": 4269,
-  "BooleanCircuitGarble": 549,
   "AddSub": 47,
   "Jump": 82,
   "Bn254FpOpAssign": 832,

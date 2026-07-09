@@ -1,4 +1,3 @@
-pub mod boolean_circuit_garble;
 pub mod edwards;
 pub mod fptower;
 pub mod keccak_sponge;
