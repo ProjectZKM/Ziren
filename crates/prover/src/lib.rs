@@ -2095,6 +2095,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // Both the CPU/host prover and the GPU device path emit
                 // MSB-folded proofs (resolve_gpu_fold_orientation() default).
                 zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
+                // band-cap carrier removal Phase B: SHRINK is a non-core stage
+                // (`core_rev == false`) → LEGACY bitrev orientation, byte-identical
+                // to the pre-carrier path (shrink never installed the carrier).
+                false,
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,

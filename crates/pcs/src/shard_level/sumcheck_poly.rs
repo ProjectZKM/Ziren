@@ -422,6 +422,11 @@ pub type GpuZerocheckPrepareCellsFn = fn(
     &(dyn core::any::Any + Send + Sync),
     &[p3_koala_bear::KoalaBear],
     usize,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // (`dense_rev`).  `true` => the device fold cells are NATURAL (no up-front
+    // bit-reversal, matching the host rev(zeta) zerocheck); `false` => LEGACY
+    // bit-reversed (byte-identical).  Was the `current_use_rev()` carrier.
+    bool,
 ) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
 
 gpu_hook_accessors!(GPU_ZEROCHECK_PREPARE_CELLS_HOOK: GpuZerocheckPrepareCellsFn

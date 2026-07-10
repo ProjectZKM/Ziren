@@ -842,7 +842,10 @@ mod phase1_acceptance_gate {
         let packing = crate::jagged::compute_jagged_metadata(&traces);
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
-        let dense_q = crate::jagged::materialize_dense_jagged(&traces, packing.log_dense_size);
+        // This unit test uses the LEGACY bitrev convention (`use_rev = false`),
+        // matching the `use_rev_y = false` companion below — byte-identical to
+        // the pre-carrier-removal behaviour (no carrier was installed here).
+        let dense_q = crate::jagged::materialize_dense_jagged(&traces, packing.log_dense_size, false);
 
         // z_row: full max_log_row_count point (the shared zerocheck point).
         let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
@@ -872,13 +875,11 @@ mod phase1_acceptance_gate {
         // sum `t = Σ z_col_lagrange·y` diverge from the true sumcheck sum
         // `Σ_b q·w`, so `verify_jagged_reduction`'s round-0 identity fails even
         // for equal heights.
-        // Mirror the production y orientation off the SAME
-        // single source of truth (`current_use_rev`) as the companion
-        // `materialize_dense_jagged` above, so this test's commit and y stay
-        // consistent under either convention.  No `UseRevGuard` is installed in
-        // this unit test => `current_use_rev()` is `None` => both stay LEGACY
-        // bitrev (the test's existing convention), byte-identical.
-        let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);
+        // Mirror the production y orientation off the SAME orientation flag as
+        // the companion `materialize_dense_jagged` above (`use_rev = false`), so
+        // this test's commit and y stay consistent — LEGACY bitrev (the test's
+        // existing convention), byte-identical to the pre-carrier-removal path.
+        let use_rev_y = false;
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()
             .zip(r_row_per_chip.iter())

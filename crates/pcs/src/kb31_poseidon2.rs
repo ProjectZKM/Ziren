@@ -582,6 +582,10 @@ pub mod koala_bear_poseidon2 {
             mmcs,
             fri,
             None,
+            // Preprocessed-trace commit helper (setup / vk path): LEGACY bitrev
+            // orientation (`use_rev = false`), byte-identical to the
+            // pre-carrier-removal path (no carrier was installed here).
+            false,
         );
         bincode::serialize(&pre.commit.original_commitment)
             .expect("inner_prep_commit: serialize commitment")

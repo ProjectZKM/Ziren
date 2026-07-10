@@ -450,6 +450,9 @@ pub mod outer_jagged_hooks {
             // #118: setup-time preprocessed commit → host (device BN254
             // wrap commit is opt-in via the wrap prover under ZIREN_GPU_WRAP_DEVICE).
             None,
+            // band-cap carrier removal Phase B: outer/wrap prep commit is LEGACY
+            // bitrev (`use_rev = false`), byte-identical to the pre-carrier path.
+            false,
         );
         bincode::serialize(&pre.commit.original_commitment)
             .expect("outer_prep_commit: serialize commitment")

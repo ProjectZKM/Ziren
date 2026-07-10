@@ -84,6 +84,12 @@ pub fn prove_shard_zerocheck<SC, A>(
     // unexercised chip is a `dummy` (inner `None`, width 0): its cells come
     // from the device fold / provider-materialize fallback below.
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // (from `StarkMachine::core_rev()` — `true` only on the CORE MIPS path).
+    // Was the `current_use_rev()` thread-local carrier.  On the CORE path the
+    // whole proof is uniformly rev; every recursion / shrink / wrap prove is
+    // `false` (legacy, byte-identical).
+    dense_rev: bool,
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,
     std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
@@ -189,23 +195,22 @@ where
                 .unwrap_or(false)
         })
     };
-    // The orientation is driven SOLELY by the core-scoped
-    // `current_use_rev()` carrier (installed `Some(true)` only on the CORE prove
-    // path; `None` on every recursion / shrink / wrap prove).  There is no
-    // rev-zeta A/B env — `None` (no carrier) is the legacy arm
-    // (byte-identical to the recursion rings today).
-    // The `_device_traces.is_none()` guard is DROPPED so the GPU
-    // CORE device-fold path (which carries a per-shard device trace provider) also
-    // honours the rev(zeta) carrier. Core-scoped: only the CORE prover installs the
-    // carrier (`Some(true)`), so compress/shrink/wrap (carrier `None`) still take the
-    // `None => false` legacy arm. The device prepare-cells hook feeds NATURAL cells
-    // and the eq-anchor built here is `rev(zeta)`, so the device fold reproduces the
-    // host CPU rev proof byte-for-byte. `full_openings_ok()` guarantees the rev claim
-    // seed (`main_trace_evaluations_full`) is present.
-    let shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
-        Some(carrier) => carrier && full_openings_ok(),
-        None => false,
-    };
+    // The orientation is driven by the per-stage `dense_rev` flag (from
+    // `StarkMachine::core_rev()` — `true` only on the CORE prove path; `false`
+    // on every recursion / shrink / wrap prove, the legacy arm) AND gated on
+    // `full_openings_ok()`.  This exactly reproduces the former
+    // `current_use_rev()` carrier's decision (`Some(true) && full_openings_ok()`
+    // on core; `None => false` elsewhere), byte-for-byte: `dense_rev` replaces
+    // the `Some(carrier)`, and `full_openings_ok()` stays a BRANCH — NOT folded
+    // out.  The fold-out to an unconditional `dense_rev` is NOT byte-neutral:
+    // on the GPU CORE path a device-only chip whose per-chip provider hook
+    // yields no full opening (`main_trace_evaluations_full == None`, see
+    // `row_gkr::top_level`) makes `full_openings_ok()` FALSE for that shard —
+    // which drifts dense multi-chip workloads (e.g. tendermint) even while fib
+    // (all-host-chip shards, `full_openings_ok()` always true) stays byte-clean.
+    // Retiring the branch requires the coupled change of making the device CORE
+    // path ALWAYS provide full openings (out of scope here).
+    let shard_use_rev = dense_rev && full_openings_ok();
 
     // Run the FIRST sumcheck round in the BASE field (K = F) on
     // the pure-host CPU path (no device provider) — dropping the up-front
@@ -300,7 +305,7 @@ where
                         } else {
                             (&[], 0)
                         };
-                    let prepared = prep_hook(raw.as_ref(), prep_kb, np_hook);
+                    let prepared = prep_hook(raw.as_ref(), prep_kb, np_hook, dense_rev);
                     if prepared.is_some() {
                         // The prepare hook CLONED the trace into its own
                         // bit-reversed fold buffer; the provider's original

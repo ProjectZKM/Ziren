@@ -368,6 +368,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         orientation: crate::shard_level::shard_proof::FoldOrientation,
+        // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
+        dense_rev: bool,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as BasefoldRing>::BfMmcs,
@@ -447,6 +449,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             challenger,
             device_traces,
             orientation,
+            dense_rev,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
             self.gpu_jagged_reduction_v2(),
@@ -644,6 +647,12 @@ where
             // band-cap retirement Phase A: the missing-chip cluster widths,
             // threaded explicitly (was the `Height0MissingGuard` thread-local).
             cluster_widths,
+            // band-cap carrier removal Phase B: the per-shard rev(zeta)
+            // orientation, read from the per-stage source of truth
+            // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS
+            // machine).  Threaded explicitly (was the `UseRevGuard` /
+            // `current_use_rev()` thread-local carrier).
+            self.machine().core_rev(),
         )
     }
 
@@ -914,6 +923,10 @@ where
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
                 precomputed_basefold_taken,
+                // band-cap carrier removal Phase B: the per-shard rev(zeta)
+                // orientation, read off the shard data (set by `commit()` from
+                // `machine.core_rev()`); was the `current_use_rev()` carrier.
+                data.rev,
             );
 
             return Ok(ShardProof::<SC> {
@@ -1062,6 +1075,10 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation,
+    // read off the shard data (`ShardMainData.rev`) in `open()`; threaded into
+    // `prover.prove_shard_to_basefold`.  Was the `current_use_rev()` carrier.
+    dense_rev: bool,
 ) -> Option<
     Box<
         crate::shard_level::shard_proof::BasefoldShardProof<
@@ -1286,6 +1303,8 @@ where
         // CpuProver path always emits MSB-folded proofs
         // (the GPU LSB packed-pool path is unreachable here).
         crate::shard_level::shard_proof::FoldOrientation::Msb,
+        // band-cap carrier removal Phase B: per-shard rev(zeta) orientation.
+        dense_rev,
         Some(precomputed),
     );
 
@@ -1323,6 +1342,13 @@ pub fn commit_basefold_path<SC, M, P>(
     // cluster chip; `None` (recursion / shrink / wrap / FIX-on) => own-chip-set
     // commit (byte-identical to legacy).
     cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // (from `StarkMachine::core_rev()`).  Threaded to the precompute (dense
+    // materialize) and recorded on the returned `ShardMainData.rev` +
+    // `PrecomputedJaggedCommit.rev`, so `open()` and the step-4 reduction stay
+    // in lockstep.  `true` only on the CORE MIPS path (was the `UseRevGuard`
+    // carrier); `false` elsewhere (byte-identical to legacy).
+    use_rev: bool,
 ) -> ShardMainData<SC, M, P>
 where
     SC: StarkGenericConfig + BasefoldRing,
@@ -1438,6 +1464,7 @@ where
         <SC as BasefoldRing>::bf_mmcs(),
         <SC as BasefoldRing>::fri_config(),
         gpu_bn254_commit,
+        use_rev,
     );
     drop(commit_named_inner);
 
@@ -1535,5 +1562,8 @@ where
         chip_ordering,
         public_values,
         precomputed_basefold: Some(Box::new(precomputed)),
+        // band-cap carrier removal Phase B: record the orientation on the shard
+        // data so `open()` reads it off the shard (not a thread-local).
+        rev: use_rev,
     }
 }

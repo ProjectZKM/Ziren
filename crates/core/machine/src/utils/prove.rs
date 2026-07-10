@@ -797,33 +797,19 @@ where
                                                 .collect()
                                         });
 
-                                    // LOCKSTEP ORIENTATION: install the per-shard
-                                    // rev(zeta) decision (the single source of truth)
-                                    // for the whole commit+open scope, so the jagged
-                                    // COMMIT (materialize), the `y_per_chip` recompute,
-                                    // and the zerocheck residual all read ONE boolean
-                                    // and can never drift.  Installed for EVERY core
-                                    // shard — whether or not it maps to a canonical
-                                    // cluster — so the whole CORE proof is uniformly
-                                    // rev (the no-CPU memory-finalize shard, which maps
-                                    // to no cluster and commits at its own raw height,
-                                    // must still carry rev so the host `core_rev=true`
-                                    // verify and the in-circuit NORMALIZE
-                                    // `core_layer_rev` stay consistent).  On this CPU
-                                    // core prove path there is no device trace
-                                    // provider, so every chip carries
-                                    // `main_trace_evaluations_full` and this equals the
-                                    // zerocheck's full predicate; the zerocheck
-                                    // re-applies the device-none / full-openings guard
-                                    // locally where that info is known, so a GPU run
-                                    // (out of scope; flag default-OFF) stays bitrev.
-                                    // rev(zeta) is a compile-time CORE DEFAULT
-                                    // (`const true`, not an env read).  The recursion /
-                                    // shrink / wrap provers never enter here, so their
-                                    // `current_use_rev()` stays `None` (legacy).
-                                    let _rev_guard =
-                                        zkm_pcs::shard_level::band_cap::UseRevGuard::new(true);
-
+                                    // LOCKSTEP ORIENTATION (band-cap carrier removal
+                                    // Phase B): the per-shard rev(zeta) decision is no
+                                    // longer a thread-local carrier.  `commit()` reads
+                                    // it directly off the per-stage source of truth
+                                    // (`StarkMachine::core_rev()` — `true` for the CORE
+                                    // MIPS machine) and records it on
+                                    // `ShardMainData.rev` / `PrecomputedJaggedCommit.rev`;
+                                    // `open()` reads it back off the shard data and
+                                    // threads it into the zerocheck + jagged reduction,
+                                    // so the whole CORE proof is uniformly rev and the
+                                    // commit / zerocheck / reduction can never drift.
+                                    // The recursion / shrink / wrap machines carry
+                                    // `core_rev() == false` (legacy, byte-identical).
                                     let t_commit = std::time::Instant::now();
                                     let main_data =
                                         prover.commit(&record, main_traces, cluster_widths);
@@ -836,7 +822,6 @@ where
                                         .unwrap();
                                     let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
-                                    drop(_rev_guard);
 
                                     tracing::info!(
                                         "PCS timing: commit={}ms open={}ms total={}ms",

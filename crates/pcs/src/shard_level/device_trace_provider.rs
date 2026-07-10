@@ -67,6 +67,17 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
+    /// band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    /// for the shards this device provider serves (from the per-stage
+    /// `StarkMachine::core_rev()` — `true` only on the CORE MIPS prove path).
+    /// The device commit / dense-pack read it OFF the provider (in lockstep with
+    /// the host `dense_rev`), replacing the former `current_use_rev()`
+    /// thread-local carrier.  Default `false` (legacy bitrev; every non-device /
+    /// non-core provider).
+    fn rev(&self) -> bool {
+        false
+    }
+
     /// Per-chip main-trace WIDTH (committed column count) for a
     /// device-resident chip whose host trace is empty.  Lets dims-only
     /// consumers (e.g. the commit-traces D2H-skip soundness gate, which

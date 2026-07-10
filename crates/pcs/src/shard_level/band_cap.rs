@@ -20,10 +20,16 @@
 //! (`zkm_core_machine::utils::prove::prove_with_context`, which has the
 //! `CoreShapeConfig` + per-shard heights):
 //!
-//!   * [`UseRevGuard`] / [`current_use_rev`] — the per-shard rev(zeta)
-//!     orientation decision (see below).
 //!   * [`RecursionAreaPinGuard`] / [`current_recursion_area_pin`] — the
 //!     recursion-layer committed-area pin (see below).
+//!
+//! (The former per-shard rev(zeta) orientation carrier — `UseRevGuard` /
+//! `current_use_rev` / `set_use_rev` — was retired in band-cap carrier removal
+//! Phase B: the orientation is now recorded EXPLICITLY on the committed data
+//! (`ShardMainData.rev` / `PrecomputedJaggedCommit.rev`, from the per-stage
+//! `StarkMachine::core_rev()` source of truth) and threaded as the `dense_rev`
+//! parameter, so commit + zerocheck + reduction stay in lockstep without a
+//! thread-local.)
 //!
 //! Transport is a per-thread stash (same pattern as
 //! `gpu_worker_context` / `device_first_layer_context`): the core prover installs
@@ -37,26 +43,6 @@
 //! own-height packing.  Only the CORE prove path sets them.
 
 thread_local! {
-    /// LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
-    /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
-    /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
-    /// no-observe verify recompute, the zerocheck residual, and the
-    /// `prove_shard_to_basefold` residual fast-path.  Computed ONCE per shard at
-    /// the core prove site (same predicate the zerocheck uses on the host path:
-    /// rev enabled AND no device trace provider — on the pure-host
-    /// FIX-off path every chip then carries `main_trace_evaluations_full`, so
-    /// this equals the zerocheck's full predicate) and installed for the WHOLE
-    /// guard scope (`prover.commit` + `prover.open`, the SAME rayon task), so the
-    /// commit orientation and the zerocheck orientation can NEVER drift per
-    /// shard.  `Some(use_rev)` when a guard set it (the core FIX-off path);
-    /// `None` (every non-core path, e.g. FIX-on `test_simple_prove`,
-    /// recursion / shrink / wrap) == no carrier => readers fall back to their
-    /// own legacy predicate (byte-identical to today).  Rev OFF
-    /// => `Some(false)` on the core path, which is
-    /// the legacy bitrev branch (byte-identical).
-    static CURRENT_USE_REV: std::cell::RefCell<Option<bool>> =
-        const { std::cell::RefCell::new(None) };
-
     /// RECURSION-LAYER trace-area pin (SP1-faithful).  When
     /// `Some(target_log)`, the jagged dense commit on this thread is pinned to
     /// `log_dense_size = max(natural, target_log)` (= a FIXED `2^target_log`
@@ -78,55 +64,6 @@ thread_local! {
 /// retired in band-cap Phase A when the canonical-cluster widths became the
 /// explicit `MachineProver::commit` `cluster_widths` parameter.)
 static GUARD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// Install (or clear, with `None`) the per-shard rev(zeta) orientation decision
-/// for the calling thread.  The core prover installs it (via [`UseRevGuard`])
-/// with `Some(use_rev)`; also exposed standalone so a future GPU / non-guard path
-/// can set the same single signal.  Passing `None` restores the legacy per-reader
-/// fallback.
-pub fn set_use_rev(decision: Option<bool>) {
-    CURRENT_USE_REV.with(|c| {
-        *c.borrow_mut() = decision;
-    });
-}
-
-/// The currently-installed per-shard rev(zeta) orientation decision for the
-/// calling thread.  `Some(true)` => the jagged commit / `y_per_chip` / zerocheck
-/// residual must all use the NATURAL (rev(zeta)) orientation; `Some(false)` =>
-/// the legacy bitrev orientation (the core path with the flag OFF, byte-identical
-/// to today); `None` => no carrier installed (every non-core path) => the reader
-/// keeps its own legacy predicate.  This is the SINGLE SOURCE OF TRUTH that keeps
-/// the commit orientation and the zerocheck orientation in lockstep per shard.
-#[must_use]
-pub fn current_use_rev() -> Option<bool> {
-    CURRENT_USE_REV.with(|c| *c.borrow())
-}
-
-/// RAII guard that installs ONLY the rev(zeta) orientation carrier
-/// (`CURRENT_USE_REV = Some(use_rev)`) for its scope, WITHOUT any missing-chip /
-/// area-pin machinery.  The CORE prover installs it for EVERY core shard so the
-/// whole CORE proof is uniformly rev (mapping to a canonical cluster or not — the
-/// no-CPU memory-finalize shard commits at its own raw height but must still
-/// carry the rev orientation so the host `core_rev=true` verify and the
-/// in-circuit NORMALIZE `core_layer_rev` stay consistent).  On drop it clears the
-/// carrier (`None`) so no stale orientation outlives the scope on a reused worker
-/// thread.
-pub struct UseRevGuard;
-
-impl UseRevGuard {
-    /// Install `CURRENT_USE_REV = Some(use_rev)` for the calling thread.
-    #[must_use]
-    pub fn new(use_rev: bool) -> Self {
-        set_use_rev(Some(use_rev));
-        Self
-    }
-}
-
-impl Drop for UseRevGuard {
-    fn drop(&mut self) {
-        set_use_rev(None);
-    }
-}
 
 /// RAII guard that pins the RECURSION-LAYER jagged commit area for its scope on
 /// the calling thread.  The recursion (`compress`) prover

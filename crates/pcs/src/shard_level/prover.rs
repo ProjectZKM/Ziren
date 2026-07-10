@@ -61,6 +61,12 @@ fn maybe_auto_precompute_basefold<SC, A>(
     // device-precompute dispatch below.  `None` = host precompute (CPU
     // prover); `Some` on the GPU free-fn callers.
     gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
+    // precompute (dense materialize) and FORCED onto the built
+    // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
+    // BOTH the device-hook and host-fallback build branches.
+    use_rev: bool,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
@@ -125,9 +131,12 @@ where
     let precomputed = {
         let device_precompute = device_traces.and_then(|p| {
             let hook = gpu_jagged_precompute_commit?;
+            // The device hook reads the orientation off the provider
+            // (`p.rev()`); the host `pre.rev = use_rev` overwrite below records
+            // the authoritative host view for the step-4 reduction.
             hook(&named_inner, p)
         });
-        match device_precompute {
+        let mut pre = match device_precompute {
             Some(pre) => pre,
             // Host fallback for the device commit hook — must be
             // provider-aware so empty (device-resident) chip traces are
@@ -137,8 +146,14 @@ where
                 &named_inner,
                 device_traces,
                 gpu_basefold_commit,
+                use_rev,
             ),
-        }
+        };
+        // Record the per-shard orientation on the built commit (the device
+        // hook builds its dense on-device under the SAME `use_rev`, but may not
+        // stamp the flag — force it here so the step-4 reduction reads it back).
+        pre.rev = use_rev;
+        pre
     };
     let raw_root_inner: [InnerVal; 8] =
         crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
@@ -213,6 +228,8 @@ pub fn prove_shard_to_basefold<SC, A>(
     challenger: &mut SC::Challenger,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
+    dense_rev: bool,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -267,6 +284,7 @@ where
         challenger,
         device_traces,
         orientation,
+        dense_rev,
         precomputed_commit,
         None,
         None,
@@ -442,6 +460,8 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     challenger: &mut SC::Challenger,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
+    dense_rev: bool,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -522,6 +542,7 @@ where
         challenger,
         device_traces,
         orientation,
+        dense_rev,
         precomputed_commit,
         &FreeFnJaggedEval,
         gpu_jagged_reduction,
@@ -550,6 +571,12 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
+    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // (from `StarkMachine::core_rev()`).  Threaded to `maybe_auto_precompute`
+    // (records it on the built `PrecomputedJaggedCommit.rev`) + the zerocheck,
+    // so the commit + zerocheck stay in lockstep.  Was the `current_use_rev()`
+    // thread-local carrier.
+    dense_rev: bool,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -838,6 +865,7 @@ where
             _device_traces,
             gpu_basefold_commit,
             gpu_jagged_precompute_commit,
+            dense_rev,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
     // `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed
@@ -971,6 +999,9 @@ where
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
+            // band-cap carrier removal Phase B: the per-shard rev(zeta)
+            // orientation (was the `current_use_rev()` carrier).
+            dense_rev,
         )
     };
     tracing::info!(
@@ -1063,31 +1094,20 @@ where
         // zerocheck_prover.rs).  NOTE: even fresh recompute does not reconcile
         // the FIX-off band-cap LOW-PLACEMENT commit under rev (documented
         // there); the legacy fast path + FIX-off baseline are preserved.
-        // LOCKSTEP: read the per-shard rev(zeta) decision from
-        // the SAME single source of truth (`current_use_rev`) the commit + the
-        // zerocheck use, re-applying the local device + full-openings guard.
-        // Under rev the residual is in a different orientation than the legacy
-        // bitrev opening, so it must NOT be reused as `y_per_chip` (the fresh
-        // recompute below — also rev-gated — produces the natural column claim).
-        // `None` (no guard) => the legacy predicate (byte-identical).
+        // The residual fast-path decline is gated on `full_openings_ok` (below).
+        // Under the CORE rev(zeta) orientation the residual is a DIFFERENT
+        // orientation than the legacy bitrev opening; the fresh jagged step-3
+        // recompute (`prove_jagged_basefold_inner`, rev-gated off the committed
+        // `PrecomputedJaggedCommit.rev`) produces the natural column claim.  The
+        // per-shard orientation itself is no longer consulted HERE (the former
+        // `current_use_rev()` carrier was already `_`-unused — the actual gate is
+        // `full_openings_ok` + the env kill-switch), so it is dropped.
         let full_openings_ok = !logup_gkr_proof.logup_evaluations.chip_openings.is_empty()
             && logup_gkr_proof
                 .logup_evaluations
                 .chip_openings
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
-        // Orientation driven solely by the core-scoped
-        // `current_use_rev()` carrier.
-        // `None` (every recursion / shrink / wrap prove) => LEGACY (byte-identical).
-        // DEVICE-REV: the GPU CORE path (device provider present) also declines
-        // the zerocheck-residual reuse under rev, forcing the fresh jagged
-        // step-3 recompute (natural rows under rev), matching the host CPU rev
-        // path. Core-scoped: only the CORE prover installs the carrier, so
-        // compress/shrink/wrap stay legacy.
-        let _shard_use_rev = match crate::shard_level::band_cap::current_use_rev() {
-            Some(carrier) => carrier && full_openings_ok,
-            None => false,
-        };
         let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
             .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
             .unwrap_or(true);
@@ -1130,10 +1150,11 @@ where
                 // `z_col_lagrange[k]` index for every later chip => reject).  An
                 // empty column's row-MLE claim is 0 (Σ over 0 rows), so emit
                 // `w` zeros.  Only a truly width-0 chip (no columns) skips.
-                // NOTE: this residual fast path is DECLINED under `shard_use_rev`
-                // (the CORE FIX-off path, which is the only path that injects
-                // 0-row chips), so this branch is currently inactive; the fix
-                // keeps it CORRECT should the non-rev / device path ever take it.
+                // NOTE: on the CORE rev(zeta) path (the only path that injects
+                // 0-row chips) the jagged step-3 recompute produces the natural
+                // column claim off the committed `PrecomputedJaggedCommit.rev`,
+                // so this branch is inactive there; the guard keeps it CORRECT
+                // should the non-rev / device path ever take it.
                 if w == 0 {
                     out.push(Vec::new());
                     continue;

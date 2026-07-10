@@ -1823,6 +1823,15 @@ pub mod jagged {
         /// the plain non-provider host build (its reduction re-materialize is
         /// sound — no drain involved).
         pub host_dense_q: Option<alloc::vec::Vec<crate::jagged_pcs::JaggedVal>>,
+        /// The per-shard rev(zeta) orientation the dense commit was
+        /// materialized under (from the per-stage `StarkMachine::core_rev()`
+        /// source of truth — `true` only on the CORE MIPS path).  Recorded on
+        /// the committed data so the step-4 jagged reduction (host
+        /// re-materialize + `y_per_chip`) uses the SAME orientation as the
+        /// commit, in lockstep — replaces the former `current_use_rev()`
+        /// thread-local carrier.  `false` on every recursion / shrink / wrap
+        /// commit (byte-identical to legacy).
+        pub rev: bool,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
@@ -1851,6 +1860,11 @@ pub mod jagged {
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         provider: &dyn crate::shard_level::DeviceTraceProvider,
     ) -> Option<PrecomputedJaggedCommit>;
+    // band-cap carrier removal Phase B: the device dense pack reads the per-shard
+    // rev(zeta) orientation OFF the provider (`DeviceTraceProvider::rev()`, set
+    // from `StarkMachine::core_rev()`) — in lockstep with the host `dense_rev` —
+    // so no `use_rev` param crosses this boundary.  Was the `current_use_rev()`
+    // thread-local carrier.
 
     // #118: the GPU jagged precompute-commit fn is provided STATICALLY
     // (threaded from the prover's `gpu_jagged_precompute_commit_hook()` down
@@ -1922,6 +1936,10 @@ pub mod jagged {
         // #118: the device BaseFold commit fn, threaded down to the inner
         // `commit_jagged_pcs_no_observe` dispatch.  `None` = host commit.
         gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
+        // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
+        // threaded to `materialize_dense_jagged` and recorded on the returned
+        // `PrecomputedJaggedCommit.rev` so the step-4 reduction stays in lockstep.
+        use_rev: bool,
     ) -> PrecomputedJaggedCommit {
         let n_chips = chip_traces.len();
 
@@ -1948,7 +1966,7 @@ pub mod jagged {
         let _commit_span = tracing::info_span!("jagged_dense_commit_pre").entered();
         let (commit, prover_data) = {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -1993,14 +2011,14 @@ pub mod jagged {
         // `materialize_dense_jagged` over the same chips).
         let host_dense_q = if gpu_basefold_commit.is_some() {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
             Some(dense_q)
         } else {
             None
         };
 
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q }
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q, rev: use_rev }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -2019,13 +2037,16 @@ pub mod jagged {
         // #118: the device BaseFold commit fn, threaded down to
         // `precompute_jagged_basefold_commit`.  `None` = host commit.
         gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
+        // The per-shard rev(zeta) orientation, threaded down (see
+        // `precompute_jagged_basefold_commit`).
+        use_rev: bool,
     ) -> PrecomputedJaggedCommit {
         // No empty entry / no provider → identical to the plain path
         // (a cheap clone-through when nothing needs re-materializing).
         let needs_remat =
             provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
         if !needs_remat {
-            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit);
+            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit, use_rev);
         }
         // DECLINE path: the device commit hook returned `None` (e.g. the
         // commit-NTT OOM preflight) so we re-materialize the device-resident
@@ -2039,9 +2060,9 @@ pub mod jagged {
         // construction (same `materialize_dense_jagged` over the same
         // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit);
+        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit, use_rev);
         let dense_q =
-            materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size);
+            materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size, use_rev);
         debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
         pre.host_dense_q = Some(dense_q);
         pre
@@ -2062,6 +2083,10 @@ pub mod jagged {
         // = host commit (every non-device-wrap caller), byte-identical to the
         // pre-#118 unregistered-hook path.
         gpu_bn254_commit: Option<GpuBn254CommitFn>,
+        // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
+        // threaded to `materialize_dense_jagged` and recorded on the returned
+        // `PrecomputedJaggedCommitGeneric.rev`.  `false` on the wrap/BN254 path.
+        use_rev: bool,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
         // `'static` bounds (Commitment + ProverData) are required by the
@@ -2091,7 +2116,7 @@ pub mod jagged {
         }
         let (commit, prover_data) = {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
             debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -2136,7 +2161,7 @@ pub mod jagged {
                 )
             }
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -2405,6 +2430,14 @@ pub mod jagged {
         // open at z*.
         let n_chips = chip_traces.len();
 
+        // The per-shard rev(zeta) orientation, read off the committed data
+        // (`PrecomputedJaggedCommit.rev`, set at commit from
+        // `StarkMachine::core_rev()`) so the step-4 reduction's dense
+        // re-materialize + `y_per_chip` stay in lockstep with the commit.
+        // `false` when no precompute (the two-commit legacy / test path, which
+        // materializes here and is legacy-bitrev — byte-identical).
+        let dense_rev = precomputed.as_ref().map(|p| p.rev).unwrap_or(false);
+
         // ── Per-round jagged split (Architecture A) ──────────────────────
         // Decide G from the public name-sorted chip dims.  Default OFF
         // (`ZIREN_JAGGED_GROUPS` unset) ⇒ ONE group over all chips ⇒ the
@@ -2440,6 +2473,7 @@ pub mod jagged {
                 &groups,
                 challenger,
                 provider,
+                dense_rev,
             );
         }
 
@@ -2496,7 +2530,7 @@ pub mod jagged {
             let _commit_span = tracing::info_span!("jagged_dense_commit").entered();
             let (commit, prover_data) = {
                 let dense_q =
-                    materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                    materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev);
                 debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
                 let dense_traces = vec![(
                     alloc::string::String::from("<jagged-dense>"),
@@ -2554,14 +2588,10 @@ pub mod jagged {
             // happy path takes the `pre` branch above).
             let rematerialized_for_y =
                 rematerialize_chip_traces_via_provider(chip_traces, provider);
-            // Read the rev(zeta) orientation ONCE on THIS thread
-            // (the carrier is thread-local, installed by `UseRevGuard` only on
-            // the worker that runs commit+open); the per-chip / per-column
-            // reductions below run on RAYON worker threads where `current_use_
-            // rev()` would return `None`, so it MUST be hoisted here and captured
-            // by value.
-            let use_rev_y =
-                crate::shard_level::band_cap::current_use_rev() == Some(true);
+            // The rev(zeta) orientation, read off the committed data
+            // (`dense_rev`, from `PrecomputedJaggedCommit.rev`), captured by
+            // value into the per-chip / per-column rayon closures below.
+            let use_rev_y = dense_rev;
             rematerialized_for_y
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
@@ -2597,9 +2627,9 @@ pub mod jagged {
                     let _ = r_row_c;
                     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
                     let eq_c = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
-                    // The rev(zeta) orientation (single source of
-                    // truth, set by `UseRevGuard` for the whole commit+open
-                    // scope).  Under rev, the COMMIT (`materialize_dense_jagged`)
+                    // The rev(zeta) orientation (`use_rev_y`, read off the
+                    // committed `PrecomputedJaggedCommit.rev`, in lockstep with
+                    // the commit).  Under rev, the COMMIT (`materialize_dense_jagged`)
                     // places the data in NATURAL row order, so the column claim
                     // must read NATURAL rows too (`src = row`) — together with the
                     // natural-indexed `build_weight_table` the round-0 identity
@@ -2820,7 +2850,7 @@ pub mod jagged {
                 // dense pack (cold path — happy path takes skip_host_dense).
                 let rematerialized =
                     rematerialize_chip_traces_via_provider(chip_traces, provider);
-                materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size)
+                materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size, dense_rev)
             };
 
             // Pick the active reduction: the statically-provided device
@@ -2912,6 +2942,7 @@ pub mod jagged {
                                 materialize_dense_jagged::<InnerVal>(
                                     &rematerialized,
                                     packing.log_dense_size,
+                                    dense_rev,
                                 )
                             });
                             crate::jagged_sumcheck::prove_jagged_reduction_owned(
@@ -3066,6 +3097,9 @@ pub mod jagged {
         groups: &[Vec<usize>],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // The per-shard rev(zeta) orientation, threaded from the caller
+        // (`prove_jagged_basefold_inner`, off `PrecomputedJaggedCommit.rev`).
+        use_rev: bool,
     ) -> JaggedBasefoldBundle {
         use p3_maybe_rayon::prelude::*;
         let g_count = groups.len();
@@ -3115,7 +3149,7 @@ pub mod jagged {
             Vec::with_capacity(g_count);
         for (g, traces_g) in group_traces.iter().enumerate() {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(traces_g, group_packing[g].log_dense_size);
+                materialize_dense_jagged::<InnerVal>(traces_g, group_packing[g].log_dense_size, use_rev);
             debug_assert_eq!(dense_q.len(), 1usize << group_packing[g].log_dense_size);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -3155,11 +3189,10 @@ pub mod jagged {
             // (3) per-chip per-column y_{c,j} for this group: reuse the
             // shard-wide pre_y_per_chip when supplied, else recompute via the
             // shared host helper.
-            // Hoist the rev(zeta) orientation onto THIS thread
-            // (thread-local carrier; the per-chip rayon closures below would see
-            // `None`).
-            let use_rev_y =
-                crate::shard_level::band_cap::current_use_rev() == Some(true);
+            // The rev(zeta) orientation, threaded in as `use_rev` (off the
+            // committed data), captured by value into the per-chip rayon
+            // closures below.
+            let use_rev_y = use_rev;
             let y_g: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip.as_ref() {
                 grp.iter().map(|&i| pre[i].clone()).collect()
             } else {
@@ -3221,6 +3254,7 @@ pub mod jagged {
                 let dense_q = materialize_dense_jagged::<InnerVal>(
                     traces_g,
                     packing_g.log_dense_size,
+                    use_rev,
                 );
                 crate::jagged_sumcheck::prove_jagged_reduction_owned(
                     dense_q, packing_g, &r_row_g, &y_g, z_col_g, z_row, challenger,
@@ -3315,15 +3349,15 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _ } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _, rev: dense_rev } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the row-eq embedding factor + empty-chip skip).
-        // Hoist the rev(zeta) orientation onto THIS thread
-        // (thread-local carrier; the per-chip rayon closures below would see
-        // `None`).  On the wrap/BN254 path no `UseRevGuard` is installed, so
-        // this is `None` => legacy bitrev (byte-identical).
-        let use_rev_y = crate::shard_level::band_cap::current_use_rev() == Some(true);
+        // The rev(zeta) orientation, read off the committed data
+        // (`PrecomputedJaggedCommitGeneric.rev`), captured by value into the
+        // per-chip rayon closures below.  On the wrap/BN254 path `rev == false`
+        // => legacy bitrev (byte-identical).
+        let use_rev_y = dense_rev;
         let y_per_chip: Vec<Vec<InnerChallenge>> = if let Some(pre) = pre_y_per_chip {
             assert_eq!(pre.len(), chip_traces.len(),
                 "pre_y_per_chip length must match chip_traces length");
@@ -3387,7 +3421,7 @@ pub mod jagged {
                       challenger: &mut Challenger|
               -> JaggedReductionProof<InnerChallenge> {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev);
             crate::jagged_sumcheck::prove_jagged_reduction_owned(
                 dense_q, &packing, r_row_per_chip, &y_per_chip, z_col, z_row, challenger,
             )

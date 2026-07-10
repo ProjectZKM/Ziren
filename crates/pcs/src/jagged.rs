@@ -207,6 +207,12 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
     log_dense_size: usize,
+    // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
+    // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
+    // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
+    // LEGACY bit-reversed (byte-identical to the recursion / shrink / wrap
+    // stages).  Replaces the former `current_use_rev()` thread-local carrier.
+    use_rev: bool,
 ) -> Vec<F> {
     // Performance optimization: pre-allocate the full output
     // and write into per-chip slices in parallel. The serial
@@ -260,20 +266,18 @@ pub fn materialize_dense_jagged<F: Field>(
             remaining = tail;
         }
 
-        // The per-shard rev(zeta) orientation, the single
-        // source of truth installed by the core prover (`UseRevGuard`) for the
-        // whole commit+open scope.  `Some(true)` => commit the dense column in
+        // The per-shard rev(zeta) orientation, threaded EXPLICITLY as the
+        // `use_rev` parameter from the per-stage source of truth
+        // (`StarkMachine::core_rev()`).  `true` => commit the dense column in
         // NATURAL row order
         // (matching the rev(zeta) zerocheck residual + the natural-indexed
         // `build_weight_table`), so the jagged round-0 identity `Σ z_col·y ==
-        // Σ_b q·w` holds.  `Some(false)` (flag OFF on the core path) or `None`
-        // (every non-core path) => keep the LEGACY bit-reversed layout exactly
-        // (byte-identical).  Only the host (width>0) chips are materialized here;
-        // device chips are skipped (their cells come from the GPU dense hook,
-        // which stays bitrev, so the carrier is forced false on any device run
-        // by the zerocheck's local device guard).
-        let use_rev_commit =
-            crate::shard_level::band_cap::current_use_rev() == Some(true);
+        // Σ_b q·w` holds.  `false` (every non-core path) => keep the LEGACY
+        // bit-reversed layout exactly (byte-identical).  Only the host (width>0)
+        // chips are materialized here; device chips are skipped (their cells come
+        // from the GPU dense hook), which reproduces the same `use_rev` layout on
+        // device.
+        let use_rev_commit = use_rev;
         chip_slots
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())

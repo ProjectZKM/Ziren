@@ -58,6 +58,15 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     // PrecomputedJaggedCommitGeneric<OuterValMmcs>. open() downcasts to
     // PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
     pub precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
+    /// The per-shard rev(zeta) orientation, recorded on the committed data at
+    /// `commit()` from the per-stage source of truth
+    /// (`StarkMachine::core_rev()` — `true` only on the CORE MIPS prove path).
+    /// `open()` reads it off the shard data and threads it into the zerocheck +
+    /// jagged reduction so the whole prove stays in lockstep — this replaces
+    /// the former `current_use_rev()` / `UseRevGuard` thread-local carrier.
+    /// `false` on every recursion / shrink / wrap commit (byte-identical to
+    /// legacy).
+    pub rev: bool,
 }
 
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
@@ -75,6 +84,9 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
             chip_ordering,
             public_values,
             precomputed_basefold: None,
+            // Default LEGACY orientation; the CORE commit path overwrites this
+            // to `machine.core_rev()` (via `commit_basefold_path`).
+            rev: false,
         }
     }
 }
