@@ -13,6 +13,14 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
+/// The default per-shard trace-AREA cap (raw main-trace cells), mirroring SP1's
+/// `ELEMENT_THRESHOLD` (sp1 crates/core/executor/src/opts.rs:12 = `(1 << 28) + (1 << 27)`).
+/// A shard is closed as soon as its accumulated (un-padded) main-trace cell count
+/// `Σ_chip event_counts[chip] × costs[chip]` reaches this, keeping dense (precompile/CPU-heavy)
+/// shards under the per-shard dense-area budget (log_dense ≤ 29) that the cycle / 24-bit-clk /
+/// height splits alone let run to log_dense = 30. Env-overridable via `ELEMENT_THRESHOLD`.
+pub const ELEMENT_THRESHOLD: usize = (1 << 28) + (1 << 27);
+
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ZKMProverOpts {
@@ -212,6 +220,14 @@ impl ZKMProverOpts {
 pub struct ZKMCoreOpts {
     /// The size of a shard in terms of cycles.
     pub shard_size: usize,
+    /// The per-shard trace-AREA cap in raw main-trace cells (SP1 `ELEMENT_THRESHOLD`).
+    ///
+    /// A shard is closed as soon as its accumulated un-padded main-trace cell count
+    /// `Σ_chip event_counts[chip] × costs[chip]` reaches this value (see
+    /// [`ELEMENT_THRESHOLD`]). This is an ADDITIONAL, strictly-earlier split than the cycle
+    /// budget / 24-bit-clk / per-chip-height splits, and — unlike `shard_size` — it is a raw
+    /// cell count, NOT scaled by 4.
+    pub element_threshold: usize,
     /// The size of a batch of shards in terms of cycles.
     pub shard_batch_size: usize,
     /// Options for splitting deferred events.
@@ -243,6 +259,13 @@ impl Default for ZKMCoreOpts {
             shard_size: env::var("SHARD_SIZE").map_or_else(
                 |_| 1 << 24,
                 |s| s.parse::<usize>().unwrap_or(1 << 24),
+            ),
+            // SP1-parity per-shard trace-AREA cap (raw main-trace cells). The
+            // ELEMENT_THRESHOLD env OVERRIDES it (mirrors the SHARD_SIZE pattern above);
+            // only the no-env / unparseable default is pinned to SP1's ELEMENT_THRESHOLD.
+            element_threshold: env::var("ELEMENT_THRESHOLD").map_or_else(
+                |_| ELEMENT_THRESHOLD,
+                |s| s.parse::<usize>().unwrap_or(ELEMENT_THRESHOLD),
             ),
             shard_batch_size: env::var("SHARD_BATCH_SIZE").map_or_else(
                 |_| default_shard_batch_size,
@@ -309,6 +332,10 @@ impl ZKMCoreOpts {
 
         Self {
             shard_size,
+            element_threshold: env::var("ELEMENT_THRESHOLD").map_or_else(
+                |_| ELEMENT_THRESHOLD,
+                |s| s.parse::<usize>().unwrap_or(ELEMENT_THRESHOLD),
+            ),
             shard_batch_size: env::var("SHARD_BATCH_SIZE").map_or_else(
                 |_| MAX_SHARD_BATCH_SIZE,
                 |s| s.parse::<usize>().unwrap_or(MAX_SHARD_BATCH_SIZE),

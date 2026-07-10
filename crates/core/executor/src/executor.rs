@@ -120,6 +120,14 @@ pub struct Executor<'a> {
     /// The maximum size of each shard.
     pub shard_size: u32,
 
+    /// The per-shard trace-AREA cap in raw main-trace cells (SP1 `ELEMENT_THRESHOLD`).
+    ///
+    /// A shard is closed once its accumulated un-padded main-trace cell count
+    /// `Σ_chip event_counts[chip] × costs[chip]` reaches this value. Unlike [`Self::shard_size`]
+    /// (a cycle budget scaled by 4), this is a raw cell count taken directly from
+    /// `opts.element_threshold` (no ×4).
+    pub element_threshold: u64,
+
     /// The maximum number of shards to execute at once.
     pub shard_batch_size: u32,
 
@@ -473,6 +481,9 @@ impl<'a> Executor<'a> {
             program,
             memory_accesses: MemoryAccessRecord::default(),
             shard_size: (opts.shard_size as u32) * 4,
+            // SP1 ELEMENT_THRESHOLD: raw main-trace cell budget — NOT scaled by 4 (it is
+            // already a cell count, whereas `shard_size` is a cycle budget × 4 → clk).
+            element_threshold: opts.element_threshold as u64,
             shard_batch_size: opts.shard_batch_size as u32,
             cycle_tracker: HashMap::new(),
             io_buf: HashMap::new(),
@@ -3158,6 +3169,14 @@ impl<'a> Executor<'a> {
         // (a cycle budget) is. This keeps every split shard inside the base-cube recursion's
         // fixed per-chip height, so recursion / vk_map / the gnark ceremony are untouched.
         let mut height_split = false;
+        // Per-shard trace-AREA split (mirrors SP1's `ShapeChecker::check_shard_limit` element
+        // branch, sp1 crates/core/executor/src/vm/shapes.rs:242 `trace_area >= element_threshold`).
+        // Close the shard once the accumulated UN-PADDED main-trace cell count reaches the SP1
+        // `ELEMENT_THRESHOLD`, so dense shards (which today run the cycle/clk budget out to
+        // log_dense = 30) split strictly earlier and stay at log_dense ≤ 29 — the per-shard
+        // dense-area budget the jagged commit is sized for. Additional to (never replaces) the
+        // cycle / 24-bit-clk / per-chip-height splits.
+        let mut area_split = false;
         if self.state.global_clk.is_multiple_of(self.shape_check_frequency) {
             // Estimate the number of events in the trace.
             let event_counts = estimate_mips_event_counts(
@@ -3166,6 +3185,19 @@ impl<'a> Executor<'a> {
                 self.local_counts.syscalls_sent as u64,
                 *self.local_counts.event_counts,
             );
+
+            // SP1-parity trace AREA = Σ_chip event_counts[chip] × costs[chip] (raw main-trace
+            // cells). This is SP1's live `trace_area` accumulator (each event adds `costs[air]`),
+            // NOT the LDE size: no `next_power_of_two`, no `× size_of × 2` byte scaling — so we do
+            // NOT reuse `estimate_mips_lde_size`. Widths come from the loaded cost table
+            // (`self.costs`); chips with no events contribute 0.
+            let area: u64 = event_counts
+                .iter()
+                .map(|(air, &count)| count.saturating_mul(self.costs.get(&air).copied().unwrap_or(0)))
+                .sum();
+            if area >= self.element_threshold {
+                area_split = true;
+            }
 
             // Ziren refreshes this estimate only every `shape_check_frequency` cycles, so pad
             // each chip by its worst-case growth over that window (SP1's
@@ -3251,7 +3283,7 @@ impl<'a> Executor<'a> {
             }
         }
 
-        if cpu_exit || clk_exit || !shape_match_found || height_split {
+        if cpu_exit || clk_exit || !shape_match_found || height_split || area_split {
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }
