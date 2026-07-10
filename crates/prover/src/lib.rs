@@ -1543,24 +1543,24 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                // RECURSION-LAYER AREA PIN (SP1-faithful,
-                                // always on — no env flag):
-                                // pin this recursion proof's (normalize AND
-                                // compose) jagged dense commit to a FIXED area
+                                // RECURSION-LAYER AREA PIN (SP1-faithful, always
+                                // on — no env flag), band-cap carrier removal
+                                // Phase C: threaded EXPLICITLY as the `commit()`
+                                // `recursion_area_pin` param (was the
+                                // `RecursionAreaPinGuard` thread-local installed
+                                // here).  Pins this recursion proof's (normalize
+                                // AND compose) jagged dense commit to a FIXED area
                                 // 2^RECURSION_LOG_TRACE_AREA so every recursion
                                 // child commits at a uniform num_stripes =
                                 // 2^(27-21) = 64 → the compose VK collapses to
-                                // f(chip-set, arity).  The guard is read at the
-                                // commit precompute (commit_basefold_path ->
-                                // precompute_jagged_basefold_commit_generic) and
-                                // inherited by the open/reduce via pre.packing;
-                                // the SAME worker thread runs commit + open here,
-                                // so it covers both.  CORE (RiscvAir) never
-                                // installs it → core commit stays NATURAL.
-                                let _recursion_area_pin =
-                                    zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
-                                        zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
-                                    );
+                                // f(chip-set, arity).  Recorded on
+                                // `PrecomputedJaggedCommit.recursion_area_pin` at
+                                // commit time and read back at open (the SAME
+                                // worker thread runs commit + open here), so it
+                                // covers both.  CORE (RiscvAir) passes `None` →
+                                // core commit stays NATURAL.
+                                let recursion_area_pin =
+                                    Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
 
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")
@@ -1582,8 +1582,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 // Commit to the record and traces.
                                 let data = tracing::debug_span!("commit").in_scope(|| {
                                     // recursion (compress): own-chip-set commit (no
-                                    // canonical-cluster missing-chip injection).
-                                    self.compress_prover.commit(&record, traces, None)
+                                    // canonical-cluster missing-chip injection);
+                                    // recursion AREA PIN threaded explicitly
+                                    // (band-cap Phase C).
+                                    self.compress_prover.commit(&record, traces, None, recursion_area_pin)
                                 });
 
                                 // Generate the proof.
@@ -1922,8 +1924,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .generate_traces(&bf_record)
                 .expect("shrink basefold attach: generate_traces failed");
             let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
-            // shrink: own-chip-set commit (no canonical-cluster missing-chip injection).
-            let data = self.shrink_prover.commit(&bf_record, traces.clone(), None);
+            // shrink: own-chip-set commit (no canonical-cluster missing-chip
+            // injection); SHRINK never pins the recursion AREA (band-cap Phase C)
+            // → None (NATURAL own-area, byte-identical).
+            let data = self.shrink_prover.commit(&bf_record, traces.clone(), None, None);
 
             // Shrink device-resident routing: when the shrink prover keeps the
             // committed main traces device-resident (StarkGpuProver), hand
@@ -2099,6 +2103,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 // (`core_rev == false`) → LEGACY bitrev orientation, byte-identical
                 // to the pre-carrier path (shrink never installed the carrier).
                 false,
+                // band-cap carrier removal Phase C: SHRINK never installed the
+                // recursion AREA PIN → NATURAL own-area (byte-identical to legacy).
+                None,
                 // GPU lacks the precomputed jagged commit; the digest
                 // above is extracted straight from the MerkleCap.
                 None,

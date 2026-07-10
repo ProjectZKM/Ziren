@@ -1165,28 +1165,26 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 >,
             >,
     {
-        // Recursion-layer area pin (dummy mirror): the compose
-        // (compress) program verifies a batch of CHILD proofs that are
-        // themselves RECURSION proofs (normalize / compose outputs), each
-        // committed by the recursion prover at the FIXED pinned area
-        // `2^RECURSION_LOG_TRACE_AREA`.  Install the SAME thread-local pin the
-        // real recursion prover installs around its commit+open (lib.rs:1779)
-        // so each child's `dummy_jagged_basefold_bundle` is built at the pinned
-        // L (= num_stripes 64, reduction rounds / eval_point 27) — the dummy
-        // child bundle then MATCHES the real pinned child regardless of its
-        // natural heights, collapsing the compose VK to f(chip-set, arity).
-        // The child build loop is synchronous on this thread, so the guard
-        // covers every `dummy_basefold_vk_and_shard_proof` call; it drops at
-        // function end.  (Deferred delegates here, so it inherits the pin.)
-        let _recursion_area_pin = zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
-            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
-        );
+        // Recursion-layer area pin (dummy mirror), band-cap carrier removal
+        // Phase C: threaded EXPLICITLY as the `dummy_basefold_vk_and_shard_proof`
+        // `recursion_area_pin` param (was the `RecursionAreaPinGuard`
+        // thread-local installed here).  The compose (compress) program verifies
+        // a batch of CHILD proofs that are themselves RECURSION proofs
+        // (normalize / compose outputs), each committed by the recursion prover
+        // at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`; passing
+        // `Some(RECURSION_LOG_TRACE_AREA)` builds each child's
+        // `dummy_jagged_basefold_bundle` at the pinned L (= num_stripes 64,
+        // reduction rounds / eval_point 27) — the dummy child bundle then
+        // MATCHES the real pinned child regardless of its natural heights,
+        // collapsing the compose VK to f(chip-set, arity).  (Deferred delegates
+        // here, so it inherits the pin.)
+        let recursion_area_pin = Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape, recursion_area_pin)
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(

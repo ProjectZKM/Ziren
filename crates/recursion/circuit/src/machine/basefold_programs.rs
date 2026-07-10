@@ -328,6 +328,12 @@ mod tests {
             None,
             // CpuProver-equivalent orientation.
             zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
+            // band-cap carrier removal Phase B: per-shard rev(zeta) orientation
+            // (shape-only synthetic builder — legacy bitrev).
+            false,
+            // band-cap carrier removal Phase C: no recursion AREA PIN (synthetic
+            // core-shape builder → NATURAL own-area).
+            None,
             // Precomputed-commit not used for the synthetic witness
             // builder — uses the in-band commit flow.
             None,

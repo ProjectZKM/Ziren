@@ -523,6 +523,15 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_col: &[InnerChallenge],
     z_trace: &[InnerChallenge],
     challenger: &mut C,
+    // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).
+    // `Some(_)` (a recursion/compress commit, whose dense was pinned to
+    // `2^RECURSION_LOG_TRACE_AREA`) => run the jagged-eval over the PINNED dense
+    // (`half = z_trace.len() + 1`) so its structural-sumcheck dimension
+    // `n = 2*half` is CONSTANT across heterogeneous recursion children (the
+    // precondition for an enumerable compose VK).  `None` (CORE / shrink / wrap,
+    // and every test) => the NATURAL `log_m + 1` (byte-identical to today).
+    recursion_area_pin: Option<usize>,
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
     // For small workloads: claimed_sum + naive
     // sumcheck via materialization.
@@ -548,18 +557,20 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     } else {
         (last - 1).next_power_of_two().trailing_zeros() as usize
     };
-    // RECURSION-LAYER AREA PIN: when the recursion (`compress`)
-    // prover has installed the area pin on this thread, run the jagged-eval over
-    // the PINNED dense rather than the natural column geometry, so its dimension
-    // is CONSTANT across heterogeneous recursion children (the precondition for
-    // an enumerable compose VK).  `z_trace` is the reduction's eval_point over
-    // the pinned `2^log_dense_size` dense, so `z_trace.len() == pinned L`; using
-    // `half = z_trace.len() + 1` makes `n = 2*(L+1)` (= 2*28 = 56 at L=27),
-    // matching the dummy mirror (`dummy_jagged_basefold_bundle`, log_m = pinned
-    // L).  The prefix sums (natural, ≤ 2^L) fit in `L+1` bits, so the bigger
-    // representation is faithful (extra high bits zero).  `None` (CORE / shrink /
-    // wrap, and every test) → the NATURAL `log_m + 1` (byte-identical to today).
-    let half = match crate::shard_level::band_cap::current_recursion_area_pin() {
+    // RECURSION-LAYER AREA PIN (band-cap Phase C: explicit param, was a
+    // thread-local): when the caller passes `Some(_)` (a recursion/compress
+    // commit, whose dense was pinned to `2^RECURSION_LOG_TRACE_AREA`), run the
+    // jagged-eval over the PINNED dense rather than the natural column geometry,
+    // so its dimension is CONSTANT across heterogeneous recursion children (the
+    // precondition for an enumerable compose VK).  `z_trace` is the reduction's
+    // eval_point over the pinned `2^log_dense_size` dense, so
+    // `z_trace.len() == pinned L`; using `half = z_trace.len() + 1` makes
+    // `n = 2*(L+1)` (= 2*28 = 56 at L=27), matching the dummy mirror
+    // (`dummy_jagged_basefold_bundle`, log_m = pinned L).  The prefix sums
+    // (natural, ≤ 2^L) fit in `L+1` bits, so the bigger representation is
+    // faithful (extra high bits zero).  `None` (CORE / shrink / wrap, and every
+    // test) → the NATURAL `log_m + 1` (byte-identical to today).
+    let half = match recursion_area_pin {
         Some(_) => z_trace.len() + 1,
         None => log_m + 1,
     };
@@ -696,6 +707,7 @@ mod tests {
             &[InnerChallenge::ZERO; 2],
             &[InnerChallenge::ZERO; 5],
             &mut challenger,
+            None,
         );
         assert_eq!(proof.partial_sumcheck_proof.univariate_polys.len(), 14);
         assert_eq!(proof.partial_sumcheck_proof.point_and_eval.0.len(), 14);
@@ -728,7 +740,7 @@ mod tests {
         // half = z_trace.len() so n = 2*3 = 6 → 64-cell hypercube.
 
         let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger,
+            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
         );
         let psp = &proof.partial_sumcheck_proof;
 
@@ -786,7 +798,7 @@ mod tests {
             InnerChallenge::from_u8(29),
         ];
         let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger,
+            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
         );
         let psp = &proof.partial_sumcheck_proof;
         let n = 2 * half_bits;
@@ -821,7 +833,7 @@ mod tests {
         let z_trace = vec![InnerChallenge::ZERO; log_m + 1];
 
         let proof = prove_jagged_evaluation(
-            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger,
+            &prefix_sums, &z_row, &z_col, &z_trace, &mut challenger, None,
         );
 
         // Direct computation via the closed-form evaluator.
@@ -904,7 +916,7 @@ mod tests {
 
             let perm: crate::kb31_poseidon2::InnerPerm = poseidon2_init();
             let mut ch = InnerChallenger::new(perm);
-            let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch);
+            let proof = prove_jagged_evaluation(&offsets, &z_row, &z_col, &z_trace, &mut ch, None);
             let psp = &proof.partial_sumcheck_proof;
             // sanity: claimed_sum == closed form at rev(z_star).
             assert_eq!(

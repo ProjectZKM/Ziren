@@ -556,21 +556,20 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 >,
             >,
     {
-        // RECURSION-LAYER AREA PIN: the shrink program (built from this wrap
+        // RECURSION-LAYER AREA PIN (band-cap carrier removal Phase C: explicit
+        // param, was a thread-local): the shrink program (built from this wrap
         // dummy) verifies a single CHILD that is a RECURSION (compress) proof
         // committed at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`.
-        // Install the same thread-local pin so the dummy child bundle matches
+        // Pass `Some(RECURSION_LOG_TRACE_AREA)` so the dummy child bundle matches
         // the real pinned compress proof (constant num_stripes / L), keeping
         // the shrink VK enumerable.
-        let _recursion_area_pin = zkm_pcs::shard_level::band_cap::RecursionAreaPinGuard::new(
-            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
-        );
+        let recursion_area_pin = Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
         let vks_and_proofs: Vec<_> = shape
             .compress_shape
             .proof_shapes
             .iter()
             .map(|proof_shape| {
-                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape)
+                crate::stark::dummy_basefold_vk_and_shard_proof::<A>(machine, proof_shape, recursion_area_pin)
             })
             .collect();
         let vk_merkle_data = super::vkey_proof::ZKMMerkleProofWitnessValues::dummy(

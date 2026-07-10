@@ -691,9 +691,11 @@ impl ZKMProofShape {
         // forcing one class per integer child log_dense L.
         //
         // With the RECURSION-LAYER AREA PIN (`RECURSION_LOG_TRACE_AREA`
-        // = 27 — installed by the recursion prover around its commit+open, and
-        // mirrored in the dummy via `RecursionAreaPinGuard` in the compress/wrap
-        // dummy builders), EVERY recursion child commits at the FIXED area 2^27:
+        // = 27 — threaded as the recursion prover's `commit` `recursion_area_pin`
+        // param, and mirrored in the dummy via the `recursion_area_pin` param of
+        // `dummy_basefold_vk_and_shard_proof` in the compress/wrap dummy
+        // builders; band-cap carrier removal Phase C), EVERY recursion child
+        // commits at the FIXED area 2^27:
         // num_stripes = 64, reduction L = 27, and (via the pinned jagged-eval,
         // `prove_jagged_evaluation` half = z_trace.len()+1) jagged_n = 56 —
         // ALL height-INDEPENDENT.  So the per-L sweep collapses to ONE

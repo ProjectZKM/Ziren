@@ -219,6 +219,11 @@ pub fn dummy_basefold_shard_proof<F, EF, A>(
     chips: &[&Chip<F, A>],
     chip_log_heights_pairs: &[(String, u8)],
     max_log_row_count: usize,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN this dummy
+    // must mirror, threaded EXPLICITLY (was `current_recursion_area_pin()`).
+    // `Some(_)` for a RECURSION (compress) child (pinned `jagged_n` / stripes);
+    // `None` for CORE/normalize (NATURAL, byte-identical).
+    recursion_area_pin: Option<usize>,
 ) -> BasefoldShardProof<F, EF>
 where
     F: Field + Copy + PrimeCharacteristicRing,
@@ -359,7 +364,7 @@ where
             })
             .collect();
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bundle(
-            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count),
+            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count, recursion_area_pin),
         )
     };
 
@@ -429,6 +434,12 @@ where
 pub fn dummy_jagged_basefold_bundle(
     chip_dims: &[(usize, u32)],
     max_log_row_count: usize,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was `current_recursion_area_pin()`).  `Some(target_log)` when
+    // this dummy mirrors a RECURSION (compress) child (pin `log_dense_size` +
+    // `jagged_n` to the pinned L); `None` for CORE/normalize (NATURAL derivation,
+    // byte-identical to legacy).
+    recursion_area_pin: Option<usize>,
 ) -> zkm_pcs::jagged_pcs::jagged::JaggedBasefoldBundle {
     use p3_matrix::dense::RowMajorMatrix;
     use p3_symmetric::MerkleCap;
@@ -480,14 +491,15 @@ pub fn dummy_jagged_basefold_bundle(
     // ── RECURSION-LAYER AREA PIN (DUMMY MIRROR) ──
     // Mirror EXACTLY the host pin in
     // `zkm_pcs::jagged_pcs::precompute_jagged_basefold_commit_generic`:
-    // when the recursion (`compress`) prover has installed the area pin on
-    // this thread (via `RecursionAreaPinGuard`, read with
-    // `current_recursion_area_pin()`), raise `log_dense_size` (= L) to the pin
-    // floor so the dummy commits at the FIXED area `2^pin` — giving constant
+    // when the child being built is a RECURSION (`compress`) proof, the caller
+    // passes `Some(target_log)` (band-cap Phase C explicit param — was the
+    // `RecursionAreaPinGuard` / `current_recursion_area_pin()` thread-local), so
+    // raise `log_dense_size` (= L) to the pin floor so the dummy commits at the
+    // FIXED area `2^pin` — giving constant
     // `num_stripes = 2^(L - log_stacking) = 2^(27-21) = 64`, constant reduction
     // rounds / eval_point (= L), and `commit.chip_dims = [(1, L)]` — IDENTICAL
     // to the real PINNED recursion proof regardless of the child's natural
-    // heights.  CORE children (normalize) leave the carrier UNSET (`None`) →
+    // heights.  CORE children (normalize) pass `None` →
     // NATURAL own-area packing (byte-identical to the unpinned dummy).
     //
     // `offsets` / `column_counts` / `total_values` stay NATURAL — the host pin
@@ -496,7 +508,7 @@ pub fn dummy_jagged_basefold_bundle(
     // The jagged-eval sub-sumcheck dimension `jagged_n` IS pinned, though (see
     // the `log_m` note below) — it tracks the PINNED dense, mirroring the real
     // prover's pinned `prove_jagged_evaluation` (`half = z_trace.len() + 1`).
-    let recursion_pin = zkm_pcs::shard_level::band_cap::current_recursion_area_pin();
+    let recursion_pin = recursion_area_pin;
     let mut log_dense_size = packing.log_dense_size;
     if let Some(target) = recursion_pin {
         if log_dense_size < target {
@@ -764,7 +776,7 @@ mod tests {
 
         // ── DUMMY side: derive from the dummy bundle's packing. ──
         let dummy_bundle =
-            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count);
+            dummy_jagged_basefold_bundle(&chip_dims, max_log_row_count, None);
         let (dummy_rc, dummy_pcc) = derive_row_and_padding_counts(
             &dummy_bundle.packing.column_counts,
             &dummy_bundle.packing.offsets,

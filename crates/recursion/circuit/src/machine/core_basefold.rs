@@ -935,9 +935,12 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             .proof_shapes
             .iter()
             .map(|s| {
+                // band-cap carrier removal Phase C: NORMALIZE verifies a CORE
+                // child (never a recursion proof), so it is UNPINNED → `None`
+                // (NATURAL own-area, byte-identical to the unpinned dummy).
                 crate::stark::dummy_basefold_vk_and_shard_proof::<
                     zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-                >(machine, s)
+                >(machine, s, None)
             })
             .unzip();
         // Build ONE program-wide core vk whose `chip_information` matches the

@@ -103,12 +103,15 @@ pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 ///
 /// The CORE (`RiscvAir`) commit is NOT pinned — it stays NATURAL (the FIX-off
 /// perf win is a core-trace property).  The pin is keyed by which machine is
-/// proving: the recursion (`compress`) prover installs the
-/// [`crate::shard_level::band_cap::RecursionAreaPinGuard`] around its
-/// commit+open so [`precompute_jagged_basefold_commit_generic`] /
+/// proving: the recursion (`compress`) prover passes
+/// `Some(RECURSION_LOG_TRACE_AREA)` as the `recursion_area_pin` param of
+/// `MachineProver::commit` (band-cap carrier removal Phase C — was the
+/// `RecursionAreaPinGuard` thread-local it installed around its commit+open), so
+/// [`precompute_jagged_basefold_commit_generic`] /
 /// [`precompute_jagged_basefold_commit`] bump `packing.log_dense_size` to
-/// `max(natural, RECURSION_LOG_TRACE_AREA)`; core leaves the carrier unset
-/// (`None`) and is byte-identical to the unpinned path.
+/// `max(natural, RECURSION_LOG_TRACE_AREA)` and record it on
+/// `PrecomputedJaggedCommit.recursion_area_pin` (read back at open); core passes
+/// `None` and is byte-identical to the unpinned path.
 pub const RECURSION_LOG_TRACE_AREA: usize = 27;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
@@ -1832,6 +1835,18 @@ pub mod jagged {
         /// thread-local carrier.  `false` on every recursion / shrink / wrap
         /// commit (byte-identical to legacy).
         pub rev: bool,
+        /// The recursion-layer AREA PIN this commit was built under (band-cap
+        /// carrier removal Phase C — replaces the former
+        /// `current_recursion_area_pin()` thread-local).  `Some(target_log)` on a
+        /// RECURSION (`compress`) commit: `packing.log_dense_size` was raised to
+        /// `max(natural, target_log)` (a FIXED `2^target_log` committed area →
+        /// constant `num_stripes`), and the step-4 jagged-eval must run over the
+        /// PINNED dense (`prove_jagged_evaluation` `half = z_trace.len() + 1`) so
+        /// its dimension is height-independent.  Recorded on the committed data so
+        /// the OPEN path reads it back in lockstep with the commit.  `None` on
+        /// every CORE / shrink / wrap commit (NATURAL own-area packing,
+        /// byte-identical to legacy).
+        pub recursion_area_pin: Option<usize>,
     }
     /// Concrete inner alias (MT = JaggedMmcs).
     pub type PrecomputedJaggedCommit = PrecomputedJaggedCommitGeneric<crate::jagged_pcs::JaggedMmcs>;
@@ -1859,6 +1874,12 @@ pub mod jagged {
     pub type GpuJaggedPrecomputeCommitFn = fn(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         provider: &dyn crate::shard_level::DeviceTraceProvider,
+        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local the GPU
+        // device dense pack read in `commit_dense.rs`).  `Some(target_log)` on the
+        // RECURSION (compress) commit => pin device `log_dense_size` to
+        // `max(natural, target_log)`; `None` on CORE => natural (byte-identical).
+        recursion_area_pin: Option<usize>,
     ) -> Option<PrecomputedJaggedCommit>;
     // band-cap carrier removal Phase B: the device dense pack reads the per-shard
     // rev(zeta) orientation OFF the provider (`DeviceTraceProvider::rev()`, set
@@ -1940,6 +1961,10 @@ pub mod jagged {
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommit.rev` so the step-4 reduction stays in lockstep.
         use_rev: bool,
+        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).  See
+        // the twin in `precompute_jagged_basefold_commit_generic`.
+        recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommit {
         let n_chips = chip_traces.len();
 
@@ -1949,7 +1974,7 @@ pub mod jagged {
         // RECURSION-LAYER AREA PIN: see the twin in
         // `precompute_jagged_basefold_commit_generic`.  Carrier-keyed
         // (recursion-only); `None` on CORE/shrink/wrap → byte-identical.
-        if let Some(target) = crate::shard_level::band_cap::current_recursion_area_pin() {
+        if let Some(target) = recursion_area_pin {
             if packing.log_dense_size < target {
                 packing.log_dense_size = target;
             }
@@ -2018,7 +2043,7 @@ pub mod jagged {
             None
         };
 
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q, rev: use_rev }
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q, rev: use_rev, recursion_area_pin }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -2040,13 +2065,16 @@ pub mod jagged {
         // The per-shard rev(zeta) orientation, threaded down (see
         // `precompute_jagged_basefold_commit`).
         use_rev: bool,
+        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // down (was the `current_recursion_area_pin()` thread-local).
+        recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommit {
         // No empty entry / no provider → identical to the plain path
         // (a cheap clone-through when nothing needs re-materializing).
         let needs_remat =
             provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
         if !needs_remat {
-            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit, use_rev);
+            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit, use_rev, recursion_area_pin);
         }
         // DECLINE path: the device commit hook returned `None` (e.g. the
         // commit-NTT OOM preflight) so we re-materialize the device-resident
@@ -2060,7 +2088,7 @@ pub mod jagged {
         // construction (same `materialize_dense_jagged` over the same
         // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit, use_rev);
+        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit, use_rev, recursion_area_pin);
         let dense_q =
             materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size, use_rev);
         debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
@@ -2087,6 +2115,12 @@ pub mod jagged {
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommitGeneric.rev`.  `false` on the wrap/BN254 path.
         use_rev: bool,
+        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).
+        // `Some(target_log)` (a recursion/compress commit) => pin
+        // `log_dense_size` to `max(natural, target_log)`; `None` (CORE / shrink /
+        // wrap) => NATURAL own-area packing.
+        recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
         // `'static` bounds (Commitment + ProverData) are required by the
@@ -2103,12 +2137,12 @@ pub mod jagged {
     {
         let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
         // RECURSION-LAYER AREA PIN (SP1-faithful).  When the
-        // recursion (`compress`) prover has installed the area pin on this
-        // thread, raise `log_dense_size` to the pin floor so the dense
+        // recursion (`compress`) prover passes `Some(target_log)` here, so
+        // raise `log_dense_size` to the pin floor so the dense
         // materialize + commit run at a FIXED area (`2^pin`) → constant
         // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
         // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
-        let pin = crate::shard_level::band_cap::current_recursion_area_pin();
+        let pin = recursion_area_pin;
         if let Some(target) = pin {
             if packing.log_dense_size < target {
                 packing.log_dense_size = target;
@@ -2161,7 +2195,7 @@ pub mod jagged {
                 )
             }
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -2336,6 +2370,11 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         area: usize,
         challenger: &mut Ch,
+        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, read
+        // off the precomputed commit (`PrecomputedJaggedCommit.recursion_area_pin`)
+        // and threaded into `prove_jagged_evaluation` so its half/round-count is
+        // pin-consistent with the (pinned) commit.  `None` on CORE/shrink/wrap.
+        recursion_area_pin: Option<usize>,
         reduce: impl FnOnce(&[InnerChallenge], &mut Ch) -> JaggedReductionProof<InnerChallenge>,
         open: impl FnOnce(Vec<InnerChallenge>, &mut Ch) -> P,
     ) -> (
@@ -2376,6 +2415,7 @@ pub mod jagged {
             &z_col,
             &z_trace_be,
             challenger,
+            recursion_area_pin,
         );
 
         // (5) Ziren point-extend (SP1 opens at `final_eval_point` directly):
@@ -2485,7 +2525,7 @@ pub mod jagged {
         // shard-level Phase 1 prologue.  Skip the in-band commit
         // observe in that case to keep transcripts aligned with the
         // verifier (which uses `verify_jagged_basefold_no_observe`).
-        let (packing, commit, prover_data, precomputed_dense_handle, precomputed_host_dense_q) = if let Some(pre) =
+        let (packing, commit, prover_data, precomputed_dense_handle, precomputed_host_dense_q, recursion_area_pin) = if let Some(pre) =
             precomputed
         {
             tracing::debug!(
@@ -2497,7 +2537,11 @@ pub mod jagged {
             // dense_q while the provider was live).  It carries the dense_q
             // forward so the reduction below does not re-materialize from the
             // (drained) provider.
-            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle, pre.host_dense_q)
+            // `pre.recursion_area_pin` (band-cap Phase C) carries the recursion
+            // AREA PIN forward so the step-4 jagged-eval half is pin-consistent
+            // with the (pinned) commit — read off the committed data, not a
+            // thread-local.
+            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle, pre.host_dense_q, pre.recursion_area_pin)
         } else {
             // No precompute → this path materializes the dense commit on
             // host.  Re-materialize empty device-resident chips from the
@@ -2549,7 +2593,9 @@ pub mod jagged {
                 sub_phase = "dense_commit",
                 "jagged sub-phase done"
             );
-            (packing, commit, prover_data, None, None)
+            // No precompute → this in-band path is host synthetic / tests only,
+            // never a pinned recursion commit → recursion_area_pin = None.
+            (packing, commit, prover_data, None, None, None)
         };
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
@@ -3042,6 +3088,7 @@ pub mod jagged {
             z_row,
             area,
             challenger,
+            recursion_area_pin,
             reduce,
             open,
         );
@@ -3272,6 +3319,10 @@ pub mod jagged {
                 z_row,
                 area_g,
                 challenger,
+                // Multi-group (G≥2) is the large-CORE-shard host path only; the
+                // recursion AREA PIN never applies here (recursion is single
+                // group) → None (byte-identical).
+                None,
                 reduce_g,
                 open_g,
             );
@@ -3349,7 +3400,7 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _, rev: dense_rev } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _, rev: dense_rev, recursion_area_pin } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the row-eq embedding factor + empty-chip skip).
@@ -3441,6 +3492,7 @@ pub mod jagged {
             z_row,
             area,
             challenger,
+            recursion_area_pin,
             reduce,
             open,
         );

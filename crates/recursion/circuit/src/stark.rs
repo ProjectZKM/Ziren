@@ -114,8 +114,12 @@ where
 {
     // Produce the basefold shard proof + matching VK using the
     // existing infrastructure.  The chip set and per-chip shapes
-    // come from the machine + shape pair.
-    let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape);
+    // come from the machine + shape pair.  band-cap carrier removal Phase C:
+    // this legacy (FRI-compose) path never had a `RecursionAreaPinGuard`
+    // installed on its call stack (the guard lived only in the basefold
+    // compress/wrap dummy builders), so the pin was always `None` here — pass
+    // `None` to preserve byte-behaviour.
+    let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape, None);
 
     // Build the empty FRI placeholder fields matching the real
     // basefold-path prover output at `prover.rs:600-610`.  Empty
@@ -231,6 +235,13 @@ where
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN this dummy
+    // child must mirror, threaded EXPLICITLY (was the `RecursionAreaPinGuard`
+    // thread-local installed by the compress/wrap dummy builders around this
+    // call).  `Some(RECURSION_LOG_TRACE_AREA)` when the child being built is a
+    // RECURSION (compress) proof (pinned dense → constant `jagged_n` / stripes);
+    // `None` when it is a CORE/normalize child (NATURAL, byte-identical).
+    recursion_area_pin: Option<usize>,
 ) -> (
     StarkVerifyingKey<KoalaBearPoseidon2>,
     zkm_pcs::shard_level::shard_proof::BasefoldShardProof<KoalaBear, InnerChallenge>,
@@ -315,6 +326,7 @@ where
         &chips,
         &chip_log_heights_pairs,
         max_log_row_count,
+        recursion_area_pin,
     );
 
     // Build a minimal-but-shape-correct VK matching the legacy
@@ -482,7 +494,7 @@ pub mod tests {
             ("Bitwise".to_string(), 3),
         ]);
         let (vk, proof) = super::dummy_basefold_vk_and_shard_proof::<MipsAir<KoalaBear>>(
-            &machine, &shape,
+            &machine, &shape, None,
         );
         assert_eq!(
             vk.chip_ordering.len(),

@@ -811,8 +811,12 @@ where
                                     // The recursion / shrink / wrap machines carry
                                     // `core_rev() == false` (legacy, byte-identical).
                                     let t_commit = std::time::Instant::now();
+                                    // band-cap carrier removal Phase C: CORE never
+                                    // pins the recursion AREA (that is a compress-only
+                                    // geometry) → `None` (NATURAL own-area commit,
+                                    // byte-identical to the pre-carrier path).
                                     let main_data =
-                                        prover.commit(&record, main_traces, cluster_widths);
+                                        prover.commit(&record, main_traces, cluster_widths, None);
                                     let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();

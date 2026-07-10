@@ -67,6 +67,14 @@ fn maybe_auto_precompute_basefold<SC, A>(
     // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
     // BOTH the device-hook and host-fallback build branches.
     use_rev: bool,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  Threaded to the
+    // host-fallback precompute (pins `log_dense_size`) and FORCED onto the built
+    // `PrecomputedJaggedCommit.recursion_area_pin` so the OPEN-path jagged-eval
+    // half reads it back in lockstep.  `Some(RECURSION_LOG_TRACE_AREA)` on the
+    // GPU RECURSION (compress) lazy-commit path; `None` on every host / CORE /
+    // shrink / wrap path (byte-identical to legacy).
+    recursion_area_pin: Option<usize>,
 ) -> (
     Vec<RowMajorMatrix<Val<SC>>>,
     [Val<SC>; 8],
@@ -134,7 +142,9 @@ where
             // The device hook reads the orientation off the provider
             // (`p.rev()`); the host `pre.rev = use_rev` overwrite below records
             // the authoritative host view for the step-4 reduction.
-            hook(&named_inner, p)
+            // band-cap carrier removal Phase C: the recursion AREA PIN is threaded
+            // EXPLICITLY to the device dense pack (was the guard commit_dense read).
+            hook(&named_inner, p, recursion_area_pin)
         });
         let mut pre = match device_precompute {
             Some(pre) => pre,
@@ -147,12 +157,18 @@ where
                 device_traces,
                 gpu_basefold_commit,
                 use_rev,
+                recursion_area_pin,
             ),
         };
         // Record the per-shard orientation on the built commit (the device
         // hook builds its dense on-device under the SAME `use_rev`, but may not
         // stamp the flag — force it here so the step-4 reduction reads it back).
         pre.rev = use_rev;
+        // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
+        // built commit (the device hook pins `log_dense_size` device-side under
+        // the SAME value, but may not stamp the field) so the OPEN-path
+        // jagged-eval half reads it back in lockstep.
+        pre.recursion_area_pin = recursion_area_pin;
         pre
     };
     let raw_root_inner: [InnerVal; 8] =
@@ -230,6 +246,10 @@ pub fn prove_shard_to_basefold<SC, A>(
     orientation: FoldOrientation,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
     dense_rev: bool,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on the
+    // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
+    recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -285,6 +305,7 @@ where
         device_traces,
         orientation,
         dense_rev,
+        recursion_area_pin,
         precomputed_commit,
         None,
         None,
@@ -462,6 +483,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     orientation: FoldOrientation,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
     dense_rev: bool,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on the
+    // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
+    recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -543,6 +568,7 @@ where
         device_traces,
         orientation,
         dense_rev,
+        recursion_area_pin,
         precomputed_commit,
         &FreeFnJaggedEval,
         gpu_jagged_reduction,
@@ -577,6 +603,12 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // so the commit + zerocheck stay in lockstep.  Was the `current_use_rev()`
     // thread-local carrier.
     dense_rev: bool,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  Threaded to
+    // `maybe_auto_precompute` (pins the lazy device/host commit + records the
+    // field).  `Some(_)` on the GPU RECURSION (compress) lazy-commit path; `None`
+    // elsewhere (byte-identical to legacy).
+    recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -866,6 +898,7 @@ where
             gpu_basefold_commit,
             gpu_jagged_precompute_commit,
             dense_rev,
+            recursion_area_pin,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
     // `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed

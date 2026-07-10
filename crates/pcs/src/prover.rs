@@ -123,6 +123,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+        // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local the recursion
+        // prover installed around its commit+open).  `Some(RECURSION_LOG_TRACE_AREA)`
+        // on the RECURSION (compress) commit; `None` on CORE / shrink / wrap
+        // (byte-identical to legacy).
+        recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
     /// Build a device-trace provider over the committed shard data —
@@ -370,6 +376,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         orientation: crate::shard_level::shard_proof::FoldOrientation,
         // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
         dense_rev: bool,
+        // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+        // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on
+        // the GPU RECURSION (compress) lazy-commit path; `None` elsewhere.
+        recursion_area_pin: Option<usize>,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as BasefoldRing>::BfMmcs,
@@ -450,6 +460,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             orientation,
             dense_rev,
+            recursion_area_pin,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
             self.gpu_jagged_reduction_v2(),
@@ -616,6 +627,7 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
+        recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
@@ -653,6 +665,10 @@ where
             // machine).  Threaded explicitly (was the `UseRevGuard` /
             // `current_use_rev()` thread-local carrier).
             self.machine().core_rev(),
+            // band-cap carrier removal Phase C: the recursion-layer AREA PIN,
+            // threaded from the caller (was the `RecursionAreaPinGuard`
+            // thread-local the recursion prover installed around commit+open).
+            recursion_area_pin,
         )
     }
 
@@ -979,8 +995,10 @@ where
 
                     let t1 = std::time::Instant::now();
                     // Legacy generic prove-shard helper: own-chip-set commit
-                    // (no canonical-cluster missing-chip injection).
-                    let shard_data = self.commit(&record, named_traces, None);
+                    // (no canonical-cluster missing-chip injection).  The wrap
+                    // STARK proves via this default `prove` → NATURAL own-area
+                    // commit (recursion_area_pin = None); byte-identical to legacy.
+                    let shard_data = self.commit(&record, named_traces, None, None);
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
@@ -1305,6 +1323,13 @@ where
         crate::shard_level::shard_proof::FoldOrientation::Msb,
         // band-cap carrier removal Phase B: per-shard rev(zeta) orientation.
         dense_rev,
+        // band-cap carrier removal Phase C: this call always passes
+        // `Some(precomputed)`, so `maybe_auto_precompute_basefold` returns the
+        // supplied commit early WITHOUT rebuilding — the recursion AREA PIN was
+        // already recorded on `precomputed.recursion_area_pin` by the eager
+        // `commit()` path (and is read back in `prove_jagged_basefold_inner`), so
+        // this lazy-build pin is never consumed here → `None`.
+        None,
         Some(precomputed),
     );
 
@@ -1349,6 +1374,14 @@ pub fn commit_basefold_path<SC, M, P>(
     // in lockstep.  `true` only on the CORE MIPS path (was the `UseRevGuard`
     // carrier); `false` elsewhere (byte-identical to legacy).
     use_rev: bool,
+    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
+    // EXPLICITLY (was the `RecursionAreaPinGuard` / `current_recursion_area_pin()`
+    // thread-local).  `Some(RECURSION_LOG_TRACE_AREA)` on the RECURSION (compress)
+    // commit → pin the jagged dense to `2^pin` (constant `num_stripes` → enumerable
+    // compose VK); recorded on the returned `PrecomputedJaggedCommit.recursion_area_pin`
+    // so the open-path jagged-eval half stays in lockstep.  `None` elsewhere (CORE
+    // / shrink / wrap — NATURAL own-area, byte-identical to legacy).
+    recursion_area_pin: Option<usize>,
 ) -> ShardMainData<SC, M, P>
 where
     SC: StarkGenericConfig + BasefoldRing,
@@ -1465,6 +1498,7 @@ where
         <SC as BasefoldRing>::fri_config(),
         gpu_bn254_commit,
         use_rev,
+        recursion_area_pin,
     );
     drop(commit_named_inner);
 

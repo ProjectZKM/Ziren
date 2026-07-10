@@ -1,7 +1,6 @@
 //! Shard-level BaseFold proof pipeline: one `LogupGkrProof` + one
 //! `PartialSumcheckProof` per shard.
 
-pub mod band_cap;
 pub mod basefold_constraint_folder;
 pub mod device_first_layer_context;
 pub mod device_trace_provider;
