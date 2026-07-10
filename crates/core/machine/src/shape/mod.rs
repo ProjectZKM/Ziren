@@ -1272,7 +1272,7 @@ pub mod tests {
         let main_traces = prover.generate_traces(&record).unwrap();
 
         // Try to commit the traces.
-        let main_data = prover.commit(&record, main_traces);
+        let main_data = prover.commit(&record, main_traces, None);
 
         let mut challenger = prover.machine().config().challenger();
 

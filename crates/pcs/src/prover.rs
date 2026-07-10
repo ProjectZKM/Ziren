@@ -108,10 +108,21 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     }
 
     /// Commit to the main traces.
+    ///
+    /// `cluster_widths` (band-cap retirement Phase A) is the per-shard FULL
+    /// canonical-CLUSTER chip NAME -> trace WIDTH map, threaded EXPLICITLY (was
+    /// carried across this boundary by the `Height0MissingGuard` thread-local).
+    /// `Some(map)` (the CORE FIX-off path) => the commit injects a genuine
+    /// HEIGHT-0 (0-row, full-width, zero) trace for each cluster chip this raw
+    /// shard is MISSING (canonical cluster minus present), keeping the chip-SET
+    /// (recursion normalize VK) stable while committing nothing for those chips.
+    /// `None` (recursion / shrink / wrap / FIX-on) => own-chip-set commit,
+    /// byte-identical to legacy.
     fn commit(
         &self,
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+        cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
     /// Build a device-trace provider over the committed shard data —
@@ -601,6 +612,7 @@ where
         &self,
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
+        cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
@@ -629,6 +641,9 @@ where
             // wrap commit (byte-identical).  A device wrap prover provides
             // `Some(..)` at its own `commit_basefold_path` call site.
             self.gpu_bn254_commit_hook(),
+            // band-cap retirement Phase A: the missing-chip cluster widths,
+            // threaded explicitly (was the `Height0MissingGuard` thread-local).
+            cluster_widths,
         )
     }
 
@@ -657,8 +672,8 @@ where
         // verifier IGNORES entirely (it reads opening evidence from
         // `basefold_shard_proof`); a 0-height chip maps to log_degree 0.
         // ALL-STAGE SOUNDNESS: a height-0 chip only ever exists on the CORE
-        // FIX-off path (the only path that installs a `Height0MissingGuard` and
-        // hence injects 0-row missing chips); compress/shrink/wrap never produce
+        // FIX-off path (the only path that passes `Some(cluster_widths)` to
+        // `commit` and hence injects 0-row missing chips); compress/shrink/wrap never produce
         // a height-0 trace, so this guard is a strict no-op (byte-identical)
         // there.
         let log_degrees = degrees
@@ -950,7 +965,9 @@ where
                     let trace_gen_ms = t0.elapsed().as_millis();
 
                     let t1 = std::time::Instant::now();
-                    let shard_data = self.commit(&record, named_traces);
+                    // Legacy generic prove-shard helper: own-chip-set commit
+                    // (no canonical-cluster missing-chip injection).
+                    let shard_data = self.commit(&record, named_traces, None);
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
@@ -1299,6 +1316,13 @@ pub fn commit_basefold_path<SC, M, P>(
     // #118: the device BN254 wrap-commit fn, threaded to
     // `precompute_jagged_basefold_commit_generic`.  `None` = host commit.
     gpu_bn254_commit: Option<crate::jagged_pcs::jagged::GpuBn254CommitFn>,
+    // band-cap retirement Phase A: the per-shard FULL canonical-CLUSTER chip
+    // NAME -> width map, threaded EXPLICITLY (was read from the
+    // `Height0MissingGuard` thread-local via `current_h0_cluster_widths()`).
+    // `Some(map)` (CORE FIX-off) => inject a HEIGHT-0 trace for each MISSING
+    // cluster chip; `None` (recursion / shrink / wrap / FIX-on) => own-chip-set
+    // commit (byte-identical to legacy).
+    cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
 ) -> ShardMainData<SC, M, P>
 where
     SC: StarkGenericConfig + BasefoldRing,
@@ -1364,13 +1388,13 @@ where
     // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
     // identity fraction (0,1)) — no constraint-valid padding-row synthesis is
     // needed.
-    if let Some(cluster_widths) = crate::shard_level::band_cap::current_h0_cluster_widths() {
+    if let Some(cluster_widths) = cluster_widths {
         use std::collections::BTreeSet;
         // #P2S0 band-cap retirement: inject a genuine HEIGHT-0 (0-row,
         // FULL-WIDTH, zero) representation for each canonical-cluster chip this
         // raw shard is MISSING (canonical cluster minus present), derived
-        // directly from the cluster chip-SET + widths (`current_h0_cluster_
-        // widths`, keyed off the chip-SET — not any band value).
+        // directly from the cluster chip-SET + widths (the `cluster_widths`
+        // param, keyed off the chip-SET — not any band value).
         // A 0-row `RowMajorMatrix` of the chip's canonical width keeps the
         // chip-SET (VK) intact (still present in `data.traces` ->
         // `chip_ordering` -> `opened_values.chips`) while committing NOTHING

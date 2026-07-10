@@ -762,41 +762,39 @@ where
                                     // the FULL canonical CLUSTER this raw FIX-off
                                     // shard lifts to (the SAME shape `fix_shape` +
                                     // `canonicalize_shape_to_cluster` produce under
-                                    // FIX_CORE_SHAPES=true) and install its chip
-                                    // NAME -> width map for the scope of commit+open
-                                    // (which run on THIS rayon task).  The PCS commit
-                                    // (`commit_basefold_path`) reads it via
-                                    // `band_cap::current_h0_cluster_widths`, derives
-                                    // the missing set (canonical cluster minus
-                                    // present), and injects a genuine HEIGHT-0 (0-row,
-                                    // full-width, zero) trace for each missing chip —
-                                    // so the FIX-off normalize VK = the FIX-on
-                                    // canonical-cluster VK (production vk_map) while
-                                    // the STARK proves at RAW heights.  Keyed by chip
-                                    // NAME (the PCS layer cannot depend on
+                                    // FIX_CORE_SHAPES=true) and its chip NAME -> width
+                                    // map, then pass it EXPLICITLY to `commit` (band-cap
+                                    // retirement Phase A — was carried across the
+                                    // `commit` trait boundary by a `Height0MissingGuard`
+                                    // thread-local).  The PCS commit
+                                    // (`commit_basefold_path`) derives the missing set
+                                    // (canonical cluster minus present), and injects a
+                                    // genuine HEIGHT-0 (0-row, full-width, zero) trace
+                                    // for each missing chip — so the FIX-off normalize
+                                    // VK = the FIX-on canonical-cluster VK (production
+                                    // vk_map) while the STARK proves at RAW heights.
+                                    // Keyed by chip NAME (the PCS layer cannot depend on
                                     // `MipsAirId`).  A shard whose heights overflow
                                     // every cluster yields `None` (no inject, legacy
                                     // own-chip-set commit).  The band `log_height` is
                                     // retired — the injection keys off the chip-SET
                                     // and a 0-row commit, not any band value.
-                                    let _h0_guard = cluster_shape_config
+                                    let cluster_widths: Option<
+                                        std::collections::BTreeMap<String, usize>,
+                                    > = cluster_shape_config
                                         .find_canonical_cluster_shape(&record)
                                         .map(|shape| {
-                                            let widths: std::collections::BTreeMap<String, usize> =
-                                                shape
-                                                    .iter()
-                                                    .map(|(air, _log_h)| {
-                                                        let name = air.to_string();
-                                                        let width = cluster_chip_widths
-                                                            .get(&name)
-                                                            .copied()
-                                                            .unwrap_or(1);
-                                                        (name, width)
-                                                    })
-                                                    .collect();
-                                            zkm_pcs::shard_level::band_cap::Height0MissingGuard::new(
-                                                widths,
-                                            )
+                                            shape
+                                                .iter()
+                                                .map(|(air, _log_h)| {
+                                                    let name = air.to_string();
+                                                    let width = cluster_chip_widths
+                                                        .get(&name)
+                                                        .copied()
+                                                        .unwrap_or(1);
+                                                    (name, width)
+                                                })
+                                                .collect()
                                         });
 
                                     // LOCKSTEP ORIENTATION: install the per-shard
@@ -827,7 +825,8 @@ where
                                         zkm_pcs::shard_level::band_cap::UseRevGuard::new(true);
 
                                     let t_commit = std::time::Instant::now();
-                                    let main_data = prover.commit(&record, main_traces);
+                                    let main_data =
+                                        prover.commit(&record, main_traces, cluster_widths);
                                     let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();
@@ -837,7 +836,6 @@ where
                                         .unwrap();
                                     let open_ms = t_open.elapsed().as_millis();
                                     opening_span.exit();
-                                    drop(_h0_guard);
                                     drop(_rev_guard);
 
                                     tracing::info!(

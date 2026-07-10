@@ -10,17 +10,16 @@
 //! commit path, so the committed chip-SET (and hence the VK) equals the FIX-on
 //! canonical cluster while committing NOTHING for the missing chips.
 //!
-//! This module carries the two remaining per-shard signals across the generic
-//! `MachineProver::open` trait boundary from the core prove site
+//! The FULL canonical-cluster chip NAME -> trace WIDTH map (from which the commit
+//! path derives the missing set and injects a 0-row full-width trace for each
+//! missing chip) is NO LONGER a carrier — as of band-cap retirement Phase A it is
+//! threaded EXPLICITLY as the `cluster_widths` parameter of
+//! `MachineProver::commit` / `commit_basefold_path`.  This module now carries only
+//! the two remaining per-shard signals across the generic `MachineProver` trait
+//! boundary from the core prove site
 //! (`zkm_core_machine::utils::prove::prove_with_context`, which has the
 //! `CoreShapeConfig` + per-shard heights):
 //!
-//!   * [`Height0MissingGuard`] / [`current_h0_cluster_widths`] — the FULL
-//!     canonical-cluster chip NAME -> trace WIDTH map, from which the commit path
-//!     derives the missing set (canonical cluster minus present) and injects a
-//!     0-row full-width trace for each.  (Formerly the band-cap value map; the
-//!     band `log_height` was retired — the injection keys off the chip-SET and a
-//!     0-row commit, not any band value.)
 //!   * [`UseRevGuard`] / [`current_use_rev`] — the per-shard rev(zeta)
 //!     orientation decision (see below).
 //!   * [`RecursionAreaPinGuard`] / [`current_recursion_area_pin`] — the
@@ -37,20 +36,7 @@
 //! stages and any caller that doesn't set the carrier keep own-chip-set,
 //! own-height packing.  Only the CORE prove path sets them.
 
-use std::collections::BTreeMap;
-
 thread_local! {
-    /// FULL canonical-CLUSTER chip NAME -> trace WIDTH for the shard currently
-    /// being committed on this thread.  `None` when no [`Height0MissingGuard`]
-    /// is installed (every non-core path == legacy own-chip-set commit).  The
-    /// commit path injects a genuine HEIGHT-0 (0-row, full-width, zero) trace for
-    /// each cluster chip this raw shard is MISSING (canonical cluster minus
-    /// present), keeping the chip-SET (VK) intact while committing nothing.
-    /// Paired with a generation tag so a stale Drop on a reused worker thread
-    /// never serves the wrong shard's widths.
-    static CURRENT_H0_CLUSTER: std::cell::RefCell<Option<(u64, BTreeMap<String, usize>)>> =
-        const { std::cell::RefCell::new(None) };
-
     /// LOCKSTEP ORIENTATION CARRIER: the per-shard rev(zeta)
     /// orientation decision, the SINGLE SOURCE OF TRUTH shared by the jagged
     /// COMMIT (`materialize_dense_jagged`), the `y_per_chip` production /
@@ -86,57 +72,12 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// Generation tag source shared by the RAII guards in this module (currently
+/// [`RecursionAreaPinGuard`]) so a stale Drop on a reused worker thread never
+/// clears a newer install.  (Formerly also used by the `Height0MissingGuard`,
+/// retired in band-cap Phase A when the canonical-cluster widths became the
+/// explicit `MachineProver::commit` `cluster_widths` parameter.)
 static GUARD_GEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// RAII guard that installs the FULL canonical-CLUSTER chip NAME -> width map
-/// into the per-thread stash for its scope, so the commit path can inject a
-/// HEIGHT-0 (0-row, full-width, zero) trace for each canonical-cluster chip this
-/// raw FIX-off shard is MISSING (canonical cluster minus present).  On Drop it
-/// clears the stash only when the slot still holds this guard's generation
-/// (nested-guard safe).  `None` (no install) == own-chip-set commit
-/// (recursion / shrink / wrap / FIX-on), byte-identical to legacy.
-pub struct Height0MissingGuard {
-    gen: u64,
-}
-
-impl Height0MissingGuard {
-    /// Install `cluster_widths` (FULL canonical cluster chip NAME -> width) for
-    /// the calling thread and return a guard that clears it on drop.  The commit
-    /// path (`commit_basefold_path` on the host; the GPU core `commit` on the
-    /// device) iterates this map, skips the chips already present, and injects a
-    /// 0-row full-width matrix for the rest — so the committed chip-SET (and
-    /// hence the normalize VK) is the canonical cluster.
-    #[must_use]
-    pub fn new(cluster_widths: BTreeMap<String, usize>) -> Self {
-        let gen = GUARD_GEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-        CURRENT_H0_CLUSTER.with(|c| {
-            *c.borrow_mut() = Some((gen, cluster_widths));
-        });
-        Self { gen }
-    }
-}
-
-impl Drop for Height0MissingGuard {
-    fn drop(&mut self) {
-        CURRENT_H0_CLUSTER.with(|c| {
-            let mut slot = c.borrow_mut();
-            if let Some((gen, _)) = slot.as_ref() {
-                if *gen == self.gen {
-                    *slot = None;
-                }
-            }
-        });
-    }
-}
-
-/// Clone of the currently-stashed FULL canonical-cluster chip NAME -> width map
-/// for the calling thread, or `None` when no [`Height0MissingGuard`] is installed
-/// (legacy own-chip-set packing).  The commit path derives the missing set
-/// (cluster minus present) from it and injects each missing chip at HEIGHT 0.
-#[must_use]
-pub fn current_h0_cluster_widths() -> Option<BTreeMap<String, usize>> {
-    CURRENT_H0_CLUSTER.with(|c| c.borrow().as_ref().map(|(_, m)| m.clone()))
-}
 
 /// Install (or clear, with `None`) the per-shard rev(zeta) orientation decision
 /// for the calling thread.  The core prover installs it (via [`UseRevGuard`])

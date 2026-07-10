@@ -1580,8 +1580,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 );
 
                                 // Commit to the record and traces.
-                                let data = tracing::debug_span!("commit")
-                                    .in_scope(|| self.compress_prover.commit(&record, traces));
+                                let data = tracing::debug_span!("commit").in_scope(|| {
+                                    // recursion (compress): own-chip-set commit (no
+                                    // canonical-cluster missing-chip injection).
+                                    self.compress_prover.commit(&record, traces, None)
+                                });
 
                                 // Generate the proof.
                                 let proof = tracing::debug_span!("open").in_scope(|| {
@@ -1919,7 +1922,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 .generate_traces(&bf_record)
                 .expect("shrink basefold attach: generate_traces failed");
             let host_pk = self.shrink_prover.pk_to_host(&shrink_pk);
-            let data = self.shrink_prover.commit(&bf_record, traces.clone());
+            // shrink: own-chip-set commit (no canonical-cluster missing-chip injection).
+            let data = self.shrink_prover.commit(&bf_record, traces.clone(), None);
 
             // Shrink device-resident routing: when the shrink prover keeps the
             // committed main traces device-resident (StarkGpuProver), hand
