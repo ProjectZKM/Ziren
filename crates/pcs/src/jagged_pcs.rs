@@ -2279,7 +2279,7 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             pre_y_per_chip,
-            Some(precomputed),
+            precomputed,
             challenger,
             provider,
             gpu_jagged_reduction,
@@ -2292,6 +2292,22 @@ pub mod jagged {
     /// GPU).  When `pre_y_per_chip` is `Some`, step (3) — the host
     /// triple-nested per-column reduction — is skipped entirely.
     /// Output bytes are identical to the host path.
+    ///
+    /// Self-contained legacy flow (host synthetic / unit tests + the
+    /// runtime-dead `prove_trusted_evaluations` no-precompute fallthrough):
+    /// precompute the single-main dense commit on host, observe its
+    /// commitment in-band (mirroring `commit_jagged_pcs`'s observe so the
+    /// `verify_jagged_basefold` transcript aligns), then run steps
+    /// (3)+(4)+(5) through the precomputed fast path.  Byte-identical to the
+    /// former inline in-band-commit body (host commit, legacy `rev = false`,
+    /// no area pin, no provider).
+    ///
+    /// Grouping is decided up front off the same public name-sorted partition
+    /// `prove_jagged_basefold_inner` uses: when it splits into >1 group the
+    /// multi-group prover re-commits + observes PER GROUP and ignores any
+    /// single-main commit, so this path routes there directly WITHOUT the
+    /// single-main precompute/observe (mirroring the former `inner(None)`
+    /// early return).  Single-group takes the precompute + in-band observe.
     pub fn prove_jagged_basefold_with_y_per_chip(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
@@ -2301,12 +2317,49 @@ pub mod jagged {
         gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
         gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
     ) -> JaggedBasefoldBundle {
+        let chip_infos_for_groups: Vec<crate::jagged::JaggedChipInfo> = chip_traces
+            .iter()
+            .map(|(name, t)| {
+                let h = t.values.len() / t.width.max(1);
+                crate::jagged::JaggedChipInfo {
+                    name: name.clone(),
+                    row_count: h,
+                    column_count: t.width,
+                }
+            })
+            .collect();
+        let groups = crate::jagged::partition_from_chip_infos(&chip_infos_for_groups);
+        if groups.len() > 1 {
+            // Multi-group (HOST-ONLY, legacy bitrev): re-commit + observe per
+            // group; no single-main commit/observe. GPU hooks are inner-typed
+            // and unused here, matching the former `inner(None)` early return.
+            return prove_jagged_basefold_multi_group(
+                chip_traces,
+                r_row_per_chip,
+                z_row,
+                pre_y_per_chip,
+                &groups,
+                challenger,
+                None,  // no provider
+                false, // legacy bitrev orientation
+            );
+        }
+        let precomputed = precompute_jagged_basefold_commit(
+            chip_traces,
+            None,  // host commit
+            false, // legacy bitrev orientation
+            None,  // no recursion area pin
+        );
+        // In-band commit observe (the precomputed prove skips it, expecting
+        // the orchestrator prologue to have observed the digest; here there
+        // is none, so observe it now to match `verify_jagged_basefold`).
+        challenger.observe(precomputed.commit.original_commitment.clone());
         prove_jagged_basefold_inner(
             chip_traces,
             r_row_per_chip,
             z_row,
             pre_y_per_chip,
-            None,
+            precomputed,
             challenger,
             None,
             gpu_jagged_reduction,
@@ -2435,17 +2488,18 @@ pub mod jagged {
     }
 
     /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
-    /// observe-inside flow) and [`prove_jagged_basefold_with_precomputed`]
-    /// (the single-commit flow).  When `precomputed` is `Some`,
-    /// steps (1) + (2) are skipped and the in-band commit observe is
-    /// suppressed (the caller already observed the digest at the Phase 1
-    /// prologue position).
+    /// self-contained flow, which now precomputes + observes the commit in its
+    /// wrapper) and [`prove_jagged_basefold_with_precomputed`] (the
+    /// single-commit flow).  `precomputed` is always supplied: steps (1) + (2)
+    /// were run up-front and the in-band commit observe is suppressed (the
+    /// caller already observed the digest — the orchestrator at the Phase 1
+    /// prologue position, or the wrapper just above).
     fn prove_jagged_basefold_inner(
         chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        precomputed: Option<PrecomputedJaggedCommit>,
+        precomputed: PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         // Per-shard device-trace provider, used only to re-materialize
         // empty (device-resident) chip traces on the host-fallback edges.
@@ -2474,9 +2528,8 @@ pub mod jagged {
         // (`PrecomputedJaggedCommit.rev`, set at commit from
         // `StarkMachine::core_rev()`) so the step-4 reduction's dense
         // re-materialize + `y_per_chip` stay in lockstep with the commit.
-        // `false` when no precompute (the two-commit legacy / test path, which
-        // materializes here and is legacy-bitrev — byte-identical).
-        let dense_rev = precomputed.as_ref().map(|p| p.rev).unwrap_or(false);
+        // Read off the committed data (`PrecomputedJaggedCommit.rev`).
+        let dense_rev = precomputed.rev;
 
         // ── Per-round jagged split (Architecture A) ──────────────────────
         // Decide G from the public name-sorted chip dims.  Default OFF
@@ -2517,86 +2570,33 @@ pub mod jagged {
             );
         }
 
-        // (1) + (2): Pack metadata + commit dense as a single Mle via
-        // BaseFold-stacked.  When `precomputed` is `Some`, both steps
-        // were run up-front by the orchestrator's single-main-commit
-        // path, which has already observed the 8-felt
-        // digest of `commit.original_commitment` as `main_commitment` in the
-        // shard-level Phase 1 prologue.  Skip the in-band commit
-        // observe in that case to keep transcripts aligned with the
-        // verifier (which uses `verify_jagged_basefold_no_observe`).
-        let (packing, commit, prover_data, precomputed_dense_handle, precomputed_host_dense_q, recursion_area_pin) = if let Some(pre) =
-            precomputed
-        {
-            tracing::debug!(
-                chips = n_chips,
-                "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
-            );
-            // `pre.host_dense_q` is `Some` ONLY on the device-commit DECLINE
-            // path (the provider-aware host fallback body captured the correct
-            // dense_q while the provider was live).  It carries the dense_q
-            // forward so the reduction below does not re-materialize from the
-            // (drained) provider.
-            // `pre.recursion_area_pin` (band-cap Phase C) carries the recursion
-            // AREA PIN forward so the step-4 jagged-eval half is pin-consistent
-            // with the (pinned) commit — read off the committed data, not a
-            // thread-local.
-            (pre.packing, pre.commit, pre.prover_data, pre.dense_device_handle, pre.host_dense_q, pre.recursion_area_pin)
-        } else {
-            // No precompute → this path materializes the dense commit on
-            // host.  Re-materialize empty device-resident chips from the
-            // provider first so metadata dims + dense values are correct
-            // (no-op clone when provider is None / traces already full).
-            let chip_traces_full =
-                rematerialize_chip_traces_via_provider(chip_traces, provider);
-            let chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)] =
-                &chip_traces_full;
-            let _t_meta = std::time::Instant::now();
-            let _meta_span = tracing::info_span!("jagged_compute_metadata").entered();
-            let packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-            drop(_meta_span);
-            tracing::info!(
-                elapsed_ms = _t_meta.elapsed().as_millis() as u64,
-                chips = n_chips,
-                sub_phase = "compute_metadata",
-                "jagged sub-phase done"
-            );
-
-            // Memory-critical ordering (E3 partial): materialize `dense_q`
-            // ONLY long enough to hand it to the commit — move, don't
-            // clone — then drop it and re-materialize for the reduction.
-            // Previous flow kept a duplicate live across (commit + reduction)
-            // which doubled peak RSS on wide workloads (tendermint OOM'd at
-            // 112 GB RSS).  Re-materialization is a cheap linear pass over
-            // `chip_traces` compared to the LDE / stripe work already done
-            // in the commit.
-            let _t_commit = std::time::Instant::now();
-            let _commit_span = tracing::info_span!("jagged_dense_commit").entered();
-            let (commit, prover_data) = {
-                let dense_q =
-                    materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev);
-                debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
-                let dense_traces = vec![(
-                    alloc::string::String::from("<jagged-dense>"),
-                    RowMajorMatrix::new(dense_q, 1),
-                )];
-                // #118: in-band commit (precomputed=None) — reached only on
-                // the non-precompute path (host synthetic / tests); the
-                // device-live commit flows through the auto-precompute path.
-                commit_jagged_pcs(dense_traces, challenger, None)
-            };
-            drop(_commit_span);
-            tracing::info!(
-                elapsed_ms = _t_commit.elapsed().as_millis() as u64,
-                chips = n_chips,
-                log_dense_size = packing.log_dense_size as u64,
-                sub_phase = "dense_commit",
-                "jagged sub-phase done"
-            );
-            // No precompute → this in-band path is host synthetic / tests only,
-            // never a pinned recursion commit → recursion_area_pin = None.
-            (packing, commit, prover_data, None, None, None)
-        };
+        // (1) + (2): metadata + dense commit were run up-front by the
+        // orchestrator's single-main-commit path, which has already observed
+        // the 8-felt digest of `commit.original_commitment` as
+        // `main_commitment` in the shard-level Phase 1 prologue.  The in-band
+        // commit observe is therefore skipped to keep transcripts aligned with
+        // the verifier (which uses `verify_jagged_basefold_no_observe`).
+        //
+        // `host_dense_q` is `Some` ONLY on the device-commit DECLINE path (the
+        // provider-aware host fallback body captured the correct dense_q while
+        // the provider was live).  It carries the dense_q forward so the
+        // reduction below does not re-materialize from the (drained) provider.
+        // `recursion_area_pin` (band-cap Phase C) carries the recursion AREA PIN
+        // forward so the step-4 jagged-eval half is pin-consistent with the
+        // (pinned) commit — read off the committed data, not a thread-local.
+        tracing::debug!(
+            chips = n_chips,
+            "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
+        );
+        let PrecomputedJaggedCommit {
+            packing,
+            commit,
+            prover_data,
+            dense_device_handle: precomputed_dense_handle,
+            host_dense_q: precomputed_host_dense_q,
+            rev: _,
+            recursion_area_pin,
+        } = precomputed;
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
