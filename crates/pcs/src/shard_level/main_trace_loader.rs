@@ -73,21 +73,45 @@ pub trait MainTraceLoader<F> {
     }
 }
 
-/// Loader backed by a borrowed slice of host `RowMajorMatrix`s.
+/// Loader backed by a borrowed slice of host `RowMajorMatrix`s and/or
+/// the shared analytic trace-MLE (`padded`, a per-chip `PaddedMle<F>`
+/// slice in chip-index order), both threaded read-only to the shard
+/// prover.
 ///
-/// Optionally carries the shared analytic trace-MLE
-/// (`padded`), a per-chip `PaddedMle<F>` slice parallel to `traces`,
-/// threaded read-only to the shard prover.
+/// Two shapes:
+///   * **raw-backed** ([`EagerHostLoader::new`] / [`with_padded`]) —
+///     carries a borrowed `traces` slice; `borrow_all` hands it back.
+///   * **MLE-authoritative** ([`EagerHostLoader::padded_only`]) — carries
+///     ONLY the shared `Arc<Mle>` store (trace-unification Phase 1: the
+///     owned `main_traces` were MOVED into it, so no separate raw buffer
+///     survives).  `borrow_all` returns `None`; `get` / `materialize_all`
+///     reconstruct a `RowMajorMatrix` from the shared MLE on demand
+///     (never hit on the hot path, which reads `padded_slice` directly).
 pub struct EagerHostLoader<'a, F: p3_field::Field> {
-    traces: &'a [RowMajorMatrix<F>],
+    /// Borrowed per-chip raw traces, or `None` when the shared MLE
+    /// (`padded`) is the sole authoritative store.
+    traces: Option<&'a [RowMajorMatrix<F>]>,
     /// Per-chip shared trace-MLE (chip-index order), or
     /// `None` when the caller does not supply one.
     padded: Option<&'a [crate::multilinear::PaddedMle<F>]>,
 }
 
+/// Reconstruct a chip's `RowMajorMatrix` from its shared padded MLE: the
+/// real (unpadded) row-major cells for a host chip, or an empty width-0
+/// matrix for a `dummy` (device-resident / unexercised) chip — byte-
+/// identical to the raw `main_traces[i]` the MLE was built from.
+fn matrix_from_padded<F: p3_field::Field>(
+    p: &crate::multilinear::PaddedMle<F>,
+) -> RowMajorMatrix<F> {
+    match p.real_trace_ref() {
+        Some(tr) => RowMajorMatrix::new(tr.values.to_vec(), tr.width),
+        None => RowMajorMatrix::new(Vec::new(), 0),
+    }
+}
+
 impl<'a, F: p3_field::Field> EagerHostLoader<'a, F> {
     pub fn new(traces: &'a [RowMajorMatrix<F>]) -> Self {
-        Self { traces, padded: None }
+        Self { traces: Some(traces), padded: None }
     }
 
     /// Construct a loader that also carries the shared
@@ -102,24 +126,47 @@ impl<'a, F: p3_field::Field> EagerHostLoader<'a, F> {
             padded.len(),
             "EagerHostLoader::with_padded: traces and padded must be parallel arrays",
         );
-        Self { traces, padded: Some(padded) }
+        Self { traces: Some(traces), padded: Some(padded) }
+    }
+
+    /// Construct an MLE-authoritative loader carrying ONLY the shared
+    /// per-chip trace-MLE store (trace-unification Phase 1): the owned
+    /// `main_traces` were MOVED into these `Arc<Mle>`s, so there is no
+    /// separate raw-trace buffer.  `borrow_all` returns `None`; the shard
+    /// prover reads dims / commit cells from `padded_slice` directly.
+    pub fn padded_only(padded: &'a [crate::multilinear::PaddedMle<F>]) -> Self {
+        Self { traces: None, padded: Some(padded) }
     }
 }
 
 impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
     fn len(&self) -> usize {
-        self.traces.len()
+        match self.traces {
+            Some(t) => t.len(),
+            None => self.padded.map(|p| p.len()).unwrap_or(0),
+        }
     }
 
     fn get(&self, i: usize) -> RowMajorMatrix<F> {
-        RowMajorMatrix::new(self.traces[i].values.clone(), self.traces[i].width)
+        match self.traces {
+            Some(t) => RowMajorMatrix::new(t[i].values.clone(), t[i].width),
+            None => matrix_from_padded(&self.padded.expect("padded_only carries padded")[i]),
+        }
     }
 
     fn materialize_all(&self) -> Vec<RowMajorMatrix<F>> {
-        self.traces
-            .iter()
-            .map(|t| RowMajorMatrix::new(t.values.clone(), t.width))
-            .collect()
+        match self.traces {
+            Some(t) => t
+                .iter()
+                .map(|t| RowMajorMatrix::new(t.values.clone(), t.width))
+                .collect(),
+            None => self
+                .padded
+                .expect("padded_only carries padded")
+                .iter()
+                .map(matrix_from_padded)
+                .collect(),
+        }
     }
 
     fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>> {
@@ -130,12 +177,14 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
         self.padded
     }
 
-    /// The host loader carries the traces read-only, so hand back a
-    /// borrow — `materialize_all` above is a pure per-chip `values.clone()`,
-    /// so `&self.traces` is byte-identical to its output and lets the caller
-    /// skip the full-trace copy.
+    /// A raw-backed host loader hands back its borrowed traces (a pure
+    /// per-chip `values.clone()` in `materialize_all`, so the borrow is
+    /// byte-identical and lets the caller skip the full-trace copy).  The
+    /// MLE-authoritative (`padded_only`) loader has NO raw buffer, so it
+    /// returns `None` and the caller sources dims / commit cells from the
+    /// shared MLE via `padded_slice`.
     fn borrow_all(&self) -> Option<&[RowMajorMatrix<F>]> {
-        Some(self.traces)
+        self.traces
     }
 }
 

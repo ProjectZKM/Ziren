@@ -40,6 +40,46 @@ pub struct Mle<F, A: Backend = CpuBackend> {
     guts: Tensor<F, A>,
 }
 
+/// A borrowed, zero-copy row-major view of a CPU-backed trace batch:
+/// `values` is the flat `[height, width]` row-major slice and `width`
+/// its column count.  This is the shared boundary type the commit / open
+/// paths read instead of owning a separate [`RowMajorMatrix`] — its
+/// layout is **byte-identical** to `RowMajorMatrix { values, width }`
+/// (from which a [`Tensor`]/[`Mle`] is a zero-copy move; see
+/// [`Tensor::as_slice`] / `From<RowMajorMatrix>`), mirroring SP1's
+/// `Message<Arc<Mle>>` shared-view model.
+///
+/// Additive (trace-unification Phase 0): the type + accessors exist so
+/// later phases can source commit/open cells from the single shared
+/// `Arc<Mle>` store; nothing it produces reaches the Fiat-Shamir
+/// transcript on its own.
+#[derive(Clone, Copy, Debug)]
+pub struct TraceRef<'a, F> {
+    /// Flat row-major `[height, width]` cells (`row * width + col`).
+    pub values: &'a [F],
+    /// Column count (`num_polynomials`).
+    pub width: usize,
+}
+
+impl<'a, F> TraceRef<'a, F> {
+    /// Wrap a flat row-major slice + its width.
+    #[inline]
+    pub fn new(values: &'a [F], width: usize) -> Self {
+        Self { values, width }
+    }
+
+    /// Row count — `values.len() / width` (`0` when `width == 0`),
+    /// matching `RowMajorMatrix` / `DenseMatrix::height` bit-for-bit.
+    #[inline]
+    pub fn height(&self) -> usize {
+        if self.width == 0 {
+            0
+        } else {
+            self.values.len() / self.width
+        }
+    }
+}
+
 impl<F, A: Backend> Mle<F, A> {
     /// Wrap a row-major `[hypercube, num_polys]` tensor.
     #[inline]
@@ -94,6 +134,16 @@ impl<F: Field> Mle<F, CpuBackend> {
         // `Tensor::from(Vec<F>)` reshapes to `[len, 1]` (zero-copy move),
         // byte-identical to the old `RowMajorMatrix::new_col(values)`.
         Self { guts: Tensor::from(values) }
+    }
+
+    /// Borrow this CPU-backed MLE as a zero-copy row-major [`TraceRef`]
+    /// (`values` = the flat cells obtained ONCE via [`Tensor::as_slice`],
+    /// `width` = [`Mle::num_polynomials`]).  The view is byte-identical to
+    /// the `RowMajorMatrix` this MLE was built from — no allocation, no
+    /// copy.  Additive (trace-unification Phase 0).
+    #[inline]
+    pub fn as_trace_ref(&self) -> TraceRef<'_, F> {
+        TraceRef::new(self.guts.as_slice(), self.num_polynomials())
     }
 
     /// Standard multilinear evaluation at an extension-field point.

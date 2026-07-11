@@ -170,6 +170,18 @@ impl<T: Field> PaddedMle<T> {
         &self.inner
     }
 
+    /// Borrow the REAL (unpadded) rows as a zero-copy
+    /// [`crate::basefold::TraceRef`], or `None` when this is a
+    /// fully-virtual (`dummy`) padded MLE (a width-0 / device-resident
+    /// chip).  `Some(view)` iff `num_polynomials() > 0` (⟺ `inner` is
+    /// `Some`).  The view's `values` are the raw trace cells and `width`
+    /// the trace width — byte-identical to the `RowMajorMatrix` the inner
+    /// `Mle` was built from.  Additive (trace-unification Phase 0).
+    #[inline]
+    pub fn real_trace_ref(&self) -> Option<crate::basefold::TraceRef<'_, T>> {
+        self.inner.as_ref().map(|m| m.as_trace_ref())
+    }
+
     /// Consume, returning the inner real-only `Mle`, if any.
     #[inline]
     pub fn into_inner(self) -> Option<Arc<Mle<T>>> {
@@ -460,6 +472,46 @@ mod tests {
                 assert_eq!(got, reference, "real_log={real_log} width={width} pad={pad}");
             }
         }
+    }
+
+    /// Phase-0 boundary: `Mle::as_trace_ref` / `PaddedMle::real_trace_ref`
+    /// expose the raw trace as a zero-copy row-major view whose
+    /// `values` / `width` / `height` are byte-identical to the
+    /// `RowMajorMatrix` the MLE was built from — the shared-view boundary
+    /// the commit/open paths read in later phases.  A `dummy` (width-0)
+    /// padded MLE yields `None`.
+    #[test]
+    fn phase0_trace_ref_matches_raw_matrix() {
+        let mut rng = StdRng::seed_from_u64(606);
+        for &(real_log, width) in &[(0usize, 1usize), (2, 1), (3, 5), (4, 3), (5, 7)] {
+            let height = 1usize << real_log;
+            let trace = rand_trace(&mut rng, height, width);
+            let raw_values = trace.values.clone();
+            let raw_width = trace.width;
+
+            // Mle::as_trace_ref: same cells / width / height as the raw matrix.
+            let mle = Mle::from_row_major(trace);
+            let tr = mle.as_trace_ref();
+            assert_eq!(tr.values, raw_values.as_slice(), "as_trace_ref values");
+            assert_eq!(tr.width, raw_width, "as_trace_ref width");
+            assert_eq!(tr.height(), height, "as_trace_ref height");
+
+            // PaddedMle::real_trace_ref: same, for a zero-padded trace MLE.
+            let padded =
+                PaddedMle::padded_with_zeros(Arc::new(mle), (real_log + 2) as u32);
+            let ptr = padded.real_trace_ref().expect("width>0 => Some");
+            assert_eq!(ptr.values, raw_values.as_slice(), "real_trace_ref values");
+            assert_eq!(ptr.width, raw_width, "real_trace_ref width");
+            assert_eq!(ptr.height(), height, "real_trace_ref height");
+            assert_eq!(padded.num_polynomials(), raw_width);
+            assert_eq!(padded.num_real_entries(), height);
+        }
+
+        // A dummy (width-0) padded MLE has no real cells → None.
+        let dummy: PaddedMle<F> =
+            PaddedMle::dummy(3, Padding::Constant(F::ZERO, 0));
+        assert!(dummy.real_trace_ref().is_none(), "dummy => None");
+        assert_eq!(dummy.num_polynomials(), 0);
     }
 
     /// `full_geq` with an all-zero threshold is identically 1 (matches

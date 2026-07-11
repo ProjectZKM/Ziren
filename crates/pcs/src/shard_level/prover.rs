@@ -692,41 +692,42 @@ where
         "chips and main_trace_loader must be parallel arrays",
     );
 
-    // `main_traces` is read-only for the rest of this scope (no mutation
-    // remains — the zeropad zeroing was removed).  On the host path the
-    // `EagerHostLoader` already holds the traces, so borrow them instead of
-    // cloning via `materialize_all` (a pure per-chip `values.clone()`).  The
-    // device `LazyDeviceLoader` returns `None` (it pulls each chip on demand)
-    // and keeps the owned-clone path byte-for-byte unchanged.  `_owned` holds
-    // the fallback Vec so the borrow lives for the whole commit+open scope.
-    let _owned_main_traces: Vec<RowMajorMatrix<Val<SC>>>;
-    let main_traces: &[RowMajorMatrix<Val<SC>>] = match main_trace_loader.borrow_all() {
-        Some(borrowed) => borrowed,
-        None => {
-            _owned_main_traces = main_trace_loader.materialize_all();
-            &_owned_main_traces
-        }
-    };
-
     // The shared per-chip analytic main-trace MLE, covering ALL chips in
-    // chip-index order — the SOLE host main-trace source for the LogUp-GKR +
-    // zerocheck stages (they no longer take `main_traces`).  Reuse the loader's
-    // slice when it carries one (the GPU-prover trait path builds it at the
-    // `EagerHostLoader::with_padded` seam); otherwise build it locally here —
-    // this closes the None-gap on the free-fn path (`EagerHostLoader::new`:
-    // shrink prover + the recursion VK-witness builder), which previously fell
-    // back to `main_traces` inside those callees.  A width-0 chip
-    // (device-resident / unexercised) maps to a fully-virtual `dummy`; a host
-    // chip wraps its raw trace via `padded_with_zeros(Mle::from_row_major(t))`.
-    // Construction is byte-identical to the trait method (crates/pcs/src/
-    // prover.rs) and to the raw-trace path, so it never perturbs the transcript.
-    // No new D2H: device main_traces are already width-0 → `dummy`.
+    // chip-index order — the SINGLE authoritative host main-trace store
+    // (trace-unification Phase 1).  The LogUp-GKR + zerocheck stages read it
+    // directly, and (Phase 1) so do the transcript-prologue heights, the
+    // prospective-dense sizing, the cumulative-tail gate, the per-chip
+    // commit-trace assembly, and the assembly-stage chip heights below — none
+    // of them keep a separate raw `main_traces` buffer alive anymore.
+    //
+    // Source:
+    //   * host trait path (`prove_shard_to_basefold`, CpuProver + GPU-core via
+    //     open) — the loader carries the store via `padded_only`; the owned
+    //     `main_traces` were already MOVED into these `Arc<Mle>`s (no clone,
+    //     the retired copy-SITE 3).
+    //   * free-fn / device paths (no `padded_slice`: shrink, recursion
+    //     VK-witness, ziren-gpu `LazyDeviceLoader`) — build it locally from the
+    //     loader's raw traces (borrowed, or device-pulled via `materialize_all`)
+    //     so ALL downstream reads share ONE uniform source.  Construction is
+    //     byte-identical to the raw-trace path, so it never perturbs the
+    //     transcript.  A width-0 chip (device-resident / unexercised) maps to a
+    //     fully-virtual `dummy`; a host chip wraps its raw trace via
+    //     `padded_with_zeros(Mle::from_row_major(t))`.  No new D2H: device
+    //     main_traces are already width-0 → `dummy`.
     let _built_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>>;
+    let _owned_main_traces: Vec<RowMajorMatrix<Val<SC>>>;
     let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] =
         match main_trace_loader.padded_slice() {
             Some(p) => p,
             None => {
-                _built_trace_mles = main_traces
+                let raw: &[RowMajorMatrix<Val<SC>>] = match main_trace_loader.borrow_all() {
+                    Some(borrowed) => borrowed,
+                    None => {
+                        _owned_main_traces = main_trace_loader.materialize_all();
+                        &_owned_main_traces
+                    }
+                };
+                _built_trace_mles = raw
                     .iter()
                     .map(|t| {
                         let width = t.width;
@@ -803,9 +804,13 @@ where
     // dims — identical to what the dense commit hook will compute.
     let prospective_total: usize = chips
         .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, t)| {
-            let (w, h) = if t.width == 0 {
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            // Width-0 (num_polynomials()==0) ⟺ the raw trace was width-0;
+            // its real dims live in the provider.  Host chips read the shared
+            // MLE's real width / row count (== the raw `t.width` /
+            // `t.values.len()/t.width`).
+            let (w, h) = if pm.num_polynomials() == 0 {
                 match (
                     _device_traces.and_then(|p| p.chip_width(&chip.name())),
                     _device_traces.and_then(|p| p.chip_height(&chip.name())),
@@ -814,7 +819,7 @@ where
                     _ => (0, 0),
                 }
             } else {
-                (t.width, t.values.len() / t.width.max(1))
+                (pm.num_polynomials(), pm.num_real_entries())
             };
             w * h
         })
@@ -828,15 +833,20 @@ where
     let skip_device_d2h = handle_path_guaranteed;
     let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
         .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, t)| {
-            if t.width == 0 {
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            // Width-0 (num_polynomials()==0) ⟺ the raw `main_traces[i]` was
+            // width-0 — a device-resident / unexercised chip carrying no host
+            // cells (its shared MLE is a `dummy`).
+            if pm.num_polynomials() == 0 {
                 if let Some(p) = _device_traces {
                     if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
                         // Device-resident chip with an empty host trace and
                         // the handle path guaranteed: skip the D2H, keep it
                         // empty.  The device commit hook packs it D2D.
-                        return t.clone();
+                        // (Byte-identical to the former width-0
+                        // `main_traces[i].clone()`.)
+                        return RowMajorMatrix::new(Vec::new(), 0);
                     }
                     // Otherwise (handle path NOT guaranteed, or kill-switch):
                     // eager D2H here, PRE-DRAIN, so the host reduction
@@ -850,8 +860,15 @@ where
                         return RowMajorMatrix::new(vals, w);
                     }
                 }
+                // No provider / materialize failed: an empty width-0 matrix,
+                // byte-identical to the former `main_traces[i].clone()`.
+                return RowMajorMatrix::new(Vec::new(), 0);
             }
-            t.clone()
+            // Host chip: clone the shared MLE's real (unpadded) row-major
+            // cells — byte-identical to the former `main_traces[i].clone()`
+            // (the MLE was built by MOVING that same buffer in).
+            let tr = pm.real_trace_ref().expect("num_polynomials()>0 => inner Some");
+            RowMajorMatrix::new(tr.values.to_vec(), tr.width)
         })
         .collect();
     // Commit-traces D2H skip: capture the cumulative-sum TAILS
@@ -865,9 +882,10 @@ where
     // full-trace materialize as the cumsum source entirely.
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips
         .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, t)| {
-            if t.width != 0 {
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            // Host-trace chips (num_polynomials()!=0) stay `None`.
+            if pm.num_polynomials() != 0 {
                 return None;
             }
             let p = _device_traces?;
@@ -901,8 +919,6 @@ where
             recursion_area_pin,
         );
     let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
-    // `main_traces` is already `&[RowMajorMatrix<Val<SC>>]` (borrowed
-    // from the loader above), so no reborrow is needed here.
 
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!(
@@ -931,7 +947,6 @@ where
     // Order matches SP1:
     //   public_values → main_commitment → num_chips →
     //   per-chip { height_felt, name_len, name_bytes }
-    use p3_matrix::Matrix;
     let _t_phase1 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_transcript_prologue").entered();
@@ -943,23 +958,25 @@ where
         }
         let num_chips = Val::<SC>::from_u64(chips.len() as u64);
         challenger.observe(num_chips);
-        for (chip, trace) in chips.iter().zip(main_traces.iter()) {
+        for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
             // Per-chip log-height observe. Source matches
             // the `chip_log_heights` BTreeMap populated below.
             //
-            // Device residency: an empty host trace (width == 0)
-            // means the chip's real trace lives device-side in the
-            // per-shard provider. Resolve the REAL height there so the
-            // observed transcript value is identical to the host-trace
-            // path (host parity); fall back to the legacy h=1/log_h=0
-            // for genuinely unexercised chips with no provider entry.
-            let h = if trace.width == 0 {
+            // Device residency: an empty host trace
+            // (num_polynomials()==0 ⟺ raw width==0) means the chip's real
+            // trace lives device-side in the per-shard provider. Resolve the
+            // REAL height there so the observed transcript value is identical
+            // to the host-trace path (host parity); fall back to the legacy
+            // h=1/log_h=0 for genuinely unexercised chips with no provider
+            // entry.  A host chip's `num_real_entries()` == the raw
+            // `trace.height()`.
+            let h = if pm.num_polynomials() == 0 {
                 _device_traces
                     .and_then(|p| p.chip_height(&chip.name()))
                     .unwrap_or(0)
                     .max(1)
             } else {
-                trace.height().max(1)
+                pm.num_real_entries().max(1)
             };
             let log_h = if h.is_power_of_two() {
                 h.trailing_zeros() as u64
@@ -1266,7 +1283,7 @@ where
     // recursion's `full_geq` (zerocheck.rs:517) degree must be its bit
     // decomposition — NOT bits of log_h.  Carry it per chip by name.
     let mut chip_heights = std::collections::BTreeMap::new();
-    for (chip, trace) in chips.iter().zip(main_traces.iter()) {
+    for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Device residency: resolve empty host traces' REAL height
         // from the per-shard device provider (host parity with the
         // host-trace path). Mirrors the Phase-1 prologue observe above —
@@ -1279,13 +1296,15 @@ where
         // all-zero degree bits => the host reconstruction excludes it.  The
         // device branch keeps its `.max(1)` (a device-resident chip with no
         // provider height still defaults to 1 as before).
-        let h = if trace.width == 0 {
+        // A host chip's `num_real_entries()` == the raw `trace.height()`
+        // (num_polynomials()==0 ⟺ raw width==0 → resolve via the provider).
+        let h = if pm.num_polynomials() == 0 {
             _device_traces
                 .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
                 .unwrap_or(0)
                 .max(1)
         } else {
-            trace.height()
+            pm.num_real_entries()
         };
         let log_h = if h <= 1 {
             0u8
@@ -1384,34 +1403,38 @@ where
     > = chips
         .iter()
         // Device residency: cumulative sums must read the REAL trace
-        // cells — `commit_traces` carries provider-materialized traces for
-        // device-resident chips (host-empty); identical to `main_traces`
-        // on the host path.
+        // cells at their raw heights.
         // Device-resident chips prefer the early-captured provider
         // TAIL (chip_cum_tails) — same 14 values, no dependence on the
         // full materialize.  Validated identical via the bf-digest
         // cumulative_sums section canary.
-        // Read RAW `main_traces` (the real per-chip cells at their raw heights)
-        // for the per-chip global cumulative sum, NOT `commit_traces`.  Under
-        // natural-commit the present chips' `commit_traces == main_traces`, so
-        // this is byte-identical; the distinction matters only if a commit trace
-        // were ever padded above its raw height (zero high rows would inject
-        // spurious LogUp contributions — e.g. a zero row reading as a real
-        // "address 0" send — making the global cumulative sum non-zero and the
-        // recursion `assert_complete`'s `assert_digest_zero` fail).
-        // Device-resident chips (width==0, empty main_trace) still use the
-        // provider TAIL below, unaffected.
-        .zip(main_traces.iter())
+        // Read the RAW per-chip cells at their raw heights from the shared
+        // `Arc<Mle>` store (`real_trace_ref().values`, a zero-copy borrow of
+        // the same buffer the owned `main_traces` were MOVED into), NOT the
+        // post-precompute `commit_traces`.  Under natural-commit the present
+        // chips' commit cells == these raw cells, so it is byte-identical; the
+        // distinction matters only if a commit trace were ever padded above its
+        // raw height (zero high rows would inject spurious LogUp contributions —
+        // e.g. a zero row reading as a real "address 0" send — making the global
+        // cumulative sum non-zero and the recursion `assert_complete`'s
+        // `assert_digest_zero` fail).  Device-resident chips (width-0 → dummy
+        // MLE, empty cells) still use the provider TAIL below, unaffected.
+        .zip(shared_trace_mles.iter())
         .zip(chip_cum_tails.iter())
-        .map(|((chip, main_trace), tail)| {
+        .map(|((chip, pm), tail)| {
             let name = MachineAir::<Val<SC>>::name(*chip);
             let global = if let Some(tail14) = tail {
                 crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_tail(
                     *chip, tail14,
                 )
             } else {
-                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum(
-                    *chip, main_trace,
+                // Host chip: the raw row-major cells (last 14 read); a width-0
+                // dummy yields an empty slice (sz<14 → zero digest, matching the
+                // former empty `main_traces[i]`).
+                let vals: &[Val<SC>] =
+                    pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
+                crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
+                    *chip, vals,
                 )
             };
             let local = Challenge::<SC>::ZERO;

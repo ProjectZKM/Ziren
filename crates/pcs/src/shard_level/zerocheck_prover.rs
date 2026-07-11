@@ -590,14 +590,31 @@ where
     F: PrimeField,
     A: MachineAir<F>,
 {
+    chip_global_cumulative_sum_from_values(chip, &main_trace.values)
+}
+
+/// Row-major-`values` variant of [`chip_global_cumulative_sum`]: reads
+/// only the last 14 cells of a chip's main-trace `values` (the fn never
+/// uses the width).  Lets the caller source the cells from the shared
+/// `Arc<Mle>` view ([`crate::multilinear::PaddedMle::real_trace_ref`]'s
+/// `values`) with no owned `RowMajorMatrix` — byte-identical to the
+/// `RowMajorMatrix` form.
+pub fn chip_global_cumulative_sum_from_values<F, A>(
+    chip: &crate::Chip<F, A>,
+    values: &[F],
+) -> crate::septic_digest::SepticDigest<F>
+where
+    F: PrimeField,
+    A: MachineAir<F>,
+{
     if chip.commit_scope() == crate::air::LookupScope::Local {
         return crate::septic_digest::SepticDigest::<F>::zero();
     }
-    let sz = main_trace.values.len();
+    let sz = values.len();
     if sz < 14 {
         return crate::septic_digest::SepticDigest::<F>::zero();
     }
-    let last_row = &main_trace.values[sz - 14..sz];
+    let last_row = &values[sz - 14..sz];
     let x = crate::septic_extension::SepticExtension::<F>::from_basis_coefficients_fn(
         |j| last_row[j],
     );

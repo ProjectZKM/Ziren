@@ -367,7 +367,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         &self,
         chips: &[&MachineChip<SC, A>],
         preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-        main_traces: &[RowMajorMatrix<Val<SC>>],
+        // trace-unification Phase 1: OWNED so the shared per-chip
+        // `Arc<Mle>` store below is built by MOVING each trace in
+        // (zero-copy `from_row_major`) instead of cloning it.
+        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         main_commitment: [Val<SC>; 8],
         public_values: Vec<Val<SC>>,
         max_log_row_count: usize,
@@ -420,17 +423,21 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
-        // Build the shared analytic trace-MLE once, per chip,
-        // in chip-index order, from the materialized main traces and the
-        // per-stage cube `max_log_row_count` (the same cube the zerocheck /
-        // LogUp-GKR stages open over).  Threaded read-only into the shard
-        // prover via the `EagerHostLoader` seam.  Sourcing a stage's cells
-        // from this shared MLE is byte-identical to re-lifting the raw trace,
-        // so it never perturbs the Fiat-Shamir transcript.  A width-0 chip
+        // Build the shared analytic trace-MLE once, per chip, in
+        // chip-index order, as the SINGLE authoritative host main-trace
+        // store (trace-unification Phase 1).  Each chip's `Arc<Mle>` is
+        // built by MOVING the owned raw trace in via the zero-copy
+        // `from_row_major` (`Tensor::from`) — NO deep copy (this retires
+        // the former per-chip `t.values.clone()`, copy-SITE 3).  It is
+        // threaded read-only into the shard prover via the loader's
+        // `padded_only` seam; the downstream commit / dims reads source
+        // their cells from this store directly.  Sourcing a stage's cells
+        // from the shared MLE is byte-identical to the raw trace, so it
+        // never perturbs the Fiat-Shamir transcript.  A width-0 chip
         // (device-resident / unexercised) has no host cells to wrap, so it
         // maps to a fully-virtual `dummy`.
         let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
-            .iter()
+            .into_iter()
             .map(|t| {
                 let width = t.width;
                 if width == 0 {
@@ -439,14 +446,13 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                         crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
                     );
                 }
-                let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
-                    RowMajorMatrix::new(t.values.clone(), width),
-                ));
+                // MOVE the trace's backing buffer into the Mle (zero-copy).
+                let mle =
+                    std::sync::Arc::new(crate::basefold::Mle::from_row_major(t));
                 crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
             })
             .collect();
-        let loader = crate::shard_level::main_trace_loader::EagerHostLoader::with_padded(
-            main_traces,
+        let loader = crate::shard_level::main_trace_loader::EagerHostLoader::padded_only(
             &shared_trace_mles,
         );
         crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch::<SC, A, _, _>(
@@ -1311,7 +1317,9 @@ where
     let proof = prover.prove_shard_to_basefold(
         &chips_reborrow,
         &preprocessed_traces,
-        &main_traces_owned,
+        // trace-unification Phase 1: hand OWNERSHIP to the trait method so
+        // it MOVES each trace into the shared `Arc<Mle>` store (no clone).
+        main_traces_owned,
         digest,
         public_values,
         max_log_row_count,
