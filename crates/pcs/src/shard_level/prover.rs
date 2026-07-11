@@ -350,7 +350,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        main_traces: &[RowMajorMatrix<Val<SC>>],
+        // trace-unification Phase 2/C: OWNED so the jagged open builds its
+        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
+        // clone) — retires copy-SITE 2.
+        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -387,7 +390,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        main_traces: &[RowMajorMatrix<Val<SC>>],
+        // trace-unification Phase 2/C: OWNED so the jagged open builds its
+        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
+        // clone) — retires copy-SITE 2.
+        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -439,7 +445,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        main_traces: &[RowMajorMatrix<Val<SC>>],
+        // trace-unification Phase 2/C: OWNED so the jagged open builds its
+        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
+        // clone) — retires copy-SITE 2.
+        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -918,7 +927,9 @@ where
             dense_rev,
             recursion_area_pin,
         );
-    let commit_traces: &[RowMajorMatrix<Val<SC>>] = &commit_traces;
+    // `commit_traces` is kept OWNED (no reborrow): the dims sites below borrow
+    // it, and the jagged open (`produce`) at Stage 4 MOVES it in so its per-chip
+    // cells become the open's `chip_traces` with NO clone (retires copy-SITE 2).
 
     let n_chips = chips.len();
     let _shard_span = tracing::info_span!(
@@ -1544,7 +1555,9 @@ where
 /// own provider; this stays the CPU body.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    main_traces: &[RowMajorMatrix<Val<SC>>],
+    // trace-unification Phase 2/C: OWNED so `chip_traces` is built by MOVING
+    // each trace's cells in (reinterpret, no clone) — retires copy-SITE 2.
+    main_traces: Vec<RowMajorMatrix<Val<SC>>>,
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -1626,24 +1639,9 @@ where
         alloc::vec::Vec::from_raw_parts(v.as_mut_ptr() as *mut B, v.len(), v.capacity())
     }
 
-    // Send `trace.width` directly; the verifier reads each chip's
-    // `column_count` from `PackingMeta` so padding to `chip.width()`
-    // would just inflate jagged-PCS data on sparse chips.
-    let chip_traces: Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
-        .iter()
-        .zip(main_traces.iter())
-        .map(|(chip, trace)| {
-            let name = chip.name().to_string();
-            let trace_width = trace.width;
-            // SAFETY: Val<SC> == InnerVal under the TypeId gate.
-            let values: Vec<InnerVal> =
-                unsafe { reinterpret_vec::<Val<SC>, InnerVal>(trace.values.clone()) };
-            (name, RowMajorMatrix::new(values, trace_width))
-        })
-        .collect();
-
     // Per-chip `r_row` = trailing log(chip_height) coords of the
-    // shared eval_point.
+    // shared eval_point.  Computed FIRST (reads dims by reference) so the
+    // `chip_traces` build below can then MOVE the owned `main_traces` in.
     // Width-0 (device-resident, un-materialized) chips resolve
     // their REAL height via the per-shard provider.  With the D2H
     // skip, `commit_traces` does not eagerly materialize device
@@ -1671,6 +1669,27 @@ where
             };
             // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
             unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(slice.to_vec()) }
+        })
+        .collect();
+
+    // Send `trace.width` directly; the verifier reads each chip's
+    // `column_count` from `PackingMeta` so padding to `chip.width()`
+    // would just inflate jagged-PCS data on sparse chips.
+    // trace-unification Phase 2/C: MOVE each owned trace's cells into
+    // `chip_traces` (reinterpret Val<SC> -> InnerVal is a zero-copy relabel
+    // under the TypeId gate) instead of the former `trace.values.clone()` —
+    // retires copy-SITE 2.  Byte-identical: same cells, same width.  The
+    // r_row reorder above lets this consume `main_traces`.
+    let chip_traces: Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
+        .iter()
+        .zip(main_traces.into_iter())
+        .map(|(chip, trace)| {
+            let name = chip.name().to_string();
+            let trace_width = trace.width;
+            // SAFETY: Val<SC> == InnerVal under the TypeId gate.
+            let values: Vec<InnerVal> =
+                unsafe { reinterpret_vec::<Val<SC>, InnerVal>(trace.values) };
+            (name, RowMajorMatrix::new(values, trace_width))
         })
         .collect();
 

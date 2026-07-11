@@ -315,7 +315,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn prove_trusted_evaluations(
         &self,
         chips: &[&MachineChip<SC, A>],
-        main_traces: &[RowMajorMatrix<Val<SC>>],
+        // trace-unification Phase 2/C: OWNED so the free-fn builds `chip_traces`
+        // by MOVING the cells in (reinterpret, no clone) — retires copy-SITE 2.
+        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
