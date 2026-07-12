@@ -3423,14 +3423,13 @@ where
     // interaction vars) is still uploaded.  `row_point` is
     // already LSB-first == `partialLagrangeNaiveEf`-native, so the
     // device table is byte-identical (NO reversal).
-    let eq_row: Vec<EF> =
-        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
-            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
-            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
-            Vec::new()
-        } else {
-            build_eq_table(row_point)
-        };
+    let eq_row: Vec<EF> = {
+        // device-eq is unconditional (the enabled-gate was retired): stash
+        // the row_point + pass an empty eq_row Vec as the device-build signal.
+        let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+        crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+        Vec::new()
+    };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3594,14 +3593,13 @@ where
     // interaction vars) is still uploaded.  `row_point` is
     // already LSB-first == `partialLagrangeNaiveEf`-native, so the
     // device table is byte-identical (NO reversal).
-    let eq_row: Vec<EF> =
-        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
-            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
-            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
-            Vec::new()
-        } else {
-            build_eq_table(row_point)
-        };
+    let eq_row: Vec<EF> = {
+        // device-eq is unconditional (the enabled-gate was retired): stash
+        // the row_point + pass an empty eq_row Vec as the device-build signal.
+        let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+        crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+        Vec::new()
+    };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 
@@ -3803,14 +3801,13 @@ where
     // interaction vars) is still uploaded.  `row_point` is
     // already LSB-first == `partialLagrangeNaiveEf`-native, so the
     // device table is byte-identical (NO reversal).
-    let eq_row: Vec<EF> =
-        if crate::shard_level::sumcheck_poly::logup_device_eq_enabled() {
-            let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
-            crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
-            Vec::new()
-        } else {
-            build_eq_table(row_point)
-        };
+    let eq_row: Vec<EF> = {
+        // device-eq is unconditional (the enabled-gate was retired): stash
+        // the row_point + pass an empty eq_row Vec as the device-build signal.
+        let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
+        crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
+        Vec::new()
+    };
 
     let initial_claim = lambda * numerator_eval + denominator_eval;
 

@@ -913,13 +913,6 @@ std::thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// The logup-round eq_row table is built on device (the finalize step reads the
-/// single needed entry via `eq_at_index`); the host build+upload is not used.
-#[must_use]
-pub fn logup_device_eq_enabled() -> bool {
-    true
-}
-
 /// Host stashes the row_point (LSB-first coords) for the GPU hook
 /// to device-build the eq_row table from.  Published immediately
 /// before the hook dispatch; the empty `eq_row` Vec is the signal.
