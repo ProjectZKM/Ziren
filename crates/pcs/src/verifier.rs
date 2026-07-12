@@ -5,10 +5,8 @@ use std::{
 };
 
 use itertools::Itertools;
-use num_traits::cast::ToPrimitive;
 use p3_air::{Air, BaseAir};
-use p3_challenger::{CanObserve, FieldChallenger};
-use p3_commit::{LagrangeSelectors, Pcs, PolynomialSpace};
+use p3_commit::{LagrangeSelectors, PolynomialSpace};
 use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
 
 use super::{
@@ -17,7 +15,7 @@ use super::{
     Domain, OpeningError, StarkGenericConfig, StarkVerifyingKey, Val,
 };
 use crate::{
-    air::{LookupScope, MachineAir},
+    air::MachineAir,
     MachineChip,
 };
 
@@ -28,7 +26,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
     /// Verify a proof for a collection of air chips.
     #[allow(clippy::too_many_lines)]
     pub fn verify_shard(
-        config: &SC,
+        _config: &SC,
         vk: &StarkVerifyingKey<SC>,
         chips: &[&MachineChip<SC, A>],
         challenger: &mut SC::Challenger,
@@ -60,7 +58,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 >>::Commitment,
             >,
     {
-        use itertools::izip;
+        
 
         // BaseFold-over-BN254: every shard proof (inner KoalaBear and the OUTER
         // wrap) carries a shard-level BaseFold proof.  There is no

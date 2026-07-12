@@ -111,7 +111,7 @@ pub fn estimate_savings(
 
     // Zerocheck costs:
     let zerocheck_eval_cost = n * avg_num_constraints * num_chips;
-    let zerocheck_sumcheck_cost = num_vars * 3; // 3 coefficients per round
+    let _zerocheck_sumcheck_cost = num_vars * 3; // 3 coefficients per round
 
     println!("\n=== Zerocheck Savings Estimate ===");
     println!("Trace: 2^{} = {} rows, {} chips, degree {}",

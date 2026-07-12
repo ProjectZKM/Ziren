@@ -2,7 +2,7 @@ use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::{BinomialExtensionField, QuinticTrinomialExtensionField};
+use p3_field::extension::BinomialExtensionField;
 use p3_commit::BatchOpening;
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
@@ -440,7 +440,7 @@ pub mod outer_jagged_hooks {
         chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     ) -> Vec<u8> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
-        use zkm_pcs::BasefoldRing as _;
+        
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         // SITE-1 trace-unification: the commit consumes BORROWED views over the

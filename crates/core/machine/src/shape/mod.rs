@@ -5,7 +5,6 @@ use hashbrown::HashMap;
 use itertools::Itertools;
 use num::Integer;
 use p3_field::PrimeField32;
-use p3_koala_bear::KoalaBear;
 use p3_util::log2_ceil_usize;
 use thiserror::Error;
 
@@ -16,7 +15,7 @@ use zkm_pcs::{
     MachineRecord,
 };
 
-use super::mips::mips_chips::{ByteChip, ProgramChip, SyscallChip};
+use super::mips::mips_chips::SyscallChip;
 use crate::{
     global::GlobalChip,
     memory::{MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},

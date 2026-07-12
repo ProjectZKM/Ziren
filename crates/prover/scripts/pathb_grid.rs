@@ -8,7 +8,7 @@
 //! Run:
 //!   cargo run --release -p zkm-prover --example pathb_grid
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::mips::MipsAir;

@@ -13,10 +13,9 @@ use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{
     air::{
-        AirLookup, BaseAirBuilder, LookupScope, MachineAir, PublicValues, ZKMAirBuilder,
-        ZKM_PROOF_NUM_PV_ELTS,
+        AirLookup, LookupScope, MachineAir, ZKMAirBuilder,
     },
-    LookupKind, Word,
+    LookupKind,
 };
 
 use crate::{

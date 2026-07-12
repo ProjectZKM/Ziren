@@ -1,24 +1,23 @@
 use hashbrown::HashMap;
-use itertools::{izip, Itertools};
+use itertools::Itertools;
 
 use num_traits::cast::ToPrimitive;
 
 use p3_air::{WindowAccess, Air, BaseAir};
 use p3_commit::{Mmcs, Pcs, PolynomialSpace};
-use p3_field::coset::TwoAdicMultiplicativeCoset;
 use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
 use p3_koala_bear::KoalaBear;
 
 use zkm_recursion_compiler::{
     circuit::CircuitV2Builder,
-    ir::{Builder, Config, DslIr, Ext, ExtConst, SymbolicExt},
+    ir::{Config, Ext, ExtConst},
     prelude::Felt,
 };
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
-    air::LookupScope, koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
+    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
     AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge,
-    ShardCommitment, ShardOpenedValues, ShardProof, Val, PROOF_MAX_NUM_PVS,
+    ShardCommitment, ShardOpenedValues, ShardProof, PROOF_MAX_NUM_PVS,
 };
 use zkm_pcs::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
 
@@ -26,13 +25,12 @@ use crate::{
     challenger::CanObserveVariable,
     fri::{dummy_commit, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
     hash::FieldHasherVariable,
-    CircuitConfig, FriProofVariable, KoalaBearFriParameters, TwoAdicPcsMatsVariable,
+    CircuitConfig, FriProofVariable, KoalaBearFriParameters,
 };
 
 use crate::{
-    challenger::FieldChallengerVariable, constraints::RecursiveVerifierConstraintFolder,
+    challenger::FieldChallengerVariable,
     domain::PolynomialSpaceVariable, KoalaBearFriParametersVariable,
-    TwoAdicPcsRoundVariable, VerifyingKeyVariable,
 };
 
 /// Reference: [zkm_core::stark::ShardProof]

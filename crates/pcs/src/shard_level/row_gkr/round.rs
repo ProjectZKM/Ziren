@@ -586,7 +586,7 @@ fn synthetic_diff_test_step7z() {
     };
 
     // eq_int / eq_row built from eval_point split.
-    let num_row_vars = 2usize;
+    let _num_row_vars = 2usize;
     let num_int_vars = 0usize;
     let interaction_point = &eval_point[..num_int_vars];
     let row_point = &eval_point[num_int_vars..];
@@ -671,7 +671,7 @@ fn synthetic_diff_test_step7z() {
     let _ = pad_eq_int_sum;
     let _ = eq_sum;
     let _ = four;
-    let mut eval_zero_sp1 = sum_zero;
+    let eval_zero_sp1 = sum_zero;
     let mut eval_half_sp1 = sum_half;
     eval_half_sp1 *= eight_inv;
     let b_const = one_m_c * (one - alpha.double()).try_inverse().expect("1-2alpha inv");
@@ -1451,7 +1451,7 @@ where
     let alpha_as_ef: EF = unsafe { core::mem::transmute_copy::<ProdEF, EF>(&alpha_ef) };
 
     let one = EF::ONE;
-    let two = one.double();
+    let _two = one.double();
     let four = EF::from_u32(4);
     let eight_inv = EF::from_u32(8).try_inverse().expect("8 has inverse in EF");
 
@@ -1462,7 +1462,7 @@ where
     // contribute identity * eq_int values).  GPU only iterates real
     // cols.  Add the analytic correction.
     let _ = eq_sum_ef;
-    let mut eval_zero_sp1 = sum_zero_ef + pad_eq_int_sum * (one - alpha_as_ef);
+    let eval_zero_sp1 = sum_zero_ef + pad_eq_int_sum * (one - alpha_as_ef);
     let mut eval_half_sp1 = sum_half_ef + pad_eq_int_sum * four;
     eval_half_sp1 *= eight_inv;
 

@@ -280,7 +280,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
-            let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
+            let _preprocessed_widths_pre: Vec<usize> = shard_chips_pre
                 .iter()
                 .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
                 .collect();
@@ -406,7 +406,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
             use p3_air::BaseAir;
-            let preprocessed_widths: Vec<usize> = shard_chips
+            let _preprocessed_widths: Vec<usize> = shard_chips
                 .iter()
                 .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
                 .collect();

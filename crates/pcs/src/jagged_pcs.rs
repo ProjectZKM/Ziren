@@ -1586,7 +1586,6 @@ pub mod jagged {
     pub type ChipTraceView<'a> = (alloc::string::String, RowMajorMatrixView<'a, InnerVal>);
 
     use super::{
-        JaggedCommit,
         FriConfig,
         commit_jagged_pcs, open_jagged_pcs,
         verify_jagged_pcs,

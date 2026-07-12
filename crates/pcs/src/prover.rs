@@ -717,7 +717,7 @@ where
             .map(|degree| if *degree == 0 { 0 } else { log2_strict_usize(*degree) })
             .collect::<Vec<_>>();
 
-        let log_quotient_degrees =
+        let _log_quotient_degrees =
             chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
@@ -727,7 +727,7 @@ where
         // (confirmed: no consumer in `open()`), so a 0-height chip maps to the
         // degree-1 domain — a discarded placeholder purely to avoid the panic.
         // Same all-stage no-op guarantee as `log_degrees` above.
-        let trace_domains = degrees
+        let _trace_domains = degrees
             .iter()
             .map(|degree| pcs.natural_domain_for_degree(if *degree == 0 { 1 } else { *degree }))
             .collect::<Vec<_>>();
@@ -766,7 +766,7 @@ where
             );
         }
 
-        let packed_perm_challenges = local_permutation_challenges
+        let _packed_perm_challenges = local_permutation_challenges
             .iter()
             .map(|c| PackedChallenge::<SC>::from(*c))
             .collect::<Vec<_>>();
@@ -1410,7 +1410,7 @@ where
     >: Send + Sync + 'static,
 {
     use core::any::Any;
-    use p3_symmetric::MerkleCap;
+    
 
     // Run the BaseFold pre-commit on the real main traces (transmuted
     // to InnerVal — the TypeId gate in `commit()` already verified

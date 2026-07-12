@@ -893,7 +893,7 @@ type OuterDigestRaw = [Bn254; crate::hash::BN254_DIGEST_SIZE];
 fn outer_cap_root(
     commitment: &<OuterValMmcs as p3_commit::Mmcs<InnerVal>>::Commitment,
 ) -> OuterDigestRaw {
-    use p3_commit::Mmcs as _;
+    
     let roots = commitment.roots();
     assert_eq!(
         roots.len(),
@@ -1892,8 +1892,8 @@ where
     use zkm_recursion_compiler::circuit::CircuitV2Builder;
     use p3_field::PrimeCharacteristicRing;
 
-    let zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
-    let zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
+    let _zero_felt = |b: &mut Builder<C>| -> Felt<C::F> { b.constant(C::F::ZERO) };
+    let _zero_ext = |b: &mut Builder<C>| -> Ext<C::F, C::EF> { b.constant(C::EF::ZERO) };
 
     // ── Padding shape (mirror of jagged_pcs_lift.rs) ──
     // Host parity: column count = FLAT Σ chip widths (the host packing
@@ -1911,7 +1911,7 @@ where
         .sum();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
-    let num_col_variables = padded_cols.trailing_zeros() as usize;
+    let _num_col_variables = padded_cols.trailing_zeros() as usize;
     let num_rounds = column_counts_by_round.len().max(1);
 
     // The baked NUMERIC `row_counts_usize` /

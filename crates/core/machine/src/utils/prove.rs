@@ -2,7 +2,6 @@ use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
 use serde::{de::DeserializeOwned, Serialize};
-use size::Size;
 use std::thread::ScopedJoinHandle;
 use std::{
     io,
@@ -1176,7 +1175,7 @@ where
 pub fn uni_stark_prove<SC, A>(
     config: &SC,
     air: &A,
-    challenger: &mut SC::Challenger,
+    _challenger: &mut SC::Challenger,
     trace: RowMajorMatrix<SC::Val>,
 ) -> Proof<UniConfig<SC>>
 where
@@ -1208,7 +1207,7 @@ where
 pub fn uni_stark_verify<SC, A>(
     config: &SC,
     air: &A,
-    challenger: &mut SC::Challenger,
+    _challenger: &mut SC::Challenger,
     proof: &Proof<UniConfig<SC>>,
 ) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
 where

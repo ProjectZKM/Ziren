@@ -18,9 +18,8 @@ use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_core_machine::shape::CoreShapeConfig;
 use zkm_recursion_circuit::machine::{
-    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
-    ZKMCoreBasefoldWitnessValues, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape,
-    ZKMDeferredWitnessValues, ZKMRecursionShape, ZKMRecursionWitnessValues,
+    ZKMCompressBasefoldWitnessValues, ZKMCompressWithVkeyShape,
+    ZKMCoreBasefoldWitnessValues, ZKMDeferredBasefoldWitnessValues, ZKMDeferredShape, ZKMRecursionShape,
     ZKMWrapBasefoldWitnessValues,
 };
 use zkm_recursion_core::{
@@ -29,7 +28,7 @@ use zkm_recursion_core::{
 };
 use zkm_pcs::{shape::OrderedShape, MachineProver, DIGEST_SIZE};
 
-use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ShrinkAir, ZKMProver};
+use crate::{components::ZKMProverComponents, CompressAir, HashableKey, ZKMProver};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ZKMProofShape {
@@ -377,7 +376,7 @@ impl ZKMProofShape {
     /// The `core_shape_config` argument is retained for API
     /// stability but is not consulted.
     pub fn generate<'a>(
-        core_shape_config: &'a CoreShapeConfig<KoalaBear>,
+        _core_shape_config: &'a CoreShapeConfig<KoalaBear>,
         recursion_shape_config: &'a RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>,
         reduce_batch_size: usize,
     ) -> impl Iterator<Item = Self> + 'a {

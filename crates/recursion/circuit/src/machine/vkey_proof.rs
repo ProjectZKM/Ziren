@@ -26,11 +26,9 @@
 
 use std::marker::PhantomData;
 
-use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
-use zkm_recursion_compiler::ir::{Builder, Felt};
-use zkm_recursion_core::DIGEST_SIZE;
+use zkm_recursion_compiler::ir::Builder;
 use zkm_pcs::{
     air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
     StarkGenericConfig, StarkMachine,

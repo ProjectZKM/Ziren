@@ -1,9 +1,6 @@
-use crate::runtime::{DIGEST_SIZE, HASH_RATE, PERMUTATION_WIDTH};
+use crate::runtime::{DIGEST_SIZE, PERMUTATION_WIDTH};
 
 use core::fmt::Debug;
-use p3_challenger::DuplexChallenger;
-use p3_field::PrimeField32;
-use p3_symmetric::CryptographicPermutation;
 use serde::{Deserialize, Serialize};
 use static_assertions::const_assert_eq;
 use std::{

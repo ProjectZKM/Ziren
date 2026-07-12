@@ -23,7 +23,7 @@ use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
 
 use crate::challenger::FieldChallengerVariable;
 use crate::jagged_circuit::RecursiveStackedPcsProof;
-use crate::logup_gkr::{evaluate_mle_ext, observe_ext_element};
+use crate::logup_gkr::evaluate_mle_ext;
 use crate::CircuitConfig;
 
 /// Trait abstracting over the underlying multilinear PCS that the

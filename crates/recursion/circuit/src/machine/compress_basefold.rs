@@ -293,7 +293,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                 .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
         });
         use p3_air::BaseAir as _Base1;
-        let preprocessed_widths_pre: Vec<usize> = shard_chips_pre
+        let _preprocessed_widths_pre: Vec<usize> = shard_chips_pre
             .iter()
             .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();
@@ -421,7 +421,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // MachineAir<F> via delegation, so width() and
         // preprocessed_width() are available on a &Chip.
         use p3_air::BaseAir;
-        let preprocessed_widths: Vec<usize> = _shard_chips
+        let _preprocessed_widths: Vec<usize> = _shard_chips
             .iter()
             .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
             .collect();

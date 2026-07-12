@@ -459,7 +459,7 @@ pub fn finalize_carried_opened_values<C>(
 where
     C: CircuitConfig<F = InnerVal, EF = InnerChallenge>,
 {
-    use p3_field::PrimeCharacteristicRing;
+    
 
     let bit_len = max_log_row_count + 1;
     let chips = carried
@@ -546,7 +546,7 @@ where
     C: CircuitConfig,
 {
     use p3_field::PrimeCharacteristicRing;
-    use std::cmp::Reverse;
+    
 
     // Pair each chip name with its log_h (default 0 when missing).
     let mut entries: Vec<(String, u8)> = chip_names

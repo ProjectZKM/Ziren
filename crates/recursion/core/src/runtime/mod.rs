@@ -16,7 +16,6 @@ use instruction::HintAddCurveInstr;
 pub use instruction::Instruction;
 use instruction::{FieldEltType, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrintInstr};
 use itertools::Itertools;
-use machine::RecursionAirEventCount;
 use memory::*;
 pub use opcode::*;
 pub use program::*;

@@ -290,7 +290,7 @@ where
     pub fn compute_padded_row_adjustment_basefold<'a>(
         builder: &mut Builder<C>,
         chip: &MachineChip<SC, A>,
-        opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
+        _opening: &'a crate::basefold_chip_opened_values::BasefoldChipOpenedValuesVariable<C>,
         alpha: Ext<C::F, C::EF>,
         public_values: &'a [Felt<C::F>],
     ) -> Ext<C::F, C::EF> {
@@ -540,7 +540,7 @@ where
         // claimed evaluation at the sumcheck-reduced point).
         let mut rlc_eval: Ext<C::F, C::EF> = zero_ext;
 
-        for (idx, (chip, opening)) in
+        for (_idx, (chip, opening)) in
             shard_chips.iter().zip(opened_values.chips.iter()).enumerate()
         {
             let degree = &opening.degree;

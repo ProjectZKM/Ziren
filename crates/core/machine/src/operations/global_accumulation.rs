@@ -10,7 +10,6 @@ use zkm_pcs::septic_curve::SepticCurveComplete;
 use zkm_pcs::ZKMAirBuilder;
 use zkm_pcs::{
     septic_curve::SepticCurve,
-    septic_digest::SepticDigest,
     septic_extension::{SepticBlock, SepticExtension},
 };
 

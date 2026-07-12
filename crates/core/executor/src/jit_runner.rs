@@ -1448,7 +1448,7 @@ mod platform {
         unsafe {
             let mut act: libc::sigaction = std::mem::zeroed();
             act.sa_flags = libc::SA_SIGINFO | libc::SA_NODEFER;
-            act.sa_sigaction = segv_probe_handler as usize;
+            act.sa_sigaction = segv_probe_handler as *const () as usize;
             libc::sigemptyset(&mut act.sa_mask);
             let mut prev: libc::sigaction = std::mem::zeroed();
             libc::sigaction(libc::SIGSEGV, &act, &mut prev);

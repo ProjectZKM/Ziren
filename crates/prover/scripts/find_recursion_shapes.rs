@@ -56,7 +56,7 @@ fn main() {
     // Create the maximal shape from all of the shapes in recursion_shape_config, then add 2 to
     // all the log-heights of that shape. This is the starting candidate for the "minimal large
     // shape".
-    let mut candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
+    let candidate = compress_shape_config.union_config_with_extra_room().first().unwrap().clone();
 
     // --measure: one-pass measurement of the per-chip MAXIMAL *natural*
     // (pre-`fix_shape`) recursion heights across all enumerated shapes.

@@ -27,7 +27,6 @@ pub use deferred::*;
 pub use deferred_basefold::*;
 pub use deferred_basefold_recursion::*;
 pub use public_values::*;
-pub use root::*;
 pub use vkey_proof::*;
 pub use wrap_basefold::*;
 
