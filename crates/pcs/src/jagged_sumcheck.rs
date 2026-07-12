@@ -837,15 +837,19 @@ mod phase1_acceptance_gate {
     fn run_case(chips: &[(usize, usize)], seed: u64) -> (InnerChallenge, InnerChallenge) {
         let mut rng = StdRng::seed_from_u64(seed);
         let traces = build_traces(chips, &mut rng);
+        // SITE-1 trace-unification: the metadata/dense helpers now take borrowed
+        // views; build them over the owned `traces` (kept alive in this scope).
+        let trace_views: Vec<(String, p3_matrix::dense::RowMajorMatrixView<'_, _>)> =
+            traces.iter().map(|(n, m)| (n.clone(), m.as_view())).collect();
 
         // Metadata packing (column-by-column, SP1 col_prefix_sums layout).
-        let packing = crate::jagged::compute_jagged_metadata(&traces);
+        let packing = crate::jagged::compute_jagged_metadata(&trace_views);
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
         // This unit test uses the LEGACY bitrev convention (`use_rev = false`),
         // matching the `use_rev_y = false` companion below — byte-identical to
         // the pre-carrier-removal behaviour (no carrier was installed here).
-        let dense_q = crate::jagged::materialize_dense_jagged(&traces, packing.log_dense_size, false);
+        let dense_q = crate::jagged::materialize_dense_jagged(&trace_views, packing.log_dense_size, false);
 
         // z_row: full max_log_row_count point (the shared zerocheck point).
         let max_log_row = chips.iter().map(|c| c.0).max().unwrap();

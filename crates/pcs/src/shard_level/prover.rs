@@ -4,7 +4,7 @@
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 
 use super::main_trace_loader::{EagerHostLoader, MainTraceLoader};
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
@@ -42,9 +42,13 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
 /// threads it into the jagged-PCS opening.  The matrices are moved into a named-tuple
 /// Vec for the commit and moved back out — no trace data is copied.
-fn maybe_auto_precompute_basefold<SC, A>(
+fn maybe_auto_precompute_basefold<'t, SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    // SITE-1 trace-unification: BORROWED views over the shard prover's shared
+    // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
+    // host eager-commit path; on the device / in-dispatch commit path they are
+    // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
+    main_traces: Vec<RowMajorMatrixView<'t, Val<SC>>>,
     main_commitment: [Val<SC>; 8],
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
@@ -76,7 +80,7 @@ fn maybe_auto_precompute_basefold<SC, A>(
     // shrink / wrap path (byte-identical to legacy).
     recursion_area_pin: Option<usize>,
 ) -> (
-    Vec<RowMajorMatrix<Val<SC>>>,
+    Vec<RowMajorMatrixView<'t, Val<SC>>>,
     [Val<SC>; 8],
     Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>>,
 )
@@ -107,24 +111,25 @@ where
         "maybe_auto_precompute_basefold: use_basefold()=true must imply the          inner KoalaBear/JaggedChallenger stack for the transmutes below",
     );
 
-    // Build named tuples, MOVING each matrix in (the `values` Vec is
-    // reinterpreted Val<SC> -> InnerVal under the TypeId gate; identical
-    // layout, no copy).
-    let named_inner: alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
+    // Build named InnerVal VIEWS by a zero-copy slice relabel of each borrowed
+    // Val<SC> view (Val<SC> == InnerVal under the TypeId gate; identical layout,
+    // no copy — was the former per-chip `from_raw_parts` Vec move).  These views
+    // borrow the same shared `Arc<Mle>` cells as `main_traces`, so they live as
+    // long as the `'t` borrow.
+    let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView<'t>> = chips
         .iter()
-        .zip(main_traces.into_iter())
+        .zip(main_traces.iter())
         .map(|(chip, trace)| {
             let name = chip.name().to_string();
             let width = trace.width;
-            let values = trace.values;
-            let (ptr, len, cap) = {
-                let mut v = core::mem::ManuallyDrop::new(values);
-                (v.as_mut_ptr(), v.len(), v.capacity())
+            let src: &'t [Val<SC>] = trace.values;
+            // SAFETY: Val<SC> == InnerVal under the TypeId gate above; the
+            // (ptr, len) is reused verbatim under an identical layout, so the
+            // produced `&[InnerVal]` is byte-for-byte the reinterpreted source.
+            let values_inner: &'t [InnerVal] = unsafe {
+                core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
             };
-            // SAFETY: Val<SC> == InnerVal under the TypeId gate above.
-            let values_inner: alloc::vec::Vec<InnerVal> =
-                unsafe { alloc::vec::Vec::from_raw_parts(ptr as *mut InnerVal, len, cap) };
-            (name, RowMajorMatrix::new(values_inner, width))
+            (name, RowMajorMatrixView::new(values_inner, width))
         })
         .collect();
 
@@ -195,22 +200,10 @@ where
         raw_root_inner
     };
 
-    // Move matrices back out (same reinterpret, no copy).
-    let main_traces: Vec<RowMajorMatrix<Val<SC>>> = named_inner
-        .into_iter()
-        .map(|(_, trace)| {
-            let width = trace.width;
-            let values = trace.values;
-            let (ptr, len, cap) = {
-                let mut v = core::mem::ManuallyDrop::new(values);
-                (v.as_mut_ptr(), v.len(), v.capacity())
-            };
-            // SAFETY: InnerVal == Val<SC> under the TypeId gate above.
-            let values_outer: alloc::vec::Vec<Val<SC>> =
-                unsafe { alloc::vec::Vec::from_raw_parts(ptr as *mut Val<SC>, len, cap) };
-            RowMajorMatrix::new(values_outer, width)
-        })
-        .collect();
+    // The borrowed `main_traces` views are returned unchanged (`named_inner`
+    // only relabeled them to InnerVal for the commit build; no owned buffer to
+    // move back).  They still borrow the shared `Arc<Mle>` store for the open.
+    drop(named_inner);
 
     // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the TypeId gate.
     let main_commitment: [Val<SC>; 8] =
@@ -350,10 +343,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        // trace-unification Phase 2/C: OWNED so the jagged open builds its
-        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
-        // clone) — retires copy-SITE 2.
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+        // SITE-1 trace-unification: BORROWED views over the shard prover's
+        // shared `Arc<Mle>` store; the jagged open builds its per-chip
+        // `chip_traces` by a zero-copy slice relabel (no clone / move).
+        main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -390,10 +383,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        // trace-unification Phase 2/C: OWNED so the jagged open builds its
-        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
-        // clone) — retires copy-SITE 2.
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+        // SITE-1 trace-unification: BORROWED views over the shard prover's
+        // shared `Arc<Mle>` store; the jagged open builds its per-chip
+        // `chip_traces` by a zero-copy slice relabel (no clone / move).
+        main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -445,10 +438,10 @@ where
     fn produce(
         &self,
         chips: &[&Chip<Val<SC>, A>],
-        // trace-unification Phase 2/C: OWNED so the jagged open builds its
-        // per-chip `chip_traces` by MOVING these cells in (reinterpret, no
-        // clone) — retires copy-SITE 2.
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+        // SITE-1 trace-unification: BORROWED views over the shard prover's
+        // shared `Arc<Mle>` store; the jagged open builds its per-chip
+        // `chip_traces` by a zero-copy slice relabel (no clone / move).
+        main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -840,44 +833,59 @@ where
     };
     let handle_path_guaranteed = jagged_on && prospective_log_dense >= gpu_min_log_dense;
     let skip_device_d2h = handle_path_guaranteed;
-    let commit_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
+    // SITE-1 trace-unification: OWNED side-storage for the RARE eager-D2H
+    // device-chip materialize (the non-happy device path: handle NOT
+    // guaranteed, or kill-switch).  Host chips + happy/unexercised device
+    // chips leave their slot `None`; the borrowed `commit_traces` view build
+    // below borrows this Vec for the populated slots, so the eager cells
+    // outlive the views.  On the host CpuProver path there is no provider, so
+    // every slot is `None` (a cheap `Vec<None>`).
+    let eager_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> = chips
         .iter()
         .zip(shared_trace_mles.iter())
         .map(|(chip, pm)| {
-            // Width-0 (num_polynomials()==0) ⟺ the raw `main_traces[i]` was
-            // width-0 — a device-resident / unexercised chip carrying no host
-            // cells (its shared MLE is a `dummy`).
-            if pm.num_polynomials() == 0 {
-                if let Some(p) = _device_traces {
-                    if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
-                        // Device-resident chip with an empty host trace and
-                        // the handle path guaranteed: skip the D2H, keep it
-                        // empty.  The device commit hook packs it D2D.
-                        // (Byte-identical to the former width-0
-                        // `main_traces[i].clone()`.)
-                        return RowMajorMatrix::new(Vec::new(), 0);
-                    }
-                    // Otherwise (handle path NOT guaranteed, or kill-switch):
-                    // eager D2H here, PRE-DRAIN, so the host reduction
-                    // fallback has correct cells.
-                    if let Some((vals, w)) =
-                        crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
-                            &chip.name(),
-                            p,
-                        )
-                    {
-                        return RowMajorMatrix::new(vals, w);
-                    }
-                }
-                // No provider / materialize failed: an empty width-0 matrix,
-                // byte-identical to the former `main_traces[i].clone()`.
-                return RowMajorMatrix::new(Vec::new(), 0);
+            if pm.num_polynomials() != 0 {
+                return None;
             }
-            // Host chip: clone the shared MLE's real (unpadded) row-major
-            // cells — byte-identical to the former `main_traces[i].clone()`
-            // (the MLE was built by MOVING that same buffer in).
+            let p = _device_traces?;
+            if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
+                // Device-resident chip, handle path guaranteed: skip the D2H,
+                // keep it empty (the device commit hook packs it D2D).
+                return None;
+            }
+            // Handle path NOT guaranteed (or kill-switch): eager D2H here,
+            // PRE-DRAIN, so the host reduction fallback has correct cells.
+            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
+                &chip.name(),
+                p,
+            )
+            .map(|(vals, w)| RowMajorMatrix::new(vals, w))
+        })
+        .collect();
+    // SITE-1: the per-chip commit trace set as BORROWED row-major views over
+    // the shared `Arc<Mle>` store (`shared_trace_mles`) — this replaces the
+    // former per-chip `tr.values.to_vec()` deep copy (copy-SITE 1).  Host chips
+    // borrow the MLE's real (unpadded) cells directly; the rare eager
+    // device-chip materialize borrows the owned `eager_device_remat` side-store;
+    // happy/unexercised device chips carry an empty width-0 view (byte-identical
+    // to the former empty `main_traces[i].clone()`).  The Val↔InnerVal relabel
+    // is deferred to a zero-copy slice reinterpret in the commit/open below.
+    let commit_traces: Vec<RowMajorMatrixView<'_, Val<SC>>> = chips
+        .iter()
+        .zip(shared_trace_mles.iter())
+        .zip(eager_device_remat.iter())
+        .map(|((_chip, pm), remat)| {
+            if pm.num_polynomials() == 0 {
+                // Device-resident / unexercised chip.
+                if let Some(m) = remat {
+                    return m.as_view();
+                }
+                return RowMajorMatrixView::new(&[], 0);
+            }
+            // Host chip: BORROW the shared MLE's real (unpadded) row-major
+            // cells (zero-copy) — was the SITE-1 deep copy.
             let tr = pm.real_trace_ref().expect("num_polynomials()>0 => inner Some");
-            RowMajorMatrix::new(tr.values.to_vec(), tr.width)
+            RowMajorMatrixView::new(tr.values, tr.width)
         })
         .collect();
     // Commit-traces D2H skip: capture the cumulative-sum TAILS
@@ -1262,10 +1270,10 @@ where
         // its own `prove_trusted_evaluations`).
         jagged_eval_producer.produce(
             chips,
-            // Commit-coverage trace set (device-resident chips
-            // materialized) — MUST be the same traces the precompute
+            // Commit-coverage trace set (BORROWED views over the shared
+            // `Arc<Mle>` store) — MUST be the same traces the precompute
             // committed, or the openings won't bind.
-            commit_traces,
+            &commit_traces,
             // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
@@ -1555,9 +1563,10 @@ where
 /// own provider; this stays the CPU body.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    // trace-unification Phase 2/C: OWNED so `chip_traces` is built by MOVING
-    // each trace's cells in (reinterpret, no clone) — retires copy-SITE 2.
-    main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    // SITE-1 trace-unification: BORROWED views over the shard prover's shared
+    // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
+    // these views (no clone / move) — retires copy-SITE 1.
+    main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     _device_traces: Option<&dyn super::DeviceTraceProvider>,
@@ -1675,21 +1684,26 @@ where
     // Send `trace.width` directly; the verifier reads each chip's
     // `column_count` from `PackingMeta` so padding to `chip.width()`
     // would just inflate jagged-PCS data on sparse chips.
-    // trace-unification Phase 2/C: MOVE each owned trace's cells into
-    // `chip_traces` (reinterpret Val<SC> -> InnerVal is a zero-copy relabel
-    // under the TypeId gate) instead of the former `trace.values.clone()` —
-    // retires copy-SITE 2.  Byte-identical: same cells, same width.  The
-    // r_row reorder above lets this consume `main_traces`.
-    let chip_traces: Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> = chips
+    // SITE-1 trace-unification: build each `chip_traces` entry as a BORROWED
+    // InnerVal view via a zero-copy slice relabel of the borrowed Val<SC> view
+    // (Val<SC> == InnerVal under the TypeId gate) — was the former owned
+    // `reinterpret_vec` Vec move (copy-SITE 2) / `trace.values.clone()`.
+    // Byte-identical: same cells, same width.  The views borrow the shard
+    // prover's shared `Arc<Mle>` store for the duration of this open.
+    let chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView<'_>> = chips
         .iter()
-        .zip(main_traces.into_iter())
+        .zip(main_traces.iter())
         .map(|(chip, trace)| {
             let name = chip.name().to_string();
             let trace_width = trace.width;
-            // SAFETY: Val<SC> == InnerVal under the TypeId gate.
-            let values: Vec<InnerVal> =
-                unsafe { reinterpret_vec::<Val<SC>, InnerVal>(trace.values) };
-            (name, RowMajorMatrix::new(values, trace_width))
+            let src: &[Val<SC>] = trace.values;
+            // SAFETY: Val<SC> == InnerVal under the TypeId gate; the (ptr, len)
+            // is reused verbatim under an identical layout, so the produced
+            // `&[InnerVal]` is byte-for-byte the reinterpreted source view.
+            let values: &[InnerVal] = unsafe {
+                core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
+            };
+            (name, RowMajorMatrixView::new(values, trace_width))
         })
         .collect();
 

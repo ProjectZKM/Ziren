@@ -577,8 +577,11 @@ pub mod koala_bear_poseidon2 {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
+        // SITE-1 trace-unification: the commit consumes BORROWED views over the
+        // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
+        let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(&chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
-            &chip_traces,
+            &chip_trace_views,
             mmcs,
             fri,
             None,

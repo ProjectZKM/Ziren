@@ -11,7 +11,7 @@ use p3_air::Air;
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_commit::{Pcs, PolynomialSpace};
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::RowMajorMatrix, Matrix};
+use p3_matrix::{dense::{RowMajorMatrix, RowMajorMatrixView}, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
 use p3_util::log2_strict_usize;
@@ -315,9 +315,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn prove_trusted_evaluations(
         &self,
         chips: &[&MachineChip<SC, A>],
-        // trace-unification Phase 2/C: OWNED so the free-fn builds `chip_traces`
-        // by MOVING the cells in (reinterpret, no clone) — retires copy-SITE 2.
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+        // SITE-1 trace-unification: BORROWED views over the shard prover's
+        // shared `Arc<Mle>` store; the free-fn builds `chip_traces` by a
+        // zero-copy slice relabel of these views (no clone / move).  This is the
+        // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
+        // mirror takes the same borrowed view.
+        main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
@@ -1500,16 +1503,20 @@ where
 
     // Build the commit over the ring's BfMmcs
     // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
+    // SITE-1 trace-unification: the eager commit consumes BORROWED views over
+    // the owned `commit_named_inner` (kept alive until after the commit).
+    let commit_named_views = crate::jagged_pcs::jagged::views_over_owned(&commit_named_inner);
     let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
         <SC as BasefoldRing>::BfMmcs,
     >(
-        &commit_named_inner,
+        &commit_named_views,
         <SC as BasefoldRing>::bf_mmcs(),
         <SC as BasefoldRing>::fri_config(),
         gpu_bn254_commit,
         use_rev,
         recursion_area_pin,
     );
+    drop(commit_named_views);
     drop(commit_named_inner);
 
     // Com<SC> == BfMmcs::Commitment for both rings (FRI commits via the

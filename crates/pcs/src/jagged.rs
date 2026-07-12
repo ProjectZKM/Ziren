@@ -65,7 +65,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use p3_field::Field;
-use p3_matrix::dense::RowMajorMatrix;
+use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 use p3_matrix::Matrix;
 
 /// Metadata for a single chip's trace in the jagged packing.
@@ -122,7 +122,7 @@ pub struct JaggedPacking<F> {
 /// downstream code (sumcheck reduction, verifier weight tables) only
 /// needs the metadata, not the dense values.
 pub fn compute_jagged_metadata<F: Field>(
-    traces: &[(String, RowMajorMatrix<F>)],
+    traces: &[(String, RowMajorMatrixView<'_, F>)],
 ) -> JaggedPacking<F> {
     // Delegate to the dims-based core so callers that have only the
     // per-chip (name, height, width) — e.g. the device commit hook,
@@ -134,8 +134,8 @@ pub fn compute_jagged_metadata<F: Field>(
         .map(|(name, trace)| {
             (
                 name.clone(),
-                <RowMajorMatrix<F> as Matrix<F>>::height(trace),
-                <RowMajorMatrix<F> as Matrix<F>>::width(trace),
+                Matrix::<F>::height(trace),
+                Matrix::<F>::width(trace),
             )
         })
         .collect();
@@ -205,7 +205,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 /// it to the consumer (e.g. WHIR `commit_column`) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
-    traces: &[(String, RowMajorMatrix<F>)],
+    traces: &[(String, RowMajorMatrixView<'_, F>)],
     log_dense_size: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
@@ -225,8 +225,8 @@ pub fn materialize_dense_jagged<F: Field>(
     let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
     let mut total: usize = 0;
     for (_name, trace) in traces {
-        let h = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
-        let w = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+        let h = Matrix::<F>::height(trace);
+        let w = Matrix::<F>::width(trace);
         chip_offsets.push(total);
         total += h * w;
     }
@@ -282,8 +282,8 @@ pub fn materialize_dense_jagged<F: Field>(
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
             .for_each(|(slot, ((_name, trace), _))| {
-                let height = <RowMajorMatrix<F> as Matrix<F>>::height(trace);
-                let width = <RowMajorMatrix<F> as Matrix<F>>::width(trace);
+                let height = Matrix::<F>::height(trace);
+                let width = Matrix::<F>::width(trace);
                 if width == 0 || height == 0 {
                     return;
                 }

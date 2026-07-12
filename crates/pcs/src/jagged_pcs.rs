@@ -1567,12 +1567,23 @@ pub mod jagged {
 
     use p3_challenger::{CanObserve, FieldChallenger};
     use p3_field::PrimeCharacteristicRing;
-    use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 
     use crate::basefold::StackedBasefoldProof;
     use crate::jagged::{JaggedChipInfo, JaggedPacking, compute_jagged_metadata, materialize_dense_jagged};
     use crate::jagged_sumcheck::{JaggedReductionProof, verify_jagged_reduction};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
+
+    /// SITE-1 trace-unification: the per-chip commit/open trace set as a
+    /// BORROWED row-major view over the shard prover's single `Arc<Mle>`
+    /// store (`shared_trace_mles`), instead of an owned `RowMajorMatrix`
+    /// deep copy.  All commit + open consumers here are read-only (dims +
+    /// `.values`), so they take `&[ChipTraceView]`; the Val↔InnerVal relabel
+    /// stays the zero-copy slice reinterpret under the caller's TypeId gate.
+    /// Device-resident chips carry an empty view (width 0); the host-fallback
+    /// `rematerialize_chip_traces_via_provider` produces owned side-storage the
+    /// caller re-views.
+    pub type ChipTraceView<'a> = (alloc::string::String, RowMajorMatrixView<'a, InnerVal>);
 
     use super::{
         JaggedCommit,
@@ -1872,7 +1883,7 @@ pub mod jagged {
     /// provider.  Returns `None` to fall through to the host precompute
     /// (any CUDA error / unsupported shape).
     pub type GpuJaggedPrecomputeCommitFn = fn(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         provider: &dyn crate::shard_level::DeviceTraceProvider,
         // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
         // EXPLICITLY (was the `current_recursion_area_pin()` thread-local the GPU
@@ -1953,7 +1964,7 @@ pub mod jagged {
     /// `main_commitment` field) at the same transcript position the
     /// verifier observes it.
     pub fn precompute_jagged_basefold_commit(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         // #118: the device BaseFold commit fn, threaded down to the inner
         // `commit_jagged_pcs_no_observe` dispatch.  `None` = host commit.
         gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
@@ -2057,7 +2068,7 @@ pub mod jagged {
     /// re-materialize is acceptable and, critically, SOUND (no silently
     /// dropped device-chip cells / zero commitment).
     pub fn precompute_jagged_basefold_commit_provider(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         // #118: the device BaseFold commit fn, threaded down to
         // `precompute_jagged_basefold_commit`.  `None` = host commit.
@@ -2088,9 +2099,10 @@ pub mod jagged {
         // construction (same `materialize_dense_jagged` over the same
         // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        let mut pre = precompute_jagged_basefold_commit(&full, gpu_basefold_commit, use_rev, recursion_area_pin);
+        let full_views = views_over_owned(&full);
+        let mut pre = precompute_jagged_basefold_commit(&full_views, gpu_basefold_commit, use_rev, recursion_area_pin);
         let dense_q =
-            materialize_dense_jagged::<InnerVal>(&full, pre.packing.log_dense_size, use_rev);
+            materialize_dense_jagged::<InnerVal>(&full_views, pre.packing.log_dense_size, use_rev);
         debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
         pre.host_dense_q = Some(dense_q);
         pre
@@ -2103,7 +2115,7 @@ pub mod jagged {
     /// KoalaBear for BOTH rings (Val == KoalaBear everywhere), so `JaggedDft`
     /// is reused. No challenger observe (caller surfaces the commitment).
     pub fn precompute_jagged_basefold_commit_generic<MT>(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         mmcs: MT,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
         // #118: the device BN254 wrap-commit fn, provided statically by the
@@ -2203,7 +2215,7 @@ pub mod jagged {
     /// reduction, open dense at the reduction's `z*` via BaseFold,
     /// bundle for the wire.
     pub fn prove_jagged_basefold(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
@@ -2228,7 +2240,7 @@ pub mod jagged {
     /// observe.  Wire bytes match the
     /// `prove_jagged_basefold_with_y_per_chip` shape exactly.
     pub fn prove_jagged_basefold_with_precomputed(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         precomputed: PrecomputedJaggedCommit,
@@ -2264,7 +2276,7 @@ pub mod jagged {
     /// traces, removing the silent invalid-proof edge that an unconditional
     /// `commit_traces` D2H skip would otherwise leave.
     pub fn prove_jagged_basefold_with_precomputed_provider(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         precomputed: PrecomputedJaggedCommit,
@@ -2309,7 +2321,7 @@ pub mod jagged {
     /// single-main precompute/observe (mirroring the former `inner(None)`
     /// early return).  Single-group takes the precompute + in-band observe.
     pub fn prove_jagged_basefold_with_y_per_chip(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -2376,7 +2388,7 @@ pub mod jagged {
     /// `Vec` so the dense materialize sees real dims + values exactly as a
     /// full eager `commit_traces` D2H would have produced.  Cold path only.
     fn rematerialize_chip_traces_via_provider(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     ) -> alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> {
         chip_traces
@@ -2393,8 +2405,26 @@ pub mod jagged {
                         }
                     }
                 }
-                (name.clone(), trace.clone())
+                // Host (width>0) chip: materialize an OWNED copy of the
+                // borrowed view's cells (byte-identical to the former owned
+                // `trace.clone()`).  Only the host-fallback / device-remat
+                // edges reach here; the happy open path never re-materializes.
+                (name.clone(), RowMajorMatrix::new(trace.values.to_vec(), trace.width))
             })
+            .collect()
+    }
+
+    /// Build borrowed `ChipTraceView`s over an OWNED re-materialized trace
+    /// set (`rematerialize_chip_traces_via_provider`), so the downstream
+    /// view-taking commit/reduction consumers can read its cells with no
+    /// further copy.  The returned views borrow `owned`, which must outlive
+    /// them (the caller keeps it in scope).
+    pub fn views_over_owned(
+        owned: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+    ) -> alloc::vec::Vec<ChipTraceView<'_>> {
+        owned
+            .iter()
+            .map(|(name, m)| (name.clone(), m.as_view()))
             .collect()
     }
 
@@ -2495,7 +2525,7 @@ pub mod jagged {
     /// caller already observed the digest — the orchestrator at the Phase 1
     /// prologue position, or the wrapper just above).
     fn prove_jagged_basefold_inner(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -2896,7 +2926,7 @@ pub mod jagged {
                 // dense pack (cold path — happy path takes skip_host_dense).
                 let rematerialized =
                     rematerialize_chip_traces_via_provider(chip_traces, provider);
-                materialize_dense_jagged::<InnerVal>(&rematerialized, packing.log_dense_size, dense_rev)
+                materialize_dense_jagged::<InnerVal>(&views_over_owned(&rematerialized), packing.log_dense_size, dense_rev)
             };
 
             // Pick the active reduction: the statically-provided device
@@ -2986,7 +3016,7 @@ pub mod jagged {
                                         provider,
                                     );
                                 materialize_dense_jagged::<InnerVal>(
-                                    &rematerialized,
+                                    &views_over_owned(&rematerialized),
                                     packing.log_dense_size,
                                     dense_rev,
                                 )
@@ -3137,7 +3167,7 @@ pub mod jagged {
     /// can still be host-proved.
     #[allow(clippy::too_many_arguments)]
     fn prove_jagged_basefold_multi_group(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -3177,7 +3207,7 @@ pub mod jagged {
                 .iter()
                 .map(|&i| chip_traces[i].clone())
                 .collect();
-            let packing_g = compute_jagged_metadata::<InnerVal>(&traces_g);
+            let packing_g = compute_jagged_metadata::<InnerVal>(&views_over_owned(&traces_g));
             debug_assert!(
                 packing_g.log_dense_size < crate::jagged::MAX_ROUND_LOG_AREA as usize,
                 "group log_dense_size {} must be < {}",
@@ -3196,7 +3226,7 @@ pub mod jagged {
             Vec::with_capacity(g_count);
         for (g, traces_g) in group_traces.iter().enumerate() {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(traces_g, group_packing[g].log_dense_size, use_rev);
+                materialize_dense_jagged::<InnerVal>(&views_over_owned(traces_g), group_packing[g].log_dense_size, use_rev);
             debug_assert_eq!(dense_q.len(), 1usize << group_packing[g].log_dense_size);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
@@ -3299,7 +3329,7 @@ pub mod jagged {
                             challenger: &mut crate::jagged_pcs::JaggedChallenger|
                   -> JaggedReductionProof<InnerChallenge> {
                 let dense_q = materialize_dense_jagged::<InnerVal>(
-                    traces_g,
+                    &views_over_owned(traces_g),
                     packing_g.log_dense_size,
                     use_rev,
                 );
@@ -3384,7 +3414,7 @@ pub mod jagged {
     /// emit a BaseFold-BN254 bundle. Requires a precomputed commit (Option B).
     #[allow(clippy::type_complexity)]
     pub fn prove_jagged_basefold_inner_generic<Challenger, MT>(
-        chip_traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        chip_traces: &[ChipTraceView<'_>],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,

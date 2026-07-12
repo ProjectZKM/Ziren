@@ -443,8 +443,11 @@ pub mod outer_jagged_hooks {
         use zkm_pcs::BasefoldRing as _;
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
+        // SITE-1 trace-unification: the commit consumes BORROWED views over the
+        // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
+        let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(&chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
-            &chip_traces,
+            &chip_trace_views,
             mmcs,
             fri,
             // #118: setup-time preprocessed commit → host (device BN254
