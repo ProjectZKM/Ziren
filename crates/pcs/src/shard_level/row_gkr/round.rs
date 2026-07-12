@@ -3213,24 +3213,8 @@ where
                 ) {
                     return proof;
                 }
-                // V3 declined → fall through to V2 (and then V1/host).
-            }
-
-            if let Some(gpu_hook_v2) =
-                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v2()
-            {
-                if let Some(proof) = try_logup_round_gpu_v2::<F, EF, _>(
-                    circuit,
-                    eval_point,
-                    numerator_eval,
-                    denominator_eval,
-                    lambda,
-                    challenger,
-                    gpu_hook_v2,
-                ) {
-                    return proof;
-                }
-                // V2 declined → fall through to V1 (and then host).
+                // V3 declined → fall through to V1/host.  (V2 dispatch arm
+                // retired in M3 — the device pack is the production path.)
             }
         }
 
@@ -3513,152 +3497,6 @@ where
     })
 }
 
-/// V2 dispatch helper.  Same input prep as
-/// `try_logup_round_gpu` but forwards to the V2 hook with a direct
-/// `&mut InnerChallenger` instead of observe/sample closures.
-///
-/// Caller has already TypeId-verified that `EF == Ef4` AND
-/// `Challenger == InnerChallenger` — the unsafe transmute below
-/// relies on that invariant.
-#[allow(clippy::too_many_arguments)]
-fn try_logup_round_gpu_v2<F, EF, Challenger>(
-    circuit: &GkrCircuitLayer<F, EF>,
-    eval_point: &[EF],
-    numerator_eval: EF,
-    denominator_eval: EF,
-    lambda: EF,
-    challenger: &mut Challenger,
-    gpu_hook_v2: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFnV2,
-) -> Option<LogupGkrRoundProof<EF>>
-where
-    F: PrimeField,
-    EF: ExtensionField<F> + BasedVectorSpace<F>,
-    Challenger: FieldChallenger<F> + 'static,
-{
-    type Ef4 = p3_field::extension::BinomialExtensionField<
-        p3_koala_bear::KoalaBear, 4>;
-
-    debug_assert_eq!(
-        core::any::TypeId::of::<EF>(),
-        core::any::TypeId::of::<Ef4>(),
-        "try_logup_round_gpu_v2 invoked with EF != Ef4",
-    );
-    debug_assert_eq!(
-        core::any::TypeId::of::<Challenger>(),
-        core::any::TypeId::of::<crate::InnerChallenger>(),
-        "try_logup_round_gpu_v2 invoked with Challenger != InnerChallenger",
-    );
-
-    #[inline]
-    fn cast_ef_to_ef4<EF: 'static + Copy>(v: EF) -> Ef4 {
-        unsafe { core::mem::transmute_copy::<EF, Ef4>(&v) }
-    }
-    #[inline]
-    fn cast_ef4_to_ef<EF: 'static + Copy>(v: Ef4) -> EF {
-        unsafe { core::mem::transmute_copy::<Ef4, EF>(&v) }
-    }
-    #[inline]
-    fn cast_vec_ef_to_ef4<EF: 'static>(mut v: Vec<EF>) -> Vec<Ef4> {
-        let len = v.len();
-        let cap = v.capacity();
-        let ptr = v.as_mut_ptr();
-        core::mem::forget(v);
-        unsafe { Vec::from_raw_parts(ptr.cast::<Ef4>(), len, cap) }
-    }
-
-    // ─── Build inputs (mirror try_logup_round_gpu) ───
-    let (num_row_variables, num_interaction_variables) = match circuit {
-        GkrCircuitLayer::Layer(l) => (l.num_row_variables, l.num_interaction_variables),
-        GkrCircuitLayer::FirstLayer(l) => {
-            (l.num_row_variables, l.num_interaction_variables)
-        }
-    };
-    let total_vars = num_row_variables + num_interaction_variables;
-    if total_vars == 0 {
-        return None;
-    }
-
-    let (n0_flat, d0_flat, n1_flat, d1_flat) = match circuit {
-        GkrCircuitLayer::Layer(l) => flatten_layer::<EF, EF>(l),
-        GkrCircuitLayer::FirstLayer(l) => flatten_layer::<F, EF>(l),
-    };
-
-    let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
-    let eq_int = build_eq_table(interaction_point);
-    // When the device-eq path is enabled, skip the
-    // host `build_eq_table(row_point)` (up to 2^21 x 16 B) + its
-    // per-round H2D upload.  Stash the tiny LSB-first `row_point`
-    // (cast to Ef4) for the GPU hook and pass an EMPTY `eq_row`
-    // Vec as the device-build signal.  The host eq_int (tiny,
-    // interaction vars) is still uploaded.  `row_point` is
-    // already LSB-first == `partialLagrangeNaiveEf`-native, so the
-    // device table is byte-identical (NO reversal).
-    let eq_row: Vec<EF> = {
-        // device-eq is unconditional (the enabled-gate was retired): stash
-        // the row_point + pass an empty eq_row Vec as the device-build signal.
-        let pt_ef4 = cast_vec_ef_to_ef4::<EF>(row_point.to_vec());
-        crate::shard_level::sumcheck_poly::publish_logup_device_eq_row_point(pt_ef4);
-        Vec::new()
-    };
-
-    let initial_claim = lambda * numerator_eval + denominator_eval;
-
-    // SAFETY: TypeId equality checked above guarantees Challenger ==
-    // InnerChallenger at runtime, so this transmute is well-defined.
-    let inner_challenger: &mut crate::InnerChallenger = unsafe {
-        &mut *(challenger as *mut Challenger as *mut crate::InnerChallenger)
-    };
-
-    // Transcript-safety: snapshot for a sound fallback (see
-    // snapshot_inner_challenger docs).
-    let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
-    let result = gpu_hook_v2(
-        cast_vec_ef_to_ef4::<EF>(n0_flat),
-        cast_vec_ef_to_ef4::<EF>(d0_flat),
-        cast_vec_ef_to_ef4::<EF>(n1_flat),
-        cast_vec_ef_to_ef4::<EF>(d1_flat),
-        cast_vec_ef_to_ef4::<EF>(eq_int),
-        cast_vec_ef_to_ef4::<EF>(eq_row),
-        cast_ef_to_ef4::<EF>(lambda),
-        cast_ef_to_ef4::<EF>(initial_claim),
-        total_vars,
-        inner_challenger,
-    );
-    let result = match result {
-        Some(r) => r,
-        None => {
-            // Transcript-safety: restore so the host fallback
-            // re-runs on the SAME transcript state.
-            *inner_challenger = challenger_snapshot;
-            return None;
-        }
-    };
-
-    let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
-        .univariate_polys
-        .into_iter()
-        .map(|coeffs| UnivariatePolynomial {
-            coefficients: coeffs.into_iter().map(cast_ef4_to_ef::<EF>).collect(),
-        })
-        .collect();
-    let point: Vec<EF> = result.point.into_iter().map(cast_ef4_to_ef::<EF>).collect();
-    let final_eval: EF = cast_ef4_to_ef::<EF>(result.final_eval);
-    let claimed_sum_ef: EF = initial_claim;
-
-    let sumcheck_proof = PartialSumcheckProof::<EF> {
-        univariate_polys,
-        claimed_sum: claimed_sum_ef,
-        point_and_eval: (point, final_eval),
-    };
-
-    Some(LogupGkrRoundProof {
-        numerator_0: cast_ef4_to_ef::<EF>(result.openings[0]),
-        denominator_0: cast_ef4_to_ef::<EF>(result.openings[1]),
-        numerator_1: cast_ef4_to_ef::<EF>(result.openings[2]),
-        denominator_1: cast_ef4_to_ef::<EF>(result.openings[3]),
-        sumcheck_proof,
-    })
-}
 
 /// V3 dispatch: thread an optional `DeviceLayerHandle` from a prior layer's
 /// hook output through TLS, plus host fallback inputs. The hook implementation
@@ -3668,6 +3506,15 @@ where
 /// Handle plumbing: stashed in `LOGUP_V3_NEXT_HANDLE` TLS — call site at the
 /// start of each shard's GKR-circuit loop clears it; each successful call
 /// publishes the returned `next_layer` for the next round.
+/// Publish per-chip first-layer metadata (num_interactions + per-quadrant real
+/// rows) for the GPU device-pack kernel.  UNCONDITIONAL: the device pack is now
+/// the production first-layer path (the `ZIREN_GPU_NV28_DEVICE_PACK` gate was
+/// retired), so the metadata the kernel needs is always published.  Cheap (a
+/// few small Vecs per first-layer round).
+fn nv28_device_pack_meta_enabled() -> bool {
+    true
+}
+
 #[allow(clippy::too_many_arguments)]
 fn try_logup_round_gpu_v3<F, EF, Challenger>(
     dims: (usize, usize),
@@ -3791,6 +3638,57 @@ where
             None => return None,
         }
     };
+
+    // M1 (nv28 device-pack): publish per-chip layer metadata for the GPU
+    // device-pack kernel / slab oracle.  The per-chip (num_interactions,
+    // real_upper, real_lower) mapping onto the global interaction axis +
+    // row-MSB split lives only on the host CpuLayer.  On the GPU device path
+    // the FIRST (interaction) layer is pulled as `Layer` (EF), not
+    // `FirstLayer`, so publish for BOTH variants; the GPU oracle discriminates
+    // the actual first layer via the per-chip stash cross-check (a transition
+    // layer's folded real-rows won't match the full first-layer stash tables).
+    // Per-chip order matches the stash (both CpuLayer chip order).
+    if nv28_device_pack_meta_enabled() {
+        // Extract (num_row_vars, num_int_vars, num_int[], real_upper[],
+        // real_lower[]) from whichever CpuLayer variant this is.
+        let extracted = match circuit {
+            Some(GkrCircuitLayer::FirstLayer(l)) => {
+                let n = l.numerator_0.len();
+                Some((
+                    l.num_row_variables,
+                    l.num_interaction_variables,
+                    (0..n).map(|c| l.numerator_0[c].num_interactions as u32).collect::<Vec<u32>>(),
+                    (0..n).map(|c| l.numerator_0[c].num_real_rows as u32).collect::<Vec<u32>>(),
+                    (0..n).map(|c| l.numerator_1[c].num_real_rows as u32).collect::<Vec<u32>>(),
+                ))
+            }
+            Some(GkrCircuitLayer::Layer(l)) => {
+                let n = l.numerator_0.len();
+                Some((
+                    l.num_row_variables,
+                    l.num_interaction_variables,
+                    (0..n).map(|c| l.numerator_0[c].num_interactions as u32).collect::<Vec<u32>>(),
+                    (0..n).map(|c| l.numerator_0[c].num_real_rows as u32).collect::<Vec<u32>>(),
+                    (0..n).map(|c| l.numerator_1[c].num_real_rows as u32).collect::<Vec<u32>>(),
+                ))
+            }
+            None => None,
+        };
+        if let Some((nrv, niv, per_chip_num_int, per_chip_real_upper, per_chip_real_lower)) =
+            extracted
+        {
+            crate::shard_level::sumcheck_poly::publish_nv28_chip_meta(
+                crate::shard_level::sumcheck_poly::Nv28ChipMeta {
+                    num_row_variables: nrv,
+                    num_interaction_variables: niv,
+                    per_chip_num_int,
+                    per_chip_real_upper,
+                    per_chip_real_lower,
+                },
+            );
+        }
+    }
+
     let (interaction_point, row_point) = eval_point.split_at(num_interaction_variables);
     let eq_int = build_eq_table(interaction_point);
     // When the device-eq path is enabled, skip the
@@ -3850,15 +3748,14 @@ where
     let _ = handle_present;
 
     let univariate_polys: Vec<UnivariatePolynomial<EF>> = result
-        .round
         .univariate_polys
         .into_iter()
         .map(|coeffs| UnivariatePolynomial {
             coefficients: coeffs.into_iter().map(cast_ef4_to_ef::<EF>).collect(),
         })
         .collect();
-    let point: Vec<EF> = result.round.point.into_iter().map(cast_ef4_to_ef::<EF>).collect();
-    let final_eval: EF = cast_ef4_to_ef::<EF>(result.round.final_eval);
+    let point: Vec<EF> = result.point.into_iter().map(cast_ef4_to_ef::<EF>).collect();
+    let final_eval: EF = cast_ef4_to_ef::<EF>(result.final_eval);
     let claimed_sum_ef: EF = initial_claim;
 
     let sumcheck_proof = PartialSumcheckProof::<EF> {
@@ -3868,10 +3765,10 @@ where
     };
 
     Some(LogupGkrRoundProof {
-        numerator_0: cast_ef4_to_ef::<EF>(result.round.openings[0]),
-        denominator_0: cast_ef4_to_ef::<EF>(result.round.openings[1]),
-        numerator_1: cast_ef4_to_ef::<EF>(result.round.openings[2]),
-        denominator_1: cast_ef4_to_ef::<EF>(result.round.openings[3]),
+        numerator_0: cast_ef4_to_ef::<EF>(result.openings[0]),
+        denominator_0: cast_ef4_to_ef::<EF>(result.openings[1]),
+        numerator_1: cast_ef4_to_ef::<EF>(result.openings[2]),
+        denominator_1: cast_ef4_to_ef::<EF>(result.openings[3]),
         sumcheck_proof,
     })
 }

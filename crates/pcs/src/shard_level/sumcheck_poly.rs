@@ -700,6 +700,12 @@ pub struct GpuLogupRoundResult {
     /// `[n0, d0, n1, d1]`, matching
     /// `LogupRoundPolynomial::get_component_poly_evals`.
     pub openings: [Ef4; 4],
+    /// Optional device-resident post-fold layer handle for the next round
+    /// (cross-call chain).  `None` means the hook couldn't stash post-fold
+    /// state device-resident; the caller falls back to host `gkr_transition`.
+    /// (Folded in from the retired `GpuLogupRoundResultV3` wrapper — always
+    /// `None` today since the cross-call chain is not yet wired.)
+    pub next_layer: Option<DeviceLayerHandle>,
 }
 
 /// `None` means GPU declined — caller must fall back to the host
@@ -789,24 +795,8 @@ gpu_hook_accessors!(GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK: GpuChipStructuredS
 // default OFF or no-op when the hook is missing.
 // ──────────────────────────────────────────────────────────────────
 
-/// V2 signature: takes a real `&mut InnerChallenger` instead of the
-/// V1 observe/sample closures.  Used by the device-resident challenger
-/// path (V2 dispatch).
-pub type GpuLogupRoundProverFnV2 = fn(
-    n0_flat: Vec<Ef4>,
-    d0_flat: Vec<Ef4>,
-    n1_flat: Vec<Ef4>,
-    d1_flat: Vec<Ef4>,
-    eq_int: Vec<Ef4>,
-    eq_row: Vec<Ef4>,
-    lambda: Ef4,
-    initial_claim: Ef4,
-    num_variables: usize,
-    challenger: &mut crate::InnerChallenger,
-) -> Option<GpuLogupRoundResult>;
-
-gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_V2: GpuLogupRoundProverFnV2
-    => register_gpu_logup_round_hook_v2, get_gpu_logup_round_hook_v2);
+// (V2 logup-round hook retired in M3 — the device pack is the production
+// first-layer path; declines route to the V1 hook.)
 
 // V3 device-handle logup-round hook: SP1-aligned signature that
 // accepts an opaque device-buffer handle instead of host
@@ -825,17 +815,11 @@ impl core::fmt::Debug for DeviceLayerHandle {
     }
 }
 
-/// `next_layer = None` means the hook couldn't stash post-fold
-/// state device-resident; caller falls back to host `gkr_transition`.
-#[derive(Debug, Clone)]
-pub struct GpuLogupRoundResultV3 {
-    pub round: GpuLogupRoundResult,
-    pub next_layer: Option<DeviceLayerHandle>,
-}
+// (The `GpuLogupRoundResultV3 { round, next_layer }` wrapper was folded into
+// the base `GpuLogupRoundResult` — `next_layer` is now a field there.)
 
 /// `input` is `None` for the outermost layer's round 0; the `*_flat`
-/// vectors are the V2 fallback shape and may be ignored when
-/// `input.is_some()`.
+/// vectors are the fallback shape and may be ignored when `input.is_some()`.
 pub type GpuLogupRoundProverFnV3 = fn(
     input: Option<DeviceLayerHandle>,
     n0_flat: Vec<Ef4>,
@@ -848,7 +832,7 @@ pub type GpuLogupRoundProverFnV3 = fn(
     initial_claim: Ef4,
     num_variables: usize,
     challenger: &mut crate::InnerChallenger,
-) -> Option<GpuLogupRoundResultV3>;
+) -> Option<GpuLogupRoundResult>;
 
 gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_V3: GpuLogupRoundProverFnV3
     => register_gpu_logup_round_hook_v3, get_gpu_logup_round_hook_v3);
@@ -925,6 +909,52 @@ pub fn publish_logup_device_eq_row_point(point: Vec<Ef4>) {
 #[must_use]
 pub fn take_logup_device_eq_row_point() -> Option<Vec<Ef4>> {
     LOGUP_DEVICE_EQ_ROW_POINT.with(|c| c.borrow_mut().take())
+}
+
+// ------------------------------------------------------------------
+// M1 (nv28 device-pack): per-chip first-layer metadata channel.
+//
+// The GPU device-pack kernel builds the packed first-layer slab from the
+// per-chip device tables (numerator/denominator).  Mapping those tables to
+// the global interaction axis + row-MSB split requires per-chip metadata
+// (num_interactions, and each quadrant's real-row count) that lives on the
+// host `LogUpGkrCpuLayer`.  The host publishes it here — only for the
+// FirstLayer, only when the device-pack / slab-oracle env gate is set —
+// immediately before the V3 hook dispatch; the GPU hook takes it at entry.
+// Positionally aligned with the drained per-chip stash (both in
+// `LogUpGkrCpuLayer` chip order).
+#[derive(Clone, Debug)]
+pub struct Nv28ChipMeta {
+    /// Layer row variables `R` (rows = `2^R` = `eq_row.len()`; also the
+    /// row-MSB split point `half_logical`).
+    pub num_row_variables: usize,
+    /// Layer interaction variables `I` (cols = `2^I` = `eq_int.len()`).
+    pub num_interaction_variables: usize,
+    /// Per-chip raw interaction (local column) count.
+    pub per_chip_num_int: Vec<u32>,
+    /// Per-chip quadrant-0 (upper) real row count (`numerator_0.num_real_rows`).
+    pub per_chip_real_upper: Vec<u32>,
+    /// Per-chip quadrant-1 (lower) real row count (`numerator_1.num_real_rows`).
+    pub per_chip_real_lower: Vec<u32>,
+}
+
+std::thread_local! {
+    static NV28_CHIP_META: std::cell::RefCell<Option<Nv28ChipMeta>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Host publishes per-chip first-layer metadata for the GPU device-pack
+/// kernel.  Published immediately before the V3 hook dispatch (FirstLayer
+/// only); the hook takes it at entry.
+pub fn publish_nv28_chip_meta(meta: Nv28ChipMeta) {
+    NV28_CHIP_META.with(|c| *c.borrow_mut() = Some(meta));
+}
+
+/// GPU hook consumes the stashed per-chip metadata.  `None` => not a
+/// FirstLayer call, or the device-pack env gate is off.
+#[must_use]
+pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
+    NV28_CHIP_META.with(|c| c.borrow_mut().take())
 }
 
 /// First-round chip-structured hook. Returns `(gpu_partials,
@@ -1108,7 +1138,7 @@ mod tests {
         _initial_claim: Ef4,
         _num_variables: usize,
         _challenger: &mut crate::InnerChallenger,
-    ) -> Option<GpuLogupRoundResultV3> {
+    ) -> Option<GpuLogupRoundResult> {
         None
     }
 
