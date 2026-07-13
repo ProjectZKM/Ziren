@@ -551,7 +551,12 @@ where
             initial_geq_value,
             padded_row_adjustment,
             virtual_geq,
-        );
+        )
+        // P6: carry the device-ops seam (was the `GPU_ZEROCHECK_YTUPLE*`
+        // global `OnceLock`s) — `&NoDeviceOps` on host, `&CudaShardDeviceOps`
+        // on the GPU prover.  The SAME `dev` already gates `prepare_cells`
+        // above; `fix_last` forwards it to every fold.
+        .with_dev(dev);
         // Device-fold: attach device cells so the per-round y-tuple +
         // fold run on device (no host cells).
         let poly = if let Some(dc) = device_cells_opt {

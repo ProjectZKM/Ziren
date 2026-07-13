@@ -496,6 +496,18 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     device_prep: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>,
     /// true until the first device fold (round-0 cells are Felt; later Ef4).
     device_round0: bool,
+    /// P6 static dispatch: the device-ops seam carrying the zerocheck y-tuple
+    /// family (was the `GPU_ZEROCHECK_YTUPLE{,_DEVICE}` / `_FOLD_DEVICE` /
+    /// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL` `OnceLock`s).  These ops are read
+    /// inside the `SumcheckPoly`/`ComponentPoly`/first-round impls, whose
+    /// signatures are fixed by the generic driver, so the `&dyn` is carried BY
+    /// the poly (reusing the existing `'a`) rather than threaded positionally.
+    /// `None` (host build) / `Some(&NoDeviceOps)` (`is_device()` = false) both
+    /// take the host path — byte-identical to an unregistered hook; the GPU
+    /// prover carries `Some(&CudaShardDeviceOps)` (`is_device()` = true).
+    /// Propagated through every fold (`fix_last`) so the device path can never
+    /// be dropped mid-sumcheck.
+    dev: Option<&'a dyn crate::shard_level::ShardDeviceOps>,
     _marker: PhantomData<A>,
 }
 
@@ -548,8 +560,20 @@ where
             device_cells: None,
             device_prep: None,
             device_round0: true,
+            dev: None,
             _marker: PhantomData,
         }
+    }
+
+    /// P6: attach the device-ops seam (`&NoDeviceOps` on the host prover,
+    /// `&CudaShardDeviceOps` on the GPU prover) so the per-round y-tuple /
+    /// fold / extract ops dispatch by prover TYPE (was the
+    /// `GPU_ZEROCHECK_YTUPLE*` global `OnceLock`s).  Called on EVERY poly at
+    /// construction; `fix_last` forwards it to each fold, so the whole
+    /// sumcheck walks with the same seam.
+    pub fn with_dev(mut self, dev: &'a dyn crate::shard_level::ShardDeviceOps) -> Self {
+        self.dev = Some(dev);
+        self
     }
 
     /// Attach device-resident cells (the chip's trace on device, from the
@@ -657,10 +681,15 @@ where
         {
             return None;
         }
-        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_batched_ytuple_hook()?;
         if polys.is_empty() {
             return Some(Vec::new());
         }
+        // P6: the batched y-tuple op is carried by the poly (was
+        // `get_gpu_zerocheck_batched_ytuple_hook()`).  Every poly in the round
+        // carries the same `dev`; read it from the first.  `is_device()`
+        // reproduces the former "hook registered" presence check (an empty
+        // round already returned above, matching the old empty-hook fallback).
+        let dev = polys[0].dev.filter(|d| d.is_device())?;
 
         // Per REAL chip (num_real > 0): partial-lagrange + last coord + owned
         // name must outlive the borrowed inputs.  `real_poly_idx` maps the
@@ -763,7 +792,7 @@ where
                 polys[0].public_values.len(),
             )
         };
-        let tuples = hook(&inputs, pv_kb, is_first_round)?;
+        let tuples = dev.zerocheck_batched_ytuple(&inputs, pv_kb, is_first_round)?;
         if tuples.len() != real_poly_idx.len() {
             return None; // shape mismatch -> host fallback
         }
@@ -802,9 +831,9 @@ where
     }
 
     /// Device-or-host dispatch for the per-pair y-tuple accumulator.
-    /// Under `ZIREN_GPU_ZEROCHECK_YTUPLE=1` with a registered
-    /// `GpuZerocheckYTupleFn` and `EF == Ef4`, computes the tuple on the
-    /// device; otherwise (and on any hook `None`) runs the byte-identical
+    /// With a device `dev` (`ShardDeviceOps::zerocheck_ytuple`, `is_device()`)
+    /// and `EF == Ef4`, computes the tuple on the
+    /// device; otherwise (host `dev` / any device `None`) runs the byte-identical
     /// host loop.  With `ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY=1` it runs BOTH
     /// and asserts the device result equals the host loop (the P0 parity
     /// gate; mirrors the prover's device-resident-verify pattern).  The
@@ -863,7 +892,10 @@ where
         {
             return None;
         }
-        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_ytuple_hook()?;
+        // P6: the host-cell y-tuple op is carried by the poly (was
+        // `get_gpu_zerocheck_ytuple_hook()`); `is_device()` reproduces the
+        // former "hook registered" presence check.
+        let dev = self.dev.filter(|d| d.is_device())?;
 
         // SAFETY: the TypeId equalities above guarantee `EF == K == Ef4` and
         // `F == Kb`, so these slice / scalar reinterpretations are
@@ -890,7 +922,7 @@ where
         let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&self.alpha) };
 
         let name = self.air.name();
-        let out = hook(
+        let out = dev.zerocheck_ytuple(
             &name,
             main_ef4,
             self.num_main_cols,
@@ -924,7 +956,9 @@ where
             return None;
         }
         let dc = self.device_cells.as_ref()?;
-        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_ytuple_device_hook()?;
+        // P6: device-cell y-tuple op carried by the poly (was
+        // `get_gpu_zerocheck_ytuple_device_hook()`); `is_device()` = registered.
+        let dev = self.dev.filter(|d| d.is_device())?;
         // SAFETY: TypeId equalities -> layout-safe reinterpretation (shared borrows).
         let gkr_ef4: &[Ef4] = unsafe {
             core::slice::from_raw_parts(self.gkr_powers.as_ptr().cast::<Ef4>(), self.gkr_powers.len())
@@ -938,7 +972,7 @@ where
         let prep_dyn: Option<&(dyn core::any::Any + Send + Sync)> =
             self.device_prep.as_deref();
         let name = self.air.name();
-        let out = hook(
+        let out = dev.zerocheck_ytuple_device(
             &name,
             dc.as_ref(),
             self.num_main_cols,
@@ -963,9 +997,17 @@ where
             return None;
         }
         let dc = self.device_cells.as_ref()?;
-        let hook = crate::shard_level::sumcheck_poly::get_gpu_zerocheck_fold_device_hook()?;
+        // P6: device fold op carried by the poly (was
+        // `get_gpu_zerocheck_fold_device_hook()`); `is_device()` = registered.
+        let dev = self.dev.filter(|d| d.is_device())?;
         let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&alpha) };
-        hook(dc.as_ref(), self.num_main_cols, self.num_real_entries, alpha_ef4, self.device_round0)
+        dev.zerocheck_fold_device(
+            dc.as_ref(),
+            self.num_main_cols,
+            self.num_real_entries,
+            alpha_ef4,
+            self.device_round0,
+        )
     }
 
     /// The per-pair degree-4 eq-weighted accumulator: returns
@@ -1225,6 +1267,8 @@ where
                 device_cells: new_device_cells,
                 device_prep: self.device_prep,
                 device_round0: false,
+                // P6: forward the device-ops seam to the fold (never drop it).
+                dev: self.dev,
                 _marker: PhantomData,
             };
         }
@@ -1259,6 +1303,8 @@ where
             device_cells: new_device_cells,
             device_prep: self.device_prep,
             device_round0: false,
+            // P6: forward the device-ops seam to the fold (never drop it).
+            dev: self.dev,
             _marker: PhantomData,
         }
     }
@@ -1450,16 +1496,17 @@ where
                 if TypeId::of::<EF>() == TypeId::of::<Ef4>()
                     && TypeId::of::<K>() == TypeId::of::<Ef4>()
                 {
-                    if let Some(hook) =
-                        crate::shard_level::sumcheck_poly::get_gpu_zerocheck_extract_final_hook()
-                    {
+                    // P6: extract-final op carried by the poly (was
+                    // `get_gpu_zerocheck_extract_final_hook()`); `is_device()`
+                    // reproduces the former "hook registered" presence check.
+                    if let Some(dev) = self.dev.filter(|d| d.is_device()) {
                         // np>0: the device buffer is the COMBINED [main ++ prep]
                         // col-major block (prep columns FOLLOW main), so
                         // extract num_main_cols + num_prep_cols residuals and emit
                         // them prep-then-main (the host/SP1 trace@z order below).
                         // np==0 chips extract exactly num_main_cols (unchanged).
                         let want = self.num_main_cols + self.num_prep_cols;
-                        if let Some(res_ef4) = hook(dc.as_ref(), want) {
+                        if let Some(res_ef4) = dev.zerocheck_extract_final(dc.as_ref(), want) {
                             // SAFETY: TypeId equality guarantees EF == Ef4.
                             let res: Vec<EF> = unsafe {
                                 let len = res_ef4.len();

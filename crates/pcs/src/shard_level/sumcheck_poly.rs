@@ -325,40 +325,17 @@ gpu_hook_accessors!(GPU_SUMCHECK_HOOK: GpuSumcheckEvalsFn
 // Their `OnceLock`s + `register_/get_` accessors + fn-ptr type aliases were
 // dropped along with the co-located `type Kb` alias.
 
-// Device-fold: per-round per-pair y-tuple computed from DEVICE-resident
-// cells (no host upload). `dev_cells` is the erased device handle held by the
-// ZeroCheckPoly (ColMajorMatrixDevice<Felt> round 0, DeviceBuffer<Ef4> later).
-// Returns (y0,y2,y3,y4) or None to fall back. The hook downcasts the handle.
-pub type GpuZerocheckYTupleDeviceFn = fn(
-    chip_name: &str,
-    dev_cells: &(dyn core::any::Any + Send + Sync),
-    num_main_cols: usize,
-    dev_prep: Option<&(dyn core::any::Any + Send + Sync)>,
-    num_prep_cols: usize,
-    gkr_powers: &[Ef4],
-    alpha: Ef4,
-    eq: &[Ef4],
-    public_values: &[p3_koala_bear::KoalaBear],
-    num_real: usize,
-    is_first_round: bool,
-) -> Option<[Ef4; 4]>;
+// P6 static dispatch: the `GPU_ZEROCHECK_YTUPLE_DEVICE` hook (per-round
+// per-pair y-tuple from DEVICE-resident cells, no host upload) moved to
+// `ShardDeviceOps::zerocheck_ytuple_device` (see `crate::shard_level::device_ops`),
+// carried by `ZeroCheckPoly`; the `OnceLock` + `register_/get_` accessors + the
+// `GpuZerocheckYTupleDeviceFn` fn-ptr alias were dropped.
 
-gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_DEVICE_HOOK: GpuZerocheckYTupleDeviceFn
-    => register_gpu_zerocheck_ytuple_device_hook, get_gpu_zerocheck_ytuple_device_hook);
-
-// Device-fold: fold the device-resident cells on the last variable to
-// `alpha`, on device. Returns the new erased device handle (DeviceBuffer<Ef4>).
-// `is_first_round` => current cells are Felt (round 0); fold lifts Felt->Ef4.
-pub type GpuZerocheckFoldDeviceFn = fn(
-    dev_cells: &(dyn core::any::Any + Send + Sync),
-    num_cols: usize,
-    num_real: usize,
-    alpha: Ef4,
-    is_first_round: bool,
-) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
-    => register_gpu_zerocheck_fold_device_hook, get_gpu_zerocheck_fold_device_hook);
+// P6 static dispatch: the `GPU_ZEROCHECK_FOLD_DEVICE` hook (fold the
+// device-resident cells on the last variable, on device) moved to
+// `ShardDeviceOps::zerocheck_fold_device`, carried by `ZeroCheckPoly`; the
+// `OnceLock` + `register_/get_` accessors + the `GpuZerocheckFoldDeviceFn`
+// fn-ptr alias were dropped.
 
 // P5 static dispatch: the `GPU_ZEROCHECK_PREPARE_CELLS` hook (device-fold
 // bit-reverse + prepare the provider trace into the ZeroCheckPoly's device-cell
@@ -367,15 +344,11 @@ gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
 // threaded by prover TYPE; the `OnceLock` + `register_/get_` accessors + the
 // `GpuZerocheckPrepareCellsFn` fn-ptr alias were dropped.
 
-// Device-fold: extract the fully-folded per-chip openings (1 row) from the
-// device cells so the host get_component_poly_evals (the trace_at_z openings)
-// reads the device result. A single-row D2H -- cheap (not the full-trace
-// materialize).
-pub type GpuZerocheckExtractFinalFn =
-    fn(dev_cells: &(dyn core::any::Any + Send + Sync), num_main_cols: usize) -> Option<Vec<Ef4>>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_EXTRACT_FINAL_HOOK: GpuZerocheckExtractFinalFn
-    => register_gpu_zerocheck_extract_final_hook, get_gpu_zerocheck_extract_final_hook);
+// P6 static dispatch: the `GPU_ZEROCHECK_EXTRACT_FINAL` hook (single-row D2H
+// of the fully-folded per-chip openings so the host get_component_poly_evals
+// reads the device result) moved to `ShardDeviceOps::zerocheck_extract_final`,
+// carried by `ZeroCheckPoly`; the `OnceLock` + `register_/get_` accessors + the
+// `GpuZerocheckExtractFinalFn` fn-ptr alias were dropped.
 
 // P5 dead-hook removal: the `GPU_FIX_ROUND_ZERO`, `GPU_ZEROCHECK`,
 // `GPU_ZEROCHECK_COMBINE`, and `GPU_CONSTRAINT_EVAL` `OnceLock` slots were
@@ -393,42 +366,14 @@ pub trait GpuZerocheckChallenger {
     fn sample_ef(&mut self) -> Ef4;
 }
 
-/// Per-chip per-round zerocheck y-tuple device hook.
-///
-/// Returns `(y_0, y_2, y_3, y_4)` — the per-pair eq-weighted
-/// accumulators the device computes for one chip in one sumcheck
-/// round, EXACTLY mirroring `ZeroCheckPoly::accumulate_y_tuple_host`
-/// (Ziren `zerocheck_poly.rs`).  These are the raw accumulators BEFORE
-/// `finalize_round_poly`'s `elf_X · eq_adjustment` scaling and the
-/// VirtualGeq padded-row correction — the host keeps that analytic,
-/// transcript-critical finalize, so the Fiat-Shamir transcript is
-/// byte-identical regardless of this hook.
-///
-/// `main_cells` / `prep_cells` are the CURRENT folded `Ef4` trace rows
-/// (row-major `num_real × width`), already bit-reversed on round 0
-/// (`prep_cells` is empty when `num_prep_cols == 0`).  `gkr_powers` is
-/// the main-then-prep batch-power vector `[β¹ .. β^(main+prep)]`.
-/// `alpha` is the constraint-batching Horner challenge.  `eq` is
-/// `partial_lagrange(zeta[..dim-1])` (length ≥ `num_real.div_ceil(2)`).
-/// `is_first_round` skips the AIR eval at sample 0 (it is summed only
-/// as the gkr term there).  Returns `None` on chip-reject (cache miss /
-/// shape unsupported); callers MUST fall back to host on `None`.
-pub type GpuZerocheckYTupleFn = fn(
-    chip_name: &str,
-    main_cells: &[Ef4],
-    num_main_cols: usize,
-    prep_cells: &[Ef4],
-    num_prep_cols: usize,
-    gkr_powers: &[Ef4],
-    alpha: Ef4,
-    eq: &[Ef4],
-    public_values: &[p3_koala_bear::KoalaBear],
-    num_real: usize,
-    is_first_round: bool,
-) -> Option<[Ef4; 4]>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_YTUPLE_HOOK: GpuZerocheckYTupleFn
-    => register_gpu_zerocheck_ytuple_hook, get_gpu_zerocheck_ytuple_hook);
+// P6 static dispatch: the `GPU_ZEROCHECK_YTUPLE` hook (per-chip per-round
+// zerocheck y-tuple from HOST cells) moved to `ShardDeviceOps::zerocheck_ytuple`,
+// carried by `ZeroCheckPoly`; the `OnceLock` + `register_/get_` accessors + the
+// `GpuZerocheckYTupleFn` fn-ptr alias were dropped.  The device returns the
+// per-pair `(y_0, y_2, y_3, y_4)` accumulators BEFORE `finalize_round_poly`'s
+// `elf_X · eq_adjustment` scaling + the VirtualGeq padded-row correction — the
+// host keeps that analytic, transcript-critical finalize, so the Fiat-Shamir
+// transcript is byte-identical regardless of the dispatch.
 
 /// Per-chip input for the BATCHED device y-tuple hook (chip fusion):
 /// one fused device launch over ALL chips in a round.  Slices borrow the
@@ -461,18 +406,12 @@ pub struct ZerocheckChipYTupleInput<'a> {
     pub device_cells: Option<&'a (dyn core::any::Any + Send + Sync)>,
 }
 
-/// Batched per-round y-tuple hook: computes (y_0,y_2,y_3,y_4) for ALL
-/// input chips in one fused device call, returning one tuple per chip in
-/// the SAME order.  None => whole-round host fallback.  Only the REAL
-/// chips (num_real > 0) are passed; the caller emits dummies for the rest.
-pub type GpuZerocheckBatchedYTupleFn = fn(
-    chips: &[ZerocheckChipYTupleInput<'_>],
-    public_values: &[p3_koala_bear::KoalaBear],
-    is_first_round: bool,
-) -> Option<Vec<[Ef4; 4]>>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_BATCHED_YTUPLE_HOOK: GpuZerocheckBatchedYTupleFn
-    => register_gpu_zerocheck_batched_ytuple_hook, get_gpu_zerocheck_batched_ytuple_hook);
+// P6 static dispatch: the `GPU_ZEROCHECK_BATCHED_YTUPLE` hook (one fused device
+// launch computing every real chip's (y_0,y_2,y_3,y_4) in a round) moved to
+// `ShardDeviceOps::zerocheck_batched_ytuple`, carried by `ZeroCheckPoly`; the
+// `OnceLock` + `register_/get_` accessors + the `GpuZerocheckBatchedYTupleFn`
+// fn-ptr alias were dropped.  `ZerocheckChipYTupleInput` (above) STAYS — it is
+// the method's per-chip input.
 
 // P5 dead-hook removal: the `GPU_CONSTRAINT_EVAL_BATCHED` and
 // `GPU_CONSTRAINT_EVAL_CROSS_SHARD` `OnceLock` slots were removed — both had

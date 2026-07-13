@@ -48,8 +48,13 @@ type Kb = p3_koala_bear::KoalaBear;
 /// "provider-carried" device ops (the SP1-parity static-dispatch collapse
 /// of the former `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
 /// `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`
-/// registries).  All methods take `&self` and concrete arg types (no
-/// generics) so the trait is object-safe and threads as `&dyn`.
+/// registries) plus (P6) the zerocheck y-tuple family
+/// (`GPU_ZEROCHECK_YTUPLE` / `_YTUPLE_DEVICE` / `_FOLD_DEVICE` /
+/// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL`), the latter carried by
+/// `ZeroCheckPoly` rather than threaded positionally (its read sites sit
+/// inside trait impls with no prover in scope).  All methods take `&self`
+/// and concrete arg types (no generics) so the trait is object-safe and
+/// threads as `&dyn`.
 ///
 /// `is_device()` gates every device op (it replaces the former
 /// `get_gpu_*_hook().is_some()` presence check); on the host it is `false`
@@ -124,6 +129,112 @@ pub trait ShardDeviceOps: Send + Sync {
         _dense_rev: bool,
     ) -> Option<Arc<dyn Any + Send + Sync>> {
         unreachable!("host ShardDeviceOps::zerocheck_prepare_cells — gated by is_device()")
+    }
+
+    // ── P6: the zerocheck y-tuple family (carried by `ZeroCheckPoly`) ──────
+    //
+    // The five methods below are the SP1-parity static-dispatch collapse of
+    // the former `GPU_ZEROCHECK_YTUPLE` / `GPU_ZEROCHECK_YTUPLE_DEVICE` /
+    // `GPU_ZEROCHECK_FOLD_DEVICE` / `GPU_ZEROCHECK_BATCHED_YTUPLE` /
+    // `GPU_ZEROCHECK_EXTRACT_FINAL` `OnceLock` hooks.  They are read INSIDE
+    // `ZeroCheckPoly`'s `SumcheckPoly`/`ComponentPoly`/first-round impls,
+    // whose signatures are fixed by the generic `reduce_sumcheck_to_evaluation`
+    // driver (no `&self`-prover in scope), so the `&dyn ShardDeviceOps` is
+    // carried by the poly (a `dev` field, threaded through every ctor + fold).
+    // `is_device()` gates each (was the `get_*_hook().is_some()` presence
+    // check); the round polynomials the y-tuple feeds are observed into the
+    // Fiat-Shamir transcript via `finalize_round_poly`, which stays host, so
+    // the transcript is byte-identical to the former global-registry dispatch.
+
+    /// Per-chip per-round zerocheck y-tuple from HOST cells (was
+    /// `GPU_ZEROCHECK_YTUPLE`).  Returns `(y_0, y_2, y_3, y_4)` — the per-pair
+    /// eq-weighted accumulators mirroring `accumulate_y_tuple_host`, BEFORE
+    /// the `finalize_round_poly` scaling (which stays host).  `main_cells` /
+    /// `prep_cells` are the current folded `Ef4` rows (row-major
+    /// `num_real × width`, bit-reversed on round 0); `gkr_powers` is the
+    /// main-then-prep batch-power vector; `eq = partial_lagrange(zeta[..dim-1])`.
+    /// `None` on chip-reject → host fallback.  Only called under `is_device()`.
+    #[allow(clippy::too_many_arguments)]
+    fn zerocheck_ytuple(
+        &self,
+        _chip_name: &str,
+        _main_cells: &[Ef4],
+        _num_main_cols: usize,
+        _prep_cells: &[Ef4],
+        _num_prep_cols: usize,
+        _gkr_powers: &[Ef4],
+        _alpha: Ef4,
+        _eq: &[Ef4],
+        _public_values: &[Kb],
+        _num_real: usize,
+        _is_first_round: bool,
+    ) -> Option<[Ef4; 4]> {
+        unreachable!("host ShardDeviceOps::zerocheck_ytuple — gated by is_device()")
+    }
+
+    /// Per-chip per-round y-tuple from DEVICE-resident cells (no host upload;
+    /// was `GPU_ZEROCHECK_YTUPLE_DEVICE`).  `dev_cells` is the erased device
+    /// handle the `ZeroCheckPoly` carries (`ColMajorMatrixDevice<Felt>` round 0,
+    /// `DeviceBuffer<Ef4>` later); the impl downcasts it.  Returns
+    /// `(y_0, y_2, y_3, y_4)` or `None` to fall back.  Only called under
+    /// `is_device()`.
+    #[allow(clippy::too_many_arguments)]
+    fn zerocheck_ytuple_device(
+        &self,
+        _chip_name: &str,
+        _dev_cells: &(dyn Any + Send + Sync),
+        _num_main_cols: usize,
+        _dev_prep: Option<&(dyn Any + Send + Sync)>,
+        _num_prep_cols: usize,
+        _gkr_powers: &[Ef4],
+        _alpha: Ef4,
+        _eq: &[Ef4],
+        _public_values: &[Kb],
+        _num_real: usize,
+        _is_first_round: bool,
+    ) -> Option<[Ef4; 4]> {
+        unreachable!("host ShardDeviceOps::zerocheck_ytuple_device — gated by is_device()")
+    }
+
+    /// Fold the device-resident cells on the last variable to `alpha`, on
+    /// device (was `GPU_ZEROCHECK_FOLD_DEVICE`).  Returns the new erased
+    /// device handle (`DeviceBuffer<Ef4>`); `is_first_round` => current cells
+    /// are Felt (round 0) and the fold lifts Felt→Ef4.  `None` to fall back.
+    /// Only called under `is_device()`.
+    fn zerocheck_fold_device(
+        &self,
+        _dev_cells: &(dyn Any + Send + Sync),
+        _num_cols: usize,
+        _num_real: usize,
+        _alpha: Ef4,
+        _is_first_round: bool,
+    ) -> Option<Arc<dyn Any + Send + Sync>> {
+        unreachable!("host ShardDeviceOps::zerocheck_fold_device — gated by is_device()")
+    }
+
+    /// BATCHED per-round y-tuple over ALL real chips in one fused device
+    /// launch (chip fusion; was `GPU_ZEROCHECK_BATCHED_YTUPLE`).  One tuple per
+    /// input chip in the SAME order; `None` => whole-round host fallback.  Only
+    /// called under `is_device()`.
+    fn zerocheck_batched_ytuple(
+        &self,
+        _chips: &[crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput<'_>],
+        _public_values: &[Kb],
+        _is_first_round: bool,
+    ) -> Option<Vec<[Ef4; 4]>> {
+        unreachable!("host ShardDeviceOps::zerocheck_batched_ytuple — gated by is_device()")
+    }
+
+    /// Extract the fully-folded per-chip openings (1 row) from the device
+    /// cells so the host `get_component_poly_evals` (the trace_at_z openings)
+    /// reads the device result (was `GPU_ZEROCHECK_EXTRACT_FINAL`).  A single-
+    /// row D2H — cheap.  `None` to fall back.  Only called under `is_device()`.
+    fn zerocheck_extract_final(
+        &self,
+        _dev_cells: &(dyn Any + Send + Sync),
+        _num_main_cols: usize,
+    ) -> Option<Vec<Ef4>> {
+        unreachable!("host ShardDeviceOps::zerocheck_extract_final — gated by is_device()")
     }
 }
 
