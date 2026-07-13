@@ -2022,8 +2022,9 @@ where
 
     // Device-resident per-layer LogUp-GKR sumcheck.
     //
-    // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
-    // registered via `register_gpu_logup_round_hook_device_fold` AND `EF` is the
+    // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a device `ShardDeviceOps` is in
+    // scope (`dev.is_device()`, was the `register_gpu_logup_round_hook_device_fold`
+    // registration presence check) AND `EF` is the
     // production `Ef4` concrete type, route the entire per-layer
     // sumcheck (all `total_vars` rounds) through the GPU hook so the
     // (n0, d0, n1, d1, eq_int, eq_row) state stays device-resident
@@ -2060,9 +2061,12 @@ where
         if TypeId::of::<EF>() == TypeId::of::<Ef4>()
             && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
         {
-            if let Some(gpu_hook_v3) =
-                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook()
-            {
+            // P8: gate on the device-ops seam (was
+            // `get_gpu_logup_round_hook().is_some()`); on the host build `dev`
+            // is `NoDeviceOps` (`is_device()` = false), reproducing the
+            // unregistered-hook path byte-for-byte.  `&**dev` reuses the P7 Arc
+            // already threaded in.
+            if dev.is_device() {
                 if let Some(proof) = try_logup_round_gpu::<F, EF, _>(
                     dims,
                     Some(circuit),
@@ -2071,18 +2075,18 @@ where
                     denominator_eval,
                     lambda,
                     challenger,
-                    gpu_hook_v3,
+                    &**dev,
                 ) {
                     return proof;
                 }
                 // Device pack declined → fall through to the device-fold
-                // hook and then the host trait driver.
+                // op and then the host trait driver.
             }
         }
 
-        if let Some(gpu_hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_device_fold()
-        {
+        // P8: gate on the device-ops seam (was
+        // `get_gpu_logup_round_hook_device_fold().is_some()`).
+        if dev.is_device() {
             if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
                 if let Some(proof) = try_logup_round_gpu_device_fold::<F, EF, _>(
                     circuit,
@@ -2091,12 +2095,12 @@ where
                     denominator_eval,
                     lambda,
                     challenger,
-                    gpu_hook,
+                    &**dev,
                 ) {
                     return proof;
                 }
-                // GPU hook returned None — fall through to host.  The
-                // hook is responsible for its own logging on the
+                // GPU op returned None — fall through to host.  The
+                // op is responsible for its own logging on the
                 // decline path; we don't double-log here to avoid log
                 // spam on the (intentional) MIN_DEVICE_HALF cutoff.
             }
@@ -2198,7 +2202,11 @@ fn try_logup_round_gpu_device_fold<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    gpu_hook: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFnDeviceFold,
+    // P8 static dispatch: was the `GpuLogupRoundProverFnDeviceFold` fn-ptr
+    // (retired `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` hook); now the device-ops
+    // seam threaded `&**dev` from `prove_gkr_round`.  Only reached when
+    // `dev.is_device()`.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Option<LogupGkrRoundProof<EF>>
 where
     F: PrimeField,
@@ -2300,7 +2308,7 @@ where
         cast_ef_to_ef4::<EF>(s)
     };
 
-    let result = gpu_hook(
+    let result = dev.logup_round_device_fold(
         cast_vec_ef_to_ef4::<EF>(n0_flat),
         cast_vec_ef_to_ef4::<EF>(d0_flat),
         cast_vec_ef_to_ef4::<EF>(n1_flat),
@@ -2386,7 +2394,10 @@ fn try_logup_round_gpu<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    gpu_hook_v3: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFn,
+    // P8 static dispatch: was the `GpuLogupRoundProverFn` fn-ptr (retired
+    // `GPU_LOGUP_ROUND_HOOK` hook); now the device-ops seam threaded `&**dev`
+    // from `prove_gkr_round`.  Only reached when `dev.is_device()`.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Option<LogupGkrRoundProof<EF>>
 where
     F: PrimeField,
@@ -2580,7 +2591,7 @@ where
     // Transcript-safety: snapshot for a sound fallback (see
     // snapshot_inner_challenger docs).
     let challenger_snapshot: crate::InnerChallenger = inner_challenger.clone();
-    let result = gpu_hook_v3(
+    let result = dev.logup_round(
         input_handle,
         cast_vec_ef_to_ef4::<EF>(n0_flat),
         cast_vec_ef_to_ef4::<EF>(d0_flat),

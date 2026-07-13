@@ -453,25 +453,13 @@ pub struct GpuLogupRoundResult {
     pub next_layer: Option<DeviceLayerHandle>,
 }
 
-/// `None` means GPU declined — caller must fall back to the host
-/// trait driver. The hook is opaque about why, so it MUST
-/// log/instrument internally.
-pub type GpuLogupRoundProverFnDeviceFold = fn(
-    n0_flat: Vec<Ef4>,
-    d0_flat: Vec<Ef4>,
-    n1_flat: Vec<Ef4>,
-    d1_flat: Vec<Ef4>,
-    eq_int: Vec<Ef4>,
-    eq_row: Vec<Ef4>,
-    lambda: Ef4,
-    initial_claim: Ef4,
-    num_variables: usize,
-    observe_ef: &dyn Fn(Ef4),
-    sample_ef: &dyn Fn() -> Ef4,
-) -> Option<GpuLogupRoundResult>;
-
-gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD: GpuLogupRoundProverFnDeviceFold
-    => register_gpu_logup_round_hook_device_fold, get_gpu_logup_round_hook_device_fold);
+// P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` hook (device-fold
+// per-layer LogUp-GKR round driver, transcript driven via `observe_ef` /
+// `sample_ef` closures) moved to `ShardDeviceOps::logup_round_device_fold` (see
+// `crate::shard_level::device_ops`), threaded POSITIONALLY into
+// `prove_gkr_round` (the per-shard `dev` is in scope there → the
+// `try_logup_round_gpu_device_fold` helper); the `OnceLock` + `register_/get_`
+// accessors + the `GpuLogupRoundProverFnDeviceFold` fn-ptr alias were dropped.
 
 // P7 static dispatch: the `GPU_CHIP_STRUCTURED_SUMCHECK` hook (chip-structured
 // row-binding per-round sumcheck round-poly evaluator, rounds 1..N with
@@ -525,24 +513,16 @@ impl core::fmt::Debug for DeviceLayerHandle {
 // (The `GpuLogupRoundResultV3 { round, next_layer }` wrapper was folded into
 // the base `GpuLogupRoundResult` — `next_layer` is now a field there.)
 
-/// `input` is `None` for the outermost layer's round 0; the `*_flat`
-/// vectors are the fallback shape and may be ignored when `input.is_some()`.
-pub type GpuLogupRoundProverFn = fn(
-    input: Option<DeviceLayerHandle>,
-    n0_flat: Vec<Ef4>,
-    d0_flat: Vec<Ef4>,
-    n1_flat: Vec<Ef4>,
-    d1_flat: Vec<Ef4>,
-    eq_int: Vec<Ef4>,
-    eq_row: Vec<Ef4>,
-    lambda: Ef4,
-    initial_claim: Ef4,
-    num_variables: usize,
-    challenger: &mut crate::InnerChallenger,
-) -> Option<GpuLogupRoundResult>;
-
-gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK: GpuLogupRoundProverFn
-    => register_gpu_logup_round_hook, get_gpu_logup_round_hook);
+// P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK` hook (device-pack per-layer
+// LogUp-GKR round driver — accepts an opaque `DeviceLayerHandle` from a prior
+// layer + drives the concrete `&mut InnerChallenger`) moved to
+// `ShardDeviceOps::logup_round` (see `crate::shard_level::device_ops`), threaded
+// POSITIONALLY into `prove_gkr_round` (the per-shard `dev` is in scope there →
+// the `try_logup_round_gpu` helper); the `OnceLock` + `register_/get_`
+// accessors + the `GpuLogupRoundProverFn` fn-ptr alias were dropped.
+// (`DeviceLayerHandle` above STAYS — the method's `input` param + the
+// cross-round `LOGUP_V3_NEXT_HANDLE` TLS chain still carry it; `Ef4` below
+// serves the remaining hooks / this module's local uses.)
 
 // TLS slot threading `DeviceLayerHandle` between V3 hook calls
 // within one shard's GKR walk. Orchestrator must `clear` at shard
@@ -822,31 +802,9 @@ mod tests {
         assert_eq!(r.coefficients[1], EF::from_u32(24));
     }
 
-    // OnceLock is process-global; this stub becomes "the" V3 hook
-    // for the rest of the test process.
-    fn stub_v3_hook(
-        _input: Option<DeviceLayerHandle>,
-        _n0: Vec<Ef4>,
-        _d0: Vec<Ef4>,
-        _n1: Vec<Ef4>,
-        _d1: Vec<Ef4>,
-        _eq_int: Vec<Ef4>,
-        _eq_row: Vec<Ef4>,
-        _lambda: Ef4,
-        _initial_claim: Ef4,
-        _num_variables: usize,
-        _challenger: &mut crate::InnerChallenger,
-    ) -> Option<GpuLogupRoundResult> {
-        None
-    }
-
-    #[test]
-    fn register_gpu_logup_round_hook_v3_smoke() {
-        // First registration succeeds; second is rejected (idempotent).
-        let _ = register_gpu_logup_round_hook(stub_v3_hook);
-        assert!(get_gpu_logup_round_hook().is_some());
-        // Re-register must fail (OnceLock).
-        let err = register_gpu_logup_round_hook(stub_v3_hook);
-        assert!(err.is_err());
-    }
+    // P8 static dispatch: the `register_gpu_logup_round_hook_v3_smoke` test (and
+    // its `stub_v3_hook`) were removed with the `GPU_LOGUP_ROUND_HOOK` `OnceLock`
+    // accessors — the round driver is now `ShardDeviceOps::logup_round`, gated by
+    // `is_device()` (host `NoDeviceOps` = false) and threaded positionally into
+    // `prove_gkr_round`, so there is no process-global registry to smoke-test.
 }
