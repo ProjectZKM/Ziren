@@ -42,7 +42,15 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
 /// threads it into the jagged-PCS opening.  The matrices are moved into a named-tuple
 /// Vec for the commit and moved back out — no trace data is copied.
-fn maybe_auto_precompute_basefold<'t, SC, A>(
+fn maybe_auto_precompute_basefold<'t, SC, A, D>(
+    // The jagged trusted-evaluations open + commit producer — the COMMIT
+    // static-dispatch seam (Phase-1 collapse of the former
+    // `gpu_basefold_commit` + `gpu_jagged_precompute_commit` `Option<fn>` pair).
+    // `ProverJaggedEval(&prover)` routes `commit_multilinears` to the prover's
+    // `MachineProver` method (a `StarkGpuProver` device override is picked up);
+    // `FreeFnJaggedEval` uses the host default (byte-identical to the former
+    // `None`-hook path).
+    jagged_eval_producer: &D,
     chips: &[&Chip<Val<SC>, A>],
     // SITE-1 trace-unification: BORROWED views over the shard prover's shared
     // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
@@ -56,15 +64,6 @@ fn maybe_auto_precompute_basefold<'t, SC, A>(
         >,
     >,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
-    // #118: the device BaseFold commit fn, threaded into the host-fallback
-    // precompute (`precompute_jagged_basefold_commit_provider`).  `None` =
-    // host commit (CPU prover); `Some` on the GPU free-fn callers.
-    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
-    // #118: the device jagged precompute-commit fn (was the global
-    // `GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK` OnceLock), consulted at the
-    // device-precompute dispatch below.  `None` = host precompute (CPU
-    // prover); `Some` on the GPU free-fn callers.
-    gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -87,6 +86,7 @@ fn maybe_auto_precompute_basefold<'t, SC, A>(
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
     A: MachineAir<Val<SC>>,
+    D: JaggedEvalProducer<SC, A>,
     Val<SC>: PrimeField + 'static,
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     SC::Challenger: 'static,
@@ -133,49 +133,32 @@ where
         })
         .collect();
 
-    // Single shard-wide commit buffer: when a per-shard device
-    // provider is present and ziren-gpu registered the device
-    // precompute-commit hook, build the dense pack + BaseFold commit
-    // device-side (resident chips D2D, host chips H2D once; dense
-    // buffer retained device-side for the step-4 reduction).  The hook
-    // is byte-identical to the host precompute; any `None` (CUDA
-    // error / shape) falls through to the host body.  Opt-out:
-    // ZIREN_GPU_COMMIT_DENSE=0.
-    let precomputed = {
-        let device_precompute = device_traces.and_then(|p| {
-            let hook = gpu_jagged_precompute_commit?;
-            // The device hook reads the orientation off the provider
-            // (`p.rev()`); the host `pre.rev = use_rev` overwrite below records
-            // the authoritative host view for the step-4 reduction.
-            // band-cap carrier removal Phase C: the recursion AREA PIN is threaded
-            // EXPLICITLY to the device dense pack (was the guard commit_dense read).
-            hook(&named_inner, p, recursion_area_pin)
-        });
-        let mut pre = match device_precompute {
-            Some(pre) => pre,
-            // Host fallback for the device commit hook — must be
-            // provider-aware so empty (device-resident) chip traces are
-            // re-materialized before the host commit body (otherwise their
-            // cells would be silently dropped → wrong commitment).
-            None => crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
-                &named_inner,
-                device_traces,
-                gpu_basefold_commit,
-                use_rev,
-                recursion_area_pin,
-            ),
-        };
-        // Record the per-shard orientation on the built commit (the device
-        // hook builds its dense on-device under the SAME `use_rev`, but may not
-        // stamp the flag — force it here so the step-4 reduction reads it back).
-        pre.rev = use_rev;
-        // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
-        // built commit (the device hook pins `log_dense_size` device-side under
-        // the SAME value, but may not stamp the field) so the OPEN-path
-        // jagged-eval half reads it back in lockstep.
-        pre.recursion_area_pin = recursion_area_pin;
-        pre
-    };
+    // Single shard-wide commit buffer, dispatched STATICALLY through the
+    // producer's `commit_multilinears` (Phase-1 static dispatch; was the
+    // `Option<fn>` device-vs-host `match` on `gpu_jagged_precompute_commit` /
+    // `gpu_basefold_commit`).  `ProverJaggedEval` routes to the prover's
+    // `MachineProver::commit_multilinears`: a `StarkGpuProver` OVERRIDE builds
+    // the dense pack + BaseFold commit device-side (resident chips D2D, host
+    // chips H2D once; dense buffer retained device-side for the step-4
+    // reduction), falling through to the provider-aware host commit on any
+    // CUDA / shape decline; the default (CpuProver / `FreeFnJaggedEval`) is the
+    // provider-aware host precompute — byte-identical to the former
+    // unregistered-hook path.
+    let mut precomputed = jagged_eval_producer.commit_multilinears(
+        &named_inner,
+        device_traces,
+        use_rev,
+        recursion_area_pin,
+    );
+    // Record the per-shard orientation on the built commit (the device
+    // hook builds its dense on-device under the SAME `use_rev`, but may not
+    // stamp the flag — force it here so the step-4 reduction reads it back).
+    precomputed.rev = use_rev;
+    // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
+    // built commit (the device hook pins `log_dense_size` device-side under
+    // the SAME value, but may not stamp the field) so the OPEN-path
+    // jagged-eval half reads it back in lockstep.
+    precomputed.recursion_area_pin = recursion_area_pin;
     let raw_root_inner: [InnerVal; 8] =
         crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
@@ -297,8 +280,6 @@ where
         None,
         None,
         None,
-        None,
-        None,
         crate::jagged_pcs::GkrDeviceHooks::default(),
     )
 }
@@ -352,6 +333,22 @@ where
         gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
         gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
+
+    /// Commit the shard's per-chip main multilinears to the BaseFold
+    /// jagged-PCS — the COMMIT static-dispatch seam paralleling
+    /// [`Self::produce`] (the OPEN seam).  `ProverJaggedEval` routes to the
+    /// prover's `MachineProver::commit_multilinears` (a `StarkGpuProver` device
+    /// override is picked up); `FreeFnJaggedEval` uses the host default
+    /// (byte-identical to the former `None`-hook host commit).  The caller
+    /// (`maybe_auto_precompute_basefold`) FORCES `rev` / `recursion_area_pin`
+    /// onto the returned commit.
+    fn commit_multilinears(
+        &self,
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
 }
 
 /// Free-fn producer: the host path (ziren-gpu + the host free-fn
@@ -402,6 +399,24 @@ where
             pre_y_per_chip,
             gpu_jagged_reduction,
             gpu_basefold_open,
+        )
+    }
+
+    fn commit_multilinears(
+        &self,
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
+        // Host default — byte-identical to the former `None`-hook
+        // (unregistered device commit) path in `maybe_auto_precompute_basefold`.
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
+            named_inner,
+            device_traces,
+            None,
+            use_rev,
+            recursion_area_pin,
         )
     }
 }
@@ -459,6 +474,19 @@ where
             gpu_basefold_open,
         )
     }
+
+    fn commit_multilinears(
+        &self,
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        device_traces: Option<&dyn super::DeviceTraceProvider>,
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
+        // Route to the prover's `MachineProver::commit_multilinears` — a
+        // `StarkGpuProver` device override is picked up here; `CpuProver` uses
+        // the trait default (host commit) → byte-identical.
+        self.0.commit_multilinears(named_inner, device_traces, use_rev, recursion_area_pin)
+    }
 }
 
 /// Loader-based entry point (free-fn form for ziren-gpu + the host free-fn
@@ -491,18 +519,10 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // callers (core/compress) provides the device reduction
     // statically, `None` on host callers = host reduction.
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-    // #118: device BaseFold commit fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device commit statically, `None` on host
-    // callers = host commit.
-    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
     // #118: device BaseFold open fn; `Some(..)` on the GPU callers
     // (core/compress) provides the device open statically, `None` on host
     // callers = host open.
     gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
-    // #118: device jagged precompute-commit fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device precompute-commit statically, `None`
-    // on host callers = host precompute.
-    gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
     // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
     // the GPU callers (core/compress) provide them statically, `None` on host
     // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
@@ -567,9 +587,7 @@ where
         precomputed_commit,
         &FreeFnJaggedEval,
         gpu_jagged_reduction,
-        gpu_basefold_commit,
         gpu_basefold_open,
-        gpu_jagged_precompute_commit,
         first_round_device_hook,
         drain_hook,
         gkr_device_hooks,
@@ -616,20 +634,11 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // `gpu_jagged_reduction_v2()` (or `None` on the free-fn path) and
     // threaded into the producer's `prove_trusted_evaluations`.
     gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-    // The device BaseFold commit fn (#118), read from the prover's
-    // `gpu_basefold_commit_hook()` (or `None` on the free-fn / CPU path) and
-    // threaded into `maybe_auto_precompute_basefold`'s host-fallback commit.
-    gpu_basefold_commit: Option<crate::jagged_pcs::GpuBasefoldCommitFn>,
     // The device BaseFold open fn (#118), read from the prover's
     // `gpu_basefold_open_hook()` (or `None` on the free-fn / CPU path) and
     // threaded through the producer's `prove_trusted_evaluations` down to the
     // `open_jagged_pcs` dispatch.
     gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
-    // The device jagged precompute-commit fn (#118), read from the prover's
-    // `gpu_jagged_precompute_commit_hook()` (or `None` on the free-fn / CPU
-    // path) and threaded into `maybe_auto_precompute_basefold`'s device
-    // precompute-commit dispatch.
-    gpu_jagged_precompute_commit: Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn>,
     // The device first-round-prove fn + TLS-stash drain fn (#118), read from
     // the prover's `first_round_device_hook()` / `drain_hook()` (or `None` on
     // the free-fn / CPU path) and threaded into `prove_shard_logup_gkr_rows`'s
@@ -917,14 +926,13 @@ where
     // chips (width==0) are not host-packed here — the GPU commit-dense path owns
     // their packing.
     let (commit_traces, main_commitment, precomputed_commit) =
-        maybe_auto_precompute_basefold::<SC, A>(
+        maybe_auto_precompute_basefold::<SC, A, D>(
+            jagged_eval_producer,
             chips,
             commit_traces,
             main_commitment,
             precomputed_commit,
             _device_traces,
-            gpu_basefold_commit,
-            gpu_jagged_precompute_commit,
             dense_rev,
             recursion_area_pin,
         );

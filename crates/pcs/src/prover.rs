@@ -186,22 +186,37 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         None
     }
 
-    /// The device BaseFold commit function, provided statically by the
-    /// prover (#118 static dispatch of the former global
-    /// `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  Default `None` = the host
-    /// commit ([`crate::jagged_pcs::commit_jagged_pcs_no_observe`] with a
-    /// `None` hook).  [`Self::prove_shard_to_basefold`] reads it and threads
-    /// the `Option` down through the auto-precompute path to the jagged-PCS
-    /// commit dispatch, so no global registry is consulted.  On the CPU prover
-    /// the default `None` yields the exact unregistered-hook (host) path →
-    /// byte-identical.  A `StarkGpuProver` cannot name the device fn (it lives
-    /// in `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the `prover`
-    /// crate instead passes `Some(device_fn)` at the free-fn
-    /// `prove_shard_to_basefold` call sites.
-    fn gpu_basefold_commit_hook(
+    /// Commit the shard's per-chip main multilinears to the BaseFold
+    /// jagged-PCS, returning the precomputed commit — the COMMIT
+    /// static-dispatch OVERRIDE point (SP1-parity Phase-1 collapse of the
+    /// former `gpu_basefold_commit_hook` + `gpu_jagged_precompute_commit_hook`
+    /// `Option<fn>` pair into one trait method).  The DEFAULT body is the host
+    /// commit
+    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]
+    /// with a `None` device commit fn) — byte-identical to the former
+    /// unregistered-hook (host) path.  A `StarkGpuProver` OVERRIDES this with
+    /// the device dense-pack + BaseFold commit body (the former
+    /// `zkm_gpu_basefold` `gpu_jagged_precompute_commit_hook` device path with
+    /// a host `gpu_basefold_commit_hook` fallback).  Consumed by
+    /// `maybe_auto_precompute_basefold` through the `JaggedEvalProducer` seam:
+    /// `ProverJaggedEval` routes to `self.commit_multilinears`; `FreeFnJaggedEval`
+    /// uses the same host default.  The `rev` / `recursion_area_pin` flags are
+    /// FORCED onto the returned commit by the caller, exactly as before.
+    #[allow(unused_variables)]
+    fn commit_multilinears(
         &self,
-    ) -> Option<crate::jagged_pcs::GpuBasefoldCommitFn> {
-        None
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
+            named_inner,
+            device_traces,
+            None,
+            use_rev,
+            recursion_area_pin,
+        )
     }
 
     /// The device BN254 wrap-commit function, provided statically by the
@@ -233,26 +248,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn gpu_basefold_open_hook(
         &self,
     ) -> Option<crate::jagged_pcs::GpuBasefoldOpenFn> {
-        None
-    }
-
-    /// The device jagged precompute-commit function, provided statically by
-    /// the prover (#118 static dispatch of the former global
-    /// `GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK` OnceLock).  Default `None` = the
-    /// host precompute
-    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]).
-    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
-    /// down through the auto-precompute path to the device precompute-commit
-    /// dispatch in `maybe_auto_precompute_basefold`, so no global registry is
-    /// consulted.  On the CPU prover the default `None` yields the exact
-    /// unregistered-hook (host precompute) path → byte-identical.  A
-    /// `StarkGpuProver` cannot name the device fn (it lives in
-    /// `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the `prover`
-    /// crate instead passes `Some(device_fn)` at the free-fn
-    /// `prove_shard_to_basefold` call sites.
-    fn gpu_jagged_precompute_commit_hook(
-        &self,
-    ) -> Option<crate::jagged_pcs::jagged::GpuJaggedPrecomputeCommitFn> {
         None
     }
 
@@ -475,9 +470,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
             self.gpu_jagged_reduction_v2(),
-            self.gpu_basefold_commit_hook(),
             self.gpu_basefold_open_hook(),
-            self.gpu_jagged_precompute_commit_hook(),
             self.first_round_device_hook(),
             self.drain_hook(),
             self.gkr_device_hooks(),

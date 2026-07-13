@@ -1870,35 +1870,16 @@ pub mod jagged {
     // is transcript-critical.
     // ─────────────────────────────────────────────────────────────────
 
-    /// Signature of the GPU jagged precompute-commit hook.  Inputs are
-    /// the per-chip COMMIT trace set (provider-materialized for
-    /// device-resident chips — the hook may ignore those host bytes and
-    /// read the provider directly) and the per-shard device-trace
-    /// provider.  Returns `None` to fall through to the host precompute
-    /// (any CUDA error / unsupported shape).
-    pub type GpuJaggedPrecomputeCommitFn = fn(
-        chip_traces: &[ChipTraceView<'_>],
-        provider: &dyn crate::shard_level::DeviceTraceProvider,
-        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local the GPU
-        // device dense pack read in `commit_dense.rs`).  `Some(target_log)` on the
-        // RECURSION (compress) commit => pin device `log_dense_size` to
-        // `max(natural, target_log)`; `None` on CORE => natural (byte-identical).
-        recursion_area_pin: Option<usize>,
-    ) -> Option<PrecomputedJaggedCommit>;
-    // band-cap carrier removal Phase B: the device dense pack reads the per-shard
-    // rev(zeta) orientation OFF the provider (`DeviceTraceProvider::rev()`, set
-    // from `StarkMachine::core_rev()`) — in lockstep with the host `dense_rev` —
-    // so no `use_rev` param crosses this boundary.  Was the `current_use_rev()`
-    // thread-local carrier.
-
-    // #118: the GPU jagged precompute-commit fn is provided STATICALLY
-    // (threaded from the prover's `gpu_jagged_precompute_commit_hook()` down
-    // to the `maybe_auto_precompute_basefold` device-precompute dispatch), not
-    // via a global registry.  The former `GPU_JAGGED_PRECOMPUTE_COMMIT_HOOK`
-    // OnceLock + `register_/get_` accessors were removed; the `prover` crate
-    // passes `Some(device_fn)` into the `prove_shard_to_basefold` free-fn
-    // (which threads it through the auto-precompute path).
+    // Phase-1 static dispatch (SP1-parity): the former
+    // `GpuJaggedPrecomputeCommitFn` `fn`-ptr type (signature of the GPU jagged
+    // precompute-commit hook) was RETIRED.  The device dense-pack + BaseFold
+    // commit is now the `StarkGpuProver` OVERRIDE of
+    // `MachineProver::commit_multilinears`, consumed by
+    // `maybe_auto_precompute_basefold` through the `JaggedEvalProducer` COMMIT
+    // seam — so no `Option<fn>` crosses this boundary.  The device hook body
+    // still lives in ziren-gpu `commit_dense::gpu_jagged_precompute_commit_hook`
+    // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read
+    // rev(zeta) semantics are unchanged (byte-identical).
 
     // ─────────────────────────────────────────────────────────────────
     // Device BaseFold-over-BN254 wrap Merkle commit.
