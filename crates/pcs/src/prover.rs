@@ -171,21 +171,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         challenger: &mut SC::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error>;
 
-    /// The device jagged-reduction function, provided statically by the
-    /// prover (#130 static dispatch of the former global reduction OnceLock).
-    /// Default `None` = the host reduction
-    /// ([`crate::jagged_sumcheck::prove_jagged_reduction_owned`]); a
-    /// `StarkGpuProver` overrides this to return its device reduction.
-    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
-    /// down to the jagged-PCS reduction dispatch, so no global registry is
-    /// consulted.  On the CPU prover the default `None` yields the exact
-    /// unregistered-hook (host) path → byte-identical.
-    fn gpu_jagged_reduction_v2(
-        &self,
-    ) -> Option<crate::jagged_pcs::GpuJaggedReductionFnV2> {
-        None
-    }
-
     /// Commit the shard's per-chip main multilinears to the BaseFold
     /// jagged-PCS, returning the precomputed commit — the COMMIT
     /// static-dispatch OVERRIDE point (SP1-parity Phase-1 collapse of the
@@ -455,7 +440,15 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             recursion_area_pin,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
-            self.gpu_jagged_reduction_v2(),
+            // Reduce hook: the default (CpuProver / any prover not overriding
+            // `prove_shard_to_basefold`, e.g. the wrap prover) always yields the
+            // HOST reduction — the former `self.gpu_jagged_reduction_v2()`
+            // accessor was a vestigial always-`None` seam (no prover overrode
+            // it; the GPU core prover supplies its device reduction fn
+            // POSITIONALLY at its own `prove_shard_to_basefold` override, not via
+            // this accessor).  Inlined `None` here, accessor removed (SP1-parity:
+            // SP1 has no such accessor).  Byte-identical to the former read.
+            None,
             self.gpu_basefold_open_hook(),
             self.first_round_device_hook(),
             self.drain_hook(),

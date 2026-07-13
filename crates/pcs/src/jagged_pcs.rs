@@ -773,9 +773,9 @@ pub type GpuBasefoldCommitFn = fn(
 
 /// Signature of the GPU jagged-reduction prover function.
 ///
-/// A device-resident prover supplies this via
-/// [`crate::prover::MachineProver::gpu_jagged_reduction_v2`]; the shard
-/// prover threads the returned `Option` down to the jagged-reduction
+/// A device-resident prover supplies this positionally at its
+/// [`crate::prover::MachineProver::prove_shard_to_basefold`] override; the
+/// shard prover threads the returned `Option` down to the jagged-reduction
 /// dispatch below and calls it in place of the host
 /// [`crate::jagged_sumcheck::prove_jagged_reduction_owned`].
 ///
