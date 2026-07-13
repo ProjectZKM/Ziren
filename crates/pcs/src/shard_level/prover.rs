@@ -276,8 +276,10 @@ where
         dense_rev,
         recursion_area_pin,
         precomputed_commit,
-        None,
-        None,
+        // Pure host-path entry (shrink + dummy callers) — host reducer/opener;
+        // the device sites override `prove_shard_to_basefold` instead.
+        &crate::jagged_pcs::HostJaggedReducer,
+        &crate::jagged_pcs::HostJaggedOpener,
         None,
         None,
         crate::jagged_pcs::GkrDeviceHooks::default(),
@@ -330,8 +332,8 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
-        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
+        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 
     /// Commit the shard's per-chip main multilinears to the BaseFold
@@ -386,8 +388,8 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
-        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
+        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         prove_trusted_evaluations::<SC, A>(
             chips,
@@ -397,8 +399,8 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -459,8 +461,8 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
-        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
+        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         self.0.prove_trusted_evaluations(
             chips,
@@ -470,8 +472,8 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -518,11 +520,11 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // #130: device jagged-reduction fn; `Some(..)` on the GPU
     // callers (core/compress) provides the device reduction
     // statically, `None` on host callers = host reduction.
-    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
     // #118: device BaseFold open fn; `Some(..)` on the GPU callers
     // (core/compress) provides the device open statically, `None` on host
     // callers = host open.
-    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
     // the GPU callers (core/compress) provide them statically, `None` on host
     // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
@@ -586,8 +588,8 @@ where
         recursion_area_pin,
         precomputed_commit,
         &FreeFnJaggedEval,
-        gpu_jagged_reduction,
-        gpu_basefold_open,
+        jagged_reducer,
+        jagged_opener,
         first_round_device_hook,
         drain_hook,
         gkr_device_hooks,
@@ -633,12 +635,12 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // The device jagged-reduction fn (#130), read from the prover's
     // `gpu_jagged_reduction_v2()` (or `None` on the free-fn path) and
     // threaded into the producer's `prove_trusted_evaluations`.
-    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
     // The device BaseFold open fn (#118), read from the prover's
     // `gpu_basefold_open_hook()` (or `None` on the free-fn / CPU path) and
     // threaded through the producer's `prove_trusted_evaluations` down to the
     // `open_jagged_pcs` dispatch.
-    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     // The device first-round-prove fn + TLS-stash drain fn (#118), read from
     // the prover's `first_round_device_hook()` / `drain_hook()` (or `None` on
     // the free-fn / CPU path) and threaded into `prove_shard_logup_gkr_rows`'s
@@ -1282,8 +1284,8 @@ where
             _device_traces,
             precomputed_commit,
             residual_y,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     };
     tracing::info!(
@@ -1584,10 +1586,10 @@ pub fn prove_trusted_evaluations<SC, A>(
     pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
     // #130: the device jagged-reduction fn, provided statically by the
     // prover; `None` = host reduction (CPU / free-fn callers).
-    gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
+    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
     // #118: the device BaseFold open fn, provided statically by the
     // prover; `None` = host open (CPU / free-fn callers).
-    gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1802,8 +1804,8 @@ where
             // Provider arms the host-fallback re-materialize for empty
             // (device-resident) chip traces — no-op on the happy path.
             _device_traces,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         );
         return EvaluationProof::Bundle(bundle);
     }
@@ -1827,8 +1829,8 @@ where
         z_row,
         pre_y_inner,
         lb_challenger,
-        gpu_jagged_reduction,
-        gpu_basefold_open,
+        jagged_reducer,
+        jagged_opener,
     );
     EvaluationProof::Bundle(bundle)
 }

@@ -795,16 +795,68 @@ pub type GpuBasefoldCommitFn = fn(
 /// path avoids the pull-to-host); when `None` it falls back to
 /// `dense_q_host`.  `zkm-pcs` never dereferences the handle — the GPU
 /// side owns allocation / deallocation.
-pub type GpuJaggedReductionFnV2 = fn(
-    dense_q_host: alloc::vec::Vec<JaggedVal>,
-    dense_q_device_handle: Option<u64>,
-    packing: &crate::jagged::JaggedPacking<JaggedVal>,
-    r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
-    y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
-    z_col: &[JaggedChallenge],
-    z_row: &[JaggedChallenge],
-    challenger: &mut JaggedChallenger,
-) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
+/// Object-safe device/host jagged-reduction dispatch — the SP1-parity
+/// static-dispatch collapse of the former `GpuJaggedReductionFnV2` fn-ptr +
+/// `Option<..>` thread + `ActiveHook` match.  The prover TYPE selects the
+/// impl: the host build threads `&HostJaggedReducer`, the GPU prover threads
+/// its own `&DeviceJaggedReducer` (in `zkm-gpu-basefold`).  `reduce_jagged`
+/// returns `None` only when the device path DECLINES a shape (having first
+/// RESTORED the challenger snapshot); the consumer then runs the host
+/// fallback (`prove_jagged_reduction_owned`).  Args mirror the former fn-ptr
+/// exactly, so device impls stay byte-equivalent.
+pub trait JaggedReducer {
+    #[allow(clippy::too_many_arguments)]
+    fn reduce_jagged(
+        &self,
+        dense_q_host: alloc::vec::Vec<JaggedVal>,
+        dense_q_device_handle: Option<u64>,
+        packing: &crate::jagged::JaggedPacking<JaggedVal>,
+        r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+        y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+        z_col: &[JaggedChallenge],
+        z_row: &[JaggedChallenge],
+        challenger: &mut JaggedChallenger,
+    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>>;
+
+    /// `true` for the device reducer — drives `skip_host_dense`, the
+    /// dense-device-handle selection, and the DROPLDES pre-reduce provider
+    /// release in `prove_jagged_basefold_inner` (was the runtime
+    /// `gpu_jagged_reduction.is_some()`).  Host default = `false`.
+    fn is_device(&self) -> bool {
+        false
+    }
+}
+
+/// Host reducer: the always-`Some` host reduction
+/// ([`crate::jagged_sumcheck::prove_jagged_reduction_owned`]) — a verbatim
+/// move of the former `ActiveHook::None` arm.  `is_device()` = false, so the
+/// consumer takes the exact pre-static-dispatch host (`None`-hook) path →
+/// byte-identical.
+pub struct HostJaggedReducer;
+
+impl JaggedReducer for HostJaggedReducer {
+    fn reduce_jagged(
+        &self,
+        dense_q_host: alloc::vec::Vec<JaggedVal>,
+        _dense_q_device_handle: Option<u64>,
+        packing: &crate::jagged::JaggedPacking<JaggedVal>,
+        r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+        y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
+        z_col: &[JaggedChallenge],
+        z_row: &[JaggedChallenge],
+        challenger: &mut JaggedChallenger,
+    ) -> Option<crate::jagged_sumcheck::JaggedReductionProof<JaggedChallenge>> {
+        Some(crate::jagged_sumcheck::prove_jagged_reduction_owned(
+            dense_q_host,
+            packing,
+            r_row_per_chip,
+            y_per_chip,
+            z_col,
+            z_row,
+            challenger,
+        ))
+    }
+}
 
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1224,59 +1276,39 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
     NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
-/// Open the committed batch at a single point and produce the
-/// stacked-basefold proof.  `eval_point.len()` must equal
-/// `log_stacking_height + log(num_stripes_padded)`.
-///
-/// GPU open dispatch — selected by prover TYPE: when the prover
-/// statically provided `gpu_basefold_open` (`Some(GpuBasefoldOpenFn)`,
-/// the GPU prover only), the open dispatches through
-/// `FriCudaProver::prove` on device.  Output proof
-/// must be byte-identical to the host path (the device hook host-side
-/// observes the same digests + univariate messages into the supplied
-/// `JaggedChallenger`).  There is no env gate (SP1-parity — the hook
-/// `Some`/`None` is the sole selector).  Falls through to the host
-/// implementation on: `gpu_basefold_open == None` (CPU prover), or
-/// hook returns `Err` (shape unsupported / device error — `Err` returns
-/// ownership of the `prover_data` so the host fallback can run without
-/// losing it).
-pub fn open_jagged_pcs(
-    prover_data: JaggedProverData,
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut JaggedChallenger,
-    // #118: the device BaseFold open fn, provided statically by the
-    // prover (was the global `GPU_BASEFOLD_OPEN_HOOK` OnceLock).  `None`
-    // = host open (CPU prover / free-fn callers), byte-identical to the
-    // pre-#118 unregistered-hook path.
-    gpu_basefold_open: Option<GpuBasefoldOpenFn>,
-) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    if let Some(hook) = gpu_basefold_open {
-        // Transcript safety: the device open ADVANCES the
-        // challenger (pre-prove grind, per-round digest observes,
-        // FRI PoW, query sampling) before it can fail —
-        // `FriCudaProver::prove` allocates on device mid-flight,
-        // so an `Err` here is pressure-dependent.  Snapshot +
-        // restore so the host fallback re-runs on the SAME
-        // transcript state; without the restore the transcript is
-        // double-advanced and the emitted proof is silently
-        // INVALID (caught only by the in-circuit verifier).
-        let challenger_snapshot = challenger.clone();
-        match hook(prover_data, eval_point, challenger) {
-            Ok(proof) => {
-                return proof;
-            }
-            Err((returned_prover_data, returned_eval_point)) => {
-                *challenger = challenger_snapshot;
-                return open_jagged_pcs_host(
-                    returned_prover_data,
-                    returned_eval_point,
-                    challenger,
-                );
-            }
-        }
+/// Object-safe device/host BaseFold-open dispatch — the SP1-parity
+/// static-dispatch collapse of the former `GpuBasefoldOpenFn` fn-ptr +
+/// `Option<..>` thread + the `open_jagged_pcs` dispatch fn.  The prover
+/// TYPE selects the impl: the host build threads `&HostJaggedOpener`, the
+/// GPU prover threads its own `&DeviceJaggedOpener` (in `zkm-gpu-basefold`,
+/// dispatching through `FriCudaProver::prove` with a snapshot-restore host
+/// fallback on `Err`).  Output proof is byte-identical to the host path.
+pub trait JaggedOpener {
+    /// Open the committed batch at a single point and produce the
+    /// stacked-basefold proof.  `eval_point.len()` must equal
+    /// `log_stacking_height + log(num_stripes_padded)`.
+    fn open_jagged(
+        &self,
+        prover_data: JaggedProverData,
+        eval_point: Vec<JaggedChallenge>,
+        challenger: &mut JaggedChallenger,
+    ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>;
+}
+
+/// Host opener: the pure-host BaseFold open ([`open_jagged_pcs_host`]) —
+/// a verbatim move of the former `open_jagged_pcs` `None`-hook path.
+/// Byte-identical to the pre-static-dispatch host open.
+pub struct HostJaggedOpener;
+
+impl JaggedOpener for HostJaggedOpener {
+    fn open_jagged(
+        &self,
+        prover_data: JaggedProverData,
+        eval_point: Vec<JaggedChallenge>,
+        challenger: &mut JaggedChallenger,
+    ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
+        open_jagged_pcs_host(prover_data, eval_point, challenger)
     }
-    // No hook registered (CPU prover): silently fall through to host.
-    open_jagged_pcs_host(prover_data, eval_point, challenger)
 }
 
 /// Pure host-side implementation of [`open_jagged_pcs`] —
@@ -1361,19 +1393,11 @@ where
 // on error (mirrors the `commit_jagged_pcs` hook contract).
 // ─────────────────────────────────────────────────────────────────────
 
-/// Signature of the GPU BaseFold open driver.  Same inputs as
-/// [`open_jagged_pcs`].  On success returns the byte-
-/// equivalent `StackedBasefoldProof`.  On unrecoverable shape/runtime
-/// error returns the original `(prover_data, eval_point)` so the host
-/// fallback can run without losing ownership.
-pub type GpuBasefoldOpenFn = fn(
-    prover_data: JaggedProverData,
-    eval_point: Vec<JaggedChallenge>,
-    challenger: &mut JaggedChallenger,
-) -> Result<
-    StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs>,
-    (JaggedProverData, Vec<JaggedChallenge>),
->;
+// `GpuBasefoldOpenFn` (the device open fn-ptr type) was removed in the
+// SP1-parity static-dispatch collapse — the device open now lives in the
+// `JaggedOpener` impl `DeviceJaggedOpener` (zkm-gpu-basefold), which calls
+// `FriCudaProver::prove` and falls back to `open_jagged_pcs_host` on `Err`
+// (returning `(prover_data, eval_point)` ownership so nothing is lost).
 
 // #118: the GPU BaseFold open fn is provided STATICALLY (threaded from
 // the prover down to the `open_jagged_pcs` dispatch), not via a global
@@ -1582,7 +1606,7 @@ pub mod jagged {
 
     use super::{
         FriConfig,
-        commit_jagged_pcs, open_jagged_pcs,
+        commit_jagged_pcs, open_jagged_pcs_host,
         verify_jagged_pcs,
     };
 
@@ -2115,8 +2139,9 @@ pub mod jagged {
             z_row,
             None,
             challenger,
-            None,
-            None,
+            // host-only self-contained flow (synthetic / tests) — host reducer/opener.
+            &super::HostJaggedReducer,
+            &super::HostJaggedOpener,
         )
     }
 
@@ -2135,8 +2160,8 @@ pub mod jagged {
         precomputed: PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn super::JaggedReducer,
+        jagged_opener: &dyn super::JaggedOpener,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_with_precomputed_provider(
             chip_traces,
@@ -2146,8 +2171,8 @@ pub mod jagged {
             pre_y_per_chip,
             challenger,
             None,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -2172,8 +2197,8 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn super::JaggedReducer,
+        jagged_opener: &dyn super::JaggedOpener,
     ) -> JaggedBasefoldBundle {
         prove_jagged_basefold_inner(
             chip_traces,
@@ -2183,8 +2208,8 @@ pub mod jagged {
             precomputed,
             challenger,
             provider,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -2208,8 +2233,8 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn super::JaggedReducer,
+        jagged_opener: &dyn super::JaggedOpener,
     ) -> JaggedBasefoldBundle {
         let precomputed = precompute_jagged_basefold_commit(
             chip_traces,
@@ -2229,8 +2254,8 @@ pub mod jagged {
             precomputed,
             challenger,
             None,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -2394,13 +2419,13 @@ pub mod jagged {
         // to the reduction dispatch below.  `None` = host reduction (CPU
         // prover / free-fn callers), byte-identical to the pre-#130
         // unregistered-hook path.
-        gpu_jagged_reduction: Option<super::GpuJaggedReductionFnV2>,
+        jagged_reducer: &dyn super::JaggedReducer,
         // The device BaseFold open function, provided statically by the
         // prover (`MachineProver::gpu_basefold_open_hook`) and threaded down
         // to the `open_jagged_pcs` dispatch (the `open` closure below).
         // `None` = host open (CPU prover / free-fn callers), byte-identical
         // to the pre-#118 unregistered-hook path.
-        gpu_basefold_open: Option<super::GpuBasefoldOpenFn>,
+        jagged_opener: &dyn super::JaggedOpener,
     ) -> JaggedBasefoldBundle {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
@@ -2632,7 +2657,7 @@ pub mod jagged {
         // touch the provider, so freeing it here is sound and lets the reduce
         // go device.
         if let Some(p) = provider {
-            let hook_v2_present = gpu_jagged_reduction.is_some();
+            let hook_v2_present = jagged_reducer.is_device();
             let device_happy = (precomputed_dense_handle.is_some()
                 || precomputed_host_dense_q.is_some())
                 && hook_v2_present;
@@ -2692,19 +2717,26 @@ pub mod jagged {
             // any transcript interaction and resumes (not restarts) on host for
             // mid-loop failures.
 
-            // The device reduction function, provided statically by the
-            // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded
-            // in.  `None` on the host / CPU-prover path → host body below.
-            let hook_v2 = gpu_jagged_reduction;
+            // The device-vs-host reduction dispatch: `jagged_reducer` is a
+            // `&dyn JaggedReducer` provided by the prover TYPE — the host build
+            // threads `&HostJaggedReducer` (is_device=false → this collapses to
+            // the former `ActiveHook::None` host arm); the GPU prover threads
+            // `&DeviceJaggedReducer` (is_device=true → the former `ActiveHook::V2`
+            // arm: it snapshots+restores the challenger around
+            // `gpu_jagged_reduction_hook_v2` and returns `None` on a shape
+            // decline — having already RESTORED the challenger — so the host
+            // fallback below re-runs on the same transcript state).  No runtime
+            // fn-ptr / env gate: SP1-parity static dispatch.
+            let is_device = jagged_reducer.is_device();
 
             // Single shard-wide commit buffer: when the precompute
-            // registered a device-resident dense_q AND the V2 hook will
+            // registered a device-resident dense_q AND the device reducer will
             // consume it, skip the host dense materialization entirely —
             // the device buffer (the same one the commit was packed
             // from) is the source.  Every fallback edge below
             // re-materializes on host before running the host body.
             let skip_host_dense = precomputed_dense_handle.is_some()
-                && hook_v2.is_some();
+                && is_device;
             // True when `dense_q` below is the CARRIED host dense_q from
             // the device-commit-decline fallback — the provider is DRAINED by
             // reduction time so this is the ONLY correct source; the V2/V1
@@ -2735,115 +2767,97 @@ pub mod jagged {
                 materialize_dense_jagged::<InnerVal>(&views_over_owned(&rematerialized), packing.log_dense_size, dense_rev)
             };
 
-            // Pick the active reduction: the statically-provided device
-            // function if present (and GPU enabled), else None → host body.
-            enum ActiveHook {
-                V2(super::GpuJaggedReductionFnV2),
-                None,
-            }
-            let active = match hook_v2 {
-                Some(f2) => ActiveHook::V2(f2),
-                None => ActiveHook::None,
-            };
-
-            // Device handle source (single shard-wide commit
-            // buffer): the Option B precompute's device dense pack
-            // registers the buffer and threads its handle through
-            // `PrecomputedJaggedCommit::dense_device_handle`; the V2
-            // hook takes it from the registry (`DenseQDevice::Owned`) so
-            // commit + reduction share ONE device buffer.  `None` on the
-            // host build path — the device handle is then unused.
-            let dense_q_device_handle: Option<u64> = if hook_v2.is_some() {
+            // Device handle source (single shard-wide commit buffer): the
+            // Option B precompute's device dense pack registers the buffer and
+            // threads its handle through
+            // `PrecomputedJaggedCommit::dense_device_handle`; the device reducer
+            // takes it from the registry (`DenseQDevice::Owned`) so commit +
+            // reduction share ONE device buffer.  `None` on the host build path
+            // — the handle is then unused.
+            let dense_q_device_handle: Option<u64> = if is_device {
                 precomputed_dense_handle
             } else {
                 None
             };
 
-            match active {
-                ActiveHook::V2(f) => {
-                    let r_row = r_row_per_chip.to_vec();
-                    let y_clone = y_per_chip.clone();
-                    // With the device-handle skip, `dense_q` is an
-                    // empty placeholder — never save it as a fallback
-                    // source (the None edge below re-materializes).
-                    // When `dense_q` is the CARRIED host dense_q (device
-                    // commit declined), ALWAYS save it — the provider is
-                    // drained so the None-fallback's re-materialize would be
-                    // wrong; the carried buffer is the only correct source.
-                    let saved_dense = if dense_q_is_carried {
-                        Some(dense_q.clone())
-                    } else if !dense_q.is_empty()
-                        && std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
-                            .map(|v| v == "1").unwrap_or(false)
-                    {
-                        Some(dense_q.clone())
-                    } else {
-                        None
-                    };
-                    // Transcript-safety: snapshot + restore so a
-                    // hook None after any challenger interaction
-                    // cannot double-advance the transcript (the hook's
-                    // internal round-0 restructure already guarantees
-                    // None is pre-transcript; this is defense-in-depth
-                    // for the whole hook surface).
-                    let challenger_snapshot = challenger.clone();
-                    match f(
+            // `r_row` / `y_clone` / `saved_dense` are computed UP-FRONT (were
+            // inside the old `ActiveHook::V2` arm) so they outlive the `dense_q`
+            // MOVE into `reduce_jagged` and stay available for the host
+            // fallback.  Pure memory clones — no challenger interaction, so this
+            // is transcript-neutral (byte-identical: the host reducer never
+            // reaches the fallback, and the device reducer received the same
+            // `&r_row` / `&y_clone` clones before).
+            let r_row = r_row_per_chip.to_vec();
+            let y_clone = y_per_chip.clone();
+            // With the device-handle skip, `dense_q` is an empty placeholder —
+            // never save it as a fallback source (the None edge below
+            // re-materializes).  When `dense_q` is the CARRIED host dense_q
+            // (device commit declined), ALWAYS save it — the provider is drained
+            // so the None-fallback's re-materialize would be wrong; the carried
+            // buffer is the only correct source.
+            let saved_dense = if dense_q_is_carried {
+                Some(dense_q.clone())
+            } else if !dense_q.is_empty()
+                && std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
+                    .map(|v| v == "1").unwrap_or(false)
+            {
+                Some(dense_q.clone())
+            } else {
+                None
+            };
+
+            // Device/host reduction via the trait object.  The device reducer
+            // snapshots+restores the challenger internally (defense-in-depth for
+            // the whole hook surface) and returns `None` on a shape decline; the
+            // host reducer always returns `Some`.
+            match jagged_reducer.reduce_jagged(
+                dense_q,
+                dense_q_device_handle,
+                &packing,
+                &r_row,
+                &y_clone,
+                &z_col,
+                z_row,
+                challenger,
+            ) {
+                Some(p) => p,
+                None => {
+                    // Device reducer DECLINED (shape rejected) — the challenger
+                    // was already RESTORED inside `reduce_jagged`, so the host
+                    // fallback re-runs on the same transcript state.
+                    tracing::warn!(
+                        chips = n_chips,
+                        log_dense_size = packing.log_dense_size as u64,
+                        "jagged_pcs device reduction returned None \
+                         (shape rejected) — falling back to host \
+                         prove_jagged_reduction_owned",
+                    );
+                    let dense_q = saved_dense.unwrap_or_else(|| {
+                        // Re-materialize empty (device-resident) chip traces
+                        // from the provider so the host reduction fallback
+                        // rebuilds the correct dense_q (not a partial zero
+                        // buffer).
+                        let rematerialized =
+                            rematerialize_chip_traces_via_provider(
+                                chip_traces,
+                                provider,
+                            );
+                        materialize_dense_jagged::<InnerVal>(
+                            &views_over_owned(&rematerialized),
+                            packing.log_dense_size,
+                            dense_rev,
+                        )
+                    });
+                    crate::jagged_sumcheck::prove_jagged_reduction_owned(
                         dense_q,
-                        dense_q_device_handle,
                         &packing,
-                        &r_row,
-                        &y_clone,
+                        r_row_per_chip,
+                        &y_per_chip,
                         &z_col,
                         z_row,
                         challenger,
-                    ) {
-                        Some(p) => p,
-                        None => {
-                            *challenger = challenger_snapshot;
-                            tracing::warn!(
-                                chips = n_chips,
-                                log_dense_size = packing.log_dense_size as u64,
-                                "jagged_pcs device reduction returned None \
-                                 (shape rejected) — falling back to host \
-                                 prove_jagged_reduction_owned",
-                            );
-                            let dense_q = saved_dense.unwrap_or_else(|| {
-                                // Re-materialize empty (device-resident)
-                                // chip traces from the provider so the host
-                                // reduction fallback rebuilds the correct
-                                // dense_q (not a partial zero buffer).
-                                let rematerialized =
-                                    rematerialize_chip_traces_via_provider(
-                                        chip_traces,
-                                        provider,
-                                    );
-                                materialize_dense_jagged::<InnerVal>(
-                                    &views_over_owned(&rematerialized),
-                                    packing.log_dense_size,
-                                    dense_rev,
-                                )
-                            });
-                            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                                dense_q,
-                                &packing,
-                                r_row_per_chip,
-                                &y_per_chip,
-                                &z_col,
-                                z_row,
-                                challenger,
-                            )
-                        }
-                    }
+                    )
                 }
-                ActiveHook::None => crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                    dense_q,
-                    &packing,
-                    r_row_per_chip,
-                    &y_per_chip,
-                    &z_col,
-                    z_row,
-                    challenger,
-                ),
             }
         };
         drop(_red_span);
@@ -2902,7 +2916,7 @@ pub mod jagged {
             let _t_open = std::time::Instant::now();
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
             let proof =
-                open_jagged_pcs(prover_data, extended_eval_point, challenger, gpu_basefold_open);
+                jagged_opener.open_jagged(prover_data, extended_eval_point, challenger);
             drop(_open_span);
             tracing::info!(
                 elapsed_ms = _t_open.elapsed().as_millis() as u64,
@@ -3779,7 +3793,7 @@ mod test {
             current[0]
         };
 
-        let proof = open_jagged_pcs(prover_data, eval_point.clone(), &mut p_chal, None);
+        let proof = open_jagged_pcs_host(prover_data, eval_point.clone(), &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.original_commitment.clone());

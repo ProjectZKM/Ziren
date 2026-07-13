@@ -204,24 +204,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         )
     }
 
-    /// The device BaseFold open function, provided statically by the
-    /// prover (#118 static dispatch of the former global
-    /// `GPU_BASEFOLD_OPEN_HOOK` OnceLock).  Default `None` = the host open
-    /// ([`crate::jagged_pcs::open_jagged_pcs`] with a `None` hook).
-    /// [`Self::prove_shard_to_basefold`] reads it and threads the `Option`
-    /// down through the jagged-eval producer + `prove_trusted_evaluations` to
-    /// the `open_jagged_pcs` dispatch, so no global registry is consulted.  On
-    /// the CPU prover the default `None` yields the exact unregistered-hook
-    /// (host) path → byte-identical.  A `StarkGpuProver` cannot name the device
-    /// fn (it lives in `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`);
-    /// the `prover` crate instead passes `Some(device_fn)` at the free-fn
-    /// `prove_shard_to_basefold` call sites.
-    fn gpu_basefold_open_hook(
-        &self,
-    ) -> Option<crate::jagged_pcs::GpuBasefoldOpenFn> {
-        None
-    }
-
     /// The device first-round-prove function, provided statically by the
     /// prover (#118 static dispatch of the former global
     /// `REGISTERED_FIRST_ROUND_HOOK` OnceLock).  Default `None` = the host
@@ -296,8 +278,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
-        gpu_jagged_reduction: Option<crate::jagged_pcs::GpuJaggedReductionFnV2>,
-        gpu_basefold_open: Option<crate::jagged_pcs::GpuBasefoldOpenFn>,
+        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
+        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof
     where
         SC: BasefoldRing,
@@ -320,8 +302,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
-            gpu_jagged_reduction,
-            gpu_basefold_open,
+            jagged_reducer,
+            jagged_opener,
         )
     }
 
@@ -440,16 +422,16 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             recursion_area_pin,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
-            // Reduce hook: the default (CpuProver / any prover not overriding
-            // `prove_shard_to_basefold`, e.g. the wrap prover) always yields the
-            // HOST reduction — the former `self.gpu_jagged_reduction_v2()`
-            // accessor was a vestigial always-`None` seam (no prover overrode
-            // it; the GPU core prover supplies its device reduction fn
-            // POSITIONALLY at its own `prove_shard_to_basefold` override, not via
-            // this accessor).  Inlined `None` here, accessor removed (SP1-parity:
-            // SP1 has no such accessor).  Byte-identical to the former read.
-            None,
-            self.gpu_basefold_open_hook(),
+            // Reduce + open dispatch: the default (CpuProver / any prover not
+            // overriding `prove_shard_to_basefold`, e.g. the wrap prover) uses
+            // the HOST reducer / opener.  The GPU core prover overrides
+            // `prove_shard_to_basefold` and threads its own `&DeviceJaggedReducer`
+            // / `&DeviceJaggedOpener` POSITIONALLY.  Static dispatch by prover
+            // TYPE (SP1-parity — the former `gpu_jagged_reduction_v2()` /
+            // `gpu_basefold_open_hook()` always-`None` accessors are removed);
+            // byte-identical to the former `None`-hook host path.
+            &crate::jagged_pcs::HostJaggedReducer,
+            &crate::jagged_pcs::HostJaggedOpener,
             self.first_round_device_hook(),
             self.drain_hook(),
             self.gkr_device_hooks(),
