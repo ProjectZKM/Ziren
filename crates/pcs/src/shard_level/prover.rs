@@ -276,13 +276,14 @@ where
         dense_rev,
         recursion_area_pin,
         precomputed_commit,
-        // Pure host-path entry (shrink + dummy callers) — host reducer/opener;
-        // the device sites override `prove_shard_to_basefold` instead.
+        // Pure host-path entry (shrink + dummy callers) — host reducer/opener +
+        // host first-round / drain / GKR-walk providers; the device sites
+        // override `prove_shard_to_basefold` instead.
         &crate::jagged_pcs::HostJaggedReducer,
         &crate::jagged_pcs::HostJaggedOpener,
-        None,
-        None,
-        crate::jagged_pcs::GkrDeviceHooks::default(),
+        &crate::shard_level::device_first_layer_context::HostFirstRound,
+        &crate::shard_level::device_first_layer_context::HostDrain,
+        &crate::jagged_pcs::HostGkrDevice,
     )
 }
 
@@ -525,19 +526,17 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // (core/compress) provides the device open statically, `None` on host
     // callers = host open.
     jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
-    // #118: device first-round-prove fn + TLS-stash drain fn; `Some(..)` on
-    // the GPU callers (core/compress) provide them statically, `None` on host
-    // callers = host first round (were the `REGISTERED_FIRST_ROUND_HOOK` /
-    // `REGISTERED_DRAIN_HOOK` OnceLocks).
-    first_round_device_hook: Option<
-        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-    >,
-    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
-    // #118: the eight GKR-walk device lifecycle fns (init / transition /
-    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
-    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
-    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    // Phase-4: device/host first-round-prove + TLS-stash drain providers; the
+    // GPU callers (core/compress) thread `&DeviceFirstRound` / `&DeviceDrain`,
+    // host callers thread `&HostFirstRound` / `&HostDrain` = host first round
+    // (were the `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK`
+    // OnceLocks, then the `#118` `Option<fn>` thread).
+    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
+    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
+    // the `GkrDeviceHooks` fn-ptr bundle).  The GPU callers thread
+    // `&DeviceGkrDevice`, host callers thread `&HostGkrDevice` = host walk.
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -641,20 +640,18 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // threaded through the producer's `prove_trusted_evaluations` down to the
     // `open_jagged_pcs` dispatch.
     jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
-    // The device first-round-prove fn + TLS-stash drain fn (#118), read from
-    // the prover's `first_round_device_hook()` / `drain_hook()` (or `None` on
-    // the free-fn / CPU path) and threaded into `prove_shard_logup_gkr_rows`'s
-    // row-GKR first-round dispatch (`try_first_round_on_gpu`).  Were the
-    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks.
-    first_round_device_hook: Option<
-        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-    >,
-    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
-    // #118: the eight GKR-walk device lifecycle fns (init / transition /
-    // pull / drain / fit-preflight / logup-scope-populate / v3-fetch-publish
-    // / generate-first-layer), `Some(..)` fields on the GPU callers, all-None
-    // on host callers = host walk.  Were the eight `GPU_*_HOOK` OnceLocks.
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    // Phase-4: device/host first-round-prove + TLS-stash drain providers
+    // (`&DeviceFirstRound` / `&DeviceDrain` on the GPU prover, `&HostFirstRound`
+    // / `&HostDrain` on the free-fn / CPU path), threaded into
+    // `prove_shard_logup_gkr_rows`'s row-GKR first-round dispatch
+    // (`try_first_round_on_gpu`).  Were the `REGISTERED_FIRST_ROUND_HOOK` /
+    // `REGISTERED_DRAIN_HOOK` OnceLocks, then the `#118` `Option<fn>` thread.
+    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
+    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
+    // the `GkrDeviceHooks` fn-ptr bundle).  `&DeviceGkrDevice` on the GPU
+    // prover, `&HostGkrDevice` on host callers = host walk.
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,

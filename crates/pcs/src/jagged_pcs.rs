@@ -1065,89 +1065,6 @@ pub type GpuLayerDrainCircuitFn = fn(circuit_id: u64);
 // the pre-#118 unregistered-hook path.  The former `GPU_LAYER_DRAIN_HOOK`
 // OnceLock + its `register_/get_` accessors were removed.
 
-/// populate the per-shard `LogupTaskScope` with
-/// device-resident layer payloads at scope-entry.
-///
-/// **Purpose**: SP1's `generate_gkr_circuit` materializes every GKR
-/// layer up front on device, then hands the per-shard
-/// `LogUpCudaCircuit<'a, TaskScope>` to the per-round prover which
-/// `pop()`s a layer per call (see
-/// `sp1-gpu/crates/logup_gkr/src/tracegen.rs:188-246`).  Ziren's
-/// `top_level.rs::prove_shard_logup_gkr_rows` now allocates a
-/// `LogupTaskScope` at the same lifetime boundary
-/// and invokes this hook so the ziren-gpu side can fill
-/// the scope's `DeviceLogupGkrCircuit` from its own device-resident
-/// per-circuit registry.
-///
-/// **Contract**: returns `Some(payloads)` when the GPU populator has
-/// at least one device-resident layer available for `circuit_id`;
-/// returns `None` when the populator declines (host-only path, env
-/// gate off, populator not yet warmed, etc.) — the V3 dispatch then
-/// falls back to the legacy `take_logup_v3_next_handle` TLS path
-/// installed in .
-///
-/// **Ordering**: `payloads[0]` MUST be the TERMINAL layer (smallest
-/// `num_row_variables`, popped LAST by `scope.next_layer()`), and the
-/// last entry MUST be the FIRST LAYER (largest, popped FIRST).  This
-/// matches SP1's `materialized_layers.pop()` semantics — Ziren's
-/// `DeviceLogupGkrCircuit::next` is a literal `Vec::pop`.
-///
-/// **Lifetime**: the returned `Arc` payloads are held by the scope for
-/// the duration of `prove_shard_logup_gkr_rows`; they drop when the
-/// scope guard's `Drop` runs at function exit.  The populator MUST
-/// ensure its concrete payload type matches what the registered V3
-/// hook downcasts to (today: ziren-gpu's `DeviceLogupLayerState`).
-///
-/// **No-op fallback**: when this hook is not registered (older
-/// ziren-gpu builds, or when the feature is disabled), `top_level.rs`
-/// skips the install call and the scope's `circuit` stays `None` —
-/// byte-equivalent to the legacy TLS-handle dispatch.
-pub type GpuLogupScopePopulateFn = fn(
-    circuit_id: u64,
-) -> Option<
-    Vec<crate::shard_level::row_gkr::device_circuit::DeviceCircuitLayerPayload>,
->;
-
-// #118: the `GpuLogupScopePopulateFn` is provided STATICALLY via
-// [`GkrDeviceHooks::logup_scope_populate`] (threaded from the prover down
-// to the scope-populate site in `top_level.rs`), not a global registry.
-// `None` (CPU prover / host walk) leaves the scope's `circuit` as `None`,
-// byte-identical to the pre-#118 unregistered-hook path.  The former
-// `GPU_LOGUP_SCOPE_POPULATE_HOOK` OnceLock + its `register_/get_`
-// accessors were removed.
-
-// ─────────────────────────────────────────────────────────────────────
-// Device-resident GKR layer fetch-and-publish hook (full residency).
-//
-// `prove_gkr_round` calls this BEFORE deciding whether to pull the
-// device layer to host.  Given the per-shard `circuit_id` and THIS
-// round's `num_variables`, the ziren-gpu impl:
-//   1. populates the per-shard V3 layer cache from the layer-transition
-//      registry on first call (idempotent; filtered to adoptable layers
-//      so the over-cap first layer never blocks the cache front),
-//   2. match-pops the cache entry whose flat length == `1 << num_variables`
-//      (match-aware: small interleaved layers find no front-match and
-//      return false), and
-//   3. on a hit, wraps the device-resident `DeviceLogupLayerState` in a
-//      `DeviceLayerHandle` and publishes it to the V3 TLS handle slot
-//      (`publish_logup_v3_next_handle`).
-//
-// Returns `true` iff a matching device layer was published — in which
-// case `prove_gkr_round` SKIPS `pull_device_layer_to_host` and the V3
-// hook adopts the device buffers directly (no device→host→device
-// round-trip).  Returns `false` (no publish) for: cache miss, shape
-// mismatch (small/over-cap layer), hook unregistered, or CUDA error —
-// the caller then pulls + runs the host/V2 fallback exactly as before.
-pub type GpuV3FetchPublishFn = fn(circuit_id: u64, num_variables: usize) -> bool;
-
-// #118: the `GpuV3FetchPublishFn` is provided STATICALLY via
-// [`GkrDeviceHooks::v3_fetch_publish`] (threaded from the prover down to
-// the per-round V3 fetch-and-publish site in `round.rs`), not a global
-// registry.  `None` (CPU prover / host walk) means no publish → the caller
-// pulls + runs the host/V2 fallback, byte-identical to the pre-#118
-// unregistered-hook path.  The former `GPU_V3_FETCH_PUBLISH_HOOK` OnceLock
-// + its `register_/get_` accessors were removed.
-
 // ─────────────────────────────────────────────────────────────────────
 // Device-resident `generate_first_layer` regen hook.
 //
@@ -1189,58 +1106,89 @@ pub type GpuGenerateFirstLayerFn = fn(
 // accessors were removed.
 
 // ─────────────────────────────────────────────────────────────────────
-// #118: static-dispatch bundle for the eight GKR-walk device lifecycle
-// fns.
+// #118 / Phase-4: object-safe static-dispatch of the row-GKR device
+// lifecycle fns.
 //
 // These fns were formerly eight independent global `OnceLock` registries
-// (`GPU_LAYER_TRANSITION_HOOK`, `GPU_LAYER_INIT_HOOK`, … ,
-// `GPU_GENERATE_FIRST_LAYER_HOOK`), each set once at ziren-gpu startup and
-// read at its firing site via a `get_*` accessor.  #118 replaces that with
-// STATIC provision: the prover exposes the set via
-// [`crate::prover::MachineProver::gkr_device_hooks`] and it is threaded
+// (`GPU_LAYER_TRANSITION_HOOK`, `GPU_LAYER_INIT_HOOK`, … ), each set once at
+// ziren-gpu startup and read at its firing site via a `get_*` accessor.  #118
+// first collapsed them into a `Copy` `GkrDeviceHooks` fn-ptr bundle; Phase-4
+// replaces that bundle with an OBJECT-SAFE TRAIT threaded `&dyn` — the prover
+// TYPE selects the impl (SP1-parity static dispatch, exactly as the
+// reduce/open `JaggedReducer`/`JaggedOpener` slices do).  The host build
+// threads `&HostGkrDevice` (host fold), the GPU prover threads its own
+// `&DeviceGkrDevice` (in `zkm-gpu-basefold`); it is threaded
 // (`prove_shard_to_basefold` → … → `prove_shard_logup_gkr_rows`) and
 // distributed to the row-GKR firing sites (`build_gkr_circuit` /
-// `prove_gkr_round` / the scope-populate + drain sites / the
-// `DeviceInputData` regen arm).
+// `prove_gkr_round` / the post-walk drain site).
 //
-// `Copy` so it threads with zero ceremony; the all-`None` `Default` is the
-// host walk — byte-identical to the pre-#118 unregistered-hook path.  A
-// `StarkGpuProver` cannot name the device fns (they live in
-// `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the `prover` crate
-// instead passes a bundle whose fields are `Some(device_fn)` at the free-fn
-// `prove_shard_to_basefold` call sites, exactly as the `#130`/`#118`
-// commit/open/reduce/first-round slices do for their fns.
+// Phase-4 dropped THREE dead fields the `GkrDeviceHooks` bundle carried:
+// `logup_scope_populate` (always `None` from every producer → its
+// scope-populate block in `top_level.rs` never ran), `v3_fetch_publish` (the
+// V3 layer cache was excised — no consumer at all), and `generate_first_layer`
+// (fed into `DeviceInputData` ONLY inside that dead scope-populate block).  The
+// remaining five are the live device-fold walk fns.
 // ─────────────────────────────────────────────────────────────────────
 
-/// The eight GKR-walk device lifecycle fns, provided STATICALLY by the
-/// prover.  All-`None` (`Default`) = the host walk (CPU prover / host
-/// free-fn callers), byte-identical to the pre-#118 unregistered-hook path.
-#[derive(Clone, Copy, Default)]
-pub struct GkrDeviceHooks {
-    /// Upload the first EF layer to device (was `GPU_LAYER_INIT_HOOK`).
-    pub layer_init: Option<GpuLayerInitFn>,
+/// Object-safe device/host row-GKR device-fold lifecycle dispatch.  Host build
+/// threads `&HostGkrDevice` (host fold), the GPU prover threads its own
+/// `&DeviceGkrDevice`.  `is_device()` gates the device-fold walk (was the
+/// `layer_init? / layer_transition? / layer_pull?` triple presence-check); the
+/// five lifecycle methods run only under `is_device()` (host defaults are
+/// `unreachable!()`, never reached because `is_device()` returns `false`).
+/// Byte-identical to the pre-#118 unregistered-hook host walk.
+pub trait GkrDeviceProvider {
+    /// `true` for the device GKR provider — gates the device-fold layer walk
+    /// (was the `layer_init? / layer_transition? / layer_pull?` triple
+    /// presence-check).  Host default = `false` → host fold.
+    fn is_device(&self) -> bool {
+        false
+    }
+
+    /// Upload the first EF layer to device, return handle (was
+    /// `GPU_LAYER_INIT_HOOK` / `GkrDeviceHooks::layer_init`).  Only called
+    /// under `is_device()`.
+    fn layer_init(&self, _circuit_id: u64, _view: HostLayerView<'_>) -> u64 {
+        unreachable!("host GkrDeviceProvider::layer_init — gated by is_device()")
+    }
+
     /// Produce the next device-resident layer state (was
-    /// `GPU_LAYER_TRANSITION_HOOK`).
-    pub layer_transition: Option<GpuLayerTransitionFn>,
+    /// `GPU_LAYER_TRANSITION_HOOK`).  Only called under `is_device()`.
+    fn layer_transition(&self, _circuit_id: u64, _prev_handle: u64) -> u64 {
+        unreachable!("host GkrDeviceProvider::layer_transition — gated by is_device()")
+    }
+
     /// Materialize a device layer handle back to host (was
-    /// `GPU_LAYER_PULL_HOOK`).
-    pub layer_pull: Option<GpuLayerPullFn>,
+    /// `GPU_LAYER_PULL_HOOK`).  Only called for a `LayerState::Device` (which
+    /// only exists when `is_device()`).
+    fn layer_pull(
+        &self,
+        _circuit_id: u64,
+        _handle: u64,
+    ) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>
+    {
+        unreachable!("host GkrDeviceProvider::layer_pull — gated by is_device()")
+    }
+
     /// Release a circuit's device-resident intermediate layers (was
-    /// `GPU_LAYER_DRAIN_HOOK`).
-    pub layer_drain: Option<GpuLayerDrainCircuitFn>,
+    /// `GPU_LAYER_DRAIN_HOOK`).  Only called under `is_device()`.
+    fn layer_drain(&self, _circuit_id: u64) {
+        unreachable!("host GkrDeviceProvider::layer_drain — gated by is_device()")
+    }
+
     /// Up-front device-fold VRAM fit preflight (was
-    /// `GPU_LAYER_FIT_PREFLIGHT_HOOK`).
-    pub layer_fit_preflight: Option<GpuLayerFitPreflightFn>,
-    /// Populate the scope with device-resident layer payloads at
-    /// scope-entry (was `GPU_LOGUP_SCOPE_POPULATE_HOOK`).
-    pub logup_scope_populate: Option<GpuLogupScopePopulateFn>,
-    /// Publish a device-resident GKR layer to the V3 TLS slot (was
-    /// `GPU_V3_FETCH_PUBLISH_HOOK`).
-    pub v3_fetch_publish: Option<GpuV3FetchPublishFn>,
-    /// Regenerate the first layer on device for the lazy `next()` arm
-    /// (was `GPU_GENERATE_FIRST_LAYER_HOOK`).
-    pub generate_first_layer: Option<GpuGenerateFirstLayerFn>,
+    /// `GPU_LAYER_FIT_PREFLIGHT_HOOK`).  Only called under `is_device()`.
+    fn layer_fit_preflight(&self, _view: &HostLayerView<'_>) -> bool {
+        unreachable!("host GkrDeviceProvider::layer_fit_preflight — gated by is_device()")
+    }
 }
+
+/// Host GKR provider: `is_device()` = false, so the device-fold walk is never
+/// taken and the GKR fold runs entirely on host — byte-identical to the
+/// pre-#118 unregistered-hook path.
+pub struct HostGkrDevice;
+
+impl GkrDeviceProvider for HostGkrDevice {}
 
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each
 /// `build_gkr_circuit` call that takes the device path allocates a

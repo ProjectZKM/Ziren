@@ -45,10 +45,11 @@ pub fn build_gkr_circuit<F, EF, A>(
     betas: &[EF],
     num_row_variables: usize,
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // #118: the eight GKR-walk device lifecycle fns bundle (were the eight
-    // `GPU_*_HOOK` OnceLocks).  On the device-fold path the init / transition
-    // / pull / fit-preflight fns are consulted; all-`None` = host fold.
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
+    // the `GkrDeviceHooks` fn-ptr bundle over the `GPU_*_HOOK` OnceLocks).  On
+    // the device-fold path the init / transition / pull / fit-preflight methods
+    // run; `&HostGkrDevice` (`is_device()` false) = host fold.
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
     F: PrimeField,
@@ -159,7 +160,7 @@ where
 fn try_run_device_path<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
 where
     F: PrimeField,
@@ -177,7 +178,7 @@ where
 fn try_run_device_path_basefold<F, EF>(
     last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
     layers: &mut Vec<LayerState<F, EF>>,
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
 where
     F: PrimeField,
@@ -194,11 +195,13 @@ where
     // by the standard p3 field bounds), but we re-check via the
     // TypeId comparisons below — `TypeId::of::<F>()` requires F : 'static.
 
-    // Gate 3: device fns provided (#118: statically via the `GkrDeviceHooks`
-    // bundle, were the `GPU_LAYER_*_HOOK` OnceLocks).  `None` on any = host.
-    let init_hook = gkr_device_hooks.layer_init?;
-    let transition_hook = gkr_device_hooks.layer_transition?;
-    let pull_hook = gkr_device_hooks.layer_pull?;
+    // Gate 3: device provider present (Phase-4: `is_device()`, was the
+    // `layer_init? / layer_transition? / layer_pull?` triple presence-check on
+    // the `GkrDeviceHooks` bundle, which were the `GPU_LAYER_*_HOOK` OnceLocks).
+    // Host provider (`is_device()` false) = host fold.
+    if !gkr_device_hooks.is_device() {
+        return None;
+    }
 
     // Gate 4: TypeId match (recursion-circuit instantiates over a
     // different field stack — those calls fall through to host).
@@ -248,8 +251,12 @@ where
     // fold runs entirely on host — byte-identical (device fold is a perf
     // optimization; the layer cells are the same) and transcript-neutral.
     // Unregistered hook => proceed as before (no decline).
-    if let Some(preflight) = gkr_device_hooks.layer_fit_preflight {
-        if !preflight(&view) {
+    // Phase-4: `layer_fit_preflight` (was `GPU_LAYER_FIT_PREFLIGHT_HOOK` /
+    // `GkrDeviceHooks::layer_fit_preflight`).  We are past the `is_device()`
+    // gate, so the device provider is present and always supplies the preflight
+    // (the GPU provider set it unconditionally alongside init/transition/pull).
+    {
+        if !gkr_device_hooks.layer_fit_preflight(&view) {
             drop(view);
             // Put the layer back so the host fall-through loop in
             // `build_gkr_circuit` (`while let Some(curr) = last_ef_layer.take()`)
@@ -271,7 +278,7 @@ where
     // init/transition/pull invocation for this circuit.
     let circuit_id: u64 = allocate_gpu_layer_circuit_id();
 
-    let mut handle: u64 = init_hook(circuit_id, view);
+    let mut handle: u64 = gkr_device_hooks.layer_init(circuit_id, view);
     let mut cur_num_row_variables = first_ef_layer.num_row_variables;
     let cur_num_interaction_variables = first_ef_layer.num_interaction_variables;
 
@@ -305,7 +312,7 @@ where
         if cur_num_row_variables == 1 {
             terminal_handle = Some(handle);
         }
-        let next_handle = transition_hook(circuit_id, handle);
+        let next_handle = gkr_device_hooks.layer_transition(circuit_id, handle);
         cur_num_row_variables = cur_num_row_variables.saturating_sub(1);
         layers.push(LayerState::Device {
             circuit_id,
@@ -338,7 +345,7 @@ where
     // points at the null terminal at num=0) mirrors the host path's
     // `layers[layers.len() - 2]` indexing.
     let terminal_lb: super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> =
-        pull_hook(circuit_id, terminal_handle);
+        gkr_device_hooks.layer_pull(circuit_id, terminal_handle);
 
     // SAFETY: TypeId gate 4 confirms `JaggedChallenge == EF` at runtime;
     // the `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` struct has

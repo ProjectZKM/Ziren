@@ -204,52 +204,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         )
     }
 
-    /// The device first-round-prove function, provided statically by the
-    /// prover (#118 static dispatch of the former global
-    /// `REGISTERED_FIRST_ROUND_HOOK` OnceLock).  Default `None` = the host
-    /// first round.  [`Self::prove_shard_to_basefold`] reads it and threads
-    /// the `Option` down through `prove_shard_logup_gkr_rows` →
-    /// `prove_gkr_round` → `LogupRoundPolynomial::new` →
-    /// `try_first_round_on_gpu`, so no global registry is consulted.  On the
-    /// CPU prover the default `None` yields the exact unregistered-hook (host)
-    /// path → byte-identical.  A `StarkGpuProver` cannot name the device fn (it
-    /// lives in `zkm-gpu-basefold`, StarkGpuProver in `zkm-gpu-core`); the
-    /// `prover` crate instead passes `Some(device_fn)` at the free-fn
-    /// `prove_shard_to_basefold` call sites.
-    fn first_round_device_hook(
-        &self,
-    ) -> Option<crate::shard_level::device_first_layer_context::FirstRoundDeviceHook>
-    {
-        None
-    }
-
-    /// The device first-layer TLS-stash drain function, provided statically by
-    /// the prover (#118 static dispatch of the former global
-    /// `REGISTERED_DRAIN_HOOK` OnceLock).  Default `None` = no device stash to
-    /// drain (host first round).  Threaded alongside
-    /// [`Self::first_round_device_hook`] down to `try_first_round_on_gpu`.
-    fn drain_hook(
-        &self,
-    ) -> Option<crate::shard_level::device_first_layer_context::DrainHook> {
-        None
-    }
-
-    /// The eight GKR-walk device lifecycle fns, provided statically by the
-    /// prover (#118 static dispatch of the former eight global
-    /// `GPU_LAYER_*` / `GPU_LOGUP_SCOPE_POPULATE_*` / `GPU_V3_FETCH_PUBLISH_*`
-    /// / `GPU_GENERATE_FIRST_LAYER_*` OnceLocks).  Default = all-`None`
-    /// ([`crate::jagged_pcs::GkrDeviceHooks::default`]) = the host walk.
-    /// [`Self::prove_shard_to_basefold`] reads this and threads the bundle
-    /// down through `prove_shard_logup_gkr_rows`, distributing it to the
-    /// row-GKR firing sites, so no global registry is consulted.  On the CPU
-    /// prover the default yields the exact unregistered-hook (host) path →
-    /// byte-identical.  A `StarkGpuProver` cannot name the device fns (they
-    /// live in `zkm-gpu-basefold`); the `prover` crate instead passes a
-    /// populated bundle at the free-fn `prove_shard_to_basefold` call sites.
-    fn gkr_device_hooks(&self) -> crate::jagged_pcs::GkrDeviceHooks {
-        crate::jagged_pcs::GkrDeviceHooks::default()
-    }
-
     /// The jagged trusted-evaluations open — the
     /// static-dispatch OVERRIDE point.  Default = the host free-fn
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] (CpuProver is
@@ -432,9 +386,18 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             // byte-identical to the former `None`-hook host path.
             &crate::jagged_pcs::HostJaggedReducer,
             &crate::jagged_pcs::HostJaggedOpener,
-            self.first_round_device_hook(),
-            self.drain_hook(),
-            self.gkr_device_hooks(),
+            // Phase-4 static dispatch: the first-round / drain / GKR-walk device
+            // hooks are provided by prover TYPE.  The default (CpuProver / any
+            // prover not overriding `prove_shard_to_basefold`, e.g. the wrap
+            // prover) threads the HOST providers; the GPU core prover overrides
+            // `prove_shard_to_basefold` and threads its own `&DeviceFirstRound`
+            // / `&DeviceDrain` / `&DeviceGkrDevice` positionally.  Byte-identical
+            // to the former `None` / `None` / `GkrDeviceHooks::default()` host
+            // path (the former `first_round_device_hook()` / `drain_hook()` /
+            // `gkr_device_hooks()` always-host accessors are removed).
+            &crate::shard_level::device_first_layer_context::HostFirstRound,
+            &crate::shard_level::device_first_layer_context::HostDrain,
+            &crate::jagged_pcs::HostGkrDevice,
         )
     }
 

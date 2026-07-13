@@ -866,15 +866,13 @@ fn try_first_round_on_gpu<F, EF>(
     eq_row: &[EF],
     pad_eq_int_sum: EF,
     claimed_sum: EF,
-    // #118: device first-round-prove fn + TLS-stash drain fn, provided
-    // statically by the prover (were the `REGISTERED_FIRST_ROUND_HOOK` /
-    // `REGISTERED_DRAIN_HOOK` OnceLocks).  `None` = host first round
-    // (CPU prover / host free-fn callers), byte-identical to the pre-#118
-    // unregistered-hook path.
-    first_round_device_hook: Option<
-        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-    >,
-    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+    // Phase-4: device/host first-round-prove + TLS-stash drain providers,
+    // provided by prover TYPE (were the `REGISTERED_FIRST_ROUND_HOOK` /
+    // `REGISTERED_DRAIN_HOOK` OnceLocks, then the `#118` `Option<fn>` thread).
+    // `&HostFirstRound` / `&HostDrain` = host first round (CPU prover / host
+    // free-fn callers), byte-identical to the pre-#118 unregistered-hook path.
+    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
 ) -> Option<(UnivariatePolynomial<EF>, Option<Box<ChipLayerState<EF>>>)>
 where
     F: Field + Into<EF> + Copy + Sync,
@@ -1293,9 +1291,9 @@ where
         // stash + hook are present (matches SP1; no per-shard gate).
         use crate::shard_level::device_first_layer_context as dfl;
         if dfl::current_device_first_layer().is_some() {
-            // #118: first-round fn threaded from the prover (was
-            // `REGISTERED_FIRST_ROUND_HOOK`).
-            if let Some(device_hook) = first_round_device_hook {
+            // Phase-4: first-round provider threaded from the prover (was
+            // `REGISTERED_FIRST_ROUND_HOOK`, then the `#118` `Option<fn>`).
+            if first_round_device_hook.is_device() {
                 let target_rows = 1usize << first_layer.num_row_variables;
                 let row_half_u = (target_rows / 2) as u32;
                 let mut per_chip_cols_v: Vec<u32> = Vec::with_capacity(n_chips);
@@ -1325,7 +1323,7 @@ where
                 let total_pair_tasks = so_far;
                 // ProdEF and the hook's Ef4 are the SAME underlying type
                 // (BinomialExtensionField<KoalaBear, 4>); pass directly.
-                device_hook(
+                first_round_device_hook.first_round(
                     &col_index,
                     &start_indices,
                     &eq_row_chip_offsets_v,
@@ -2395,13 +2393,13 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         numerator_eval: EF,
         denominator_eval: EF,
         lambda: EF,
-        // #118: device first-round-prove + drain fns, threaded down to
-        // `try_first_round_on_gpu` (were the `REGISTERED_FIRST_ROUND_HOOK` /
-        // `REGISTERED_DRAIN_HOOK` OnceLocks).  `None` = host first round.
-        first_round_device_hook: Option<
-            crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-        >,
-        drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
+        // Phase-4: device/host first-round-prove + drain providers, threaded
+        // down to `try_first_round_on_gpu` (were the
+        // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks,
+        // then the `#118` `Option<fn>` thread).  `&HostFirstRound` /
+        // `&HostDrain` = host first round.
+        first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+        drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
     ) -> Self
     where
         F: Field + Into<EF> + Copy + Sync,
@@ -2990,19 +2988,17 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    // #118: device first-round-prove + drain fns, threaded down to
-    // `LogupRoundPolynomial::new` → `try_first_round_on_gpu` (were the
-    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks).
-    // `None` = host first round (CPU prover / host free-fn callers).
-    first_round_device_hook: Option<
-        crate::shard_level::device_first_layer_context::FirstRoundDeviceHook,
-    >,
-    drain_hook: Option<crate::shard_level::device_first_layer_context::DrainHook>,
-    // #118: the eight GKR-walk device lifecycle fns bundle (were the eight
-    // `GPU_*_HOOK` OnceLocks).  Here the v3-fetch-publish fn drives the
-    // per-round full-residency publish and the layer-pull fn feeds
-    // `pull_device_layer_to_host`.  All-`None` = host round.
-    gkr_device_hooks: crate::jagged_pcs::GkrDeviceHooks,
+    // Phase-4: device/host first-round-prove + drain providers, threaded down
+    // to `LogupRoundPolynomial::new` → `try_first_round_on_gpu` (were the
+    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks, then
+    // the `#118` `Option<fn>` thread).  `&HostFirstRound` / `&HostDrain` = host
+    // first round (CPU prover / host free-fn callers).
+    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
+    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
+    // the `GkrDeviceHooks` fn-ptr bundle).  Here the layer-pull method feeds
+    // `pull_device_layer_to_host`.  `&HostGkrDevice` = host round.
+    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
 ) -> LogupGkrRoundProof<EF>
 where
     F: PrimeField,
@@ -3023,8 +3019,8 @@ where
             super::top_level::pull_device_layer_to_host::<F, EF>(
                 *circuit_id,
                 *handle,
-                // #118: layer-pull fn (was `GPU_LAYER_PULL_HOOK`).
-                gkr_device_hooks.layer_pull,
+                // Phase-4: layer-pull provider (was `GPU_LAYER_PULL_HOOK`).
+                gkr_device_hooks,
             ),
         ),
     };
@@ -3909,10 +3905,10 @@ mod tests {
             d_eval,
             lambda,
             &mut ch,
-            // #118: host-only test → host first round + host GKR walk.
-            None,
-            None,
-            crate::jagged_pcs::GkrDeviceHooks::default(),
+            // Phase-4: host-only test → host first round + host GKR walk.
+            &crate::shard_level::device_first_layer_context::HostFirstRound,
+            &crate::shard_level::device_first_layer_context::HostDrain,
+            &crate::jagged_pcs::HostGkrDevice,
         );
 
         // Claimed sum = λ · n_eval + d_eval.
@@ -3999,9 +3995,11 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            // #118: host-only test → host first round + host GKR walk.
-            &state, &point, n_eval, d_eval, lambda, &mut ch, None, None,
-            crate::jagged_pcs::GkrDeviceHooks::default(),
+            // Phase-4: host-only test → host first round + host GKR walk.
+            &state, &point, n_eval, d_eval, lambda, &mut ch,
+            &crate::shard_level::device_first_layer_context::HostFirstRound,
+            &crate::shard_level::device_first_layer_context::HostDrain,
+            &crate::jagged_pcs::HostGkrDevice,
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.
