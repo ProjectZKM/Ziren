@@ -766,8 +766,8 @@ pub type GpuBasefoldCommitFn = fn(
 // signature one-for-one — same inputs (owned `dense_q`, packing,
 // `r_row_per_chip`, `y_per_chip`, challenger), same output
 // (`JaggedReductionProof<InnerChallenge>`).  Wired from
-// `prove_jagged_basefold_with_y_per_chip` step (4) when
-// `ZIREN_GPU_JAGGED_PCS=1` is set.
+// `prove_jagged_basefold_with_y_per_chip` step (4) when the GPU
+// jagged-reduction hook is registered (GPU prover only).
 //
 // Per-shard wall: 2.41–2.76s × 25 shards ≈ 62s of the 144s tendermint
 // compress wall (measured) — the largest remaining
@@ -2680,10 +2680,10 @@ pub mod jagged {
         // after round 0 (releasing the 4N base-field buffer before the
         // EF tables for rounds 1..n are built).  Saves one full N-element
         // clone vs the &[InnerVal] entry point.
-        // dispatch: when ZIREN_GPU_JAGGED_PCS=1 is set AND a
-        // GPU jagged-reduction hook has been registered (by ziren-gpu's
-        // `compress_multi_gpu` startup block), route the reduction
-        // through the device hook.  The hook is byte-equivalent to
+        // dispatch: when a GPU jagged-reduction hook has been registered
+        // (by ziren-gpu's `compress_multi_gpu` startup block; the hook is
+        // `Some` only on the GPU prover), route the reduction through the
+        // device hook.  The hook is byte-equivalent to
         // `prove_jagged_reduction_owned` (verified by the existing
         // host fallback path + the GPU-side scaffold tests in
         // `ziren-gpu/basefold/src/jagged_sumcheck.rs::tests`).  When
@@ -2692,10 +2692,6 @@ pub mod jagged {
         //
         // Hook hardening / diagnostics:
         //   * V2 hook (with optional device handle) preferred over V1
-        //   * `env_set_but_unregistered` warn-once when ZIREN_GPU_JAGGED_PCS=1
-        //     but neither V1 nor V2 hook is registered
-        //   * `hook_registered_but_env_unset` warn-once when a hook is
-        //     registered but the env flag isn't set (possible misconfig)
         //   * shape-rejection counter — log on each Nth (geometric) None
         //   * V2 hook with `Some(device_handle)` is logged separately to
         //     confirm the device-resident path is exercised
@@ -2746,9 +2742,6 @@ pub mod jagged {
         // touch the provider, so freeing it here is sound and lets the reduce
         // go device.
         if let Some(p) = provider {
-            let try_gpu_pr = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                .map(|v| v != "0")
-                .unwrap_or(false);
             let hook_v2_present = gpu_jagged_reduction.is_some();
             let device_happy = (precomputed_dense_handle.is_some()
                 || precomputed_host_dense_q.is_some())
@@ -2772,7 +2765,6 @@ pub mod jagged {
                     tracing::warn!(
                         precomputed_dense_handle = precomputed_dense_handle.is_some(),
                         carried_host_dense_q = precomputed_host_dense_q.is_some(),
-                        try_gpu = try_gpu_pr,
                         hook_v2 = hook_v2_present,
                         "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
                          the device-happy path (neither a device handle nor a \
@@ -2797,19 +2789,18 @@ pub mod jagged {
             // device-handle and host-dense legs, tendermint core shards, fib
             // full chain + wrap).
             //
-            // DEFAULT ON (=0/false to opt out).  All fallible allocs MUST be
-            // hoisted before any transcript interaction: allocating the
-            // round-0 fold-output buffers (2 x 4 GiB at log_dense=29) AFTER
-            // the round-0 observe+sample risks an OOM there (peaks ~29.5 GiB
-            // VRAM) that returns None and makes the caller re-run round 0 on
-            // host, double-advancing the transcript and emitting a
-            // (log_n+1)-round proof a downstream compose rejects (a
-            // TRANSCRIPT-POISON).  The ziren-gpu jagged_sumcheck.rs hoists
-            // all fallible allocs before any transcript interaction and
-            // resumes (not restarts) on host for mid-loop failures.
-            let try_gpu = std::env::var("ZIREN_GPU_JAGGED_PCS")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
+            // Device dispatch is selected by prover TYPE — the V2 hook is
+            // registered (Some) only on the GPU prover, None on the CPU prover;
+            // there is no env gate.  All fallible allocs MUST be hoisted before
+            // any transcript interaction: allocating the round-0 fold-output
+            // buffers (2 x 4 GiB at log_dense=29) AFTER the round-0
+            // observe+sample risks an OOM there (peaks ~29.5 GiB VRAM) that
+            // returns None and makes the caller re-run round 0 on host,
+            // double-advancing the transcript and emitting a (log_n+1)-round
+            // proof a downstream compose rejects (a TRANSCRIPT-POISON).  The
+            // ziren-gpu jagged_sumcheck.rs hoists all fallible allocs before
+            // any transcript interaction and resumes (not restarts) on host for
+            // mid-loop failures.
 
             // The device reduction function, provided statically by the
             // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded
@@ -2823,7 +2814,6 @@ pub mod jagged {
             // from) is the source.  Every fallback edge below
             // re-materializes on host before running the host body.
             let skip_host_dense = precomputed_dense_handle.is_some()
-                && try_gpu
                 && hook_v2.is_some();
             // True when `dense_q` below is the CARRIED host dense_q from
             // the device-commit-decline fallback — the provider is DRAINED by
@@ -2861,13 +2851,9 @@ pub mod jagged {
                 V2(super::GpuJaggedReductionFnV2),
                 None,
             }
-            let active = if try_gpu {
-                match hook_v2 {
-                    Some(f2) => ActiveHook::V2(f2),
-                    None => ActiveHook::None,
-                }
-            } else {
-                ActiveHook::None
+            let active = match hook_v2 {
+                Some(f2) => ActiveHook::V2(f2),
+                None => ActiveHook::None,
             };
 
             // Device handle source (single shard-wide commit
@@ -2877,7 +2863,7 @@ pub mod jagged {
             // hook takes it from the registry (`DenseQDevice::Owned`) so
             // commit + reduction share ONE device buffer.  `None` on the
             // host build path — the device handle is then unused.
-            let dense_q_device_handle: Option<u64> = if try_gpu && hook_v2.is_some() {
+            let dense_q_device_handle: Option<u64> = if hook_v2.is_some() {
                 precomputed_dense_handle
             } else {
                 None

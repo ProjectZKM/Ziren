@@ -784,9 +784,6 @@ where
     // reduction time the device traces are GONE and a late re-materialize
     // cannot recover them.  In that case we MUST keep the eager early D2H
     // (captured here, pre-drain) for a correct dense_q.
-    let jagged_on = std::env::var("ZIREN_GPU_JAGGED_PCS")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
     // GPU reduction min log-dense (mirror ziren-gpu
     // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
     // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 23).  The device dense
@@ -824,7 +821,10 @@ where
     } else {
         (prospective_total.next_power_of_two()).trailing_zeros() as usize
     };
-    let handle_path_guaranteed = jagged_on && prospective_log_dense >= gpu_min_log_dense;
+    // Device-vs-host is chosen statically by prover TYPE (the reduction hook is
+    // registered only on the GPU prover); the device dense handle is registered
+    // only at/above the GPU reduction min log-dense, so mirror that size guard here.
+    let handle_path_guaranteed = prospective_log_dense >= gpu_min_log_dense;
     let skip_device_d2h = handle_path_guaranteed;
     // SITE-1 trace-unification: OWNED side-storage for the RARE eager-D2H
     // device-chip materialize (the non-happy device path: handle NOT
