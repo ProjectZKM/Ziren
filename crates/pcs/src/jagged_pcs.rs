@@ -281,14 +281,15 @@ pub fn chips_to_mles_owned(
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
 ///
-/// GPU commit dispatch — when `ZIREN_GPU_BASEFOLD=1` is
-/// set AND the prover statically provided `gpu_basefold_commit`
-/// (`Some(GpuBasefoldCommitFn)`), the commit dispatches
-/// through `FriCudaProver::encode_and_commit` + `CudaTcsProver` on
-/// device.  Output `(commit, prover_data)` must be byte-identical to
+/// GPU commit dispatch — selected by prover TYPE: when the prover
+/// statically provided `gpu_basefold_commit`
+/// (`Some(GpuBasefoldCommitFn)`, the GPU prover only), the commit
+/// dispatches through `FriCudaProver::encode_and_commit` + `CudaTcsProver`
+/// on device.  Output `(commit, prover_data)` must be byte-identical to
 /// the host path (the device hook host-side observes the same digest
-/// into the same `JaggedChallenger`).  Falls through to the host
-/// implementation on any of: env unset, `gpu_basefold_commit == None`,
+/// into the same `JaggedChallenger`).  There is no env gate (SP1-parity —
+/// the hook `Some`/`None` is the sole selector).  Falls through to the host
+/// implementation on: `gpu_basefold_commit == None` (CPU prover), or
 /// hook returns `Err` (shape unsupported / device error).
 pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
@@ -299,26 +300,24 @@ pub fn commit_jagged_pcs(
     // pre-#118 unregistered-hook path.
     gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (JaggedCommit, JaggedProverData) {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = gpu_basefold_commit {
-            // The hook signature returns `Result` so the device side
-            // can tunnel its host-input back to us on shape-unsupported
-            // / runtime errors (we then run the host path with the
-            // returned input — no double-allocation, no challenger
-            // double-observe).
-            // Transcript safety: snapshot + restore around the
-            // fallible device hook so an Err after any challenger
-            // interaction cannot double-advance the transcript (see
-            // the open_jagged_pcs twin below for the full rationale).
-            let challenger_snapshot = challenger.clone();
-            match hook(chip_traces, challenger) {
-                Ok(out) => {
-                    return out;
-                }
-                Err(returned_traces) => {
-                    *challenger = challenger_snapshot;
-                    return commit_jagged_pcs_host(returned_traces, challenger);
-                }
+    if let Some(hook) = gpu_basefold_commit {
+        // The hook signature returns `Result` so the device side
+        // can tunnel its host-input back to us on shape-unsupported
+        // / runtime errors (we then run the host path with the
+        // returned input — no double-allocation, no challenger
+        // double-observe).
+        // Transcript safety: snapshot + restore around the
+        // fallible device hook so an Err after any challenger
+        // interaction cannot double-advance the transcript (see
+        // the open_jagged_pcs twin below for the full rationale).
+        let challenger_snapshot = challenger.clone();
+        match hook(chip_traces, challenger) {
+            Ok(out) => {
+                return out;
+            }
+            Err(returned_traces) => {
+                *challenger = challenger_snapshot;
+                return commit_jagged_pcs_host(returned_traces, challenger);
             }
         }
     }
@@ -378,12 +377,12 @@ where
 
 /// GPU-dispatched no-observe variant — the single-main-commit precompute
 /// uses this so the main-trace BaseFold commit runs on the device when
-/// `ZIREN_GPU_BASEFOLD=1` AND the hook is registered.  The hook's
+/// the hook is registered (GPU prover only; no env gate).  The hook's
 /// internal `challenger.observe` is absorbed by a throwaway challenger
 /// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
 /// observe is the real transcript binding).  Falls through to
-/// [`commit_jagged_pcs_host_no_observe`] when the env is
-/// unset, the hook is unregistered, or the hook returns `Err`.
+/// [`commit_jagged_pcs_host_no_observe`] when the hook is
+/// unregistered, or the hook returns `Err`.
 pub fn commit_jagged_pcs_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     // #118: the device BaseFold commit fn, provided statically by the
@@ -391,17 +390,15 @@ pub fn commit_jagged_pcs_no_observe(
     // = host commit, byte-identical to the pre-#118 unregistered-hook path.
     gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (JaggedCommit, JaggedProverData) {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = gpu_basefold_commit {
-            let mut throwaway: JaggedChallenger =
-                JaggedChallenger::new(zkm_primitives::poseidon2_init());
-            match hook(chip_traces, &mut throwaway) {
-                Ok(out) => {
-                    return out;
-                }
-                Err(returned_traces) => {
-                    return commit_jagged_pcs_host_no_observe(returned_traces);
-                }
+    if let Some(hook) = gpu_basefold_commit {
+        let mut throwaway: JaggedChallenger =
+            JaggedChallenger::new(zkm_primitives::poseidon2_init());
+        match hook(chip_traces, &mut throwaway) {
+            Ok(out) => {
+                return out;
+            }
+            Err(returned_traces) => {
+                return commit_jagged_pcs_host_no_observe(returned_traces);
             }
         }
     }
@@ -1231,16 +1228,18 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// stacked-basefold proof.  `eval_point.len()` must equal
 /// `log_stacking_height + log(num_stripes_padded)`.
 ///
-/// GPU open dispatch — when
-/// `ZIREN_GPU_BASEFOLD=1` is set AND the prover statically provided
-/// `gpu_basefold_open` (`Some(GpuBasefoldOpenFn)`), the open
-/// dispatches through `FriCudaProver::prove` on device.  Output proof
+/// GPU open dispatch — selected by prover TYPE: when the prover
+/// statically provided `gpu_basefold_open` (`Some(GpuBasefoldOpenFn)`,
+/// the GPU prover only), the open dispatches through
+/// `FriCudaProver::prove` on device.  Output proof
 /// must be byte-identical to the host path (the device hook host-side
 /// observes the same digests + univariate messages into the supplied
-/// `JaggedChallenger`).  Falls through to the host implementation on any
-/// of: env unset, `gpu_basefold_open == None`, hook returns `Err` (shape
-/// unsupported / device error — `Err` returns ownership of the
-/// `prover_data` so the host fallback can run without losing it).
+/// `JaggedChallenger`).  There is no env gate (SP1-parity — the hook
+/// `Some`/`None` is the sole selector).  Falls through to the host
+/// implementation on: `gpu_basefold_open == None` (CPU prover), or
+/// hook returns `Err` (shape unsupported / device error — `Err` returns
+/// ownership of the `prover_data` so the host fallback can run without
+/// losing it).
 pub fn open_jagged_pcs(
     prover_data: JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
@@ -1251,36 +1250,32 @@ pub fn open_jagged_pcs(
     // pre-#118 unregistered-hook path.
     gpu_basefold_open: Option<GpuBasefoldOpenFn>,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
-    if std::env::var("ZIREN_GPU_BASEFOLD").map(|v| v != "0" && !v.eq_ignore_ascii_case("false")).unwrap_or(true) {
-        if let Some(hook) = gpu_basefold_open {
-            // Transcript safety: the device open ADVANCES the
-            // challenger (pre-prove grind, per-round digest observes,
-            // FRI PoW, query sampling) before it can fail —
-            // `FriCudaProver::prove` allocates on device mid-flight,
-            // so an `Err` here is pressure-dependent.  Snapshot +
-            // restore so the host fallback re-runs on the SAME
-            // transcript state; without the restore the transcript is
-            // double-advanced and the emitted proof is silently
-            // INVALID (caught only by the in-circuit verifier).
-            let challenger_snapshot = challenger.clone();
-            match hook(prover_data, eval_point, challenger) {
-                Ok(proof) => {
-                    return proof;
-                }
-                Err((returned_prover_data, returned_eval_point)) => {
-                    *challenger = challenger_snapshot;
-                    return open_jagged_pcs_host(
-                        returned_prover_data,
-                        returned_eval_point,
-                        challenger,
-                    );
-                }
+    if let Some(hook) = gpu_basefold_open {
+        // Transcript safety: the device open ADVANCES the
+        // challenger (pre-prove grind, per-round digest observes,
+        // FRI PoW, query sampling) before it can fail —
+        // `FriCudaProver::prove` allocates on device mid-flight,
+        // so an `Err` here is pressure-dependent.  Snapshot +
+        // restore so the host fallback re-runs on the SAME
+        // transcript state; without the restore the transcript is
+        // double-advanced and the emitted proof is silently
+        // INVALID (caught only by the in-circuit verifier).
+        let challenger_snapshot = challenger.clone();
+        match hook(prover_data, eval_point, challenger) {
+            Ok(proof) => {
+                return proof;
+            }
+            Err((returned_prover_data, returned_eval_point)) => {
+                *challenger = challenger_snapshot;
+                return open_jagged_pcs_host(
+                    returned_prover_data,
+                    returned_eval_point,
+                    challenger,
+                );
             }
         }
-        // No hook registered: silently fall through (the COMMIT site
-        // already emits its own one-shot WARN_ONCE for the same
-        // env-set + no-hook condition; we don't need to double up).
     }
+    // No hook registered (CPU prover): silently fall through to host.
     open_jagged_pcs_host(prover_data, eval_point, challenger)
 }
 
@@ -2169,30 +2164,24 @@ pub mod jagged {
             )];
 
             // Device BN254 wrap Merkle commit.  When
-            // the prover statically provided `gpu_bn254_commit` AND `MT` is the
-            // BN254 OuterValMmcs AND `ZIREN_GPU_BASEFOLD_BN254_COMMIT != 0`, the
+            // the prover statically provided `gpu_bn254_commit` (GPU prover
+            // only) AND `MT` is the BN254 OuterValMmcs, the
             // Merkle leaf-hash + compress-layers run on the device (the
             // host DFT encode is still consumed by the open path).  Output
             // is byte-identical to the host commit (transcript-neutral).
-            // Any miss (wrong TypeId / CUDA error / env off) falls through
-            // to the unchanged host commit below.
-            let bn254_device = if std::env::var("ZIREN_GPU_BASEFOLD_BN254_COMMIT")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true)
-            {
-                if let Some(hook) = gpu_bn254_commit {
-                    hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
-                        boxed
-                            .downcast::<(
-                                crate::jagged_pcs::JaggedCommitGeneric<MT>,
-                                crate::jagged_pcs::JaggedProverDataGeneric<MT>,
-                            )>()
-                            .ok()
-                            .map(|b| *b)
-                    })
-                } else {
-                    None
-                }
+            // Selected purely by the hook `Some`/`None` (no env gate,
+            // SP1-parity).  Any miss (wrong TypeId / CUDA error / hook
+            // `None`) falls through to the unchanged host commit below.
+            let bn254_device = if let Some(hook) = gpu_bn254_commit {
+                hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
+                    boxed
+                        .downcast::<(
+                            crate::jagged_pcs::JaggedCommitGeneric<MT>,
+                            crate::jagged_pcs::JaggedProverDataGeneric<MT>,
+                        )>()
+                        .ok()
+                        .map(|b| *b)
+                })
             } else {
                 None
             };
