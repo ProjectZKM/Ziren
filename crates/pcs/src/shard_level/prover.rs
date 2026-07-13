@@ -42,7 +42,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
 /// threads it into the jagged-PCS opening.  The matrices are moved into a named-tuple
 /// Vec for the commit and moved back out — no trace data is copied.
-fn maybe_auto_precompute_basefold<'t, SC, A, D>(
+pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
     // The jagged trusted-evaluations open + commit producer — the COMMIT
     // static-dispatch seam (Phase-1 collapse of the former
     // `gpu_basefold_commit` + `gpu_jagged_precompute_commit` `Option<fn>` pair).
