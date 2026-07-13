@@ -822,124 +822,29 @@ where
     // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
     // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 23).  The device dense
     // handle is registered only at/above this size.
-    let gpu_min_log_dense = std::env::var("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(23);
-    // Prospective dense size from the FULL (provider-resolved) per-chip
-    // dims — identical to what the dense commit hook will compute.
-    let prospective_total: usize = chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            // Width-0 (num_polynomials()==0) ⟺ the raw trace was width-0;
-            // its real dims live in the provider.  Host chips read the shared
-            // MLE's real width / row count (== the raw `t.width` /
-            // `t.values.len()/t.width`).
-            let (w, h) = if pm.num_polynomials() == 0 {
-                match (
-                    _device_traces.and_then(|p| p.chip_width(&chip.name())),
-                    _device_traces.and_then(|p| p.chip_height(&chip.name())),
-                ) {
-                    (Some(w), Some(h)) => (w, h),
-                    _ => (0, 0),
-                }
-            } else {
-                (pm.num_polynomials(), pm.num_real_entries())
-            };
-            w * h
-        })
-        .sum();
-    let prospective_log_dense = if prospective_total == 0 {
-        0
-    } else {
-        (prospective_total.next_power_of_two()).trailing_zeros() as usize
-    };
-    // Device-vs-host is chosen statically by prover TYPE (the reduction hook is
-    // registered only on the GPU prover); the device dense handle is registered
-    // only at/above the GPU reduction min log-dense, so mirror that size guard here.
-    let handle_path_guaranteed = prospective_log_dense >= gpu_min_log_dense;
-    let skip_device_d2h = handle_path_guaranteed;
-    // SITE-1 trace-unification: OWNED side-storage for the RARE eager-D2H
-    // device-chip materialize (the non-happy device path: handle NOT
-    // guaranteed, or kill-switch).  Host chips + happy/unexercised device
-    // chips leave their slot `None`; the borrowed `commit_traces` view build
-    // below borrows this Vec for the populated slots, so the eager cells
-    // outlive the views.  On the host CpuProver path there is no provider, so
-    // every slot is `None` (a cheap `Vec<None>`).
-    let eager_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> = chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            if pm.num_polynomials() != 0 {
-                return None;
-            }
-            let p = _device_traces?;
-            if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
-                // Device-resident chip, handle path guaranteed: skip the D2H,
-                // keep it empty (the device commit hook packs it D2D).
-                return None;
-            }
-            // Handle path NOT guaranteed (or kill-switch): eager D2H here,
-            // PRE-DRAIN, so the host reduction fallback has correct cells.
-            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
-                &chip.name(),
-                p,
-            )
-            .map(|(vals, w)| RowMajorMatrix::new(vals, w))
-        })
-        .collect();
-    // SITE-1: the per-chip commit trace set as BORROWED row-major views over
-    // the shared `Arc<Mle>` store (`shared_trace_mles`) — this replaces the
-    // former per-chip `tr.values.to_vec()` deep copy (copy-SITE 1).  Host chips
-    // borrow the MLE's real (unpadded) cells directly; the rare eager
-    // device-chip materialize borrows the owned `eager_device_remat` side-store;
-    // happy/unexercised device chips carry an empty width-0 view (byte-identical
-    // to the former empty `main_traces[i].clone()`).  The Val↔InnerVal relabel
-    // is deferred to a zero-copy slice reinterpret in the commit/open below.
-    let commit_traces: Vec<RowMajorMatrixView<'_, Val<SC>>> = chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .zip(eager_device_remat.iter())
-        .map(|((_chip, pm), remat)| {
-            if pm.num_polynomials() == 0 {
-                // Device-resident / unexercised chip.
-                if let Some(m) = remat {
-                    return m.as_view();
-                }
-                return RowMajorMatrixView::new(&[], 0);
-            }
-            // Host chip: BORROW the shared MLE's real (unpadded) row-major
-            // cells (zero-copy) — was the SITE-1 deep copy.
-            let tr = pm.real_trace_ref().expect("num_polynomials()>0 => inner Some");
-            RowMajorMatrixView::new(tr.values, tr.width)
-        })
-        .collect();
-    // Commit-traces D2H skip: capture the cumulative-sum TAILS
-    // (last 14 row-major values) for device-resident chips via a
-    // ~56-byte provider gather, EARLY — before the zerocheck prepare's
-    // release_by_name (drain-on-lookup) can drop the provider entry.
-    // Host-trace chips stay `None` (the assembly step
-    // reads their host cells as before); `None` for a device chip
-    // falls back to its materialized commit trace.  Once step-3
-    // y_per_chip is device-served too, this gather replaces the
-    // full-trace materialize as the cumsum source entirely.
-    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            // Host-trace chips (num_polynomials()!=0) stay `None`.
-            if pm.num_polynomials() != 0 {
-                return None;
-            }
-            let p = _device_traces?;
-            crate::shard_level::logup_gkr_prover::chip_main_tail_via_provider::<Val<SC>>(
-                &MachineAir::<Val<SC>>::name(*chip),
-                14,
-                p,
-            )
-        })
-        .collect();
+    // C0 extraction: prospective-dense D2H-skip decision + the eager
+    // device-chip remat side-store.  Lifted verbatim into `zkm-pcs` pub
+    // helpers so the device-native drivers reuse the SAME non-device
+    // commit-trace plumbing.  Pure data — no transcript observe.
+    let skip_device_d2h =
+        compute_skip_device_d2h::<SC, A>(chips, shared_trace_mles, _device_traces);
+    let eager_device_remat = build_eager_device_remat::<SC, A>(
+        chips,
+        shared_trace_mles,
+        _device_traces,
+        skip_device_d2h,
+    );
+    // C0 extraction: the per-chip commit-trace set as BORROWED row-major
+    // views over the shared `Arc<Mle>` store + the eager remat side-store
+    // (retains the SITE-1 zero-copy).  The returned views borrow the
+    // driver-owned `eager_device_remat` + `shared_trace_mles`, so they
+    // outlive as long as those inputs.
+    let commit_traces =
+        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &eager_device_remat);
+    // C0 extraction: early cumulative-sum TAIL capture (pre-drain) for
+    // device-resident chips.
+    let chip_cum_tails =
+        capture_chip_cum_tails::<SC, A>(chips, shared_trace_mles, _device_traces);
     // HEIGHT-AGNOSTIC RECURSION: the PRESENT chips' commit traces stay at their
     // NATURAL raw height (no band-pad), so the host packing offsets == the raw
     // degree heights == the in-circuit RAW col_prefix_sums reconstruction.  The
@@ -995,49 +900,17 @@ where
     let _t_phase1 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_transcript_prologue").entered();
-        for &pv in public_values.iter() {
-            challenger.observe(pv);
-        }
-        for &c in main_commitment.iter() {
-            challenger.observe(c);
-        }
-        let num_chips = Val::<SC>::from_u64(chips.len() as u64);
-        challenger.observe(num_chips);
-        for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-            // Per-chip log-height observe. Source matches
-            // the `chip_log_heights` BTreeMap populated below.
-            //
-            // Device residency: an empty host trace
-            // (num_polynomials()==0 ⟺ raw width==0) means the chip's real
-            // trace lives device-side in the per-shard provider. Resolve the
-            // REAL height there so the observed transcript value is identical
-            // to the host-trace path (host parity); fall back to the legacy
-            // h=1/log_h=0 for genuinely unexercised chips with no provider
-            // entry.  A host chip's `num_real_entries()` == the raw
-            // `trace.height()`.
-            let h = if pm.num_polynomials() == 0 {
-                _device_traces
-                    .and_then(|p| p.chip_height(&chip.name()))
-                    .unwrap_or(0)
-                    .max(1)
-            } else {
-                pm.num_real_entries().max(1)
-            };
-            let log_h = if h.is_power_of_two() {
-                h.trailing_zeros() as u64
-            } else {
-                (usize::BITS - h.leading_zeros()) as u64
-            };
-            challenger.observe(Val::<SC>::from_u64(log_h));
-
-            // Name length + name bytes (unchanged).
-            let name_bytes = chip.name();
-            let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
-            challenger.observe(len_felt);
-            for byte in name_bytes.bytes() {
-                challenger.observe(Val::<SC>::from_u64(byte as u64));
-            }
-        }
+        // C0 extraction: the Stage-1 transcript prologue observes are lifted
+        // VERBATIM into a `zkm-pcs` pub helper so the device-native drivers
+        // reproduce the EXACT Fiat-Shamir prologue (order unchanged).
+        observe_transcript_prologue::<SC, A>(
+            challenger,
+            &public_values,
+            &main_commitment,
+            chips,
+            shared_trace_mles,
+            _device_traces,
+        );
     }
     tracing::info!(
         elapsed_ms = _t_phase1.elapsed().as_millis() as u64,
@@ -1125,23 +998,14 @@ where
     let _t_phase35 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_bridge_3_4").entered();
-        use p3_field::BasedVectorSpace;
-        let num_chips_felt = Val::<SC>::from_u64(chips.len() as u64);
-        challenger.observe(num_chips_felt);
-        for (_name, opening) in logup_gkr_proof.logup_evaluations.chip_openings.iter() {
-            if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
-                for c in prep.iter() {
-                    for basis in c.as_basis_coefficients_slice() {
-                        challenger.observe(*basis);
-                    }
-                }
-            }
-            for c in opening.main_trace_evaluations.iter() {
-                for basis in c.as_basis_coefficients_slice() {
-                    challenger.observe(*basis);
-                }
-            }
-        }
+        // C0 extraction: the zerocheck→jagged bridge observes are lifted
+        // VERBATIM into a `zkm-pcs` pub helper (num_chips felt, then per-chip
+        // prep-then-main basis coefficients in NAME order — order unchanged).
+        observe_zerocheck_to_jagged_bridge::<SC>(
+            challenger,
+            chips.len(),
+            &logup_gkr_proof.logup_evaluations,
+        );
     }
     tracing::info!(
         elapsed_ms = _t_phase35.elapsed().as_millis() as u64,
@@ -1165,135 +1029,18 @@ where
     // when any chip's residual is missing or shape-mismatched, or when a
     // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
     // natural-row conventions diverge.
-    let residual_y: Option<Vec<Vec<Challenge<SC>>>> = {
-        // HEIGHT-AGNOSTIC RECURSION (LOW-PLACEMENT commit).
-        //
-        // The band-cap path commits at the per-chip-set CLUSTER BAND heights
-        // (so the recursion VK is keyed by the chip-SET), but the LOW-PLACEMENT
-        // materialize (`materialize_dense_jagged`, keyed by the raw-log map set
-        // in the band-pad loop above) places each chip's data in the LOW rows
-        // of its band-length slot, bit-reversed over the RAW log height, with
-        // the high rows zero.  By construction the reduction's per-chip column
-        // value `band_y` then EQUALS the raw-height zerocheck residual `raw_y`
-        // EXACTLY (proven: `stage5_gate_lowplace_band_equals_raw`):
-        //   band_y = Σ_{row} eq_c[row]·dense[off+row]
-        //          = Σ_{r<2^raw} eq_c[bitrev_raw(r)... in low rows]·trace[r] = raw_y
-        // (the high zero rows contribute nothing).  So the fast raw residual
-        // (`trace_at_z`) IS reduction-consistent — the round-0 identity
-        // `p0+p1 == Σ z_col·y` holds — and we DO NOT decline it under a
-        // band-cap.  No scalar embed_factor can reconcile
-        // the OLD band layout (bitrev over log_band permutes the data); the
-        // low-placement layout removes the mismatch at the source, so the
-        // recursion verifier needs no embed_factor at all.
-        //
-        // Kill-switch unchanged: ZIREN_ZC_RESIDUAL_Y=0 → legacy host recompute
-        // (which, with low-placement materialize, also yields raw_y).
-        // ── rev(zeta) convention gate ──────────
-        // Under the rev(zeta) convention the zerocheck residual (`trace_at_z`)
-        // is in a DIFFERENT orientation than the legacy bitrev opening, so it
-        // must NOT be reused as the jagged `y_per_chip`; force a fresh recompute
-        // (the residual fast path is a legacy-convention-only optimization).
-        // Shard-uniform signal the zerocheck uses (see
-        // zerocheck_prover.rs).  NOTE: even fresh recompute does not reconcile
-        // the FIX-off band-cap LOW-PLACEMENT commit under rev (documented
-        // there); the legacy fast path + FIX-off baseline are preserved.
-        // The residual fast-path decline is gated on `full_openings_ok` (below).
-        // Under the CORE rev(zeta) orientation the residual is a DIFFERENT
-        // orientation than the legacy bitrev opening; the fresh jagged step-3
-        // recompute (`prove_jagged_basefold_inner`, rev-gated off the committed
-        // `PrecomputedJaggedCommit.rev`) produces the natural column claim.  The
-        // per-shard orientation itself is no longer consulted HERE (the former
-        // `current_use_rev()` carrier was already `_`-unused — the actual gate is
-        // `full_openings_ok` + the env kill-switch), so it is dropped.
-        let full_openings_ok = !logup_gkr_proof.logup_evaluations.chip_openings.is_empty()
-            && logup_gkr_proof
-                .logup_evaluations
-                .chip_openings
-                .values()
-                .all(|ce| ce.main_trace_evaluations_full.is_some());
-        // Residual fast-path is unconditional (SP1-parity; was the
-        // ZIREN_ZC_RESIDUAL_Y default-on kill-switch).  Declines whole-shard
-        // (legacy fallback, identical bytes) only when the full openings are
-        // unavailable.
-        if !full_openings_ok {
-            None
-        } else {
-            let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
-            let mut ok = true;
-            for ((chip, ctrace), ptrace) in chips
-                .iter()
-                .zip(commit_traces.iter())
-                .zip(preprocessed_traces.iter())
-            {
-                let name = MachineAir::<Val<SC>>::name(*chip);
-                // A device-resident chip now carries an EMPTY commit
-                // trace (its full cells were never D2H'd).  Resolve its REAL
-                // dims so the residual openings still cover it: height from
-                // the provider, width from the residual itself
-                // (evals.len() == prep_width + main_width).  A genuinely
-                // unexercised chip (no provider entry) stays empty.
-                let (w, h) = if ctrace.width == 0 {
-                    let dev_h = _device_traces
-                        .and_then(|p| p.chip_height(&name))
-                        .unwrap_or(0);
-                    let dev_w = trace_at_z
-                        .get(&name)
-                        .map(|evals| evals.len().saturating_sub(ptrace.width))
-                        .unwrap_or(0);
-                    (dev_w, dev_h)
-                } else {
-                    let w = ctrace.width;
-                    (w, ctrace.values.len() / w)
-                };
-                // #P2S0 (band-cap retirement Phase 2): mirror the `y_per_chip`
-                // guard in jagged_pcs.rs.  A genuine HEIGHT-0 (0-row) but
-                // FULL-WIDTH missing chip must still emit ONE zero column claim
-                // PER COLUMN (the verifier's `verify_jagged_reduction` k-walk
-                // advances `k` through EVERY committed column, incl. the 0-row
-                // chip's `w` empty columns; an empty Vec here would misalign the
-                // `z_col_lagrange[k]` index for every later chip => reject).  An
-                // empty column's row-MLE claim is 0 (Σ over 0 rows), so emit
-                // `w` zeros.  Only a truly width-0 chip (no columns) skips.
-                // NOTE: on the CORE rev(zeta) path (the only path that injects
-                // 0-row chips) the jagged step-3 recompute produces the natural
-                // column claim off the committed `PrecomputedJaggedCommit.rev`,
-                // so this branch is inactive there; the guard keeps it CORRECT
-                // should the non-rev / device path ever take it.
-                if w == 0 {
-                    out.push(Vec::new());
-                    continue;
-                }
-                if h == 0 {
-                    out.push(vec![Challenge::<SC>::ZERO; w]);
-                    continue;
-                }
-                if !h.is_power_of_two() {
-                    ok = false;
-                    break;
-                }
-                match trace_at_z.get(&name) {
-                    // Strict shape check: prep-then-main, main slice is the
-                    // last `w` values (zerocheck num_main_cols == trace width).
-                    Some(evals) if evals.len() == ptrace.width + w => {
-                        out.push(evals[ptrace.width..].to_vec());
-                    }
-                    _ => {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-            if ok {
-                Some(out)
-            } else {
-                tracing::warn!(
-                    "#33 residual_y DECLINED (missing/shape-mismatched residual or \
-                     non-pow2 height) — legacy jagged step-3 recompute"
-                );
-                None
-            }
-        }
-    };
+    // C0 extraction: the residual-y reuse decision is lifted VERBATIM into a
+    // `zkm-pcs` pub helper.  It is transcript-silent (step 3 is silent), so
+    // reusing the zerocheck residual as `y_per_chip` — or declining whole-shard
+    // to the legacy recompute — produces identical proof bytes either way.
+    let residual_y: Option<Vec<Vec<Challenge<SC>>>> = compute_residual_y_openings::<SC, A>(
+        chips,
+        &commit_traces,
+        preprocessed_traces,
+        &trace_at_z,
+        &logup_gkr_proof.logup_evaluations,
+        _device_traces,
+    );
 
     // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
     // log(chip_height) coords of the LogUp-GKR final eval_point.
@@ -1330,30 +1077,438 @@ where
     let _t_phase5 = std::time::Instant::now();
     let _phase5_span = tracing::info_span!("phase_assembly").entered();
 
+    // C0 extraction: per-chip log-height (u8) + REAL-height (usize) maps,
+    // device-residency aware.  The log-height map is stored on the proof; the
+    // REAL-height map feeds the `opened_values` degree-bit decomposition below.
+    // MUST agree with the Phase-1 prologue observe + the verifier.
+    let (chip_log_heights, chip_heights) =
+        build_chip_log_heights::<SC, A>(chips, shared_trace_mles, _device_traces);
+
+    // populate `opened_values` with the per-chip
+    // trace@z openings from the zerocheck reduction (the values the
+    // recursion zerocheck verifier batches/constrains at the reduced
+    // point z and asserts equal `point_and_eval.1`, recursion
+    // zerocheck.rs:573).  `trace_at_z` is keyed by chip name and is
+    // prep-then-main per chip (SP1 ordering, shard.rs:622); split at the
+    // chip's `preprocessed_width` to recover `preprocessed.local` /
+    // `main.local`.  Chips are emitted in NAME order to match the
+    // recursion `opened_values.chips` BTreeMap key-order iteration and
+    // SP1's `shard_open_values` BTreeMap.
+    // C0 extraction: per-chip trace@z openings assembled in NAME order, with
+    // the REAL-height big-endian degree bits in the `quotient` slot.
+    let opened_values = build_opened_values::<SC, A>(
+        chips,
+        &trace_at_z,
+        &chip_log_heights,
+        &chip_heights,
+        max_log_row_count,
+    );
+
+    // C0 extraction: per-chip (local, global) cumulative sums.  `local` is
+    // ZERO (the basefold path doesn't materialize the permutation trace);
+    // `global` reads the RAW per-chip cells (device chips use the early TAIL).
+    let chip_cumulative_sums =
+        build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
+
+    // C0 extraction: the final `BasefoldShardProof` construction — including
+    // the witnessed row/padding-column counts + the SP1-faithful raw BaseFold
+    // root (`jagged_original_commitment`), both derived from `evaluation_proof`
+    // — is lifted VERBATIM into a `zkm-pcs` pub helper.
+    let proof = assemble_basefold_shard_proof::<SC>(
+        public_values,
+        main_commitment,
+        logup_gkr_proof,
+        zerocheck_proof,
+        opened_values,
+        chip_log_heights,
+        chip_cumulative_sums,
+        evaluation_proof,
+        orientation,
+    );
+    drop(_phase5_span);
+    tracing::info!(
+        elapsed_ms = _t_phase5.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "assembly",
+        "shard phase done"
+    );
+    proof
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// C0 (Option-C Phase 0): shared NON-DEVICE shard-driver orchestration lifted
+// out of `prove_shard_to_basefold_with_loader_dispatch` into `pub` helpers so
+// the upcoming ziren-gpu device-native drivers (C1 zerocheck, C2 logup) reuse
+// them instead of duplicating — bounding the driver-divergence surface BEFORE
+// any split.  Each helper is a VERBATIM lift of an inline block; the operation
+// order + observe/sample sequence are unchanged (pure extraction → the driver
+// emits byte-identical proofs).  None of these introduce an env gate.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// C0 block 1 — Stage-1 transcript prologue.  Observes, in SP1 order:
+/// `public_values → main_commitment → num_chips → per-chip {height_felt,
+/// name_len, name_bytes}`.  These are the ONLY challenger writes of the
+/// prologue; the device-native drivers call this to reproduce the exact
+/// Fiat-Shamir binding of the shard's chip-set identity + per-chip row count.
+pub fn observe_transcript_prologue<SC, A>(
+    challenger: &mut SC::Challenger,
+    public_values: &[Val<SC>],
+    main_commitment: &[Val<SC>; 8],
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+) where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    for &pv in public_values.iter() {
+        challenger.observe(pv);
+    }
+    for &c in main_commitment.iter() {
+        challenger.observe(c);
+    }
+    let num_chips = Val::<SC>::from_u64(chips.len() as u64);
+    challenger.observe(num_chips);
+    for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
+        // Per-chip log-height observe (device-residency aware): resolve an
+        // empty host trace's REAL height from the per-shard provider so the
+        // observed value matches the host-trace path; fall back to h=1/log_h=0
+        // for genuinely unexercised chips.  Source matches the
+        // `chip_log_heights` map + the verifier re-observe.
+        let h = if pm.num_polynomials() == 0 {
+            device_traces
+                .and_then(|p| p.chip_height(&chip.name()))
+                .unwrap_or(0)
+                .max(1)
+        } else {
+            pm.num_real_entries().max(1)
+        };
+        let log_h = if h.is_power_of_two() {
+            h.trailing_zeros() as u64
+        } else {
+            (usize::BITS - h.leading_zeros()) as u64
+        };
+        challenger.observe(Val::<SC>::from_u64(log_h));
+
+        // Name length + name bytes.
+        let name_bytes = chip.name();
+        let len_felt = Val::<SC>::from_u64(name_bytes.len() as u64);
+        challenger.observe(len_felt);
+        for byte in name_bytes.bytes() {
+            challenger.observe(Val::<SC>::from_u64(byte as u64));
+        }
+    }
+}
+
+/// C0 block 3 — zerocheck → jagged-PCS bridge observe.  Observes the
+/// `num_chips` felt, then per-chip preprocessed-then-main basis coefficients
+/// in chip-NAME order (`chip_openings` is a `BTreeMap`, so iteration is name
+/// order) — keeping the challenger in sync with the verifier's step (9).
+pub fn observe_zerocheck_to_jagged_bridge<SC>(
+    challenger: &mut SC::Challenger,
+    num_chips: usize,
+    logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
+) where
+    SC: StarkGenericConfig,
+    Challenge<SC>: BasedVectorSpace<Val<SC>>,
+{
+    use p3_field::BasedVectorSpace;
+    let num_chips_felt = Val::<SC>::from_u64(num_chips as u64);
+    challenger.observe(num_chips_felt);
+    for (_name, opening) in logup_evaluations.chip_openings.iter() {
+        if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
+            for c in prep.iter() {
+                for basis in c.as_basis_coefficients_slice() {
+                    challenger.observe(*basis);
+                }
+            }
+        }
+        for c in opening.main_trace_evaluations.iter() {
+            for basis in c.as_basis_coefficients_slice() {
+                challenger.observe(*basis);
+            }
+        }
+    }
+}
+
+/// C0 block 2 (part 1) — the prospective-dense D2H-skip decision.  Returns
+/// `true` when the device dense-handle happy path is GUARANTEED (prospective
+/// `log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, default 23), in which
+/// case device-resident chips skip the eager D2H (the device commit hook
+/// packs them D2D).  Pure computation — no transcript.
+pub fn compute_skip_device_d2h<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+) -> bool
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    // GPU reduction min log-dense (mirror ziren-gpu
+    // jagged_reduction_dispatch::min_log_dense_size_for_gpu).  The device dense
+    // handle is registered only at/above this size.
+    let gpu_min_log_dense = std::env::var("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(23);
+    // Prospective dense size from the FULL (provider-resolved) per-chip
+    // dims — identical to what the dense commit hook will compute.
+    let prospective_total: usize = chips
+        .iter()
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            // Width-0 (num_polynomials()==0) ⟺ the raw trace was width-0;
+            // its real dims live in the provider.  Host chips read the shared
+            // MLE's real width / row count.
+            let (w, h) = if pm.num_polynomials() == 0 {
+                match (
+                    device_traces.and_then(|p| p.chip_width(&chip.name())),
+                    device_traces.and_then(|p| p.chip_height(&chip.name())),
+                ) {
+                    (Some(w), Some(h)) => (w, h),
+                    _ => (0, 0),
+                }
+            } else {
+                (pm.num_polynomials(), pm.num_real_entries())
+            };
+            w * h
+        })
+        .sum();
+    let prospective_log_dense = if prospective_total == 0 {
+        0
+    } else {
+        (prospective_total.next_power_of_two()).trailing_zeros() as usize
+    };
+    // Device-vs-host is chosen statically by prover TYPE; the device dense
+    // handle is registered only at/above the GPU reduction min log-dense, so
+    // mirror that size guard here.
+    prospective_log_dense >= gpu_min_log_dense
+}
+
+/// C0 block 2 (part 2) — the OWNED side-storage for the RARE eager-D2H
+/// device-chip materialize (the non-happy device path: `skip_device_d2h ==
+/// false`, or no provider height).  Host chips + happy/unexercised device
+/// chips leave their slot `None`.  The `build_commit_trace_views` output
+/// borrows this Vec for its populated slots, so the eager cells must outlive
+/// those views (the driver owns this Vec).
+pub fn build_eager_device_remat<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+    skip_device_d2h: bool,
+) -> Vec<Option<RowMajorMatrix<Val<SC>>>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    chips
+        .iter()
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            if pm.num_polynomials() != 0 {
+                return None;
+            }
+            let p = device_traces?;
+            if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
+                // Device-resident chip, handle path guaranteed: skip the D2H,
+                // keep it empty (the device commit hook packs it D2D).
+                return None;
+            }
+            // Handle path NOT guaranteed: eager D2H here, PRE-DRAIN, so the
+            // host reduction fallback has correct cells.
+            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
+                &chip.name(),
+                p,
+            )
+            .map(|(vals, w)| RowMajorMatrix::new(vals, w))
+        })
+        .collect()
+}
+
+/// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
+/// views over the shared `Arc<Mle>` store + the eager remat side-store
+/// (retains the SITE-1 zero-copy).  Host chips borrow the MLE's real
+/// (unpadded) cells; the rare eager device-chip materialize borrows
+/// `eager_device_remat`; happy/unexercised device chips carry an empty
+/// width-0 view.  The returned views borrow BOTH inputs for `'a`.
+pub fn build_commit_trace_views<'a, SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &'a [crate::multilinear::PaddedMle<Val<SC>>],
+    eager_device_remat: &'a [Option<RowMajorMatrix<Val<SC>>>],
+) -> Vec<RowMajorMatrixView<'a, Val<SC>>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    chips
+        .iter()
+        .zip(shared_trace_mles.iter())
+        .zip(eager_device_remat.iter())
+        .map(|((_chip, pm), remat)| {
+            if pm.num_polynomials() == 0 {
+                // Device-resident / unexercised chip.
+                if let Some(m) = remat {
+                    return m.as_view();
+                }
+                return RowMajorMatrixView::new(&[], 0);
+            }
+            // Host chip: BORROW the shared MLE's real (unpadded) row-major
+            // cells (zero-copy) — was the SITE-1 deep copy.
+            let tr = pm.real_trace_ref().expect("num_polynomials()>0 => inner Some");
+            RowMajorMatrixView::new(tr.values, tr.width)
+        })
+        .collect()
+}
+
+/// C0 block 2 (part 4) — early capture of the cumulative-sum TAILS (last 14
+/// row-major values) for device-resident chips via a ~56-byte provider gather,
+/// BEFORE the zerocheck prepare's drain-on-lookup can drop the provider entry.
+/// Host-trace chips stay `None` (the assembly step reads their host cells).
+pub fn capture_chip_cum_tails<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+) -> Vec<Option<Vec<Val<SC>>>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    chips
+        .iter()
+        .zip(shared_trace_mles.iter())
+        .map(|(chip, pm)| {
+            // Host-trace chips (num_polynomials()!=0) stay `None`.
+            if pm.num_polynomials() != 0 {
+                return None;
+            }
+            let p = device_traces?;
+            crate::shard_level::logup_gkr_prover::chip_main_tail_via_provider::<Val<SC>>(
+                &MachineAir::<Val<SC>>::name(*chip),
+                14,
+                p,
+            )
+        })
+        .collect()
+}
+
+/// C0 block 5 — residual-y reuse.  Reuses the zerocheck reduction residual
+/// (`trace_at_z` main slice) as the jagged step-3 `y_per_chip`, skipping the
+/// host triple-nested recompute.  Step 3 is transcript-silent, so `Some` (fast
+/// path) and `None` (whole-shard decline → legacy recompute) both yield
+/// identical proof bytes.  Declines when the full openings are unavailable, or
+/// any chip's residual is missing / shape-mismatched / non-pow2-height.
+pub fn compute_residual_y_openings<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    commit_traces: &[RowMajorMatrixView<'_, Val<SC>>],
+    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+    logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+) -> Option<Vec<Vec<Challenge<SC>>>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    let full_openings_ok = !logup_evaluations.chip_openings.is_empty()
+        && logup_evaluations
+            .chip_openings
+            .values()
+            .all(|ce| ce.main_trace_evaluations_full.is_some());
+    // Residual fast-path is unconditional (SP1-parity).  Declines whole-shard
+    // (legacy fallback, identical bytes) only when the full openings are
+    // unavailable.
+    if !full_openings_ok {
+        return None;
+    }
+    let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
+    let mut ok = true;
+    for ((chip, ctrace), ptrace) in chips
+        .iter()
+        .zip(commit_traces.iter())
+        .zip(preprocessed_traces.iter())
+    {
+        let name = MachineAir::<Val<SC>>::name(*chip);
+        // A device-resident chip carries an EMPTY commit trace; resolve its
+        // REAL dims so the residual openings still cover it: height from the
+        // provider, width from the residual itself.
+        let (w, h) = if ctrace.width == 0 {
+            let dev_h = device_traces
+                .and_then(|p| p.chip_height(&name))
+                .unwrap_or(0);
+            let dev_w = trace_at_z
+                .get(&name)
+                .map(|evals| evals.len().saturating_sub(ptrace.width))
+                .unwrap_or(0);
+            (dev_w, dev_h)
+        } else {
+            let w = ctrace.width;
+            (w, ctrace.values.len() / w)
+        };
+        // #P2S0: mirror the `y_per_chip` guard in jagged_pcs.rs.  A genuine
+        // HEIGHT-0 but FULL-WIDTH missing chip must still emit ONE zero column
+        // claim PER COLUMN (the verifier k-walk advances through every
+        // committed column); a truly width-0 chip skips.
+        if w == 0 {
+            out.push(Vec::new());
+            continue;
+        }
+        if h == 0 {
+            out.push(vec![Challenge::<SC>::ZERO; w]);
+            continue;
+        }
+        if !h.is_power_of_two() {
+            ok = false;
+            break;
+        }
+        match trace_at_z.get(&name) {
+            // Strict shape check: prep-then-main, main slice is the last `w`
+            // values (zerocheck num_main_cols == trace width).
+            Some(evals) if evals.len() == ptrace.width + w => {
+                out.push(evals[ptrace.width..].to_vec());
+            }
+            _ => {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if ok {
+        Some(out)
+    } else {
+        tracing::warn!(
+            "#33 residual_y DECLINED (missing/shape-mismatched residual or \
+             non-pow2 height) — legacy jagged step-3 recompute"
+        );
+        None
+    }
+}
+
+/// C0 block 6 (part 1) — per-chip log-height (u8, stored on the proof) + REAL
+/// per-chip height (usize, the VirtualGeq threshold feeding the `opened_values`
+/// degree-bit decomposition) maps, device-residency aware.  MUST agree with
+/// the Phase-1 prologue observe + the verifier re-observe.
+pub fn build_chip_log_heights<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    device_traces: Option<&dyn super::DeviceTraceProvider>,
+) -> (
+    std::collections::BTreeMap<String, u8>,
+    std::collections::BTreeMap<String, usize>,
+)
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
     let mut chip_log_heights = std::collections::BTreeMap::new();
-    // the REAL per-chip height (row count, possibly
-    // non-power-of-2) is the VirtualGeq threshold the prover uses
-    // (zerocheck_prover.rs:487 `VirtualGeq::new(main_height,..)`), so the
-    // recursion's `full_geq` (zerocheck.rs:517) degree must be its bit
-    // decomposition — NOT bits of log_h.  Carry it per chip by name.
     let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Device residency: resolve empty host traces' REAL height
-        // from the per-shard device provider (host parity with the
-        // host-trace path). Mirrors the Phase-1 prologue observe above —
-        // both MUST agree with what the verifier re-observes from
-        // `proof.chip_log_heights`.
-        // #P2S0 SPIKE (WIP, band-cap retirement Phase 2, Stage 0): do NOT
-        // clamp the host-trace height to 1.  A canonical-cluster chip this
-        // shard is MISSING is committed as a genuine 0-row matrix (see
-        // `commit_basefold_path`), so its real height is 0 => log_h 0 =>
-        // all-zero degree bits => the host reconstruction excludes it.  The
-        // device branch keeps its `.max(1)` (a device-resident chip with no
-        // provider height still defaults to 1 as before).
-        // A host chip's `num_real_entries()` == the raw `trace.height()`
-        // (num_polynomials()==0 ⟺ raw width==0 → resolve via the provider).
+        // Device residency: resolve empty host traces' REAL height from the
+        // provider (host parity).  A MISSING canonical-cluster chip is a
+        // genuine 0-row matrix (log_h 0 => all-zero degree bits); the device
+        // branch keeps `.max(1)`.
         let h = if pm.num_polynomials() == 0 {
-            _device_traces
+            device_traces
                 .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
                 .unwrap_or(0)
                 .max(1)
@@ -1371,108 +1526,103 @@ where
         chip_log_heights.insert(name.clone(), log_h);
         chip_heights.insert(name, h);
     }
+    (chip_log_heights, chip_heights)
+}
 
-    // populate `opened_values` with the per-chip
-    // trace@z openings from the zerocheck reduction (the values the
-    // recursion zerocheck verifier batches/constrains at the reduced
-    // point z and asserts equal `point_and_eval.1`, recursion
-    // zerocheck.rs:573).  `trace_at_z` is keyed by chip name and is
-    // prep-then-main per chip (SP1 ordering, shard.rs:622); split at the
-    // chip's `preprocessed_width` to recover `preprocessed.local` /
-    // `main.local`.  Chips are emitted in NAME order to match the
-    // recursion `opened_values.chips` BTreeMap key-order iteration and
-    // SP1's `shard_open_values` BTreeMap.
-    let opened_values = {
-        let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
-        name_sorted.sort_by(|a, b| {
-            MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b))
-        });
-        let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> =
-            name_sorted
-                .iter()
-                .map(|chip| {
-                    let name = MachineAir::<Val<SC>>::name(**chip);
-                    let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
-                    let evals: Vec<Challenge<SC>> =
-                        trace_at_z.get(&name).cloned().unwrap_or_default();
-                    let split = prep_width.min(evals.len());
-                    let (prep_local, main_local) = evals.split_at(split);
-                    let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
-                    // big-endian bit decomposition of the
-                    // REAL height (the VirtualGeq threshold) carried via the
-                    // unused `quotient` slot for the recursion `full_geq`
-                    // degree.  bit_len = max_log_row_count + 1 (matches the
-                    // verifier's `proof_point_extended`, zerocheck.rs:497).
-                    let height = *chip_heights.get(&name).unwrap_or(&1);
-                    let bit_len = max_log_row_count + 1;
-                    let degree_bits: Vec<Challenge<SC>> = (0..bit_len)
-                        .map(|i| {
-                            // BIG-ENDIAN (MSB at index 0): SP1
-                            // Point::from_usize is big-endian (point.rs:93)
-                            // and the verifier shape asserts (zerocheck.rs:512)
-                            // require degree[0]=MSB.  z_extended front-inserts
-                            // the extra high coord (zerocheck.rs:504).
-                            let shift = bit_len - 1 - i;
-                            let bit = if shift < usize::BITS as usize {
-                                (height >> shift) & 1
-                            } else {
-                                0
-                            };
-                            if bit == 1 {
-                                Challenge::<SC>::ONE
-                            } else {
-                                Challenge::<SC>::ZERO
-                            }
-                        })
-                        .collect();
-                    crate::types::ChipOpenedValues {
-                        preprocessed: crate::types::AirOpenedValues {
-                            local: prep_local.to_vec(),
-                            next: Vec::new(),
-                        },
-                        main: crate::types::AirOpenedValues {
-                            local: main_local.to_vec(),
-                            next: Vec::new(),
-                        },
-                        permutation: crate::types::AirOpenedValues {
-                            local: Vec::new(),
-                            next: Vec::new(),
-                        },
-                        quotient: vec![degree_bits],
-                        global_cumulative_sum:
-                            crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
-                        local_cumulative_sum: Challenge::<SC>::ZERO,
-                        log_degree,
-                    }
-                })
-                .collect();
-        ShardOpenedValues { chips: chip_opened }
-    };
+/// C0 block 6 (part 2) — per-chip trace@z opened values, emitted in chip-NAME
+/// order (matching the recursion `opened_values.chips` BTreeMap key order).
+/// `trace_at_z` is prep-then-main per chip; the REAL height's big-endian bit
+/// decomposition is carried via the `quotient` slot for the recursion
+/// `full_geq` degree.
+pub fn build_opened_values<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+    chip_log_heights: &std::collections::BTreeMap<String, u8>,
+    chip_heights: &std::collections::BTreeMap<String, usize>,
+    max_log_row_count: usize,
+) -> ShardOpenedValues<Val<SC>, Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
+    name_sorted.sort_by(|a, b| {
+        MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b))
+    });
+    let chip_opened: Vec<crate::types::ChipOpenedValues<Val<SC>, Challenge<SC>>> =
+        name_sorted
+            .iter()
+            .map(|chip| {
+                let name = MachineAir::<Val<SC>>::name(**chip);
+                let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+                let evals: Vec<Challenge<SC>> =
+                    trace_at_z.get(&name).cloned().unwrap_or_default();
+                let split = prep_width.min(evals.len());
+                let (prep_local, main_local) = evals.split_at(split);
+                let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
+                // big-endian bit decomposition of the REAL height (the
+                // VirtualGeq threshold).  bit_len = max_log_row_count + 1.
+                let height = *chip_heights.get(&name).unwrap_or(&1);
+                let bit_len = max_log_row_count + 1;
+                let degree_bits: Vec<Challenge<SC>> = (0..bit_len)
+                    .map(|i| {
+                        // BIG-ENDIAN (MSB at index 0): SP1 Point::from_usize is
+                        // big-endian; the verifier shape asserts degree[0]=MSB.
+                        let shift = bit_len - 1 - i;
+                        let bit = if shift < usize::BITS as usize {
+                            (height >> shift) & 1
+                        } else {
+                            0
+                        };
+                        if bit == 1 {
+                            Challenge::<SC>::ONE
+                        } else {
+                            Challenge::<SC>::ZERO
+                        }
+                    })
+                    .collect();
+                crate::types::ChipOpenedValues {
+                    preprocessed: crate::types::AirOpenedValues {
+                        local: prep_local.to_vec(),
+                        next: Vec::new(),
+                    },
+                    main: crate::types::AirOpenedValues {
+                        local: main_local.to_vec(),
+                        next: Vec::new(),
+                    },
+                    permutation: crate::types::AirOpenedValues {
+                        local: Vec::new(),
+                        next: Vec::new(),
+                    },
+                    quotient: vec![degree_bits],
+                    global_cumulative_sum:
+                        crate::septic_digest::SepticDigest::<Val<SC>>::zero(),
+                    local_cumulative_sum: Challenge::<SC>::ZERO,
+                    log_degree,
+                }
+            })
+            .collect();
+    ShardOpenedValues { chips: chip_opened }
+}
 
-    // local sum is ZERO (the basefold path doesn't materialize the
-    // permutation trace — future: thread from LogUp-GKR layer 0).
-    let chip_cumulative_sums: std::collections::BTreeMap<
-        String,
-        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
-    > = chips
+/// C0 block 4 — per-chip (local, global) cumulative sums.  `local` is ZERO
+/// (the basefold path doesn't materialize the permutation trace); `global`
+/// reads the RAW per-chip cells at their raw heights (device chips use the
+/// early-captured provider TAIL, `chip_cum_tails`).
+pub fn build_chip_cumulative_sums<SC, A>(
+    chips: &[&Chip<Val<SC>, A>],
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    chip_cum_tails: &[Option<Vec<Val<SC>>>],
+) -> std::collections::BTreeMap<
+    String,
+    crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
+>
+where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+{
+    chips
         .iter()
-        // Device residency: cumulative sums must read the REAL trace
-        // cells at their raw heights.
-        // Device-resident chips prefer the early-captured provider
-        // TAIL (chip_cum_tails) — same 14 values, no dependence on the
-        // full materialize.  Validated identical via the bf-digest
-        // cumulative_sums section canary.
-        // Read the RAW per-chip cells at their raw heights from the shared
-        // `Arc<Mle>` store (`real_trace_ref().values`, a zero-copy borrow of
-        // the same buffer the owned `main_traces` were MOVED into), NOT the
-        // post-precompute `commit_traces`.  Under natural-commit the present
-        // chips' commit cells == these raw cells, so it is byte-identical; the
-        // distinction matters only if a commit trace were ever padded above its
-        // raw height (zero high rows would inject spurious LogUp contributions —
-        // e.g. a zero row reading as a real "address 0" send — making the global
-        // cumulative sum non-zero and the recursion `assert_complete`'s
-        // `assert_digest_zero` fail).  Device-resident chips (width-0 → dummy
-        // MLE, empty cells) still use the provider TAIL below, unaffected.
         .zip(shared_trace_mles.iter())
         .zip(chip_cum_tails.iter())
         .map(|((chip, pm), tail)| {
@@ -1483,8 +1633,7 @@ where
                 )
             } else {
                 // Host chip: the raw row-major cells (last 14 read); a width-0
-                // dummy yields an empty slice (sz<14 → zero digest, matching the
-                // former empty `main_traces[i]`).
+                // dummy yields an empty slice (sz<14 → zero digest).
                 let vals: &[Val<SC>] =
                     pm.real_trace_ref().map(|tr| tr.values).unwrap_or(&[]);
                 crate::shard_level::zerocheck_prover::chip_global_cumulative_sum_from_values(
@@ -1497,17 +1646,34 @@ where
                 crate::shard_level::shard_proof::ChipCumulativeSums { local, global },
             )
         })
-        .collect();
+        .collect()
+}
 
-    // ── Height-agnostic jagged-verifier groundwork ──
-    // Emit the witnessed per-round per-chip row_counts + the per-round
-    // padding_column_count, derived from the host jagged packing the
-    // commit already produced.  Ziren's single-stacked main commit is
-    // exactly ONE round, so both outer vecs have length 1 (or 0 when
-    // there is no host bundle to derive from -- GPU `Bytes` / `Empty`
-    // paths, where the lift derives the same values from the witnessed
-    // packing).  PURE DATA: nothing branches on these (the verifier
-    // checks read them separately).
+/// C0 block 6 (part 3) — the final `BasefoldShardProof` construction.  Derives
+/// the witnessed per-round row/padding-column counts and the SP1-faithful RAW
+/// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
+/// moves every piece into the proof.  PURE DATA — no transcript.
+#[allow(clippy::too_many_arguments)]
+pub fn assemble_basefold_shard_proof<SC>(
+    public_values: Vec<Val<SC>>,
+    main_commitment: [Val<SC>; 8],
+    logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
+    zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
+    opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
+    chip_log_heights: std::collections::BTreeMap<String, u8>,
+    chip_cumulative_sums: std::collections::BTreeMap<
+        String,
+        crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
+    >,
+    evaluation_proof: crate::shard_level::shard_proof::EvaluationProof,
+    orientation: FoldOrientation,
+) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
+where
+    SC: StarkGenericConfig,
+{
+    // Witnessed per-round per-chip row_counts + per-round padding_column_count,
+    // derived from the host jagged packing (single-stacked main commit = ONE
+    // round).  PURE DATA: nothing branches on these.
     let (row_counts, padding_column_counts): (Vec<Vec<usize>>, Vec<usize>) =
         match &evaluation_proof {
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
@@ -1521,12 +1687,10 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
-    // SP1-faithful jagged hash-bind: carry the RAW BaseFold root (the
-    // value the BaseFold opening binds against) so the recursion lift can
-    // populate `original_commitments` from it while the FS-observed
-    // `main_commitment` is the MODIFIED digest.  Recover the raw root from the
-    // bundle's commit; fall back to `main_commitment` (== raw root on the
-    // hash-bind-off path / non-bundle proofs).
+    // SP1-faithful jagged hash-bind: carry the RAW BaseFold root (the value the
+    // BaseFold opening binds against) while the FS-observed `main_commitment`
+    // is the MODIFIED digest.  Fall back to `main_commitment` on the
+    // hash-bind-off path / non-bundle proofs.
     let jagged_original_commitment: [Val<SC>; 8] = match &evaluation_proof {
         crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
             let raw_inner = crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
@@ -1539,7 +1703,7 @@ where
         _ => main_commitment,
     };
 
-    let proof = BasefoldShardProof {
+    BasefoldShardProof {
         public_values,
         main_commitment,
         logup_gkr_proof,
@@ -1552,15 +1716,7 @@ where
         row_counts,
         padding_column_counts,
         jagged_original_commitment,
-    };
-    drop(_phase5_span);
-    tracing::info!(
-        elapsed_ms = _t_phase5.elapsed().as_millis() as u64,
-        chips = n_chips,
-        phase = "assembly",
-        "shard phase done"
-    );
-    proof
+    }
 }
 
 /// Returns an [`EvaluationProof`] tagged with the path that produced
