@@ -300,21 +300,11 @@ fn rlc_eval<EF: Field>(vals: &[EF], lambda: EF) -> EF {
 // zkm-pcs and the GPU crate.
 type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
 
-/// Signature of the GPU sumcheck round-poly evaluator.  Returns the
-/// 4-point evaluations (p(0), p(1), p(2), p(3)) for the round.
-pub type GpuSumcheckEvalsFn = fn(
-    eq_int: &[Ef4],
-    eq_row: &[Ef4],
-    n0: &[Ef4],
-    d0: &[Ef4],
-    n1: &[Ef4],
-    d1: &[Ef4],
-    lambda: Ef4,
-    current_claim: Ef4,
-) -> [Ef4; 4];
-
-gpu_hook_accessors!(GPU_SUMCHECK_HOOK: GpuSumcheckEvalsFn
-    => register_gpu_sumcheck_hook, get_gpu_sumcheck_hook);
+// P7 static dispatch: the `GPU_SUMCHECK` hook (packed-arm per-round LogUp-GKR
+// sumcheck round-poly evaluator) moved to `ShardDeviceOps::logup_sumcheck`
+// (see `crate::shard_level::device_ops`), carried by `LogupRoundPolynomial`;
+// the `OnceLock` + `register_/get_` accessors + the `GpuSumcheckEvalsFn`
+// fn-ptr alias were dropped.
 
 // P5 static dispatch: the `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER`
 // hooks moved to `ShardDeviceOps::{eval_at_provider, eval_at_batch_provider}`
@@ -483,59 +473,21 @@ pub type GpuLogupRoundProverFnDeviceFold = fn(
 gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD: GpuLogupRoundProverFnDeviceFold
     => register_gpu_logup_round_hook_device_fold, get_gpu_logup_round_hook_device_fold);
 
-// Chip-structured sumcheck round-poly (rounds 1..N with
-// `chip_rows > 1`, data still in per-chip `Vec<Vec<EF>>` form).
-pub type GpuChipStructuredSumcheckFn = fn(
-    n0: &[&[Ef4]],
-    d0: &[&[Ef4]],
-    n1: &[&[Ef4]],
-    d1: &[&[Ef4]],
-    chip_offsets: &[usize],
-    chip_cols: &[usize],
-    num_real_rows: &[usize],
-    chip_rows: usize,
-    eq_int: &[Ef4],
-    eq_row: &[Ef4],
-    pad_eq_int_sum: Ef4,
-    lambda: Ef4,
-    current_claim: Ef4,
-) -> [Ef4; 4];
+// P7 static dispatch: the `GPU_CHIP_STRUCTURED_SUMCHECK` hook (chip-structured
+// row-binding per-round sumcheck round-poly evaluator, rounds 1..N with
+// `chip_rows > 1`, data in per-chip `&[&[Ef4]]` form) moved to
+// `ShardDeviceOps::logup_chip_structured_sumcheck` (see
+// `crate::shard_level::device_ops`), read via the poly's `dev` field threaded
+// into the `round_poly_evaluations_chip_structured` free fn; the `OnceLock` +
+// `register_/get_` accessors + the `GpuChipStructuredSumcheckFn` fn-ptr alias
+// were dropped.
 
-gpu_hook_accessors!(GPU_CHIP_STRUCTURED_SUMCHECK_HOOK: GpuChipStructuredSumcheckFn
-    => register_gpu_chip_structured_sumcheck_hook,
-       get_gpu_chip_structured_sumcheck_hook);
-
-// Device-resident chip-structured sumcheck with per-round state:
-//   - `sumcheck_id` keys a thread-local device cache; caller picks
-//     a fresh id per chip-sumcheck instance.
-//   - `round_idx == 0` marshals from host arrays; rounds 1..N may
-//     consume the cached device layer.
-//   - `alpha_prev` is the previous round's verifier-sampled binding
-//     scalar; the device folds the cached layer with it before the
-//     next round. `None` for round 0.
-// Returns `None` on internal error; caller falls back to host.
-pub type GpuChipStructuredSumcheckDeviceFn = fn(
-    n0: &[&[Ef4]],
-    d0: &[&[Ef4]],
-    n1: &[&[Ef4]],
-    d1: &[&[Ef4]],
-    chip_offsets: &[usize],
-    chip_cols: &[usize],
-    num_real_rows: &[usize],
-    chip_rows: usize,
-    eq_int: &[Ef4],
-    eq_row: &[Ef4],
-    pad_eq_int_sum: Ef4,
-    lambda: Ef4,
-    current_claim: Ef4,
-    sumcheck_id: u64,
-    round_idx: usize,
-    alpha_prev: Option<Ef4>,
-) -> Option<[Ef4; 4]>;
-
-gpu_hook_accessors!(GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE_HOOK: GpuChipStructuredSumcheckDeviceFn
-    => register_gpu_chip_structured_sumcheck_device_hook,
-       get_gpu_chip_structured_sumcheck_device_hook);
+// P7 static dispatch: the `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` hook
+// (device-resident chip-structured sumcheck with the per-round `sumcheck_id` /
+// `round_idx` / `alpha_prev` cross-round device-layer cache) moved to
+// `ShardDeviceOps::logup_chip_structured_sumcheck_device`, carried by
+// `LogupRoundPolynomial`; the `OnceLock` + `register_/get_` accessors + the
+// `GpuChipStructuredSumcheckDeviceFn` fn-ptr alias were dropped.
 
 // ──────────────────────────────────────────────────────────────────
 // fixup: V2 logup-round hook + first-round hook stubs.
@@ -712,24 +664,15 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
     NV28_CHIP_META.with(|c| c.borrow_mut().take())
 }
 
-/// First-round chip-structured hook. Returns `(gpu_partials,
-/// post_fix)` where `gpu_partials = [sum_zero, sum_half, eq_sum]`
-/// and `post_fix` is the packed strided payload that
-/// `from_strided_post_fix` decodes.
-pub type GpuFirstRoundHookFn = fn(
-    numerator_concat: &[p3_koala_bear::KoalaBear],
-    denominator_concat: &[Ef4],
-    col_index: &[u32],
-    start_indices: &[u32],
-    eq_row_chip_offsets: &[u32],
-    eq_row_real: &[Ef4],
-    eq_int_real: &[Ef4],
-    lambda: Ef4,
-    alpha: Ef4,
-) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
-
-gpu_hook_accessors!(GPU_FIRST_ROUND_HOOK: GpuFirstRoundHookFn
-    => register_gpu_first_round_hook, get_gpu_first_round_hook);
+// P7 removal: the `GPU_FIRST_ROUND` hook (SP1-aligned fused first-round
+// chip-structured kernel) was RUNTIME-DEAD — its sole consumers
+// (`try_first_round_on_gpu` + the `synthetic_diff_test_step7z` diff harness in
+// `row_gkr/round.rs`) sat behind a `let enabled = false` short-circuit, so the
+// GpuPrefolded fused first-round path never engaged (the legacy per-chip
+// round-0 path, device-accelerated via the zerocheck device-fold / y-tuple
+// ops, is the sole path).  The `OnceLock` + `register_/get_` accessors + the
+// `GpuFirstRoundHookFn` fn-ptr alias were dropped (the disabled consumer paths
+// deleted; the ziren-gpu register sites retired to no-ops).
 
 // ── BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify ──
 //

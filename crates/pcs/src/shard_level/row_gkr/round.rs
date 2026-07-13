@@ -440,273 +440,6 @@ struct ChipLayerState<EF> {
     chip_rows: usize,
 }
 
-/// Build a post-fix `ChipLayerState` from the strided GPU output
-/// buffer + packed header metadata.
-///
-/// Inputs (decoded from the post_fix Vec by the packed-header parser):
-/// - `post_fix_data`: 4 * n_output_pairs Ef4 cells, laid out as
-///   `[n0, n1, d0, d1]` per output pair (kernel outputLayer + 4*i).
-/// - `chip_offsets`: length n_chips + 1, cumulative global col indices
-///   per chip.  `chip_offsets[c+1] - chip_offsets[c]` = chip c's
-///   `num_interactions`.
-/// - `per_int_h`: length n_chips, output-pair count per col within
-///   chip c.  All cols in a chip share this value.
-/// - `chip_rows_post_fix`: layer-wide row count after the round-0
-///   fold = `1 << (num_row_variables - 1)`.  Per-chip
-///   `num_real_rows` is `min(per_int_h[c], chip_rows_post_fix)`.
-///
-/// Output layout (row-major `cells[r * cols + col]` per chip):
-/// - For pair (chip c, col col_within_chip, local_row r):
-///     global_pair_idx = chip_pair_start_c + col * per_int_h[c] + r
-///   where chip_pair_start_c = sum over c' < c of
-///   (chip_offsets[c'+1] - chip_offsets[c']) * per_int_h[c'].
-/// - cells[r * cols + col_within_chip] = post_fix_data[4 * global_pair_idx + slot]
-///   for slot ∈ {0,1,2,3} = {n0, n1, d0, d1}.
-#[allow(dead_code)]
-fn from_strided_post_fix<EF: Field + Copy>(
-    post_fix_data: &[EF],
-    chip_offsets: &[u32],
-    per_int_h: &[u32],
-    chip_rows_post_fix: usize,
-) -> Option<ChipLayerState<EF>> {
-    if chip_offsets.len() != per_int_h.len() + 1 {
-        return None;
-    }
-    let n_chips = per_int_h.len();
-    let mut n0_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
-    let mut n1_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
-    let mut d0_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
-    let mut d1_vec: Vec<Vec<EF>> = Vec::with_capacity(n_chips);
-    let mut chip_offsets_cells: Vec<usize> = Vec::with_capacity(n_chips);
-    let mut chip_cols_vec: Vec<usize> = Vec::with_capacity(n_chips);
-    let mut num_real_rows_vec: Vec<usize> = Vec::with_capacity(n_chips);
-    let mut cell_so_far = 0usize;
-    let mut pair_so_far = 0usize;
-    for c in 0..n_chips {
-        let cols_c = (chip_offsets[c + 1] - chip_offsets[c]) as usize;
-        let per_h_c = per_int_h[c] as usize;
-        let real_rows = per_h_c.min(chip_rows_post_fix);
-        let chip_size = cols_c * real_rows;
-        let mut chip_n0: Vec<EF> = vec![EF::ZERO; chip_size];
-        let mut chip_n1: Vec<EF> = vec![EF::ZERO; chip_size];
-        let mut chip_d0: Vec<EF> = vec![EF::ONE; chip_size];
-        let mut chip_d1: Vec<EF> = vec![EF::ONE; chip_size];
-        for col in 0..cols_c {
-            let col_pair_start = pair_so_far + col * per_h_c;
-            for r in 0..real_rows {
-                let pair_idx = col_pair_start + r;
-                let base = 4 * pair_idx;
-                if base + 3 < post_fix_data.len() {
-                    let dst = r * cols_c + col;
-                    chip_n0[dst] = post_fix_data[base + 0];
-                    chip_n1[dst] = post_fix_data[base + 1];
-                    chip_d0[dst] = post_fix_data[base + 2];
-                    chip_d1[dst] = post_fix_data[base + 3];
-                }
-            }
-        }
-        n0_vec.push(chip_n0);
-        n1_vec.push(chip_n1);
-        d0_vec.push(chip_d0);
-        d1_vec.push(chip_d1);
-        chip_offsets_cells.push(cell_so_far);
-        chip_cols_vec.push(cols_c);
-        num_real_rows_vec.push(real_rows);
-        cell_so_far += cols_c;
-        pair_so_far += cols_c * per_h_c;
-    }
-    Some(ChipLayerState {
-        n0: n0_vec,
-        d0: d0_vec,
-        n1: n1_vec,
-        d1: d1_vec,
-        chip_offsets: chip_offsets_cells,
-        chip_cols: chip_cols_vec,
-        num_real_rows: num_real_rows_vec,
-        chip_rows: chip_rows_post_fix,
-    })
-}
-
-/// Hand-computable 1-chip 4-row 1-col synthetic case run once via
-/// OnceLock for diffing the SP1 vs Ziren conventions.
-fn synthetic_diff_test_step7z() {
-    use p3_field::PrimeCharacteristicRing as _;
-    use p3_field::BasedVectorSpace as _;
-    type ProdF = p3_koala_bear::KoalaBear;
-    type ProdEF = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-
-    let hook = match crate::shard_level::sumcheck_poly::get_gpu_first_round_hook() {
-        Some(h) => h,
-        None => {
-            tracing::warn!("synthetic_diff_test skipped: no hook registered");
-            return;
-        }
-    };
-
-    // Synthetic case: 1 chip, chip_rows=4, cols=1.
-    // num_row_variables = 2, num_interaction_variables = 0.
-    let n0_vals: [ProdF; 4] = [
-        ProdF::new(1), ProdF::new(2), ProdF::new(3), ProdF::new(4),
-    ];
-    let n1_vals: [ProdF; 4] = [
-        ProdF::new(10), ProdF::new(20), ProdF::new(30), ProdF::new(40),
-    ];
-    // d0/d1 in ProdEF, simple base-only values.
-    let mk_ef = |x: u32| -> ProdEF {
-        let arr: [ProdF; 4] = [ProdF::new(x), ProdF::ZERO, ProdF::ZERO, ProdF::ZERO];
-        ProdEF::from_basis_coefficients_iter(arr.into_iter()).unwrap()
-    };
-    let d0_vals: [ProdEF; 4] = [mk_ef(11), mk_ef(12), mk_ef(13), mk_ef(14)];
-    let d1_vals: [ProdEF; 4] = [mk_ef(21), mk_ef(22), mk_ef(23), mk_ef(24)];
-
-    // Fixed eval_point (2 coords for row vars, 0 for int).
-    let c0 = mk_ef(7);
-    let c1 = mk_ef(13);
-    let eval_point: Vec<ProdEF> = vec![c0, c1];
-    let lambda = mk_ef(3);
-    // claim = TRUE p(0) + TRUE p(1) = -48816 + 78936 = 30120.
-    // Hand-computed for the fixed synthetic inputs.  Required so host's
-    // claim - p(1) formula yields the actual polynomial constant term.
-    let claim = mk_ef(30120);
-
-    // Build host ChipLayerState equivalent: per-chip Vec<EF>.
-    let n0_chip_ef: Vec<ProdEF> = n0_vals.iter().map(|f| ProdEF::from(*f)).collect();
-    let n1_chip_ef: Vec<ProdEF> = n1_vals.iter().map(|f| ProdEF::from(*f)).collect();
-    let d0_chip_ef: Vec<ProdEF> = d0_vals.to_vec();
-    let d1_chip_ef: Vec<ProdEF> = d1_vals.to_vec();
-    let chip_state = ChipLayerState::<ProdEF> {
-        n0: vec![n0_chip_ef],
-        d0: vec![d0_chip_ef],
-        n1: vec![n1_chip_ef],
-        d1: vec![d1_chip_ef],
-        chip_offsets: vec![0usize],
-        chip_cols: vec![1usize],
-        num_real_rows: vec![4usize],
-        chip_rows: 4usize,
-    };
-
-    // eq_int / eq_row built from eval_point split.
-    let _num_row_vars = 2usize;
-    let num_int_vars = 0usize;
-    let interaction_point = &eval_point[..num_int_vars];
-    let row_point = &eval_point[num_int_vars..];
-    let eq_int = build_eq_table(interaction_point);
-    let eq_row = build_eq_table(row_point);
-    // pad_eq_int_sum: sum of eq_int[total_chip_cols..]; total_chip_cols=1
-    // and eq_int.len()=1 so empty sum = ZERO.
-    let pad_eq_int_sum = ProdEF::ZERO;
-
-    // Host evals.  Round-0 row binding ⇒ eq-root coordinate = the top
-    // remaining row coord row_point[log2(eq_row.len()) - 1] (= c1 here).
-    let synth_round_coord = row_point[eq_row.len().trailing_zeros() as usize - 1];
-    let host_evals = round_poly_evaluations_chip_structured(
-        &chip_state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, synth_round_coord,
-    );
-    let host_coeffs = poly_coefficients_from_evals(host_evals);
-
-    // GPU marshal: per-column interleaved (lower/upper halves).
-    // For chip_rows=4, row_half=2: emit [r0, r2, r1, r3] order.
-    let mut numerator_concat: Vec<ProdF> = Vec::new();
-    let mut denominator_concat: Vec<ProdEF> = Vec::new();
-    // num_zero section interleaved
-    for k in 0..2usize {
-        numerator_concat.push(n0_vals[k]);
-        numerator_concat.push(n0_vals[k + 2]);
-        denominator_concat.push(d0_vals[k]);
-        denominator_concat.push(d0_vals[k + 2]);
-    }
-    // num_one section interleaved
-    for k in 0..2usize {
-        numerator_concat.push(n1_vals[k]);
-        numerator_concat.push(n1_vals[k + 2]);
-        denominator_concat.push(d1_vals[k]);
-        denominator_concat.push(d1_vals[k + 2]);
-    }
-    // sum-only path needs col_index.len() == input_height == 2
-    let col_index: Vec<u32> = vec![0u32, 0u32]; // 2 entries (1 chip)
-    let start_indices: Vec<u32> = vec![0u32, 2u32];
-
-    // Build per-chip-local + reversed eq_row for GPU.
-    let row_point_rev: Vec<ProdEF> = row_point.iter().rev().copied().collect();
-    let eq_row_gpu_full: Vec<ProdEF> = build_eq_table(&row_point_rev);
-    let eq_row_real: &[ProdEF] = &eq_row_gpu_full[..4];
-
-    // alpha = eval_point.last() (Ziren binds last coord)
-    let alpha = c1;
-
-    // Synthetic test uses a single chip with offset 0.
-    let eq_row_chip_offsets: Vec<u32> = vec![0u32];
-    let result = hook(
-        &numerator_concat,
-        &denominator_concat,
-        &col_index,
-        &start_indices,
-        &eq_row_chip_offsets,
-        eq_row_real,
-        &eq_int,
-        lambda,
-        alpha,
-    );
-
-    let (gpu_partials, post_fix) = match result {
-        Some(t) => t,
-        None => {
-            tracing::warn!("synthetic_diff_test: hook returned None");
-            return;
-        }
-    };
-
-    let sum_zero = gpu_partials[0];
-    let sum_half = gpu_partials[1];
-    let eq_sum = gpu_partials[2];
-
-    // SP1-style reconstruction.
-    let one = ProdEF::ONE;
-    let four = mk_ef(4);
-    let eight_inv = mk_ef(8).try_inverse().expect("8 inv");
-    let two_c_m1 = alpha.double() - one;
-    let one_m_c = one - alpha;
-
-    // Skip SP1 eq_correction (kernel materialized rows already include contributions).
-    let _ = pad_eq_int_sum;
-    let _ = eq_sum;
-    let _ = four;
-    let eval_zero_sp1 = sum_zero;
-    let mut eval_half_sp1 = sum_half;
-    eval_half_sp1 *= eight_inv;
-    let b_const = one_m_c * (one - alpha.double()).try_inverse().expect("1-2alpha inv");
-    let eval_one_sp1 = claim - eval_zero_sp1;
-    let half_pt = mk_ef(2).try_inverse().expect("2 inv");
-    let sp1_pts: [ProdEF; 4] = [ProdEF::ZERO, ProdEF::ONE, half_pt, b_const];
-    let sp1_vals: [ProdEF; 4] = [eval_zero_sp1, eval_one_sp1, eval_half_sp1, ProdEF::ZERO];
-    let sp1_coeffs = lagrange_interp_4(sp1_pts, sp1_vals);
-    let sp1_div_q = poly_div_linear(sp1_coeffs, one_m_c, two_c_m1);
-
-    tracing::warn!(
-        "first_roundz SYNTHETIC SP1_COEFFS=[{:?}, {:?}, {:?}, {:?}]",
-        sp1_coeffs[0], sp1_coeffs[1], sp1_coeffs[2], sp1_coeffs[3],
-    );
-    tracing::warn!(
-        "first_roundz SYNTHETIC:          host_coeffs=[{:?}, {:?}, {:?}, {:?}]          sp1_div_q=[{:?}, {:?}, {:?}]          host_evals=[{:?}, {:?}, {:?}, {:?}]          gpu_partials=[sz={:?}, sh={:?}, eq={:?}]          eval_zero_sp1={:?} eval_half_sp1={:?} eval_one_sp1={:?}          post_fix.len()={} eq_row.len()={} eq_int.len()={}          alpha={:?} c0={:?} c1={:?}",
-        host_coeffs[0], host_coeffs[1], host_coeffs[2], host_coeffs[3],
-        sp1_div_q[0], sp1_div_q[1], sp1_div_q[2],
-        host_evals[0], host_evals[1], host_evals[2], host_evals[3],
-        sum_zero, sum_half, eq_sum,
-        eval_zero_sp1, eval_half_sp1, eval_one_sp1,
-        post_fix.len(), eq_row_real.len(), eq_int.len(),
-        alpha, c0, c1,
-    );
-}
-
-/// Divide a degree-3 polynomial (4 coeffs, low-degree-first) by
-/// linear (a + b*x).  Returns the degree-2 quotient (3 coeffs).
-fn poly_div_linear<EF: Field>(coeffs: [EF; 4], a: EF, b: EF) -> [EF; 3] {
-    let b_inv = b.try_inverse().expect("linear divisor has nonzero slope");
-    let q2 = coeffs[3] * b_inv;
-    let q1 = (coeffs[2] - q2 * a) * b_inv;
-    let q0 = (coeffs[1] - q1 * a) * b_inv;
-    [q0, q1, q2]
-}
 
 /// 4-point Lagrange interpolation.  Given 4 distinct points and 4
 /// values, returns the unique degree-3 polynomial coefficients
@@ -796,758 +529,6 @@ fn reconstruct_round_evals_from_eqroot<EF: Field>(
         poly_eval(&coeffs, two),
         poly_eval(&coeffs, three),
     ])
-}
-
-/// Dedicated rayon pool for the GPU first-round marshal.
-///
-/// Running the marshal's `n_chips`-wide par_iter on the rayon global
-/// pool contends with concurrent shards' rayon work on multi-GPU.
-/// The dedicated pool caps per-marshal parallelism so M concurrent
-/// shards stay within `M * num_threads` cores rather than oversubscribing
-/// every available core via the global pool.
-fn marshal_thread_pool() -> &'static std::sync::Arc<rayon::ThreadPool> {
-    use std::sync::OnceLock;
-    static MARSHAL_POOL: OnceLock<std::sync::Arc<rayon::ThreadPool>> = OnceLock::new();
-    MARSHAL_POOL.get_or_init(|| {
-        // Pool size policy:
-        //   1) Honor ZIREN_GPU_MARSHAL_THREADS if set (operator override).
-        //   2) Otherwise auto-size: max(4, available_parallelism / num_gpus).
-        //      This keeps 1-GPU at full host parallelism (matches the
-        //      global pool) while capping multi-GPU total marshal threads
-        //      at host parallelism (no oversubscription).
-        //   GPU count is read from ZKM_GPU_DEVICES (comma-separated) to
-        //   avoid taking a CUDA dep in this stark crate.
-        let threads = std::env::var("ZIREN_GPU_MARSHAL_THREADS")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .filter(|&n| n >= 1)
-            .unwrap_or_else(|| {
-                let num_cpus = std::thread::available_parallelism()
-                    .map(|n| n.get())
-                    .unwrap_or(8);
-                let num_gpus = std::env::var("ZKM_GPU_DEVICES")
-                    .ok()
-                    .map(|s| {
-                        s.split(',')
-                            .filter(|t| !t.trim().is_empty())
-                            .count()
-                            .max(1)
-                    })
-                    .unwrap_or(1);
-                (num_cpus / num_gpus).max(4)
-            });
-        std::sync::Arc::new(
-            rayon::ThreadPoolBuilder::new()
-                .num_threads(threads)
-                .thread_name(|i| format!("gpu-marshal-{i}"))
-                .build()
-                .expect("build marshal thread pool")
-        )
-    })
-}
-
-/// Returns `(round_0_univariate, Option<post_fix_chip_state>)`.
-///
-/// When SP1 mode (ZIREN_GPU_SP1_FIRST_LAYER=1) produces a
-/// fully-decoded post-fix ChipLayerState via `from_strided_post_fix`,
-/// the inner Option is `Some(state)` — the
-/// caller can wire it into `PolynomialLayer::GpuPrefolded { ... }`
-/// to fully skip the host Chip path for rounds 1..N.
-///
-/// Inner Option `None` preserves legacy behavior: caller falls back
-/// to `PolynomialLayer::Chip(chip_state)` + cached round-0 poly.
-#[allow(clippy::too_many_arguments)]
-fn try_first_round_on_gpu<F, EF>(
-    circuit: &GkrCircuitLayer<F, EF>,
-    eval_point: &[EF],
-    _lambda: EF,
-    chip_state: &ChipLayerState<EF>,
-    eq_int: &[EF],
-    eq_row: &[EF],
-    pad_eq_int_sum: EF,
-    claimed_sum: EF,
-    // Phase-4: device/host first-round-prove + TLS-stash drain providers,
-    // provided by prover TYPE (were the `REGISTERED_FIRST_ROUND_HOOK` /
-    // `REGISTERED_DRAIN_HOOK` OnceLocks, then the `#118` `Option<fn>` thread).
-    // `&HostFirstRound` / `&HostDrain` = host first round (CPU prover / host
-    // free-fn callers), byte-identical to the pre-#118 unregistered-hook path.
-    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
-    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
-) -> Option<(UnivariatePolynomial<EF>, Option<Box<ChipLayerState<EF>>>)>
-where
-    F: Field + Into<EF> + Copy + Sync,
-    EF: ExtensionField<F>,
-{
-    use core::any::TypeId;
-    use std::sync::OnceLock;
-
-    // The fused GPU first-round (GpuPrefolded) path is not engaged: the proof
-    // takes the legacy per-chip round-0 path, which is itself device-accelerated
-    // via the zerocheck device-fold / device-eq / y-tuple hooks.  The body below
-    // is the sole consumer of first_round_device_hook / drain_hook; it is
-    // retained (byte-identical when engaged) but returns `None` here.
-    let enabled = false;
-    if !enabled {
-        return None;
-    }
-
-    type ProdF = p3_koala_bear::KoalaBear;
-    type ProdEF = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-    if TypeId::of::<F>() != TypeId::of::<ProdF>()
-        || TypeId::of::<EF>() != TypeId::of::<ProdEF>()
-    {
-        return None;
-    }
-
-    // Lazily drain the ziren-gpu device-first-layer stash and install into TLS
-    // for this scope (the stash is populated under the
-    // `ZIREN_GPU_DEVICE_FIRST_LAYER` flag).
-    let _device_first_layer_guard = {
-        use crate::shard_level::device_first_layer_context as dfl;
-        // Drain the device-first-layer stash on each shard's first dispatch
-        // (matches SP1's mandatory first-round kernel pipeline).  The TLS slot
-        // persists across shards (Drop is a no-op), so we drain unconditionally:
-        // each call replaces the slot with fresh data (an is_none() check would
-        // reuse shard 1's stale handle on later shards).  drain fn threaded from
-        // the prover.
-        dfl::drain_via_hook(drain_hook).map(dfl::DeviceFirstLayerGuard::new)
-    };
-    static SYN_TEST: OnceLock<()> = OnceLock::new();
-    SYN_TEST.get_or_init(|| synthetic_diff_test_step7z());
-
-    let first_layer = match circuit {
-        GkrCircuitLayer::FirstLayer(l) => l,
-        GkrCircuitLayer::Layer(_) => return None,
-    };
-
-    let n_chips = first_layer.numerator_0.len();
-    use p3_field::PrimeCharacteristicRing as _;
-
-    let hook = match crate::shard_level::sumcheck_poly::get_gpu_first_round_hook() {
-        Some(h) => h,
-        None => {
-            return None;
-        }
-    };
-
-    // Marshal layer data — padded-MLE-aware path.
-    // Parallel marshal: pre-allocate output, rayon par_iter
-    // per chip writes directly to its slice.  Eliminates per-chip
-    // intermediate Vec<Vec> overhead.
-    //
-    // Time the marshal (aggregated across shards) to track its cost.
-    let _marshal_start = std::time::Instant::now();
-    let mut chip_pair_counts: Vec<usize> = Vec::with_capacity(n_chips);
-    let mut chip_cell_counts: Vec<usize> = Vec::with_capacity(n_chips);
-    let mut quadrant_mismatch = false;
-    for c in 0..n_chips {
-        let n0_table = &first_layer.numerator_0[c];
-        let n1_table = &first_layer.numerator_1[c];
-        let d0_table = &first_layer.denominator_0[c];
-        let d1_table = &first_layer.denominator_1[c];
-        let cols = n0_table.num_interactions;
-        if cols != n1_table.num_interactions
-            || cols != d0_table.num_interactions
-            || cols != d1_table.num_interactions
-        {
-            quadrant_mismatch = true;
-            break;
-        }
-        let target_rows = (1usize << n0_table.num_row_variables).max(1);
-        let chip_cells = target_rows * cols;
-        if chip_cells % 2 != 0 { quadrant_mismatch = true; break; }
-        chip_pair_counts.push(chip_cells / 2);
-        chip_cell_counts.push(chip_cells);
-    }
-    // Detect padding chips (real=0) — compute their contribution analytically
-    // on host, skip them from GPU upload + kernel work. SP1-static: zero-row
-    // padding chips are always skipped from GPU dispatch (bandwidth savings).
-    // Env gate removed (was ZIREN_GPU_SKIP_PADDING_CHIPS / _DISABLE, default-on).
-    let is_padding_chip: Vec<bool> =
-        (0..n_chips).map(|c| first_layer.numerator_0[c].num_real_rows == 0).collect();
-    // Reduce chip_cell_counts to ZERO for padding chips (skip from concat).
-    let mut effective_chip_cell_counts = chip_cell_counts.clone();
-    for c in 0..n_chips {
-        if is_padding_chip[c] {
-            effective_chip_cell_counts[c] = 0;
-        }
-    }
-    let total_cells_one_quadrant: usize = effective_chip_cell_counts.iter().sum();
-    let total_concat_len = 2 * total_cells_one_quadrant;
-    let chip_offsets_in_section: Vec<usize> = {
-        let mut v = Vec::with_capacity(n_chips);
-        let mut so_far = 0usize;
-        for c in 0..n_chips {
-            v.push(so_far);
-            so_far += effective_chip_cell_counts[c];
-        }
-        v
-    };
-    let mut numerator_concat: Vec<p3_koala_bear::KoalaBear> =
-        vec![p3_koala_bear::KoalaBear::ZERO; total_concat_len];
-    let mut denominator_concat: Vec<ProdEF> = vec![ProdEF::ONE; total_concat_len];
-    if !quadrant_mismatch {
-        // Per-chip parallel write: each chip writes 4 disjoint slices
-        // (n0_lo, n0_hi, n1_lo, n1_hi).  numerator_concat layout:
-        //   [num_zero_section | num_one_section]
-        // num_zero_section[c.start..c.start+c.cells]   = chip c's n0 interleaved
-        // num_one_section [c.start..c.start+c.cells]   = chip c's n1 interleaved
-        //
-        // Pool: run the marshal par_iter on a dedicated pool (capped at
-        // 4 threads default) instead of the rayon global pool — see
-        // marshal_thread_pool() doc for the multi-GPU contention story.
-        use p3_maybe_rayon::prelude::*;
-        let num_zero_ptr = numerator_concat.as_mut_ptr();
-        let num_one_ptr = unsafe { num_zero_ptr.add(total_cells_one_quadrant) };
-        let den_zero_ptr = denominator_concat.as_mut_ptr();
-        let den_one_ptr = unsafe { den_zero_ptr.add(total_cells_one_quadrant) };
-        let num_zero_addr = num_zero_ptr as usize;
-        let num_one_addr = num_one_ptr as usize;
-        let den_zero_addr = den_zero_ptr as usize;
-        let den_one_addr = den_one_ptr as usize;
-        marshal_thread_pool().install(|| {
-        (0..n_chips).into_par_iter().filter(|&c| !is_padding_chip[c]).for_each(|c| {
-            let n0_table = &first_layer.numerator_0[c];
-            let n1_table = &first_layer.numerator_1[c];
-            let d0_table = &first_layer.denominator_0[c];
-            let d1_table = &first_layer.denominator_1[c];
-            let cols = n0_table.num_interactions;
-            let target_rows = (1usize << n0_table.num_row_variables).max(1);
-            let row_half = target_rows / 2;
-            let chip_off = chip_offsets_in_section[c];
-            let num_zero_slice = unsafe {
-                core::slice::from_raw_parts_mut(
-                    (num_zero_addr as *mut p3_koala_bear::KoalaBear).add(chip_off),
-                    chip_cell_counts[c],
-                )
-            };
-            let num_one_slice = unsafe {
-                core::slice::from_raw_parts_mut(
-                    (num_one_addr as *mut p3_koala_bear::KoalaBear).add(chip_off),
-                    chip_cell_counts[c],
-                )
-            };
-            let den_zero_slice = unsafe {
-                core::slice::from_raw_parts_mut(
-                    (den_zero_addr as *mut ProdEF).add(chip_off),
-                    chip_cell_counts[c],
-                )
-            };
-            let den_one_slice = unsafe {
-                core::slice::from_raw_parts_mut(
-                    (den_one_addr as *mut ProdEF).add(chip_off),
-                    chip_cell_counts[c],
-                )
-            };
-            let n0_real = n0_table.num_real_rows;
-            let n1_real = n1_table.num_real_rows;
-            let d0_real = d0_table.num_real_rows;
-            let d1_real = d1_table.num_real_rows;
-            // Per-chip column-major interleave: pos 2k = row k, pos 2k+1 = row k+row_half
-            let mut idx = 0usize;
-            for col in 0..cols {
-                if row_half == 0 {
-                    // Edge case chip_rows = 1
-                    num_zero_slice[idx] = if 0 < n0_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n0_table.cells[col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    num_one_slice[idx] = if 0 < n1_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n1_table.cells[col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    den_zero_slice[idx] = if 0 < d0_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d0_table.cells[col]) }
-                    } else { ProdEF::ONE };
-                    den_one_slice[idx] = if 0 < d1_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d1_table.cells[col]) }
-                    } else { ProdEF::ONE };
-                    idx += 1;
-                    continue;
-                }
-                for k in 0..row_half {
-                    let r_lo = k;
-                    let r_hi = k + row_half;
-                    // n0 interleave
-                    num_zero_slice[idx] = if r_lo < n0_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n0_table.cells[r_lo * cols + col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    num_zero_slice[idx + 1] = if r_hi < n0_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n0_table.cells[r_hi * cols + col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    // n1 interleave
-                    num_one_slice[idx] = if r_lo < n1_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n1_table.cells[r_lo * cols + col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    num_one_slice[idx + 1] = if r_hi < n1_real {
-                        unsafe { core::mem::transmute_copy::<F, p3_koala_bear::KoalaBear>(&n1_table.cells[r_hi * cols + col]) }
-                    } else { p3_koala_bear::KoalaBear::ZERO };
-                    // d0 interleave
-                    den_zero_slice[idx] = if r_lo < d0_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d0_table.cells[r_lo * cols + col]) }
-                    } else { ProdEF::ONE };
-                    den_zero_slice[idx + 1] = if r_hi < d0_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d0_table.cells[r_hi * cols + col]) }
-                    } else { ProdEF::ONE };
-                    // d1 interleave
-                    den_one_slice[idx] = if r_lo < d1_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d1_table.cells[r_lo * cols + col]) }
-                    } else { ProdEF::ONE };
-                    den_one_slice[idx + 1] = if r_hi < d1_real {
-                        unsafe { core::mem::transmute_copy::<EF, ProdEF>(&d1_table.cells[r_hi * cols + col]) }
-                    } else { ProdEF::ONE };
-                    idx += 2;
-                }
-            }
-        });
-        });  // marshal_thread_pool().install
-    }
-    // ROI probe: per-shard marshal elapsed.
-    let _marshal_elapsed_us = _marshal_start.elapsed().as_micros();
-    tracing::info!(
-        target = "first_round_marshal",
-        event = "marshal_done",
-        n_chips = n_chips,
-        elapsed_us = _marshal_elapsed_us as u64,
-    );
-    // marshal_dump removed (per_chip_n0 no longer exists).
-
-    if quadrant_mismatch {
-        return None;
-    }
-
-    // Isolation diagnostics block removed (referenced removed per_chip vecs).
-    // To re-enable isolation diagnostics, modify slices in-place after marshal.
-
-    // numerator_concat / denominator_concat already filled
-    // by parallel par_iter above (no concat step needed).
-
-    let total_pairs: usize = chip_pair_counts.iter().sum();
-    // SP1 semantics: colIndex[i] maps OUTPUT pair position
-    // to a GLOBAL COLUMN id (across all chips), NOT to a chip.  Each
-    // (chip, col-within-chip) pair is a distinct global col.
-    //
-    // With all chips having chip_rows = 2^layer.num_row_variables, each
-    // col contributes chip_rows/2 pairs.  start_indices[c_g] = c_g *
-    // (chip_rows/2).  local_row = i - start_indices[c_g] stays in
-    // [0, chip_rows/2) per col, allowing eq_row of length chip_rows
-    // SHARED across all cols (same MSB-binding for the layer).
-    let layer_chip_rows = 1usize << first_layer.num_row_variables;
-    let pairs_per_col = layer_chip_rows / 2;
-    let total_cols: usize = (0..n_chips)
-        .map(|c| first_layer.numerator_0[c].num_interactions)
-        .sum();
-    // Skip padding chips from col_index.  start_indices still
-    // sized at total_cols+1 to allow indexing by global col id, but
-    // pad-chip entries get a sentinel (won't be referenced).
-    let effective_total_pairs: usize = (0..n_chips)
-        .filter(|&c| !is_padding_chip[c])
-        .map(|c| first_layer.numerator_0[c].num_interactions * pairs_per_col)
-        .sum();
-    let mut col_index: Vec<u32> = Vec::with_capacity(effective_total_pairs);
-    let mut start_indices: Vec<u32> = vec![0u32; total_cols + 1];
-    let mut so_far: u32 = 0;
-    let mut col_to_chip: Vec<u32> = Vec::with_capacity(total_cols);
-    let mut global_col: usize = 0;
-    for c in 0..n_chips {
-        let c_cols = first_layer.numerator_0[c].num_interactions;
-        if is_padding_chip[c] {
-            // Padding chip: skip cols from col_index but still consume
-            // global col slots so col_id mapping stays consistent.
-            for _ in 0..c_cols {
-                start_indices[global_col] = so_far;
-                col_to_chip.push(c as u32);
-                global_col += 1;
-            }
-            continue;
-        }
-        for _ in 0..c_cols {
-            start_indices[global_col] = so_far;
-            for _ in 0..pairs_per_col {
-                col_index.push(global_col as u32);
-            }
-            so_far += pairs_per_col as u32;
-            col_to_chip.push(c as u32);
-            global_col += 1;
-        }
-    }
-    start_indices[total_cols] = so_far;
-    let _ = chip_pair_counts;
-    let _ = total_pairs;
-
-    let expected_concat = 4 * total_pairs;
-    if numerator_concat.len() != expected_concat {
-        return None;
-    }
-
-    // C3 May-14: dump host num/den only (metadata vars not yet built here).
-    {
-        static DUMP_PROBE: OnceLock<()> = OnceLock::new();
-        DUMP_PROBE.get_or_init(|| {
-            let fingerprint = if denominator_concat.is_empty() { format!("empty") } else { format!("{:?}", denominator_concat[0]) };
-            tracing::warn!("Diag-FINGERPRINT host marshal: numerator_concat.len={} fp={}", numerator_concat.len(), fingerprint);
-            let n_bytes = unsafe {
-                std::slice::from_raw_parts(numerator_concat.as_ptr() as *const u8,
-                    numerator_concat.len() * std::mem::size_of::<p3_koala_bear::KoalaBear>())
-            };
-            let d_bytes = unsafe {
-                std::slice::from_raw_parts(denominator_concat.as_ptr() as *const u8,
-                    denominator_concat.len() * std::mem::size_of::<ProdEF>())
-            };
-            let _ = std::fs::write("/tmp/c2_validate/host_num.bin", n_bytes);
-            let _ = std::fs::write("/tmp/c2_validate/host_den.bin", d_bytes);
-        });
-    }
-
-    // REAL eq tables (passed-in from caller).  Transmute_copy
-    // EF -> ProdEF is sound by TypeId guard above.  Slice cast via
-    // raw pointer so we can pass &[ProdEF] without rebuilding.
-    unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
-        core::slice::from_raw_parts(s.as_ptr().cast::<B>(), s.len())
-    }
-    // Build a SEPARATE eq_row from REVERSED row coords so the
-    // GPU kernels LSB-binding (adjacent (2i, 2i+1)) targets the same
-    // variable Ziren binds via MSB (last coord of row_point).
-    //
-    // Ziren convention: eq_row built from row_point in order; bit_k(idx)
-    // corresponds to row_point[k]. eq_row[row+row_half] flips bit
-    // log_chip_rows-1 → binds the LAST coord of row_point.
-    //
-    // SP1 convention: kernel reads eq_row at LSB-adjacent indices →
-    // binds the FIRST coord of the eq tables underlying coord vector.
-    //
-    // Conversion: reverse the row_point so SP1s "first" = Ziren "last".
-    let max_chip_rows: usize = (0..n_chips)
-        .map(|c| 1usize << first_layer.numerator_0[c].num_row_variables)
-        .max()
-        .unwrap_or(1);
-    // Single shuffled eq_row shared across ALL global cols.
-    // All chips have chip_rows = layer_chip_rows = 2^num_row_vars,
-    // so single shuffled buffer of length chip_rows works.
-    let num_row_vars = first_layer.num_row_variables;
-    let total_dim = eval_point.len();
-    let row_start = total_dim.saturating_sub(num_row_vars);
-    let row_point_orig: Vec<EF> = eval_point[row_start..].to_vec();
-    let eq_row_full: Vec<EF> = build_eq_table(&row_point_orig);
-    let eq_row_full_ef: &[ProdEF] = unsafe { slice_cast::<EF, ProdEF>(&eq_row_full) };
-    let row_half = layer_chip_rows / 2;
-    let mut shuffled_eq_row: Vec<ProdEF> = Vec::with_capacity(layer_chip_rows);
-    if row_half > 0 {
-        for k in 0..row_half {
-            shuffled_eq_row.push(eq_row_full_ef[k]);
-            shuffled_eq_row.push(eq_row_full_ef[k + row_half]);
-        }
-    } else {
-        shuffled_eq_row.push(eq_row_full_ef[0]);
-    }
-    // eq_row_chip_offsets indexed by GLOBAL COL id (not chip id) — all 0.
-    let eq_row_chip_offsets_v: Vec<u32> = vec![0u32; total_cols];
-    let _ = max_chip_rows;
-    let eq_row_real: &[ProdEF] = &shuffled_eq_row;
-    // Use ORIGINAL interaction_point for GPU eq_int (matches
-    // Zirens host indexing — eq_int[global_col_id] reads correctly).
-    let num_int_vars = total_dim.saturating_sub(num_row_vars);
-    let interaction_point_orig: Vec<EF> = eval_point[..num_int_vars].to_vec();
-    let eq_int_gpu_full: Vec<EF> = build_eq_table(&interaction_point_orig);
-    let eq_int_real: &[ProdEF] = unsafe { slice_cast::<EF, ProdEF>(&eq_int_gpu_full) };
-
-    // alpha + lambda from eval_point.  Per LogupRoundPolynomial::new
-    // convention: eval_point is split as
-    //   [interaction_point | row_point]
-    // and the LAST coord of eval_point is the one being bound in
-    // round 0 (the high-order row variable).
-    let alpha_ef: ProdEF = if let Some(last) = eval_point.last() {
-        unsafe { core::mem::transmute_copy::<EF, ProdEF>(last) }
-    } else {
-        ProdEF::default()
-    };
-    let lambda_ef: ProdEF = unsafe { core::mem::transmute_copy::<EF, ProdEF>(&_lambda) };
-
-
-    // Device-variant attempt.  When env flag is set
-    // AND TLS handle present, try the device-resident dispatch first.
-    // Returns same (Vec<Ef4>, Vec<Ef4>) partials shape as the host
-    // hook — the SP1-style reconstruction continues unchanged.  On None,
-    // fall through to host hook (default behavior preserved).
-    // C3 May-14: dump metadata buffers for diff (just before device dispatch).
-    {
-        static META_DUMP: OnceLock<()> = OnceLock::new();
-        META_DUMP.get_or_init(|| {
-            let cidx_b = unsafe { std::slice::from_raw_parts(col_index.as_ptr() as *const u8, col_index.len() * 4) };
-            let sidx_b = unsafe { std::slice::from_raw_parts(start_indices.as_ptr() as *const u8, start_indices.len() * 4) };
-            let erc_b = unsafe { std::slice::from_raw_parts(eq_row_chip_offsets_v.as_ptr() as *const u8, eq_row_chip_offsets_v.len() * 4) };
-            let eqr_b = unsafe { std::slice::from_raw_parts(eq_row_real.as_ptr() as *const u8, eq_row_real.len() * std::mem::size_of::<ProdEF>()) };
-            let eqi_b = unsafe { std::slice::from_raw_parts(eq_int_real.as_ptr() as *const u8, eq_int_real.len() * std::mem::size_of::<ProdEF>()) };
-            let _ = std::fs::write("/tmp/c2_validate/host_col_index.bin", cidx_b);
-            let _ = std::fs::write("/tmp/c2_validate/host_start_indices.bin", sidx_b);
-            let _ = std::fs::write("/tmp/c2_validate/host_eq_row_chip_offsets.bin", erc_b);
-            let _ = std::fs::write("/tmp/c2_validate/host_eq_row.bin", eqr_b);
-            let _ = std::fs::write("/tmp/c2_validate/host_eq_interaction.bin", eqi_b);
-            let lam_bytes = unsafe { std::slice::from_raw_parts(&lambda_ef as *const ProdEF as *const u8, std::mem::size_of::<ProdEF>()) };
-            let _ = std::fs::write("/tmp/c2_validate/host_lambda.bin", lam_bytes);
-            tracing::warn!("Diag-DUMP host meta: col_index.len={} start_indices.len={} eq_row_chip_offsets.len={} eq_row.len={} eq_int.len={} lambda={:?}", col_index.len(), start_indices.len(), eq_row_chip_offsets_v.len(), eq_row_real.len(), eq_int_real.len(), lambda_ef);
-        });
-    }
-    let device_result: Option<(Vec<ProdEF>, Vec<ProdEF>)> = {
-        // Phase-3 device dispatch is always engaged when the first-layer TLS
-        // stash + hook are present (matches SP1; no per-shard gate).
-        use crate::shard_level::device_first_layer_context as dfl;
-        if dfl::current_device_first_layer().is_some() {
-            // Phase-4: first-round provider threaded from the prover (was
-            // `REGISTERED_FIRST_ROUND_HOOK`, then the `#118` `Option<fn>`).
-            if first_round_device_hook.is_device() {
-                let target_rows = 1usize << first_layer.num_row_variables;
-                let row_half_u = (target_rows / 2) as u32;
-                let mut per_chip_cols_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut per_chip_real_n0_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut per_chip_real_n1_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut per_chip_real_d0_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut per_chip_real_d1_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut per_chip_pair_offsets_v: Vec<u32> = Vec::with_capacity(n_chips);
-                let mut so_far: u32 = 0;
-                let mut total_one_quadrant_cells: u32 = 0;
-                for c in 0..n_chips {
-                    let n0 = &first_layer.numerator_0[c];
-                    let n1 = &first_layer.numerator_1[c];
-                    let d0 = &first_layer.denominator_0[c];
-                    let d1 = &first_layer.denominator_1[c];
-                    let cols = n0.num_interactions as u32;
-                    per_chip_cols_v.push(cols);
-                    per_chip_real_n0_v.push(n0.num_real_rows as u32);
-                    per_chip_real_n1_v.push(n1.num_real_rows as u32);
-                    per_chip_real_d0_v.push(d0.num_real_rows as u32);
-                    per_chip_real_d1_v.push(d1.num_real_rows as u32);
-                    per_chip_pair_offsets_v.push(so_far);
-                    let pair_count_for_chip = cols * row_half_u;
-                    so_far += pair_count_for_chip;
-                    total_one_quadrant_cells += cols * (target_rows as u32);
-                }
-                let total_pair_tasks = so_far;
-                // ProdEF and the hook's Ef4 are the SAME underlying type
-                // (BinomialExtensionField<KoalaBear, 4>); pass directly.
-                first_round_device_hook.first_round(
-                    &col_index,
-                    &start_indices,
-                    &eq_row_chip_offsets_v,
-                    &per_chip_cols_v,
-                    &per_chip_real_n0_v,
-                    &per_chip_real_n1_v,
-                    &per_chip_real_d0_v,
-                    &per_chip_real_d1_v,
-                    &per_chip_pair_offsets_v,
-                    row_half_u,
-                    total_pair_tasks,
-                    total_one_quadrant_cells,
-                    eq_row_real,
-                    eq_int_real,
-                    lambda_ef,
-                    alpha_ef,
-                )
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    let result = device_result.or_else(|| hook(
-        &numerator_concat,
-        &denominator_concat,
-        &col_index,
-        &start_indices,
-        &eq_row_chip_offsets_v,
-        eq_row_real,
-        eq_int_real,
-        lambda_ef,
-        alpha_ef,
-    ));
-
-    let (gpu_partials, post_fix) = match result {
-        Some(t) => t,
-        None => {
-            return None;
-        }
-    };
-
-    // Compute host evals via the production round-poly path.
-    // Round-0 row binding ⇒ eq-root coordinate = the top remaining row
-    // coord row_point[log2(eq_row.len()) - 1] (row_point is the row-axis
-    // suffix of eval_point).
-    let round_coord: EF = {
-        let num_int_vars = first_layer.num_interaction_variables;
-        let row_point = &eval_point[num_int_vars..];
-        if eq_row.len() > 1 {
-            row_point[eq_row.len().trailing_zeros() as usize - 1]
-        } else {
-            EF::ZERO
-        }
-    };
-    let host_evals = round_poly_evaluations_chip_structured(
-        chip_state,
-        eq_int,
-        eq_row,
-        pad_eq_int_sum,
-        _lambda,
-        claimed_sum,
-        round_coord,
-    );
-
-    // Cast partials EF -> ProdEF.
-    let mut sum_zero_ef: EF = if let Some(v) = gpu_partials.get(0) {
-        unsafe { core::mem::transmute_copy::<ProdEF, EF>(v) }
-    } else { return None; };
-    let mut sum_half_ef: EF = if let Some(v) = gpu_partials.get(1) {
-        unsafe { core::mem::transmute_copy::<ProdEF, EF>(v) }
-    } else { return None; };
-    let mut eq_sum_ef: EF = if let Some(v) = gpu_partials.get(2) {
-        unsafe { core::mem::transmute_copy::<ProdEF, EF>(v) }
-    } else { return None; };
-
-    // Add back analytic contributions from skipped padding chips.
-    // Per padding chip c: contribution to sum_zero = chip_eq_int_sum_c * sum_eq_lo,
-    // to sum_half = chip_eq_int_sum_c * (sum_eq_lo + sum_eq_hi),
-    // to eq_sum = chip_eq_int_sum_c (one per pair = chip_eq_int_sum total).
-    {
-        let mut sum_eq_lo_local = EF::ZERO;
-        let mut sum_eq_hi_local = EF::ZERO;
-        let r_half = layer_chip_rows / 2;
-        for k in 0..r_half.min(eq_row.len()) {
-            sum_eq_lo_local += eq_row[k];
-            sum_eq_hi_local += eq_row[k + r_half];
-        }
-        let mut padding_chip_eq_int_sum_total = EF::ZERO;
-        let mut chip_off = 0usize;
-        for c in 0..n_chips {
-            let c_cols = first_layer.numerator_0[c].num_interactions;
-            if is_padding_chip[c] {
-                for col in 0..c_cols {
-                    padding_chip_eq_int_sum_total += eq_int[chip_off + col];
-                }
-            }
-            chip_off += c_cols;
-        }
-        // For sum_half: SP1 valuesHalf = valuesZero + valuesOne component-wise.
-        // For padding chip: bracket(valuesHalf) = 1 (since (0+0)*(1+1) + (0+0)*(1+1) ... + (1+1)*(1+1) = 4)
-        // Hmm wait need to compute carefully. For valuesZero = (0,0,1,1) and valuesOne = (0,0,1,1):
-        // valuesHalf = (0, 0, 2, 2). bracket = lambda*(0*2 + 0*2) + 2*2 = 4.
-        // contribution = eqValueHalf * 4 per pair.
-        // sum across pairs of eqValueHalf = sum across (k, col) of (eq_lo[k] + eq_hi[k]) * eq_int[col]
-        //                               = (sum_eq_lo + sum_eq_hi) * chip_eq_int_sum
-        // Total sum_half contribution per padding chip = 4 * (sum_eq_lo + sum_eq_hi) * chip_eq_int_sum
-        let eq_half_total = sum_eq_lo_local + sum_eq_hi_local;
-        let four = EF::from_u32(4);
-        // For eq_sum: GPU sums eqValueHalf per pair.  Total = (sum_eq_lo + sum_eq_hi) * chip_eq_int_sum per chip.
-        // For sum_zero: GPU sums eqValueZero * bracket(valuesZero) per pair.
-        //   bracket(valuesZero) for padding chip = lambda*(0*1 + 0*1) + 1*1 = 1.
-        //   contribution per pair = eq_lo[k] * eq_int[col] * 1.
-        //   sum across pairs = sum_eq_lo * chip_eq_int_sum.
-        sum_zero_ef += padding_chip_eq_int_sum_total * sum_eq_lo_local;
-        sum_half_ef += padding_chip_eq_int_sum_total * eq_half_total * four;
-        eq_sum_ef += padding_chip_eq_int_sum_total * eq_half_total;
-    }
-
-    // alpha_ef -> EF (already same memory).
-    let alpha_as_ef: EF = unsafe { core::mem::transmute_copy::<ProdEF, EF>(&alpha_ef) };
-
-    let one = EF::ONE;
-    let _two = one.double();
-    let four = EF::from_u32(4);
-    let eight_inv = EF::from_u32(8).try_inverse().expect("8 has inverse in EF");
-
-    // Restore col-axis padding correction.
-    // Diagnostically: host_evals[0] = GPU sum_zero +
-    // pad_eq_int_sum * (1-alpha).  Ziren's polynomial includes
-    // col-axis padding (virtual cols [total_real_cols..2^num_int_vars)
-    // contribute identity * eq_int values).  GPU only iterates real
-    // cols.  Add the analytic correction.
-    let _ = eq_sum_ef;
-    let eval_zero_sp1 = sum_zero_ef + pad_eq_int_sum * (one - alpha_as_ef);
-    let mut eval_half_sp1 = sum_half_ef + pad_eq_int_sum * four;
-    eval_half_sp1 *= eight_inv;
-
-    let b_const = (one - alpha_as_ef)
-        * (one - alpha_as_ef.double()).try_inverse()
-            .expect("1-2alpha has inverse in EF");
-    let eval_one_sp1 = claimed_sum - eval_zero_sp1;
-
-    // Interpolate at points [0, 1, 1/2, b_const] -> values
-    // [eval_zero_sp1, eval_one_sp1, eval_half_sp1, ZERO].
-    let half_pt = EF::from_u32(2).try_inverse().expect("2 has inverse");
-    let sp1_pts: [EF; 4] = [EF::ZERO, EF::ONE, half_pt, b_const];
-    let sp1_vals: [EF; 4] = [eval_zero_sp1, eval_one_sp1, eval_half_sp1, EF::ZERO];
-    let sp1_coeffs = lagrange_interp_4(sp1_pts, sp1_vals);
-
-    // SP1 port: decode the full packed header from
-    // post_fix when SP1 mode emits the packed payload, then build the
-    // post-fix ChipLayerState via the strided-post-fix constructor.  When the build
-    // succeeds, the caller (LogupRoundPolynomial::new) wires it into
-    // PolynomialLayer::GpuPrefolded.  When it doesn't, the caller
-    // falls back to PolynomialLayer::Chip(host_chip_state) +
-    // gpu_cached_first_poly.
-    let mut post_fix_chip_state: Option<Box<ChipLayerState<EF>>> = None;
-    {
-        use p3_field::PrimeCharacteristicRing as _;
-        use p3_field::BasedVectorSpace as _;
-        use p3_field::PrimeField32 as _;
-        let extract_u32 = |v: &ProdEF| -> u32 {
-            let basis: &[ProdF] = v.as_basis_coefficients_slice();
-            basis.first().map(|c| c.as_canonical_u32()).unwrap_or(0)
-        };
-        if post_fix.len() >= 4 {
-            let magic = ProdEF::from_u32(0xB1B1_B1B1);
-            if post_fix[0] == magic {
-                let chip_offsets_len = extract_u32(&post_fix[1]) as usize;
-                let chip_offsets_end = 2 + chip_offsets_len;
-                if post_fix.len() >= chip_offsets_end + 1 {
-                    let mut chip_offsets: Vec<u32> = Vec::with_capacity(chip_offsets_len);
-                    for i in 0..chip_offsets_len {
-                        chip_offsets.push(extract_u32(&post_fix[2 + i]));
-                    }
-                    let per_int_h_len = extract_u32(&post_fix[chip_offsets_end]) as usize;
-                    let per_int_h_end = chip_offsets_end + 1 + per_int_h_len;
-                    if post_fix.len() >= per_int_h_end {
-                        let mut per_int_h: Vec<u32> = Vec::with_capacity(per_int_h_len);
-                        for i in 0..per_int_h_len {
-                            per_int_h.push(extract_u32(&post_fix[chip_offsets_end + 1 + i]));
-                        }
-                        let data_len = post_fix.len().saturating_sub(per_int_h_end);
-                        let expected_data: u32 = chip_offsets
-                            .windows(2)
-                            .zip(per_int_h.iter())
-                            .map(|(co, &ph)| (co[1] - co[0]) * ph * 4)
-                            .sum();
-                        let valid = data_len as u32 == expected_data;
-                        if valid {
-                            // chip_rows_post_fix = layer chip_rows / 2.
-                            // Caller's eq_row.len() = layer chip_rows.
-                            let chip_rows_post_fix = (eq_row.len() / 2).max(1);
-                            // Cast post_fix_data slice from &[ProdEF] to &[EF].
-                            // SAFETY: ProdEF == EF in production (Ef4).
-                            // try_first_round_on_gpu is gated on this elsewhere.
-                            let pf_data_prodef: &[ProdEF] = &post_fix[per_int_h_end..];
-                            let pf_data_ef: &[EF] = unsafe {
-                                core::slice::from_raw_parts(
-                                    pf_data_prodef.as_ptr() as *const EF,
-                                    pf_data_prodef.len(),
-                                )
-                            };
-                            if let Some(state) = from_strided_post_fix::<EF>(
-                                pf_data_ef,
-                                &chip_offsets,
-                                &per_int_h,
-                                chip_rows_post_fix,
-                            ) {
-                                post_fix_chip_state = Some(Box::new(state));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    let _ = (host_evals, gpu_partials, post_fix);
-
-    let poly = UnivariatePolynomial::new(sp1_coeffs.to_vec());
-    Some((poly, post_fix_chip_state))
 }
 
 
@@ -1702,6 +683,11 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     lambda: EF,
     current_claim: EF,
     round_coord: EF,
+    // P7 static dispatch: the poly's owned device-ops seam threaded positionally
+    // (this is a free fn, not a method on the poly), read via
+    // `dev.filter(|d| d.is_device())` — was `GPU_CHIP_STRUCTURED_SUMCHECK`.
+    // `None` / `&NoDeviceOps` → host path.
+    dev: Option<&dyn crate::shard_level::ShardDeviceOps>,
 ) -> [EF; 4] {
     use p3_maybe_rayon::prelude::*;
 
@@ -1719,9 +705,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     // (host-only builds have no hook => byte-identical host path). Env gate
     // removed (was ZIREN_GPU_CHIP_SUMCHECK, default-on).
     {
-        if let Some(gpu_hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_hook()
-        {
+        if let Some(dev_ops) = dev.filter(|d| d.is_device()) {
             use core::any::TypeId;
             type Ef4 = p3_field::extension::BinomialExtensionField<
                 p3_koala_bear::KoalaBear, 4>;
@@ -1752,7 +736,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
                 let claim_v: Ef4 = unsafe {
                     core::mem::transmute_copy::<EF, Ef4>(&current_claim)
                 };
-                let evals_ef4 = gpu_hook(
+                let evals_ef4 = dev_ops.logup_chip_structured_sumcheck(
                     &n0_views, &d0_views, &n1_views, &d1_views,
                     &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
                     state.chip_rows,
@@ -2336,6 +1320,18 @@ pub struct LogupRoundPolynomial<EF> {
     /// cached device layer before running the next round's
     /// sumcheck kernel.
     last_chip_alpha: Option<EF>,
+    /// P7 static dispatch: the owned shard-level device-ops seam (was the
+    /// `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
+    /// `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks).  Set once at
+    /// `new` from the `Arc<dyn ShardDeviceOps>` the prover TYPE threads down
+    /// the LogUp path (`Arc<NoDeviceOps>` host / `Arc<CudaShardDeviceOps>` GPU)
+    /// and carried across every fold (`fix_last_variable` mutates `self` in
+    /// place, so the field survives without re-plumbing).  The packed / chip-
+    /// device read sites gate on `self.dev.as_ref().filter(|d| d.is_device())`
+    /// — byte-identical to the former `get_*_hook().is_some()` presence check;
+    /// the chip-structured (host-form) arm threads `self.dev.as_deref()` into
+    /// `round_poly_evaluations_chip_structured`.
+    dev: Option<alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>>,
 }
 
 /// Two-mode storage backing for `LogupRoundPolynomial.state`.
@@ -2369,6 +1365,12 @@ enum PolynomialLayer<EF> {
     /// Both calls MUST happen in this order on the GpuPrefolded
     /// variant.  Any other call site reaching this variant should
     /// panic loudly — it's a state-machine invariant violation.
+    ///
+    /// P7: no longer constructed (the fused first-round dispatcher
+    /// `try_first_round_on_gpu` was runtime-dead and deleted with the
+    /// `GPU_FIRST_ROUND` hook); the variant + its fold/sum arms are retained
+    /// for a later dedicated retirement.
+    #[allow(dead_code)]
     GpuPrefolded {
         /// Round-0 univariate polynomial (pre-computed by GPU).
         cached_round_poly: UnivariatePolynomial<EF>,
@@ -2393,13 +1395,21 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         numerator_eval: EF,
         denominator_eval: EF,
         lambda: EF,
-        // Phase-4: device/host first-round-prove + drain providers, threaded
-        // down to `try_first_round_on_gpu` (were the
-        // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks,
-        // then the `#118` `Option<fn>` thread).  `&HostFirstRound` /
-        // `&HostDrain` = host first round.
-        first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
-        drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
+        // Phase-4: device/host first-round-prove + drain providers.  Their sole
+        // consumer was `try_first_round_on_gpu`'s GpuPrefolded fused first-round
+        // path, which was runtime-dead (`enabled = false`) and was DELETED in
+        // P7 along with the `GPU_FIRST_ROUND` hook — so these stay threaded (the
+        // P4 wiring is left intact) but are unused here.  `&HostFirstRound` /
+        // `&HostDrain` on host callers.
+        _first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
+        _drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
+        // P7 static dispatch: the owned shard-level device-ops seam (was the
+        // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
+        // `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks), cloned into
+        // the poly's `dev` field and forwarded across every fold.
+        // `Arc<NoDeviceOps>` (`is_device()` false → host path) on host callers,
+        // `Arc<CudaShardDeviceOps>` on the GPU prover.
+        dev: alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
     ) -> Self
     where
         F: Field + Into<EF> + Copy + Sync,
@@ -2418,13 +1428,8 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             total_vars,
         );
 
-        // Env-gated GPU first-round pre-computation hook.  When
-        // ZIREN_GPU_FUSED_FIRST_ROUND=1 AND we're processing a FirstLayer
-        // (not an intermediate GKR layer), pre-compute the first sumcheck
-        // round on GPU using the SP1-aligned fixAndSumFirstCircuitLayer
-        // kernel (byte-equivalent to the host first round).  This sits
-        // BEFORE `build_chip_state` so we have raw FELT numerators
-        // (matching SP1's layer-0 type signature).
+        // Build the per-chip chip-structured n/d state (raw FELT numerators for
+        // a FirstLayer, matching SP1's layer-0 type signature).
         let chip_state: ChipLayerState<EF> = match circuit {
             GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
@@ -2441,42 +1446,15 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
 
         let claimed_sum = lambda * numerator_eval + denominator_eval;
 
-        // first_round_dispatch: diff harness — when env on, dispatch GPU
-        // first-round + compute host evals + log side-by-side.
-        // All inputs built; safe to compare paths.  Returns None
-        // unconditionally (safety net).
-        let gpu_result = try_first_round_on_gpu::<F, EF>(
-            circuit,
-            eval_point,
-            lambda,
-            &chip_state,
-            &eq_int,
-            &eq_row,
-            pad_eq_int_sum,
-            claimed_sum,
-            first_round_device_hook,
-            drain_hook,
-        );
-
-        // When GPU returns a fully-built post-fix
-        // ChipLayerState (Some inner Option), wire into
-        // PolynomialLayer::GpuPrefolded.  Otherwise fall back to
-        // PolynomialLayer::Chip(chip_state) + cached round-0 poly
-        // (legacy path).
-        let (initial_state, gpu_cached_first_poly): (
-            PolynomialLayer<EF>,
-            Option<UnivariatePolynomial<EF>>,
-        ) = match gpu_result {
-            Some((poly, Some(post_fix_state))) => (
-                PolynomialLayer::GpuPrefolded {
-                    cached_round_poly: poly,
-                    post_fix_state,
-                },
-                None,
-            ),
-            Some((poly, None)) => (PolynomialLayer::Chip(chip_state), Some(poly)),
-            None => (PolynomialLayer::Chip(chip_state), None),
-        };
+        // P7: the GPU fused first-round (`PolynomialLayer::GpuPrefolded`) path
+        // is retired — its dispatcher `try_first_round_on_gpu` was runtime-dead
+        // (`enabled = false`) and was deleted with the `GPU_FIRST_ROUND` hook.
+        // The layer takes the legacy per-chip round-0 path (itself device-
+        // accelerated via the chip-structured / zerocheck device ops); the
+        // round-0 univariate poly is computed lazily by the first
+        // `sum_as_poly_in_last_variable`.
+        let initial_state = PolynomialLayer::Chip(chip_state);
+        let gpu_cached_first_poly: Option<UnivariatePolynomial<EF>> = None;
 
         let mut me = Self {
             state: initial_state,
@@ -2503,6 +1481,10 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             },
             chip_sumcheck_round: 0,
             last_chip_alpha: None,
+            // P7: carry the owned device-ops seam for the packed / chip read
+            // sites.  `fix_last_variable` mutates `self` in place, so this
+            // survives every fold / round-transition without re-plumbing.
+            dev: Some(dev),
         };
 
         // Edge case: zero row variables — chip tables are already 1-row.
@@ -2772,8 +1754,8 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 // Env gates removed (were ZIREN_GPU_CHIP_SUMCHECK / _SP1_DEVICE,
                 // default-on).
                 {
-                    if let Some(dev_hook) =
-                        crate::shard_level::sumcheck_poly::get_gpu_chip_structured_sumcheck_device_hook()
+                    if let Some(dev_ops) =
+                        self.dev.as_ref().filter(|d| d.is_device())
                     {
                         use core::any::TypeId;
                         type Ef4 = p3_field::extension::BinomialExtensionField<
@@ -2809,7 +1791,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                             let alpha_prev_v: Option<Ef4> = self.last_chip_alpha
                                 .as_ref()
                                 .map(|a| unsafe { core::mem::transmute_copy::<EF, Ef4>(a) });
-                            if let Some(evals_ef4) = dev_hook(
+                            if let Some(evals_ef4) = dev_ops.logup_chip_structured_sumcheck_device(
                                 &n0v, &d0v, &n1v, &d1v,
                                 &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
                                 state.chip_rows,
@@ -2843,6 +1825,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                     self.lambda,
                     claim_v,
                     round_coord,
+                    self.dev.as_deref(),
                 )
             }
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
@@ -2864,8 +1847,8 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                 // attempted (host fallback when no hook / non-Ef4). Env gate
                 // removed (was ZIREN_GPU_SUMCHECK, default-on).
                 {
-                    if let Some(gpu_hook) =
-                        crate::shard_level::sumcheck_poly::get_gpu_sumcheck_hook()
+                    if let Some(dev_ops) =
+                        self.dev.as_ref().filter(|d| d.is_device())
                     {
                         use core::any::TypeId;
                         type Ef4 = p3_field::extension::BinomialExtensionField<
@@ -2883,7 +1866,7 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                                 )
                             }
                             unsafe {
-                                let evals_ef4: [Ef4; 4] = gpu_hook(
+                                let evals_ef4: [Ef4; 4] = dev_ops.logup_sumcheck(
                                     slice_cast::<EF, Ef4>(self.eq_int.as_slice()),
                                     slice_cast::<EF, Ef4>(self.eq_row.as_slice()),
                                     slice_cast::<EF, Ef4>(n0.as_slice()),
@@ -2999,6 +1982,12 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     // the `GkrDeviceHooks` fn-ptr bundle).  Here the layer-pull method feeds
     // `pull_device_layer_to_host`.  `&HostGkrDevice` = host round.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
+    // P7 static dispatch: the owned shard-level device-ops seam (was the
+    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
+    // `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks), cloned into the
+    // `LogupRoundPolynomial` built below and carried across every fold.
+    // `Arc<NoDeviceOps>` host / `Arc<CudaShardDeviceOps>` GPU.
+    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> LogupGkrRoundProof<EF>
 where
     F: PrimeField,
@@ -3126,6 +2115,7 @@ where
         lambda,
         first_round_device_hook,
         drain_hook,
+        alloc::sync::Arc::clone(dev),
     );
     let claimed_sum = poly.claimed_sum();
 
@@ -3677,6 +2667,12 @@ mod tests {
         DuplexChallenger::new(perm)
     }
 
+    /// Host device-ops seam for the round tests (P7): `Arc<NoDeviceOps>`
+    /// (`is_device()` false → the pure-host sumcheck path).
+    fn host_dev() -> alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps> {
+        alloc::sync::Arc::new(crate::shard_level::NoDeviceOps)
+    }
+
     #[test]
     fn poly_coefficients_roundtrip_recovers_evaluations() {
         // Pick a random-ish degree-3 poly.
@@ -3909,6 +2905,8 @@ mod tests {
             &crate::shard_level::device_first_layer_context::HostFirstRound,
             &crate::shard_level::device_first_layer_context::HostDrain,
             &crate::jagged_pcs::HostGkrDevice,
+            // P7: host device-ops seam.
+            &host_dev(),
         );
 
         // Claimed sum = λ · n_eval + d_eval.
@@ -4000,6 +2998,8 @@ mod tests {
             &crate::shard_level::device_first_layer_context::HostFirstRound,
             &crate::shard_level::device_first_layer_context::HostDrain,
             &crate::jagged_pcs::HostGkrDevice,
+            // P7: host device-ops seam.
+            &host_dev(),
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.
@@ -4210,10 +3210,10 @@ mod tests {
             + ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ONE);
 
         let eqroot = round_poly_evaluations_chip_structured(
-            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, round_coord,
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, round_coord, None,
         );
         let sweep = round_poly_evaluations_chip_structured(
-            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, EF::ZERO,
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, EF::ZERO, None,
         );
         assert_eq!(eqroot, sweep, "chip eq-root reconstruction != {{1,2,3}} sweep");
 

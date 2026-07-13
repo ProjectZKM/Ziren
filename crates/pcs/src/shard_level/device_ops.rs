@@ -51,8 +51,12 @@ type Kb = p3_koala_bear::KoalaBear;
 /// registries) plus (P6) the zerocheck y-tuple family
 /// (`GPU_ZEROCHECK_YTUPLE` / `_YTUPLE_DEVICE` / `_FOLD_DEVICE` /
 /// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL`), the latter carried by
-/// `ZeroCheckPoly` rather than threaded positionally (its read sites sit
-/// inside trait impls with no prover in scope).  All methods take `&self`
+/// `ZeroCheckPoly`, plus (P7) the logup-round sumcheck family
+/// (`GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
+/// `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE`), carried by
+/// `LogupRoundPolynomial` — both carried rather than threaded positionally
+/// (their read sites sit inside trait impls with no prover in scope).  All
+/// methods take `&self`
 /// and concrete arg types (no generics) so the trait is object-safe and
 /// threads as `&dyn`.
 ///
@@ -235,6 +239,100 @@ pub trait ShardDeviceOps: Send + Sync {
         _num_main_cols: usize,
     ) -> Option<Vec<Ef4>> {
         unreachable!("host ShardDeviceOps::zerocheck_extract_final — gated by is_device()")
+    }
+
+    // ── P7: the logup-round sumcheck family (carried by
+    //    `LogupRoundPolynomial`) ─────────────────────────────────────────
+    //
+    // The three methods below are the SP1-parity static-dispatch collapse of
+    // the former `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
+    // `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks.  They fire inside
+    // `LogupRoundPolynomial`'s `SumcheckPoly::sum_as_poly_in_last_variable`
+    // impl (the packed + chip-structured-device arms) and the
+    // `round_poly_evaluations_chip_structured` free fn, whose signatures are
+    // fixed by the generic `reduce_sumcheck_to_evaluation` driver (no
+    // `&self`-prover in scope), so the `Arc<dyn ShardDeviceOps>` is carried by
+    // the poly (an owned `dev` field, set at `new` + forwarded through every
+    // fold).  `is_device()` gates each (was the `get_*_hook().is_some()`
+    // presence check); the round polynomials the sumcheck feeds are observed
+    // into the Fiat-Shamir transcript by the host `reduce_sumcheck_to_evaluation`
+    // driver, which stays host, so the transcript is byte-identical to the
+    // former global-registry dispatch.
+
+    /// Packed-arm per-round LogUp-GKR sumcheck round-poly evaluator (was
+    /// `GPU_SUMCHECK`).  Returns the 4-point evals `(p(0), p(1), p(2), p(3))`
+    /// for an interaction-binding (packed-flat) round.  Only called under
+    /// `is_device()`.
+    #[allow(clippy::too_many_arguments)]
+    fn logup_sumcheck(
+        &self,
+        _eq_int: &[Ef4],
+        _eq_row: &[Ef4],
+        _n0: &[Ef4],
+        _d0: &[Ef4],
+        _n1: &[Ef4],
+        _d1: &[Ef4],
+        _lambda: Ef4,
+        _current_claim: Ef4,
+    ) -> [Ef4; 4] {
+        unreachable!("host ShardDeviceOps::logup_sumcheck — gated by is_device()")
+    }
+
+    /// Chip-structured (row-binding) per-round LogUp-GKR sumcheck round-poly
+    /// evaluator (was `GPU_CHIP_STRUCTURED_SUMCHECK`).  Data still in per-chip
+    /// `&[&[Ef4]]` form.  Returns the 4-point evals.  Only called under
+    /// `is_device()`.
+    #[allow(clippy::too_many_arguments)]
+    fn logup_chip_structured_sumcheck(
+        &self,
+        _n0: &[&[Ef4]],
+        _d0: &[&[Ef4]],
+        _n1: &[&[Ef4]],
+        _d1: &[&[Ef4]],
+        _chip_offsets: &[usize],
+        _chip_cols: &[usize],
+        _num_real_rows: &[usize],
+        _chip_rows: usize,
+        _eq_int: &[Ef4],
+        _eq_row: &[Ef4],
+        _pad_eq_int_sum: Ef4,
+        _lambda: Ef4,
+        _current_claim: Ef4,
+    ) -> [Ef4; 4] {
+        unreachable!(
+            "host ShardDeviceOps::logup_chip_structured_sumcheck — gated by is_device()"
+        )
+    }
+
+    /// Device-resident chip-structured per-round LogUp-GKR sumcheck with a
+    /// cross-round device-layer cache (was `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE`).
+    /// `sumcheck_id` keys the device cache; `round_idx == 0` marshals from the
+    /// host arrays, later rounds may consume the cached device layer folded by
+    /// `alpha_prev`.  Returns `Some([p(0),p(1),p(2),p(3)])`, or `None` to fall
+    /// back to host.  Only called under `is_device()`.
+    #[allow(clippy::too_many_arguments)]
+    fn logup_chip_structured_sumcheck_device(
+        &self,
+        _n0: &[&[Ef4]],
+        _d0: &[&[Ef4]],
+        _n1: &[&[Ef4]],
+        _d1: &[&[Ef4]],
+        _chip_offsets: &[usize],
+        _chip_cols: &[usize],
+        _num_real_rows: &[usize],
+        _chip_rows: usize,
+        _eq_int: &[Ef4],
+        _eq_row: &[Ef4],
+        _pad_eq_int_sum: Ef4,
+        _lambda: Ef4,
+        _current_claim: Ef4,
+        _sumcheck_id: u64,
+        _round_idx: usize,
+        _alpha_prev: Option<Ef4>,
+    ) -> Option<[Ef4; 4]> {
+        unreachable!(
+            "host ShardDeviceOps::logup_chip_structured_sumcheck_device — gated by is_device()"
+        )
     }
 }
 

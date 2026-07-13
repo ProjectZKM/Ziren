@@ -362,6 +362,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         let loader = crate::shard_level::main_trace_loader::EagerHostLoader::padded_only(
             &shared_trace_mles,
         );
+        // P7: source the single owned device-ops Arc for this shard.  The
+        // default (CpuProver / wrap prover / any prover not overriding
+        // `prove_shard_to_basefold`) is `Arc<NoDeviceOps>` (`is_device()` false
+        // → host path); `&**dev` serves the positional `&dyn` reads, the clone
+        // serves each round's `LogupRoundPolynomial`.  The GPU core prover
+        // overrides `prove_shard_to_basefold` and sources `Arc<CudaShardDeviceOps>`.
+        let dev: alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps> =
+            alloc::sync::Arc::new(crate::shard_level::NoDeviceOps);
         crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch::<SC, A, _, _>(
             chips,
             preprocessed_traces,
@@ -398,12 +406,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             &crate::shard_level::device_first_layer_context::HostFirstRound,
             &crate::shard_level::device_first_layer_context::HostDrain,
             &crate::jagged_pcs::HostGkrDevice,
-            // P5 static dispatch: host device ops = no device.  The default
-            // (CpuProver / wrap prover / any prover not overriding
-            // `prove_shard_to_basefold`) threads `&NoDeviceOps`
+            // P5/P7 static dispatch: host device ops = no device, carried as the
+            // owned `Arc`.  The default (CpuProver / wrap prover / any prover not
+            // overriding `prove_shard_to_basefold`) threads `Arc<NoDeviceOps>`
             // (`is_device()` false → host path); the GPU core prover overrides
-            // `prove_shard_to_basefold` and threads `&CudaShardDeviceOps`.
-            &crate::shard_level::NoDeviceOps,
+            // `prove_shard_to_basefold` and threads `Arc<CudaShardDeviceOps>`.
+            &dev,
         )
     }
 

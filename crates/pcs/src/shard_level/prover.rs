@@ -263,6 +263,11 @@ where
     // Pure host-path entry (the shrink + dummy callers): no device fns.  The
     // device sites (core/compress/wrap) supply these via the
     // `MachineProver::prove_shard_to_basefold` override, not this free fn.
+    // P7: source the single owned device-ops Arc for this shard (host = no
+    // device); `&**dev` serves the positional `&dyn` reads, the clone serves
+    // the per-round `LogupRoundPolynomial`.
+    let dev: alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps> =
+        alloc::sync::Arc::new(crate::shard_level::NoDeviceOps);
     prove_shard_to_basefold_with_loader::<SC, A, _>(
         chips,
         preprocessed_traces,
@@ -284,8 +289,8 @@ where
         &crate::shard_level::device_first_layer_context::HostFirstRound,
         &crate::shard_level::device_first_layer_context::HostDrain,
         &crate::jagged_pcs::HostGkrDevice,
-        // P5: host device ops = no device (the pre-hook host path).
-        &crate::shard_level::NoDeviceOps,
+        // P5/P7: host device ops = no device (the pre-hook host path), owned Arc.
+        &dev,
     )
 }
 
@@ -539,11 +544,15 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // the `GkrDeviceHooks` fn-ptr bundle).  The GPU callers thread
     // `&DeviceGkrDevice`, host callers thread `&HostGkrDevice` = host walk.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-    // P5: the unified device ops seam (was the `GPU_EVAL_AT_PROVIDER` /
-    // `GPU_EVAL_AT_BATCH_PROVIDER` / `GPU_INTERACTION_EVAL` /
-    // `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`s).  `&CudaShardDeviceOps` on
-    // the GPU prover, `&NoDeviceOps` on host callers = host path.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
+    // P5/P7: the unified device ops seam, carried as the OWNED `Arc` so the one
+    // per-shard dev object feeds BOTH the P5 positional `&dyn` reads (`&**dev`)
+    // and the P7 per-round `LogupRoundPolynomial` clone.  Was the
+    // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
+    // `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` P5 hooks + the P7
+    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` / `_DEVICE` logup hooks.
+    // `Arc<CudaShardDeviceOps>` on the GPU prover, `Arc<NoDeviceOps>` on host
+    // callers = host path.
+    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -660,12 +669,15 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // the `GkrDeviceHooks` fn-ptr bundle).  `&DeviceGkrDevice` on the GPU
     // prover, `&HostGkrDevice` on host callers = host walk.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-    // P5: the unified device ops seam (was the `GPU_EVAL_AT_PROVIDER` /
-    // `GPU_EVAL_AT_BATCH_PROVIDER` / `GPU_INTERACTION_EVAL` /
-    // `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`s), distributed to the GKR-rows
-    // + zerocheck stages.  `&CudaShardDeviceOps` on the GPU prover,
-    // `&NoDeviceOps` on host callers = host path.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
+    // P5/P7: the unified device ops seam, carried as the OWNED `Arc`, distributed
+    // to the GKR-rows (`&**dev` for the P5 eval-at reads + `dev` cloned into the
+    // P7 per-round `LogupRoundPolynomial`) + zerocheck (`&**dev`) stages.  Was
+    // the `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
+    // `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` P5 hooks + the P7
+    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` / `_DEVICE` logup hooks.
+    // `Arc<CudaShardDeviceOps>` on the GPU prover, `Arc<NoDeviceOps>` on host
+    // callers = host path.
+    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1091,7 +1103,8 @@ where
             dense_rev,
             // P5: the device ops seam for the zerocheck device-fold
             // prepare-cells op (was the `GPU_ZEROCHECK_PREPARE_CELLS` OnceLock).
-            dev,
+            // Zerocheck keeps its positional `&dyn` param; deref the owned Arc.
+            &**dev,
         )
     };
     tracing::info!(
