@@ -322,14 +322,10 @@ pub fn verify_core_basefold<C, SC, A>(
                 };
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
 
-            // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
-            // (set to any value) falls back to the bytes lift; preserved
-            // as a kill switch when bundle-lift recursion shape
-            // registration regresses.
+            // Bundle lift is the production (and only) path.
             use crate::shard_level_witness::LiftedEvalProof;
-            let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
             let evaluation_proof_var = match &evaluation_proof {
-                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                     crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                         builder,
                         host,
@@ -345,12 +341,6 @@ pub fn verify_core_basefold<C, SC, A>(
                         cps_heights,
                     )
                 }
-                LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                    builder,
-                    &host.to_bytes(),
-                    max_log_row_count,
-                    &column_counts_by_round_pre,
-                ),
                 LiftedEvalProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                     builder,
                     bytes,
@@ -549,7 +539,7 @@ pub fn verify_core_basefold<C, SC, A>(
             // primitive is in place regardless.
             let per_proof_verifier;
             let active_verifier = match &evaluation_proof {
-                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+                LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                     let bundle_num_vars =
                         host.basefold_proof.basefold_proof.fri_commitments.len();
                     // Fixed-height guard: enumerability rests on every

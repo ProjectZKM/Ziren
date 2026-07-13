@@ -185,20 +185,13 @@ where
     // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
     // below); the BaseFold opening still binds against `raw_root`, carried to
     // the recursion lift via `BasefoldShardProof::jagged_original_commitment`.
-    // Default-ON (the production / enumerable+sound path); opt-out
-    // ZIREN_JAGGED_HASH_BIND=0 keeps the legacy raw-root-only digest for A/B
-    // (then the lift falls back to main_commitment == raw_root).
-    let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
-        .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-        .unwrap_or(true);
-    let digest_inner: [InnerVal; 8] = if hash_bind_on {
+    // Jagged hash-bind is unconditional on this inner-ring build path
+    // (SP1-parity; was the ZIREN_JAGGED_HASH_BIND default-on gate).
+    let digest_inner: [InnerVal; 8] =
         crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
             raw_root_inner,
             &precomputed.packing,
-        )
-    } else {
-        raw_root_inner
-    };
+        );
 
     // The borrowed `main_traces` views are returned unchanged (`named_inner`
     // only relabeled them to InnerVal for the commit build; no owned buffer to
@@ -1177,10 +1170,11 @@ where
                 .chip_openings
                 .values()
                 .all(|ce| ce.main_trace_evaluations_full.is_some());
-        let on = std::env::var("ZIREN_ZC_RESIDUAL_Y")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(true);
-        if !on || !full_openings_ok {
+        // Residual fast-path is unconditional (SP1-parity; was the
+        // ZIREN_ZC_RESIDUAL_Y default-on kill-switch).  Declines whole-shard
+        // (legacy fallback, identical bytes) only when the full openings are
+        // unavailable.
+        if !full_openings_ok {
             None
         } else {
             let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());

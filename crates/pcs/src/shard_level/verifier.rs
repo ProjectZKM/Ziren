@@ -349,10 +349,7 @@ impl BasefoldShardVerifier {
                 && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
                 && TypeId::of::<SC::Challenger>()
                     == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
-            let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
-            if inner_ring && hash_bind_on {
+            if inner_ring {
                 if let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof {
                     let raw_inner =
                         crate::jagged_pcs::basefold_commit_digest(&bundle.commit);

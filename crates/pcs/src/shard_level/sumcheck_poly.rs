@@ -711,7 +711,7 @@ pub struct GpuLogupRoundResult {
 /// `None` means GPU declined — caller must fall back to the host
 /// trait driver. The hook is opaque about why, so it MUST
 /// log/instrument internally.
-pub type GpuLogupRoundProverFn = fn(
+pub type GpuLogupRoundProverFnDeviceFold = fn(
     n0_flat: Vec<Ef4>,
     d0_flat: Vec<Ef4>,
     n1_flat: Vec<Ef4>,
@@ -725,8 +725,8 @@ pub type GpuLogupRoundProverFn = fn(
     sample_ef: &dyn Fn() -> Ef4,
 ) -> Option<GpuLogupRoundResult>;
 
-gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK: GpuLogupRoundProverFn
-    => register_gpu_logup_round_hook, get_gpu_logup_round_hook);
+gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD: GpuLogupRoundProverFnDeviceFold
+    => register_gpu_logup_round_hook_device_fold, get_gpu_logup_round_hook_device_fold);
 
 // Chip-structured sumcheck round-poly (rounds 1..N with
 // `chip_rows > 1`, data still in per-chip `Vec<Vec<EF>>` form).
@@ -820,7 +820,7 @@ impl core::fmt::Debug for DeviceLayerHandle {
 
 /// `input` is `None` for the outermost layer's round 0; the `*_flat`
 /// vectors are the fallback shape and may be ignored when `input.is_some()`.
-pub type GpuLogupRoundProverFnV3 = fn(
+pub type GpuLogupRoundProverFn = fn(
     input: Option<DeviceLayerHandle>,
     n0_flat: Vec<Ef4>,
     d0_flat: Vec<Ef4>,
@@ -834,8 +834,8 @@ pub type GpuLogupRoundProverFnV3 = fn(
     challenger: &mut crate::InnerChallenger,
 ) -> Option<GpuLogupRoundResult>;
 
-gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK_V3: GpuLogupRoundProverFnV3
-    => register_gpu_logup_round_hook_v3, get_gpu_logup_round_hook_v3);
+gpu_hook_accessors!(GPU_LOGUP_ROUND_HOOK: GpuLogupRoundProverFn
+    => register_gpu_logup_round_hook, get_gpu_logup_round_hook);
 
 // TLS slot threading `DeviceLayerHandle` between V3 hook calls
 // within one shard's GKR walk. Orchestrator must `clear` at shard
@@ -1145,10 +1145,10 @@ mod tests {
     #[test]
     fn register_gpu_logup_round_hook_v3_smoke() {
         // First registration succeeds; second is rejected (idempotent).
-        let _ = register_gpu_logup_round_hook_v3(stub_v3_hook);
-        assert!(get_gpu_logup_round_hook_v3().is_some());
+        let _ = register_gpu_logup_round_hook(stub_v3_hook);
+        assert!(get_gpu_logup_round_hook().is_some());
         // Re-register must fail (OnceLock).
-        let err = register_gpu_logup_round_hook_v3(stub_v3_hook);
+        let err = register_gpu_logup_round_hook(stub_v3_hook);
         assert!(err.is_err());
     }
 }

@@ -1232,17 +1232,13 @@ where
     // in its registered hook).  Default-ON; ZIREN_JAGGED_HASH_BIND=0 = legacy.
     let digest_jv: [crate::jagged_pcs::JaggedVal; 8] = {
         use core::any::TypeId;
-        let hash_bind_on = std::env::var("ZIREN_JAGGED_HASH_BIND")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(true);
         let is_inner = TypeId::of::<SC::Challenger>()
             == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
-        if hash_bind_on && is_inner {
-            let modified = crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
+        if is_inner {
+            crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
                 digest_jv_raw,
                 &precomputed.packing,
-            );
-            modified
+            )
         } else {
             digest_jv_raw
         }

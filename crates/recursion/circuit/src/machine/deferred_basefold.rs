@@ -248,14 +248,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 ))
             };
 
-        // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
-        // (set to any value) falls back to the bytes lift; preserved
-        // as a kill switch when bundle-lift recursion shape
-        // registration regresses.
+        // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
-        let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
         let evaluation_proof_var = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                 crate::shard_level_witness::lift_jagged_basefold_bundle::<C, SC>(
                     builder,
                     host,
@@ -271,12 +267,6 @@ pub fn verify_deferred_basefold<C, SC, A>(
                     chip_height_felts_pre.as_deref(),
                 )
             }
-            LiftedEvalProof::Bundle { host, .. } => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
-                builder,
-                &host.to_bytes(),
-                max_log_row_count,
-                &column_counts_by_round,
-            ),
             LiftedEvalProof::Bytes(bytes) => crate::jagged_pcs_lift::lift_evaluation_proof_bytes::<C, SC>(
                 builder,
                 bytes,
@@ -372,7 +362,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
         // Mirrors core_basefold.rs:418-434 / compress_basefold.rs / wrap_basefold.rs.
         let per_proof_verifier;
         let active_verifier = match &evaluation_proof {
-            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+            LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
                 let bundle_num_vars =
                     host.basefold_proof.basefold_proof.fri_commitments.len();
                 // Fixed-height guard: see core_basefold.

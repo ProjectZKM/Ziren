@@ -3009,89 +3009,14 @@ where
     EF: ExtensionField<F> + BasedVectorSpace<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // ── Lazy device-resident V3 fast path (SP1-style full residency) ──
-    //
-    // The per-layer LogUp-GKR sumcheck state stays device-resident across
-    // layers: when the prior layer's V3 call stashed a device-output handle
-    // (every subsequent layer in a shard's GKR walk), V3 reads its
-    // (n0,d0,n1,d1) quadrants straight from that device buffer and needs NO
-    // host cells.  So for those layers we SKIP pulling the device layer to
-    // host entirely and run V3 device-resident — eliminating the
-    // device→host→device round-trip that dominated the reth wall.
-    //
-    // Only the first layer of a shard (no handle yet) or a V3 *decline*
-    // (e.g. the 28-var first layer above the device-vars cap) falls through
-    // to the host pull below, which feeds V2/V1/host.  Pull-on-decline keeps
-    // the fallback correct.
-    //
     // Dims come from the layer STATE — no pull needed to compute them.
-    // SP1-static: LogUp-GKR device dispatch always on (V3 lazy-residency
-    // path). Env gate removed (was ZIREN_GPU_LOGUP_GKR_DEVICE, default-on).
+    // SP1-static: LogUp-GKR device dispatch is always on (host trait
+    // driver on decline).
     let dims = (state.num_row_variables(), state.num_interaction_variables());
-    let total_vars_state = dims.0 + dims.1;
-    let v3_threshold_vars: usize = {
-        static THRESH: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-        *THRESH.get_or_init(|| {
-            std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(0)
-        })
-    };
-    let v3_threshold_ok = !(v3_threshold_vars > 0 && total_vars_state < v3_threshold_vars);
-
-    let mut lazy_v3_attempted = false;
-    if v3_threshold_ok {
-        use core::any::TypeId;
-        type Ef4Lazy =
-            p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        if let LayerState::Device { circuit_id, .. } = state {
-            if TypeId::of::<EF>() == TypeId::of::<Ef4Lazy>()
-                && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
-            {
-                // Full residency: ask the device-side cache to publish THIS
-                // layer's device-resident state to the V3 TLS handle.  The hook
-                // is match-aware on `num_variables` and filters to adoptable
-                // layers, so small/interleaved/over-cap layers (e.g. the 28-var
-                // first layer) return `false` and fall through to the host pull.
-                // On success the V3 hook adopts the device buffers directly —
-                // no device→host→device round-trip.
-                let published =
-                    gkr_device_hooks
-                        .v3_fetch_publish
-                        .map(|h| h(*circuit_id, total_vars_state))
-                        .unwrap_or(false);
-                if published {
-                    if let Some(gpu_hook_v3) =
-                        crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3()
-                    {
-                        lazy_v3_attempted = true;
-                        if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
-                            dims,
-                            None,
-                            eval_point,
-                            numerator_eval,
-                            denominator_eval,
-                            lambda,
-                            challenger,
-                            gpu_hook_v3,
-                        ) {
-                            return proof;
-                        }
-                        // V3 declined (should not happen for a published,
-                        // adoptable layer) → fall through to the host pull +
-                        // V2/V1/host.  The TLS handle was consumed by
-                        // try_logup_round_gpu_v3, so no stale handle leaks.
-                    }
-                }
-            }
-        }
-    }
 
     // Host-resident layer view.  For `LayerState::Device` this pulls the
-    // cells from the GPU registry — reached only when the lazy V3 fast path
-    // above didn't handle this layer (first layer, V3 decline, or V3 not
-    // eligible).  Feeds the V3 first-layer marshalling + V2/V1/host fallback.
+    // cells from the GPU registry.  Feeds the device-pack first-layer
+    // marshalling + device-fold/host fallback.
     let pulled_owner: Option<GkrCircuitLayer<F, EF>> = match state {
         LayerState::Host(_) => None,
         LayerState::Device { circuit_id, handle, .. } => Some(
@@ -3113,7 +3038,7 @@ where
     // Device-resident per-layer LogUp-GKR sumcheck.
     //
     // When `ZIREN_GPU_LOGUP_GKR_DEVICE=1` AND a GPU prover is
-    // registered via `register_gpu_logup_round_hook` AND `EF` is the
+    // registered via `register_gpu_logup_round_hook_device_fold` AND `EF` is the
     // production `Ef4` concrete type, route the entire per-layer
     // sumcheck (all `total_vars` rounds) through the GPU hook so the
     // (n0, d0, n1, d1, eq_int, eq_row) state stays device-resident
@@ -3141,67 +3066,19 @@ where
         type Ef4 = p3_field::extension::BinomialExtensionField<
             p3_koala_bear::KoalaBear, 4>;
 
-        // Per-layer size threshold: skip the GPU dispatch entirely
-        // (including all of try_logup_round_gpu_v3's host marshalling —
-        // flatten_layer, build_eq_table, vec conversions) when this
-        // layer's total_vars is below the env-configured threshold.
-        // Default = 0 runs every dispatch, whether the inner hook will
-        // accept or decline based on its own MIN_DEVICE_TOTAL_VARS=8 gate.
-        //
-        // Set ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS=N (recommend
-        // N in [14,20]) to avoid routing tiny layers through V3.  When
-        // the guard fires, control falls straight to the host
-        // trait-driven driver below.
-        let v3_threshold_vars: usize = {
-            static THRESH: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
-            *THRESH.get_or_init(|| {
-                std::env::var("ZIREN_GPU_LOGUP_GKR_DEVICE_THRESHOLD_VARS")
-                    .ok()
-                    .and_then(|v| v.parse::<usize>().ok())
-                    .unwrap_or(0)
-            })
-        };
-        let total_vars_for_threshold: usize = match circuit {
-            GkrCircuitLayer::Layer(l) => {
-                l.num_row_variables + l.num_interaction_variables
-            }
-            GkrCircuitLayer::FirstLayer(l) => {
-                l.num_row_variables + l.num_interaction_variables
-            }
-        };
-        if v3_threshold_vars > 0
-            && total_vars_for_threshold < v3_threshold_vars
-        {
-            // Skip GPU dispatch — too small to amortize per-call
-            // overhead.  Fall through to the host trait driver below.
-            // No fired_once log here: per-call diagnostics would be too
-            // noisy; the ZIREN_LOGUP_V3_PROFILE probe inside
-            // try_logup_round_gpu_v3 captures "did we even reach the
-            // hook" via its log presence.
-        } else {
-
-        // V2 dispatch (preferred when challenger is
-        // InnerChallenger).  V2 takes &mut InnerChallenger directly —
-        // the eventual fused round-finalize kernel will use device-
-        // resident DuplexChallenger state to eliminate per-round
-        // host roundtrips.  V2 falls through to V1 below if it
-        // declines or the registered V2 impl chooses not to handle
-        // this layer.
+        // Device-pack dispatch (preferred when the challenger is the
+        // production InnerChallenger).  The device-pack hook accepts an
+        // opaque device-layer handle and marshals from the pulled layer;
+        // its inner MIN_DEVICE_TOTAL_VARS gate decides per-layer
+        // eligibility and declines (`None`) for tiny layers, falling
+        // through to the device-fold hook and then the host trait driver.
         if TypeId::of::<EF>() == TypeId::of::<Ef4>()
             && TypeId::of::<Challenger>() == TypeId::of::<crate::InnerChallenger>()
         {
-            // V3 dispatch (preferred over V2 when registered).
-            // V3 hook accepts an opaque device-layer handle (Option<...>); first
-            // call passes None and the hook marshals from `*_flat` host vecs,
-            // subsequent calls within the same shard pass the stashed handle
-            // from the prior layer's output so flatten_layer is skipped.
-            // Handle threading is via TLS — this dispatch site stays
-            // signature-compatible with V2.
-            if let (false, Some(gpu_hook_v3)) = (
-                lazy_v3_attempted,
-                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_v3(),
-            ) {
-                if let Some(proof) = try_logup_round_gpu_v3::<F, EF, _>(
+            if let Some(gpu_hook_v3) =
+                crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook()
+            {
+                if let Some(proof) = try_logup_round_gpu::<F, EF, _>(
                     dims,
                     Some(circuit),
                     eval_point,
@@ -3213,16 +3090,16 @@ where
                 ) {
                     return proof;
                 }
-                // V3 declined → fall through to V1/host.  (V2 dispatch arm
-                // retired in M3 — the device pack is the production path.)
+                // Device pack declined → fall through to the device-fold
+                // hook and then the host trait driver.
             }
         }
 
         if let Some(gpu_hook) =
-            crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook()
+            crate::shard_level::sumcheck_poly::get_gpu_logup_round_hook_device_fold()
         {
             if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
-                if let Some(proof) = try_logup_round_gpu::<F, EF, _>(
+                if let Some(proof) = try_logup_round_gpu_device_fold::<F, EF, _>(
                     circuit,
                     eval_point,
                     numerator_eval,
@@ -3239,7 +3116,6 @@ where
                 // spam on the (intentional) MIN_DEVICE_HALF cutoff.
             }
         }
-        } // end of `else` arm for v3_threshold_vars guard (threshold guard)
     }
 
     // Construct the trait-shaped sumcheck poly that wraps the layer
@@ -3329,14 +3205,14 @@ fn snapshot_inner_challenger<Challenger: 'static>(ch: &Challenger) -> Option<Cha
     }
 }
 
-fn try_logup_round_gpu<F, EF, Challenger>(
+fn try_logup_round_gpu_device_fold<F, EF, Challenger>(
     circuit: &GkrCircuitLayer<F, EF>,
     eval_point: &[EF],
     numerator_eval: EF,
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    gpu_hook: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFn,
+    gpu_hook: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFnDeviceFold,
 ) -> Option<LogupGkrRoundProof<EF>>
 where
     F: PrimeField,
@@ -3351,7 +3227,7 @@ where
     debug_assert_eq!(
         core::any::TypeId::of::<EF>(),
         core::any::TypeId::of::<Ef4>(),
-        "try_logup_round_gpu invoked with EF != Ef4",
+        "try_logup_round_gpu_device_fold invoked with EF != Ef4",
     );
 
     // SAFETY: TypeId equality (asserted above) guarantees `EF` and
@@ -3516,7 +3392,7 @@ fn nv28_device_pack_meta_enabled() -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn try_logup_round_gpu_v3<F, EF, Challenger>(
+fn try_logup_round_gpu<F, EF, Challenger>(
     dims: (usize, usize),
     circuit: Option<&GkrCircuitLayer<F, EF>>,
     eval_point: &[EF],
@@ -3524,7 +3400,7 @@ fn try_logup_round_gpu_v3<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    gpu_hook_v3: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFnV3,
+    gpu_hook_v3: crate::shard_level::sumcheck_poly::GpuLogupRoundProverFn,
 ) -> Option<LogupGkrRoundProof<EF>>
 where
     F: PrimeField,
@@ -3537,12 +3413,12 @@ where
     debug_assert_eq!(
         core::any::TypeId::of::<EF>(),
         core::any::TypeId::of::<Ef4>(),
-        "try_logup_round_gpu_v3 invoked with EF != Ef4",
+        "try_logup_round_gpu invoked with EF != Ef4",
     );
     debug_assert_eq!(
         core::any::TypeId::of::<Challenger>(),
         core::any::TypeId::of::<crate::InnerChallenger>(),
-        "try_logup_round_gpu_v3 invoked with Challenger != InnerChallenger",
+        "try_logup_round_gpu invoked with Challenger != InnerChallenger",
     );
 
     #[inline]

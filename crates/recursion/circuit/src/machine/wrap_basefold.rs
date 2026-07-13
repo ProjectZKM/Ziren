@@ -244,12 +244,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             &proof_opened_values,
         );
 
-    // Bundle lift is the production path.  ZIREN_LEGACY_NONBUNDLE_LIFT
-    // (set to any value) falls back to the placeholder per-shard lift;
-    // preserved as a kill switch for forensics when bundle-lift recursion
-    // shape registration regresses.  Default unset = bundle path.
+    // Bundle lift is the production (and only) path.
     use crate::shard_level_witness::LiftedEvalProof;
-    let legacy_lift = std::env::var("ZIREN_LEGACY_NONBUNDLE_LIFT").is_ok();
     let evaluation_proof_var = match &evaluation_proof {
         // The gnark wrap path — WITNESSED outer BN254 bundle.
         // Routed via the ring dispatch (OUTER impl lifts it value-independently;
@@ -268,7 +264,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 None,
             )
         }
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
             // Route through the ring-aware trait dispatch so the
             // SC-generic core compiles for BOTH inner ([Felt;8], witnessed
             // bundle) and outer (BN254, dead arm → placeholder).
@@ -287,12 +283,6 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 Some(&chip_height_felts_pre),
             )
         }
-        LiftedEvalProof::Bundle { host, .. } => <SC as FieldHasherVariable<C>>::lift_evaluation_proof_bytes_dispatch(
-            builder,
-            &host.to_bytes(),
-            max_log_row_count,
-            &column_counts_by_round,
-        ),
         LiftedEvalProof::Bytes(bytes) => {
             // Ring-aware dispatch.  SC is the field hasher (HV); its impl
             // deserializes the OUTER bundle
@@ -405,7 +395,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // Mirrors core_basefold.rs:418-434 / compress_basefold.rs.
     let per_proof_verifier;
     let active_verifier = match &evaluation_proof {
-        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } if !legacy_lift => {
+        LiftedEvalProof::Bundle { host, basefold_proof, sumcheck, jagged_eval, expected_eval, commit_root, modified_commitment } => {
             let bundle_num_vars =
                 host.basefold_proof.basefold_proof.fri_commitments.len();
             per_proof_verifier =

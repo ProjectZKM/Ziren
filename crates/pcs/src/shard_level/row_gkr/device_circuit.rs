@@ -456,7 +456,7 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 /// * **Construction** binds a fresh `circuit_id` (multi-GPU isolation —
 ///   matches `LayerState::Device::circuit_id`) and stashes the
 ///   scope handle in a thread-local slot so the V3 dispatch site
-///   (`try_logup_round_gpu_v3`) can consult it without threading new
+///   (`try_logup_round_gpu`) can consult it without threading new
 ///   arguments through Ziren's per-round signatures.
 ///
 /// * **Drop** clears the slot AND the V3 next-layer TLS via
@@ -624,7 +624,7 @@ std::thread_local! {
 ///
 /// Stores a raw `*mut LogupTaskScope<KoalaBear, Ef4>` for the
 /// production scope (`(F, EF) = (KoalaBear, Ef4)`).  The V3 dispatch
-/// at `round.rs:try_logup_round_gpu_v3` reads this slot to:
+/// at `round.rs:try_logup_round_gpu` reads this slot to:
 ///
 /// 1. Pop a pre-materialized [`DeviceCircuitLayer`] from the scope's
 ///    installed [`DeviceLogupGkrCircuit`].
@@ -1241,7 +1241,7 @@ mod tests {
     /// pop a layer from an installed scope via
     /// `with_production_scope_mut`, bridge to a sumcheck handle, and
     /// confirm the round-trip.  This mirrors what
-    /// `try_logup_round_gpu_v3` does on the hot path once 
+    /// `try_logup_round_gpu` does on the hot path once 
     /// installs a circuit.
     #[test]
     fn dispatch_site_pop_and_bridge_roundtrip() {
