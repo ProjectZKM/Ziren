@@ -284,6 +284,8 @@ where
         &crate::shard_level::device_first_layer_context::HostFirstRound,
         &crate::shard_level::device_first_layer_context::HostDrain,
         &crate::jagged_pcs::HostGkrDevice,
+        // P5: host device ops = no device (the pre-hook host path).
+        &crate::shard_level::NoDeviceOps,
     )
 }
 
@@ -537,6 +539,11 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // the `GkrDeviceHooks` fn-ptr bundle).  The GPU callers thread
     // `&DeviceGkrDevice`, host callers thread `&HostGkrDevice` = host walk.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
+    // P5: the unified device ops seam (was the `GPU_EVAL_AT_PROVIDER` /
+    // `GPU_EVAL_AT_BATCH_PROVIDER` / `GPU_INTERACTION_EVAL` /
+    // `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`s).  `&CudaShardDeviceOps` on
+    // the GPU prover, `&NoDeviceOps` on host callers = host path.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -592,6 +599,7 @@ where
         first_round_device_hook,
         drain_hook,
         gkr_device_hooks,
+        dev,
     )
 }
 
@@ -652,6 +660,12 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // the `GkrDeviceHooks` fn-ptr bundle).  `&DeviceGkrDevice` on the GPU
     // prover, `&HostGkrDevice` on host callers = host walk.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
+    // P5: the unified device ops seam (was the `GPU_EVAL_AT_PROVIDER` /
+    // `GPU_EVAL_AT_BATCH_PROVIDER` / `GPU_INTERACTION_EVAL` /
+    // `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`s), distributed to the GKR-rows
+    // + zerocheck stages.  `&CudaShardDeviceOps` on the GPU prover,
+    // `&NoDeviceOps` on host callers = host path.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1041,6 +1055,10 @@ where
             // eight `GPU_*_HOOK` OnceLocks), distributed to the row-GKR
             // firing sites inside `prove_shard_logup_gkr_rows`.
             gkr_device_hooks,
+            // P5: the device ops seam for eval-at + interaction-eval (was the
+            // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
+            // `GPU_INTERACTION_EVAL` OnceLocks).
+            dev,
         )
     };
     tracing::info!(
@@ -1071,6 +1089,9 @@ where
             // band-cap carrier removal Phase B: the per-shard rev(zeta)
             // orientation (was the `current_use_rev()` carrier).
             dense_rev,
+            // P5: the device ops seam for the zerocheck device-fold
+            // prepare-cells op (was the `GPU_ZEROCHECK_PREPARE_CELLS` OnceLock).
+            dev,
         )
     };
     tracing::info!(

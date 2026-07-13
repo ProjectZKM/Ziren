@@ -89,13 +89,16 @@ pub fn materialize_chip_main_trace_via_provider<F>(
 where
     F: PrimeField,
 {
-    let hook = crate::shard_level::sumcheck_poly::get_gpu_materialize_trace_hook()?;
     use core::any::TypeId;
     type Kb = p3_koala_bear::KoalaBear;
     if TypeId::of::<F>() != TypeId::of::<Kb>() {
         return None;
     }
-    let (vals_kb, width) = hook(chip_name, device_traces)?;
+    // P5 static dispatch: the former `GPU_MATERIALIZE_TRACE` `OnceLock` is
+    // now the `DeviceTraceProvider::materialize_main_trace` method (a pure
+    // provider query).  `None` on host / non-device providers = the legacy
+    // unregistered-hook path.
+    let (vals_kb, width) = device_traces.materialize_main_trace(chip_name)?;
     // SAFETY: TypeId equality guarantees F == Kb; Vec layout identical.
     let vals: Vec<F> = unsafe {
         let len = vals_kb.len();
@@ -144,12 +147,19 @@ pub fn eval_chip_columns_at_point_via_provider<F, EF>(
     chip_name: &str,
     eval_point: &[EF],
     device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+    // P5 static dispatch: the device ops provider (was the
+    // `GPU_EVAL_AT_PROVIDER` `OnceLock`).  `NoDeviceOps` on host
+    // (`is_device()` false → `None`, the legacy unregistered-hook path);
+    // `CudaShardDeviceOps` on the GPU prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Option<Vec<EF>>
 where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    let hook = crate::shard_level::sumcheck_poly::get_gpu_eval_at_provider_hook()?;
+    if !dev.is_device() {
+        return None;
+    }
     use core::any::TypeId;
     type Kb = p3_koala_bear::KoalaBear;
     type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
@@ -160,7 +170,7 @@ where
     unsafe {
         let ep: &[Ef4] =
             core::slice::from_raw_parts(eval_point.as_ptr().cast::<Ef4>(), eval_point.len());
-        let res_ef4: Vec<Ef4> = hook(chip_name, ep, device_traces)?;
+        let res_ef4: Vec<Ef4> = dev.eval_at_provider(chip_name, ep, device_traces)?;
         let len = res_ef4.len();
         let cap = res_ef4.capacity();
         let ptr = core::mem::ManuallyDrop::new(res_ef4).as_mut_ptr() as *mut EF;
@@ -180,17 +190,20 @@ pub fn eval_chips_at_points_batched_via_provider<F, EF>(
     names: &[String],
     eval_points: &[Vec<EF>],
     device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+    // P5 static dispatch: the device ops provider (was the
+    // `GPU_EVAL_AT_BATCH_PROVIDER` `OnceLock`).  `NoDeviceOps` on host
+    // (`is_device()` false → all-`None`, the legacy unregistered-hook
+    // path); `CudaShardDeviceOps` on the GPU prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Vec<Option<Vec<EF>>>
 where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
     let none = || (0..names.len()).map(|_| None).collect::<Vec<_>>();
-    let Some(hook) =
-        crate::shard_level::sumcheck_poly::get_gpu_eval_at_batch_provider_hook()
-    else {
+    if !dev.is_device() {
         return none();
-    };
+    }
     use core::any::TypeId;
     type Kb = p3_koala_bear::KoalaBear;
     type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
@@ -204,7 +217,7 @@ where
             eval_points.as_ptr().cast::<Vec<Ef4>>(),
             eval_points.len(),
         );
-        let res: Vec<Option<Vec<Ef4>>> = hook(names, eps, device_traces);
+        let res: Vec<Option<Vec<Ef4>>> = dev.eval_at_batch_provider(names, eps, device_traces);
         // Reinterpret Vec<Option<Vec<Ef4>>> -> Vec<Option<Vec<EF>>> (same layout).
         let len = res.len();
         let cap = res.capacity();

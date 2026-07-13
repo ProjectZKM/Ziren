@@ -56,6 +56,14 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     // post-walk drain site.  `&HostGkrDevice` = host walk, byte-identical to
     // the pre-#118 path.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
+    // P5 static dispatch: the shard-level device ops seam (was the
+    // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
+    // `GPU_INTERACTION_EVAL` `OnceLock`s), threaded to the eval-at provider
+    // helpers here and down into `build_gkr_circuit` →
+    // `generate_first_layer` (interaction eval).  `&NoDeviceOps`
+    // (`is_device()` false) = host path, `&CudaShardDeviceOps` on the GPU
+    // prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -170,6 +178,9 @@ where
         // #118: init / transition / pull / fit-preflight fns (were the
         // `GPU_LAYER_*_HOOK` OnceLocks), consulted on the device-fold path.
         gkr_device_hooks,
+        // P5: the device ops seam, distributed to `generate_first_layer`'s
+        // interaction-eval dispatch (was the `GPU_INTERACTION_EVAL` OnceLock).
+        dev,
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
@@ -384,7 +395,7 @@ where
             } else {
                 let results =
                     crate::shard_level::logup_gkr_prover::eval_chips_at_points_batched_via_provider::<F, EF>(
-                        &names, &points, provider,
+                        &names, &points, provider, dev,
                     );
                 let mut map = BTreeMap::new();
                 for (name, res) in names.iter().zip(results.into_iter()) {
@@ -457,6 +468,7 @@ where
                                 &chip.name(),
                                 main_eval_point,
                                 p,
+                                dev,
                             )
                         })
                     })
@@ -504,6 +516,7 @@ where
                         &chip.name(),
                         full_eval_point,
                         p,
+                        dev,
                     )
                 })
             } else if pm.inner().is_some() {

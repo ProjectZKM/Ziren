@@ -316,66 +316,14 @@ pub type GpuSumcheckEvalsFn = fn(
 gpu_hook_accessors!(GPU_SUMCHECK_HOOK: GpuSumcheckEvalsFn
     => register_gpu_sumcheck_hook, get_gpu_sumcheck_hook);
 
-// GPU per-chip eval_at hook for the LogUp-GKR final-layer eval-at step.
-type Kb = p3_koala_bear::KoalaBear;
-
-/// Signature: `(trace_row_major: &[Kb], width: usize, eval_point: &[Ef4])
-///            -> Vec<Ef4>` returning one Ef4 per column.  Receives
-/// row-major host data; the implementation is responsible for any
-/// device upload/download.
-pub type GpuEvalAtFn = fn(
-    trace: &[Kb],
-    width: usize,
-    eval_point: &[Ef4],
-) -> Vec<Ef4>;
-
-gpu_hook_accessors!(GPU_EVAL_AT_HOOK: GpuEvalAtFn
-    => register_gpu_eval_at_hook, get_gpu_eval_at_hook);
-
-// Device trace residency: per-chip eval_at that reads the chip's
-// device trace from the per-shard provider (for device-only chips that
-// have NO host main trace). `eval_point` is the trailing log(chip_height)
-// coords. The hook downcasts the provider handle to its device-matrix type,
-// evaluates each main-trace column at the point on device, and returns one
-// Ef4 per column, or `None` to fall back to the host (zero) path.
-pub type GpuEvalAtProviderFn = fn(
-    chip_name: &str,
-    eval_point: &[Ef4],
-    device_traces: &dyn super::DeviceTraceProvider,
-) -> Option<Vec<Ef4>>;
-
-gpu_hook_accessors!(GPU_EVAL_AT_PROVIDER_HOOK: GpuEvalAtProviderFn
-    => register_gpu_eval_at_provider_hook, get_gpu_eval_at_provider_hook);
-
-// BATCHED device-trace residency eval-at: ONE call evaluates EVERY
-// device-only chip at its trailing-coord GKR point, building one eq-table per
-// DISTINCT eval-point instead of one eq-build per chip. `requests[i] =
-// (chip_name, eval_point)` (eval_point = trailing log(chip_height) coords, the
-// same slice the per-chip hook gets). Returns `results[i] = Some(per-column
-// Ef4)` for resolved chips, `None` for chips the provider can't resolve
-// (caller emits the legacy zero vector). Byte-identical to N per-chip calls.
-pub type GpuEvalAtBatchProviderFn = fn(
-    requests: &[alloc::string::String],
-    eval_points: &[alloc::vec::Vec<Ef4>],
-    device_traces: &dyn super::DeviceTraceProvider,
-) -> alloc::vec::Vec<Option<alloc::vec::Vec<Ef4>>>;
-
-gpu_hook_accessors!(GPU_EVAL_AT_BATCH_PROVIDER_HOOK: GpuEvalAtBatchProviderFn
-    => register_gpu_eval_at_batch_provider_hook, get_gpu_eval_at_batch_provider_hook);
-
-// Materialize a device-only chip's FULL main trace to host
-// (row-major Felt) from the per-shard provider, for the zerocheck constraint
-// eval (ZeroCheckPoly needs the full trace cells, not just a point-eval).
-// Read at zerocheck time (after commit/open) so the D2H does not stall on the
-// commit stream. Returns (row-major values, width). `None` -> caller keeps the
-// empty host trace (legacy / no provider entry).
-pub type GpuMaterializeTraceFn = fn(
-    chip_name: &str,
-    device_traces: &dyn super::DeviceTraceProvider,
-) -> Option<(Vec<p3_koala_bear::KoalaBear>, usize)>;
-
-gpu_hook_accessors!(GPU_MATERIALIZE_TRACE_HOOK: GpuMaterializeTraceFn
-    => register_gpu_materialize_trace_hook, get_gpu_materialize_trace_hook);
+// P5 static dispatch: the `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER`
+// hooks moved to `ShardDeviceOps::{eval_at_provider, eval_at_batch_provider}`
+// (see `crate::shard_level::device_ops`), threaded by prover TYPE.  The
+// `GPU_MATERIALIZE_TRACE` hook moved to
+// `DeviceTraceProvider::materialize_main_trace` (a pure provider query).  The
+// dead `GPU_EVAL_AT` slot (no `get_*` consumer ever) was removed outright.
+// Their `OnceLock`s + `register_/get_` accessors + fn-ptr type aliases were
+// dropped along with the co-located `type Kb` alias.
 
 // Device-fold: per-round per-pair y-tuple computed from DEVICE-resident
 // cells (no host upload). `dev_cells` is the erased device handle held by the
@@ -412,25 +360,12 @@ pub type GpuZerocheckFoldDeviceFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_FOLD_DEVICE_HOOK: GpuZerocheckFoldDeviceFn
     => register_gpu_zerocheck_fold_device_hook, get_gpu_zerocheck_fold_device_hook);
 
-// Device-fold: bit-reverse + prepare the provider trace once into the
-// device-cell handle the ZeroCheckPoly carries (round-0 cells). Erased handle.
-// Core np>0 path: the prepare hook also receives the chip's preprocessed
-// cells (column-major, KoalaBear, height = provider main height) + prep width,
-// so it can build a combined [main ++ prep] device buffer that folds as one.
-// Empty slice / np==0 => main-only (the np==0 device-fold path, unchanged).
-pub type GpuZerocheckPrepareCellsFn = fn(
-    &(dyn core::any::Any + Send + Sync),
-    &[p3_koala_bear::KoalaBear],
-    usize,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
-    // (`dense_rev`).  `true` => the device fold cells are NATURAL (no up-front
-    // bit-reversal, matching the host rev(zeta) zerocheck); `false` => LEGACY
-    // bit-reversed (byte-identical).  Was the `current_use_rev()` carrier.
-    bool,
-) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_PREPARE_CELLS_HOOK: GpuZerocheckPrepareCellsFn
-    => register_gpu_zerocheck_prepare_cells_hook, get_gpu_zerocheck_prepare_cells_hook);
+// P5 static dispatch: the `GPU_ZEROCHECK_PREPARE_CELLS` hook (device-fold
+// bit-reverse + prepare the provider trace into the ZeroCheckPoly's device-cell
+// handle, carrying `dense_rev`) moved to
+// `ShardDeviceOps::zerocheck_prepare_cells` (see `crate::shard_level::device_ops`),
+// threaded by prover TYPE; the `OnceLock` + `register_/get_` accessors + the
+// `GpuZerocheckPrepareCellsFn` fn-ptr alias were dropped.
 
 // Device-fold: extract the fully-folded per-chip openings (1 row) from the
 // device cells so the host get_component_poly_evals (the trace_at_z openings)
@@ -442,81 +377,21 @@ pub type GpuZerocheckExtractFinalFn =
 gpu_hook_accessors!(GPU_ZEROCHECK_EXTRACT_FINAL_HOOK: GpuZerocheckExtractFinalFn
     => register_gpu_zerocheck_extract_final_hook, get_gpu_zerocheck_extract_final_hook);
 
-// Registration slot for round-0 alpha binding hook. No in-tree
-// caller today; provided so ziren-gpu's startup registration compiles.
-pub type GpuFixRoundZeroFn = fn(
-    alpha: Ef4,
-    lambda: Ef4,
-    eq_row: &[Ef4],
-    eq_interaction: &[Ef4],
-) -> Option<Vec<Ef4>>;
+// P5 dead-hook removal: the `GPU_FIX_ROUND_ZERO`, `GPU_ZEROCHECK`,
+// `GPU_ZEROCHECK_COMBINE`, and `GPU_CONSTRAINT_EVAL` `OnceLock` slots were
+// removed — each had ZERO `get_*` consumers (write-only registration), so the
+// registries were dead process-global state.  Their `register_/get_` accessors
+// + fn-ptr type aliases were dropped (and the co-located GPU register sites).
+// `GpuZerocheckChallenger` is KEPT: it is still used by the ziren-gpu zerocheck
+// kernel, independent of the (removed) hook.
 
-gpu_hook_accessors!(GPU_FIX_ROUND_ZERO_HOOK: GpuFixRoundZeroFn
-    => register_gpu_fix_round_zero_hook, get_gpu_fix_round_zero_hook);
-
-// GPU shard-zerocheck driver. Invariants the impl must preserve:
-//   * per-round univariate `[c0, c1, ZERO, ZERO]` (4 coeffs);
-//   * observe all 4 coefficients before sampling the next α;
-//   * `point` built front-first via `insert(0, alpha)`;
-//   * `claimed_sum = ZERO`;
-//   * `point_and_eval.1 = c_table[0]` after the final fold.
-pub type GpuZerocheckFn = fn(
-    combined_c_table: Vec<Ef4>,
-    num_vars: usize,
-    challenger: &mut dyn GpuZerocheckChallenger,
-) -> PartialSumcheckProof<Ef4>;
-
-/// Type-erased challenger so the hook signature doesn't depend on
-/// `SC::Challenger`. Not `Send`: hook is single-threaded per shard.
+/// Type-erased challenger so a device zerocheck kernel signature doesn't depend
+/// on `SC::Challenger`. Not `Send`: single-threaded per shard.  (Retained from
+/// the removed `GPU_ZEROCHECK` hook — still used device-side.)
 pub trait GpuZerocheckChallenger {
     fn observe_ef(&mut self, v: Ef4);
     fn sample_ef(&mut self) -> Ef4;
 }
-
-gpu_hook_accessors!(GPU_ZEROCHECK_HOOK: GpuZerocheckFn
-    => register_gpu_zerocheck_hook, get_gpu_zerocheck_hook);
-
-// ────────────────────────────────────────────────────────────────────
-// GPU lambda-RLC combine hook.
-// ────────────────────────────────────────────────────────────────────
-// GPU lambda-RLC combine: caller passes already-padded chip tables
-// + `[1, λ, …, λ^(n-1)]`. `None` falls back to host parallel fold.
-pub type GpuZerocheckCombineFn = fn(
-    padded_tables: &[Vec<Ef4>],
-    powers_of_lambda: &[Ef4],
-    target_size: usize,
-) -> Option<Vec<Ef4>>;
-
-gpu_hook_accessors!(GPU_ZEROCHECK_COMBINE_HOOK: GpuZerocheckCombineFn
-    => register_gpu_zerocheck_combine_hook, get_gpu_zerocheck_combine_hook);
-
-/// Per-row BaseFold constraint-table builder keyed by chip name.
-///
-/// Invariants:
-///   * Output length == `1 << num_vars` == main trace height.
-///   * `output[i] = Σ_j α^(K-1-j) · C_j(row_i, row_{(i+1) mod n}, …)`
-///     applied in Horner order (`acc = acc · α + c_i`).
-///   * Selectors: `is_first[0] = 1`, `is_last[n-1] = 1`,
-///     `is_transition[i] = 1` for `i < n-1`.
-///   * Permutation columns are unused; the impl must accept a
-///     placeholder permutation matrix (width 0 ok).
-/// Returns `None` on chip-reject (cache miss / oversized memory);
-/// callers must fall back to host on `None`.
-pub type GpuConstraintEvalFn = fn(
-    chip_name: &str,
-    main_row_major: &[p3_koala_bear::KoalaBear],
-    main_width: usize,
-    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
-    preprocessed_width: usize,
-    public_values: &[p3_koala_bear::KoalaBear],
-    alpha: Ef4,
-    local_cumulative_sum: Ef4,
-    global_cumulative_sum_xy: [p3_koala_bear::KoalaBear; 14],
-    num_vars: usize,
-) -> Option<Vec<Ef4>>;
-
-gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_HOOK: GpuConstraintEvalFn
-    => register_gpu_constraint_eval_hook, get_gpu_constraint_eval_hook);
 
 /// Per-chip per-round zerocheck y-tuple device hook.
 ///
@@ -599,76 +474,17 @@ pub type GpuZerocheckBatchedYTupleFn = fn(
 gpu_hook_accessors!(GPU_ZEROCHECK_BATCHED_YTUPLE_HOOK: GpuZerocheckBatchedYTupleFn
     => register_gpu_zerocheck_batched_ytuple_hook, get_gpu_zerocheck_batched_ytuple_hook);
 
-/// Multi-chip batched variant of `GpuConstraintEvalFn`. Returns
-/// `Vec<Option<Vec<Ef4>>>` of length `chip_names.len()`; `None`
-/// slots must be filled in via per-chip GPU or host fallback.
-pub type GpuConstraintEvalBatchedFn = fn(
-    chip_names: &[&str],
-    main_row_majors: &[&[p3_koala_bear::KoalaBear]],
-    main_widths: &[usize],
-    preprocessed_row_majors: &[&[p3_koala_bear::KoalaBear]],
-    preprocessed_widths: &[usize],
-    public_values: &[p3_koala_bear::KoalaBear],
-    alphas: &[Ef4],
-    local_cumulative_sums: &[Ef4],
-    global_cumulative_sums_xy: &[[p3_koala_bear::KoalaBear; 14]],
-    num_vars_list: &[usize],
-) -> Vec<Option<Vec<Ef4>>>;
+// P5 dead-hook removal: the `GPU_CONSTRAINT_EVAL_BATCHED` and
+// `GPU_CONSTRAINT_EVAL_CROSS_SHARD` `OnceLock` slots were removed — both had
+// ZERO `get_*` consumers (write-only registration), dead process-global state.
+// Their `register_/get_` accessors + fn-ptr type aliases were dropped (and the
+// co-located GPU register sites).
 
-gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_BATCHED_HOOK: GpuConstraintEvalBatchedFn
-    => register_gpu_constraint_eval_batched_hook,
-       get_gpu_constraint_eval_batched_hook);
-
-/// Cross-shard batched variant of `GpuConstraintEvalBatchedFn`;
-/// outer slice indexes shard. Output `result[s][i] = None` falls
-/// back to per-shard / per-chip / host. Empty outer `Vec` signals
-/// total dispatch failure for the entire batch.
-#[allow(clippy::type_complexity)]
-pub type GpuConstraintEvalCrossShardFn = fn(
-    chip_names_per_shard: &[&[&str]],
-    main_row_majors_per_shard: &[&[&[p3_koala_bear::KoalaBear]]],
-    main_widths_per_shard: &[&[usize]],
-    preprocessed_row_majors_per_shard: &[&[&[p3_koala_bear::KoalaBear]]],
-    preprocessed_widths_per_shard: &[&[usize]],
-    public_values_per_shard: &[&[p3_koala_bear::KoalaBear]],
-    alphas_per_shard: &[&[Ef4]],
-    local_cumulative_sums_per_shard: &[&[Ef4]],
-    global_cumulative_sums_xy_per_shard: &[&[[p3_koala_bear::KoalaBear; 14]]],
-    num_vars_list_per_shard: &[&[usize]],
-) -> Vec<Vec<Option<Vec<Ef4>>>>;
-
-gpu_hook_accessors!(GPU_CONSTRAINT_EVAL_CROSS_SHARD_HOOK: GpuConstraintEvalCrossShardFn
-    => register_gpu_constraint_eval_cross_shard_hook,
-       get_gpu_constraint_eval_cross_shard_hook);
-
-/// GPU per-chip LogUp-GKR phase-2 interaction-table builder.
-///
-/// Invariants:
-///   * Output lengths == `height * num_interactions` for `numer`
-///     and `denom`.
-///   * Row-major layout `out[row * num_interactions + col]`.
-///   * `numer = +mult` for sends, `-mult` for receives.
-///   * `denom = α + β_0·argument_index + Σ_k β_k · vpc_k(row)`.
-/// `None` falls back to host.
-pub type GpuInteractionEvalFn = fn(
-    chip_name: &str,
-    main_row_major: &[p3_koala_bear::KoalaBear],
-    main_width: usize,
-    preprocessed_row_major: &[p3_koala_bear::KoalaBear],
-    preprocessed_width: usize,
-    alpha: Ef4,
-    betas: &[Ef4],
-    // SP1-aligned: per-shard device-trace provider replaces the
-    // racy global Mutex<DeviceTraceSnapshot> in
-    // `ziren-gpu/core/src/basefold/interaction_eval.rs`.  The hook
-    // implementation downcasts the per-chip handle to its concrete
-    // device-trace type (typically `Arc<ColMajorMatrixDevice<F>>`).
-    // `None` => fall back to the host-upload path inside the hook.
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
-) -> Option<(Vec<p3_koala_bear::KoalaBear>, Vec<Ef4>)>;
-
-gpu_hook_accessors!(GPU_INTERACTION_EVAL_HOOK: GpuInteractionEvalFn
-    => register_gpu_interaction_eval_hook, get_gpu_interaction_eval_hook);
+// P5 static dispatch: the `GPU_INTERACTION_EVAL` hook (per-chip LogUp-GKR
+// phase-2 interaction-table builder, provider-carried) moved to
+// `ShardDeviceOps::interaction_eval` (see `crate::shard_level::device_ops`),
+// threaded by prover TYPE; the `OnceLock` + `register_/get_` accessors + the
+// `GpuInteractionEvalFn` fn-ptr alias were dropped.
 
 // #118: the two whole-pipeline jagged-PCS GPU orchestration hooks —
 // `GPU_JAGGED_ORCHESTRATION_HOOK` (host-trace variant) and

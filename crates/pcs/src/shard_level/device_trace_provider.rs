@@ -134,4 +134,25 @@ pub trait DeviceTraceProvider: Send + Sync {
     ) -> Option<alloc::vec::Vec<p3_koala_bear::KoalaBear>> {
         None
     }
+
+    /// Materialize a device-only chip's FULL main trace to host (row-major
+    /// `KoalaBear`) from this provider, for the zerocheck constraint eval
+    /// and the jagged host-fallback re-materialize edges.  Returns
+    /// `(row-major values, width)`, or `None` when the chip is absent /
+    /// already drained (callers keep the empty host trace — the legacy /
+    /// no-provider path).
+    ///
+    /// SP1-parity static dispatch of the former `GPU_MATERIALIZE_TRACE`
+    /// `OnceLock` hook: it is a pure provider query (the device impl
+    /// downcasts `self` to its concrete device-matrix type and pulls the
+    /// trace), and its consumers include the deep cross-crate jagged
+    /// reduce/open edges where only `&dyn DeviceTraceProvider` is threaded,
+    /// so it lives on the provider (no separate `ShardDeviceOps` thread
+    /// needed).  Default `None` (host / non-device providers).
+    fn materialize_main_trace(
+        &self,
+        _chip_name: &str,
+    ) -> Option<(alloc::vec::Vec<p3_koala_bear::KoalaBear>, usize)> {
+        None
+    }
 }

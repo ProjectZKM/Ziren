@@ -398,6 +398,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             &crate::shard_level::device_first_layer_context::HostFirstRound,
             &crate::shard_level::device_first_layer_context::HostDrain,
             &crate::jagged_pcs::HostGkrDevice,
+            // P5 static dispatch: host device ops = no device.  The default
+            // (CpuProver / wrap prover / any prover not overriding
+            // `prove_shard_to_basefold`) threads `&NoDeviceOps`
+            // (`is_device()` false → host path); the GPU core prover overrides
+            // `prove_shard_to_basefold` and threads `&CudaShardDeviceOps`.
+            &crate::shard_level::NoDeviceOps,
         )
     }
 

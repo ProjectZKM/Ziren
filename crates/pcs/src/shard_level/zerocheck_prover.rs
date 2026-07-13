@@ -90,6 +90,11 @@ pub fn prove_shard_zerocheck<SC, A>(
     // whole proof is uniformly rev; every recursion / shrink / wrap prove is
     // `false` (legacy, byte-identical).
     dense_rev: bool,
+    // P5 static dispatch: the device ops seam carrying the zerocheck
+    // device-fold prepare-cells op (was the `GPU_ZEROCHECK_PREPARE_CELLS`
+    // `OnceLock`).  `&NoDeviceOps` (`is_device()` false) = host / materialize
+    // fallback, `&CudaShardDeviceOps` on the GPU prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,
     std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
@@ -265,8 +270,11 @@ where
         let device_cells_opt: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
             if pm.inner().is_none() {
                 _device_traces.and_then(|p| {
-                    let prep_hook =
-                        crate::shard_level::sumcheck_poly::get_gpu_zerocheck_prepare_cells_hook()?;
+                    // P5: gate the device-fold prepare on the device ops seam
+                    // (was `get_gpu_zerocheck_prepare_cells_hook().is_some()`).
+                    if !dev.is_device() {
+                        return None;
+                    }
                     let raw = p.lookup_by_name(&name)?;
                     // For chips with preprocessed columns (np>0): build the
                     // chip's preprocessed cells in
@@ -305,7 +313,8 @@ where
                         } else {
                             (&[], 0)
                         };
-                    let prepared = prep_hook(raw.as_ref(), prep_kb, np_hook, dense_rev);
+                    let prepared =
+                        dev.zerocheck_prepare_cells(raw.as_ref(), prep_kb, np_hook, dense_rev);
                     if prepared.is_some() {
                         // The prepare hook CLONED the trace into its own
                         // bit-reversed fold buffer; the provider's original

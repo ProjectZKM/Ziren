@@ -3,6 +3,7 @@
 
 pub mod basefold_constraint_folder;
 pub mod device_first_layer_context;
+pub mod device_ops;
 pub mod device_trace_provider;
 pub mod logup_gkr_prover;
 pub mod main_trace_loader;
@@ -15,6 +16,7 @@ pub mod verifier;
 pub mod zerocheck_poly;
 pub mod zerocheck_prover;
 
+pub use device_ops::{NoDeviceOps, ShardDeviceOps};
 pub use device_trace_provider::DeviceTraceProvider;
 pub use logup_gkr_prover::*;
 pub use main_trace_loader::{EagerHostLoader, LazyDeviceLoader, MainTraceLoader};

@@ -232,6 +232,11 @@ pub fn generate_first_layer<F, EF, A>(
     // per-shard device-trace provider threaded into the GPU
     // first-layer hook (replaces the racy global Mutex snapshot).
     device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+    // P5 static dispatch: the device ops seam carrying the interaction-eval
+    // op (was the `GPU_INTERACTION_EVAL` `OnceLock`).  `&NoDeviceOps`
+    // (`is_device()` false) = host build, `&CudaShardDeviceOps` on the GPU
+    // prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> LogUpGkrCpuLayer<F, EF>
 where
     F: PrimeField,
@@ -284,8 +289,8 @@ where
         // thread, which on off-pool basefold rayon workers has no
         // `cudaSetDevice` context and would dispatch to the wrong GPU.
         let provider_present = device_traces.is_some();
-        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present {
-            if let Some(gpu_hook) = crate::shard_level::sumcheck_poly::get_gpu_interaction_eval_hook() {
+        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present && dev.is_device() {
+            {
                 use core::any::TypeId;
                 type Ef4 = p3_field::extension::BinomialExtensionField<
                     p3_koala_bear::KoalaBear,
@@ -353,7 +358,7 @@ where
                             betas.as_ptr().cast::<Ef4>(),
                             betas.len(),
                         );
-                        let result = gpu_hook(
+                        let result = dev.interaction_eval(
                             &chip.name(),
                             main_kb,
                             main_padded_width,
@@ -386,8 +391,6 @@ where
                 } else {
                     None
                 }
-            } else {
-                None
             }
         } else {
             None

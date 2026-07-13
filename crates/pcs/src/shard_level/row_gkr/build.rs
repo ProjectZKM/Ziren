@@ -50,6 +50,10 @@ pub fn build_gkr_circuit<F, EF, A>(
     // the device-fold path the init / transition / pull / fit-preflight methods
     // run; `&HostGkrDevice` (`is_device()` false) = host fold.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
+    // P5: the device ops seam, threaded to `generate_first_layer`'s
+    // interaction-eval dispatch (was the `GPU_INTERACTION_EVAL` OnceLock).
+    // `&NoDeviceOps` = host, `&CudaShardDeviceOps` on the GPU prover.
+    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
     F: PrimeField,
@@ -66,6 +70,7 @@ where
         betas,
         num_row_variables,
         device_traces,
+        dev,
     );
 
     // `generate_first_layer` reduces num_row_variables by 1. Three
