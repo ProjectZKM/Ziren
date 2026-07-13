@@ -683,78 +683,12 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
     lambda: EF,
     current_claim: EF,
     round_coord: EF,
-    // P7 static dispatch: the poly's owned device-ops seam threaded positionally
-    // (this is a free fn, not a method on the poly), read via
-    // `dev.filter(|d| d.is_device())` — was `GPU_CHIP_STRUCTURED_SUMCHECK`.
-    // `None` / `&NoDeviceOps` → host path.
-    dev: Option<&dyn crate::shard_level::ShardDeviceOps>,
 ) -> [EF; 4] {
     use p3_maybe_rayon::prelude::*;
 
     debug_assert!(state.chip_rows >= 2, "row-binding round needs >= 2 rows");
     debug_assert!(eq_row.len() == state.chip_rows);
     let row_half = state.chip_rows / 2;
-
-    // : GPU dispatch hook for chip-structured round-poly
-    // compute. SP1-parity default-ON (kill-switch `ZIREN_GPU_CHIP_SUMCHECK=0`).
-    // Hook impl lives in ziren-gpu/basefold/chip_sumcheck_dispatch.rs;
-    // when registered + env on + EF == Ef4 production type, route to
-    // GPU. Returns [p(0), p(1), p(2), p(3)] same shape as the host
-    // fallback (host-only builds have no hook => host path, byte-identical).
-    // SP1-static: chip-structured sumcheck GPU dispatch always attempted
-    // (host-only builds have no hook => byte-identical host path). Env gate
-    // removed (was ZIREN_GPU_CHIP_SUMCHECK, default-on).
-    {
-        if let Some(dev_ops) = dev.filter(|d| d.is_device()) {
-            use core::any::TypeId;
-            type Ef4 = p3_field::extension::BinomialExtensionField<
-                p3_koala_bear::KoalaBear, 4>;
-            if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
-                // SAFETY: TypeId equality at runtime guarantees EF == Ef4.
-                unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
-                    core::slice::from_raw_parts(s.as_ptr().cast::<B>(), s.len())
-                }
-                let n0_views: Vec<&[Ef4]> = state.n0.iter()
-                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                    .collect();
-                let d0_views: Vec<&[Ef4]> = state.d0.iter()
-                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                    .collect();
-                let n1_views: Vec<&[Ef4]> = state.n1.iter()
-                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                    .collect();
-                let d1_views: Vec<&[Ef4]> = state.d1.iter()
-                    .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                    .collect();
-                let eq_int_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(eq_int) };
-                let eq_row_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(eq_row) };
-                let pad_eq_int_v: Ef4 = unsafe {
-                    core::mem::transmute_copy::<EF, Ef4>(&pad_eq_int_sum)
-                };
-                let lambda_v: Ef4 =
-                    unsafe { core::mem::transmute_copy::<EF, Ef4>(&lambda) };
-                let claim_v: Ef4 = unsafe {
-                    core::mem::transmute_copy::<EF, Ef4>(&current_claim)
-                };
-                let evals_ef4 = dev_ops.logup_chip_structured_sumcheck(
-                    &n0_views, &d0_views, &n1_views, &d1_views,
-                    &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
-                    state.chip_rows,
-                    eq_int_v, eq_row_v,
-                    pad_eq_int_v, lambda_v, claim_v,
-                );
-                let evals: [EF; 4] = unsafe {
-                    [
-                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
-                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
-                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
-                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
-                    ]
-                };
-                return evals;
-            }
-        }
-    }
 
     // Pre-compute the row sums Σ eq_row_X(row) for X ∈ {1, 2, 3} —
     // used by the "fully-padding chip" fast path AND by the per-chip
@@ -1302,36 +1236,6 @@ pub struct LogupRoundPolynomial<EF> {
     /// call.  Cleared by fix_last_variable so subsequent rounds use the
     /// normal host path.
     gpu_cached_first_poly: Option<UnivariatePolynomial<EF>>,
-    /// Device-resident: per-instance id for the device-resident
-    /// chip-sumcheck cache. Assigned eagerly via a process-global
-    /// counter so every `LogupRoundPolynomial` has a unique key
-    /// for the device hook's thread-local layer cache.
-    chip_sumcheck_id: u64,
-    /// Device-resident: 0-based round counter for the chip-state
-    /// sumcheck. Incremented at the end of each `fix_last_variable`
-    /// while in `Chip` state. Round 0 of the chip-sumcheck is
-    /// the value when `sum_as_poly_in_last_variable` first runs
-    /// on `PolynomialLayer::Chip` (transitions from GpuPrefolded
-    /// reset this to 0).
-    chip_sumcheck_round: usize,
-    /// Device-resident: verifier-sampled `alpha` from the most recent
-    /// `fix_last_variable` call while in `Chip` state. `None` until
-    /// the first such call. Used by the device hook to fold the
-    /// cached device layer before running the next round's
-    /// sumcheck kernel.
-    last_chip_alpha: Option<EF>,
-    /// P7 static dispatch: the owned shard-level device-ops seam (was the
-    /// `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
-    /// `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks).  Set once at
-    /// `new` from the `Arc<dyn ShardDeviceOps>` the prover TYPE threads down
-    /// the LogUp path (`Arc<NoDeviceOps>` host / `Arc<CudaShardDeviceOps>` GPU)
-    /// and carried across every fold (`fix_last_variable` mutates `self` in
-    /// place, so the field survives without re-plumbing).  The packed / chip-
-    /// device read sites gate on `self.dev.as_ref().filter(|d| d.is_device())`
-    /// — byte-identical to the former `get_*_hook().is_some()` presence check;
-    /// the chip-structured (host-form) arm threads `self.dev.as_deref()` into
-    /// `round_poly_evaluations_chip_structured`.
-    dev: Option<alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>>,
 }
 
 /// Two-mode storage backing for `LogupRoundPolynomial.state`.
@@ -1403,13 +1307,6 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         // `&HostDrain` on host callers.
         _first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
         _drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
-        // P7 static dispatch: the owned shard-level device-ops seam (was the
-        // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
-        // `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks), cloned into
-        // the poly's `dev` field and forwarded across every fold.
-        // `Arc<NoDeviceOps>` (`is_device()` false → host path) on host callers,
-        // `Arc<CudaShardDeviceOps>` on the GPU prover.
-        dev: alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
     ) -> Self
     where
         F: Field + Into<EF> + Copy + Sync,
@@ -1470,21 +1367,6 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             remaining_row_vars: num_row_variables,
             layer_int_vars: num_interaction_variables,
             gpu_cached_first_poly,
-            // Device-resident: device-resident chip-sumcheck per-instance
-            // id (process-global counter) + round counters. The id is
-            // assigned eagerly so every LogupRoundPolynomial instance
-            // has a unique key for the thread-local device cache.
-            chip_sumcheck_id: {
-                use std::sync::atomic::{AtomicU64, Ordering};
-                static NEXT_ID: AtomicU64 = AtomicU64::new(1);
-                NEXT_ID.fetch_add(1, Ordering::Relaxed)
-            },
-            chip_sumcheck_round: 0,
-            last_chip_alpha: None,
-            // P7: carry the owned device-ops seam for the packed / chip read
-            // sites.  `fix_last_variable` mutates `self` in place, so this
-            // survives every fold / round-transition without re-plumbing.
-            dev: Some(dev),
         };
 
         // Edge case: zero row variables — chip tables are already 1-row.
@@ -1628,13 +1510,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
             PolynomialLayer::Chip(state) => {
                 fold_chip_state_row(state, alpha);
                 self.remaining_row_vars -= 1;
-                // Device-resident: capture the alpha just applied to the
-                // chip state. Round counter advances by one — the next
-                // sum_as_poly_in_last_variable will be the next round
-                // in this chip-sumcheck instance.
-                self.last_chip_alpha = Some(alpha);
-                self.chip_sumcheck_round =
-                    self.chip_sumcheck_round.saturating_add(1);
                 if state.chip_rows == 1 && self.remaining_row_vars == 0 {
                     // Don't transition yet if there are still row
                     // variables left.  But chip_rows == 1 with
@@ -1747,76 +1622,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         };
         let evals = match &self.state {
             PolynomialLayer::Chip(state) => {
-                // SP1-static: device-resident chip-sumcheck dispatch always
-                // attempted; threads sumcheck_id + round_idx + alpha_prev so
-                // the device hook keeps a cross-round layer cache and applies
-                // the fold kernel in place. Falls through to host on None.
-                // Env gates removed (were ZIREN_GPU_CHIP_SUMCHECK / _SP1_DEVICE,
-                // default-on).
-                {
-                    if let Some(dev_ops) =
-                        self.dev.as_ref().filter(|d| d.is_device())
-                    {
-                        use core::any::TypeId;
-                        type Ef4 = p3_field::extension::BinomialExtensionField<
-                            p3_koala_bear::KoalaBear, 4>;
-                        if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
-                            // SAFETY: TypeId equality guarantees EF == Ef4.
-                            unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
-                                core::slice::from_raw_parts(
-                                    s.as_ptr().cast::<B>(), s.len(),
-                                )
-                            }
-                            let n0v: Vec<&[Ef4]> = state.n0.iter()
-                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                                .collect();
-                            let d0v: Vec<&[Ef4]> = state.d0.iter()
-                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                                .collect();
-                            let n1v: Vec<&[Ef4]> = state.n1.iter()
-                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                                .collect();
-                            let d1v: Vec<&[Ef4]> = state.d1.iter()
-                                .map(|v| unsafe { slice_cast::<EF, Ef4>(v.as_slice()) })
-                                .collect();
-                            let eq_int_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(&self.eq_int) };
-                            let eq_row_v: &[Ef4] = unsafe { slice_cast::<EF, Ef4>(&self.eq_row) };
-                            let pad_eq_int_v: Ef4 = unsafe {
-                                core::mem::transmute_copy::<EF, Ef4>(&self.pad_eq_int_sum)
-                            };
-                            let lambda_v: Ef4 =
-                                unsafe { core::mem::transmute_copy::<EF, Ef4>(&self.lambda) };
-                            let claim_vv: Ef4 =
-                                unsafe { core::mem::transmute_copy::<EF, Ef4>(&claim_v) };
-                            let alpha_prev_v: Option<Ef4> = self.last_chip_alpha
-                                .as_ref()
-                                .map(|a| unsafe { core::mem::transmute_copy::<EF, Ef4>(a) });
-                            if let Some(evals_ef4) = dev_ops.logup_chip_structured_sumcheck_device(
-                                &n0v, &d0v, &n1v, &d1v,
-                                &state.chip_offsets, &state.chip_cols, &state.num_real_rows,
-                                state.chip_rows,
-                                eq_int_v, eq_row_v,
-                                pad_eq_int_v, lambda_v, claim_vv,
-                                self.chip_sumcheck_id,
-                                self.chip_sumcheck_round,
-                                alpha_prev_v,
-                            ) {
-                                let evals: [EF; 4] = unsafe {
-                                    [
-                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
-                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
-                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
-                                        core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
-                                    ]
-                                };
-                                return UnivariatePolynomial::new(
-                                    poly_coefficients_from_evals(evals).to_vec(),
-                                );
-                            }
-                            // Device hook None → fall through to host.
-                        }
-                    }
-                }
                 round_poly_evaluations_chip_structured(
                     state,
                     &self.eq_int,
@@ -1825,70 +1630,9 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                     self.lambda,
                     claim_v,
                     round_coord,
-                    self.dev.as_deref(),
                 )
             }
             PolynomialLayer::Packed { n0, d0, n1, d1 } => {
-                // GPU dispatch hook: when
-                // ZIREN_GPU_SUMCHECK=1 AND a GPU evaluator is
-                // registered via
-                // `crate::shard_level::sumcheck_poly::register_gpu_sumcheck_hook`
-                // AND `EF` is the concrete `Ef4` type used in
-                // production reth, route to the registered GPU
-                // function-pointer.  Otherwise fall back to host
-                // round_poly_evaluations.
-                //
-                // The TypeId guard + transmute is sound because
-                // TypeId equality guarantees `EF` and `Ef4` are the
-                // same concrete type at runtime.  Generic-EF callers
-                // (test code, non-production paths) always take the
-                // host fallback.
-                // SP1-static: packed-round GPU sumcheck dispatch always
-                // attempted (host fallback when no hook / non-Ef4). Env gate
-                // removed (was ZIREN_GPU_SUMCHECK, default-on).
-                {
-                    if let Some(dev_ops) =
-                        self.dev.as_ref().filter(|d| d.is_device())
-                    {
-                        use core::any::TypeId;
-                        type Ef4 = p3_field::extension::BinomialExtensionField<
-                            p3_koala_bear::KoalaBear, 4>;
-                        if TypeId::of::<EF>() == TypeId::of::<Ef4>() {
-                            // SAFETY: TypeId equality guarantees EF == Ef4
-                            // at runtime.  Slice reinterpretation via
-                            // *const pointer cast bypasses the
-                            // compile-time size-check that
-                            // mem::transmute requires for generic types.
-                            unsafe fn slice_cast<A, B>(s: &[A]) -> &[B] {
-                                core::slice::from_raw_parts(
-                                    s.as_ptr().cast::<B>(),
-                                    s.len(),
-                                )
-                            }
-                            unsafe {
-                                let evals_ef4: [Ef4; 4] = dev_ops.logup_sumcheck(
-                                    slice_cast::<EF, Ef4>(self.eq_int.as_slice()),
-                                    slice_cast::<EF, Ef4>(self.eq_row.as_slice()),
-                                    slice_cast::<EF, Ef4>(n0.as_slice()),
-                                    slice_cast::<EF, Ef4>(d0.as_slice()),
-                                    slice_cast::<EF, Ef4>(n1.as_slice()),
-                                    slice_cast::<EF, Ef4>(d1.as_slice()),
-                                    core::mem::transmute_copy::<EF, Ef4>(&self.lambda),
-                                    core::mem::transmute_copy::<EF, Ef4>(&claim_v),
-                                );
-                                let evals_ef: [EF; 4] = [
-                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[0]),
-                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[1]),
-                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[2]),
-                                    core::mem::transmute_copy::<Ef4, EF>(&evals_ef4[3]),
-                                ];
-                                return UnivariatePolynomial::new(
-                                    poly_coefficients_from_evals(evals_ef).to_vec(),
-                                );
-                            }
-                        }
-                    }
-                }
                 round_poly_evaluations(
                     &self.eq_int,
                     &self.eq_row,
@@ -1982,10 +1726,11 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     // the `GkrDeviceHooks` fn-ptr bundle).  Here the layer-pull method feeds
     // `pull_device_layer_to_host`.  `&HostGkrDevice` = host round.
     gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-    // P7 static dispatch: the owned shard-level device-ops seam (was the
-    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
-    // `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` `OnceLock` hooks), cloned into the
-    // `LogupRoundPolynomial` built below and carried across every fold.
+    // P8 static dispatch: the owned shard-level device-ops seam (was the
+    // `GPU_LOGUP_ROUND_HOOK` / `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` `OnceLock`
+    // hooks), threaded `&**dev` into the device-pack / device-fold per-layer
+    // drivers below.  The host `LogupRoundPolynomial` fallback is device-free
+    // (runs the pure-host sumcheck), so `dev` is NOT forwarded into it.
     // `Arc<NoDeviceOps>` host / `Arc<CudaShardDeviceOps>` GPU.
     dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> LogupGkrRoundProof<EF>
@@ -2119,7 +1864,6 @@ where
         lambda,
         first_round_device_hook,
         drain_hook,
-        alloc::sync::Arc::clone(dev),
     );
     let claimed_sum = poly.claimed_sum();
 
