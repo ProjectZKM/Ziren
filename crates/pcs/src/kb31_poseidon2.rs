@@ -584,7 +584,6 @@ pub mod koala_bear_poseidon2 {
             &chip_trace_views,
             mmcs,
             fri,
-            None,
             // Preprocessed-trace commit helper (setup / vk path): LEGACY bitrev
             // orientation (`use_rev = false`), byte-identical to the
             // pre-carrier-removal path (no carrier was installed here).

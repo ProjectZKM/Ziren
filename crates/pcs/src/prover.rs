@@ -219,20 +219,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         )
     }
 
-    /// The device BN254 wrap-commit function, provided statically by the
-    /// prover (#118 static dispatch of the former global `GPU_BN254_COMMIT_HOOK`
-    /// OnceLock).  Default `None` = the host wrap commit.  The `commit()` body
-    /// reads it and threads the `Option` through `commit_basefold_path` into
-    /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`].
-    /// `WrapGpuProver` overrides this to return `Some(device_fn)` only under
-    /// `ZIREN_GPU_WRAP_DEVICE`; every other prover keeps the `None` (host wrap
-    /// commit, byte-identical).
-    fn gpu_bn254_commit_hook(
-        &self,
-    ) -> Option<crate::jagged_pcs::jagged::GpuBn254CommitFn> {
-        None
-    }
-
     /// The device BaseFold open function, provided statically by the
     /// prover (#118 static dispatch of the former global
     /// `GPU_BASEFOLD_OPEN_HOOK` OnceLock).  Default `None` = the host open
@@ -656,10 +642,6 @@ where
             pcs,
             record.public_values(),
             named_traces,
-            // #118: CpuProver never provides a device BN254 commit fn → host
-            // wrap commit (byte-identical).  A device wrap prover provides
-            // `Some(..)` at its own `commit_basefold_path` call site.
-            self.gpu_bn254_commit_hook(),
             // band-cap retirement Phase A: the missing-chip cluster widths,
             // threaded explicitly (was the `Height0MissingGuard` thread-local).
             cluster_widths,
@@ -1351,17 +1333,12 @@ where
 /// satisfy the type signature of `main_data` — `open()` mirrors this
 /// with a placeholder `pcs.open`.  The placeholder cost is
 /// microseconds vs the seconds of a real main-trace FRI commit.
-/// #118: `pub` so the `prover` crate's `WrapGpuProver` can drive the
-/// BaseFold-over-BN254 wrap commit through the same body, statically
-/// providing `Some(device_bn254_fn)` (gated on `ZIREN_GPU_WRAP_DEVICE`) in
-/// place of the former global `GPU_BN254_COMMIT_HOOK` OnceLock.
+/// `pub` so the `prover` crate's `WrapGpuProver` can drive the
+/// BaseFold-over-BN254 wrap commit through the same body.
 pub fn commit_basefold_path<SC, M, P>(
     pcs: &<SC as StarkGenericConfig>::Pcs,
     public_values: Vec<Val<SC>>,
     named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
-    // #118: the device BN254 wrap-commit fn, threaded to
-    // `precompute_jagged_basefold_commit_generic`.  `None` = host commit.
-    gpu_bn254_commit: Option<crate::jagged_pcs::jagged::GpuBn254CommitFn>,
     // band-cap retirement Phase A: the per-shard FULL canonical-CLUSTER chip
     // NAME -> width map, threaded EXPLICITLY (was read from the
     // `Height0MissingGuard` thread-local via `current_h0_cluster_widths()`).
@@ -1501,7 +1478,6 @@ where
         &commit_named_views,
         <SC as BasefoldRing>::bf_mmcs(),
         <SC as BasefoldRing>::fri_config(),
-        gpu_bn254_commit,
         use_rev,
         recursion_area_pin,
     );

@@ -1881,52 +1881,6 @@ pub mod jagged {
     // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read
     // rev(zeta) semantics are unchanged (byte-identical).
 
-    // ─────────────────────────────────────────────────────────────────
-    // Device BaseFold-over-BN254 wrap Merkle commit.
-    //
-    // The wrap stage (OuterSC) builds its BaseFold commit over the
-    // Poseidon2-BN254 `OuterValMmcs` (Digest = [Bn254Fr; 1]) via
-    // `precompute_jagged_basefold_commit_generic::<OuterValMmcs>`.  On the
-    // host CpuProver path the BN254 Merkle leaf-hash + compress-layers run
-    // on CPU (the ~860ms wrap `commit=` phase).  This type-erased hook lets
-    // ziren-gpu (which CAN name OuterValMmcs via zkm_recursion_core) move
-    // that Merkle commit onto the device while keeping the host DFT encode,
-    // host challenger FS, and host grind unchanged.
-    //
-    // TRANSCRIPT-NEUTRALITY: the device FieldMerkleTreeGpu<KoalaBear,
-    // [Bn254Fr;1]> produces byte-identical roots to the host
-    // MerkleTree<OuterHash, OuterCompress> (validated by ziren-gpu
-    // bn254_tests::test_commit_matrices); the reconstructed host-shaped
-    // prover_data drives the unchanged host BaseFold open.  Output is
-    // byte-identical to the host precompute -> same wrap proof bytes.
-    //
-    // Type erasure: zkm-pcs cannot name OuterValMmcs, so the hook takes
-    // the `MT` TypeId and returns the concrete-typed
-    // `(commit, prover_data)` boxed as `dyn Any`.  The hook returns `None`
-    // (host fallback) when the TypeId is not the BN254 OuterValMmcs, the
-    // CUDA path errors, or the shape is unsupported.
-    // ─────────────────────────────────────────────────────────────────
-
-    /// Signature of the device BN254 wrap-commit hook.  `mt_type_id` is
-    /// `TypeId::of::<MT>()` from the generic precompute call site; the hook
-    /// matches it against `TypeId::of::<OuterValMmcs>()`.  On a match it
-    /// builds the device BN254 Merkle commit over the supplied dense traces
-    /// and returns a boxed
-    /// `(JaggedCommitGeneric<OuterValMmcs>,
-    ///   JaggedProverDataGeneric<OuterValMmcs>)`.
-    pub type GpuBn254CommitFn = fn(
-        mt_type_id: core::any::TypeId,
-        dense_traces: &[(alloc::string::String, RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
-    ) -> Option<alloc::boxed::Box<dyn core::any::Any + Send>>;
-
-    // #118: the device BN254 wrap-commit fn is provided STATICALLY (threaded
-    // from the prover's `gpu_bn254_commit_hook()` through `commit_basefold_path`
-    // into `precompute_jagged_basefold_commit_generic`), not via a global
-    // registry.  The former `GPU_BN254_COMMIT_HOOK` OnceLock + `register_/get_`
-    // accessors were removed.  `WrapGpuProver` provides `Some(device_fn)` only
-    // under `ZIREN_GPU_WRAP_DEVICE`; every other prover returns `None` (host
-    // wrap commit, byte-identical).
-
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
     /// Returns the packing metadata plus the BaseFold commit + prover
@@ -2093,11 +2047,6 @@ pub mod jagged {
         chip_traces: &[ChipTraceView<'_>],
         mmcs: MT,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
-        // #118: the device BN254 wrap-commit fn, provided statically by the
-        // prover (was the global `GPU_BN254_COMMIT_HOOK` OnceLock).  `None`
-        // = host commit (every non-device-wrap caller), byte-identical to the
-        // pre-#118 unregistered-hook path.
-        gpu_bn254_commit: Option<GpuBn254CommitFn>,
         // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommitGeneric.rev`.  `false` on the wrap/BN254 path.
@@ -2110,11 +2059,9 @@ pub mod jagged {
         recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommitGeneric<MT>
     where
-        // `'static` bounds (Commitment + ProverData) are required by the
-        // device BN254 commit hook's `Box<dyn Any>` downcast back to
-        // `JaggedCommitGeneric<MT>`.  Both rings (JaggedMmcs /
-        // OuterValMmcs) are concrete `'static` types, so this is a no-op
-        // tightening for every existing caller.
+        // `'static`/`Send` bounds on the commitment + prover data.  Both rings
+        // (JaggedMmcs / OuterValMmcs) are concrete `'static` types, so this is a
+        // no-op tightening for every existing caller.
         MT: p3_commit::Mmcs<
                 crate::jagged_pcs::JaggedVal,
                 Commitment: Clone + Send + 'static,
@@ -2144,37 +2091,10 @@ pub mod jagged {
                 RowMajorMatrix::new(dense_q, 1),
             )];
 
-            // Device BN254 wrap Merkle commit.  When
-            // the prover statically provided `gpu_bn254_commit` (GPU prover
-            // only) AND `MT` is the BN254 OuterValMmcs, the
-            // Merkle leaf-hash + compress-layers run on the device (the
-            // host DFT encode is still consumed by the open path).  Output
-            // is byte-identical to the host commit (transcript-neutral).
-            // Selected purely by the hook `Some`/`None` (no env gate,
-            // SP1-parity).  Any miss (wrong TypeId / CUDA error / hook
-            // `None`) falls through to the unchanged host commit below.
-            let bn254_device = if let Some(hook) = gpu_bn254_commit {
-                hook(core::any::TypeId::of::<MT>(), &dense_traces).and_then(|boxed| {
-                    boxed
-                        .downcast::<(
-                            crate::jagged_pcs::JaggedCommitGeneric<MT>,
-                            crate::jagged_pcs::JaggedProverDataGeneric<MT>,
-                        )>()
-                        .ok()
-                        .map(|b| *b)
-                })
-            } else {
-                None
-            };
-
-            if let Some((commit, prover_data)) = bn254_device {
-                (commit, prover_data)
-            } else {
-                let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-                crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
-                    dense_traces, mmcs, dft, fri,
-                )
-            }
+            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+            crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
+                dense_traces, mmcs, dft, fri,
+            )
         };
         PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
     }

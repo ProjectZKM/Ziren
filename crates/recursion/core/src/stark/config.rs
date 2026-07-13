@@ -450,9 +450,6 @@ pub mod outer_jagged_hooks {
             &chip_trace_views,
             mmcs,
             fri,
-            // #118: setup-time preprocessed commit → host (device BN254
-            // wrap commit is opt-in via the wrap prover under ZIREN_GPU_WRAP_DEVICE).
-            None,
             // band-cap carrier removal Phase B: outer/wrap prep commit is LEGACY
             // bitrev (`use_rev = false`), byte-identical to the pre-carrier path.
             false,
@@ -563,7 +560,6 @@ mod basefold_over_bn254_roundtrip_test {
             &traces,
             mmcs.clone(),
             fri.clone(),
-            None,
         );
         let commitment = precompute.commit.original_commitment.clone();
 
