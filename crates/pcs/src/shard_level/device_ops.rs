@@ -19,22 +19,25 @@
 //!     to install — same kernels, same marshaling, same `TypeId`/transmute
 //!     guards — so the device walk is byte-equivalent too.
 //!
-//! This is the reusable seam later phases EXTEND with the remaining
-//! Category-B device ops; the five original slots collapsed here are the
-//! "provider-carried" ones read where a `&dyn DeviceTraceProvider` is
-//! already threaded.  The full-trace materialize op is NOT here: it is a
-//! pure device-trace-provider query (it downcasts the provider and pulls
-//! the chip's trace), it is consumed on the deep cross-crate jagged
-//! reduce/open edges where only the provider is threaded, so it lives on
-//! [`crate::shard_level::DeviceTraceProvider::materialize_main_trace`]
-//! (strictly lower threading-churn, semantically the provider's job).
+//! Option-C divergence has since retired the "provider-carried" eval-at ops
+//! (the former `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` slots) and
+//! the two per-layer logup-round drivers (the former `GPU_LOGUP_ROUND_HOOK` /
+//! `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` slots): the GPU prover diverged to
+//! device-native drivers (`device_logup_gkr` / `device_gkr_circuit`) that call
+//! the underlying `zkm-gpu-core` kernels DIRECTLY, so the shared host
+//! `prove_shard_logup_gkr_rows` / `prove_gkr_round` those seams dispatched from
+//! are now CpuProver-only (`is_device()` == `false`) and the device arms were
+//! dead.  What remains is the P6 zerocheck host-cell y-tuple family, still fired
+//! by the MULTI-GPU route, which delegates to the shared host
+//! `prove_shard_zerocheck` threaded with `CudaShardDeviceOps`.
+//!
+//! The full-trace materialize op is NOT here: it is a pure device-trace-provider
+//! query (it downcasts the provider and pulls the chip's trace), consumed on the
+//! deep cross-crate jagged reduce/open edges where only the provider is threaded,
+//! so it lives on
+//! [`crate::shard_level::DeviceTraceProvider::materialize_main_trace`].
 
-use alloc::string::String;
-use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::any::Any;
-
-use crate::shard_level::DeviceTraceProvider;
 
 /// `Ef4` — the KoalaBear degree-4 binomial extension, the concrete
 /// challenge field of the KoalaBear jagged-PCS config; the device ops
@@ -44,24 +47,14 @@ type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear,
 /// `Kb` — KoalaBear, the base field of the same config.
 type Kb = p3_koala_bear::KoalaBear;
 
-/// Object-safe device/host dispatch for the shard-level prover's
-/// "provider-carried" device ops (the SP1-parity static-dispatch collapse
-/// of the former `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
-/// `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` `OnceLock`
-/// registries) plus (P6) the zerocheck y-tuple family
-/// (`GPU_ZEROCHECK_YTUPLE` / `_YTUPLE_DEVICE` / `_FOLD_DEVICE` /
-/// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL`), the latter carried by
-/// `ZeroCheckPoly`, plus (P7) the logup-round sumcheck family
-/// (`GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` /
-/// `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE`), carried by
-/// `LogupRoundPolynomial` — both carried rather than threaded positionally
-/// (their read sites sit inside trait impls with no prover in scope), plus
-/// (P8) the two per-layer logup-round device drivers (`GPU_LOGUP_ROUND_HOOK` /
-/// `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD`), threaded POSITIONALLY into
-/// `prove_gkr_round` (where the per-shard `dev` is already in scope).  All
-/// methods take `&self`
-/// and concrete arg types (no generics) so the trait is object-safe and
-/// threads as `&dyn`.
+/// Object-safe device/host dispatch for the shard-level prover's zerocheck
+/// y-tuple family (P6) — the SP1-parity static-dispatch collapse of the former
+/// `GPU_ZEROCHECK_YTUPLE` / `GPU_ZEROCHECK_BATCHED_YTUPLE` `OnceLock`
+/// registries, carried by `ZeroCheckPoly` (their read sites sit inside trait
+/// impls with no prover in scope, so the `&dyn ShardDeviceOps` is carried by the
+/// poly rather than threaded positionally).  All methods take `&self` and
+/// concrete arg types (no generics) so the trait is object-safe and threads as
+/// `&dyn`.
 ///
 /// `is_device()` gates every device op (it replaces the former
 /// `get_gpu_*_hook().is_some()` presence check); on the host it is `false`
@@ -75,48 +68,19 @@ pub trait ShardDeviceOps: Send + Sync {
         false
     }
 
-    /// Per-chip `eval_at` via the per-shard device-trace provider, for a
-    /// device-only chip with NO host main trace (was
-    /// `GPU_EVAL_AT_PROVIDER`).  Returns one `Ef4` per column, or `None`
-    /// (caller emits the legacy zero vector).  Only called under
-    /// `is_device()`.
-    fn eval_at_provider(
-        &self,
-        _chip_name: &str,
-        _eval_point: &[Ef4],
-        _device_traces: &dyn DeviceTraceProvider,
-    ) -> Option<Vec<Ef4>> {
-        unreachable!("host ShardDeviceOps::eval_at_provider — gated by is_device()")
-    }
-
-    /// BATCHED per-chip `eval_at` via the provider: one call resolves every
-    /// device-only chip at its eval-point, building one eq-table per
-    /// distinct point (was `GPU_EVAL_AT_BATCH_PROVIDER`).  `results[i]` is
-    /// `Some(per-column Ef4)` for resolved chips, `None` otherwise.  Only
-    /// called under `is_device()`.
-    fn eval_at_batch_provider(
-        &self,
-        _requests: &[String],
-        _eval_points: &[Vec<Ef4>],
-        _device_traces: &dyn DeviceTraceProvider,
-    ) -> Vec<Option<Vec<Ef4>>> {
-        unreachable!("host ShardDeviceOps::eval_at_batch_provider — gated by is_device()")
-    }
-
     // ── P6: the zerocheck y-tuple family (carried by `ZeroCheckPoly`) ──────
     //
-    // The five methods below are the SP1-parity static-dispatch collapse of
-    // the former `GPU_ZEROCHECK_YTUPLE` / `GPU_ZEROCHECK_YTUPLE_DEVICE` /
-    // `GPU_ZEROCHECK_FOLD_DEVICE` / `GPU_ZEROCHECK_BATCHED_YTUPLE` /
-    // `GPU_ZEROCHECK_EXTRACT_FINAL` `OnceLock` hooks.  They are read INSIDE
-    // `ZeroCheckPoly`'s `SumcheckPoly`/`ComponentPoly`/first-round impls,
-    // whose signatures are fixed by the generic `reduce_sumcheck_to_evaluation`
-    // driver (no `&self`-prover in scope), so the `&dyn ShardDeviceOps` is
-    // carried by the poly (a `dev` field, threaded through every ctor + fold).
-    // `is_device()` gates each (was the `get_*_hook().is_some()` presence
-    // check); the round polynomials the y-tuple feeds are observed into the
-    // Fiat-Shamir transcript via `finalize_round_poly`, which stays host, so
-    // the transcript is byte-identical to the former global-registry dispatch.
+    // The two methods below are the SP1-parity static-dispatch collapse of
+    // the former `GPU_ZEROCHECK_YTUPLE` / `GPU_ZEROCHECK_BATCHED_YTUPLE`
+    // `OnceLock` hooks.  They are read INSIDE `ZeroCheckPoly`'s
+    // `SumcheckPoly`/`ComponentPoly`/first-round impls, whose signatures are
+    // fixed by the generic `reduce_sumcheck_to_evaluation` driver (no
+    // `&self`-prover in scope), so the `&dyn ShardDeviceOps` is carried by the
+    // poly (a `dev` field, threaded through every ctor + fold).  `is_device()`
+    // gates each (was the `get_*_hook().is_some()` presence check); the round
+    // polynomials the y-tuple feeds are observed into the Fiat-Shamir transcript
+    // via `finalize_round_poly`, which stays host, so the transcript is
+    // byte-identical to the former global-registry dispatch.
 
     /// Per-chip per-round zerocheck y-tuple from HOST cells (was
     /// `GPU_ZEROCHECK_YTUPLE`).  Returns `(y_0, y_2, y_3, y_4)` — the per-pair
@@ -155,74 +119,6 @@ pub trait ShardDeviceOps: Send + Sync {
         _is_first_round: bool,
     ) -> Option<Vec<[Ef4; 4]>> {
         unreachable!("host ShardDeviceOps::zerocheck_batched_ytuple — gated by is_device()")
-    }
-
-    // ── P8: the logup-round device drivers (threaded POSITIONALLY into
-    //    `prove_gkr_round`) ─────────────────────────────────────────────
-    //
-    // The two methods below are the SP1-parity static-dispatch collapse of the
-    // former `GPU_LOGUP_ROUND_HOOK` / `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD`
-    // `OnceLock` hooks.  Unlike the P6/P7 poly-carried ops, these fire in
-    // `prove_gkr_round` itself (a free fn where the per-shard `dev` is already
-    // in scope), so the `&dyn ShardDeviceOps` is threaded POSITIONALLY (deref'd
-    // `&**dev` from the P7 `Arc`) into the `try_logup_round_gpu{,_device_fold}`
-    // helpers that host the dispatch — no poly field needed.  `is_device()`
-    // gates each (was the `get_*_hook().is_some()` presence check); the round
-    // polynomials the driver emits are observed/sampled into the caller's live
-    // `&mut InnerChallenger` in the SAME transcript order as before (the helpers
-    // snapshot for a sound host fallback on a `None` decline), so the
-    // Fiat-Shamir transcript is byte-identical to the former global-registry
-    // dispatch.  Both retain the SAME concrete arg types the retired fn-ptr
-    // aliases used (`Vec<Ef4>`, `DeviceLayerHandle`, `&mut InnerChallenger`,
-    // the `&dyn Fn(Ef4)` transcript closures) and the GPU impl forwards VERBATIM
-    // to the same fns — same nv28 device-pack logic + cross-round
-    // `DeviceLayerHandle` / eq-row-point / chip-meta TLS chain inside the body.
-
-    /// Device-pack per-layer LogUp-GKR round driver (was `GPU_LOGUP_ROUND_HOOK`).
-    /// `input` is `None` for the outermost layer's round 0; the `*_flat` vectors
-    /// are the host-fallback shape and may be ignored when `input.is_some()`.
-    /// Observes/samples into the caller's live challenger.  `None` => GPU
-    /// declined; the caller falls back to the host trait driver (transcript
-    /// restored).  Only called under `is_device()`.
-    #[allow(clippy::too_many_arguments)]
-    fn logup_round(
-        &self,
-        _input: Option<crate::shard_level::sumcheck_poly::DeviceLayerHandle>,
-        _n0_flat: Vec<Ef4>,
-        _d0_flat: Vec<Ef4>,
-        _n1_flat: Vec<Ef4>,
-        _d1_flat: Vec<Ef4>,
-        _eq_int: Vec<Ef4>,
-        _eq_row: Vec<Ef4>,
-        _lambda: Ef4,
-        _initial_claim: Ef4,
-        _num_variables: usize,
-        _challenger: &mut crate::InnerChallenger,
-    ) -> Option<crate::shard_level::sumcheck_poly::GpuLogupRoundResult> {
-        unreachable!("host ShardDeviceOps::logup_round — gated by is_device()")
-    }
-
-    /// Device-fold per-layer LogUp-GKR round driver (was
-    /// `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD`).  Drives the transcript via the
-    /// `observe_ef` / `sample_ef` closures instead of a concrete challenger
-    /// (fn-ptr dispatch could not carry a generic `Challenger`).  `None` => GPU
-    /// declined; the caller falls back.  Only called under `is_device()`.
-    #[allow(clippy::too_many_arguments)]
-    fn logup_round_device_fold(
-        &self,
-        _n0_flat: Vec<Ef4>,
-        _d0_flat: Vec<Ef4>,
-        _n1_flat: Vec<Ef4>,
-        _d1_flat: Vec<Ef4>,
-        _eq_int: Vec<Ef4>,
-        _eq_row: Vec<Ef4>,
-        _lambda: Ef4,
-        _initial_claim: Ef4,
-        _num_variables: usize,
-        _observe_ef: &dyn Fn(Ef4),
-        _sample_ef: &dyn Fn() -> Ef4,
-    ) -> Option<crate::shard_level::sumcheck_poly::GpuLogupRoundResult> {
-        unreachable!("host ShardDeviceOps::logup_round_device_fold — gated by is_device()")
     }
 }
 

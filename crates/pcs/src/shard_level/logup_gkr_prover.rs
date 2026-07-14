@@ -144,38 +144,25 @@ where
 /// vector) when the provider hook is unregistered, the chip is absent, or
 /// (F,EF) != (KoalaBear, Ef4).
 pub fn eval_chip_columns_at_point_via_provider<F, EF>(
-    chip_name: &str,
-    eval_point: &[EF],
-    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-    // P5 static dispatch: the device ops provider (was the
-    // `GPU_EVAL_AT_PROVIDER` `OnceLock`).  `NoDeviceOps` on host
-    // (`is_device()` false → `None`, the legacy unregistered-hook path);
-    // `CudaShardDeviceOps` on the GPU prover.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
+    _chip_name: &str,
+    _eval_point: &[EF],
+    _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+    // Retained for signature stability (the shard prover still threads the
+    // device-ops seam); unused here — see below.
+    _dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Option<Vec<EF>>
 where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    if !dev.is_device() {
-        return None;
-    }
-    use core::any::TypeId;
-    type Kb = p3_koala_bear::KoalaBear;
-    type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
-    if TypeId::of::<F>() != TypeId::of::<Kb>() || TypeId::of::<EF>() != TypeId::of::<Ef4>() {
-        return None;
-    }
-    // SAFETY: TypeId equality guarantees EF == Ef4; slice/Vec layout identical.
-    unsafe {
-        let ep: &[Ef4] =
-            core::slice::from_raw_parts(eval_point.as_ptr().cast::<Ef4>(), eval_point.len());
-        let res_ef4: Vec<Ef4> = dev.eval_at_provider(chip_name, ep, device_traces)?;
-        let len = res_ef4.len();
-        let cap = res_ef4.capacity();
-        let ptr = core::mem::ManuallyDrop::new(res_ef4).as_mut_ptr() as *mut EF;
-        Some(Vec::from_raw_parts(ptr, len, cap))
-    }
+    // Option-C divergence (D3a): the device eval-at seam
+    // (`ShardDeviceOps::eval_at_provider`) is RETIRED.  The GPU driver
+    // (`device_logup_gkr`) now calls the `eval_chip_at_point_via_provider_gpu`
+    // kernel DIRECTLY, so this shared host helper is CpuProver-only — where the
+    // device-trace provider is absent and `is_device()` is `false` — and it
+    // always yields the legacy zero-vector fallback (`None`), byte-identical to
+    // the former `!is_device()` early-return.
+    None
 }
 
 /// BATCHED eval_at via the per-shard device-trace provider. Evaluates
@@ -188,42 +175,23 @@ where
 /// (F,EF) != (KoalaBear, Ef4).
 pub fn eval_chips_at_points_batched_via_provider<F, EF>(
     names: &[String],
-    eval_points: &[Vec<EF>],
-    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-    // P5 static dispatch: the device ops provider (was the
-    // `GPU_EVAL_AT_BATCH_PROVIDER` `OnceLock`).  `NoDeviceOps` on host
-    // (`is_device()` false → all-`None`, the legacy unregistered-hook
-    // path); `CudaShardDeviceOps` on the GPU prover.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
+    _eval_points: &[Vec<EF>],
+    _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
+    // Retained for signature stability (the shard prover still threads the
+    // device-ops seam); unused here — see below.
+    _dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Vec<Option<Vec<EF>>>
 where
     F: PrimeField,
     EF: ExtensionField<F>,
 {
-    let none = || (0..names.len()).map(|_| None).collect::<Vec<_>>();
-    if !dev.is_device() {
-        return none();
-    }
-    use core::any::TypeId;
-    type Kb = p3_koala_bear::KoalaBear;
-    type Ef4 = p3_field::extension::BinomialExtensionField<Kb, 4>;
-    if TypeId::of::<F>() != TypeId::of::<Kb>() || TypeId::of::<EF>() != TypeId::of::<Ef4>() {
-        return none();
-    }
-    // SAFETY: TypeId equality guarantees EF == Ef4; Vec<EF> and Vec<Ef4> have
-    // identical layout, so the slice-of-Vec reinterpret is sound.
-    unsafe {
-        let eps: &[Vec<Ef4>] = core::slice::from_raw_parts(
-            eval_points.as_ptr().cast::<Vec<Ef4>>(),
-            eval_points.len(),
-        );
-        let res: Vec<Option<Vec<Ef4>>> = dev.eval_at_batch_provider(names, eps, device_traces);
-        // Reinterpret Vec<Option<Vec<Ef4>>> -> Vec<Option<Vec<EF>>> (same layout).
-        let len = res.len();
-        let cap = res.capacity();
-        let ptr = core::mem::ManuallyDrop::new(res).as_mut_ptr() as *mut Option<Vec<EF>>;
-        Vec::from_raw_parts(ptr, len, cap)
-    }
+    // Option-C divergence (D3a): the batched device eval-at seam
+    // (`ShardDeviceOps::eval_at_batch_provider`) is RETIRED.  The GPU driver
+    // calls `eval_chips_at_points_batched_via_provider_gpu` DIRECTLY, so this
+    // shared host helper is CpuProver-only (provider absent / `is_device()`
+    // false) and always yields the legacy all-`None` fallback, byte-identical
+    // to the former `!is_device()` early-return.
+    (0..names.len()).map(|_| None).collect::<Vec<_>>()
 }
 
 /// Compute per-column MLE evaluations of a row-major trace at a
