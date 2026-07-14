@@ -1292,21 +1292,12 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
     /// `num_row_variables + num_interaction_variables`; its lower
     /// `num_interaction_variables` coords are the interaction-axis
     /// random point, the upper coords are the row-axis random point.
-    #[allow(clippy::too_many_arguments)]
     pub fn new<F>(
         circuit: &GkrCircuitLayer<F, EF>,
         eval_point: &[EF],
         numerator_eval: EF,
         denominator_eval: EF,
         lambda: EF,
-        // Phase-4: device/host first-round-prove + drain providers.  Their sole
-        // consumer was `try_first_round_on_gpu`'s GpuPrefolded fused first-round
-        // path, which was runtime-dead (`enabled = false`) and was DELETED in
-        // P7 along with the `GPU_FIRST_ROUND` hook — so these stay threaded (the
-        // P4 wiring is left intact) but are unused here.  `&HostFirstRound` /
-        // `&HostDrain` on host callers.
-        _first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
-        _drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
     ) -> Self
     where
         F: Field + Into<EF> + Copy + Sync,
@@ -1715,17 +1706,6 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    // Phase-4: device/host first-round-prove + drain providers, threaded down
-    // to `LogupRoundPolynomial::new` → `try_first_round_on_gpu` (were the
-    // `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks, then
-    // the `#118` `Option<fn>` thread).  `&HostFirstRound` / `&HostDrain` = host
-    // first round (CPU prover / host free-fn callers).
-    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
-    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
-    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
-    // the `GkrDeviceHooks` fn-ptr bundle).  Here the layer-pull method feeds
-    // `pull_device_layer_to_host`.  `&HostGkrDevice` = host round.
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
     // P8 static dispatch: the owned shard-level device-ops seam (was the
     // `GPU_LOGUP_ROUND_HOOK` / `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` `OnceLock`
     // hooks), threaded `&**dev` into the device-pack / device-fold per-layer
@@ -1747,15 +1727,16 @@ where
     // Host-resident layer view.  For `LayerState::Device` this pulls the
     // cells from the GPU registry.  Feeds the device-pack first-layer
     // marshalling + device-fold/host fallback.
+    // D3c: this shared HOST `prove_gkr_round` is CpuProver-only — the shared
+    // `build_gkr_circuit` no longer constructs `LayerState::Device`, so the
+    // Device arm is unreachable here (the GPU prover walks its own device-native
+    // `prove_gkr_round_native`, which pulls via the `gpu_layer_pull_hook` kernel
+    // directly).
     let pulled_owner: Option<GkrCircuitLayer<F, EF>> = match state {
         LayerState::Host(_) => None,
-        LayerState::Device { circuit_id, handle, .. } => Some(
-            super::top_level::pull_device_layer_to_host::<F, EF>(
-                *circuit_id,
-                *handle,
-                // Phase-4: layer-pull provider (was `GPU_LAYER_PULL_HOOK`).
-                gkr_device_hooks,
-            ),
+        LayerState::Device { .. } => unreachable!(
+            "D3c: shared host prove_gkr_round never sees LayerState::Device \
+             (device-fold path removed from build_gkr_circuit)"
         ),
     };
     let circuit: &GkrCircuitLayer<F, EF> = match state {
@@ -1862,8 +1843,6 @@ where
         numerator_eval,
         denominator_eval,
         lambda,
-        first_round_device_hook,
-        drain_hook,
     );
     let claimed_sum = poly.claimed_sum();
 
@@ -2656,10 +2635,6 @@ mod tests {
             d_eval,
             lambda,
             &mut ch,
-            // Phase-4: host-only test → host first round + host GKR walk.
-            &crate::shard_level::device_first_layer_context::HostFirstRound,
-            &crate::shard_level::device_first_layer_context::HostDrain,
-            &crate::jagged_pcs::HostGkrDevice,
             // P7: host device-ops seam.
             &host_dev(),
         );
@@ -2748,11 +2723,7 @@ mod tests {
 
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
-            // Phase-4: host-only test → host first round + host GKR walk.
             &state, &point, n_eval, d_eval, lambda, &mut ch,
-            &crate::shard_level::device_first_layer_context::HostFirstRound,
-            &crate::shard_level::device_first_layer_context::HostDrain,
-            &crate::jagged_pcs::HostGkrDevice,
             // P7: host device-ops seam.
             &host_dev(),
         );

@@ -42,20 +42,6 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     // consumes the inner via `PaddedMle::eval_at` (== the on-the-fly
     // `evaluate_trace_columns_at_point`, unit-tested).
     shared_trace_mles: &[PaddedMle<F>],
-    // Phase-4: device/host first-round-prove + drain providers, threaded down
-    // to `prove_gkr_round` → `LogupRoundPolynomial::new` →
-    // `try_first_round_on_gpu` (were the `REGISTERED_FIRST_ROUND_HOOK` /
-    // `REGISTERED_DRAIN_HOOK` OnceLocks, then the `#118` `Option<fn>` thread).
-    // `&HostFirstRound` / `&HostDrain` = host first round (CPU prover / host
-    // free-fn callers).
-    first_round_device_hook: &dyn crate::shard_level::device_first_layer_context::FirstRoundProvider,
-    drain_hook: &dyn crate::shard_level::device_first_layer_context::DrainProvider,
-    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
-    // the `GkrDeviceHooks` fn-ptr bundle), distributed below to
-    // `build_gkr_circuit` (init/transition/pull/fit-preflight) and the
-    // post-walk drain site.  `&HostGkrDevice` = host walk, byte-identical to
-    // the pre-#118 path.
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
     // P5/P7 static dispatch: the shard-level device ops seam (was the
     // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
     // `GPU_INTERACTION_EVAL` P5 hooks + the P7 `GPU_SUMCHECK` /
@@ -176,13 +162,6 @@ where
         alpha,
         &betas,
         num_row_variables,
-        _device_traces,
-        // #118: init / transition / pull / fit-preflight fns (were the
-        // `GPU_LAYER_*_HOOK` OnceLocks), consulted on the device-fold path.
-        gkr_device_hooks,
-        // P5: the device ops seam, distributed to `generate_first_layer`'s
-        // interaction-eval dispatch (was the `GPU_INTERACTION_EVAL` OnceLock).
-        &**dev,
     );
     let num_interaction_variables =
         output.numerator.len().trailing_zeros().saturating_sub(1) as usize;
@@ -263,36 +242,13 @@ where
     // num_row_variables == 0 terminal (only there to enable clean
     // termination of the build loop), then dispatch on the variant.
     //
-    // After the layer walk, drain the GPU's per-circuit intermediate
-    // state buffers — without an explicit drain ~18 layers' worth of
-    // buffers stay resident across all shards and OOM the following
-    // Merkle commit phase.
-    let mut device_circuit_id_to_drain: Option<u64> = None;
-
+    // D3c: this shared HOST driver is CpuProver-only — `build_gkr_circuit`
+    // never constructs `LayerState::Device`, so the per-circuit device-drain
+    // (formerly `gkr_device_hooks.layer_drain`) is not needed here.  The GPU
+    // prover's device-native driver owns the device drain (`gpu_layer_drain_circuit_hook`).
     for state in circuit.layers.iter().filter(|l| l.num_row_variables() >= 1) {
         let lambda: EF = challenger.sample_algebra_element::<EF>();
 
-        // Capture the per-shard device circuit_id for the post-loop
-        // drain hook. All Device entries from the same build_gkr_circuit
-        // call share one circuit_id, so a single Option suffices.
-        if let super::layer::LayerState::Device { circuit_id, .. } = state {
-            if device_circuit_id_to_drain.is_none() {
-                device_circuit_id_to_drain = Some(*circuit_id);
-            } else {
-                debug_assert_eq!(
-                    device_circuit_id_to_drain,
-                    Some(*circuit_id),
-                    "all Device layers in one build_gkr_circuit call must \
-                     share circuit_id"
-                );
-            }
-        }
-
-        // `prove_gkr_round` resolves `LayerState::Device` to a host-
-        // resident layer internally (via `pull_device_layer_to_host`)
-        // so V1/V2/host fallback paths always have real cells. V3 still
-        // consumes the device-resident handle from the active
-        // `LogupTaskScope` on its hot path.
         let round_proof = prove_gkr_round::<F, EF, _>(
             state,
             &eval_point,
@@ -300,11 +256,6 @@ where
             denominator_eval,
             lambda,
             challenger,
-            first_round_device_hook,
-            drain_hook,
-            // Phase-4: row-GKR device-fold walk provider; here its layer-pull
-            // method feeds `pull_device_layer_to_host`.
-            gkr_device_hooks,
             // P7: the owned device-ops seam, cloned into each round's
             // `LogupRoundPolynomial` for the packed / chip sumcheck arms.
             dev,
@@ -335,17 +286,6 @@ where
         round_proofs.push(round_proof);
     }
     let n_layers = round_proofs.len();
-
-    // Drain the GPU's per-circuit bucket. No-op on host-only path
-    // or when ziren-gpu hasn't registered the drain hook.
-    if let Some(circuit_id) = device_circuit_id_to_drain {
-        // Phase-4: the per-circuit drain (was `GPU_LAYER_DRAIN_HOOK` /
-        // `GkrDeviceHooks::layer_drain`).  A `Device` circuit only exists under
-        // the device walk, so `is_device()` is true here; on host it never runs.
-        if gkr_device_hooks.is_device() {
-            gkr_device_hooks.layer_drain(circuit_id);
-        }
-    }
 
     drop(_layers_span);
     let _dt_layers_us = _t_layers.elapsed().as_micros() as u64;
@@ -607,51 +547,4 @@ where
     for c in v.as_basis_coefficients_slice() {
         challenger.observe(*c);
     }
-}
-
-/// Pull a device-resident GKR layer back to host. Panics if the
-/// `EF != JaggedChallenge` TypeId gate fires or if no pull hook is
-/// registered — both indicate a programmer error: `build_gkr_circuit`
-/// requires the EF match and all three hooks before producing any
-/// `Device` entries.
-pub fn pull_device_layer_to_host<F, EF>(
-    circuit_id: u64,
-    handle: u64,
-    // Phase-4: the layer-pull provider (was `GPU_LAYER_PULL_HOOK` /
-    // `GkrDeviceHooks::layer_pull`), threaded from the prover via
-    // `prove_gkr_round`.  A `Device` layer only exists under the device walk,
-    // so `is_device()` is true and `layer_pull` is the GPU pull (the host
-    // default is `unreachable!()` — a programmer error, impossible once
-    // `build_gkr_circuit` gated the device path on `is_device()`).
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-) -> super::layer::GkrCircuitLayer<F, EF>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    use core::any::TypeId;
-
-    use crate::jagged_pcs::JaggedChallenge;
-
-    assert_eq!(
-        TypeId::of::<EF>(),
-        TypeId::of::<JaggedChallenge>(),
-        "LayerState::Device under EF != JaggedChallenge"
-    );
-
-    // Pass circuit_id so the GPU registry scopes per build call —
-    // concurrent shards on the same GPU would otherwise collide on
-    // the per-GPU `next_handle` counter.
-    let pulled_lb: super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> =
-        gkr_device_hooks.layer_pull(circuit_id, handle);
-
-    // SAFETY: assert above confirms `EF == JaggedChallenge` at runtime.
-    let pulled_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {
-        let out: super::layer::LogUpGkrCpuLayer<EF, EF> =
-            core::mem::transmute_copy(&pulled_lb);
-        core::mem::forget(pulled_lb);
-        out
-    };
-
-    super::layer::GkrCircuitLayer::Layer(pulled_ef)
 }

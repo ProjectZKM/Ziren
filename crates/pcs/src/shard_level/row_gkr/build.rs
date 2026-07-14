@@ -36,7 +36,13 @@ use crate::Chip;
 ///
 /// **Panics** when `num_row_variables == 0` (degenerate empty shard
 /// — handled by the caller, not by this builder).
-#[allow(clippy::too_many_arguments)]
+// D3c (Option-C divergence): the device seam params (`device_traces` provider,
+// the `gkr_device_hooks` `GkrDeviceProvider` device-fold walk, and the `dev`
+// `ShardDeviceOps` interaction-eval seam) were REMOVED — this shared HOST
+// builder is now CpuProver-only (host fold; no `LayerState::Device` ever
+// constructed).  The GPU prover routes through its own device-native
+// `build_gkr_circuit_native` copy (in `zkm-gpu-basefold`) that calls the
+// ziren-gpu layer-lifecycle + interaction-eval kernels DIRECTLY.
 pub fn build_gkr_circuit<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
@@ -44,16 +50,6 @@ pub fn build_gkr_circuit<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
-    device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // Phase-4: object-safe device/host row-GKR device-fold walk provider (was
-    // the `GkrDeviceHooks` fn-ptr bundle over the `GPU_*_HOOK` OnceLocks).  On
-    // the device-fold path the init / transition / pull / fit-preflight methods
-    // run; `&HostGkrDevice` (`is_device()` false) = host fold.
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-    // P5: the device ops seam, threaded to `generate_first_layer`'s
-    // interaction-eval dispatch (was the `GPU_INTERACTION_EVAL` OnceLock).
-    // `&NoDeviceOps` = host, `&CudaShardDeviceOps` on the GPU prover.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> (LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)
 where
     F: PrimeField,
@@ -69,8 +65,6 @@ where
         alpha,
         betas,
         num_row_variables,
-        device_traces,
-        dev,
     );
 
     // `generate_first_layer` reduces num_row_variables by 1. Three
@@ -111,13 +105,8 @@ where
     }
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
-    let device_terminal: Option<super::layer::LogUpGkrCpuLayer<EF, EF>> =
-        try_run_device_path::<F, EF>(&mut last_ef_layer, &mut layers, gkr_device_hooks);
-
-    // Subsequent transitions stay in EF.  When the device path took
-    // over, `last_ef_layer` is `None` here and the loop is a no-op
-    // (all intermediate `LayerState::Device` entries were already
-    // pushed by `try_run_device_path`).
+    // D3c: the device-fold path (`try_run_device_path`) was removed from this
+    // shared HOST builder — every subsequent transition stays in EF on host.
     while let Some(curr) = last_ef_layer.take() {
         if curr.num_row_variables >= 1 {
             let next = layer_transition::<EF, EF>(&curr);
@@ -131,17 +120,13 @@ where
     }
 
     // Pick the terminal layer (num_row_variables == 1) for output
-    // extraction. Three paths:
+    // extraction. Two paths:
     //
     //   * num_row_variables=2 input → terminal_owned is Some
     //     (F→EF-promoted FirstLayer)
-    //   * device path took over → device_terminal is Some
-    //     (pulled from device via GpuLayerPullFn)
     //   * num_row_variables>=3 input, host path → layers[len-2] is the
     //     EF Layer with num_row_variables==1
     let output = if let Some(t) = terminal_owned.as_ref() {
-        extract_outputs(t)
-    } else if let Some(t) = device_terminal.as_ref() {
         extract_outputs(t)
     } else {
         match &layers[layers.len() - 2] {
@@ -150,220 +135,12 @@ where
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
             LayerState::Device { .. } => unreachable!(
-                "device path returns the terminal via `device_terminal`; \
-                 the layers[len-2] arm is only entered on the host-only path"
+                "D3c: the shared host build_gkr_circuit never constructs \
+                 LayerState::Device (device-fold path removed)"
             ),
         }
     };
     (output, LogupGkrCpuCircuit::new(layers))
-}
-
-/// Runs the GKR layer walk on device: returns `Some(terminal)` when it ran
-/// end-to-end and pulled the terminal layer back to host; `None` falls back to
-/// host.  Side effects on `Some`: `last_ef_layer` consumed; `layers` gains one
-/// `LayerState::Device` per intermediate.
-fn try_run_device_path<F, EF>(
-    last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
-    layers: &mut Vec<LayerState<F, EF>>,
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    // Require a GPU pool worker TLS context: off-pool basefold rayon
-    // workers have no `cudaSetDevice` and would dispatch to the wrong
-    // GPU (or GPU 0 by default), paying full PCIe + launch overhead.
-    if crate::gpu_worker_context::current_gpu_pool_worker_device().is_none() {
-        return None;
-    }
-    try_run_device_path_basefold::<F, EF>(last_ef_layer, layers, gkr_device_hooks)
-}
-
-fn try_run_device_path_basefold<F, EF>(
-    last_ef_layer: &mut Option<super::layer::LogUpGkrCpuLayer<EF, EF>>,
-    layers: &mut Vec<LayerState<F, EF>>,
-    gkr_device_hooks: &dyn crate::jagged_pcs::GkrDeviceProvider,
-) -> Option<super::layer::LogUpGkrCpuLayer<EF, EF>>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    use core::any::TypeId;
-
-    use crate::jagged_pcs::{
-        allocate_gpu_layer_circuit_id, HostLayerView, JaggedChallenge, JaggedVal,
-    };
-
-    // Need 'static bound on F/EF to use TypeId; the build_gkr_circuit
-    // generics already satisfy this (PrimeField : 'static is implied
-    // by the standard p3 field bounds), but we re-check via the
-    // TypeId comparisons below — `TypeId::of::<F>()` requires F : 'static.
-
-    // Gate 3: device provider present (Phase-4: `is_device()`, was the
-    // `layer_init? / layer_transition? / layer_pull?` triple presence-check on
-    // the `GkrDeviceHooks` bundle, which were the `GPU_LAYER_*_HOOK` OnceLocks).
-    // Host provider (`is_device()` false) = host fold.
-    if !gkr_device_hooks.is_device() {
-        return None;
-    }
-
-    // Gate 4: TypeId match (recursion-circuit instantiates over a
-    // different field stack — those calls fall through to host).
-    if TypeId::of::<F>() != TypeId::of::<JaggedVal>()
-        || TypeId::of::<EF>() != TypeId::of::<JaggedChallenge>()
-    {
-        return None;
-    }
-
-    // Gate 5: at least one EF layer present (i.e. the F→EF host
-    // transition above produced something).  When this is `None` the
-    // FirstLayer was already the terminal and the host path's
-    // `terminal_owned` short-circuit takes over; no device dispatch.
-    let first_ef_layer = last_ef_layer.take()?;
-
-    // SAFETY: TypeId gates 4 confirm `EF == JaggedChallenge` and
-    // `F == JaggedVal` at runtime; the layer type
-    // `LogUpGkrCpuLayer<EF, EF>` therefore has identical layout to
-    // `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` and `RowMajorTable<EF>`
-    // to `RowMajorTable<JaggedChallenge>`.  We reinterpret-borrow via a
-    // pointer cast so the upload stays zero-copy on the host side.
-    //
-    // The borrow in `view` cannot outlive `first_ef_layer`; we pass
-    // `view` by value to the init hook which returns immediately with
-    // a `u64` handle.
-    let layer_as_lb: &super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> = unsafe {
-        &*(&first_ef_layer
-            as *const super::layer::LogUpGkrCpuLayer<EF, EF>
-            as *const super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>)
-    };
-
-    let view = HostLayerView {
-        numerator_0: &layer_as_lb.numerator_0,
-        denominator_0: &layer_as_lb.denominator_0,
-        numerator_1: &layer_as_lb.numerator_1,
-        denominator_1: &layer_as_lb.denominator_1,
-        num_row_variables: layer_as_lb.num_row_variables,
-        num_interaction_variables: layer_as_lb.num_interaction_variables,
-    };
-
-    // PIECE3: device-fold FIT PREFLIGHT.  The init/transition hooks have no
-    // error channel — an OOM inside a transition panics mid-loop and cannot
-    // cleanly fall back (earlier layers already device-resident).  Ask the
-    // GPU side (which can read free VRAM) whether this layer set fits BEFORE
-    // any device alloc.  When it declines, DROP `view`, restore the taken
-    // `first_ef_layer` into `last_ef_layer`, and return `None` so the GKR
-    // fold runs entirely on host — byte-identical (device fold is a perf
-    // optimization; the layer cells are the same) and transcript-neutral.
-    // Unregistered hook => proceed as before (no decline).
-    // Phase-4: `layer_fit_preflight` (was `GPU_LAYER_FIT_PREFLIGHT_HOOK` /
-    // `GkrDeviceHooks::layer_fit_preflight`).  We are past the `is_device()`
-    // gate, so the device provider is present and always supplies the preflight
-    // (the GPU provider set it unconditionally alongside init/transition/pull).
-    {
-        if !gkr_device_hooks.layer_fit_preflight(&view) {
-            drop(view);
-            // Put the layer back so the host fall-through loop in
-            // `build_gkr_circuit` (`while let Some(curr) = last_ef_layer.take()`)
-            // picks it up — the `None` contract requires `last_ef_layer`
-            // un-consumed.
-            *last_ef_layer = Some(first_ef_layer);
-            tracing::info!(
-                sub_phase = "row_gkr_fold_fit_preflight",
-                "PIECE3: device-fold fit preflight DECLINED — running GKR fold on host"
-            );
-            return None;
-        }
-    }
-
-    // multi-GPU fix: allocate a fresh circuit_id for this
-    // build_gkr_circuit call.  The GPU side keys its registry by
-    // (device_id, circuit_id) so concurrent shards on the same GPU
-    // don't share a `next_handle` counter.  Threaded through every
-    // init/transition/pull invocation for this circuit.
-    let circuit_id: u64 = allocate_gpu_layer_circuit_id();
-
-    let mut handle: u64 = gkr_device_hooks.layer_init(circuit_id, view);
-    let mut cur_num_row_variables = first_ef_layer.num_row_variables;
-    let cur_num_interaction_variables = first_ef_layer.num_interaction_variables;
-
-    // Push the first EF layer as a Host entry — the host transition
-    // out of the FirstLayer already happened, and the sumcheck round
-    // dispatcher needs the per-layer cells anyway.
-    // Storing it host-side here matches the host path's behavior for
-    // this one layer; only SUBSEQUENT layers go through Device.
-    layers.push(LayerState::Host(GkrCircuitLayer::Layer(first_ef_layer)));
-
-    // Drive the remaining transitions on device.  `cur_num_row_variables`
-    // was the ROW count of the layer we just uploaded; each transition
-    // halves it, mirroring the host loop's `curr.num_row_variables >= 1`
-    // termination.
-    //
-    // The host loop pushes EVERY layer (including the final null
-    // terminal at num=0).  We do the same to keep `layers.len()`
-    // identical to the host path so `layers[layers.len() - 2]`
-    // indexing in downstream code (the round.rs migration)
-    // still resolves to the terminal at num=1.
-    //
-    // We capture the handle at num=1 (the TERMINAL layer
-    // `extract_outputs` needs) before the final transition that takes
-    // it to num=0; pulling the terminal handle (not the post-final
-    // null one) mirrors the host path's `layers[len - 2]` indexing.
-    let mut terminal_handle: Option<u64> = None;
-    while cur_num_row_variables >= 1 {
-        // BEFORE invoking the next transition, record this handle if
-        // the layer at the CURRENT step has num_row_variables == 1
-        // (i.e. transitioning out of the terminal candidate).
-        if cur_num_row_variables == 1 {
-            terminal_handle = Some(handle);
-        }
-        let next_handle = gkr_device_hooks.layer_transition(circuit_id, handle);
-        cur_num_row_variables = cur_num_row_variables.saturating_sub(1);
-        layers.push(LayerState::Device {
-            circuit_id,
-            handle: next_handle,
-            num_row_variables: cur_num_row_variables,
-            num_interaction_variables: cur_num_interaction_variables,
-        });
-        handle = next_handle;
-    }
-
-    // Special case: when first_ef_layer.num_row_variables == 1 the
-    // first uploaded layer IS the terminal — the loop above never
-    // ran (entry condition `cur >= 1` would fire for one iteration,
-    // setting terminal_handle = first_handle, then transition + push
-    // null terminal).  Both branches have terminal_handle = Some(_).
-    //
-    // Edge case: when first_ef_layer.num_row_variables == 0 the loop
-    // body never executes and terminal_handle stays None.  In that
-    // case extract_outputs cannot run on this device-pulled terminal,
-    // so we fall back to pulling the initial handle.  This degenerate
-    // shape never appears in production (build_gkr_circuit asserts
-    // num_row_variables >= 2 at entry, which guarantees the first EF
-    // layer has num >= 1) but the `unwrap_or(handle)` keeps the
-    // device-path code total.
-    let terminal_handle = terminal_handle.unwrap_or(handle);
-
-    // Pull the terminal device-resident layer back to host so
-    // `extract_outputs` (host primitive) can run unchanged.  Pulling
-    // the captured terminal_handle (NOT the post-loop `handle` which
-    // points at the null terminal at num=0) mirrors the host path's
-    // `layers[layers.len() - 2]` indexing.
-    let terminal_lb: super::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge> =
-        gkr_device_hooks.layer_pull(circuit_id, terminal_handle);
-
-    // SAFETY: TypeId gate 4 confirms `JaggedChallenge == EF` at runtime;
-    // the `LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>` struct has
-    // identical layout to `LogUpGkrCpuLayer<EF, EF>`.  Reinterpret via
-    // `transmute_copy` and `forget` to move ownership safely.
-    let terminal_ef: super::layer::LogUpGkrCpuLayer<EF, EF> = unsafe {
-        let out: super::layer::LogUpGkrCpuLayer<EF, EF> =
-            core::mem::transmute_copy(&terminal_lb);
-        core::mem::forget(terminal_lb);
-        out
-    };
-
-    Some(terminal_ef)
 }
 
 /// F→EF promotion of a FirstLayer's numerators (denominators are

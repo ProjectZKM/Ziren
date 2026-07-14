@@ -394,18 +394,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             // byte-identical to the former `None`-hook host path.
             &crate::jagged_pcs::HostJaggedReducer,
             &crate::jagged_pcs::HostJaggedOpener,
-            // Phase-4 static dispatch: the first-round / drain / GKR-walk device
-            // hooks are provided by prover TYPE.  The default (CpuProver / any
-            // prover not overriding `prove_shard_to_basefold`, e.g. the wrap
-            // prover) threads the HOST providers; the GPU core prover overrides
-            // `prove_shard_to_basefold` and threads its own `&DeviceFirstRound`
-            // / `&DeviceDrain` / `&DeviceGkrDevice` positionally.  Byte-identical
-            // to the former `None` / `None` / `GkrDeviceHooks::default()` host
-            // path (the former `first_round_device_hook()` / `drain_hook()` /
-            // `gkr_device_hooks()` always-host accessors are removed).
-            &crate::shard_level::device_first_layer_context::HostFirstRound,
-            &crate::shard_level::device_first_layer_context::HostDrain,
-            &crate::jagged_pcs::HostGkrDevice,
             // P5/P7 static dispatch: host device ops = no device, carried as the
             // owned `Arc`.  The default (CpuProver / wrap prover / any prover not
             // overriding `prove_shard_to_basefold`) threads `Arc<NoDeviceOps>`

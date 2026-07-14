@@ -7,8 +7,6 @@
 use core::any::Any;
 use std::sync::Arc;
 
-type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-
 /// Opaque, cheaply-cloneable handle to a device-resident
 /// first-layer trace; downcast to recover the concrete type.
 #[derive(Clone)]
@@ -98,119 +96,16 @@ pub fn current_device_first_layer() -> Option<DeviceFirstLayerHandle> {
     CURRENT_HANDLE.with(|c| c.borrow().as_ref().map(|(_, h)| h.clone()))
 }
 
-/// Object-safe device/host row-GKR FIRST-ROUND dispatch — the SP1-parity
-/// static-dispatch collapse of the former `FirstRoundDeviceHook` fn-ptr +
-/// `Option<..>` thread (was `REGISTERED_FIRST_ROUND_HOOK`).  The prover TYPE
-/// selects the impl: the host build threads `&HostFirstRound`, the GPU prover
-/// threads its own `&DeviceFirstRound` (in `zkm-gpu-basefold`).  `is_device()`
-/// gates the device first-round dispatch (was
-/// `first_round_device_hook.is_some()`); `first_round` runs the device kernel
-/// (args mirror the former fn-ptr exactly, so device impls stay
-/// byte-equivalent).  Host default = `is_device()` false + `first_round`
-/// returns `None`, byte-identical to the pre-#118 unregistered-hook path.
-pub trait FirstRoundProvider {
-    #[allow(clippy::too_many_arguments)]
-    fn first_round(
-        &self,
-        col_index: &[u32],
-        start_indices: &[u32],
-        eq_row_chip_offsets: &[u32],
-        per_chip_cols: &[u32],
-        per_chip_real_n0: &[u32],
-        per_chip_real_n1: &[u32],
-        per_chip_real_d0: &[u32],
-        per_chip_real_d1: &[u32],
-        per_chip_pair_offsets: &[u32],
-        row_half: u32,
-        total_pair_tasks: u32,
-        total_one_quadrant_cells: u32,
-        eq_row_real: &[Ef4],
-        eq_int_real: &[Ef4],
-        lambda: Ef4,
-        alpha: Ef4,
-    ) -> Option<(Vec<Ef4>, Vec<Ef4>)>;
-
-    /// `true` for the device first-round provider — gates the device
-    /// first-round dispatch (was `first_round_device_hook.is_some()`).  Host
-    /// default = `false`.
-    fn is_device(&self) -> bool {
-        false
-    }
-}
-
-/// Host first-round provider: no device first round.  `is_device()` = false +
-/// `first_round` returns `None`, so the row-GKR round-0 dispatch takes the
-/// exact pre-static-dispatch host path → byte-identical.
-pub struct HostFirstRound;
-
-impl FirstRoundProvider for HostFirstRound {
-    #[allow(clippy::too_many_arguments)]
-    fn first_round(
-        &self,
-        _col_index: &[u32],
-        _start_indices: &[u32],
-        _eq_row_chip_offsets: &[u32],
-        _per_chip_cols: &[u32],
-        _per_chip_real_n0: &[u32],
-        _per_chip_real_n1: &[u32],
-        _per_chip_real_d0: &[u32],
-        _per_chip_real_d1: &[u32],
-        _per_chip_pair_offsets: &[u32],
-        _row_half: u32,
-        _total_pair_tasks: u32,
-        _total_one_quadrant_cells: u32,
-        _eq_row_real: &[Ef4],
-        _eq_int_real: &[Ef4],
-        _lambda: Ef4,
-        _alpha: Ef4,
-    ) -> Option<(Vec<Ef4>, Vec<Ef4>)> {
-        None
-    }
-}
-
-/// Object-safe device/host first-layer TLS-stash DRAIN dispatch — the
-/// SP1-parity static-dispatch collapse of the former `DrainHook` fn-ptr +
-/// `Option<..>` thread (was `REGISTERED_DRAIN_HOOK`).  The host build threads
-/// `&HostDrain` (drains nothing → `None`), the GPU prover threads its own
-/// `&DeviceDrain` (in `zkm-gpu-basefold`).
-pub trait DrainProvider {
-    /// Drain the device first-layer TLS stash into an opaque payload; `None`
-    /// when there is no device stash (host first round).
-    fn drain(&self) -> Option<Arc<dyn Any + Send + Sync>>;
-}
-
-/// Host drain provider: no device stash to drain → `None`, byte-identical to
-/// the pre-#118 unregistered-hook path.
-pub struct HostDrain;
-
-impl DrainProvider for HostDrain {
-    fn drain(&self) -> Option<Arc<dyn Any + Send + Sync>> {
-        None
-    }
-}
-
-/// Drain the device-first-layer stash via the statically-provided drain
-/// provider.  #118: the drain provider is threaded from the prover
-/// (`&HostDrain` on the CPU / free-fn path, `&DeviceDrain` on the GPU prover)
-/// down to the row-GKR first-round dispatch, not read from a global registry.
-/// `HostDrain` (CPU prover / host free-fn callers) = no device stash to drain
-/// → `None`, byte-identical to the pre-#118 unregistered-hook path.
-#[must_use]
-pub fn drain_via_hook(drain: &dyn DrainProvider) -> Option<DeviceFirstLayerHandle> {
-    let payload = drain.drain()?;
-    Some(DeviceFirstLayerHandle::new(payload))
-}
-
-// #118: the device first-round-prove provider (`FirstRoundProvider`) and the
-// TLS-stash drain provider (`DrainProvider`) are provided STATICALLY (threaded
-// from the prover down to the row-GKR first-round dispatch in
-// `try_first_round_on_gpu`), not via global registries.  The former
-// `REGISTERED_FIRST_ROUND_HOOK` / `REGISTERED_DRAIN_HOOK` OnceLocks + their
-// `register_/get_` accessors were removed; ziren-gpu's prover exposes the two
-// impls (`&DeviceFirstRound` / `&DeviceDrain`) for the `prover` crate to pass
-// into the free-fn `prove_shard_to_basefold` (which threads them through
-// `prove_shard_logup_gkr_rows` → `prove_gkr_round` →
-// `LogupRoundPolynomial::new` → `try_first_round_on_gpu`).
+// D3c (Option-C divergence): the `FirstRoundProvider` / `DrainProvider` traits
+// + `HostFirstRound` / `HostDrain` impls + `drain_via_hook` were REMOVED.  Their
+// sole consumer was the runtime-dead GPU fused first-round path
+// (`try_first_round_on_gpu`, `enabled = false`), retired in P7 along with the
+// `GPU_FIRST_ROUND` hook — so `LogupRoundPolynomial::new` ignored the two
+// providers (`_`-prefixed).  The row-GKR first-round is now the host per-chip
+// path unconditionally; `prove_shard_logup_gkr_rows` / `prove_gkr_round` no
+// longer thread them.  The `DeviceFirstLayerHandle` / `DeviceFirstLayerGuard` /
+// `current_device_first_layer` TLS stash above is retained (the GPU first-layer
+// generation still installs into it; harmless side channel).
 
 #[cfg(test)]
 mod tests {

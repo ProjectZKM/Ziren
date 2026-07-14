@@ -103,24 +103,6 @@ pub trait ShardDeviceOps: Send + Sync {
         unreachable!("host ShardDeviceOps::eval_at_batch_provider — gated by is_device()")
     }
 
-    /// Per-chip LogUp-GKR phase-2 interaction-table builder (was
-    /// `GPU_INTERACTION_EVAL`).  Returns `(numer, denom)` row-major, or
-    /// `None` to fall back to host.  Only called under `is_device()`.
-    #[allow(clippy::too_many_arguments)]
-    fn interaction_eval(
-        &self,
-        _chip_name: &str,
-        _main_row_major: &[Kb],
-        _main_width: usize,
-        _preprocessed_row_major: &[Kb],
-        _preprocessed_width: usize,
-        _alpha: Ef4,
-        _betas: &[Ef4],
-        _device_traces: Option<&dyn DeviceTraceProvider>,
-    ) -> Option<(Vec<Kb>, Vec<Ef4>)> {
-        unreachable!("host ShardDeviceOps::interaction_eval — gated by is_device()")
-    }
-
     // ── P6: the zerocheck y-tuple family (carried by `ZeroCheckPoly`) ──────
     //
     // The five methods below are the SP1-parity static-dispatch collapse of

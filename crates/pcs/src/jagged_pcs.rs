@@ -1130,65 +1130,15 @@ pub type GpuGenerateFirstLayerFn = fn(
 // remaining five are the live device-fold walk fns.
 // ─────────────────────────────────────────────────────────────────────
 
-/// Object-safe device/host row-GKR device-fold lifecycle dispatch.  Host build
-/// threads `&HostGkrDevice` (host fold), the GPU prover threads its own
-/// `&DeviceGkrDevice`.  `is_device()` gates the device-fold walk (was the
-/// `layer_init? / layer_transition? / layer_pull?` triple presence-check); the
-/// five lifecycle methods run only under `is_device()` (host defaults are
-/// `unreachable!()`, never reached because `is_device()` returns `false`).
-/// Byte-identical to the pre-#118 unregistered-hook host walk.
-pub trait GkrDeviceProvider {
-    /// `true` for the device GKR provider — gates the device-fold layer walk
-    /// (was the `layer_init? / layer_transition? / layer_pull?` triple
-    /// presence-check).  Host default = `false` → host fold.
-    fn is_device(&self) -> bool {
-        false
-    }
-
-    /// Upload the first EF layer to device, return handle (was
-    /// `GPU_LAYER_INIT_HOOK` / `GkrDeviceHooks::layer_init`).  Only called
-    /// under `is_device()`.
-    fn layer_init(&self, _circuit_id: u64, _view: HostLayerView<'_>) -> u64 {
-        unreachable!("host GkrDeviceProvider::layer_init — gated by is_device()")
-    }
-
-    /// Produce the next device-resident layer state (was
-    /// `GPU_LAYER_TRANSITION_HOOK`).  Only called under `is_device()`.
-    fn layer_transition(&self, _circuit_id: u64, _prev_handle: u64) -> u64 {
-        unreachable!("host GkrDeviceProvider::layer_transition — gated by is_device()")
-    }
-
-    /// Materialize a device layer handle back to host (was
-    /// `GPU_LAYER_PULL_HOOK`).  Only called for a `LayerState::Device` (which
-    /// only exists when `is_device()`).
-    fn layer_pull(
-        &self,
-        _circuit_id: u64,
-        _handle: u64,
-    ) -> crate::shard_level::row_gkr::layer::LogUpGkrCpuLayer<JaggedChallenge, JaggedChallenge>
-    {
-        unreachable!("host GkrDeviceProvider::layer_pull — gated by is_device()")
-    }
-
-    /// Release a circuit's device-resident intermediate layers (was
-    /// `GPU_LAYER_DRAIN_HOOK`).  Only called under `is_device()`.
-    fn layer_drain(&self, _circuit_id: u64) {
-        unreachable!("host GkrDeviceProvider::layer_drain — gated by is_device()")
-    }
-
-    /// Up-front device-fold VRAM fit preflight (was
-    /// `GPU_LAYER_FIT_PREFLIGHT_HOOK`).  Only called under `is_device()`.
-    fn layer_fit_preflight(&self, _view: &HostLayerView<'_>) -> bool {
-        unreachable!("host GkrDeviceProvider::layer_fit_preflight — gated by is_device()")
-    }
-}
-
-/// Host GKR provider: `is_device()` = false, so the device-fold walk is never
-/// taken and the GKR fold runs entirely on host — byte-identical to the
-/// pre-#118 unregistered-hook path.
-pub struct HostGkrDevice;
-
-impl GkrDeviceProvider for HostGkrDevice {}
+// D3c (Option-C divergence): the `GkrDeviceProvider` trait + `HostGkrDevice`
+// impl were REMOVED.  The row-GKR device-fold layer walk is now driven ONLY by
+// the ziren-gpu-owned device-native driver (`prove_shard_logup_gkr_rows_native`
+// → `build_gkr_circuit_native`), which calls the `gpu_layer_{init,transition,
+// pull,drain,fit_preflight}_hook` kernels DIRECTLY (what `DeviceGkrDevice`
+// forwarded to VERBATIM).  The shared host `build_gkr_circuit` / `prove_gkr_round`
+// are now CpuProver-only (host fold, no `LayerState::Device` ever constructed).
+// `HostLayerView` is retained — it is the GPU init/transition/preflight
+// kernels' argument type.
 
 /// Process-wide monotonic counter for GKR-circuit IDs.  Each
 /// `build_gkr_circuit` call that takes the device path allocates a

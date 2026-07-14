@@ -221,7 +221,13 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 /// `num_row_variables` on the layer is set to `original - 1`
 /// (the row MSB has been fixed).  `num_interaction_variables` is
 /// `log₂(total_interactions.next_power_of_two())`.
-#[allow(clippy::too_many_arguments)]
+// D3c (Option-C divergence): the device interaction-eval seam (the `dev`
+// `ShardDeviceOps` param + the `device_traces` provider it consumed) was
+// REMOVED from this HOST generator — it is now the CpuProver-only host build.
+// The GPU prover routes through its own device-native `generate_first_layer_native`
+// copy (in `zkm-gpu-basefold`) whose interaction-eval arm calls the ziren-gpu
+// kernel `prove_shard_interaction_eval_gpu` DIRECTLY (what
+// `CudaShardDeviceOps::interaction_eval` forwarded to VERBATIM).
 pub fn generate_first_layer<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
@@ -229,14 +235,6 @@ pub fn generate_first_layer<F, EF, A>(
     alpha: EF,
     betas: &[EF],
     num_row_variables: usize,
-    // per-shard device-trace provider threaded into the GPU
-    // first-layer hook (replaces the racy global Mutex snapshot).
-    device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    // P5 static dispatch: the device ops seam carrying the interaction-eval
-    // op (was the `GPU_INTERACTION_EVAL` `OnceLock`).  `&NoDeviceOps`
-    // (`is_device()` false) = host build, `&CudaShardDeviceOps` on the GPU
-    // prover.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> LogUpGkrCpuLayer<F, EF>
 where
     F: PrimeField,
@@ -284,133 +282,14 @@ where
             .collect();
         let num_interactions = interactions.len();
 
-        // `provider_present` is load-bearing: without it the hook
-        // would fall back to a host-upload launch from the calling
-        // thread, which on off-pool basefold rayon workers has no
-        // `cudaSetDevice` context and would dispatch to the wrong GPU.
-        let provider_present = device_traces.is_some();
-        let gpu_tables: Option<(Vec<F>, Vec<EF>)> = if provider_present && dev.is_device() {
-            {
-                use core::any::TypeId;
-                type Ef4 = p3_field::extension::BinomialExtensionField<
-                    p3_koala_bear::KoalaBear,
-                    4,
-                >;
-                type Kb = p3_koala_bear::KoalaBear;
-                if TypeId::of::<F>() == TypeId::of::<Kb>()
-                    && TypeId::of::<EF>() == TypeId::of::<Ef4>()
-                {
-                    // Pad main/prep traces to the chip's declared
-                    // width; otherwise the cache lookup keyed on
-                    // declared width silently misses on narrower
-                    // runtime traces.
-                    use p3_air::BaseAir;
-                    let chip_main_width = <_ as BaseAir<F>>::width(&chip.air);
-                    let chip_prep_width = chip.preprocessed_width();
-                    let main_height = if mt_width == 0 { 0 } else { mt_values.len() / mt_width };
-                    let main_padded: Vec<F> = if mt_width == chip_main_width || mt_width == 0 {
-                        mt_values.to_vec()
-                    } else if mt_width < chip_main_width {
-                        let mut padded = vec![F::ZERO; main_height * chip_main_width];
-                        for r in 0..main_height {
-                            let src = &mt_values[r * mt_width..(r + 1) * mt_width];
-                            let dst = &mut padded[r * chip_main_width..r * chip_main_width + mt_width];
-                            dst.copy_from_slice(src);
-                        }
-                        padded
-                    } else {
-                        mt_values.to_vec()
-                    };
-                    let prep_height = if prep_trace.width == 0 { 0 } else { prep_trace.values.len() / prep_trace.width };
-                    let prep_padded: Vec<F> = if prep_trace.width == chip_prep_width || prep_trace.width == 0 {
-                        prep_trace.values.clone()
-                    } else if prep_trace.width < chip_prep_width {
-                        let mut padded = vec![F::ZERO; prep_height * chip_prep_width];
-                        for r in 0..prep_height {
-                            let src = &prep_trace.values[r * prep_trace.width..(r + 1) * prep_trace.width];
-                            let dst = &mut padded[r * chip_prep_width..r * chip_prep_width + prep_trace.width];
-                            dst.copy_from_slice(src);
-                        }
-                        padded
-                    } else {
-                        prep_trace.values.clone()
-                    };
-                    let main_padded_width = if mt_width == 0 { 0 } else { chip_main_width };
-                    let prep_padded_width = if prep_trace.width == 0 { 0 } else { chip_prep_width };
-                    // SAFETY: TypeId equality guarantees F == Kb and
-                    // EF == Ef4; slice/value reinterp is sound.
-                    let r = unsafe {
-                        let main_kb: &[Kb] = core::slice::from_raw_parts(
-                            main_padded.as_ptr().cast::<Kb>(),
-                            main_padded.len(),
-                        );
-                        let prep_kb: &[Kb] = if prep_padded_width > 0 {
-                            core::slice::from_raw_parts(
-                                prep_padded.as_ptr().cast::<Kb>(),
-                                prep_padded.len(),
-                            )
-                        } else {
-                            &[]
-                        };
-                        let alpha_ef4: Ef4 = core::mem::transmute_copy(&alpha);
-                        // Reinterpret betas slice EF→Ef4.
-                        let betas_ef4: &[Ef4] = core::slice::from_raw_parts(
-                            betas.as_ptr().cast::<Ef4>(),
-                            betas.len(),
-                        );
-                        let result = dev.interaction_eval(
-                            &chip.name(),
-                            main_kb,
-                            main_padded_width,
-                            prep_kb,
-                            prep_padded_width,
-                            alpha_ef4,
-                            betas_ef4,
-                            device_traces,
-                        );
-                        result.map(|(numer_kb, denom_ef4)| {
-                            // Reinterpret Vec<Kb> → Vec<F> and
-                            // Vec<Ef4> → Vec<EF> under TypeId
-                            // equality.
-                            let mut me_n = std::mem::ManuallyDrop::new(numer_kb);
-                            let numer_f: Vec<F> = Vec::from_raw_parts(
-                                me_n.as_mut_ptr().cast::<F>(),
-                                me_n.len(),
-                                me_n.capacity(),
-                            );
-                            let mut me_d = std::mem::ManuallyDrop::new(denom_ef4);
-                            let denom_ef: Vec<EF> = Vec::from_raw_parts(
-                                me_d.as_mut_ptr().cast::<EF>(),
-                                me_d.len(),
-                                me_d.capacity(),
-                            );
-                            (numer_f, denom_ef)
-                        })
-                    };
-                    r
-                } else {
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        let (numer_mat, denom_mat) = if let Some((numer_v, denom_v)) = gpu_tables {
-            (
-                RowMajorMatrix::new(numer_v, num_interactions),
-                RowMajorMatrix::new(denom_v, num_interactions),
-            )
-        } else {
-            build_chip_interaction_tables::<F, EF>(
-                &interactions,
-                mt_values,
-                mt_width,
-                if prep_trace.width > 0 { Some(prep_trace) } else { None },
-                alpha,
-                betas,
-            )
-        };
+        let (numer_mat, denom_mat) = build_chip_interaction_tables::<F, EF>(
+            &interactions,
+            mt_values,
+            mt_width,
+            if prep_trace.width > 0 { Some(prep_trace) } else { None },
+            alpha,
+            betas,
+        );
 
         // PaddedMle row optimisation:  do NOT materialise
         // the row padding here.  Compute the per-chip real row count,
