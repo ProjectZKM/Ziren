@@ -614,7 +614,7 @@ where
 /// registered — both indicate a programmer error: `build_gkr_circuit`
 /// requires the EF match and all three hooks before producing any
 /// `Device` entries.
-pub(super) fn pull_device_layer_to_host<F, EF>(
+pub fn pull_device_layer_to_host<F, EF>(
     circuit_id: u64,
     handle: u64,
     // Phase-4: the layer-pull provider (was `GPU_LAYER_PULL_HOOK` /
