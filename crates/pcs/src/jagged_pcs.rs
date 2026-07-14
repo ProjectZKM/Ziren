@@ -2276,7 +2276,7 @@ pub mod jagged {
     /// in the IDENTICAL order.  This is the de-dup that stops `z_col`'s
     /// transcript position from being path-dependent.
     #[allow(clippy::type_complexity)]
-    fn prove_jagged_basefold_linear_core<Ch, P>(
+    pub fn prove_jagged_basefold_linear_core<Ch, P>(
         offsets: &[usize],
         z_row: &[InnerChallenge],
         area: usize,
