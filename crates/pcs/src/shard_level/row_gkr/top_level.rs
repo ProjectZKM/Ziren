@@ -42,16 +42,6 @@ pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     // consumes the inner via `PaddedMle::eval_at` (== the on-the-fly
     // `evaluate_trace_columns_at_point`, unit-tested).
     shared_trace_mles: &[PaddedMle<F>],
-    // P5/P7 static dispatch: the shard-level device ops seam (was the
-    // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
-    // `GPU_INTERACTION_EVAL` P5 hooks + the P7 `GPU_SUMCHECK` /
-    // `GPU_CHIP_STRUCTURED_SUMCHECK` / `_DEVICE` logup hooks), carried as the
-    // OWNED `Arc` so the single per-shard dev object serves BOTH the eval-at /
-    // `build_gkr_circuit` → `generate_first_layer` positional `&dyn` reads
-    // (`&**dev`) AND the per-round `LogupRoundPolynomial` (cloned into its `dev`
-    // field via `prove_gkr_round`).  `Arc<NoDeviceOps>` (`is_device()` false) =
-    // host path, `Arc<CudaShardDeviceOps>` on the GPU prover.
-    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> LogupGkrProof<F, EF>
 where
     F: PrimeField + 'static,
@@ -256,9 +246,6 @@ where
             denominator_eval,
             lambda,
             challenger,
-            // P7: the owned device-ops seam, cloned into each round's
-            // `LogupRoundPolynomial` for the packed / chip sumcheck arms.
-            dev,
         );
 
         // Observe order MUST match verifier: n0, n1, d0, d1.
@@ -340,7 +327,7 @@ where
             } else {
                 let results =
                     crate::shard_level::logup_gkr_prover::eval_chips_at_points_batched_via_provider::<F, EF>(
-                        &names, &points, provider, &**dev,
+                        &names, &points, provider,
                     );
                 let mut map = BTreeMap::new();
                 for (name, res) in names.iter().zip(results.into_iter()) {
@@ -413,7 +400,6 @@ where
                                 &chip.name(),
                                 main_eval_point,
                                 p,
-                                &**dev,
                             )
                         })
                     })
@@ -461,7 +447,6 @@ where
                         &chip.name(),
                         full_eval_point,
                         p,
-                        &**dev,
                     )
                 })
             } else if pm.inner().is_some() {

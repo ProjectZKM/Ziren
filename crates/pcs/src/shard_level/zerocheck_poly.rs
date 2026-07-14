@@ -248,31 +248,6 @@ pub(crate) fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
     evals
 }
 
-/// Single entry of [`partial_lagrange`]`(point)` in `O(|point|)`:
-/// `eq(point, bits(index))` with `index` read big-endian (`point[0]` =
-/// MSB), i.e. `partial_lagrange(point)[index]`.  Returns `EF::ZERO` when
-/// `index >= 2^|point|` (mirrors the finalize step's out-of-table guard).
-///
-/// Device-eq: when the eq table is built ON DEVICE, the host-side
-/// `finalize_round_poly` still needs exactly ONE entry of it
-/// (`partial[threshold_half]`) — this computes that entry without
-/// materializing the `2^{dim-1}` table.
-pub(crate) fn eq_at_index<EF: Field>(point: &[EF], index: usize) -> EF {
-    let n = point.len();
-    if n < usize::BITS as usize && (index >> n) != 0 {
-        return EF::ZERO;
-    }
-    let mut acc = EF::ONE;
-    for (k, &z) in point.iter().enumerate() {
-        if (index >> (n - 1 - k)) & 1 == 1 {
-            acc *= z;
-        } else {
-            acc *= EF::ONE - z;
-        }
-    }
-    acc
-}
-
 /// Lagrange-interpolate the polynomial through `(xs[i], ys[i])` into
 /// monomial-basis coefficients.  Port of
 /// `slop_algebra::interpolate_univariate_polynomial`.  Panics if `xs`
@@ -489,18 +464,6 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     padded_row_adjustment: EF,
     /// Virtual padded-row indicator.
     virtual_geq: VirtualGeq<EF>,
-    /// P6 static dispatch: the device-ops seam carrying the zerocheck y-tuple
-    /// family (was the `GPU_ZEROCHECK_YTUPLE{,_DEVICE}` / `_FOLD_DEVICE` /
-    /// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL` `OnceLock`s).  These ops are read
-    /// inside the `SumcheckPoly`/`ComponentPoly`/first-round impls, whose
-    /// signatures are fixed by the generic driver, so the `&dyn` is carried BY
-    /// the poly (reusing the existing `'a`) rather than threaded positionally.
-    /// `None` (host build) / `Some(&NoDeviceOps)` (`is_device()` = false) both
-    /// take the host path — byte-identical to an unregistered hook; the GPU
-    /// prover carries `Some(&CudaShardDeviceOps)` (`is_device()` = true).
-    /// Propagated through every fold (`fix_last`) so the device path can never
-    /// be dropped mid-sumcheck.
-    dev: Option<&'a dyn crate::shard_level::ShardDeviceOps>,
     _marker: PhantomData<A>,
 }
 
@@ -550,20 +513,8 @@ where
             geq_value,
             padded_row_adjustment,
             virtual_geq,
-            dev: None,
             _marker: PhantomData,
         }
-    }
-
-    /// P6: attach the device-ops seam (`&NoDeviceOps` on the host prover,
-    /// `&CudaShardDeviceOps` on the GPU prover) so the per-round y-tuple /
-    /// fold / extract ops dispatch by prover TYPE (was the
-    /// `GPU_ZEROCHECK_YTUPLE*` global `OnceLock`s).  Called on EVERY poly at
-    /// construction; `fix_last` forwards it to each fold, so the whole
-    /// sumcheck walks with the same seam.
-    pub fn with_dev(mut self, dev: &'a dyn crate::shard_level::ShardDeviceOps) -> Self {
-        self.dev = Some(dev);
-        self
     }
 
     /// Evaluate the chip's α-RLC'd constraints at a single `K` row,
@@ -633,269 +584,16 @@ where
         self.finalize_round_poly(claim, last, partial_at_threshold, y_0, y_2, y_3, y_4)
     }
 
-    /// Chip fusion: compute ALL chips' (y_0,y_2,y_3,y_4) in ONE fused
-    /// device call (TypeId-guarded), then per-chip host finalize.  Returns the
-    /// same per-chip round polynomials as the per-chip `sum_as_poly` loop, or
-    /// `None` to signal whole-round host fallback (no hook / wrong field /
-    /// shape mismatch).
-    fn batched_device_round(
-        polys: &[Self],
-        claims: &[Option<EF>],
-        is_first_round: bool,
-    ) -> Option<Vec<UnivariatePolynomial<EF>>> {
-        use core::any::TypeId;
-        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        type Kb = p3_koala_bear::KoalaBear;
-        // The host cells are reinterpreted as `Ef4` below, so the CELL field
-        // `K` (not just `EF`) must be `Ef4`.  On the base-field first round
-        // (`K = F`) this is false → host fallback (the base-field round-0 is a
-        // pure-host CPU path; the device base-field round-0 is a GPU follow-on).
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
-            || TypeId::of::<K>() != TypeId::of::<Ef4>()
-            || TypeId::of::<F>() != TypeId::of::<Kb>()
-        {
-            return None;
-        }
-        if polys.is_empty() {
-            return Some(Vec::new());
-        }
-        // P6: the batched y-tuple op is carried by the poly (was
-        // `get_gpu_zerocheck_batched_ytuple_hook()`).  Every poly in the round
-        // carries the same `dev`; read it from the first.  `is_device()`
-        // reproduces the former "hook registered" presence check (an empty
-        // round already returned above, matching the old empty-hook fallback).
-        let dev = polys[0].dev.filter(|d| d.is_device())?;
-
-        // Per REAL chip (num_real > 0): partial-lagrange + last coord + owned
-        // name must outlive the borrowed inputs.  `real_poly_idx` maps the
-        // real-chip order back to the full poly order.
-        //
-        // ALL real chips ride the fused launch now: np>0 chips marshal their
-        // prep cells alongside main ([main ++ prep] per-chip block — the
-        // kernel's preprocessed_ptr path, validated by the np>0 residency
-        // work), and device-RESIDENT chips (host cells emptied under
-        // ZIREN_GPU_CORE_DEVICE_FOLD / NP_PREP) pass their device handle so
-        // the hook's pointer-array kernel reads them IN PLACE.  One launch
-        // per round (SP1 jagged_constraint_poly_eval shape) instead of
-        // per-chip launches.
-        // Device-eq: the host SKIPS the per-chip per-round `partial_lagrange`
-        // table build entirely — the hook constructs the eq table ON DEVICE
-        // from `zeta_rest` (passed below; `eq` left empty), and the finalize
-        // step's single needed entry is computed in O(dim) via `eq_at_index`.
-        let mut partials: Vec<Vec<EF>> = Vec::new();
-        let mut names: Vec<String> = Vec::new();
-        let mut lasts: Vec<EF> = Vec::new();
-        let mut real_poly_idx: Vec<usize> = Vec::new();
-        for (i, poly) in polys.iter().enumerate() {
-            if poly.num_real_entries == 0 {
-                continue;
-            }
-            let dim = poly.zeta.len();
-            lasts.push(poly.zeta[dim - 1]);
-            partials.push(Vec::new());
-            names.push(poly.air.name());
-            real_poly_idx.push(i);
-        }
-
-        // No real chip this round -> host fallback.
-        if real_poly_idx.is_empty() {
-            return None;
-        }
-
-        // SAFETY: TypeId guard above => EF == Ef4 and F == Kb, so these slice /
-        // scalar reinterpretations are layout-safe (shared borrows only).
-        let empty: Vec<Ef4> = Vec::new();
-        let inputs: Vec<crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput<'_>> =
-            real_poly_idx
-                .iter()
-                .enumerate()
-                .map(|(r, &i)| {
-                    let poly = &polys[i];
-                    let main_ef4: &[Ef4] = unsafe {
-                        core::slice::from_raw_parts(
-                            poly.main_cells.as_ptr().cast::<Ef4>(),
-                            poly.main_cells.len(),
-                        )
-                    };
-                    let prep_ef4: &[Ef4] = match poly.prep_cells.as_ref() {
-                        Some(p) => unsafe {
-                            core::slice::from_raw_parts(p.as_ptr().cast::<Ef4>(), p.len())
-                        },
-                        None => &empty,
-                    };
-                    let gkr_ef4: &[Ef4] = unsafe {
-                        core::slice::from_raw_parts(
-                            poly.gkr_powers.as_ptr().cast::<Ef4>(),
-                            poly.gkr_powers.len(),
-                        )
-                    };
-                    let eq_ef4: &[Ef4] = unsafe {
-                        core::slice::from_raw_parts(
-                            partials[r].as_ptr().cast::<Ef4>(),
-                            partials[r].len(),
-                        )
-                    };
-                    // Device-eq: the point the eq table is built from
-                    // (`zeta[..dim-1]`); the hook builds the table on device
-                    // when `eq` is empty.
-                    let zeta_rest_ef4: &[Ef4] = unsafe {
-                        core::slice::from_raw_parts(
-                            poly.zeta.as_ptr().cast::<Ef4>(),
-                            poly.zeta.len() - 1,
-                        )
-                    };
-                    let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&poly.alpha) };
-                    crate::shard_level::sumcheck_poly::ZerocheckChipYTupleInput {
-                        chip_name: names[r].as_str(),
-                        main_cells: main_ef4,
-                        num_main_cols: poly.num_main_cols,
-                        prep_cells: prep_ef4,
-                        num_prep_cols: poly.num_prep_cols,
-                        gkr_powers: gkr_ef4,
-                        alpha: alpha_ef4,
-                        eq: eq_ef4,
-                        zeta_rest: zeta_rest_ef4,
-                        num_real: poly.num_real_entries,
-                        // C4: the host `ZeroCheckPoly` no longer carries device
-                        // cells (single-GPU device residency now runs on the
-                        // ziren-gpu `GpuZeroCheckPoly`); the shared batched hook
-                        // input keeps the field for that GPU poly.
-                        device_cells: None,
-                    }
-                })
-                .collect();
-
-        let pv_kb: &[Kb] = unsafe {
-            core::slice::from_raw_parts(
-                polys[0].public_values.as_ptr().cast::<Kb>(),
-                polys[0].public_values.len(),
-            )
-        };
-        let tuples = dev.zerocheck_batched_ytuple(&inputs, pv_kb, is_first_round)?;
-        if tuples.len() != real_poly_idx.len() {
-            return None; // shape mismatch -> host fallback
-        }
-        drop(inputs); // release the shared borrows before finalize
-
-        let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
-        let mut out: Vec<UnivariatePolynomial<EF>> = Vec::with_capacity(polys.len());
-        let mut r = 0usize;
-        for (i, poly) in polys.iter().enumerate() {
-            if poly.num_real_entries == 0 {
-                out.push(UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] });
-                continue;
-            }
-            let yt = &tuples[r];
-            let claim = claims[i].expect("batched_device_round: claim required");
-            // Device-eq: finalize needs only partial[threshold_half] —
-            // with the device-built table it is recomputed in O(dim).
-            let threshold_half = poly.num_real_entries.div_ceil(2) - 1;
-            let partial_at_threshold = {
-                let dim = poly.zeta.len();
-                eq_at_index(&poly.zeta[..dim - 1], threshold_half)
-            };
-            out.push(poly.finalize_round_poly(
-                claim,
-                lasts[r],
-                partial_at_threshold,
-                to_ef(&yt[0]),
-                to_ef(&yt[1]),
-                to_ef(&yt[2]),
-                to_ef(&yt[3]),
-            ));
-            r += 1;
-        }
-
-        Some(out)
-    }
-
-    /// Device-or-host dispatch for the per-pair y-tuple accumulator.
-    /// With a device `dev` (`ShardDeviceOps::zerocheck_ytuple`, `is_device()`)
-    /// and `EF == Ef4`, computes the tuple on the
-    /// device; otherwise (host `dev` / any device `None`) runs the byte-identical
-    /// host loop.  With `ZIREN_GPU_ZEROCHECK_YTUPLE_VERIFY=1` it runs BOTH
-    /// and asserts the device result equals the host loop (the P0 parity
-    /// gate; mirrors the prover's device-resident-verify pattern).  The
-    /// transcript is unaffected either way — `finalize_round_poly` and the
-    /// challenger stay host.
+    /// The per-pair y-tuple accumulator — runs the host loop
+    /// (`accumulate_y_tuple_host`).  `finalize_round_poly` and the challenger
+    /// stay host, so the transcript is byte-identical.
     fn accumulate_y_tuple(
         &self,
         partial: &[EF],
         is_first_round: bool,
         compute_y3: bool,
     ) -> (EF, EF, EF, EF) {
-        // Device-on by default; gpu_y_tuple returns None (-> host) unless EF==Ef4,
-        // F==KoalaBear and a hook is registered (the TypeId guard is the safety net).
-        if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
-            return dev;
-        }
         self.accumulate_y_tuple_host(partial, is_first_round, compute_y3)
-    }
-
-    /// TypeId-guarded bridge to the registered device y-tuple hook.
-    /// Returns `None` (host fallback) unless `EF == Ef4`, `F == KoalaBear`,
-    /// and a hook is registered.  All reinterpretations are sound under the
-    /// `TypeId` equalities (identical layout).
-    fn gpu_y_tuple(&self, partial: &[EF], is_first_round: bool) -> Option<(EF, EF, EF, EF)> {
-        use core::any::TypeId;
-        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        type Kb = p3_koala_bear::KoalaBear;
-        // `K` (the cell field) must be `Ef4` — the host `main_cells` are
-        // reinterpreted as `Ef4` below.  Base-field round 0 (`K = F`) falls
-        // back to the host y-tuple loop.
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
-            || TypeId::of::<K>() != TypeId::of::<Ef4>()
-            || TypeId::of::<F>() != TypeId::of::<Kb>()
-        {
-            return None;
-        }
-        // P6: the host-cell y-tuple op is carried by the poly (was
-        // `get_gpu_zerocheck_ytuple_hook()`); `is_device()` reproduces the
-        // former "hook registered" presence check.
-        let dev = self.dev.filter(|d| d.is_device())?;
-
-        // SAFETY: the TypeId equalities above guarantee `EF == K == Ef4` and
-        // `F == Kb`, so these slice / scalar reinterpretations are
-        // layout-safe for the duration of the call (shared borrows only).
-        let main_ef4: &[Ef4] = unsafe {
-            core::slice::from_raw_parts(self.main_cells.as_ptr().cast::<Ef4>(), self.main_cells.len())
-        };
-        let empty: Vec<Ef4> = Vec::new();
-        let prep_ef4: &[Ef4] = match self.prep_cells.as_ref() {
-            Some(p) => unsafe { core::slice::from_raw_parts(p.as_ptr().cast::<Ef4>(), p.len()) },
-            None => &empty,
-        };
-        let gkr_ef4: &[Ef4] = unsafe {
-            core::slice::from_raw_parts(self.gkr_powers.as_ptr().cast::<Ef4>(), self.gkr_powers.len())
-        };
-        let eq_ef4: &[Ef4] =
-            unsafe { core::slice::from_raw_parts(partial.as_ptr().cast::<Ef4>(), partial.len()) };
-        let pv_kb: &[Kb] = unsafe {
-            core::slice::from_raw_parts(
-                self.public_values.as_ptr().cast::<Kb>(),
-                self.public_values.len(),
-            )
-        };
-        let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&self.alpha) };
-
-        let name = self.air.name();
-        let out = dev.zerocheck_ytuple(
-            &name,
-            main_ef4,
-            self.num_main_cols,
-            prep_ef4,
-            self.num_prep_cols,
-            gkr_ef4,
-            alpha_ef4,
-            eq_ef4,
-            pv_kb,
-            self.num_real_entries,
-            is_first_round,
-        )?;
-
-        // SAFETY: `Ef4 == EF` under the TypeId guard.
-        let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
-        Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
     }
 
     /// The per-pair degree-4 eq-weighted accumulator: returns
@@ -1023,8 +721,7 @@ where
     /// `accumulate_y_tuple_host` consumed; `partial_at_threshold` is
     /// `partial_lagrange(zeta[..dim-1])[threshold_half]` (ZERO when the
     /// boundary index falls past the table) — the ONLY table entry finalize
-    /// needs, pre-resolved by the caller so the device-eq path can skip
-    /// materializing the host table (via [`eq_at_index`]).
+    /// needs, pre-resolved by the caller.
     ///
     /// eq-root HALF trick: the corrected round poly
     /// `p(X) = elf_X · h(X)` has the eq factor `elf_X = (2X − 1)·last − (X − 1)`
@@ -1138,8 +835,6 @@ where
                 geq_value: self.geq_value,
                 padded_row_adjustment: self.padded_row_adjustment,
                 virtual_geq: new_virtual_geq,
-                // P6: forward the device-ops seam to the fold (never drop it).
-                dev: self.dev,
                 _marker: PhantomData,
             };
         }
@@ -1171,8 +866,6 @@ where
             geq_value,
             padded_row_adjustment: self.padded_row_adjustment,
             virtual_geq: new_virtual_geq,
-            // P6: forward the device-ops seam to the fold (never drop it).
-            dev: self.dev,
             _marker: PhantomData,
         }
     }
@@ -1395,9 +1088,6 @@ where
         polys: &[Self],
         claims: &[Option<EF>],
     ) -> Vec<UnivariatePolynomial<EF>> {
-        if let Some(r) = Self::batched_device_round(polys, claims, false) {
-            return r;
-        }
         polys
             .iter()
             .zip(claims.iter())
@@ -1441,9 +1131,6 @@ where
         t: usize,
     ) -> Vec<UnivariatePolynomial<EF>> {
         assert_eq!(t, 1, "ZeroCheckPoly only supports t = 1");
-        if let Some(r) = Self::batched_device_round(polys, claims, true) {
-            return r;
-        }
         polys
             .iter()
             .zip(claims.iter())

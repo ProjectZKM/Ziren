@@ -147,9 +147,6 @@ pub fn eval_chip_columns_at_point_via_provider<F, EF>(
     _chip_name: &str,
     _eval_point: &[EF],
     _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-    // Retained for signature stability (the shard prover still threads the
-    // device-ops seam); unused here — see below.
-    _dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Option<Vec<EF>>
 where
     F: PrimeField,
@@ -177,9 +174,6 @@ pub fn eval_chips_at_points_batched_via_provider<F, EF>(
     names: &[String],
     _eval_points: &[Vec<EF>],
     _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-    // Retained for signature stability (the shard prover still threads the
-    // device-ops seam); unused here — see below.
-    _dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> Vec<Option<Vec<EF>>>
 where
     F: PrimeField,

@@ -90,11 +90,6 @@ pub fn prove_shard_zerocheck<SC, A>(
     // whole proof is uniformly rev; every recursion / shrink / wrap prove is
     // `false` (legacy, byte-identical).
     dense_rev: bool,
-    // P5 static dispatch: the device ops seam carrying the zerocheck
-    // device-fold prepare-cells op (was the `GPU_ZEROCHECK_PREPARE_CELLS`
-    // `OnceLock`).  `&NoDeviceOps` (`is_device()` false) = host / materialize
-    // fallback, `&CudaShardDeviceOps` on the GPU prover.
-    dev: &dyn crate::shard_level::ShardDeviceOps,
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,
     std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
@@ -461,12 +456,7 @@ where
             initial_geq_value,
             padded_row_adjustment,
             virtual_geq,
-        )
-        // P6: carry the device-ops seam (was the `GPU_ZEROCHECK_YTUPLE*`
-        // global `OnceLock`s) — `&NoDeviceOps` on host, `&CudaShardDeviceOps`
-        // on the GPU prover; drives the host-cell fused y-tuple.  `fix_last`
-        // forwards it to every fold.
-        .with_dev(dev);
+        );
         zerocheck_polys.push(poly);
     }
 

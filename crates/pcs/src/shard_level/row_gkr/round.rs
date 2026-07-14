@@ -1706,15 +1706,6 @@ pub fn prove_gkr_round<F, EF, Challenger>(
     denominator_eval: EF,
     lambda: EF,
     challenger: &mut Challenger,
-    // Option-C divergence (D3/D3c): the per-layer logup-round device seam (the
-    // former `GPU_LOGUP_ROUND_HOOK` / `_DEVICE_FOLD` hooks) is RETIRED — the GPU
-    // prover walks its own device-native `prove_shard_logup_gkr_rows_native`
-    // (calling `prove_logup_round_gpu{,_device_fold}` DIRECTLY), so this shared
-    // host `prove_gkr_round` is CpuProver-only and runs the pure-host
-    // `LogupRoundPolynomial` sumcheck below.  `dev` is retained so the shard
-    // prover keeps threading the device-ops seam (the multi-GPU zerocheck still
-    // needs it); it is unused here.
-    _dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> LogupGkrRoundProof<EF>
 where
     F: PrimeField,
@@ -1802,12 +1793,6 @@ mod tests {
     fn test_challenger() -> DuplexChallenger<KoalaBear, Poseidon2KoalaBear<16>, 16, 8> {
         let perm = crate::kb31_poseidon2::inner_perm();
         DuplexChallenger::new(perm)
-    }
-
-    /// Host device-ops seam for the round tests (P7): `Arc<NoDeviceOps>`
-    /// (`is_device()` false → the pure-host sumcheck path).
-    fn host_dev() -> alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps> {
-        alloc::sync::Arc::new(crate::shard_level::NoDeviceOps)
     }
 
     #[test]
@@ -2038,8 +2023,6 @@ mod tests {
             d_eval,
             lambda,
             &mut ch,
-            // P7: host device-ops seam.
-            &host_dev(),
         );
 
         // Claimed sum = λ · n_eval + d_eval.
@@ -2127,8 +2110,6 @@ mod tests {
         let mut ch = test_challenger();
         let proof = prove_gkr_round::<KoalaBear, EF, _>(
             &state, &point, n_eval, d_eval, lambda, &mut ch,
-            // P7: host device-ops seam.
-            &host_dev(),
         );
 
         // First round's p(0) + p(1) must equal claimed_sum.

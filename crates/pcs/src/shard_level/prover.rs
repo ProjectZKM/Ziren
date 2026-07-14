@@ -263,11 +263,6 @@ where
     // Pure host-path entry (the shrink + dummy callers): no device fns.  The
     // device sites (core/compress/wrap) supply these via the
     // `MachineProver::prove_shard_to_basefold` override, not this free fn.
-    // P7: source the single owned device-ops Arc for this shard (host = no
-    // device); `&**dev` serves the positional `&dyn` reads, the clone serves
-    // the per-round `LogupRoundPolynomial`.
-    let dev: alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps> =
-        alloc::sync::Arc::new(crate::shard_level::NoDeviceOps);
     prove_shard_to_basefold_with_loader::<SC, A, _>(
         chips,
         preprocessed_traces,
@@ -285,8 +280,6 @@ where
         // the device sites override `prove_shard_to_basefold` instead.
         &crate::jagged_pcs::HostJaggedReducer,
         &crate::jagged_pcs::HostJaggedOpener,
-        // P5/P7: host device ops = no device (the pre-hook host path), owned Arc.
-        &dev,
     )
 }
 
@@ -529,15 +522,6 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     // (core/compress) provides the device open statically, `None` on host
     // callers = host open.
     jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
-    // P5/P7: the unified device ops seam, carried as the OWNED `Arc` so the one
-    // per-shard dev object feeds BOTH the P5 positional `&dyn` reads (`&**dev`)
-    // and the P7 per-round `LogupRoundPolynomial` clone.  Was the
-    // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
-    // `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` P5 hooks + the P7
-    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` / `_DEVICE` logup hooks.
-    // `Arc<CudaShardDeviceOps>` on the GPU prover, `Arc<NoDeviceOps>` on host
-    // callers = host path.
-    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -590,7 +574,6 @@ where
         &FreeFnJaggedEval,
         jagged_reducer,
         jagged_opener,
-        dev,
     )
 }
 
@@ -639,15 +622,6 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // threaded through the producer's `prove_trusted_evaluations` down to the
     // `open_jagged_pcs` dispatch.
     jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
-    // P5/P7: the unified device ops seam, carried as the OWNED `Arc`, distributed
-    // to the GKR-rows (`&**dev` for the P5 eval-at reads + `dev` cloned into the
-    // P7 per-round `LogupRoundPolynomial`) + zerocheck (`&**dev`) stages.  Was
-    // the `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` /
-    // `GPU_INTERACTION_EVAL` / `GPU_ZEROCHECK_PREPARE_CELLS` P5 hooks + the P7
-    // `GPU_SUMCHECK` / `GPU_CHIP_STRUCTURED_SUMCHECK` / `_DEVICE` logup hooks.
-    // `Arc<CudaShardDeviceOps>` on the GPU prover, `Arc<NoDeviceOps>` on host
-    // callers = host path.
-    dev: &alloc::sync::Arc<dyn crate::shard_level::ShardDeviceOps>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -902,11 +876,6 @@ where
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
-            // P5/P7: the device ops seam for eval-at (was the
-            // `GPU_EVAL_AT_PROVIDER` / `GPU_EVAL_AT_BATCH_PROVIDER` OnceLocks)
-            // + the P7/P8 per-round logup device drivers.  `Arc<NoDeviceOps>`
-            // on this CpuProver-only shared driver.
-            dev,
         )
     };
     tracing::info!(
@@ -937,10 +906,6 @@ where
             // band-cap carrier removal Phase B: the per-shard rev(zeta)
             // orientation (was the `current_use_rev()` carrier).
             dense_rev,
-            // P5: the device ops seam for the zerocheck device-fold
-            // prepare-cells op (was the `GPU_ZEROCHECK_PREPARE_CELLS` OnceLock).
-            // Zerocheck keeps its positional `&dyn` param; deref the owned Arc.
-            &**dev,
         )
     };
     tracing::info!(
