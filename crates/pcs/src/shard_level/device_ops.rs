@@ -121,23 +121,6 @@ pub trait ShardDeviceOps: Send + Sync {
         unreachable!("host ShardDeviceOps::interaction_eval — gated by is_device()")
     }
 
-    /// Device-fold: bit-reverse + prepare the provider trace once into the
-    /// device-cell handle the ZeroCheckPoly carries (was
-    /// `GPU_ZEROCHECK_PREPARE_CELLS`).  Args: the erased round-0 device
-    /// cells, the chip's preprocessed cells (column-major, provider
-    /// height) + prep width, and the per-shard `dense_rev` orientation.
-    /// Returns the erased prepared handle, or `None` to fall back.  Only
-    /// called under `is_device()`.
-    fn zerocheck_prepare_cells(
-        &self,
-        _cells: &(dyn Any + Send + Sync),
-        _prep_cells: &[Kb],
-        _num_prep_cols: usize,
-        _dense_rev: bool,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
-        unreachable!("host ShardDeviceOps::zerocheck_prepare_cells — gated by is_device()")
-    }
-
     // ── P6: the zerocheck y-tuple family (carried by `ZeroCheckPoly`) ──────
     //
     // The five methods below are the SP1-parity static-dispatch collapse of
@@ -179,46 +162,6 @@ pub trait ShardDeviceOps: Send + Sync {
         unreachable!("host ShardDeviceOps::zerocheck_ytuple — gated by is_device()")
     }
 
-    /// Per-chip per-round y-tuple from DEVICE-resident cells (no host upload;
-    /// was `GPU_ZEROCHECK_YTUPLE_DEVICE`).  `dev_cells` is the erased device
-    /// handle the `ZeroCheckPoly` carries (`ColMajorMatrixDevice<Felt>` round 0,
-    /// `DeviceBuffer<Ef4>` later); the impl downcasts it.  Returns
-    /// `(y_0, y_2, y_3, y_4)` or `None` to fall back.  Only called under
-    /// `is_device()`.
-    #[allow(clippy::too_many_arguments)]
-    fn zerocheck_ytuple_device(
-        &self,
-        _chip_name: &str,
-        _dev_cells: &(dyn Any + Send + Sync),
-        _num_main_cols: usize,
-        _dev_prep: Option<&(dyn Any + Send + Sync)>,
-        _num_prep_cols: usize,
-        _gkr_powers: &[Ef4],
-        _alpha: Ef4,
-        _eq: &[Ef4],
-        _public_values: &[Kb],
-        _num_real: usize,
-        _is_first_round: bool,
-    ) -> Option<[Ef4; 4]> {
-        unreachable!("host ShardDeviceOps::zerocheck_ytuple_device — gated by is_device()")
-    }
-
-    /// Fold the device-resident cells on the last variable to `alpha`, on
-    /// device (was `GPU_ZEROCHECK_FOLD_DEVICE`).  Returns the new erased
-    /// device handle (`DeviceBuffer<Ef4>`); `is_first_round` => current cells
-    /// are Felt (round 0) and the fold lifts Felt→Ef4.  `None` to fall back.
-    /// Only called under `is_device()`.
-    fn zerocheck_fold_device(
-        &self,
-        _dev_cells: &(dyn Any + Send + Sync),
-        _num_cols: usize,
-        _num_real: usize,
-        _alpha: Ef4,
-        _is_first_round: bool,
-    ) -> Option<Arc<dyn Any + Send + Sync>> {
-        unreachable!("host ShardDeviceOps::zerocheck_fold_device — gated by is_device()")
-    }
-
     /// BATCHED per-round y-tuple over ALL real chips in one fused device
     /// launch (chip fusion; was `GPU_ZEROCHECK_BATCHED_YTUPLE`).  One tuple per
     /// input chip in the SAME order; `None` => whole-round host fallback.  Only
@@ -230,18 +173,6 @@ pub trait ShardDeviceOps: Send + Sync {
         _is_first_round: bool,
     ) -> Option<Vec<[Ef4; 4]>> {
         unreachable!("host ShardDeviceOps::zerocheck_batched_ytuple — gated by is_device()")
-    }
-
-    /// Extract the fully-folded per-chip openings (1 row) from the device
-    /// cells so the host `get_component_poly_evals` (the trace_at_z openings)
-    /// reads the device result (was `GPU_ZEROCHECK_EXTRACT_FINAL`).  A single-
-    /// row D2H — cheap.  `None` to fall back.  Only called under `is_device()`.
-    fn zerocheck_extract_final(
-        &self,
-        _dev_cells: &(dyn Any + Send + Sync),
-        _num_main_cols: usize,
-    ) -> Option<Vec<Ef4>> {
-        unreachable!("host ShardDeviceOps::zerocheck_extract_final — gated by is_device()")
     }
 
     // ── P8: the logup-round device drivers (threaded POSITIONALLY into

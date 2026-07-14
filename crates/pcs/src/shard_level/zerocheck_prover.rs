@@ -257,91 +257,14 @@ where
                 panic!("chip {name} missing from logup_evaluations.chip_openings")
             });
 
-        // Device-fold: for device-only chips (empty host main trace),
-        // run the zerocheck FULLY on device — build the round-0 device cells
-        // from the per-shard provider (bit-reversed by the prepare hook to
-        // match the host bitrev_rows below). No materialize D2H. Falls back
-        // to the materialize path (host cells) when the device-fold prepare
-        // hook isn't registered.
-        // For ALL device-only chips. Mixed-height is handled in fold_device_hook
-        // (odd num_real folds host-side, div_ceil + ZERO tail, matching host
-        // fold_cells); the virtual_geq/padded_row_adjustment pad correction stays
-        // host-side in finalize (same as the materialize path).
-        let device_cells_opt: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
-            if pm.inner().is_none() {
-                _device_traces.and_then(|p| {
-                    // P5: gate the device-fold prepare on the device ops seam
-                    // (was `get_gpu_zerocheck_prepare_cells_hook().is_some()`).
-                    if !dev.is_device() {
-                        return None;
-                    }
-                    let raw = p.lookup_by_name(&name)?;
-                    // For chips with preprocessed columns (np>0): build the
-                    // chip's preprocessed cells in
-                    // column-major at the PROVIDER main height so the device
-                    // prepare hook can append them to the main device cells and
-                    // fold [main ++ prep] as one buffer. KoalaBear-only (the
-                    // device y-tuple path is Kb); otherwise pass empty (np==0).
-                    let prov_h = p.chip_height(&name).unwrap_or(0);
-                    let pt = &preprocessed_traces[chip_idx];
-                    let np = pt.width;
-                    let is_kb = core::any::TypeId::of::<Val<SC>>()
-                        == core::any::TypeId::of::<p3_koala_bear::KoalaBear>();
-                    let prep_storage: Vec<Val<SC>> = if np > 0 && prov_h > 0 && is_kb {
-                        let mut cm =
-                            vec![<Val<SC> as p3_field::PrimeCharacteristicRing>::ZERO; prov_h * np];
-                        let ph = pt.values.len() / np;
-                        for r in 0..ph.min(prov_h) {
-                            for c in 0..np {
-                                cm[c * prov_h + r] = pt.values[r * np + c];
-                            }
-                        }
-                        cm
-                    } else {
-                        Vec::new()
-                    };
-                    let (prep_kb, np_hook): (&[p3_koala_bear::KoalaBear], usize) =
-                        if !prep_storage.is_empty() {
-                            // SAFETY: is_kb guard => Val<SC> == KoalaBear (same layout).
-                            let s = unsafe {
-                                core::slice::from_raw_parts(
-                                    prep_storage.as_ptr() as *const p3_koala_bear::KoalaBear,
-                                    prep_storage.len(),
-                                )
-                            };
-                            (s, np)
-                        } else {
-                            (&[], 0)
-                        };
-                    let prepared =
-                        dev.zerocheck_prepare_cells(raw.as_ref(), prep_kb, np_hook, dense_rev);
-                    if prepared.is_some() {
-                        // The prepare hook CLONED the trace into its own
-                        // bit-reversed fold buffer; the provider's original
-                        // is never read again (folds + openings derive from
-                        // the clone) — let the provider release it early
-                        // to shrink the peak VRAM window. No-op for legacy providers.
-                        drop(raw);
-                        p.release_by_name(&name);
-                    }
-                    prepared
-                })
-            } else {
-                None
-            };
-        // Device-fold chips source dims from the AIR width + provider height
-        // (the host trace is empty); host fold cells stay empty.
-        let df_dims: Option<(usize, usize)> = if device_cells_opt.is_some() {
-            let w = <A as p3_air::BaseAir<Val<SC>>>::width(&chip.air);
-            let h = _device_traces.and_then(|p| p.chip_height(&name)).unwrap_or(0);
-            Some((w, h))
-        } else {
-            None
-        };
-        // Materialize fallback (host cells via D2H) only when device-fold is
-        // unavailable for this empty-host chip.
+        // C4: device residency (path A) now runs on the ziren-gpu
+        // `GpuZeroCheckPoly` (single-GPU device path).  The shared host
+        // `ZeroCheckPoly` is host-cell only: a device-resident chip (empty host
+        // main trace) materializes its main trace via the provider (D2H) and
+        // folds it as host cells — the former "device-fold prepare cells" arm
+        // (`dev.zerocheck_prepare_cells` + `device_cells`/`df_dims`) is retired.
         let materialized_dev: Option<RowMajorMatrix<Val<SC>>> =
-            if device_cells_opt.is_none() && pm.inner().is_none() {
+            if pm.inner().is_none() {
                 _device_traces.and_then(|p| {
                     crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
                         &name, p,
@@ -353,20 +276,17 @@ where
             };
         let prep_trace = &preprocessed_traces[chip_idx];
         let prep_width = prep_trace.width;
-        // Main-trace dims, in the SAME precedence the raw path used
-        // (`df_dims` device-fold > device-materialize D2H > host trace):
-        //   * device-fold chip → dims from `df_dims`.
+        // Main-trace dims: device-materialize D2H > host trace.
         //   * device-materialize fallback → dims from the D2H'd matrix.
         //   * host (or unexercised) chip → dims from the shared MLE
         //     (`num_polynomials`/`num_real_entries`; a `dummy` yields (0, 0),
         //     matching an empty raw trace).
-        let (main_width, main_height): (usize, usize) = if let Some((w, h)) = df_dims {
-            (w, h)
-        } else if let Some(md) = materialized_dev.as_ref() {
-            (md.width, if md.width == 0 { 0 } else { md.values.len() / md.width })
-        } else {
-            (pm.num_polynomials(), pm.num_real_entries())
-        };
+        let (main_width, main_height): (usize, usize) =
+            if let Some(md) = materialized_dev.as_ref() {
+                (md.width, if md.width == 0 { 0 } else { md.values.len() / md.width })
+            } else {
+                (pm.num_polynomials(), pm.num_real_entries())
+            };
 
         // GKR-opening batch powers [β¹ .. β^(main+prep)].
         let combined_width = main_width + prep_width;
@@ -427,13 +347,9 @@ where
         // orientation — required because the verifier binds the single
         // reduced value with one global eq-bridge.
         //
-        // `use_rev` and `df_dims` (device-fold) are not
-        // mutually exclusive — the GPU CORE path runs the device fold under the
-        // rev(zeta) convention. Under rev the device chips keep EMPTY host cells (the
-        // device prepare hook feeds NATURAL cells) and the eq-anchor below is
-        // `rev(zeta)`; the claim is seeded from the full-point opening
-        // (`main_trace_evaluations_full`), which the device GKR phase populates. So
-        // no host cells are needed here regardless of `df_dims`.
+        // Under rev(zeta) the claim is seeded from the full-point opening
+        // (`main_trace_evaluations_full`), which the (multi-GPU / host) GKR
+        // phase populates.
         let use_rev = shard_use_rev;
         let claim: Challenge<SC> = if use_rev {
             let main_full = main_full_opt.expect("use_rev => main_full_opt.is_some()");
@@ -461,27 +377,23 @@ where
         };
         chip_sumcheck_claims.push(claim);
 
-        // Lift real trace rows to the challenge field. Device-fold chips keep
-        // host cells EMPTY (the device cells carry the trace).
+        // Lift real trace rows to the challenge field.
         //
         // The shared trace-MLE is the SOLE host main-trace source: a host
         // chip's inner Mle is `Mle::new(raw trace)`, so `inner().guts()`
         // equals the raw trace bit-for-bit (same row-major layout) — the SAME
         // lift (`Challenge::from`) and the SAME downstream bitrev reproduce
-        // IDENTICAL `main_cells`.  There is NO raw-trace fallback: a chip with
-        // no MLE inner is device-resident, and its cells come EITHER from the
-        // device fold (`df_dims`, empty host cells) OR the provider-materialize
-        // D2H (`materialized_dev`).  Byte-neutral.
-        let main_cells: Vec<$K> = if df_dims.is_some() {
-            Vec::new()
-        } else {
+        // IDENTICAL `main_cells`.  A chip with no MLE inner is device-resident,
+        // and its cells come from the provider-materialize D2H
+        // (`materialized_dev`).  Byte-neutral.
+        let main_cells: Vec<$K> = {
             let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
                 Some(mle) => mle.guts().as_slice(),
                 None => materialized_dev.as_ref().map(|md| md.values.as_slice()).unwrap_or(&[]),
             };
             cells_src.iter().map(|v| <$K>::from(*v)).collect()
         };
-        let prep_cells: Option<Vec<$K>> = if df_dims.is_none() && prep_width > 0 {
+        let prep_cells: Option<Vec<$K>> = if prep_width > 0 {
             Some(prep_trace.values.iter().map(|v| <$K>::from(*v)).collect())
         } else {
             None
@@ -499,10 +411,8 @@ where
         // bit-reversal.  Validated by `orientation_sweep_revzeta`.
         //
         // Legacy (!use_rev): keep the bit-reversed rows + `zeta` anchor.
-        // Device-fold cells are bit-reversed by the GPU prepare hook (the
-        // device path is always !use_rev here); only host cells bitrev.
-        let main_cells = if use_rev || df_dims.is_some() {
-            // use_rev: natural cells.  df_dims (device-fold): cells empty.
+        let main_cells = if use_rev {
+            // use_rev: natural cells.
             main_cells
         } else {
             crate::shard_level::zerocheck_poly::bitrev_rows(&main_cells, main_width, main_height)
@@ -554,16 +464,9 @@ where
         )
         // P6: carry the device-ops seam (was the `GPU_ZEROCHECK_YTUPLE*`
         // global `OnceLock`s) — `&NoDeviceOps` on host, `&CudaShardDeviceOps`
-        // on the GPU prover.  The SAME `dev` already gates `prepare_cells`
-        // above; `fix_last` forwards it to every fold.
+        // on the GPU prover; drives the host-cell fused y-tuple.  `fix_last`
+        // forwards it to every fold.
         .with_dev(dev);
-        // Device-fold: attach device cells so the per-round y-tuple +
-        // fold run on device (no host cells).
-        let poly = if let Some(dc) = device_cells_opt {
-            poly.with_device_cells(dc, None)
-        } else {
-            poly
-        };
         zerocheck_polys.push(poly);
     }
 

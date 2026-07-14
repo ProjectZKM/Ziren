@@ -489,13 +489,6 @@ pub struct ZeroCheckPoly<'a, F: Field, K: Field, EF: ExtensionField<F>, A> {
     padded_row_adjustment: EF,
     /// Virtual padded-row indicator.
     virtual_geq: VirtualGeq<EF>,
-    /// Device-fold: erased device cell handle (ColMajorMatrixDevice<Felt>
-    /// at round 0, DeviceBuffer<Ef4> after the first fold). When `Some`, the
-    /// per-round y-tuple + the fold run on DEVICE (no host `main_cells`).
-    device_cells: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>,
-    device_prep: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>,
-    /// true until the first device fold (round-0 cells are Felt; later Ef4).
-    device_round0: bool,
     /// P6 static dispatch: the device-ops seam carrying the zerocheck y-tuple
     /// family (was the `GPU_ZEROCHECK_YTUPLE{,_DEVICE}` / `_FOLD_DEVICE` /
     /// `_BATCHED_YTUPLE` / `_EXTRACT_FINAL` `OnceLock`s).  These ops are read
@@ -557,9 +550,6 @@ where
             geq_value,
             padded_row_adjustment,
             virtual_geq,
-            device_cells: None,
-            device_prep: None,
-            device_round0: true,
             dev: None,
             _marker: PhantomData,
         }
@@ -573,21 +563,6 @@ where
     /// sumcheck walks with the same seam.
     pub fn with_dev(mut self, dev: &'a dyn crate::shard_level::ShardDeviceOps) -> Self {
         self.dev = Some(dev);
-        self
-    }
-
-    /// Attach device-resident cells (the chip's trace on device, from the
-    /// per-shard provider) so the zerocheck runs fully on device for this chip.
-    /// `cells` is round-0 Felt (`ColMajorMatrixDevice<KoalaBear>`); the fold
-    /// hook returns later-round Ef4 buffers.
-    pub fn with_device_cells(
-        mut self,
-        cells: std::sync::Arc<dyn core::any::Any + Send + Sync>,
-        prep: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>>,
-    ) -> Self {
-        self.device_cells = Some(cells);
-        self.device_prep = prep;
-        self.device_round0 = true;
         self
     }
 
@@ -781,7 +756,11 @@ where
                         eq: eq_ef4,
                         zeta_rest: zeta_rest_ef4,
                         num_real: poly.num_real_entries,
-                        device_cells: poly.device_cells.as_deref(),
+                        // C4: the host `ZeroCheckPoly` no longer carries device
+                        // cells (single-GPU device residency now runs on the
+                        // ziren-gpu `GpuZeroCheckPoly`); the shared batched hook
+                        // input keeps the field for that GPU poly.
+                        device_cells: None,
                     }
                 })
                 .collect();
@@ -845,28 +824,6 @@ where
         is_first_round: bool,
         compute_y3: bool,
     ) -> (EF, EF, EF, EF) {
-        // Device-fold: if cells live on device, compute the y-tuple on
-        // device directly (no host upload). Falls through to the host-cell
-        // paths below if the device hook is unregistered.
-        if self.device_cells.is_some() {
-            if let Some(dev) = self.gpu_y_tuple_device(partial, is_first_round) {
-                return dev;
-            }
-            // Core residency: device cells were set (host trace emptied)
-            // but the device y-tuple hook declined for this chip. main_cells is
-            // empty, so the host-cell paths below would OOB. Fail loudly +
-            // actionably rather than corrupt -- this chip type is not yet
-            // supported under the per-chip device-fold residency path.
-            if self.main_cells.is_empty() && self.num_real_entries > 0 {
-                panic!(
-                    "core device-fold: gpu_y_tuple_device declined for chip {} \
-                     under device residency (host trace emptied, no device \
-                     y-tuple support) -- disable ZIREN_GPU_CORE_DEVICE_FOLD or \
-                     extend the device y-tuple hook for this chip type",
-                    self.air.name(),
-                );
-            }
-        }
         // Device-on by default; gpu_y_tuple returns None (-> host) unless EF==Ef4,
         // F==KoalaBear and a hook is registered (the TypeId guard is the safety net).
         if let Some(dev) = self.gpu_y_tuple(partial, is_first_round) {
@@ -939,75 +896,6 @@ where
         // SAFETY: `Ef4 == EF` under the TypeId guard.
         let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
         Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
-    }
-
-    /// Device-fold: per-round y-tuple from DEVICE cells via the registered
-    /// device hook. `None` unless EF==Ef4, F==Kb, device_cells set, hook present.
-    fn gpu_y_tuple_device(&self, partial: &[EF], is_first_round: bool) -> Option<(EF, EF, EF, EF)> {
-        use core::any::TypeId;
-        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        type Kb = p3_koala_bear::KoalaBear;
-        // Device residency is only ever attached to `K = EF` polys; the
-        // `K = Ef4` guard keeps that invariant explicit.
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>()
-            || TypeId::of::<K>() != TypeId::of::<Ef4>()
-            || TypeId::of::<F>() != TypeId::of::<Kb>()
-        {
-            return None;
-        }
-        let dc = self.device_cells.as_ref()?;
-        // P6: device-cell y-tuple op carried by the poly (was
-        // `get_gpu_zerocheck_ytuple_device_hook()`); `is_device()` = registered.
-        let dev = self.dev.filter(|d| d.is_device())?;
-        // SAFETY: TypeId equalities -> layout-safe reinterpretation (shared borrows).
-        let gkr_ef4: &[Ef4] = unsafe {
-            core::slice::from_raw_parts(self.gkr_powers.as_ptr().cast::<Ef4>(), self.gkr_powers.len())
-        };
-        let eq_ef4: &[Ef4] =
-            unsafe { core::slice::from_raw_parts(partial.as_ptr().cast::<Ef4>(), partial.len()) };
-        let pv_kb: &[Kb] = unsafe {
-            core::slice::from_raw_parts(self.public_values.as_ptr().cast::<Kb>(), self.public_values.len())
-        };
-        let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&self.alpha) };
-        let prep_dyn: Option<&(dyn core::any::Any + Send + Sync)> =
-            self.device_prep.as_deref();
-        let name = self.air.name();
-        let out = dev.zerocheck_ytuple_device(
-            &name,
-            dc.as_ref(),
-            self.num_main_cols,
-            prep_dyn,
-            self.num_prep_cols,
-            gkr_ef4,
-            alpha_ef4,
-            eq_ef4,
-            pv_kb,
-            self.num_real_entries,
-            is_first_round,
-        )?;
-        let to_ef = |x: &Ef4| -> EF { unsafe { core::mem::transmute_copy(x) } };
-        Some((to_ef(&out[0]), to_ef(&out[1]), to_ef(&out[2]), to_ef(&out[3])))
-    }
-
-    /// Device-fold: fold the device cells on the last variable, on device.
-    fn gpu_fold_device(&self, alpha: EF) -> Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> {
-        use core::any::TypeId;
-        type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-        if TypeId::of::<EF>() != TypeId::of::<Ef4>() {
-            return None;
-        }
-        let dc = self.device_cells.as_ref()?;
-        // P6: device fold op carried by the poly (was
-        // `get_gpu_zerocheck_fold_device_hook()`); `is_device()` = registered.
-        let dev = self.dev.filter(|d| d.is_device())?;
-        let alpha_ef4: Ef4 = unsafe { core::mem::transmute_copy(&alpha) };
-        dev.zerocheck_fold_device(
-            dc.as_ref(),
-            self.num_main_cols,
-            self.num_real_entries,
-            alpha_ef4,
-            self.device_round0,
-        )
     }
 
     /// The per-pair degree-4 eq-weighted accumulator: returns
@@ -1213,29 +1101,15 @@ where
     /// `ZeroCheckPoly<'a, F, EF, EF, A>` (for `K = EF` this is `Self`; for
     /// the base-field first round `K = F` it lifts on the fold).
     fn fix_last(self, alpha: EF) -> ZeroCheckPoly<'a, F, EF, EF, A> {
-        // Device-fold: fold the device cells on device; host cells unused.
-        // Device residency is only ever `K = EF`, so this branch is dead for
-        // the base-field first round (`device_cells` is `None`).
-        let new_device_cells: Option<std::sync::Arc<dyn core::any::Any + Send + Sync>> =
-            if self.device_cells.is_some() {
-                Some(self.gpu_fold_device(alpha).expect(
-                    "#108: device_cells set but fold hook unregistered/typeid-mismatch",
-                ))
-            } else {
-                None
-            };
-        let new_main: Vec<EF> = if self.device_cells.is_some() {
-            Vec::new()
-        } else {
-            fold_cells::<K, EF>(&self.main_cells, self.num_main_cols, self.num_real_entries, alpha)
-        };
-        let new_prep: Option<Vec<EF>> = if self.device_cells.is_some() {
-            None
-        } else {
-            self.prep_cells
-                .as_ref()
-                .map(|c| fold_cells::<K, EF>(c, self.num_prep_cols, self.num_real_entries, alpha))
-        };
+        // C4: the host poly is host-cell-only (single-GPU device residency
+        // runs on the ziren-gpu `GpuZeroCheckPoly`); fold the host cells
+        // `K → EF`.
+        let new_main: Vec<EF> =
+            fold_cells::<K, EF>(&self.main_cells, self.num_main_cols, self.num_real_entries, alpha);
+        let new_prep: Option<Vec<EF>> = self
+            .prep_cells
+            .as_ref()
+            .map(|c| fold_cells::<K, EF>(c, self.num_prep_cols, self.num_real_entries, alpha));
         let new_num_real = self.num_real_entries.div_ceil(2);
         let new_num_vars = self.num_variables - 1;
         let new_virtual_geq = self.virtual_geq.fix_last_variable(alpha);
@@ -1264,9 +1138,6 @@ where
                 geq_value: self.geq_value,
                 padded_row_adjustment: self.padded_row_adjustment,
                 virtual_geq: new_virtual_geq,
-                device_cells: new_device_cells,
-                device_prep: self.device_prep,
-                device_round0: false,
                 // P6: forward the device-ops seam to the fold (never drop it).
                 dev: self.dev,
                 _marker: PhantomData,
@@ -1300,9 +1171,6 @@ where
             geq_value,
             padded_row_adjustment: self.padded_row_adjustment,
             virtual_geq: new_virtual_geq,
-            device_cells: new_device_cells,
-            device_prep: self.device_prep,
-            device_round0: false,
             // P6: forward the device-ops seam to the fold (never drop it).
             dev: self.dev,
             _marker: PhantomData,
@@ -1488,50 +1356,6 @@ where
         debug_assert_eq!(self.num_variables, 0, "get_component_poly_evals before full reduction");
         let mut out = Vec::with_capacity(self.num_prep_cols + self.num_main_cols);
         if self.num_real_entries >= 1 {
-            // Device-fold: extract the folded 1-row openings from device cells.
-            // Device residency implies `K == EF == Ef4`.
-            if let Some(dc) = self.device_cells.as_ref() {
-                use core::any::TypeId;
-                type Ef4 = p3_field::extension::BinomialExtensionField<p3_koala_bear::KoalaBear, 4>;
-                if TypeId::of::<EF>() == TypeId::of::<Ef4>()
-                    && TypeId::of::<K>() == TypeId::of::<Ef4>()
-                {
-                    // P6: extract-final op carried by the poly (was
-                    // `get_gpu_zerocheck_extract_final_hook()`); `is_device()`
-                    // reproduces the former "hook registered" presence check.
-                    if let Some(dev) = self.dev.filter(|d| d.is_device()) {
-                        // np>0: the device buffer is the COMBINED [main ++ prep]
-                        // col-major block (prep columns FOLLOW main), so
-                        // extract num_main_cols + num_prep_cols residuals and emit
-                        // them prep-then-main (the host/SP1 trace@z order below).
-                        // np==0 chips extract exactly num_main_cols (unchanged).
-                        let want = self.num_main_cols + self.num_prep_cols;
-                        if let Some(res_ef4) = dev.zerocheck_extract_final(dc.as_ref(), want) {
-                            // SAFETY: TypeId equality guarantees EF == Ef4.
-                            let res: Vec<EF> = unsafe {
-                                let len = res_ef4.len();
-                                let cap = res_ef4.capacity();
-                                let ptr =
-                                    core::mem::ManuallyDrop::new(res_ef4).as_mut_ptr() as *mut EF;
-                                Vec::from_raw_parts(ptr, len, cap)
-                            };
-                            if res.len() == want {
-                                // prep residuals (buffer cols nm..nm+np) first.
-                                out.extend_from_slice(&res[self.num_main_cols..]);
-                                out.extend_from_slice(&res[..self.num_main_cols]);
-                            } else {
-                                // Device buffer carries main only (legacy np==0
-                                // shape): zero prep slots, then main residuals.
-                                out.extend(
-                                    std::iter::repeat(EF::ZERO).take(self.num_prep_cols),
-                                );
-                                out.extend_from_slice(&res[..self.num_main_cols.min(res.len())]);
-                            }
-                            return out;
-                        }
-                    }
-                }
-            }
             if let Some(prep) = self.prep_cells.as_ref() {
                 out.extend(
                     prep[..self.num_prep_cols.min(prep.len())].iter().map(|&v| EF::from(v)),
