@@ -660,7 +660,7 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
 /// ziren-gpu jagged-reduction hook builds a byte-identical `w` instead
 /// of re-deriving the gamma-mixing weights.  Keep in lockstep with the
 /// host body; any weight-table change MUST update both.
-pub fn build_weight_table_sp1(
+pub fn build_weight_table_from_z_col(
     packing: &JaggedPacking<InnerVal>,
     r_row_per_chip: &[Vec<InnerChallenge>],
     z_col: &[InnerChallenge],
@@ -670,7 +670,7 @@ pub fn build_weight_table_sp1(
     build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row)
 }
 
-/// The two SEPARABLE factors of `build_weight_table_sp1`'s
+/// The two SEPARABLE factors of `build_weight_table_from_z_col`'s
 /// weight table, exposed `pub` so the ziren-gpu fused jagged-reduction hook
 /// can DERIVE `w[off_k + row] = z_col_lagrange[k] * row_eq[row]` on the GPU
 /// from the resident `dense_q` without ever materializing the full
@@ -684,9 +684,9 @@ pub fn build_weight_table_sp1(
 /// BYTE-IDENTICAL to `build_weight_table` by construction: that fn computes
 /// exactly `w[off + row] = z_col_lagrange[k] * row_eq[row]` from these same
 /// two factors (see `build_weight_table` body).  Keep in lockstep with
-/// `build_weight_table` / `build_weight_table_sp1`; any weight-table change
+/// `build_weight_table` / `build_weight_table_from_z_col`; any weight-table change
 /// MUST update all three.
-pub fn build_fused_weight_inputs_sp1(
+pub fn build_fused_weight_inputs(
     z_col: &[InnerChallenge],
     z_row: &[InnerChallenge],
 ) -> (Vec<InnerChallenge>, Vec<InnerChallenge>) {

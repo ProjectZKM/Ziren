@@ -443,10 +443,10 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 /// device-resident state — the scope amortizes one upload across `~18`
 /// layers' worth of `prove_gkr_round` invocations.
 ///
-/// Ziren re-marshals on every V3 dispatch (`round.rs:3891-3902`):
-/// `flatten_layer + build_eq_table + cast_vec_ef_to_ef4 + hook`.  This
-/// per-layer marshalling (× ~3400 calls/shard) is the dominant cost of
-/// `ZIREN_GPU_LOGUP_GKR_DEVICE=1` on small shards (tendermint).
+/// Ziren re-marshals the layer inputs on every per-layer device dispatch
+/// (`flatten_layer + build_eq_table + cast_vec_ef_to_ef4`).  This per-layer
+/// marshalling (× ~3400 calls/shard) is the dominant device-dispatch cost on
+/// small shards (tendermint).
 ///
 /// **Scope semantics**
 ///

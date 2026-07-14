@@ -2695,11 +2695,6 @@ pub mod jagged {
             // buffer is the only correct source.
             let saved_dense = if dense_q_is_carried {
                 Some(dense_q.clone())
-            } else if !dense_q.is_empty()
-                && std::env::var("ZIREN_GPU_JAGGED_PCS_HOST_GUARD")
-                    .map(|v| v == "1").unwrap_or(false)
-            {
-                Some(dense_q.clone())
             } else {
                 None
             };
