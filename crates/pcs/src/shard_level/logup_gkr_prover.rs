@@ -138,56 +138,6 @@ where
     Some(vals)
 }
 
-/// Per-chip eval_at via the per-shard device-trace provider, for
-/// device-only chips with NO host main trace. `eval_point` is the trailing
-/// log(chip_height) coords. Returns `None` (caller emits the legacy zero
-/// vector) when the provider hook is unregistered, the chip is absent, or
-/// (F,EF) != (KoalaBear, Ef4).
-pub fn eval_chip_columns_at_point_via_provider<F, EF>(
-    _chip_name: &str,
-    _eval_point: &[EF],
-    _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-) -> Option<Vec<EF>>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    // Option-C divergence (D3a): the device eval-at seam
-    // (`ShardDeviceOps::eval_at_provider`) is RETIRED.  The GPU driver
-    // (`device_logup_gkr`) now calls the `eval_chip_at_point_via_provider_gpu`
-    // kernel DIRECTLY, so this shared host helper is CpuProver-only — where the
-    // device-trace provider is absent and `is_device()` is `false` — and it
-    // always yields the legacy zero-vector fallback (`None`), byte-identical to
-    // the former `!is_device()` early-return.
-    None
-}
-
-/// BATCHED eval_at via the per-shard device-trace provider. Evaluates
-/// EVERY device-only chip in `names` at its `eval_points[i]` (trailing
-/// log(chip_height) coords) in ONE call that builds one eq-table per distinct
-/// eval-point. Returns `results[i] = Some(per-column EF)` for resolved chips,
-/// `None` (caller emits the legacy zero vector) for chips the provider can't
-/// resolve. Byte-identical to N per-chip `eval_chip_columns_at_point_via_provider`
-/// calls. Returns all-`None` when the batch hook is unregistered or
-/// (F,EF) != (KoalaBear, Ef4).
-pub fn eval_chips_at_points_batched_via_provider<F, EF>(
-    names: &[String],
-    _eval_points: &[Vec<EF>],
-    _device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-) -> Vec<Option<Vec<EF>>>
-where
-    F: PrimeField,
-    EF: ExtensionField<F>,
-{
-    // Option-C divergence (D3a): the batched device eval-at seam
-    // (`ShardDeviceOps::eval_at_batch_provider`) is RETIRED.  The GPU driver
-    // calls `eval_chips_at_points_batched_via_provider_gpu` DIRECTLY, so this
-    // shared host helper is CpuProver-only (provider absent / `is_device()`
-    // false) and always yields the legacy all-`None` fallback, byte-identical
-    // to the former `!is_device()` early-return.
-    (0..names.len()).map(|_| None).collect::<Vec<_>>()
-}
-
 /// Compute per-column MLE evaluations of a row-major trace at a
 /// multilinear point.
 ///

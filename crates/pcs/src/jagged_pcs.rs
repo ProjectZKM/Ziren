@@ -2142,14 +2142,20 @@ pub mod jagged {
         );
         // In-band commit observe (the precomputed prove skips it, expecting
         // the orchestrator prologue to have observed the digest; here there
-        // is none, so observe it now to match `verify_jagged_basefold`).
+        // is none, so observe it now to match `verify_jagged_basefold`).  This
+        // observe stays on THIS (legacy/synthetic) arm and precedes the spine
+        // call — the precomputed arms omit it. Then route through the shared
+        // `prove_jagged_basefold_with_precomputed_provider` spine (provider
+        // `None`) instead of calling `_inner` directly, so `_inner` has a
+        // single caller. Byte-identical: the spine is a pure pass-through to
+        // `_inner` with these exact args, and the observe order is unchanged.
         challenger.observe(precomputed.commit.original_commitment.clone());
-        prove_jagged_basefold_inner(
+        prove_jagged_basefold_with_precomputed_provider(
             chip_traces,
             r_row_per_chip,
             z_row,
-            pre_y_per_chip,
             precomputed,
+            pre_y_per_chip,
             challenger,
             None,
             jagged_reducer,
@@ -2396,11 +2402,11 @@ pub mod jagged {
             // reduction skips it naturally.
             pre
         } else {
-            // When the residual openings are unavailable (kill-switch
-            // ZIREN_ZC_RESIDUAL_Y=0) the host triple-loop reads chip cells
-            // directly — re-materialize empty device-resident chips from the
-            // provider first so the reduction sees real cells (cold path;
-            // happy path takes the `pre` branch above).
+            // When the residual openings are unavailable (the residual-y
+            // decline — no env kill-switch exists) the host triple-loop reads
+            // chip cells directly — re-materialize empty device-resident chips
+            // from the provider first so the reduction sees real cells (cold
+            // path; happy path takes the `pre` branch above).
             let rematerialized_for_y =
                 rematerialize_chip_traces_via_provider(chip_traces, provider);
             // The rev(zeta) orientation, read off the committed data

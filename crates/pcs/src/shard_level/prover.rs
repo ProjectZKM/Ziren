@@ -958,11 +958,11 @@ where
     // sp1-gpu zerocheck/lib.rs:658-702).  Passing the main slice as
     // pre_y_per_chip skips the host triple-nested step-3 reduction; the
     // proof bytes are unchanged (identical values, and step 3 is
-    // transcript-silent).  Kill-switch: ZIREN_ZC_RESIDUAL_Y=0 → legacy
-    // recompute.  Declines whole-shard (legacy fallback, identical bytes)
-    // when any chip's residual is missing or shape-mismatched, or when a
-    // non-pow2 height would make the zerocheck `bitrev_rows` and the jagged
-    // natural-row conventions diverge.
+    // transcript-silent).  There is no env kill-switch: the reuse simply
+    // declines whole-shard to the legacy recompute (identical bytes) when any
+    // chip's residual is missing or shape-mismatched, or when a non-pow2 height
+    // would make the zerocheck `bitrev_rows` and the jagged natural-row
+    // conventions diverge (the residual-y decline).
     // C0 extraction: the residual-y reuse decision is lifted VERBATIM into a
     // `zkm-pcs` pub helper.  It is transcript-silent (step 3 is silent), so
     // reusing the zerocheck residual as `y_per_chip` — or declining whole-shard

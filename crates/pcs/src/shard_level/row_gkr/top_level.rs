@@ -292,54 +292,13 @@ where
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
 
-    // BATCHED per-chip eval (default ON; ZIREN_GPU_EVAL_AT_BATCH=0 opt-out):
-    // collect every device-only chip (empty host trace, non-zero declared
-    // width) + its trailing-coord eval-point, then evaluate them ALL in ONE
-    // batched provider call that builds one eq-table per DISTINCT eval-point
-    // instead of one eq-build per chip. Byte-identical to the per-chip path
-    // (same kernels, same fold); the par_iter below reads each device chip's
-    // result from this map. Falls back to the per-chip hook when disabled, the
-    // batch hook is unregistered, or a chip is absent from the batch result.
-    let batched_main_evals: BTreeMap<String, Vec<EF>> =
-        if let Some(provider) = _device_traces {
-            let mut names: Vec<String> = Vec::new();
-            let mut points: Vec<Vec<EF>> = Vec::new();
-            for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-                let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
-                // Only device-only chips (dummy MLE = empty host trace) with a
-                // non-zero declared width are batched via the provider.
-                if pm.inner().is_some() || chip_main_width == 0 {
-                    continue;
-                }
-                let main_height = provider.chip_height(&chip.name()).unwrap_or(1);
-                let log_main_height =
-                    main_height.max(1).next_power_of_two().trailing_zeros() as usize;
-                let main_eval_point: Vec<EF> = if eval_point.len() >= log_main_height {
-                    eval_point[eval_point.len() - log_main_height..].to_vec()
-                } else {
-                    eval_point.clone()
-                };
-                names.push(chip.name().to_string());
-                points.push(main_eval_point);
-            }
-            if names.is_empty() {
-                BTreeMap::new()
-            } else {
-                let results =
-                    crate::shard_level::logup_gkr_prover::eval_chips_at_points_batched_via_provider::<F, EF>(
-                        &names, &points, provider,
-                    );
-                let mut map = BTreeMap::new();
-                for (name, res) in names.iter().zip(results.into_iter()) {
-                    if let Some(v) = res {
-                        map.insert(name.clone(), v);
-                    }
-                }
-                map
-            }
-        } else {
-            BTreeMap::new()
-        };
+    // Per-chip device-eval map. Device eval-at seam retired (Option-C D3a):
+    // the batched host helper is
+    // CpuProver-only and always yields all-None, so this map is always empty
+    // on the host path (the GPU driver calls the `_gpu` batch kernel directly).
+    // Device-only chips therefore fall to the zero-vector below — byte-identical
+    // to the former always-None provider call.
+    let batched_main_evals: BTreeMap<String, Vec<EF>> = BTreeMap::new();
 
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
         .par_iter()
@@ -385,24 +344,14 @@ where
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
             let main_evals = if pm.inner().is_none() && chip_main_width > 0 {
-                // Device-only chip — eval its device-resident trace
-                // (from the provider) at the GKR point on device, instead of
-                // emitting a zero vector (which breaks the zerocheck GKR
-                // sum-modification identity). Prefer the BATCHED result
-                // (one eq-build per distinct point); fall back to the per-chip
-                // hook, then to zeros (legacy unexercised-chip behaviour).
+                // Device-only chip. On the host path the batched map is empty
+                // and the per-chip device eval-at seam is retired (CpuProver
+                // helper always None), so the chip emits the legacy zero vector
+                // of its declared width. The GPU driver evaluates the
+                // device-resident trace at the GKR point via its own kernel.
                 batched_main_evals
                     .get(&chip.name().to_string())
                     .cloned()
-                    .or_else(|| {
-                        _device_traces.and_then(|p| {
-                            crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
-                                &chip.name(),
-                                main_eval_point,
-                                p,
-                            )
-                        })
-                    })
                     .unwrap_or_else(|| vec![EF::ZERO; chip_main_width])
             } else {
                 // Host chip (or width-0 unexercised) — evaluate the shared
@@ -442,13 +391,11 @@ where
             // coords.  Device-only chips: per-chip provider hook at the full
             // point (no batch map for this point); falls back to None.
             let main_evals_full: Option<Vec<EF>> = if pm.inner().is_none() && chip_main_width > 0 {
-                _device_traces.and_then(|p| {
-                    crate::shard_level::logup_gkr_prover::eval_chip_columns_at_point_via_provider::<F, EF>(
-                        &chip.name(),
-                        full_eval_point,
-                        p,
-                    )
-                })
+                // Device-only chip: the per-chip device eval-at seam is retired
+                // (CpuProver helper always None), so the full-point opening is
+                // None on the host path. The GPU driver serves this via its own
+                // kernel. Byte-identical to the former always-None provider call.
+                None
             } else if pm.inner().is_some() {
                 // Consume the shared analytic trace-MLE at the
                 // FULL point (`num_variables == max_log_row_count ==
