@@ -26,6 +26,36 @@ use crate::{
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
+/// SP1-parity `data` bundle for `MachineProver::prove_shard_to_basefold`
+/// (mirrors SP1's `ShardData` fed to `prove_shard_with_data`). Pure
+/// repackaging of the former positional data params — byte-neutral. A
+/// superset of SP1's `ShardData`: also carries Ziren's eager-precomputed main
+/// commit + the per-shard device provider, which SP1 produces/holds internally.
+pub struct ShardProveData<'a, SC, A>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+    A: MachineAir<Val<SC>>,
+{
+    /// SP1: MainTraceData.shard_chips.
+    pub chips: &'a [&'a MachineChip<SC, A>],
+    /// SP1: pk.preprocessed_data.preprocessed_traces.
+    pub preprocessed_traces: &'a [RowMajorMatrix<Val<SC>>],
+    /// SP1: MainTraceData.traces (owned; MOVED into the shared Arc<Mle> store).
+    pub main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    /// Ziren eager-precompute; SP1 computes inline via commit_traces (no field).
+    pub main_commitment: [Val<SC>; 8],
+    /// SP1: MainTraceData.public_values.
+    pub public_values: Vec<Val<SC>>,
+    /// Ziren per-shard multi-GPU provider; SP1 keeps device state in `self`.
+    pub device_traces: Option<&'a dyn crate::shard_level::DeviceTraceProvider>,
+    /// Ziren eager main pcs-data bundle; SP1 produces this inline (no field).
+    pub precomputed_commit: Option<
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
+    >,
+}
+
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
 pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     'static + Send + Sync
@@ -282,30 +312,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     #[allow(clippy::too_many_arguments)]
     fn prove_shard_to_basefold(
         &self,
-        chips: &[&MachineChip<SC, A>],
-        preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-        // trace-unification Phase 1: OWNED so the shared per-chip
-        // `Arc<Mle>` store below is built by MOVING each trace in
-        // (zero-copy `from_row_major`) instead of cloning it.
-        main_traces: Vec<RowMajorMatrix<Val<SC>>>,
-        main_commitment: [Val<SC>; 8],
-        public_values: Vec<Val<SC>>,
+        // SP1-parity: the former 7 positional data params are now bundled into
+        // this single `data` struct (mirrors SP1's `ShardData`), pure
+        // repackaging — byte-neutral.  Destructured into the same locals below.
+        data: ShardProveData<'_, SC, A>,
         challenger: &mut SC::Challenger,
-        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        // SP1-parity: `max_log_row_count`, `orientation`, `dense_rev`, and the
-        // recursion-layer AREA PIN are no longer carried as params (SP1's prover
-        // trait lacks them) — each is sourced from `self`/the traces inside the
-        // method body below.  The pin's ONLY consumer is the LAZY
-        // `maybe_auto_precompute_basefold` build; on this default (CpuProver /
-        // host) path the caller always supplies `Some(precomputed_commit)`, so
-        // that lazy build is skipped and the pin is inert here (the eager
-        // `commit()` path already recorded the real pin on
-        // `PrecomputedJaggedCommit.recursion_area_pin`) → sourced as `None`.
-        precomputed_commit: Option<
-            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-                <SC as BasefoldRing>::BfMmcs,
-            >,
-        >,
     ) -> crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, crate::Challenge<SC>>
     where
         SC: BasefoldRing,
@@ -341,6 +352,17 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
+        // SP1-parity: unbundle the `data` struct into the same locals the body
+        // below already references by name (byte-neutral repackaging).
+        let ShardProveData {
+            chips,
+            preprocessed_traces,
+            main_traces,
+            main_commitment,
+            public_values,
+            device_traces,
+            precomputed_commit,
+        } = data;
         // SP1-parity: source the three former carrier params from `self`/traces
         // (byte-identical to the values the driver used to thread in).
         //   * `orientation` — CpuProver default emits MSB-folded proofs (it ONLY
@@ -1228,25 +1250,30 @@ where
     // seam).  On `CpuProver` this delegates step-for-step to the same free-fns
     // as the free-fn `prove_shard_to_basefold` call → byte-identical.
     let proof = prover.prove_shard_to_basefold(
-        &chips_reborrow,
-        &preprocessed_traces,
-        // trace-unification Phase 1: hand OWNERSHIP to the trait method so
-        // it MOVES each trace into the shared `Arc<Mle>` store (no clone).
-        main_traces_owned,
-        digest,
-        public_values,
+        // SP1-parity: the former 7 positional data params are bundled into the
+        // `ShardProveData` struct (byte-neutral repackaging).
+        ShardProveData {
+            chips: &chips_reborrow,
+            preprocessed_traces: &preprocessed_traces,
+            // trace-unification Phase 1: hand OWNERSHIP to the trait method so
+            // it MOVES each trace into the shared `Arc<Mle>` store (no clone).
+            main_traces: main_traces_owned,
+            main_commitment: digest,
+            public_values,
+            // CPU prover path; no device traces.
+            device_traces: None,
+            // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
+            // and the recursion AREA PIN are sourced inside
+            // `prove_shard_to_basefold` from the traces + self, not threaded here.
+            // This call always passes `Some(precomputed)`, so
+            // `maybe_auto_precompute_basefold` returns the supplied commit early
+            // WITHOUT rebuilding — the recursion AREA PIN was already recorded on
+            // `precomputed.recursion_area_pin` by the eager `commit()` path (and
+            // is read back in `prove_jagged_basefold_inner`), so the lazy-build
+            // pin the method sources internally is never consumed here.
+            precomputed_commit: Some(precomputed),
+        },
         &mut shard_challenger,
-        // CPU prover path; no device traces.
-        None,
-        // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
-        // and the recursion AREA PIN are sourced inside `prove_shard_to_basefold`
-        // from the traces + self, not threaded here.  This call always passes
-        // `Some(precomputed)`, so `maybe_auto_precompute_basefold` returns the
-        // supplied commit early WITHOUT rebuilding — the recursion AREA PIN was
-        // already recorded on `precomputed.recursion_area_pin` by the eager
-        // `commit()` path (and is read back in `prove_jagged_basefold_inner`), so
-        // the lazy-build pin the method sources internally is never consumed here.
-        Some(precomputed),
     );
 
     Some(Box::new(proof))
