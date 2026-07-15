@@ -292,13 +292,15 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         public_values: Vec<Val<SC>>,
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        // SP1-parity: `max_log_row_count`, `orientation`, and `dense_rev` are no
-        // longer carried as params (SP1's prover trait lacks them) — each is
-        // sourced from `self`/the traces inside the method body below.
-        // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on
-        // the GPU RECURSION (compress) lazy-commit path; `None` elsewhere.
-        recursion_area_pin: Option<usize>,
+        // SP1-parity: `max_log_row_count`, `orientation`, `dense_rev`, and the
+        // recursion-layer AREA PIN are no longer carried as params (SP1's prover
+        // trait lacks them) — each is sourced from `self`/the traces inside the
+        // method body below.  The pin's ONLY consumer is the LAZY
+        // `maybe_auto_precompute_basefold` build; on this default (CpuProver /
+        // host) path the caller always supplies `Some(precomputed_commit)`, so
+        // that lazy build is skipped and the pin is inert here (the eager
+        // `commit()` path already recorded the real pin on
+        // `PrecomputedJaggedCommit.recursion_area_pin`) → sourced as `None`.
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as BasefoldRing>::BfMmcs,
@@ -418,7 +420,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             orientation,
             dense_rev,
-            recursion_area_pin,
+            // SP1-parity: the recursion AREA PIN is no longer a param — sourced
+            // as `None` here (inert on the host path: the caller always supplies
+            // `Some(precomputed_commit)`, so the LAZY precompute that would read
+            // the pin is skipped; the eager `commit()` recorded the real pin).
+            None,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
             // Reduce + open dispatch: the default (CpuProver / any prover not
@@ -1233,15 +1239,13 @@ where
         // CPU prover path; no device traces.
         None,
         // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
-        // are sourced inside `prove_shard_to_basefold` from the traces + self,
-        // not threaded here.
-        // band-cap carrier removal Phase C: this call always passes
+        // and the recursion AREA PIN are sourced inside `prove_shard_to_basefold`
+        // from the traces + self, not threaded here.  This call always passes
         // `Some(precomputed)`, so `maybe_auto_precompute_basefold` returns the
         // supplied commit early WITHOUT rebuilding — the recursion AREA PIN was
         // already recorded on `precomputed.recursion_area_pin` by the eager
         // `commit()` path (and is read back in `prove_jagged_basefold_inner`), so
-        // this lazy-build pin is never consumed here → `None`.
-        None,
+        // the lazy-build pin the method sources internally is never consumed here.
         Some(precomputed),
     );
 
