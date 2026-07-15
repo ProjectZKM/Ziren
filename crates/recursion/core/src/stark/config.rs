@@ -176,6 +176,15 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
         // has no consumers on the basefold path.
         true
     }
+
+    fn prep_commit_hook() -> Option<zkm_pcs::shard_level::sumcheck_poly::OuterPrepCommitFn> {
+        // Statically resolve the OuterSC wrap-machine PREPROCESSED commit to
+        // `outer_prep_commit` (SP1-style stacked BaseFold over the Poseidon2-BN254
+        // `OuterValMmcs`, no two-adic coset LDE) — replaces the retired runtime
+        // OnceLock hook (`register_outer_prep_commit_hook`).
+        Some(outer_jagged_hooks::outer_prep_commit)
+    }
+
     type Val = OuterVal;
     type Domain = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Domain;
     type Pcs = OuterPcs;
@@ -403,10 +412,11 @@ mod basefold_over_bn254_generic_typecheck {
 // OUTER-ring jagged BaseFold setup hook.
 // The open + verify hook bodies are static generic calls
 // in `prove_trusted_evaluations` / `verify_jagged_pcs_host` over the `BasefoldRing`
-// associated type). Only `outer_prep_commit` remains — registered into zkm-pcs's
-// process-global hook slot so `StarkMachine::setup` (which cannot name
-// `OuterValMmcs`) routes the wrap-ring preprocessed commit here. `Val`/`Challenge`
-// are KoalaBear / KoalaBear^4 for both rings, so only the MMCS differs.
+// associated type). Only `outer_prep_commit` remains — resolved STATICALLY via
+// `KoalaBearPoseidon2Outer::prep_commit_hook()` so `StarkMachine::setup` (which
+// cannot name `OuterValMmcs`) routes the wrap-ring preprocessed commit here.
+// `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so only the MMCS
+// differs.
 pub mod outer_jagged_hooks {
     use super::{KoalaBearPoseidon2Outer, OuterValMmcs};
     use p3_matrix::dense::RowMajorMatrix;
@@ -416,27 +426,15 @@ pub mod outer_jagged_hooks {
     // (`verify_jagged_pcs_host`) name `OuterChallenger`/`OuterValMmcs` via the
     // `BasefoldRing` associated type and call the generic BaseFold open/verify
     // statically, so the dyn-Any open/verify hooks are absent. Only
-    // `outer_prep_commit` remains (setup/VK-side; a plain crate-dep fn pointer).
-
-    /// Register the outer-ring jagged BaseFold prep-commit hook into zkm-pcs.
-    /// Idempotent (OnceLock-backed); safe to call repeatedly. Must run before the
-    /// wrap STARK proves/verifies on the BaseFold-over-BN254 path (i.e. once
-    /// `KoalaBearPoseidon2Outer::use_basefold()` returns `true`).
-    pub fn register_outer_jagged_hooks() {
-        // The open + verify paths are static generic calls in the shard
-        // prover / host verifier, so no open/verify hooks are registered.
-        // Only the PREP-COMMIT hook remains (setup/VK-side crate-dep fn pointer).
-        let _ = zkm_pcs::shard_level::sumcheck_poly::register_outer_prep_commit_hook(
-            outer_prep_commit,
-        );
-    }
+    // `outer_prep_commit` remains (setup/VK-side; a plain crate-dep fn pointer),
+    // returned by `KoalaBearPoseidon2Outer::prep_commit_hook()`.
 
     /// SP1-style PREPROCESSED-trace setup commit for the OuterSC wrap
     /// machine: stacked BaseFold over the Poseidon2-BN254 `OuterValMmcs`
     /// (no two-adic coset LDE).  Returns bincode of the
     /// `OuterValMmcs::Commitment` (== `Com<KoalaBearPoseidon2Outer>` since
     /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>`).
-    fn outer_prep_commit(
+    pub(crate) fn outer_prep_commit(
         chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     ) -> Vec<u8> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;

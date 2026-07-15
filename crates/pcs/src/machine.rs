@@ -515,7 +515,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
             let hook = SC::prep_commit_hook()
-                .or_else(crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook)
                 .expect(
                     "prep commit hook required but none available \
                      (SC::prep_commit_hook nor registered OuterPrepCommitFn)",
@@ -682,7 +681,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
             let hook = SC::prep_commit_hook()
-                .or_else(crate::shard_level::sumcheck_poly::get_outer_prep_commit_hook)
                 .expect(
                     "prep commit hook required but none available \
                      (SC::prep_commit_hook nor registered OuterPrepCommitFn)",

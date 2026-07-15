@@ -2146,10 +2146,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         compressed_proof: ZKMReduceProof<InnerSC>,
         opts: ZKMProverOpts,
     ) -> Result<ZKMReduceProof<OuterSC>, ZKMRecursionProverError> {
-        // BaseFold-over-BN254 wrap port: install the outer-ring jagged
-        // BaseFold open/verify hooks so the wrap STARK (CpuProver<OuterSC>) can
-        // prove + host-verify over OuterValMmcs/OuterChallenger. Idempotent.
-        zkm_recursion_core::stark::outer_jagged_hooks::register_outer_jagged_hooks();
+        // BaseFold-over-BN254 wrap port: the wrap STARK (CpuProver<OuterSC>)
+        // proves + host-verifies over OuterValMmcs/OuterChallenger. The outer
+        // jagged BaseFold open/verify paths are static generic calls; the
+        // PREPROCESSED-commit is resolved statically via
+        // `KoalaBearPoseidon2Outer::prep_commit_hook`.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
         let basefold_proof = *compressed_proof
             .basefold_shard_proof

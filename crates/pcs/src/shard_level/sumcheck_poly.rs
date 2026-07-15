@@ -671,10 +671,12 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
 // name `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
 // and call `prove_jagged_basefold_inner_generic` / `build_jagged_verify_inputs`
 // + `verify_jagged_basefold_inner_generic` statically, so the dyn-Any open/verify
-// hooks are dead. Only the PREP-COMMIT hook below remains — it feeds the VK on
-// the setup side, is a plain (no dyn-Any) crate-dep fn pointer, and converting it
-// would thread `BasefoldRing` through ~60 `StarkMachine::setup` callsites, so it
-// is intentionally left as a hook.
+// hooks are dead. Only the PREP-COMMIT `OuterPrepCommitFn` type below remains —
+// it feeds the VK on the setup side and is a plain (no dyn-Any) crate-dep fn
+// pointer. It is now resolved STATICALLY via
+// `KoalaBearPoseidon2Outer::prep_commit_hook` (recursion-core), so the runtime
+// OnceLock registry (`OUTER_PREP_COMMIT_HOOK` slot + register/get accessors) has
+// been retired.
 
 /// Outer PREPROCESSED-trace setup commit (SP1-style: stacked BaseFold over
 /// the Poseidon2-BN254 `OuterValMmcs`, NO two-adic coset LDE).  Input =
@@ -686,9 +688,6 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
 /// `ProverData` has no consumers on the basefold path.
 pub type OuterPrepCommitFn =
     fn(Vec<(String, p3_matrix::dense::RowMajorMatrix<p3_koala_bear::KoalaBear>)>) -> Vec<u8>;
-
-gpu_hook_accessors!(OUTER_PREP_COMMIT_HOOK: OuterPrepCommitFn
-    => register_outer_prep_commit_hook, get_outer_prep_commit_hook);
 
 #[cfg(test)]
 mod tests {

@@ -86,7 +86,8 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// invokes it when `prep_commit_via_hook()` is set OR a prep trace exceeds
     /// `prep_two_adic_ceiling_log()`.  Default None (only `pcs.commit` is used).
     /// The inner (`KoalaBearPoseidon2`) config returns `inner_prep_commit`; the
-    /// wrap config falls back to the registered `get_outer_prep_commit_hook`.
+    /// wrap (`KoalaBearPoseidon2Outer`) config returns `outer_prep_commit`
+    /// (statically, replacing the retired runtime hook registry).
     fn prep_commit_hook() -> Option<crate::shard_level::sumcheck_poly::OuterPrepCommitFn> {
         None
     }
