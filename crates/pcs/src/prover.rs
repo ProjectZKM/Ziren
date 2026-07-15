@@ -280,12 +280,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         main_traces: Vec<RowMajorMatrix<Val<SC>>>,
         main_commitment: [Val<SC>; 8],
         public_values: Vec<Val<SC>>,
-        max_log_row_count: usize,
         challenger: &mut SC::Challenger,
         device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        orientation: crate::shard_level::shard_proof::FoldOrientation,
-        // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
-        dense_rev: bool,
+        // SP1-parity: `max_log_row_count`, `orientation`, and `dense_rev` are no
+        // longer carried as params (SP1's prover trait lacks them) — each is
+        // sourced from `self`/the traces inside the method body below.
         // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
         // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on
         // the GPU RECURSION (compress) lazy-commit path; `None` elsewhere.
@@ -330,6 +329,42 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         Self: Sized,
     {
+        // SP1-parity: source the three former carrier params from `self`/traces
+        // (byte-identical to the values the driver used to thread in).
+        //   * `orientation` — CpuProver default emits MSB-folded proofs (it ONLY
+        //     sets the proof envelope's `fold_orientation` field; no transcript
+        //     effect).  A `StarkGpuProver` overrides this whole method and
+        //     supplies its own orientation.
+        //   * `dense_rev` — the per-shard rev(zeta) orientation, from the per-stage
+        //     source of truth `StarkMachine::core_rev()` (== the `data.rev` the
+        //     driver used to read off `ShardMainData`, itself set from `core_rev()`).
+        //   * `max_log_row_count` — the PER-STAGE cube `max(BASE, max over chips of
+        //     log2(resolved height))`, computed from the traces exactly as the
+        //     driver's cube logic did (NO-OP == BASE for core + FIX-on recursion).
+        let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
+        let dense_rev = self.machine().core_rev();
+        let max_log_row_count = {
+            let base_cube =
+                crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+                    .max_log_row_count;
+            let mut cube = base_cube;
+            for t in main_traces.iter() {
+                let w = t.width;
+                if w == 0 {
+                    continue;
+                }
+                let h = t.values.len() / w;
+                if h == 0 {
+                    continue;
+                }
+                // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
+                let log_h = (h as u64).trailing_zeros() as usize;
+                if log_h > cube {
+                    cube = log_h;
+                }
+            }
+            cube
+        };
         // Build the shared analytic trace-MLE once, per chip, in
         // chip-index order, as the SINGLE authoritative host main-trace
         // store (trace-unification Phase 1).  Each chip's `Arc<Mle>` is
@@ -851,10 +886,9 @@ where
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
                 precomputed_basefold_taken,
-                // band-cap carrier removal Phase B: the per-shard rev(zeta)
-                // orientation, read off the shard data (set by `commit()` from
-                // `machine.core_rev()`); was the `current_use_rev()` carrier.
-                data.rev,
+                // SP1-parity: `dense_rev` no longer threaded — the prover's
+                // `prove_shard_to_basefold` sources it from `self.machine().core_rev()`
+                // (== `data.rev`, itself set by `commit()` from `core_rev()`).
             );
 
             return Ok(ShardProof::<SC> {
@@ -1005,10 +1039,9 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation,
-    // read off the shard data (`ShardMainData.rev`) in `open()`; threaded into
-    // `prover.prove_shard_to_basefold`.  Was the `current_use_rev()` carrier.
-    dense_rev: bool,
+    // SP1-parity: the per-shard rev(zeta) orientation (`dense_rev`) is no longer
+    // threaded here — the prover's `prove_shard_to_basefold` sources it from
+    // `self.machine().core_rev()` (== the `ShardMainData.rev` this used to carry).
 ) -> Option<
     Box<
         crate::shard_level::shard_proof::BasefoldShardProof<
@@ -1159,49 +1192,11 @@ where
     // prove the shard directly, with no panic-catch / legacy fallback.
     // A panic here is a genuine bug to surface, exactly as SP1 does; there
     // is no `catch_unwind` fallback masking a LogUp-GKR shape-handling gap.
-    // PER-STAGE cube: `cube = max(BASE, max over chips of log2(resolved
-    // height))` where BASE=22 (= BasefoldShardVerifier production default).
-    // The zerocheck cube (`max_log_row_count`) MUST cover the tallest chip
-    // trace; the FIX-off recursion bands (ext_alu:24, base_alu:23) can pad
-    // a chip above 22, so a fixed 22 underflows the zerocheck embed-factor
-    // slice.  The prover-computed cube here MUST equal the cube the
-    // verifier-circuit was BUILT with (recursion `build_*_basefold_program`
-    // is rebuilt at the same band-max in crates/prover/src/lib.rs+build.rs).
     //
-    // NO-OP for core + FIX-on recursion: all heights ≤ 21/22 → cube stays 22
-    // → BYTE-IDENTICAL (the production vk_map invariant).  Heights are
-    // power-of-2 post-fix_shape, so log2 = trailing_zeros.  CPU path (no
-    // device): height = main values.len() / width.  Resolved exactly the
-    // same way as the residual_y block (prover.rs:695-707): commit width==0
-    // → device chip_height; else values.len()/width; skip h==0.
-    let base_cube =
-        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-            .max_log_row_count;
-    let max_log_row_count = {
-        let mut cube = base_cube;
-        for arc in main_traces.iter() {
-            let w = arc.width();
-            if w == 0 {
-                continue;
-            }
-            let h = arc.values.len() / w;
-            if h == 0 {
-                continue;
-            }
-            // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
-            let log_h = (h as u64).trailing_zeros() as usize;
-            if log_h > cube {
-                cube = log_h;
-            }
-        }
-        cube
-    };
-    if max_log_row_count != base_cube {
-        eprintln!(
-            "PERSTAGE-CUBE prover: base={base_cube} -> cube={max_log_row_count} \
-             (FIX-off band-padded chip exceeds base)"
-        );
-    }
+    // SP1-parity: the PER-STAGE zerocheck cube (`max_log_row_count`) is no
+    // longer computed here and threaded in — `prove_shard_to_basefold` derives
+    // it from the traces itself (byte-identical `max(BASE, max over chips of
+    // log2(resolved height))`; NO-OP == BASE for core + FIX-on recursion).
     // Materialize the Arc-wrapped main traces into a contiguous
     // `Vec<RowMajorMatrix>` for the legacy shard-level prover API.
     // The clone cost matches the pre-Vec<Arc<M>> refactor (the
@@ -1224,15 +1219,12 @@ where
         main_traces_owned,
         digest,
         public_values,
-        max_log_row_count,
         &mut shard_challenger,
         // CPU prover path; no device traces.
         None,
-        // CpuProver path always emits MSB-folded proofs
-        // (the GPU LSB packed-pool path is unreachable here).
-        crate::shard_level::shard_proof::FoldOrientation::Msb,
-        // band-cap carrier removal Phase B: per-shard rev(zeta) orientation.
-        dense_rev,
+        // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
+        // are sourced inside `prove_shard_to_basefold` from the traces + self,
+        // not threaded here.
         // band-cap carrier removal Phase C: this call always passes
         // `Some(precomputed)`, so `maybe_auto_precompute_basefold` returns the
         // supplied commit early WITHOUT rebuilding — the recursion AREA PIN was
