@@ -232,8 +232,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
-        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
+        // SP1-parity: the jagged `reducer` / `opener` are no longer carried as
+        // params (SP1's `prove_trusted_evaluations` has neither — it reduces/opens
+        // inline, dispatched by prover TYPE).  The CpuProver default sources the
+        // HOST reducer/opener inside the body below (they are ZSTs); a
+        // `StarkGpuProver` OVERRIDES this method and sources its own DEVICE
+        // reducer/opener.  The internal free-fn keeps the `&dyn` params as
+        // plumbing (crates/prover shrink + crates/recursion dummy callers, out of
+        // scope) — the trait method feeds it the type-determined Host* here.
     ) -> crate::shard_level::shard_proof::EvaluationProof
     where
         SC: BasefoldRing,
@@ -256,8 +262,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
-            jagged_reducer,
-            jagged_opener,
+            // SP1-parity: CpuProver default = HOST reducer/opener, sourced by
+            // prover TYPE (byte-identical to the former threaded
+            // `&HostJaggedReducer` / `&HostJaggedOpener`; `is_device()` is always
+            // false on this path, so the host reduce/open is always used).
+            &crate::jagged_pcs::HostJaggedReducer,
+            &crate::jagged_pcs::HostJaggedOpener,
         )
     }
 

@@ -461,6 +461,14 @@ where
         jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
         jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
+        // SP1-parity: `MachineProver::prove_trusted_evaluations` no longer takes
+        // the reducer/opener — it sources them by prover TYPE (CpuProver = Host*,
+        // StarkGpuProver = Device*).  The producer's own `jagged_reducer` /
+        // `jagged_opener` params (kept on the `JaggedEvalProducer` seam for the
+        // `FreeFnJaggedEval` sibling, which DOES forward them to the free-fn) are
+        // unused on this prover-routed path.  Byte-identical: the value they
+        // carried == the type-determined one the trait method now sources.
+        let _ = (jagged_reducer, jagged_opener);
         self.0.prove_trusted_evaluations(
             chips,
             main_traces,
@@ -469,8 +477,6 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
-            jagged_reducer,
-            jagged_opener,
         )
     }
 
