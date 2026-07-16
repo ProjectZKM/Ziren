@@ -390,23 +390,20 @@ where
             // needs.  Host path: `evaluate_trace_columns_at_point` over the full
             // coords.  Device-only chips: per-chip provider hook at the full
             // point (no batch map for this point); falls back to None.
-            let main_evals_full: Option<Vec<EF>> = if pm.inner().is_none() && chip_main_width > 0 {
-                // Device-only chip: the per-chip device eval-at seam is retired
-                // (CpuProver helper always None), so the full-point opening is
-                // None on the host path. The GPU driver serves this via its own
-                // kernel. Byte-identical to the former always-None provider call.
-                None
-            } else if pm.inner().is_some() {
-                // Consume the shared analytic trace-MLE at the
-                // FULL point (`num_variables == max_log_row_count ==
-                // full_eval_point.len()`, zero padding) instead of
-                // re-evaluating the trace on the fly.  `PaddedMle::eval_at`
-                // reproduces `evaluate_trace_columns_at_point` bit-for-bit
-                // (see `eval_at_matches_evaluate_trace_columns`), so this
-                // is transcript-neutral.
+            // SP1-parity: ALWAYS emit the full-point opening for every chip so
+            // the shard-uniform rev(zeta) convention is unconditional on core.
+            // Host chips consume the shared analytic trace-MLE (`PaddedMle::
+            // eval_at`, transcript-neutral, reproduces
+            // `evaluate_trace_columns_at_point` bit-for-bit).  On the host CPU
+            // path the per-chip device eval-at seam is retired, so device-only
+            // chips serve a zero vector of declared width (unexercised/height-0);
+            // width-0 chips emit an empty opening.
+            let main_evals_full: Option<Vec<EF>> = if pm.inner().is_some() {
                 Some(pm.eval_at::<EF>(full_eval_point))
+            } else if chip_main_width > 0 {
+                Some(vec![EF::ZERO; chip_main_width])
             } else {
-                None
+                Some(Vec::new())
             };
             let prep_evals_full: Option<Vec<EF>> = if prep_trace.width > 0 {
                 Some(evaluate_trace_columns_at_point::<F, EF>(

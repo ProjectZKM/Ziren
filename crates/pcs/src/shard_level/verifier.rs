@@ -1045,12 +1045,11 @@ where
         // `core_rev` flag (true for the CORE machine, false for recursion / wrap).
         // A core proof is verified
         // rev; a recursion / wrap proof legacy (its embed-loop untouched).
-        let verifier_use_rev = core_rev
-            && !gkr_evaluations.chip_openings.is_empty()
-            && gkr_evaluations
-                .chip_openings
-                .values()
-                .all(|ce| ce.main_trace_evaluations_full.is_some());
+        // Piece A: every core shard emits full openings (`*_full`) for ALL
+        // chips, so the former all-`*_full`-present gate is always true on core
+        // and has been retired — the convention follows the per-machine
+        // `core_rev` flag alone (mirrors the prover's `shard_use_rev`).
+        let verifier_use_rev = core_rev;
         let zerocheck_sum_mod: Challenge<SC> = gkr_evaluations
             .chip_openings
             .values()
@@ -1221,12 +1220,9 @@ where
     // `*_full`).  Legacy shards keep `eq(z_gkr, z*)`.
     // The eq-bridge anchor orientation follows the per-machine
     // `core_rev` flag. Core => rev.
-    let conv_use_rev = core_rev
-        && !gkr_evaluations.chip_openings.is_empty()
-        && gkr_evaluations
-            .chip_openings
-            .values()
-            .all(|ce| ce.main_trace_evaluations_full.is_some());
+    // Piece A: every core shard emits full openings for ALL chips, so the eq-
+    // bridge anchor orientation follows the per-machine `core_rev` flag alone.
+    let conv_use_rev = core_rev;
     let z_gkr_anchor: Vec<Challenge<SC>> = if conv_use_rev {
         z_gkr.iter().rev().copied().collect()
     } else {

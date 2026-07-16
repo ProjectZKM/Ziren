@@ -183,34 +183,14 @@ where
     let mut name_order: Vec<usize> = (0..chips.len()).collect();
     name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 
-    // SHARD-UNIFORM rev(zeta) convention decision (see the per-chip loop for
-    // the full rationale).  K-independent.
-    let full_openings_ok = || {
-        name_order.iter().all(|&i| {
-            let name = chips[i].name().to_string();
-            logup_evaluations
-                .chip_openings
-                .get(&name)
-                .map(|o| o.main_trace_evaluations_full.is_some())
-                .unwrap_or(false)
-        })
-    };
-    // The orientation is driven by the per-stage `dense_rev` flag (from
-    // `StarkMachine::core_rev()` — `true` only on the CORE prove path; `false`
-    // on every recursion / shrink / wrap prove, the legacy arm) AND gated on
-    // `full_openings_ok()`.  This exactly reproduces the former
-    // `current_use_rev()` carrier's decision (`Some(true) && full_openings_ok()`
-    // on core; `None => false` elsewhere), byte-for-byte: `dense_rev` replaces
-    // the `Some(carrier)`, and `full_openings_ok()` stays a BRANCH — NOT folded
-    // out.  The fold-out to an unconditional `dense_rev` is NOT byte-neutral:
-    // on the GPU CORE path a device-only chip whose per-chip provider hook
-    // yields no full opening (`main_trace_evaluations_full == None`, see
-    // `row_gkr::top_level`) makes `full_openings_ok()` FALSE for that shard —
-    // which drifts dense multi-chip workloads (e.g. tendermint) even while fib
-    // (all-host-chip shards, `full_openings_ok()` always true) stays byte-clean.
-    // Retiring the branch requires the coupled change of making the device CORE
-    // path ALWAYS provide full openings (out of scope here).
-    let shard_use_rev = dense_rev && full_openings_ok();
+    // SHARD-UNIFORM rev(zeta) convention: driven solely by the per-stage
+    // `dense_rev` flag (from `StarkMachine::core_rev()` — `true` only on the
+    // CORE prove path; `false` on every recursion / shrink / wrap prove, the
+    // legacy arm).  Piece A makes the GKR opening ALWAYS emit
+    // `main_trace_evaluations_full` for every chip (device-only/height-0 →
+    // zeros, width-0 → empty), so the former `full_openings_ok()` gate is always
+    // true on core and has been retired.
+    let shard_use_rev = dense_rev;
 
     // Run the FIRST sumcheck round in the BASE field (K = F) on
     // the pure-host CPU path (no device provider) — dropping the up-front
