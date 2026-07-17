@@ -2560,6 +2560,11 @@ pub mod jagged {
         // case) lets the reduce upload/fold the carried dense_q and never
         // touch the provider, so freeing it here is sound and lets the reduce
         // go device.
+        // Set once `release_all` below has actually DRAINED the provider, so the
+        // device-decline fallback can tell a live provider from a drained one.
+        // Without it that fallback silently re-materializes EMPTY traces (see the
+        // `saved_dense` None edge below).
+        let mut provider_released = false;
         if let Some(p) = provider {
             let hook_v2_present = jagged_reducer.is_device();
             let device_happy = (precomputed_dense_handle.is_some()
@@ -2569,6 +2574,7 @@ pub mod jagged {
                 let _rel_span =
                     tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
                 p.release_all();
+                provider_released = true;
                 tracing::info!(
                     chips = n_chips,
                     log_dense_size = packing.log_dense_size as u64,
@@ -2736,6 +2742,31 @@ pub mod jagged {
                         // from the provider so the host reduction fallback
                         // rebuilds the correct dense_q (not a partial zero
                         // buffer).
+                        //
+                        // This edge is REACHABLE and CORRECT whenever the
+                        // provider is still live: the pre-reduce `release_all`
+                        // deliberately SKIPS the not-device-happy path exactly
+                        // so this can re-materialize (see its warn-once above).
+                        //
+                        // It is NOT correct once the provider has been drained.
+                        // On the device-HANDLE path `dense_q` is an empty
+                        // placeholder, so `saved_dense` is `None` — yet
+                        // `device_happy` was true, so `release_all` already ran.
+                        // Re-materializing from a drained provider yields
+                        // all-zero traces, hence an all-zero `dense_q`, hence a
+                        // proof that fails verification — silently, with no
+                        // panic and no wrong-answer signal. Fail loudly instead
+                        // of burning a shard's work on a proof we know is bad.
+                        assert!(
+                            !provider_released,
+                            "jagged reduce: the device reducer declined AFTER the \
+                             pre-reduce release_all drained the provider, and no \
+                             host dense_q was carried (device-handle path). \
+                             Re-materializing now would produce an all-zero \
+                             dense_q and an invalid proof. Fix the caller: either \
+                             carry a host dense_q on the handle path or withhold \
+                             the pre-reduce release when the reducer may decline."
+                        );
                         let rematerialized =
                             rematerialize_chip_traces_via_provider(
                                 chip_traces,
