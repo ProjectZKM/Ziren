@@ -120,11 +120,7 @@ where
             let max_height = chips
                 .iter()
                 .zip(shared_trace_mles.iter())
-                .map(|(chip, pm)| {
-                    pm.metadata_height()
-                        .or_else(|| _device_traces.and_then(|p| p.chip_height(&chip.name())))
-                        .unwrap_or(0)
-                })
+                .map(|(_chip, pm)| pm.metadata_height().unwrap_or(0))
                 .max()
                 .unwrap_or(0);
             let actual_log_height =
@@ -308,14 +304,11 @@ where
                 Some(mle) => (mle.guts().as_slice(), pm.num_polynomials()),
                 None => (&[], 0),
             };
-            // Device-only chip — its real height comes from the dummy's
-            // baked metadata (else the per-shard provider); a host chip
-            // reads the shared MLE's real row count.  Falls back to 1
-            // (legacy unexercised-chip) when neither is present.
-            let main_height = pm
-                .metadata_height()
-                .or_else(|| _device_traces.and_then(|p| p.chip_height(&chip.name())))
-                .unwrap_or(1);
+            // Device-only chip — its real height is baked into the dummy MLE
+            // (Stage B), read via `metadata_height()`; a host chip reads the
+            // shared MLE's real row count.  Falls back to 1 (legacy
+            // unexercised-chip) when absent.
+            let main_height = pm.metadata_height().unwrap_or(1);
             let log_main_height =
                 main_height.max(1).next_power_of_two().trailing_zeros() as usize;
             let main_eval_point: &[EF] = if eval_point.len() >= log_main_height {

@@ -1114,7 +1114,9 @@ pub fn observe_transcript_prologue<SC, A>(
     main_commitment: &[Val<SC>; 8],
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // chip_height removal Stage C: the per-shard provider is no longer
+    // consulted here — the baked `metadata_height()` is the sole source.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -1128,16 +1130,13 @@ pub fn observe_transcript_prologue<SC, A>(
     let num_chips = Val::<SC>::from_u64(chips.len() as u64);
     challenger.observe(num_chips);
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Per-chip log-height observe (device-residency aware): resolve an
-        // empty host trace's REAL height from the per-shard provider so the
-        // observed value matches the host-trace path; fall back to h=1/log_h=0
-        // for genuinely unexercised chips.  Source matches the
-        // `chip_log_heights` map + the verifier re-observe.
-        let h = pm
-            .metadata_height()
-            .or_else(|| device_traces.and_then(|p| p.chip_height(&chip.name())))
-            .unwrap_or(0)
-            .max(1);
+        // Per-chip log-height observe (device-residency aware): a device
+        // chip's REAL height is baked into its dummy MLE (Stage B), read back
+        // via `metadata_height()`; a host chip reports its real row count the
+        // same way.  Falls back to h=1/log_h=0 for genuinely unexercised
+        // chips.  Source matches the `chip_log_heights` map + the verifier
+        // re-observe.
+        let h = pm.metadata_height().unwrap_or(0).max(1);
         let log_h = if h.is_power_of_two() {
             h.trailing_zeros() as u64
         } else {
@@ -1194,7 +1193,9 @@ pub fn observe_zerocheck_to_jagged_bridge<SC>(
 pub fn compute_skip_device_d2h<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // chip_height removal Stage C: unused — `metadata_height()` is the sole
+    // per-chip height source now.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> bool
 where
     SC: StarkGenericConfig,
@@ -1226,10 +1227,7 @@ where
             let (w, h) = if pm.inner().is_some() {
                 (pm.num_polynomials(), pm.num_real_entries())
             } else {
-                match pm
-                    .metadata_height()
-                    .or_else(|| device_traces.and_then(|p| p.chip_height(&chip.name())))
-                {
+                match pm.metadata_height() {
                     Some(h) => (<_ as p3_air::BaseAir<Val<SC>>>::width(&chip.air), h),
                     None => (0, 0),
                 }
@@ -1272,12 +1270,7 @@ where
                 return None;
             }
             let p = device_traces?;
-            if skip_device_d2h
-                && pm
-                    .metadata_height()
-                    .or_else(|| p.chip_height(&chip.name()))
-                    .is_some()
-            {
+            if skip_device_d2h && pm.metadata_height().is_some() {
                 // Device-resident chip, handle path guaranteed: skip the D2H,
                 // keep it empty (the device commit hook packs it D2D).
                 return None;
@@ -1371,11 +1364,13 @@ pub fn compute_residual_y_openings<SC, A>(
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // chip_height removal Stage C: unused — the baked `heights` slice below is
+    // the sole per-chip height source now.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
     // Per-chip metadata heights, parallel to `chips` (device dummies carry a
-    // baked height; host chips `None`).  Consulted before `device_traces` in
-    // the empty-commit-trace branch below.  An empty / short slice (host
-    // callers that don't precompute it) tolerates `.get` → provider fallback.
+    // baked height; host chips `None`).  The sole empty-commit-trace height
+    // source.  An empty / short slice (host callers that don't precompute it)
+    // tolerates `.get` → falls back to 0 (unexercised).
     heights: &[Option<usize>],
 ) -> Option<Vec<Vec<Challenge<SC>>>>
 where
@@ -1407,12 +1402,7 @@ where
         // dummy's baked metadata (else the provider), width from the residual
         // itself.
         let (w, h) = if ctrace.width == 0 {
-            let dev_h = heights
-                .get(idx)
-                .copied()
-                .flatten()
-                .or_else(|| device_traces.and_then(|p| p.chip_height(&name)))
-                .unwrap_or(0);
+            let dev_h = heights.get(idx).copied().flatten().unwrap_or(0);
             let dev_w = trace_at_z
                 .get(&name)
                 .map(|evals| evals.len().saturating_sub(ptrace.width))
@@ -1468,7 +1458,9 @@ where
 pub fn build_chip_log_heights<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // chip_height removal Stage C: unused — `metadata_height()` is the sole
+    // per-chip height source now.
+    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> (
     std::collections::BTreeMap<String, u8>,
     std::collections::BTreeMap<String, usize>,
@@ -1480,19 +1472,14 @@ where
     let mut chip_log_heights = std::collections::BTreeMap::new();
     let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Device residency: resolve empty host traces' REAL height from the
-        // provider (host parity).  A MISSING canonical-cluster chip is a
-        // genuine 0-row matrix (log_h 0 => all-zero degree bits); the device
-        // branch keeps `.max(1)`.
+        // Device residency: a device chip's REAL height is baked into its
+        // dummy MLE (Stage B), read back via `metadata_height()`.  A MISSING
+        // canonical-cluster chip is a genuine 0-row matrix (log_h 0 => all-zero
+        // degree bits); the device branch keeps `.max(1)`.
         let h = if pm.inner().is_some() {
             pm.num_real_entries()
         } else {
-            pm.metadata_height()
-                .or_else(|| {
-                    device_traces.and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
-                })
-                .unwrap_or(0)
-                .max(1)
+            pm.metadata_height().unwrap_or(0).max(1)
         };
         let log_h = if h <= 1 {
             0u8
@@ -1837,17 +1824,9 @@ where
         .iter()
         .zip(main_traces.iter())
         .enumerate()
-        .map(|(i, (chip, trace))| {
+        .map(|(i, (_chip, trace))| {
             let main_height = if trace.width == 0 {
-                heights
-                    .get(i)
-                    .copied()
-                    .flatten()
-                    .or_else(|| {
-                        _device_traces
-                            .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
-                    })
-                    .unwrap_or(1)
+                heights.get(i).copied().flatten().unwrap_or(1)
             } else {
                 trace.values.len() / trace.width
             };

@@ -47,23 +47,6 @@ pub trait DeviceTraceProvider: Send + Sync {
     /// behaviour).
     fn release_all(&self) {}
 
-    /// Per-chip trace height for a device-resident chip whose host trace
-    /// is empty.  Host consumers read it as a HEIGHT LOOKUP, not a sort
-    /// key: the per-chip `chip_heights` / `chip_log_heights` maps, the
-    /// per-chip `r_row` trailing-coord count, and the commit-traces
-    /// D2H-skip gate (`shard_level/prover.rs`, `row_gkr/top_level.rs`).
-    /// `None` when unknown (caller falls back to the host trace).
-    ///
-    /// NOT an ordering hook: the shard chip order is NAME order
-    /// everywhere (`CpuProver::commit` re-sorts by name before
-    /// `commit_basefold_path`, so `chip_ordering` — and hence
-    /// `shard_chips_ordered` — enumerates name order).  The one sorting
-    /// consumer, `ziren-gpu`'s `canonical_chip_order`, followed that
-    /// migration and sorts by name alone.
-    fn chip_height(&self, _name: &str) -> Option<usize> {
-        None
-    }
-
     /// Commit-traces D2H removal: read the LAST `k` row-major
     /// values of the chip's main trace — `trace.values[h*w - k ..]` in
     /// host layout — i.e. the trailing `k` cells of the last row(s).
