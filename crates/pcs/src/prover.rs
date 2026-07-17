@@ -47,25 +47,51 @@ use crate::{
 /// byte-identical to reading the raw trace, and name-keying preserves order
 /// (the chip set is committed and observed in SP1 BTreeMap / alphabetical
 /// order, so `names` is already name-sorted).
-pub fn named_padded_traces<F, N, T>(
+///
+/// `heights` supplies the per-chip DEVICE trace height (by chip name) for the
+/// width-0 (device-resident / unexercised) chips whose host trace is empty and
+/// so carries no row count.  `chip_height` removal Stage B: when a width-0 chip
+/// has a `Some(height)` here, it is BAKED into the dummy via
+/// [`crate::multilinear::PaddedMle::dummy_with_height`], so the 8 downstream
+/// height consumers read it back through `metadata_height()` instead of the
+/// per-shard `DeviceTraceProvider`.  Byte-neutral by SAME-SOURCE construction:
+/// the caller sources `heights(name)` from the exact `ColMajorMatrixDevice::
+/// height()` the provider's `chip_height(name)` returns, so the baked value
+/// equals the provider value for every chip.  A host (`CpuProver`) caller with
+/// no device traces passes `|_| None`, so every width-0 chip stays a plain
+/// `dummy` — byte-identical to before this parameter existed.
+pub fn named_padded_traces<F, N, T, H>(
     names: N,
     traces: T,
     max_log_row_count: u32,
+    heights: H,
 ) -> std::collections::BTreeMap<String, crate::multilinear::PaddedMle<F>>
 where
     F: p3_field::Field,
     N: IntoIterator<Item = String>,
     T: IntoIterator<Item = RowMajorMatrix<F>>,
+    H: Fn(&str) -> Option<usize>,
 {
     names
         .into_iter()
         .zip(traces)
         .map(|(name, t)| {
             let pm = if t.width == 0 {
-                crate::multilinear::PaddedMle::dummy(
-                    max_log_row_count,
-                    crate::multilinear::Padding::Constant(F::ZERO, 0),
-                )
+                // Device-resident / unexercised chip: no host cells.  Bake the
+                // per-chip device height when the caller supplies one (so
+                // `metadata_height()` is the sole source), else a plain dummy
+                // (falls back to the provider — byte-identical to Stage A).
+                match heights(&name) {
+                    Some(h) => crate::multilinear::PaddedMle::dummy_with_height(
+                        max_log_row_count,
+                        crate::multilinear::Padding::Constant(F::ZERO, 0),
+                        h,
+                    ),
+                    None => crate::multilinear::PaddedMle::dummy(
+                        max_log_row_count,
+                        crate::multilinear::Padding::Constant(F::ZERO, 0),
+                    ),
+                }
             } else {
                 // MOVE the trace's backing buffer into the Mle (zero-copy).
                 let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(t));
@@ -1328,6 +1354,10 @@ where
         chips.iter().map(|chip| chip.name()),
         main_traces.iter().map(|arc| (**arc).clone()),
         max_log_row_count as u32,
+        // CPU prover path: no device traces, so no per-chip device height to
+        // bake — every width-0 chip stays a plain `dummy` (byte-identical to
+        // the pre-Stage-B call).
+        |_| None,
     );
     debug_assert_eq!(
         main_traces_named.len(),
