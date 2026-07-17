@@ -179,7 +179,12 @@ where
 
     // The cross-chip lambda-RLC folds in chip-NAME order (matching the
     // recursion verifier + SP1 BTreeSet<Chip>).  The incoming slices are
-    // HEIGHT-descending, so iterate a name-sorted index permutation.
+    // ALREADY name-ordered: `CpuProver::commit` height-sorts only to pick the
+    // commit's size order, then re-sorts by name before `commit_basefold_path`
+    // (prover.rs), whose `chip_ordering` therefore enumerates NAME order, and
+    // `shard_chips_ordered(chip_ordering)` replays it into `chips`.  So this
+    // permutation is an identity no-op today; it is kept as a cheap defensive
+    // guard that pins the fold order to name regardless of caller ordering.
     let mut name_order: Vec<usize> = (0..chips.len()).collect();
     name_order.sort_by(|&i, &j| chips[i].name().cmp(&chips[j].name()));
 

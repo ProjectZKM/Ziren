@@ -1901,8 +1901,16 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // driving `prove_shard_to_basefold` here, extracting the 8-felt
         // `main_commitment` from the `MerkleCap` (precomputed_commit =
         // None, since the GPU lacks the precomputed jagged commit the
-        // CPU helper expects).  Host `prove_shard_to_basefold` with
-        // `device_traces = None` needs no device snapshot.
+        // CPU helper expects).  The `device_traces` this drives
+        // `prove_shard_to_basefold` with is NOT unconditionally `None`: it
+        // comes from `shrink_prover.shard_device_trace_provider(&data)`
+        // below, which is build-dependent.  On CPU components
+        // (`ShrinkProver = CpuProver`) the trait default returns `None` — no
+        // device snapshot.  On GPU components `ShrinkProver =
+        // StarkGpuProver`, which OVERRIDES it and returns `Some((
+        // DeviceShardTraces, device_id))` over the device-resident traces
+        // `commit()` left behind — so the GPU shrink path DOES carry a device
+        // snapshot, and it is threaded through at the call below.
         if proof.basefold_shard_proof.is_none() {
             use core::any::Any;
             use p3_challenger::CanObserve;

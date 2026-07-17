@@ -2320,10 +2320,10 @@ mod tests {
             + ref_p(&eq_int, &eq_row, &fn0, &fd0, &fn1, &fd1, lambda, EF::ONE);
 
         let eqroot = round_poly_evaluations_chip_structured(
-            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, round_coord, None,
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, round_coord,
         );
         let sweep = round_poly_evaluations_chip_structured(
-            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, EF::ZERO, None,
+            &state, &eq_int, &eq_row, pad_eq_int_sum, lambda, claim, EF::ZERO,
         );
         assert_eq!(eqroot, sweep, "chip eq-root reconstruction != {{1,2,3}} sweep");
 

@@ -3529,6 +3529,21 @@ pub mod jagged {
             crate::jagged_pcs::JaggedChallenger::new(zkm_primitives::poseidon2_init())
         }
 
+        /// SITE-1 trace-unification: the commit/open entry points take BORROWED
+        /// `ChipTraceView`s over the shard prover's shared `Arc<Mle>` store.
+        /// Tests own their matrices, so relabel each owned matrix as a
+        /// zero-copy view over its own cells — same cells, same width.
+        fn as_chip_views(
+            traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
+        ) -> Vec<ChipTraceView<'_>> {
+            traces
+                .iter()
+                .map(|(name, t)| {
+                    (name.clone(), RowMajorMatrixView::new(&t.values, t.width))
+                })
+                .collect()
+        }
+
         /// The recursion circuit binds the jagged claimed sum to the trace
         /// openings (recursive_jagged_pcs.rs:247); this mirrors that on the
         /// host.  This test proves the bind is load-bearing:
@@ -3562,10 +3577,11 @@ pub mod jagged {
                 .cloned()
                 .unwrap_or_default();
 
+            let views = as_chip_views(&traces);
             let mut p = chal();
-            let bundle = prove_jagged_basefold(&traces, &r_row_per_chip, &z_row, &mut p);
+            let bundle = prove_jagged_basefold(&views, &r_row_per_chip, &z_row, &mut p);
             let infos =
-                crate::jagged::compute_jagged_metadata::<InnerVal>(&traces).chip_infos;
+                crate::jagged::compute_jagged_metadata::<InnerVal>(&views).chip_infos;
 
             // The honest per-chip `main.local` openings coincide with the
             // bundle's column claims (single-orientation synthetic bundle).
@@ -3748,13 +3764,14 @@ mod test {
             .max_by_key(|v| v.len())
             .cloned()
             .unwrap_or_default();
+        let views = as_chip_views(&traces);
         let bundle =
-            prove_jagged_basefold(&traces, &r_row_per_chip, &z_row_test, &mut p_chal);
+            prove_jagged_basefold(&views, &r_row_per_chip, &z_row_test, &mut p_chal);
 
         // Verifier reconstructs chip_infos from the same traces it
         // already has access to via the protocol's outer loop.
         let chip_infos =
-            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&views).chip_infos;
         let mut v_chal = build_challenger();
         let ok = verify_jagged_basefold(&chip_infos, &r_row_per_chip, &z_row_test, &bundle, &mut v_chal);
         assert!(ok, "jagged-basefold pipeline should accept honest proof");
@@ -3793,10 +3810,11 @@ mod test {
             .max_by_key(|v| v.len())
             .cloned()
             .unwrap_or_default();
+        let views = as_chip_views(&traces);
         let bundle =
-            prove_jagged_basefold(&traces, &r_row_per_chip, &z_row_test, &mut p_chal);
+            prove_jagged_basefold(&views, &r_row_per_chip, &z_row_test, &mut p_chal);
         let chip_infos =
-            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&views).chip_infos;
 
         // Tamper #1: corrupt the sumcheck final claim `q_at_z`.
         let mut tampered = bundle.clone();
@@ -3834,9 +3852,23 @@ mod test {
     // ════════════════════════════════════════════════════════════════
 
     use crate::jagged_pcs::jagged::{
-        prove_jagged_basefold, verify_jagged_basefold, JaggedBasefoldBundle, VerifyStage,
-        LAST_VERIFY_STAGE,
+        prove_jagged_basefold, verify_jagged_basefold, ChipTraceView, JaggedBasefoldBundle,
+        VerifyStage, LAST_VERIFY_STAGE,
     };
+    use p3_matrix::dense::RowMajorMatrixView;
+
+    /// SITE-1 trace-unification: the commit/open entry points take BORROWED
+    /// `ChipTraceView`s over the shard prover's shared `Arc<Mle>` store.
+    /// Tests own their matrices, so relabel each owned matrix as a zero-copy
+    /// view over its own cells — same cells, same width.
+    fn as_chip_views(
+        traces: &[(String, RowMajorMatrix<JaggedVal>)],
+    ) -> Vec<ChipTraceView<'_>> {
+        traces
+            .iter()
+            .map(|(name, t)| (name.clone(), RowMajorMatrixView::new(&t.values, t.width)))
+            .collect()
+    }
 
     /// Run `verify_jagged_basefold` and return (accepted, last_stage).
     fn verify_with_stage(
@@ -3896,8 +3928,9 @@ mod test {
     fn test_cp_a_g1_noop_byte_identity() {
         // grouping OFF (no test threshold set, env unset).
         let (traces, r_row, z_row) = mk_shard(&[(4, 16), (2, 8), (6, 4)], 0xA11CE);
+        let views = as_chip_views(&traces);
         let mut p_chal = build_challenger();
-        let bundle = prove_jagged_basefold(&traces, &r_row, &z_row, &mut p_chal);
+        let bundle = prove_jagged_basefold(&views, &r_row, &z_row, &mut p_chal);
 
         // Single-group invariants: scalar fields populated, extras empty.
         assert_eq!(bundle.num_groups(), 1, "grouping OFF ⇒ G==1");
@@ -3922,7 +3955,7 @@ mod test {
         // shared by today's single-group path — see report).  Either way the
         // failure must NOT be at coverage (the CP-A guard).
         let chip_infos =
-            crate::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            crate::jagged::compute_jagged_metadata::<JaggedVal>(&views).chip_infos;
         let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle);
         eprintln!("[CP-A (i) G==1 no-op] accepted={ok} stage={stage:?}");
         assert!(
