@@ -1,9 +1,18 @@
 //! PORTED VERBATIM from SP1 `slop/crates/alloc/src/backend/mod.rs` (succinctlabs/sp1) for the
 //! Ziren backend-generic tensor stack (#125 INC-6, full SP1-fidelity Buffer port).
 //! Ziren adaptations vs upstream: `crate::` -> `crate::tensor::`; `thiserror` errors
-//! hand-written; `slop_algebra` -> `p3_field`. Only `CpuBackend` is implemented here
-//! (host stays device-dependency-free); `ziren-gpu` implements `CudaBackend` against
-//! this `Backend`/`RawBuffer`/`Slice`/`DeviceMemory` abstraction.
+//! hand-written; `slop_algebra` -> `p3_field`.
+//!
+//! `CpuBackend` is the ONLY implementor, in either tree — there is no `CudaBackend`.
+//! `ziren-gpu` does not reference this abstraction at all; its device traces are a
+//! bespoke COLUMN-major `ColMajorMatrixDevice` over `DeviceBuffer`, whereas `Tensor`
+//! here is ROW-major, so the two stacks are not interchangeable as they stand.
+//!
+//! This module is therefore a faithful port that is currently CPU-only. Note also that
+//! upstream SP1 pins `CpuBackend` at every shard-prover use site (`MainTraceData<_, _,
+//! CpuBackend>`), so the `Backend` parameter is vestigial there too — SP1 separates CPU
+//! from GPU at the PROVER level, not via this parameter. Do not infer from the generics
+//! that a device backend is wired up or that one would be cheap to wire up.
 
 mod cpu;
 mod io;
