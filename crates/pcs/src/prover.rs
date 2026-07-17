@@ -26,6 +26,56 @@ use crate::{
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
+/// Wrap raw per-chip main traces into SP1's name-keyed `PaddedMle` store
+/// ([`ShardProveData::main_traces`] — SP1's `Traces::named_traces`).
+///
+/// THE single definition of the trace wrap, shared by every
+/// `ShardProveData` construction site (host `open` + the ziren-gpu core /
+/// pipeline drivers), so the wrap can never drift between them.
+///
+/// `names` and `traces` are parallel, in chip-index order. Each owned trace is
+/// MOVED into its `Arc<Mle>` via the zero-copy `Mle::from_row_major` (the Mle's
+/// layout is identical to `RowMajorMatrix{values,width}`), so no trace cell is
+/// copied. A width-0 chip (device-resident / unexercised) has no host cells to
+/// wrap and maps to a fully-virtual `dummy` — preserving `num_polynomials() ==
+/// 0` as the device-chip discriminator and the `real_trace_ref` invariant.
+///
+/// Every entry is padded to the SAME `max_log_row_count`, so a consumer reads
+/// the shard cube back off any entry via `PaddedMle::num_variables`.
+///
+/// Byte-neutral: sourcing a stage's cells from the shared MLE is
+/// byte-identical to reading the raw trace, and name-keying preserves order
+/// (the chip set is committed and observed in SP1 BTreeMap / alphabetical
+/// order, so `names` is already name-sorted).
+pub fn named_padded_traces<F, N, T>(
+    names: N,
+    traces: T,
+    max_log_row_count: u32,
+) -> std::collections::BTreeMap<String, crate::multilinear::PaddedMle<F>>
+where
+    F: p3_field::Field,
+    N: IntoIterator<Item = String>,
+    T: IntoIterator<Item = RowMajorMatrix<F>>,
+{
+    names
+        .into_iter()
+        .zip(traces)
+        .map(|(name, t)| {
+            let pm = if t.width == 0 {
+                crate::multilinear::PaddedMle::dummy(
+                    max_log_row_count,
+                    crate::multilinear::Padding::Constant(F::ZERO, 0),
+                )
+            } else {
+                // MOVE the trace's backing buffer into the Mle (zero-copy).
+                let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(t));
+                crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count)
+            };
+            (name, pm)
+        })
+        .collect()
+}
+
 /// SP1-parity `data` bundle for `MachineProver::prove_shard_to_basefold`
 /// (mirrors SP1's `ShardData` fed to `prove_shard_with_data`). Pure
 /// repackaging of the former positional data params — byte-neutral. A
@@ -40,8 +90,20 @@ where
     pub chips: &'a [&'a MachineChip<SC, A>],
     /// SP1: pk.preprocessed_data.preprocessed_traces.
     pub preprocessed_traces: &'a [RowMajorMatrix<Val<SC>>],
-    /// SP1: MainTraceData.traces (owned; MOVED into the shared Arc<Mle> store).
-    pub main_traces: Vec<RowMajorMatrix<Val<SC>>>,
+    /// SP1: `Traces::named_traces` — the shard's main traces as name-keyed
+    /// [`crate::multilinear::PaddedMle`]s (SP1's `BTreeMap<String, PaddedMle>`).
+    ///
+    /// The raw `RowMajorMatrix` -> `Arc<Mle>` wrap is done ONCE at the
+    /// construction site (the owned trace is MOVED in via the zero-copy
+    /// `Mle::from_row_major`), so every consumer receives the store ready-made
+    /// instead of re-deriving it. Each entry is padded to the SAME shard cube,
+    /// so `num_variables()` reads the cube back off any entry.
+    ///
+    /// Name-keying is byte-neutral: the chip set is committed and observed in
+    /// SP1 BTreeMap (alphabetical) order — `commit()`'s name-order re-sort
+    /// builds `chip_ordering`, and `shard_chips_ordered` replays it — so map
+    /// order already equals the `chips` slice order.
+    pub main_traces: std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
     /// Ziren eager-precompute; SP1 computes inline via commit_traces (no field).
     pub main_commitment: [Val<SC>; 8],
     /// SP1: MainTraceData.public_values.
@@ -373,59 +435,45 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         //     source of truth `StarkMachine::core_rev()` (== the `data.rev` the
         //     driver used to read off `ShardMainData`, itself set from `core_rev()`).
         //   * `max_log_row_count` — the PER-STAGE cube `max(BASE, max over chips of
-        //     log2(resolved height))`, computed from the traces exactly as the
-        //     driver's cube logic did (NO-OP == BASE for core + FIX-on recursion).
+        //     log2(resolved height))`, read back off the traces: the construction
+        //     site padded every entry to that cube (NO-OP == BASE for core +
+        //     FIX-on recursion), so `num_variables()` IS the cube.
         let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
         let dense_rev = self.machine().core_rev();
-        let max_log_row_count = {
-            let base_cube =
+        // Every `PaddedMle` in the map carries the SAME cube (both the
+        // `padded_with_zeros` host chips and the `dummy` width-0 chips are built
+        // with it), so any entry reports it.  An empty chip set never reaches a
+        // shard proof; fall back to the BASE floor for totality.
+        let max_log_row_count = main_traces
+            .values()
+            .next()
+            .map(|pm| pm.num_variables() as usize)
+            .unwrap_or_else(|| {
                 crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-                    .max_log_row_count;
-            let mut cube = base_cube;
-            for t in main_traces.iter() {
-                let w = t.width;
-                if w == 0 {
-                    continue;
+                    .max_log_row_count
+            });
+        // The shared analytic trace-MLE store — the SINGLE authoritative host
+        // main-trace store (trace-unification Phase 1) — is now built ONCE at the
+        // construction site and handed over ready-made on `data.main_traces`
+        // (SP1's name-keyed `Traces`), so this driver no longer re-derives it.
+        // Re-key the name-ordered map onto the chip-INDEX order the loader and
+        // every downstream stage expect (they zip `chips` with this slice).
+        // Byte-neutral: `chips` is itself in SP1 BTreeMap (name) order — it comes
+        // from `shard_chips_ordered(chip_ordering)` and `chip_ordering` is built
+        // from the name-order-sorted commit — so this lookup is order-preserving
+        // and the resulting slice is exactly the former chip-index-ordered wrap.
+        // Cloning a `PaddedMle` clones an `Arc<Mle>` + a small `Padding`, so the
+        // trace cells are still MOVED (never deep-copied).
+        let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
+            .iter()
+            .map(|chip| {
+                let name = chip.name();
+                match main_traces.get(&name) {
+                    Some(pm) => pm.clone(),
+                    None => panic!(
+                        "prove_shard_to_basefold: chip {name} missing from main_traces",
+                    ),
                 }
-                let h = t.values.len() / w;
-                if h == 0 {
-                    continue;
-                }
-                // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
-                let log_h = (h as u64).trailing_zeros() as usize;
-                if log_h > cube {
-                    cube = log_h;
-                }
-            }
-            cube
-        };
-        // Build the shared analytic trace-MLE once, per chip, in
-        // chip-index order, as the SINGLE authoritative host main-trace
-        // store (trace-unification Phase 1).  Each chip's `Arc<Mle>` is
-        // built by MOVING the owned raw trace in via the zero-copy
-        // `from_row_major` (`Tensor::from`) — NO deep copy (this retires
-        // the former per-chip `t.values.clone()`, copy-SITE 3).  It is
-        // threaded read-only into the shard prover via the loader's
-        // `padded_only` seam; the downstream commit / dims reads source
-        // their cells from this store directly.  Sourcing a stage's cells
-        // from the shared MLE is byte-identical to the raw trace, so it
-        // never perturbs the Fiat-Shamir transcript.  A width-0 chip
-        // (device-resident / unexercised) has no host cells to wrap, so it
-        // maps to a fully-virtual `dummy`.
-        let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
-            .into_iter()
-            .map(|t| {
-                let width = t.width;
-                if width == 0 {
-                    return crate::multilinear::PaddedMle::dummy(
-                        max_log_row_count as u32,
-                        crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
-                    );
-                }
-                // MOVE the trace's backing buffer into the Mle (zero-copy).
-                let mle =
-                    std::sync::Arc::new(crate::basefold::Mle::from_row_major(t));
-                crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
             })
             .collect();
         let loader = crate::shard_level::main_trace_loader::EagerHostLoader::padded_only(
@@ -1231,19 +1279,55 @@ where
     // A panic here is a genuine bug to surface, exactly as SP1 does; there
     // is no `catch_unwind` fallback masking a LogUp-GKR shape-handling gap.
     //
-    // SP1-parity: the PER-STAGE zerocheck cube (`max_log_row_count`) is no
-    // longer computed here and threaded in — `prove_shard_to_basefold` derives
-    // it from the traces itself (byte-identical `max(BASE, max over chips of
-    // log2(resolved height))`; NO-OP == BASE for core + FIX-on recursion).
-    // Materialize the Arc-wrapped main traces into a contiguous
-    // `Vec<RowMajorMatrix>` for the legacy shard-level prover API.
-    // The clone cost matches the pre-Vec<Arc<M>> refactor (the
-    // shard_level prover already cloned preprocessed_traces and
-    // received owned-by-borrow main_traces).  Once
-    // `prove_shard_to_basefold` itself is migrated to accept
-    // `&[Arc<RowMajorMatrix>]`, drop this materialization step.
-    let main_traces_owned: Vec<RowMajorMatrix<Val<SC>>> =
-        main_traces.iter().map(|arc| (**arc).clone()).collect();
+    // SP1-parity: the PER-STAGE zerocheck cube (`max_log_row_count`).  The wrap
+    // below pads every trace to it, so `prove_shard_to_basefold` reads it back
+    // off the traces (`PaddedMle::num_variables`) instead of recomputing.  This
+    // is the SAME `max(BASE, max over chips of log2(resolved height))` the
+    // driver computed; NO-OP == BASE for core + FIX-on recursion.
+    //
+    // The cube MUST be resolved here (not in the consumer) because it is the
+    // padding width the wrap itself needs.  This site's consumer is always the
+    // DEFAULT `prove_shard_to_basefold` — `StarkGpuProver` overrides `open()`,
+    // whose default body is this function's only caller, so the GPU override
+    // (which pins the BASE constant) is never reached from here and its
+    // convention is untouched.
+    let max_log_row_count = {
+        let base_cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
+        let mut cube = base_cube;
+        for t in main_traces.iter() {
+            let w = t.width;
+            if w == 0 {
+                continue;
+            }
+            let h = t.values.len() / w;
+            if h == 0 {
+                continue;
+            }
+            // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
+            let log_h = (h as u64).trailing_zeros() as usize;
+            if log_h > cube {
+                cube = log_h;
+            }
+        }
+        cube
+    };
+    // SP1-parity trace hoist: build the shared analytic trace-MLE store HERE,
+    // once, as SP1's name-keyed `Traces::named_traces` — the SINGLE
+    // authoritative host main-trace store (trace-unification Phase 1).  The
+    // per-chip `RowMajorMatrix` materialization out of the `Arc`s is the SAME
+    // clone this site already paid before handing owned traces to the trait
+    // method; `named_padded_traces` then MOVES each one into its `Arc<Mle>`.
+    let main_traces_named = named_padded_traces(
+        chips.iter().map(|chip| chip.name()),
+        main_traces.iter().map(|arc| (**arc).clone()),
+        max_log_row_count as u32,
+    );
+    debug_assert_eq!(
+        main_traces_named.len(),
+        chips.len(),
+        "chip names must be unique for the name-keyed trace map to stay parallel to `chips`",
+    );
 
     // Route through the prover's trait method so the jagged
     // open is dispatched via `prover.prove_trusted_evaluations` (the override
@@ -1255,9 +1339,10 @@ where
         ShardProveData {
             chips: &chips_reborrow,
             preprocessed_traces: &preprocessed_traces,
-            // trace-unification Phase 1: hand OWNERSHIP to the trait method so
-            // it MOVES each trace into the shared `Arc<Mle>` store (no clone).
-            main_traces: main_traces_owned,
+            // SP1-parity trace hoist: hand over the ready-made name-keyed
+            // `PaddedMle` store (SP1's `Traces`); the trait method no longer
+            // re-derives it from raw `RowMajorMatrix`es.
+            main_traces: main_traces_named,
             main_commitment: digest,
             public_values,
             // CPU prover path; no device traces.
