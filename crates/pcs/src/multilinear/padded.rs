@@ -215,9 +215,10 @@ impl<T: Field, A: Backend> PaddedMle<T, A> {
 impl<T: Field> PaddedMle<T, CpuBackend> {
     /// Borrow the REAL (unpadded) rows as a zero-copy
     /// [`crate::basefold::TraceRef`], or `None` when this is a
-    /// fully-virtual (`dummy`) padded MLE (a width-0 / device-resident
-    /// chip).  `Some(view)` iff `num_polynomials() > 0` (⟺ `inner` is
-    /// `Some`).  The view's `values` are the raw trace cells and `width`
+    /// fully-virtual (`dummy`) padded MLE (a device-resident /
+    /// unexercised chip).  `Some(view)` iff [`Self::inner`] is `Some` —
+    /// the storage invariant, independent of the padding's declared
+    /// column count.  The view's `values` are the raw trace cells and `width`
     /// the trace width — byte-identical to the `RowMajorMatrix` the inner
     /// `Mle` was built from.  Additive (trace-unification Phase 0).
     #[inline]

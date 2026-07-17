@@ -64,16 +64,6 @@ pub trait DeviceTraceProvider: Send + Sync {
         None
     }
 
-    /// Per-chip main-trace WIDTH (committed column count) for a
-    /// device-resident chip whose host trace is empty.  Lets dims-only
-    /// consumers (e.g. the commit-traces D2H-skip soundness gate, which
-    /// predicts the dense size from `width * height` without a host D2H)
-    /// resolve the chip's real width.  `None` when unknown (caller falls
-    /// back to a conservative path).
-    fn chip_width(&self, _name: &str) -> Option<usize> {
-        None
-    }
-
     /// Commit-traces D2H removal: read the LAST `k` row-major
     /// values of the chip's main trace — `trace.values[h*w - k ..]` in
     /// host layout — i.e. the trailing `k` cells of the last row(s).

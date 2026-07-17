@@ -1109,7 +1109,7 @@ pub fn observe_transcript_prologue<SC, A>(
         // observed value matches the host-trace path; fall back to h=1/log_h=0
         // for genuinely unexercised chips.  Source matches the
         // `chip_log_heights` map + the verifier re-observe.
-        let h = if pm.num_polynomials() == 0 {
+        let h = if pm.inner().is_none() {
             device_traces
                 .and_then(|p| p.chip_height(&chip.name()))
                 .unwrap_or(0)
@@ -1192,16 +1192,20 @@ where
         .iter()
         .zip(shared_trace_mles.iter())
         .map(|(chip, pm)| {
-            // Width-0 (num_polynomials()==0) ⟺ the raw trace was width-0;
-            // its real dims live in the provider.  Host chips read the shared
-            // MLE's real width / row count.
-            let (w, h) = if pm.num_polynomials() == 0 {
-                match (
-                    device_traces.and_then(|p| p.chip_width(&chip.name())),
-                    device_traces.and_then(|p| p.chip_height(&chip.name())),
-                ) {
-                    (Some(w), Some(h)) => (w, h),
-                    _ => (0, 0),
+            // An empty host trace (inner `None`) ⟺ the raw trace was width-0;
+            // its real HEIGHT lives in the provider.  Host chips read the
+            // shared MLE's real width / row count.
+            //
+            // A device chip's committed WIDTH is its declared AIR width — the
+            // same "AIR width + provider height" pairing the device-fold path
+            // already sources its dims from, and the width the verifier
+            // hard-checks (`opening.main.local.len() == chip.width()`).  So it
+            // needs no provider round-trip.  An unexercised chip has no
+            // provider entry → (0, 0), exactly as before.
+            let (w, h) = if pm.inner().is_none() {
+                match device_traces.and_then(|p| p.chip_height(&chip.name())) {
+                    Some(h) => (<_ as p3_air::BaseAir<Val<SC>>>::width(&chip.air), h),
+                    None => (0, 0),
                 }
             } else {
                 (pm.num_polynomials(), pm.num_real_entries())
@@ -1240,7 +1244,7 @@ where
         .iter()
         .zip(shared_trace_mles.iter())
         .map(|(chip, pm)| {
-            if pm.num_polynomials() != 0 {
+            if pm.inner().is_some() {
                 return None;
             }
             let p = device_traces?;
@@ -1280,7 +1284,7 @@ where
         .zip(shared_trace_mles.iter())
         .zip(eager_device_remat.iter())
         .map(|((_chip, pm), remat)| {
-            if pm.num_polynomials() == 0 {
+            if pm.inner().is_none() {
                 // Device-resident / unexercised chip.
                 if let Some(m) = remat {
                     return m.as_view();
@@ -1289,7 +1293,7 @@ where
             }
             // Host chip: BORROW the shared MLE's real (unpadded) row-major
             // cells (zero-copy) — was the SITE-1 deep copy.
-            let tr = pm.real_trace_ref().expect("num_polynomials()>0 => inner Some");
+            let tr = pm.real_trace_ref().expect("inner Some => real_trace_ref Some");
             RowMajorMatrixView::new(tr.values, tr.width)
         })
         .collect()
@@ -1312,8 +1316,8 @@ where
         .iter()
         .zip(shared_trace_mles.iter())
         .map(|(chip, pm)| {
-            // Host-trace chips (num_polynomials()!=0) stay `None`.
-            if pm.num_polynomials() != 0 {
+            // Host-trace chips (inner `Some`) stay `None`.
+            if pm.inner().is_some() {
                 return None;
             }
             let p = device_traces?;
@@ -1441,7 +1445,7 @@ where
         // provider (host parity).  A MISSING canonical-cluster chip is a
         // genuine 0-row matrix (log_h 0 => all-zero degree bits); the device
         // branch keeps `.max(1)`.
-        let h = if pm.num_polynomials() == 0 {
+        let h = if pm.inner().is_none() {
             device_traces
                 .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
                 .unwrap_or(0)

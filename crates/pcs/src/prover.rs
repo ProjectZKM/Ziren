@@ -37,8 +37,8 @@ use crate::{
 /// MOVED into its `Arc<Mle>` via the zero-copy `Mle::from_row_major` (the Mle's
 /// layout is identical to `RowMajorMatrix{values,width}`), so no trace cell is
 /// copied. A width-0 chip (device-resident / unexercised) has no host cells to
-/// wrap and maps to a fully-virtual `dummy` — preserving `num_polynomials() ==
-/// 0` as the device-chip discriminator and the `real_trace_ref` invariant.
+/// wrap and maps to a fully-virtual `dummy` — an empty `inner` is THE
+/// "no host trace data" discriminator (and the `real_trace_ref` invariant).
 ///
 /// Every entry is padded to the SAME `max_log_row_count`, so a consumer reads
 /// the shard cube back off any entry via `PaddedMle::num_variables`.
