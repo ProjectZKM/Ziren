@@ -7,14 +7,32 @@
 //! ## Source
 //!
 //! Ported from SP1's `slop/crates/multilinear/src/padded.rs`
-//! (`PaddedMle<T, A>` / `Padding<F, A>`).  Ziren's [`crate::basefold::Mle`]
-//! is CPU-only (`RowMajorMatrix<F>` storage) so the `A: Backend`
-//! parameter is dropped.  Both SP1 padding shapes are ported:
+//! (`PaddedMle<T, A>` / `Padding<F, A>`).  Like SP1, this type is
+//! **backend-generic** over a [`Backend`], carrying its real rows as an
+//! `Mle<T, A>`.  Ziren has only the CPU backend today, so `A` defaults to
+//! [`CpuBackend`] — which makes every existing `PaddedMle<T>` annotation
+//! keep compiling unchanged (SP1's default-type-param trick).
+//!
+//! The impl split mirrors [`crate::basefold::Mle`]'s:
+//!   * `impl<T: Field, A: Backend> PaddedMle<T, A>` — the structural /
+//!     metadata surface (constructors and shape accessors).  These rest
+//!     entirely on backend-generic `Mle` accessors and host-side
+//!     [`Padding`] metadata, so they hold for any backend.
+//!   * `impl<T: Field> PaddedMle<T, CpuBackend>` — the DATA ops
+//!     (`real_trace_ref` / `fix_last_variable` / `eval_at`), which reach
+//!     into the backing cells via CPU-only `Mle<T, CpuBackend>` methods.
+//!     These stay byte-identical to the pre-split code.
+//!
+//! Both SP1 padding shapes are ported:
 //!
 //! | SP1 variant                 | Ziren equivalent               |
 //! |-----------------------------|--------------------------------|
 //! | `Padding::Constant((c, n))` | `Padding::Constant(c, n)`      |
 //! | `Padding::Generic(evals)`   | `Padding::Generic(Arc<Vec<T>>)`|
+//!
+//! Ziren's [`Padding`] needs no backend parameter: SP1's variants carry a
+//! backend handle / device-resident `MleEval<F, A>`, whereas Ziren's are
+//! plain host metadata (`Arc<Vec<T>>`).
 //!
 //! This is the single `PaddedMle` in the crate: the SP1-shaped
 //! *analytic* multilinear (`eval_at` / `fix_last_variable` over an
@@ -51,6 +69,7 @@ use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
 use crate::basefold::Mle;
+use crate::tensor::{Backend, CpuBackend};
 
 /// Analytic padding descriptor for a [`PaddedMle`].  Rows in
 /// `[num_real_entries, 2^num_variables)` carry these value(s) without
@@ -103,21 +122,28 @@ impl<T: Field> Padding<T> {
 /// rows are described analytically by `padding`.
 ///
 /// Storage invariant: when `inner` is `Some(mle)`, the inner
-/// `Mle<T>` holds exactly the real rows (`inner.guts().height() ==
+/// `Mle<T, A>` holds exactly the real rows (`inner.hypercube_size() ==
 /// num_real_entries <= 2^num_variables`), and its width equals
 /// `padding.num_polynomials()`.
+///
+/// `A` defaults to [`CpuBackend`], so a plain `PaddedMle<T>` means
+/// `PaddedMle<T, CpuBackend>` exactly as before.  Mirrors SP1
+/// `PaddedMle<T, A: Backend = CpuBackend>`.
 #[derive(Clone, Debug)]
-pub struct PaddedMle<T: Field> {
-    inner: Option<Arc<Mle<T>>>,
+pub struct PaddedMle<T, A: Backend = CpuBackend> {
+    inner: Option<Arc<Mle<T, A>>>,
     padding: Padding<T>,
     num_variables: u32,
 }
 
-impl<T: Field> PaddedMle<T> {
+/// Structural / metadata surface — backend-generic.  Every method here
+/// reads only host-side [`Padding`] metadata or backend-generic `Mle`
+/// shape accessors, never the backing cells.
+impl<T: Field, A: Backend> PaddedMle<T, A> {
     /// Wrap `inner` (its real rows) with a logical `num_variables`
     /// shape and a `padding` descriptor.  Mirrors SP1
     /// `PaddedMle::padded`.
-    pub fn padded(inner: Arc<Mle<T>>, num_variables: u32, padding: Padding<T>) -> Self {
+    pub fn padded(inner: Arc<Mle<T, A>>, num_variables: u32, padding: Padding<T>) -> Self {
         assert!(
             inner.hypercube_size() <= 1usize << num_variables,
             "PaddedMle::padded: real rows {} exceed 2^num_variables {}",
@@ -141,7 +167,7 @@ impl<T: Field> PaddedMle<T> {
     /// Wrap `inner` with `num_variables` variables, zero-padding the
     /// rows beyond `inner`'s real height.  This is the trace-MLE
     /// constructor.  Mirrors SP1 `PaddedMle::padded_with_zeros`.
-    pub fn padded_with_zeros(inner: Arc<Mle<T>>, num_variables: u32) -> Self {
+    pub fn padded_with_zeros(inner: Arc<Mle<T, A>>, num_variables: u32) -> Self {
         let num_polys = inner.num_polynomials();
         Self::padded(inner, num_variables, Padding::Constant(T::ZERO, num_polys))
     }
@@ -166,10 +192,27 @@ impl<T: Field> PaddedMle<T> {
 
     /// Borrow the inner real-only `Mle`, if any.
     #[inline]
-    pub fn inner(&self) -> &Option<Arc<Mle<T>>> {
+    pub fn inner(&self) -> &Option<Arc<Mle<T, A>>> {
         &self.inner
     }
 
+    /// Consume, returning the inner real-only `Mle`, if any.
+    #[inline]
+    pub fn into_inner(self) -> Option<Arc<Mle<T, A>>> {
+        self.inner
+    }
+
+    /// Consume, returning the padding descriptor.
+    #[inline]
+    pub fn into_padding(self) -> Padding<T> {
+        self.padding
+    }
+}
+
+/// DATA ops — CPU-only.  These reach into the backing cells (via
+/// `Mle<T, CpuBackend>`'s CPU accessors), so unlike the metadata surface
+/// above they cannot be backend-generic.
+impl<T: Field> PaddedMle<T, CpuBackend> {
     /// Borrow the REAL (unpadded) rows as a zero-copy
     /// [`crate::basefold::TraceRef`], or `None` when this is a
     /// fully-virtual (`dummy`) padded MLE (a width-0 / device-resident
@@ -182,18 +225,6 @@ impl<T: Field> PaddedMle<T> {
         self.inner.as_ref().map(|m| m.as_trace_ref())
     }
 
-    /// Consume, returning the inner real-only `Mle`, if any.
-    #[inline]
-    pub fn into_inner(self) -> Option<Arc<Mle<T>>> {
-        self.inner
-    }
-
-    /// Consume, returning the padding descriptor.
-    #[inline]
-    pub fn into_padding(self) -> Padding<T> {
-        self.padding
-    }
-
     /// Fix the *stride-1* (LSB / `point[0]`) variable to `alpha`,
     /// returning a `PaddedMle<EF>` over one fewer variable.  Analytic:
     /// the real rows fold by adjacent pairs `(2i, 2i+1)` (Lagrange fold
@@ -201,7 +232,7 @@ impl<T: Field> PaddedMle<T> {
     /// the padding value), and the padding value is invariant under the
     /// fold (`(1-alpha)·c + alpha·c == c`).  Mirrors SP1
     /// `PaddedMle::fix_last_variable` + `mle_fix_last_variable`.
-    pub fn fix_last_variable<EF>(&self, alpha: EF) -> PaddedMle<EF>
+    pub fn fix_last_variable<EF>(&self, alpha: EF) -> PaddedMle<EF, CpuBackend>
     where
         EF: ExtensionField<T>,
     {
