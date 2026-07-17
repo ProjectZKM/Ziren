@@ -134,6 +134,14 @@ pub struct PaddedMle<T, A: Backend = CpuBackend> {
     inner: Option<Arc<Mle<T, A>>>,
     padding: Padding<T>,
     num_variables: u32,
+    /// Metadata-only real trace HEIGHT baked into a fully-virtual
+    /// (`dummy`) MLE at construction (a device-resident chip whose host
+    /// trace is empty).  `None` for a plain `dummy` / any `inner`-carrying
+    /// MLE.  Read via [`Self::metadata_height`]; NEVER via
+    /// `num_real_entries` (which stays 0 for dummies so the zerocheck's
+    /// `num_real_entries`-gated `VirtualGeq` / `initial_geq_value` are
+    /// untouched).
+    baked_height: Option<usize>,
 }
 
 /// Structural / metadata surface — backend-generic.  Every method here
@@ -155,13 +163,23 @@ impl<T: Field, A: Backend> PaddedMle<T, A> {
             inner.num_polynomials(),
             "PaddedMle::padded: padding num_polynomials must equal inner width",
         );
-        Self { inner: Some(inner), padding, num_variables }
+        Self { inner: Some(inner), padding, num_variables, baked_height: None }
     }
 
     /// A fully-virtual ("dummy") padded MLE — no real rows, every row is
     /// the padding value.  Mirrors SP1 `PaddedMle::dummy`.
     pub fn dummy(num_variables: u32, padding: Padding<T>) -> Self {
-        Self { inner: None, padding, num_variables }
+        Self { inner: None, padding, num_variables, baked_height: None }
+    }
+
+    /// A fully-virtual ("dummy") padded MLE that additionally BAKES the
+    /// device chip's real trace `height` for metadata / Fiat-Shamir
+    /// sourcing via [`Self::metadata_height`].  Structurally IDENTICAL to
+    /// [`Self::dummy`] — still `inner: None`, so `num_real_entries` stays 0
+    /// and the analytic padding is unchanged; only the metadata height is
+    /// recorded, so no data op or the zerocheck field-fork is perturbed.
+    pub fn dummy_with_height(num_variables: u32, padding: Padding<T>, height: usize) -> Self {
+        Self { inner: None, padding, num_variables, baked_height: Some(height) }
     }
 
     /// Wrap `inner` with `num_variables` variables, zero-padding the
@@ -182,6 +200,22 @@ impl<T: Field, A: Backend> PaddedMle<T, A> {
     #[inline]
     pub fn num_real_entries(&self) -> usize {
         self.inner.as_ref().map(|m| m.hypercube_size()).unwrap_or(0)
+    }
+
+    /// Per-chip trace HEIGHT for metadata / Fiat-Shamir sourcing: the real
+    /// `hypercube_size()` when real rows are present, else the height baked
+    /// into a `dummy` at construction ([`Self::dummy_with_height`]), else
+    /// `None` (a plain `dummy` — callers fall back to the per-shard
+    /// `DeviceTraceProvider`).  Unlike [`Self::num_real_entries`], this
+    /// exposes a device chip's REAL height WITHOUT making a dummy's real
+    /// entry-count non-zero — so it never perturbs the zerocheck's
+    /// `num_real_entries`-gated `VirtualGeq` / `initial_geq_value`.  `O(1)`.
+    #[inline]
+    pub fn metadata_height(&self) -> Option<usize> {
+        match &self.inner {
+            Some(m) => Some(m.hypercube_size()),
+            None => self.baked_height,
+        }
     }
 
     /// Number of polynomials (columns) in the batch.
@@ -274,6 +308,10 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
             inner: new_inner,
             padding: new_padding,
             num_variables: self.num_variables - 1,
+            // A baked dummy height tracks the real-row fold (`out_height ==
+            // height.div_ceil(2)`); `None` (plain dummy / inner-carrying)
+            // stays `None`.
+            baked_height: self.baked_height.map(|h| h.div_ceil(2)),
         }
     }
 

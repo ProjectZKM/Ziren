@@ -329,6 +329,10 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        // Per-chip metadata heights (parallel to `chips`); forwarded to the
+        // free-fn `prove_trusted_evaluations` by `FreeFnJaggedEval`, unused on
+        // the prover-routed path (the `MachineProver` override sources its own).
+        heights: &[Option<usize>],
         jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
         jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
@@ -385,6 +389,7 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        heights: &[Option<usize>],
         jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
         jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
@@ -396,6 +401,7 @@ where
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
+            heights,
             jagged_reducer,
             jagged_opener,
         )
@@ -458,6 +464,7 @@ where
             >,
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+        heights: &[Option<usize>],
         jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
         jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
@@ -468,7 +475,10 @@ where
         // `FreeFnJaggedEval` sibling, which DOES forward them to the free-fn) are
         // unused on this prover-routed path.  Byte-identical: the value they
         // carried == the type-determined one the trait method now sources.
-        let _ = (jagged_reducer, jagged_opener);
+        // `heights` is likewise unused here — the `StarkGpuProver` override
+        // sources a device chip's height from its OWN provider/dummies, and the
+        // CpuProver default (all host chips) never reads the empty-trace branch.
+        let _ = (heights, jagged_reducer, jagged_opener);
         self.0.prove_trusted_evaluations(
             chips,
             main_traces,
@@ -967,6 +977,18 @@ where
     // `zkm-pcs` pub helper.  It is transcript-silent (step 3 is silent), so
     // reusing the zerocheck residual as `y_per_chip` — or declining whole-shard
     // to the legacy recompute — produces identical proof bytes either way.
+    // Per-chip metadata HEIGHT for the two jagged-open sites that branch on an
+    // EMPTY commit trace (`compute_residual_y_openings` + the jagged-eval
+    // producer) and so cannot reach `shared_trace_mles` directly.  A
+    // device-resident chip (dummy, `inner` None) carries its baked height here;
+    // a host chip maps to `None` (its height comes from the non-empty trace, so
+    // this slot is never read).  Stage A bakes nothing → all `None`, so both
+    // sites fall back to the per-shard provider — byte-identical to today.
+    let open_heights: Vec<Option<usize>> = shared_trace_mles
+        .iter()
+        .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
+        .collect();
+
     let residual_y: Option<Vec<Vec<Challenge<SC>>>> = compute_residual_y_openings::<SC, A>(
         chips,
         &commit_traces,
@@ -974,6 +996,7 @@ where
         &trace_at_z,
         &logup_gkr_proof.logup_evaluations,
         _device_traces,
+        &open_heights,
     );
 
     // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
@@ -996,6 +1019,7 @@ where
             _device_traces,
             precomputed_commit,
             residual_y,
+            &open_heights,
             jagged_reducer,
             jagged_opener,
         )
@@ -1109,14 +1133,11 @@ pub fn observe_transcript_prologue<SC, A>(
         // observed value matches the host-trace path; fall back to h=1/log_h=0
         // for genuinely unexercised chips.  Source matches the
         // `chip_log_heights` map + the verifier re-observe.
-        let h = if pm.inner().is_none() {
-            device_traces
-                .and_then(|p| p.chip_height(&chip.name()))
-                .unwrap_or(0)
-                .max(1)
-        } else {
-            pm.num_real_entries().max(1)
-        };
+        let h = pm
+            .metadata_height()
+            .or_else(|| device_traces.and_then(|p| p.chip_height(&chip.name())))
+            .unwrap_or(0)
+            .max(1);
         let log_h = if h.is_power_of_two() {
             h.trailing_zeros() as u64
         } else {
@@ -1202,13 +1223,16 @@ where
             // hard-checks (`opening.main.local.len() == chip.width()`).  So it
             // needs no provider round-trip.  An unexercised chip has no
             // provider entry → (0, 0), exactly as before.
-            let (w, h) = if pm.inner().is_none() {
-                match device_traces.and_then(|p| p.chip_height(&chip.name())) {
+            let (w, h) = if pm.inner().is_some() {
+                (pm.num_polynomials(), pm.num_real_entries())
+            } else {
+                match pm
+                    .metadata_height()
+                    .or_else(|| device_traces.and_then(|p| p.chip_height(&chip.name())))
+                {
                     Some(h) => (<_ as p3_air::BaseAir<Val<SC>>>::width(&chip.air), h),
                     None => (0, 0),
                 }
-            } else {
-                (pm.num_polynomials(), pm.num_real_entries())
             };
             w * h
         })
@@ -1248,7 +1272,12 @@ where
                 return None;
             }
             let p = device_traces?;
-            if skip_device_d2h && p.chip_height(&chip.name()).is_some() {
+            if skip_device_d2h
+                && pm
+                    .metadata_height()
+                    .or_else(|| p.chip_height(&chip.name()))
+                    .is_some()
+            {
                 // Device-resident chip, handle path guaranteed: skip the D2H,
                 // keep it empty (the device commit hook packs it D2D).
                 return None;
@@ -1343,6 +1372,11 @@ pub fn compute_residual_y_openings<SC, A>(
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
     device_traces: Option<&dyn super::DeviceTraceProvider>,
+    // Per-chip metadata heights, parallel to `chips` (device dummies carry a
+    // baked height; host chips `None`).  Consulted before `device_traces` in
+    // the empty-commit-trace branch below.  An empty / short slice (host
+    // callers that don't precompute it) tolerates `.get` → provider fallback.
+    heights: &[Option<usize>],
 ) -> Option<Vec<Vec<Challenge<SC>>>>
 where
     SC: StarkGenericConfig,
@@ -1361,18 +1395,23 @@ where
     }
     let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
     let mut ok = true;
-    for ((chip, ctrace), ptrace) in chips
+    for (idx, ((chip, ctrace), ptrace)) in chips
         .iter()
         .zip(commit_traces.iter())
         .zip(preprocessed_traces.iter())
+        .enumerate()
     {
         let name = MachineAir::<Val<SC>>::name(*chip);
         // A device-resident chip carries an EMPTY commit trace; resolve its
         // REAL dims so the residual openings still cover it: height from the
-        // provider, width from the residual itself.
+        // dummy's baked metadata (else the provider), width from the residual
+        // itself.
         let (w, h) = if ctrace.width == 0 {
-            let dev_h = device_traces
-                .and_then(|p| p.chip_height(&name))
+            let dev_h = heights
+                .get(idx)
+                .copied()
+                .flatten()
+                .or_else(|| device_traces.and_then(|p| p.chip_height(&name)))
                 .unwrap_or(0);
             let dev_w = trace_at_z
                 .get(&name)
@@ -1445,13 +1484,15 @@ where
         // provider (host parity).  A MISSING canonical-cluster chip is a
         // genuine 0-row matrix (log_h 0 => all-zero degree bits); the device
         // branch keeps `.max(1)`.
-        let h = if pm.inner().is_none() {
-            device_traces
-                .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
+        let h = if pm.inner().is_some() {
+            pm.num_real_entries()
+        } else {
+            pm.metadata_height()
+                .or_else(|| {
+                    device_traces.and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
+                })
                 .unwrap_or(0)
                 .max(1)
-        } else {
-            pm.num_real_entries()
         };
         let log_h = if h <= 1 {
             0u8
@@ -1709,6 +1750,12 @@ pub fn prove_trusted_evaluations<SC, A>(
     // empty Vec per empty chip.  `Some` skips the jagged step-3 host
     // recompute (identical values, identical bytes); `None` = legacy.
     pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    // Per-chip metadata heights, parallel to `chips` (device dummies carry a
+    // baked height; host chips `None`).  Consulted before `_device_traces` for
+    // an empty (width-0) commit trace's REAL height in `r_row_per_chip` below.
+    // An empty / short slice tolerates `.get` → provider fallback (the
+    // CpuProver trait-method path passes `&[]`).
+    heights: &[Option<usize>],
     // #130: the device jagged-reduction fn, provided statically by the
     // prover; `None` = host reduction (CPU / free-fn callers).
     jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
@@ -1789,11 +1836,16 @@ where
     let r_row_per_chip: Vec<Vec<InnerChallenge>> = chips
         .iter()
         .zip(main_traces.iter())
-        .map(|(chip, trace)| {
+        .enumerate()
+        .map(|(i, (chip, trace))| {
             let main_height = if trace.width == 0 {
-                _device_traces
-                    .and_then(|p| {
-                        p.chip_height(&MachineAir::<Val<SC>>::name(*chip))
+                heights
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .or_else(|| {
+                        _device_traces
+                            .and_then(|p| p.chip_height(&MachineAir::<Val<SC>>::name(*chip)))
                     })
                     .unwrap_or(1)
             } else {

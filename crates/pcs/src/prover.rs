@@ -354,6 +354,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             device_traces,
             precomputed_commit,
             pre_y_per_chip,
+            // No per-chip metadata heights on this trait-method seam (kept off
+            // it so the `StarkGpuProver` override signature is untouched): the
+            // CpuProver default proves only host chips (non-empty commit
+            // traces), so the free-fn's empty-trace height branch is never
+            // taken → `&[]` (provider fallback) is byte-identical.
+            &[],
             // SP1-parity: CpuProver default = HOST reducer/opener, sourced by
             // prover TYPE (byte-identical to the former threaded
             // `&HostJaggedReducer` / `&HostJaggedOpener`; `is_device()` is always
