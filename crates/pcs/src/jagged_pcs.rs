@@ -281,46 +281,15 @@ pub fn chips_to_mles_owned(
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
 ///
-/// GPU commit dispatch — selected by prover TYPE: when the prover
-/// statically provided `gpu_basefold_commit`
-/// (`Some(GpuBasefoldCommitFn)`, the GPU prover only), the commit
-/// dispatches through `FriCudaProver::encode_and_commit` + `CudaTcsProver`
-/// on device.  Output `(commit, prover_data)` must be byte-identical to
-/// the host path (the device hook host-side observes the same digest
-/// into the same `JaggedChallenger`).  There is no env gate (SP1-parity —
-/// the hook `Some`/`None` is the sole selector).  Falls through to the host
-/// implementation on: `gpu_basefold_commit == None` (CPU prover), or
-/// hook returns `Err` (shape unsupported / device error).
+/// The shard commit runs the host BaseFold + Plonky3 MMCS commit.  The
+/// GPU prover does NOT reach this free-fn — its device dense-pack +
+/// BaseFold commit is the `StarkGpuProver` override of
+/// `MachineProver::commit_multilinears` (SP1-parity: unconditional device
+/// commit, no host fallback).  This free-fn is the host / unit-test path.
 pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
-    // #118: the device BaseFold commit fn, provided statically by the
-    // prover (was the global `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  `None`
-    // = host commit (CPU prover / free-fn callers), byte-identical to the
-    // pre-#118 unregistered-hook path.
-    gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (JaggedCommit, JaggedProverData) {
-    if let Some(hook) = gpu_basefold_commit {
-        // The hook signature returns `Result` so the device side
-        // can tunnel its host-input back to us on shape-unsupported
-        // / runtime errors (we then run the host path with the
-        // returned input — no double-allocation, no challenger
-        // double-observe).
-        // Transcript safety: snapshot + restore around the
-        // fallible device hook so an Err after any challenger
-        // interaction cannot double-advance the transcript (see
-        // the open_jagged_pcs twin below for the full rationale).
-        let challenger_snapshot = challenger.clone();
-        match hook(chip_traces, challenger) {
-            Ok(out) => {
-                return out;
-            }
-            Err(returned_traces) => {
-                *challenger = challenger_snapshot;
-                return commit_jagged_pcs_host(returned_traces, challenger);
-            }
-        }
-    }
     commit_jagged_pcs_host(chip_traces, challenger)
 }
 
@@ -375,33 +344,15 @@ where
     (commit, prover_data)
 }
 
-/// GPU-dispatched no-observe variant — the single-main-commit precompute
-/// uses this so the main-trace BaseFold commit runs on the device when
-/// the hook is registered (GPU prover only; no env gate).  The hook's
-/// internal `challenger.observe` is absorbed by a throwaway challenger
-/// (the orchestrator/Phase 1 prologue's 8-felt `main_commitment`
-/// observe is the real transcript binding).  Falls through to
-/// [`commit_jagged_pcs_host_no_observe`] when the hook is
-/// unregistered, or the hook returns `Err`.
+/// No-observe variant used by the single-main-commit precompute — runs
+/// the host BaseFold + MMCS commit without observing the commitment into
+/// a challenger (the orchestrator/Phase 1 prologue's 8-felt
+/// `main_commitment` observe is the real transcript binding).  The GPU
+/// prover commits device-side in its `commit_multilinears` override and
+/// does NOT reach this free-fn.
 pub fn commit_jagged_pcs_no_observe(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    // #118: the device BaseFold commit fn, provided statically by the
-    // prover (was the global `GPU_BASEFOLD_COMMIT_HOOK` OnceLock).  `None`
-    // = host commit, byte-identical to the pre-#118 unregistered-hook path.
-    gpu_basefold_commit: Option<GpuBasefoldCommitFn>,
 ) -> (JaggedCommit, JaggedProverData) {
-    if let Some(hook) = gpu_basefold_commit {
-        let mut throwaway: JaggedChallenger =
-            JaggedChallenger::new(zkm_primitives::poseidon2_init());
-        match hook(chip_traces, &mut throwaway) {
-            Ok(out) => {
-                return out;
-            }
-            Err(returned_traces) => {
-                return commit_jagged_pcs_host_no_observe(returned_traces);
-            }
-        }
-    }
     commit_jagged_pcs_host_no_observe(chip_traces)
 }
 
@@ -708,55 +659,6 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// GPU BaseFold commit dispatch hook.
-//
-// The hook receives the same inputs as `commit_jagged_pcs` and
-// returns a byte-identical `(commit, prover_data)` — the device side
-// is responsible for:
-//
-//   * uploading the per-chip traces to GPU memory,
-//   * running `FriCudaProver::encode_and_commit` (the existing 1349
-//     LOC device commit) + the SP1 `compress([root, hash([h, w])])`
-//     post-processing step so the digest matches Plonky3
-//     `MerkleTreeMmcs`,
-//   * observing the resulting commitment into the supplied
-//     `JaggedChallenger` (so the transcript stays in lock-step with the
-//     host path),
-//   * assembling a `JaggedProverData` whose
-//     `stacked_data.pcs_batch_data.prover_data` is shape-compatible
-//     with the host `MerkleTreeMmcs::ProverData` consumed downstream by
-//     `open_jagged_pcs`.  Because that prover-data shape compatibility
-//     is not guaranteed for every shape, until the open-path adapter
-//     lands the device hook can return `Err` on un-handled shapes and
-//     we fall back to host.
-//
-// The hook returns `Result<.., Vec<...>>` instead of `Option<..>` so
-// the device side can tunnel ownership of the host-input back to the
-// host fallback on error (mirrors the `try_emit_jagged_pcs_bytes_device`
-// fall-through contract on the bytes path).
-// ─────────────────────────────────────────────────────────────────────
-
-/// Signature of the GPU BaseFold commit driver.  Same inputs as
-/// [`commit_jagged_pcs`].  On success returns the
-/// byte-equivalent `(commit, prover_data)`.  On unrecoverable
-/// shape/runtime error returns the original `chip_traces` so the host
-/// fallback can run without losing ownership.
-pub type GpuBasefoldCommitFn = fn(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    challenger: &mut JaggedChallenger,
-) -> Result<
-    (JaggedCommit, JaggedProverData),
-    Vec<(String, RowMajorMatrix<JaggedVal>)>,
->;
-
-// #118: the GPU BaseFold commit fn is provided STATICALLY (threaded from
-// the prover down to the commit dispatch), not via a global registry.  The
-// former `GPU_BASEFOLD_COMMIT_HOOK` OnceLock + `register_/get_` accessors
-// were removed; the `prover` crate passes `Some(device_fn)` into the
-// `prove_shard_to_basefold` free-fn (which threads it through the
-// auto-precompute path to `commit_jagged_pcs_no_observe`).
-
-// ─────────────────────────────────────────────────────────────────────
 // GPU jagged-reduction sumcheck dispatch hook.
 //
 // Mirrors the host `crate::jagged_sumcheck::prove_jagged_reduction_owned`
@@ -1001,7 +903,7 @@ where
 // GPU BaseFold open
 // dispatch fn.
 //
-// Mirror of the GPU commit fn ([`GpuBasefoldCommitFn`]) — provided
+// Mirror of the GPU commit override — provided
 // statically by the prover (`MachineProver::gpu_basefold_open_hook`) and
 // threaded down to the `open_jagged_pcs` dispatch, not via a registry.
 // The hook receives the same inputs as `open_jagged_pcs` and
@@ -1551,9 +1453,6 @@ pub mod jagged {
     /// verifier observes it.
     pub fn precompute_jagged_basefold_commit(
         chip_traces: &[ChipTraceView<'_>],
-        // #118: the device BaseFold commit fn, threaded down to the inner
-        // `commit_jagged_pcs_no_observe` dispatch.  `None` = host commit.
-        gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
         // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommit.rev` so the step-4 reduction stays in lockstep.
@@ -1594,10 +1493,7 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            crate::jagged_pcs::commit_jagged_pcs_no_observe(
-                dense_traces,
-                gpu_basefold_commit,
-            )
+            crate::jagged_pcs::commit_jagged_pcs_no_observe(dense_traces)
         };
         drop(_commit_span);
         tracing::info!(
@@ -1608,39 +1504,13 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // Retain the commit's dense_q so EVERY shard —
-        // including the ones with NO device-trace provider (the dominant
-        // big-shard case: only the first `provider_inflight_cap` shards
-        // snapshot a provider, the rest get `device_traces = None`) — carries
-        // the ~4 GiB commit-output forward to the step-4 reduction via
-        // `host_dense_q`.  The downstream gate (`device_happy =
-        // precomputed_host_dense_q.is_some() && ...`) then fires the carried
-        // reduce path (uploads this 4 GiB dense pack H2D and folds it on
-        // device), with NO 16 GiB per-chip provider, NO inflight cap, and NO
-        // extra resident VRAM.  This is shard-0's already-byte-identical
-        // device-reduce path extended to all shards: the carried dense_q is
-        // byte-identical to the committed digest by construction (same
-        // `materialize_dense_jagged` over the same chips that produced
-        // `commit`).  Gated `ZIREN_GPU_FREE_TRACES_PRE_REDUCE` (default OFF →
-        // `host_dense_q = None`, byte-identical to the prior behavior); the
-        // orchestrator sets it for the device-happy path (it is the natural
-        // companion to the pre-reduce trace-free, which keys on the same env).
-        // Carry the committed dense_q forward for the step-4 device reduce to
-        // upload+fold (no re-materialize, no per-chip provider). Only useful on
-        // the device commit path, so key it on the device BaseFold commit fn
-        // being present; the host commit path (`None`) leaves it `None`.
-        // Byte-identical to the committed digest by construction (same
-        // `materialize_dense_jagged` over the same chips).
-        let host_dense_q = if gpu_basefold_commit.is_some() {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
-            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
-            Some(dense_q)
-        } else {
-            None
-        };
-
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q, rev: use_rev, recursion_area_pin }
+        // This host precompute leaves `host_dense_q = None`.  It is set only
+        // by the provider-aware DECLINE remat path
+        // (`precompute_jagged_basefold_commit_provider`), which carries the
+        // re-materialized dense_q forward for the step-4 reduce.  The GPU
+        // prover commits device-side in its `commit_multilinears` override
+        // (SP1-parity, no host fallback) and produces its own carried dense_q.
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -1656,9 +1526,6 @@ pub mod jagged {
     pub fn precompute_jagged_basefold_commit_provider(
         chip_traces: &[ChipTraceView<'_>],
         provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-        // #118: the device BaseFold commit fn, threaded down to
-        // `precompute_jagged_basefold_commit`.  `None` = host commit.
-        gpu_basefold_commit: Option<super::GpuBasefoldCommitFn>,
         // The per-shard rev(zeta) orientation, threaded down (see
         // `precompute_jagged_basefold_commit`).
         use_rev: bool,
@@ -1671,7 +1538,7 @@ pub mod jagged {
         let needs_remat =
             provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
         if !needs_remat {
-            return precompute_jagged_basefold_commit(chip_traces, gpu_basefold_commit, use_rev, recursion_area_pin);
+            return precompute_jagged_basefold_commit(chip_traces, use_rev, recursion_area_pin);
         }
         // DECLINE path: the device commit hook returned `None` (e.g. the
         // commit-NTT OOM preflight) so we re-materialize the device-resident
@@ -1686,7 +1553,7 @@ pub mod jagged {
         // re-materialized chips that produced the committed digest).
         let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
         let full_views = views_over_owned(&full);
-        let mut pre = precompute_jagged_basefold_commit(&full_views, gpu_basefold_commit, use_rev, recursion_area_pin);
+        let mut pre = precompute_jagged_basefold_commit(&full_views, use_rev, recursion_area_pin);
         let dense_q =
             materialize_dense_jagged::<InnerVal>(&full_views, pre.packing.log_dense_size, use_rev);
         debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
@@ -1871,7 +1738,6 @@ pub mod jagged {
     ) -> JaggedBasefoldBundle {
         let precomputed = precompute_jagged_basefold_commit(
             chip_traces,
-            None,  // host commit
             false, // legacy bitrev orientation
             None,  // no recursion area pin
         );
@@ -3434,7 +3300,7 @@ mod test {
 
         let mut p_chal = build_challenger();
         let (commit, prover_data) =
-            commit_jagged_pcs(traces.clone(), &mut p_chal, None);
+            commit_jagged_pcs(traces.clone(), &mut p_chal);
 
         // Compute the eval point + claim for the stacked PCS.  Claim
         // is the multilinear-extension of the *flattened*

@@ -291,20 +291,17 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
 
     /// Commit the shard's per-chip main multilinears to the BaseFold
     /// jagged-PCS, returning the precomputed commit — the COMMIT
-    /// static-dispatch OVERRIDE point (SP1-parity Phase-1 collapse of the
-    /// former `gpu_basefold_commit_hook` + `gpu_jagged_precompute_commit_hook`
-    /// `Option<fn>` pair into one trait method).  The DEFAULT body is the host
-    /// commit
-    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]
-    /// with a `None` device commit fn) — byte-identical to the former
-    /// unregistered-hook (host) path.  A `StarkGpuProver` OVERRIDES this with
-    /// the device dense-pack + BaseFold commit body (the former
-    /// `zkm_gpu_basefold` `gpu_jagged_precompute_commit_hook` device path with
-    /// a host `gpu_basefold_commit_hook` fallback).  Consumed by
-    /// `maybe_auto_precompute_basefold` through the `JaggedEvalProducer` seam:
-    /// `ProverJaggedEval` routes to `self.commit_multilinears`; `FreeFnJaggedEval`
-    /// uses the same host default.  The `rev` / `recursion_area_pin` flags are
-    /// FORCED onto the returned commit by the caller, exactly as before.
+    /// static-dispatch OVERRIDE point (one trait method).  The DEFAULT body
+    /// is the host commit
+    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]).
+    /// A `StarkGpuProver` OVERRIDES this with the device dense-pack + BaseFold
+    /// commit body (the `zkm_gpu_basefold::commit_dense::gpu_jagged_precompute_commit_hook`
+    /// device path) — UNCONDITIONALLY on device, no host fallback (SP1-parity).
+    /// Consumed by `maybe_auto_precompute_basefold` through the
+    /// `JaggedEvalProducer` seam: `ProverJaggedEval` routes to
+    /// `self.commit_multilinears`; `FreeFnJaggedEval` uses the same host
+    /// default.  The `rev` / `recursion_area_pin` flags are FORCED onto the
+    /// returned commit by the caller, exactly as before.
     #[allow(unused_variables)]
     fn commit_multilinears(
         &self,
@@ -316,7 +313,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
             named_inner,
             device_traces,
-            None,
             use_rev,
             recursion_area_pin,
         )

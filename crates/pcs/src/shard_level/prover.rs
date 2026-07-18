@@ -419,7 +419,6 @@ where
         crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
             named_inner,
             device_traces,
-            None,
             use_rev,
             recursion_area_pin,
         )

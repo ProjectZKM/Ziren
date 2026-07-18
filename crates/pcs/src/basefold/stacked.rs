@@ -314,9 +314,9 @@ where
             .unzip();
 
         // GPU dispatch hook for the
-        // **OPEN/prove** phase.  The COMMIT side of `ZIREN_GPU_BASEFOLD=1`
-        // is wired in `jagged_pcs::commit_jagged_pcs`
-        // (statically-provided `GpuBasefoldCommitFn`).  The OPEN side is
+        // **OPEN/prove** phase.  The COMMIT side is the `StarkGpuProver`
+        // override of `MachineProver::commit_multilinears` (device-side,
+        // no host fallback).  The OPEN side is
         // wired one level up at `jagged_pcs::open_jagged_pcs`
         // (statically-provided `GpuBasefoldOpenFn`) — the
         // sister hook intercepts at the jagged-PCS entry so it can
