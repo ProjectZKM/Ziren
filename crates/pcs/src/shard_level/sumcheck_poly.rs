@@ -17,24 +17,6 @@ use p3_field::{BasedVectorSpace, ExtensionField, Field};
 
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 
-/// Generate the boilerplate static + register/get pair for a GPU hook
-/// slot. Each slot is a process-global `OnceLock` that ziren-gpu's
-/// startup registers once and the stark prover consults per call.
-macro_rules! gpu_hook_accessors {
-    ($static:ident: $fn_ty:ty => $register:ident, $getter:ident) => {
-        static $static: std::sync::OnceLock<$fn_ty> = std::sync::OnceLock::new();
-
-        pub fn $register(f: $fn_ty) -> Result<(), $fn_ty> {
-            $static.set(f)
-        }
-
-        #[must_use]
-        pub fn $getter() -> Option<$fn_ty> {
-            $static.get().copied()
-        }
-    };
-}
-
 pub trait SumcheckPolyBase {
     fn num_variables(&self) -> u32;
 }
