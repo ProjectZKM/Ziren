@@ -2,8 +2,8 @@
 //!
 //! ## Purpose
 //!
-//! Some GPU dispatch hooks (e.g. `GpuLayerTransitionFn` in
-//! [`crate::jagged_pcs`]) operate on opaque GPU
+//! Some GPU dispatch hooks (e.g. the row-GKR layer-transition
+//! hook) operate on opaque GPU
 //! handles managed by per-GPU stream pools.  When the dispatch
 //! happens from a thread that has the right `cudaSetDevice`
 //! context (typically a `MultiGpuDevicePool` worker), the handle
@@ -32,7 +32,7 @@
 //! DeviceTraceProvider>` arg added to the chip-keyed hooks,
 //! but without requiring fn-pointer signature changes
 //! across the call graph.  Particularly suited to hooks like
-//! `GpuLayerTransitionFn` whose signature is `fn(u64, u64) ->
+//! the layer-transition hook whose signature is `fn(u64, u64) ->
 //! u64` (opaque IDs only — no place to attach an explicit
 //! provider arg).
 //!
