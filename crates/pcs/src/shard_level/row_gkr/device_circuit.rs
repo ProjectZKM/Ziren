@@ -123,12 +123,6 @@ pub struct DeviceInputData {
     /// surfaces the pull-stub panic if the drop path was taken
     /// without a regen hook.
     pub input_handle: Option<alloc::sync::Arc<dyn core::any::Any + Send + Sync>>,
-    /// #118: the device first-layer regen fn, provided statically by the
-    /// prover (was the `GPU_GENERATE_FIRST_LAYER_HOOK` OnceLock).  Stashed
-    /// here at scope-populate time and read by [`DeviceLogupGkrCircuit::next`]'s
-    /// lazy-regen arm.  `None` => regen unavailable → `next()` returns `None`.
-    /// Production uses `num_virtual_layers == 0`, so the arm never fires.
-    pub generate_first_layer: Option<crate::jagged_pcs::GpuGenerateFirstLayerFn>,
 }
 
 impl DeviceInputData {
@@ -146,7 +140,6 @@ impl DeviceInputData {
             num_row_variables,
             num_interaction_variables,
             input_handle: None,
-            generate_first_layer: None,
         }
     }
 
@@ -164,7 +157,6 @@ impl DeviceInputData {
             num_row_variables,
             num_interaction_variables,
             input_handle: Some(input_handle),
-            generate_first_layer: None,
         }
     }
 
@@ -360,32 +352,13 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
 
     /// Pop the next layer bottom-up:
     /// * `materialized_layers` non-empty → pop and return.
-    /// * `num_virtual_layers > 0` → regenerate the FirstLayer via
-    ///   the registered hook (one-shot, decrement counter).
+    /// * `num_virtual_layers > 0` → decrement the counter and return
+    ///   `None`.
     /// * Otherwise `None`.
     ///
-    /// The regen arm consults the
-    /// [`crate::jagged_pcs::GpuGenerateFirstLayerFn`] hook
-    /// (when the `basefold` feature is on) via `circuit_id`.  When the
-    /// hook is registered AND returns `Some(payload)`, we wrap it in a
-    /// fresh [`DeviceCircuitLayer::FirstLayer`] and return it.  When
-    /// the hook is unregistered OR returns `None`, this arm decrements
-    /// `num_virtual_layers` and returns `None` — the upstream
-    /// `gpu_layer_pull_hook` in ziren-gpu already special-cases
-    /// "dropped-but-no-regen" with a detailed diagnostic panic (see
-    /// the related design memo).
-    ///
-    /// **Note**: until the ziren-gpu side wires its CUDA
-    /// `generate_first_layer` kernel + concrete `input_handle`
-    /// downcast (multi-day work — see
-    /// the related design memo), callers SHOULD
-    /// continue to construct `DeviceLogupGkrCircuit` with
-    /// `num_virtual_layers == 0` and rely on the existing
-    /// eager-pull-to-host path.  The dispatch here is
-    /// correctness-preserving when the hook is unregistered (returns
-    /// `None` cleanly), but the upstream pull stub in ziren-gpu will
-    /// still fire if the production round loop actually revisits a
-    /// dropped seq=1.
+    /// Production constructs `DeviceLogupGkrCircuit` with
+    /// `num_virtual_layers == 0`, so the lazy first-layer arm never
+    /// fires.
     pub fn next(&mut self) -> Option<DeviceCircuitLayer<F, EF>> {
         if let Some(layer) = self.materialized_layers.pop() {
             return Some(layer);
@@ -397,27 +370,12 @@ impl<F: Field, EF: ExtensionField<F>> DeviceLogupGkrCircuit<F, EF> {
             self.num_virtual_layers, 1,
             "DeviceLogupGkrCircuit: lazy regeneration only supports a single virtual layer"
         );
-        // Decrement first so a second `next()` after a failed regen
-        // attempt cleanly returns `None` without re-entering this arm.
+        // Decrement so a second `next()` cleanly returns `None`.
         self.num_virtual_layers = 0;
 
-        // Consult the registered regen hook. When unregistered (no
-        // ziren-gpu CUDA impl yet) OR it returns None (downcast failed
-        // / kernel error), surface None to the caller — the upstream
-        // pull-stub panic in ziren-gpu's `gpu_layer_pull_hook` remains
-        // the primary signal that the regen path was needed but
-        // unavailable.
-        if let Some(hook) = self.input_data.generate_first_layer {
-            if let Some(payload) = hook(self.input_data.circuit_id) {
-                let handle = DeviceLayerHandle::new(
-                    payload.inner,
-                    payload.num_row_variables,
-                    payload.num_interaction_variables,
-                    self.input_data.circuit_id,
-                );
-                return Some(DeviceCircuitLayer::FirstLayer(handle, PhantomData));
-            }
-        }
+        // No device-side first-layer regen hook: the lazy arm always
+        // surfaces `None`.  Production uses `num_virtual_layers == 0`, so
+        // this arm never fires.
         None
     }
 
@@ -822,7 +780,6 @@ mod tests {
             num_row_variables: 4,
             num_interaction_variables: 3,
             input_handle: None,
-            generate_first_layer: None,
         };
         // Layers pushed bottom-first: index 0 = terminal (smallest),
         // last index = FirstLayer (largest).  `pop()` yields the
@@ -863,7 +820,6 @@ mod tests {
             num_row_variables: 4,
             num_interaction_variables: 3,
             input_handle: None,
-            generate_first_layer: None,
         };
         let mut circuit =
             DeviceLogupGkrCircuit::<KoalaBear, EF>::new(Vec::new(), input_data, 0);
@@ -874,18 +830,12 @@ mod tests {
         assert!(circuit.next().is_none());
     }
 
-    /// when `num_virtual_layers == 1`, the
-    /// materialized stack is empty, AND no `GpuGenerateFirstLayerFn`
-    /// fn is provided (`input_data.generate_first_layer == None`),
-    /// `next()` returns `None` (rather than panicking via the old
-    /// `todo!()` arm).  This is the new safe default: the regen-on-pull
+    /// when `num_virtual_layers == 1` and the materialized stack is
+    /// empty, `next()` returns `None` (rather than panicking) — there
+    /// is no device-side first-layer regen hook. The regen-on-pull
     /// contract is fulfilled by the upstream `gpu_layer_pull_hook` in
-    /// ziren-gpu, which already emits a detailed diagnostic when a
-    /// dropped seq is pulled and no regen is available.
-    ///
-    /// #118: the regen fn is now a per-`DeviceInputData` field (not a
-    /// process-wide `OnceLock`), so this test is deterministic — the
-    /// `None` field guarantees the graceful `None` path.
+    /// ziren-gpu, which emits a detailed diagnostic when a dropped seq
+    /// is pulled and no regen is available.
     #[test]
     fn next_returns_none_when_virtual_and_no_regen_hook() {
         let input_data = DeviceInputData {
@@ -893,8 +843,6 @@ mod tests {
             num_row_variables: 6,
             num_interaction_variables: 4,
             input_handle: None,
-            // #118: no regen fn provided → graceful `None`.
-            generate_first_layer: None,
         };
         let mut circuit =
             DeviceLogupGkrCircuit::<KoalaBear, EF>::new(Vec::new(), input_data, 1);
@@ -956,7 +904,6 @@ mod tests {
             num_row_variables: 5,
             num_interaction_variables: 2,
             input_handle: None,
-            generate_first_layer: None,
         };
         let layer = DeviceCircuitLayer::<KoalaBear, EF>::FirstLayerVirtual(input, PhantomData);
         assert!(layer.is_virtual());
@@ -1002,7 +949,6 @@ mod tests {
             num_row_variables: 3,
             num_interaction_variables: 2,
             input_handle: None,
-            generate_first_layer: None,
         };
         let layers = vec![
             DeviceCircuitLayer::<KoalaBear, EF>::Materialized(make_handle(1, 1, 2), PhantomData),
@@ -1152,7 +1098,6 @@ mod tests {
             num_row_variables: 4,
             num_interaction_variables: 2,
             input_handle: None,
-            generate_first_layer: None,
         };
         // Payloads ordered bottom-up: index 0 = terminal (popped LAST),
         // last index = FirstLayer (popped FIRST).
@@ -1228,7 +1173,6 @@ mod tests {
             num_row_variables: 2,
             num_interaction_variables: 1,
             input_handle: None,
-            generate_first_layer: None,
         };
         let mut scope = LogupTaskScope::<KoalaBear, EF>::new(301);
         scope.install_circuit_from_payloads(Vec::new(), input_data);
@@ -1251,7 +1195,6 @@ mod tests {
             num_row_variables: 3,
             num_interaction_variables: 2,
             input_handle: None,
-            generate_first_layer: None,
         };
         let layers = vec![
             DeviceCircuitLayer::<KoalaBear, Ef4>::Materialized(
