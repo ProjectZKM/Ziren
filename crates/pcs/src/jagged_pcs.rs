@@ -691,12 +691,15 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 /// signature; sampling gamma or observing evals before the round loop
 /// produces INVALID proofs.
 ///
-/// `dense_q_device_handle` is an opaque device-resident dense_q handle:
-/// when `Some(handle)` the producer uses the device buffer (looked up in
-/// its own registry) and `dense_q_host` MAY be empty (the device round-0
-/// path avoids the pull-to-host); when `None` it falls back to
-/// `dense_q_host`.  `zkm-pcs` never dereferences the handle — the GPU
-/// side owns allocation / deallocation.
+/// `dense_q_device` is a type-erased OWNED carrier for the device-resident
+/// dense_q buffer the commit built (SP1-parity: the buffer rides the
+/// commit/reduce seams by value, not a process-global registry handle):
+/// when `Some(payload)` the producer downcasts it back to its own device
+/// buffer type and `dense_q_host` MAY be empty (the device round-0 path
+/// avoids the pull-to-host); when `None` it falls back to `dense_q_host`.
+/// `zkm-pcs` never inspects the payload — the GPU side owns the buffer's
+/// allocation / deallocation (it moves the buffer out of the `Box` and drops
+/// it after the reduce).
 /// Object-safe device/host jagged-reduction dispatch — the SP1-parity
 /// static-dispatch collapse of the former `GpuJaggedReductionFnV2` fn-ptr +
 /// `Option<..>` thread + `ActiveHook` match.  The prover TYPE selects the
@@ -711,7 +714,7 @@ pub trait JaggedReducer {
     fn reduce_jagged(
         &self,
         dense_q_host: alloc::vec::Vec<JaggedVal>,
-        dense_q_device_handle: Option<u64>,
+        dense_q_device: Option<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
         packing: &crate::jagged::JaggedPacking<JaggedVal>,
         r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
         y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
@@ -740,7 +743,7 @@ impl JaggedReducer for HostJaggedReducer {
     fn reduce_jagged(
         &self,
         dense_q_host: alloc::vec::Vec<JaggedVal>,
-        _dense_q_device_handle: Option<u64>,
+        _dense_q_device: Option<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
         packing: &crate::jagged::JaggedPacking<JaggedVal>,
         r_row_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
         y_per_chip: &[alloc::vec::Vec<JaggedChallenge>],
@@ -1363,14 +1366,19 @@ pub mod jagged {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
-        /// Single shard-wide commit buffer: opaque handle to the
-        /// device-resident dense polynomial the commit was built from,
-        /// registered in ziren-gpu's `dense_q_device_registry`.  When
-        /// `Some`, the step-4 jagged reduction passes it through the V2
-        /// GPU hook so the SAME device buffer serves commit + reduction
-        /// (no host re-materialize, no H2D re-upload).  `None` on the
-        /// host build path — behaviour unchanged.
-        pub dense_device_handle: Option<u64>,
+        /// Single shard-wide commit buffer: a type-erased OWNED carrier for
+        /// the device-resident dense polynomial the commit was built from
+        /// (SP1-parity — the buffer rides this struct across the
+        /// `commit_multilinears` return / `prove_trusted_evaluations` input
+        /// seams, replacing the former process-global `u64` handle registry).
+        /// `zkm-pcs` cannot name `DeviceBuffer` (no GPU dep), so it holds the
+        /// buffer type-erased as `Box<dyn Any + Send + Sync>` (matching the
+        /// outer `ShardMainData::precomputed_basefold` erasure); the GPU
+        /// reducer downcasts it back.  When `Some`, the step-4 reduction MOVES
+        /// it through the device hook so the SAME device buffer serves commit
+        /// + reduction (no host re-materialize, no H2D re-upload, no clone).
+        /// `None` on the host build path — behaviour unchanged.
+        pub dense_device: Option<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
         /// The CORRECT host-built dense_q that the commit was committed
         /// over, carried forward to the step-4 reduction.  Populated ONLY
         /// by the provider-aware HOST fallback commit body
@@ -1385,7 +1393,7 @@ pub mod jagged {
         /// the wrong data → the verifier REJECTS the bundle.
         /// Carrying the already-correct dense_q makes the decline path
         /// byte-identical to the golden host/device commit.  `None` on the
-        /// happy path (the device commit fired → `dense_device_handle` is
+        /// happy path (the device commit fired → `dense_device` is
         /// `Some` → the reduction takes the device buffer, never this) and on
         /// the plain non-provider host build (its reduction re-materialize is
         /// sound — no drain involved).
@@ -1510,7 +1518,7 @@ pub mod jagged {
         // re-materialized dense_q forward for the step-4 reduce.  The GPU
         // prover commits device-side in its `commit_multilinears` override
         // (SP1-parity, no host fallback) and produces its own carried dense_q.
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
+        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -1620,7 +1628,7 @@ pub mod jagged {
                 dense_traces, mmcs, dft, fri,
             )
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -1968,7 +1976,7 @@ pub mod jagged {
             packing,
             commit,
             prover_data,
-            dense_device_handle: precomputed_dense_handle,
+            dense_device: precomputed_dense_carrier,
             host_dense_q: precomputed_host_dense_q,
             rev: _,
             recursion_area_pin,
@@ -2132,17 +2140,23 @@ pub mod jagged {
         // transcript position is identical to the generic / per-group paths —
         // the whole point of the de-dup.  Non-`move`: every capture (packing /
         // y_per_chip / chip_traces / provider / r_row_per_chip / z_row /
-        // n_chips / the device handle) is read by reference; only
-        // `precomputed_host_dense_q` is consumed, via `.take()`.
+        // n_chips) is read by reference; `precomputed_host_dense_q` and the
+        // device dense_q carrier `precomputed_dense_carrier` are consumed, via
+        // `.take()`.
         let mut precomputed_host_dense_q = precomputed_host_dense_q;
+        // The device dense_q carrier is MOVED out (via `.take()`) into the
+        // reduce dispatch below, so the SAME `DeviceBuffer` the GPU commit
+        // built rides commit→reduce by value with no clone (SP1-parity
+        // single-buffer transport; replaces the former `u64` registry handle).
+        let mut precomputed_dense_carrier = precomputed_dense_carrier;
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
         // Free the prior-phase device residency BEFORE
         // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
         // model.  The reduce reads ONLY dense_q (either the device-resident
-        // buffer registered via precomputed_dense_handle, OR the CARRIED host
-        // dense_q the commit-decline path captured into
+        // buffer carried by value in precomputed_dense_carrier, OR the CARRIED
+        // host dense_q the commit-decline path captured into
         // precomputed_host_dense_q), NOT the per-chip device traces held by
         // the provider.  Freeing the provider traces is sound on EITHER
         // device-happy path -- the reduce has its dense_q without
@@ -2154,28 +2168,22 @@ pub mod jagged {
         //
         // It accepts the CARRIED host dense_q path
         // (precomputed_host_dense_q.is_some()), not only the DEVICE-commit
-        // path (precomputed_dense_handle.is_some()).  On big shards (TM 2^22,
+        // path (precomputed_dense_carrier.is_some()).  On big shards (TM 2^22,
         // log_dense=29) the device commit OOM-DECLINES to host (~6 GiB free)
-        // so the handle is None and the dense_q is the CARRIED host buffer;
+        // so the carrier is None and the dense_q is the CARRIED host buffer;
         // firing the free on that carried path too (the dominant big-shard
         // case) lets the reduce upload/fold the carried dense_q and never
         // touch the provider, so freeing it here is sound and lets the reduce
         // go device.
-        // Set once `release_all` below has actually DRAINED the provider, so the
-        // device-decline fallback can tell a live provider from a drained one.
-        // Without it that fallback silently re-materializes EMPTY traces (see the
-        // `saved_dense` None edge below).
-        let mut provider_released = false;
         if let Some(p) = provider {
             let hook_v2_present = jagged_reducer.is_device();
-            let device_happy = (precomputed_dense_handle.is_some()
+            let device_happy = (precomputed_dense_carrier.is_some()
                 || precomputed_host_dense_q.is_some())
                 && hook_v2_present;
             if device_happy {
                 let _rel_span =
                     tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
                 p.release_all();
-                provider_released = true;
                 tracing::info!(
                     chips = n_chips,
                     log_dense_size = packing.log_dense_size as u64,
@@ -2189,7 +2197,7 @@ pub mod jagged {
                 static WARN_ONCE: OnceLock<()> = OnceLock::new();
                 WARN_ONCE.get_or_init(|| {
                     tracing::warn!(
-                        precomputed_dense_handle = precomputed_dense_handle.is_some(),
+                        precomputed_dense_carrier = precomputed_dense_carrier.is_some(),
                         carried_host_dense_q = precomputed_host_dense_q.is_some(),
                         hook_v2 = hook_v2_present,
                         "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
@@ -2246,7 +2254,7 @@ pub mod jagged {
             // the device buffer (the same one the commit was packed
             // from) is the source.  Every fallback edge below
             // re-materializes on host before running the host body.
-            let skip_host_dense = precomputed_dense_handle.is_some()
+            let skip_host_dense = precomputed_dense_carrier.is_some()
                 && is_device;
             // True when `dense_q` below is the CARRIED host dense_q from
             // the device-commit-decline fallback — the provider is DRAINED by
@@ -2278,18 +2286,20 @@ pub mod jagged {
                 materialize_dense_jagged::<InnerVal>(&views_over_owned(&rematerialized), packing.log_dense_size, dense_rev)
             };
 
-            // Device handle source (single shard-wide commit buffer): the
-            // Option B precompute's device dense pack registers the buffer and
-            // threads its handle through
-            // `PrecomputedJaggedCommit::dense_device_handle`; the device reducer
-            // takes it from the registry (`DenseQDevice::Owned`) so commit +
-            // reduction share ONE device buffer.  `None` on the host build path
-            // — the handle is then unused.
-            let dense_q_device_handle: Option<u64> = if is_device {
-                precomputed_dense_handle
-            } else {
-                None
-            };
+            // Device buffer source (single shard-wide commit buffer): the
+            // Option B precompute's device dense pack MOVED the device buffer
+            // into `PrecomputedJaggedCommit::dense_device`; the device reducer
+            // downcasts it and reduces it in place (`DenseQDevice::Owned`) so
+            // commit + reduction share ONE device buffer (no clone, no
+            // re-upload).  Taken out by value here so it is dropped after the
+            // reduce.  `None` on the host build path — the carrier is then
+            // unused (and empty).
+            let dense_q_device: Option<alloc::boxed::Box<dyn core::any::Any + Send + Sync>> =
+                if is_device {
+                    precomputed_dense_carrier.take()
+                } else {
+                    None
+                };
 
             // `r_row` / `y_clone` / `saved_dense` are computed UP-FRONT (were
             // inside the old `ActiveHook::V2` arm) so they outlive the `dense_q`
@@ -2318,7 +2328,7 @@ pub mod jagged {
             // host reducer always returns `Some`.
             match jagged_reducer.reduce_jagged(
                 dense_q,
-                dense_q_device_handle,
+                dense_q_device,
                 &packing,
                 &r_row,
                 &y_clone,
@@ -2349,25 +2359,17 @@ pub mod jagged {
                         // deliberately SKIPS the not-device-happy path exactly
                         // so this can re-materialize (see its warn-once above).
                         //
-                        // It is NOT correct once the provider has been drained.
-                        // On the device-HANDLE path `dense_q` is an empty
-                        // placeholder, so `saved_dense` is `None` — yet
-                        // `device_happy` was true, so `release_all` already ran.
-                        // Re-materializing from a drained provider yields
-                        // all-zero traces, hence an all-zero `dense_q`, hence a
-                        // proof that fails verification — silently, with no
-                        // panic and no wrong-answer signal. Fail loudly instead
-                        // of burning a shard's work on a proof we know is bad.
-                        assert!(
-                            !provider_released,
-                            "jagged reduce: the device reducer declined AFTER the \
-                             pre-reduce release_all drained the provider, and no \
-                             host dense_q was carried (device-handle path). \
-                             Re-materializing now would produce an all-zero \
-                             dense_q and an invalid proof. Fix the caller: either \
-                             carry a host dense_q on the handle path or withhold \
-                             the pre-reduce release when the reducer may decline."
-                        );
+                        // With the SP1-parity owned carrier the device buffer
+                        // rides the commit→reduce seam BY VALUE, so there is no
+                        // registry MISS — the former only decline that could
+                        // reach this edge on an already-drained provider.  The
+                        // sole remaining decline is the reduce size-gate
+                        // (`log_dense < min`), which is CONSISTENT with the
+                        // commit size-gate that set the carrier, so a
+                        // `skip_host_dense` (carrier-Some) shard never reaches
+                        // here.  Only LIVE-provider shape declines do (small
+                        // shards below the gate, provider not released), and
+                        // they re-materialize correctly.
                         let rematerialized =
                             rematerialize_chip_traces_via_provider(
                                 chip_traces,
@@ -2524,7 +2526,7 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device_handle: _, host_dense_q: _, rev: dense_rev, recursion_area_pin } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device: _, host_dense_q: _, rev: dense_rev, recursion_area_pin } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the row-eq embedding factor + empty-chip skip).
