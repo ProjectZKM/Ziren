@@ -79,65 +79,6 @@ where
     evaluate_trace_columns_at_point::<F, EF>(trace, width, eval_point)
 }
 
-/// Materialize a device-only chip's full main trace from the
-/// per-shard provider (host row-major). Returns `None` when the hook is
-/// unregistered, the chip is absent, or F != KoalaBear.
-pub fn materialize_chip_main_trace_via_provider<F>(
-    chip_name: &str,
-    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-) -> Option<(Vec<F>, usize)>
-where
-    F: PrimeField,
-{
-    use core::any::TypeId;
-    type Kb = p3_koala_bear::KoalaBear;
-    if TypeId::of::<F>() != TypeId::of::<Kb>() {
-        return None;
-    }
-    // P5 static dispatch: the former `GPU_MATERIALIZE_TRACE` `OnceLock` is
-    // now the `DeviceTraceProvider::materialize_main_trace` method (a pure
-    // provider query).  `None` on host / non-device providers = the legacy
-    // unregistered-hook path.
-    let (vals_kb, width) = device_traces.materialize_main_trace(chip_name)?;
-    // SAFETY: TypeId equality guarantees F == Kb; Vec layout identical.
-    let vals: Vec<F> = unsafe {
-        let len = vals_kb.len();
-        let cap = vals_kb.capacity();
-        let ptr = core::mem::ManuallyDrop::new(vals_kb).as_mut_ptr() as *mut F;
-        Vec::from_raw_parts(ptr, len, cap)
-    };
-    Some((vals, width))
-}
-
-/// Commit-traces D2H removal: cumulative-sum tail (last `k`
-/// row-major values of the chip's main trace) via the per-shard
-/// provider — a ~`4k`-byte D2H gather instead of the full-trace
-/// materialize.  Returns `None` when the provider can't serve the
-/// chip or F != KoalaBear (caller falls back to the host trace).
-pub fn chip_main_tail_via_provider<F>(
-    chip_name: &str,
-    k: usize,
-    device_traces: &dyn crate::shard_level::DeviceTraceProvider,
-) -> Option<Vec<F>>
-where
-    F: PrimeField,
-{
-    use core::any::TypeId;
-    type Kb = p3_koala_bear::KoalaBear;
-    if TypeId::of::<F>() != TypeId::of::<Kb>() {
-        return None;
-    }
-    let vals_kb = device_traces.chip_main_tail(chip_name, k)?;
-    // SAFETY: TypeId equality guarantees F == Kb; Vec layout identical.
-    let vals: Vec<F> = unsafe {
-        let len = vals_kb.len();
-        let cap = vals_kb.capacity();
-        let ptr = core::mem::ManuallyDrop::new(vals_kb).as_mut_ptr() as *mut F;
-        Vec::from_raw_parts(ptr, len, cap)
-    };
-    Some(vals)
-}
-
 /// Compute per-column MLE evaluations of a row-major trace at a
 /// multilinear point.
 ///
