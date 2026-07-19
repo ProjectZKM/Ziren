@@ -23,22 +23,20 @@ use crate::shard_level::types::{ChipEvaluation, LogUpEvaluations, LogUpGkrOutput
 use crate::zerocheck_prover::eq_mle_table;
 use crate::Chip;
 
-/// `preprocessed_traces[i]` may have width 0; `device_traces` is
-/// `Some(provider)` per pool-worker shard, `None` for host-only.
+/// `preprocessed_traces[i]` may have width 0.
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[RowMajorMatrix<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
-    _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     // The shared per-chip analytic main-trace MLE (chip-index order),
     // built once in the shard dispatch over the `max_log_row_count` cube and
     // threaded read-only — the SOLE host main-trace source for this stage.
     // A host chip's `PaddedMle` carries a real inner (`guts == the raw
     // trace`, byte-for-byte); a device-resident / unexercised chip is a
     // `dummy` (inner `None`, width 0) whose real cells come from the
-    // per-shard device provider (`_device_traces`).  The FULL-POINT opening
+    // per-shard device provider.  The FULL-POINT opening
     // consumes the inner via `PaddedMle::eval_at` (== the on-the-fly
     // `evaluate_trace_columns_at_point`, unit-tested).
     shared_trace_mles: &[PaddedMle<F>],

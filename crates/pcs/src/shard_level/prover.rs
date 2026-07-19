@@ -786,7 +786,7 @@ where
     // helpers so the device-native drivers reuse the SAME non-device
     // commit-trace plumbing.  Pure data — no transcript observe.
     let skip_device_d2h =
-        compute_skip_device_d2h::<SC, A>(chips, shared_trace_mles, _device_traces);
+        compute_skip_device_d2h::<SC, A>(chips, shared_trace_mles);
     let eager_device_remat = build_eager_device_remat::<SC, A>(
         chips,
         shared_trace_mles,
@@ -868,7 +868,6 @@ where
             &main_commitment,
             chips,
             shared_trace_mles,
-            _device_traces,
         );
     }
     tracing::info!(
@@ -887,7 +886,6 @@ where
             preprocessed_traces,
             max_log_row_count,
             challenger,
-            _device_traces,
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
@@ -994,7 +992,6 @@ where
         preprocessed_traces,
         &trace_at_z,
         &logup_gkr_proof.logup_evaluations,
-        _device_traces,
         &open_heights,
     );
 
@@ -1039,7 +1036,7 @@ where
     // REAL-height map feeds the `opened_values` degree-bit decomposition below.
     // MUST agree with the Phase-1 prologue observe + the verifier.
     let (chip_log_heights, chip_heights) =
-        build_chip_log_heights::<SC, A>(chips, shared_trace_mles, _device_traces);
+        build_chip_log_heights::<SC, A>(chips, shared_trace_mles);
 
     // populate `opened_values` with the per-chip
     // trace@z openings from the zerocheck reduction (the values the
@@ -1113,9 +1110,6 @@ pub fn observe_transcript_prologue<SC, A>(
     main_commitment: &[Val<SC>; 8],
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    // chip_height removal Stage C: the per-shard provider is no longer
-    // consulted here — the baked `metadata_height()` is the sole source.
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -1192,9 +1186,6 @@ pub fn observe_zerocheck_to_jagged_bridge<SC>(
 pub fn compute_skip_device_d2h<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    // chip_height removal Stage C: unused — `metadata_height()` is the sole
-    // per-chip height source now.
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> bool
 where
     SC: StarkGenericConfig,
@@ -1363,9 +1354,6 @@ pub fn compute_residual_y_openings<SC, A>(
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
-    // chip_height removal Stage C: unused — the baked `heights` slice below is
-    // the sole per-chip height source now.
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
     // Per-chip metadata heights, parallel to `chips` (device dummies carry a
     // baked height; host chips `None`).  The sole empty-commit-trace height
     // source.  An empty / short slice (host callers that don't precompute it)
@@ -1457,9 +1445,6 @@ where
 pub fn build_chip_log_heights<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    // chip_height removal Stage C: unused — `metadata_height()` is the sole
-    // per-chip height source now.
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
 ) -> (
     std::collections::BTreeMap<String, u8>,
     std::collections::BTreeMap<String, usize>,
