@@ -243,30 +243,20 @@ where
         // main trace) materializes its main trace via the provider (D2H) and
         // folds it as host cells — the former "device-fold prepare cells" arm
         // (`dev.zerocheck_prepare_cells` + `device_cells`/`df_dims`) is retired.
-        let materialized_dev: Option<RowMajorMatrix<Val<SC>>> =
-            if pm.inner().is_none() {
-                _device_traces.and_then(|p| {
-                    crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
-                        &name, p,
-                    )
-                    .map(|(vals, w)| RowMajorMatrix::new(vals, w))
-                })
-            } else {
-                None
-            };
+        // CPU/GPU prover separation: the host zerocheck runs ONLY on the CpuProver
+        // path, which threads `_device_traces = None` (StarkGpuProver assembles the
+        // shard stages itself and routes the zerocheck to the device-native
+        // `prove_shard_zerocheck_gpu`, so this free-fn is never entered with a
+        // provider).  The former device-resident provider-materialize D2H
+        // (`materialized_dev`) was therefore always `None` here and is retired; a
+        // device-resident / unexercised chip is a width-0 `dummy` whose cells come
+        // from the empty-slice fallback below.
         let prep_trace = &preprocessed_traces[chip_idx];
         let prep_width = prep_trace.width;
-        // Main-trace dims: device-materialize D2H > host trace.
-        //   * device-materialize fallback → dims from the D2H'd matrix.
-        //   * host (or unexercised) chip → dims from the shared MLE
-        //     (`num_polynomials`/`num_real_entries`; a `dummy` yields (0, 0),
-        //     matching an empty raw trace).
+        // Main-trace dims from the shared MLE (`num_polynomials`/`num_real_entries`;
+        // a `dummy` yields (0, 0), matching an empty raw trace).
         let (main_width, main_height): (usize, usize) =
-            if let Some(md) = materialized_dev.as_ref() {
-                (md.width, if md.width == 0 { 0 } else { md.values.len() / md.width })
-            } else {
-                (pm.num_polynomials(), pm.num_real_entries())
-            };
+            (pm.num_polynomials(), pm.num_real_entries());
 
         // GKR-opening batch powers [β¹ .. β^(main+prep)].
         let combined_width = main_width + prep_width;
@@ -369,7 +359,10 @@ where
         let main_cells: Vec<$K> = {
             let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
                 Some(mle) => mle.guts().as_slice(),
-                None => materialized_dev.as_ref().map(|md| md.values.as_slice()).unwrap_or(&[]),
+                // Device-resident / unexercised chip (no host MLE inner): the
+                // provider-materialize D2H is retired (host zerocheck is
+                // `_device_traces = None`-only), so its cells are empty.
+                None => &[],
             };
             cells_src.iter().map(|v| <$K>::from(*v)).collect()
         };
@@ -463,11 +456,14 @@ where
     (sp1_proof, trace_at_z)
         }};
     }
-    if _device_traces.is_none() {
-        run_zerocheck_for_k!(Val<SC>)
-    } else {
-        run_zerocheck_for_k!(Challenge<SC>)
-    }
+    // CPU/GPU prover separation: the host zerocheck is entered ONLY by the
+    // CpuProver path, which always threads `_device_traces = None`
+    // (StarkGpuProver uses the device-native `prove_shard_zerocheck_gpu`, never
+    // this free-fn).  The provider-`Some` `K = EF` cell instantiation was
+    // therefore dead; the first sumcheck round runs unconditionally in the base
+    // field (`K = F`).  The `iota: F -> EF` ring-hom kept the two bit-identical,
+    // so this collapse is byte-neutral.
+    run_zerocheck_for_k!(Val<SC>)
 }
 
 
