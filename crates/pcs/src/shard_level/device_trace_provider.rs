@@ -32,18 +32,4 @@ pub trait DeviceTraceProvider: Send + Sync {
     /// orientation, and the dense / commit-jagged pack accessors).
     /// Implementations return `self`.
     fn as_any(&self) -> &(dyn Any + Send + Sync);
-
-    /// PIECE2: release ALL retained device-trace strong refs held by
-    /// this provider (per-chip `by_name` map AND any retained dense /
-    /// commit-jagged pack) so the underlying device buffers free as
-    /// soon as the last OTHER outstanding `Arc` drops.  Called by the
-    /// host orchestrator BETWEEN the jagged sumcheck reduce and the
-    /// BaseFold open (`prove_jagged_basefold_inner`), at which point the
-    /// raw main traces are no longer read on the device-happy path
-    /// (commit + GKR first-layer + reduce are all done; the open reads
-    /// only the committed stripe MLEs / codewords / Merkle tree).
-    /// Pure lifetime change — transcript-neutral (no challenger touch).
-    /// Default: no-op (host-only / non-device providers keep the legacy
-    /// behaviour).
-    fn release_all(&self) {}
 }
