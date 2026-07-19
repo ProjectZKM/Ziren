@@ -324,8 +324,6 @@ mod tests {
             zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count,
             &mut challenger,
-            // Host-only synthetic-witness builder; no device traces.
-            None,
             // CpuProver-equivalent orientation.
             zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
             // band-cap carrier removal Phase B: per-shard rev(zeta) orientation

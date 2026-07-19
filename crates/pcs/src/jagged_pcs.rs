@@ -1533,11 +1533,6 @@ pub mod jagged {
     /// dropped device-chip cells / zero commitment).
     pub fn precompute_jagged_basefold_commit_provider(
         chip_traces: &[ChipTraceView<'_>],
-        // Per-shard device-trace provider — retained for signature parity with
-        // the GPU prover (which runs its own device-native copy); unused on this
-        // host path after Stage 5 removed the device re-materialize DECLINE
-        // branch (a later stage deletes the param + trait).
-        _provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         // The per-shard rev(zeta) orientation, threaded down (see
         // `precompute_jagged_basefold_commit`).
         use_rev: bool,
@@ -1662,7 +1657,6 @@ pub mod jagged {
             precomputed,
             pre_y_per_chip,
             challenger,
-            None,
             jagged_reducer,
             jagged_opener,
         )
@@ -1688,7 +1682,6 @@ pub mod jagged {
         precomputed: PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         jagged_reducer: &dyn super::JaggedReducer,
         jagged_opener: &dyn super::JaggedOpener,
     ) -> JaggedBasefoldBundle {
@@ -1699,7 +1692,6 @@ pub mod jagged {
             pre_y_per_chip,
             precomputed,
             challenger,
-            provider,
             jagged_reducer,
             jagged_opener,
         )
@@ -1750,7 +1742,6 @@ pub mod jagged {
             precomputed,
             pre_y_per_chip,
             challenger,
-            None,
             jagged_reducer,
             jagged_opener,
         )
@@ -1873,11 +1864,6 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        // Per-shard device-trace provider — retained for signature parity with
-        // the GPU prover (which runs its own device-native copy); unused on this
-        // host path after Stage 5 removed the device re-materialize/release
-        // branches (a later stage deletes the param + trait).
-        _provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         // The device jagged-reduction function, provided statically by the
         // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded down
         // to the reduction dispatch below.  `None` = host reduction (CPU

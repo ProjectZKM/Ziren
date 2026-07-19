@@ -74,7 +74,6 @@ pub fn prove_shard_zerocheck<SC, A>(
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    _device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
     // The shared per-chip analytic main-trace MLE (chip-index order),
     // built once in the shard dispatch over the `max_log_row_count` cube and
     // threaded read-only — the SOLE host main-trace source for this stage.

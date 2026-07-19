@@ -63,7 +63,6 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -146,7 +145,6 @@ where
     // unregistered-hook path.
     let mut precomputed = jagged_eval_producer.commit_multilinears(
         &named_inner,
-        device_traces,
         use_rev,
         recursion_area_pin,
     );
@@ -211,7 +209,6 @@ pub fn prove_shard_to_basefold<SC, A>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
     dense_rev: bool,
@@ -271,7 +268,6 @@ where
         public_values,
         max_log_row_count,
         challenger,
-        device_traces,
         orientation,
         dense_rev,
         recursion_area_pin,
@@ -322,7 +318,6 @@ where
         main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as crate::BasefoldRing>::BfMmcs,
@@ -348,7 +343,6 @@ where
     fn commit_multilinears(
         &self,
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
@@ -382,7 +376,6 @@ where
         main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as crate::BasefoldRing>::BfMmcs,
@@ -398,7 +391,6 @@ where
             main_traces,
             shared_eval_point,
             challenger,
-            device_traces,
             precomputed_commit,
             pre_y_per_chip,
             heights,
@@ -410,7 +402,6 @@ where
     fn commit_multilinears(
         &self,
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
@@ -418,7 +409,6 @@ where
         // (unregistered device commit) path in `maybe_auto_precompute_basefold`.
         crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
             named_inner,
-            device_traces,
             use_rev,
             recursion_area_pin,
         )
@@ -456,7 +446,6 @@ where
         main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[Challenge<SC>],
         challenger: &mut SC::Challenger,
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as crate::BasefoldRing>::BfMmcs,
@@ -483,7 +472,6 @@ where
             main_traces,
             shared_eval_point,
             challenger,
-            device_traces,
             precomputed_commit,
             pre_y_per_chip,
         )
@@ -492,14 +480,13 @@ where
     fn commit_multilinears(
         &self,
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
-        device_traces: Option<&dyn super::DeviceTraceProvider>,
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         // Route to the prover's `MachineProver::commit_multilinears` — a
         // `StarkGpuProver` device override is picked up here; `CpuProver` uses
         // the trait default (host commit) → byte-identical.
-        self.0.commit_multilinears(named_inner, device_traces, use_rev, recursion_area_pin)
+        self.0.commit_multilinears(named_inner, use_rev, recursion_area_pin)
     }
 }
 
@@ -516,7 +503,6 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
     dense_rev: bool,
@@ -581,7 +567,6 @@ where
         public_values,
         max_log_row_count,
         challenger,
-        device_traces,
         orientation,
         dense_rev,
         recursion_area_pin,
@@ -606,7 +591,6 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
     orientation: FoldOrientation,
     // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to `maybe_auto_precompute`
@@ -815,7 +799,6 @@ where
             commit_traces,
             main_commitment,
             precomputed_commit,
-            _device_traces,
             dense_rev,
             recursion_area_pin,
         );
@@ -906,7 +889,6 @@ where
             &logup_gkr_proof.logup_evaluations,
             max_log_row_count,
             challenger,
-            _device_traces,
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
@@ -1006,7 +988,6 @@ where
             // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
-            _device_traces,
             precomputed_commit,
             residual_y,
             &open_heights,
@@ -1633,7 +1614,6 @@ pub fn prove_trusted_evaluations<SC, A>(
     main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
-    _device_traces: Option<&dyn super::DeviceTraceProvider>,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as crate::BasefoldRing>::BfMmcs,
@@ -1864,9 +1844,6 @@ where
             // Zerocheck-residual openings (skips host step 3).
             pre_y_inner,
             lb_challenger,
-            // Provider arms the host-fallback re-materialize for empty
-            // (device-resident) chip traces — no-op on the happy path.
-            _device_traces,
             jagged_reducer,
             jagged_opener,
         );

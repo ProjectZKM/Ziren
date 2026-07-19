@@ -134,8 +134,6 @@ where
     pub main_commitment: [Val<SC>; 8],
     /// SP1: MainTraceData.public_values.
     pub public_values: Vec<Val<SC>>,
-    /// Ziren per-shard multi-GPU provider; SP1 keeps device state in `self`.
-    pub device_traces: Option<&'a dyn crate::shard_level::DeviceTraceProvider>,
     /// Ziren eager main pcs-data bundle; SP1 produces this inline (no field).
     pub precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
@@ -249,22 +247,56 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
-    /// Build a device-trace provider over the committed shard data —
-    /// plus the CUDA device id the traces live on — when this prover
-    /// keeps the main traces device-resident.  Host provers return
-    /// `None` (the default).
-    ///
-    /// Shrink device routing: lets generic orchestration code
-    /// (e.g. the shrink stage in `zkm-prover`) hand
-    /// `prove_shard_to_basefold` a [`crate::shard_level::DeviceTraceProvider`]
-    /// without naming GPU crate types, exactly like the GPU compress
-    /// pipeline does with its per-shard `DeviceShardTraces` snapshot.
+    /// Attach the BaseFold shard side-channel (`ShardProof::basefold_shard_proof`)
+    /// for the SHRINK stage.  Default no-op: the CPU `StarkMachine::open`
+    /// already populates `basefold_shard_proof` inline, so on a `CpuProver`
+    /// this is byte-exact skipped.  A `StarkGpuProver` OVERRIDES this with the
+    /// device-native attach — it re-runs the commit pipeline on the shrink
+    /// machine, builds its own per-shard `DeviceShardTraces` in-crate, and
+    /// drives the device BaseFold producer (the block that used to live inline
+    /// in `zkm-prover`'s `fn shrink`).  This keeps `fn shrink` backend-agnostic
+    /// and removes the device-shaped provider from the host prover surface
+    /// (SP1 parity: the host prover is `CpuBackend`-concrete).
     #[allow(unused_variables)]
-    fn shard_device_trace_provider(
+    fn attach_shard_basefold_side_channel(
         &self,
-        data: &ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>,
-    ) -> Option<(Box<dyn crate::shard_level::DeviceTraceProvider>, usize)> {
-        None
+        proof: &mut ShardProof<SC>,
+        dev_pk: &Self::DeviceProvingKey,
+        record: &A::Record,
+        opts: &<A::Record as MachineRecord>::Config,
+    ) where
+        SC: BasefoldRing,
+        A: for<'b> Air<VerifierConstraintFolder<'b, SC>>
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    crate::Challenge<SC>,
+                    crate::Challenge<SC>,
+                >,
+            >
+            + for<'b> Air<
+                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
+                    'b,
+                    Val<SC>,
+                    Val<SC>,
+                    crate::Challenge<SC>,
+                >,
+            > + Sync,
+        Val<SC>: p3_field::PrimeField + 'static,
+        crate::Challenge<SC>: p3_field::ExtensionField<Val<SC>>
+            + p3_field::BasedVectorSpace<Val<SC>>
+            + 'static,
+        SC::Challenger: 'static
+            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
+            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+            + p3_challenger::CanObserve<
+                <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >,
+        Self: Sized,
+    {
     }
 
     /// Observe the main commitment and public values and update the challenger.
@@ -306,13 +338,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn commit_multilinears(
         &self,
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
-        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
             named_inner,
-            device_traces,
             use_rev,
             recursion_area_pin,
         )
@@ -339,7 +369,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
-        device_traces: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         precomputed_commit: Option<
             crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
                 <SC as BasefoldRing>::BfMmcs,
@@ -373,7 +402,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             main_traces,
             shared_eval_point,
             challenger,
-            device_traces,
             precomputed_commit,
             pre_y_per_chip,
             // No per-chip metadata heights on this trait-method seam (kept off
@@ -450,7 +478,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             main_traces,
             main_commitment,
             public_values,
-            device_traces,
             precomputed_commit,
         } = data;
         // SP1-parity: source the three former carrier params from `self`/traces
@@ -515,7 +542,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             public_values,
             max_log_row_count,
             challenger,
-            device_traces,
             orientation,
             dense_rev,
             // SP1-parity: the recursion AREA PIN is no longer a param — sourced
@@ -1377,8 +1403,6 @@ where
             main_traces: main_traces_named,
             main_commitment: digest,
             public_values,
-            // CPU prover path; no device traces.
-            device_traces: None,
             // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
             // and the recursion AREA PIN are sourced inside
             // `prove_shard_to_basefold` from the traces + self, not threaded here.
