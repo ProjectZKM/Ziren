@@ -410,12 +410,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             // traces), so the free-fn's empty-trace height branch is never
             // taken → `&[]` (provider fallback) is byte-identical.
             &[],
-            // SP1-parity: CpuProver default = HOST reducer/opener, sourced by
-            // prover TYPE (byte-identical to the former threaded
-            // `&HostJaggedReducer` / `&HostJaggedOpener`; `is_device()` is always
-            // false on this path, so the host reduce/open is always used).
-            &crate::jagged_pcs::HostJaggedReducer,
-            &crate::jagged_pcs::HostJaggedOpener,
         )
     }
 
@@ -551,16 +545,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             None,
             precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
-            // Reduce + open dispatch: the default (CpuProver / any prover not
-            // overriding `prove_shard_to_basefold`, e.g. the wrap prover) uses
-            // the HOST reducer / opener.  The GPU core prover overrides
-            // `prove_shard_to_basefold` and threads its own `&DeviceJaggedReducer`
-            // / `&DeviceJaggedOpener` POSITIONALLY.  Static dispatch by prover
-            // TYPE (SP1-parity — the former `gpu_jagged_reduction_v2()` /
-            // `gpu_basefold_open_hook()` always-`None` accessors are removed);
-            // byte-identical to the former `None`-hook host path.
-            &crate::jagged_pcs::HostJaggedReducer,
-            &crate::jagged_pcs::HostJaggedOpener,
         )
     }
 

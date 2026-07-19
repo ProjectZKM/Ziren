@@ -272,10 +272,6 @@ where
         dense_rev,
         recursion_area_pin,
         precomputed_commit,
-        // Pure host-path entry (shrink + dummy callers) — host reducer/opener;
-        // the device sites override `prove_shard_to_basefold` instead.
-        &crate::jagged_pcs::HostJaggedReducer,
-        &crate::jagged_pcs::HostJaggedOpener,
     )
 }
 
@@ -328,8 +324,6 @@ where
         // free-fn `prove_trusted_evaluations` by `FreeFnJaggedEval`, unused on
         // the prover-routed path (the `MachineProver` override sources its own).
         heights: &[Option<usize>],
-        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 
     /// Commit the shard's per-chip main multilinears to the BaseFold
@@ -383,8 +377,6 @@ where
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
         heights: &[Option<usize>],
-        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
         prove_trusted_evaluations::<SC, A>(
             chips,
@@ -394,8 +386,6 @@ where
             precomputed_commit,
             pre_y_per_chip,
             heights,
-            jagged_reducer,
-            jagged_opener,
         )
     }
 
@@ -453,20 +443,12 @@ where
         >,
         pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
         heights: &[Option<usize>],
-        jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-        jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
     ) -> crate::shard_level::shard_proof::EvaluationProof {
-        // SP1-parity: `MachineProver::prove_trusted_evaluations` no longer takes
-        // the reducer/opener — it sources them by prover TYPE (CpuProver = Host*,
-        // StarkGpuProver = Device*).  The producer's own `jagged_reducer` /
-        // `jagged_opener` params (kept on the `JaggedEvalProducer` seam for the
-        // `FreeFnJaggedEval` sibling, which DOES forward them to the free-fn) are
-        // unused on this prover-routed path.  Byte-identical: the value they
-        // carried == the type-determined one the trait method now sources.
-        // `heights` is likewise unused here — the `StarkGpuProver` override
-        // sources a device chip's height from its OWN provider/dummies, and the
-        // CpuProver default (all host chips) never reads the empty-trace branch.
-        let _ = (heights, jagged_reducer, jagged_opener);
+        // `heights` is unused on this prover-routed path: the `StarkGpuProver`
+        // override sources a device chip's height from its OWN provider/dummies,
+        // and the CpuProver default (all host chips) never reads the empty-trace
+        // branch.
+        let _ = heights;
         self.0.prove_trusted_evaluations(
             chips,
             main_traces,
@@ -515,14 +497,6 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    // #130: device jagged-reduction fn; `Some(..)` on the GPU
-    // callers (core/compress) provides the device reduction
-    // statically, `None` on host callers = host reduction.
-    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-    // #118: device BaseFold open fn; `Some(..)` on the GPU callers
-    // (core/compress) provides the device open statically, `None` on host
-    // callers = host open.
-    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -572,8 +546,6 @@ where
         recursion_area_pin,
         precomputed_commit,
         &FreeFnJaggedEval,
-        jagged_reducer,
-        jagged_opener,
     )
 }
 
@@ -612,15 +584,6 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     // The jagged trusted-evaluations open producer.  Free-fn path
     // passes `&FreeFnJaggedEval`; a prover routes `&ProverJaggedEval(self)`.
     jagged_eval_producer: &D,
-    // The device jagged-reduction fn (#130), read from the prover's
-    // `gpu_jagged_reduction_v2()` (or `None` on the free-fn path) and
-    // threaded into the producer's `prove_trusted_evaluations`.
-    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-    // The device BaseFold open fn (#118), read from the prover's
-    // `gpu_basefold_open_hook()` (or `None` on the free-fn / CPU path) and
-    // threaded through the producer's `prove_trusted_evaluations` down to the
-    // `open_jagged_pcs` dispatch.
-    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -991,8 +954,6 @@ where
             precomputed_commit,
             residual_y,
             &open_heights,
-            jagged_reducer,
-            jagged_opener,
         )
     };
     tracing::info!(
@@ -1630,12 +1591,6 @@ pub fn prove_trusted_evaluations<SC, A>(
     // An empty / short slice tolerates `.get` → provider fallback (the
     // CpuProver trait-method path passes `&[]`).
     heights: &[Option<usize>],
-    // #130: the device jagged-reduction fn, provided statically by the
-    // prover; `None` = host reduction (CPU / free-fn callers).
-    jagged_reducer: &dyn crate::jagged_pcs::JaggedReducer,
-    // #118: the device BaseFold open fn, provided statically by the
-    // prover; `None` = host open (CPU / free-fn callers).
-    jagged_opener: &dyn crate::jagged_pcs::JaggedOpener,
 ) -> crate::shard_level::shard_proof::EvaluationProof
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -1844,8 +1799,6 @@ where
             // Zerocheck-residual openings (skips host step 3).
             pre_y_inner,
             lb_challenger,
-            jagged_reducer,
-            jagged_opener,
         );
         return EvaluationProof::Bundle(bundle);
     }
@@ -1869,8 +1822,6 @@ where
         z_row,
         pre_y_inner,
         lb_challenger,
-        jagged_reducer,
-        jagged_opener,
     );
     EvaluationProof::Bundle(bundle)
 }
