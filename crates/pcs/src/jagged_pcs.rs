@@ -1533,7 +1533,11 @@ pub mod jagged {
     /// dropped device-chip cells / zero commitment).
     pub fn precompute_jagged_basefold_commit_provider(
         chip_traces: &[ChipTraceView<'_>],
-        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // Per-shard device-trace provider — retained for signature parity with
+        // the GPU prover (which runs its own device-native copy); unused on this
+        // host path after Stage 5 removed the device re-materialize DECLINE
+        // branch (a later stage deletes the param + trait).
+        _provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         // The per-shard rev(zeta) orientation, threaded down (see
         // `precompute_jagged_basefold_commit`).
         use_rev: bool,
@@ -1541,32 +1545,12 @@ pub mod jagged {
         // down (was the `current_recursion_area_pin()` thread-local).
         recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommit {
-        // No empty entry / no provider → identical to the plain path
-        // (a cheap clone-through when nothing needs re-materializing).
-        let needs_remat =
-            provider.is_some() && chip_traces.iter().any(|(_, t)| t.width == 0);
-        if !needs_remat {
-            return precompute_jagged_basefold_commit(chip_traces, use_rev, recursion_area_pin);
-        }
-        // DECLINE path: the device commit hook returned `None` (e.g. the
-        // commit-NTT OOM preflight) so we re-materialize the device-resident
-        // chips from the per-shard provider HERE, while the provider is still
-        // LIVE (the zerocheck-prepare `release_by_name` drain has NOT run yet
-        // at commit time).  Capture the CORRECT dense_q the commit is built
-        // over and carry it forward to the step-4 reduction via
-        // `host_dense_q`, so the reduction does NOT re-materialize from the
-        // (by-then DRAINED) provider → no wrong dense_q → no verifier
-        // reject.  Byte-identical to the golden host/device commit by
-        // construction (same `materialize_dense_jagged` over the same
-        // re-materialized chips that produced the committed digest).
-        let full = rematerialize_chip_traces_via_provider(chip_traces, provider);
-        let full_views = views_over_owned(&full);
-        let mut pre = precompute_jagged_basefold_commit(&full_views, use_rev, recursion_area_pin);
-        let dense_q =
-            materialize_dense_jagged::<InnerVal>(&full_views, pre.packing.log_dense_size, use_rev);
-        debug_assert_eq!(dense_q.len(), 1usize << pre.packing.log_dense_size);
-        pre.host_dense_q = Some(dense_q);
-        pre
+        // Stage 5: the device-resident re-materialize DECLINE path is dead from
+        // the GPU prover (it commits device-side in its own device-native copy
+        // and never calls this host fn) and inert on the CPU prover (no
+        // provider, no empty device-resident chips), so this is a thin
+        // pass-through to the host precompute.
+        precompute_jagged_basefold_commit(chip_traces, use_rev, recursion_area_pin)
     }
 
     /// BaseFold-over-BN254 generic precompute: build the BaseFold commit
@@ -1772,41 +1756,6 @@ pub mod jagged {
         )
     }
 
-    /// Re-materialize a provider-aware view of `chip_traces` for the
-    /// host fallback.  Any entry whose host trace is empty (width 0 — the
-    /// chip is device-resident, its real cells never D2H'd onto the host
-    /// `chip_traces`) is rebuilt from the per-shard provider via the
-    /// `register_materialize_trace_hook` D2H path; non-empty entries and
-    /// provider-misses are cloned through unchanged.  Returns an owned
-    /// `Vec` so the dense materialize sees real dims + values exactly as a
-    /// full eager `commit_traces` D2H would have produced.  Cold path only.
-    fn rematerialize_chip_traces_via_provider(
-        chip_traces: &[ChipTraceView<'_>],
-        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
-    ) -> alloc::vec::Vec<(alloc::string::String, RowMajorMatrix<InnerVal>)> {
-        chip_traces
-            .iter()
-            .map(|(name, trace)| {
-                if trace.width == 0 {
-                    if let Some(p) = provider {
-                        if let Some((vals, w)) =
-                            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<InnerVal>(
-                                name, p,
-                            )
-                        {
-                            return (name.clone(), RowMajorMatrix::new(vals, w));
-                        }
-                    }
-                }
-                // Host (width>0) chip: materialize an OWNED copy of the
-                // borrowed view's cells (byte-identical to the former owned
-                // `trace.clone()`).  Only the host-fallback / device-remat
-                // edges reach here; the happy open path never re-materializes.
-                (name.clone(), RowMajorMatrix::new(trace.values.to_vec(), trace.width))
-            })
-            .collect()
-    }
-
     /// Build borrowed `ChipTraceView`s over an OWNED re-materialized trace
     /// set (`rematerialize_chip_traces_via_provider`), so the downstream
     /// view-taking commit/reduction consumers can read its cells with no
@@ -1924,9 +1873,11 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-        // Per-shard device-trace provider, used only to re-materialize
-        // empty (device-resident) chip traces on the host-fallback edges.
-        provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
+        // Per-shard device-trace provider — retained for signature parity with
+        // the GPU prover (which runs its own device-native copy); unused on this
+        // host path after Stage 5 removed the device re-materialize/release
+        // branches (a later stage deletes the param + trait).
+        _provider: Option<&dyn crate::shard_level::DeviceTraceProvider>,
         // The device jagged-reduction function, provided statically by the
         // prover (`MachineProver::gpu_jagged_reduction_v2`) and threaded down
         // to the reduction dispatch below.  `None` = host reduction (CPU
@@ -2011,18 +1962,16 @@ pub mod jagged {
             // reduction skips it naturally.
             pre
         } else {
-            // When the residual openings are unavailable (the residual-y
-            // decline — no env kill-switch exists) the host triple-loop reads
-            // chip cells directly — re-materialize empty device-resident chips
-            // from the provider first so the reduction sees real cells (cold
-            // path; happy path takes the `pre` branch above).
-            let rematerialized_for_y =
-                rematerialize_chip_traces_via_provider(chip_traces, provider);
+            // The host triple-loop reads chip cells directly from the host
+            // `chip_traces` views.  (Stage 5: the device-resident re-materialize
+            // fallback is gone — dead from the GPU prover, which runs its own
+            // device-native copy, and inert on the CPU prover, which owns real
+            // host traces.)
             // The rev(zeta) orientation, read off the committed data
             // (`dense_rev`, from `PrecomputedJaggedCommit.rev`), captured by
             // value into the per-chip / per-column rayon closures below.
             let use_rev_y = dense_rev;
-            rematerialized_for_y
+            chip_traces
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
                 .map(|((_name, trace), r_row_c)| {
@@ -2152,62 +2101,9 @@ pub mod jagged {
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
-        // Free the prior-phase device residency BEFORE
-        // the jagged sumcheck reduce -- SP1's drop_ldes + read-base-by-ref
-        // model.  The reduce reads ONLY dense_q (either the device-resident
-        // buffer carried by value in precomputed_dense_carrier, OR the CARRIED
-        // host dense_q the commit-decline path captured into
-        // precomputed_host_dense_q), NOT the per-chip device traces held by
-        // the provider.  Freeing the provider traces is sound on EITHER
-        // device-happy path -- the reduce has its dense_q without
-        // re-materializing from the (about-to-be-drained) provider; off both
-        // paths a later cold re-materialize from the drained provider would
-        // silently produce an INVALID proof, so we leave the traces in place.
-        // Pure lifetime change, transcript-neutral.  Fires unconditionally on
-        // the device path (a provider being present).
-        //
-        // It accepts the CARRIED host dense_q path
-        // (precomputed_host_dense_q.is_some()), not only the DEVICE-commit
-        // path (precomputed_dense_carrier.is_some()).  On big shards (TM 2^22,
-        // log_dense=29) the device commit OOM-DECLINES to host (~6 GiB free)
-        // so the carrier is None and the dense_q is the CARRIED host buffer;
-        // firing the free on that carried path too (the dominant big-shard
-        // case) lets the reduce upload/fold the carried dense_q and never
-        // touch the provider, so freeing it here is sound and lets the reduce
-        // go device.
-        if let Some(p) = provider {
-            let hook_v2_present = jagged_reducer.is_device();
-            let device_happy = (precomputed_dense_carrier.is_some()
-                || precomputed_host_dense_q.is_some())
-                && hook_v2_present;
-            if device_happy {
-                let _rel_span =
-                    tracing::info_span!("dropldes_free_traces_pre_reduce").entered();
-                p.release_all();
-                tracing::info!(
-                    chips = n_chips,
-                    log_dense_size = packing.log_dense_size as u64,
-                    sub_phase = "free_traces_pre_reduce",
-                    "DROPLDES (#74): released device-trace provider refs \
-                     BEFORE the jagged reduce (SP1 drop_ldes analog; \
-                     dense_q registry untouched)"
-                );
-            } else {
-                use std::sync::OnceLock;
-                static WARN_ONCE: OnceLock<()> = OnceLock::new();
-                WARN_ONCE.get_or_init(|| {
-                    tracing::warn!(
-                        precomputed_dense_carrier = precomputed_dense_carrier.is_some(),
-                        carried_host_dense_q = precomputed_host_dense_q.is_some(),
-                        hook_v2 = hook_v2_present,
-                        "DROPLDES (#74/#116): pre-reduce free requested but NOT on \
-                         the device-happy path (neither a device handle nor a \
-                         carried host dense_q) -- skipping (a later cold path \
-                         could re-materialize from the provider)."
-                    );
-                });
-            }
-        }
+        // Stage 5: the pre-reduce device-trace `release_all` (SP1 drop_ldes
+        // analog) is gone — dead from the GPU prover (its own device-native
+        // copy owns the free) and inert on the CPU prover (no provider).
 
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
@@ -2278,12 +2174,11 @@ pub mod jagged {
                 debug_assert_eq!(carried.len(), 1usize << packing.log_dense_size);
                 carried
             } else {
-                // When device-resident chips carry empty host traces,
-                // re-materialize them from the provider before the host
-                // dense pack (cold path — happy path takes skip_host_dense).
-                let rematerialized =
-                    rematerialize_chip_traces_via_provider(chip_traces, provider);
-                materialize_dense_jagged::<InnerVal>(&views_over_owned(&rematerialized), packing.log_dense_size, dense_rev)
+                // Host dense pack straight from the host `chip_traces` views.
+                // (Stage 5: the device-resident re-materialize fallback is gone
+                // — dead from the GPU prover's own device-native copy, inert on
+                // the CPU prover.)
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev)
             };
 
             // Device buffer source (single shard-wide commit buffer): the
@@ -2349,34 +2244,13 @@ pub mod jagged {
                          prove_jagged_reduction_owned",
                     );
                     let dense_q = saved_dense.unwrap_or_else(|| {
-                        // Re-materialize empty (device-resident) chip traces
-                        // from the provider so the host reduction fallback
-                        // rebuilds the correct dense_q (not a partial zero
-                        // buffer).
-                        //
-                        // This edge is REACHABLE and CORRECT whenever the
-                        // provider is still live: the pre-reduce `release_all`
-                        // deliberately SKIPS the not-device-happy path exactly
-                        // so this can re-materialize (see its warn-once above).
-                        //
-                        // With the SP1-parity owned carrier the device buffer
-                        // rides the commit→reduce seam BY VALUE, so there is no
-                        // registry MISS — the former only decline that could
-                        // reach this edge on an already-drained provider.  The
-                        // sole remaining decline is the reduce size-gate
-                        // (`log_dense < min`), which is CONSISTENT with the
-                        // commit size-gate that set the carrier, so a
-                        // `skip_host_dense` (carrier-Some) shard never reaches
-                        // here.  Only LIVE-provider shape declines do (small
-                        // shards below the gate, provider not released), and
-                        // they re-materialize correctly.
-                        let rematerialized =
-                            rematerialize_chip_traces_via_provider(
-                                chip_traces,
-                                provider,
-                            );
+                        // Host fallback: pack dense_q straight from the host
+                        // `chip_traces` views.  (Stage 5: the device-resident
+                        // re-materialize is gone — dead from the GPU prover's own
+                        // device-native copy, inert on the CPU prover, whose host
+                        // reducer never declines so this arm never fires.)
                         materialize_dense_jagged::<InnerVal>(
-                            &views_over_owned(&rematerialized),
+                            chip_traces,
                             packing.log_dense_size,
                             dense_rev,
                         )
@@ -2401,32 +2275,9 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // ── Free the device-resident main traces BEFORE the
-        // BaseFold open.  The reduce is the LAST phase that reads the raw
-        // per-chip traces (commit + GKR first-layer + reduce all done);
-        // the jagged-eval sub-protocol below operates on `packing.offsets`
-        // (column geometry, not cells) and the open reads only the
-        // committed stripe MLEs / codewords / Merkle tree (see
-        // `open_jagged_pcs`).  Dropping the provider's retained trace +
-        // dense/commit-jagged strong refs here lets the underlying device
-        // buffers free (~10.5 GiB at log_dense=30) so the device open's
-        // ~21.78 GiB footprint fits a 32 GB card instead of pre-firing a
-        // host decline (and the host open's device NTT no longer OOMs).
-        //
-        // Pure LIFETIME change — transcript-neutral (no challenger touch,
-        // no proof bytes affected).  Gated on a provider being present
-        // (i.e. the GPU device path); host-only proving never passes one,
-        // so the host test/verify path is unaffected.  Kill-switch:
-        // ZIREN_GPU_FREE_TRACES_PRE_OPEN=0.
-        if let Some(p) = provider {
-            let _rel_span = tracing::info_span!("piece2_free_traces_pre_open").entered();
-            p.release_all();
-            tracing::info!(
-                chips = n_chips,
-                sub_phase = "free_traces_pre_open",
-                "PIECE2: released device-trace provider refs before open"
-            );
-        }
+        // Stage 5: the pre-open device-trace `release_all` (PIECE2) is gone —
+        // dead from the GPU prover (its own device-native copy owns the
+        // pre-open free) and inert on the CPU prover (no provider).
 
             reduction
         };
