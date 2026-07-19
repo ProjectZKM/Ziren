@@ -781,29 +781,23 @@ where
     // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
     // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 23).  The device dense
     // handle is registered only at/above this size.
-    // C0 extraction: prospective-dense D2H-skip decision + the eager
-    // device-chip remat side-store.  Lifted verbatim into `zkm-pcs` pub
-    // helpers so the device-native drivers reuse the SAME non-device
-    // commit-trace plumbing.  Pure data — no transcript observe.
-    let skip_device_d2h =
-        compute_skip_device_d2h::<SC, A>(chips, shared_trace_mles);
-    let eager_device_remat = build_eager_device_remat::<SC, A>(
-        chips,
-        shared_trace_mles,
-        _device_traces,
-        skip_device_d2h,
-    );
-    // C0 extraction: the per-chip commit-trace set as BORROWED row-major
-    // views over the shared `Arc<Mle>` store + the eager remat side-store
-    // (retains the SITE-1 zero-copy).  The returned views borrow the
-    // driver-owned `eager_device_remat` + `shared_trace_mles`, so they
-    // outlive as long as those inputs.
+    // The CpuProver driver's per-shard provider is always `None` (the GPU
+    // pipeline assembles this stage device-native and never calls this host
+    // driver), so every chip is host-resident. There is no device-chip remat
+    // side-store and no early device cumulative-sum tail capture: an
+    // all-`None` remat drives `build_commit_trace_views` down the pure
+    // host-trace branch, where each present chip BORROWS the shared `Arc<Mle>`
+    // store's real (unpadded) cells (the SITE-1 zero-copy). The returned
+    // views' lifetime is tied to `no_device_remat`, so the driver owns it for
+    // the duration.
+    let no_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> =
+        chips.iter().map(|_| None).collect();
     let commit_traces =
-        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &eager_device_remat);
-    // C0 extraction: early cumulative-sum TAIL capture (pre-drain) for
-    // device-resident chips.
-    let chip_cum_tails =
-        capture_chip_cum_tails::<SC, A>(chips, shared_trace_mles, _device_traces);
+        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &no_device_remat);
+    // All-`None` cumulative-sum tails: `build_chip_cumulative_sums` reads each
+    // present chip's raw host cells directly.
+    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
+        chips.iter().map(|_| None).collect();
     // HEIGHT-AGNOSTIC RECURSION: the PRESENT chips' commit traces stay at their
     // NATURAL raw height (no band-pad), so the host packing offsets == the raw
     // degree heights == the in-circuit RAW col_prefix_sums reconstruction.  The
@@ -1236,46 +1230,6 @@ where
     prospective_log_dense >= gpu_min_log_dense
 }
 
-/// C0 block 2 (part 2) — the OWNED side-storage for the RARE eager-D2H
-/// device-chip materialize (the non-happy device path: `skip_device_d2h ==
-/// false`, or no provider height).  Host chips + happy/unexercised device
-/// chips leave their slot `None`.  The `build_commit_trace_views` output
-/// borrows this Vec for its populated slots, so the eager cells must outlive
-/// those views (the driver owns this Vec).
-pub fn build_eager_device_remat<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
-    skip_device_d2h: bool,
-) -> Vec<Option<RowMajorMatrix<Val<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            if pm.inner().is_some() {
-                return None;
-            }
-            let p = device_traces?;
-            if skip_device_d2h && pm.metadata_height().is_some() {
-                // Device-resident chip, handle path guaranteed: skip the D2H,
-                // keep it empty (the device commit hook packs it D2D).
-                return None;
-            }
-            // Handle path NOT guaranteed: eager D2H here, PRE-DRAIN, so the
-            // host reduction fallback has correct cells.
-            crate::shard_level::logup_gkr_prover::materialize_chip_main_trace_via_provider::<Val<SC>>(
-                &chip.name(),
-                p,
-            )
-            .map(|(vals, w)| RowMajorMatrix::new(vals, w))
-        })
-        .collect()
-}
-
 /// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
 /// views over the shared `Arc<Mle>` store + the eager remat side-store
 /// (retains the SITE-1 zero-copy).  Host chips borrow the MLE's real
@@ -1307,37 +1261,6 @@ where
             // cells (zero-copy) — was the SITE-1 deep copy.
             let tr = pm.real_trace_ref().expect("inner Some => real_trace_ref Some");
             RowMajorMatrixView::new(tr.values, tr.width)
-        })
-        .collect()
-}
-
-/// C0 block 2 (part 4) — early capture of the cumulative-sum TAILS (last 14
-/// row-major values) for device-resident chips via a ~56-byte provider gather,
-/// BEFORE the zerocheck prepare's drain-on-lookup can drop the provider entry.
-/// Host-trace chips stay `None` (the assembly step reads their host cells).
-pub fn capture_chip_cum_tails<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    device_traces: Option<&dyn super::DeviceTraceProvider>,
-) -> Vec<Option<Vec<Val<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            // Host-trace chips (inner `Some`) stay `None`.
-            if pm.inner().is_some() {
-                return None;
-            }
-            let p = device_traces?;
-            crate::shard_level::logup_gkr_prover::chip_main_tail_via_provider::<Val<SC>>(
-                &MachineAir::<Val<SC>>::name(*chip),
-                14,
-                p,
-            )
         })
         .collect()
 }
