@@ -138,11 +138,20 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
         .map(Chip::new)
         .into_iter()
         .collect::<Vec<_>>();
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
+        // COMPRESS/reduce shards share a FIXED recursion trace area
+        // (`2^RECURSION_LOG_TRACE_AREA`) so every reduce layer commits against
+        // one jagged geometry — mark the machine so the device
+        // `prove_shard_to_basefold` override pins it (`Some(2^27)`).
+        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS).with_recursion_area_pin(true)
     }
 
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
-        Self::compress_machine(config)
+        // SHRINK reuses compress's selector-free chip set but proves against its
+        // OWN natural trace area — it must NOT inherit compress's recursion-area
+        // pin (SP1-parity: only the compress stage pins).  Clearing the flag
+        // makes the device override yield `recursion_area_pin = None`, matching
+        // the former host free-fn shrink path (which passed `None`).
+        Self::compress_machine(config).with_recursion_area_pin(false)
     }
 
     /// A machine with dynamic chip sizes that includes the skinny variant of the Poseidon2 chip.

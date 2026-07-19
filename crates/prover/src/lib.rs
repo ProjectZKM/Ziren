@@ -2088,35 +2088,45 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 );
             }
 
-            let bf_proof = zkm_pcs::shard_level::prover::prove_shard_to_basefold::<
-                InnerSC,
-                ShrinkAir<Val<InnerSC>>,
-            >(
-                &chips,
-                &preprocessed_traces,
-                &main_traces,
-                digest,
-                data.public_values.clone(),
-                max_log_row_count,
+            // Seam A re-route (CPU/GPU prover separation, stage 1): drive the
+            // BaseFold producer through the `MachineProver::prove_shard_to_basefold`
+            // TRAIT METHOD on `self.shrink_prover` instead of the shared host
+            // free-fn.  On GPU components (`ShrinkProver = StarkGpuProver`) this
+            // picks up the device-native override (device zerocheck / LogUp-GKR /
+            // open — no host D2H via the provider); on CPU components
+            // (`ShrinkProver = CpuProver`) the trait DEFAULT delegates to the same
+            // free-fn → byte-identical host path.  SP1-parity repack of the former
+            // positional args into `ShardProveData` (mirrors the GPU compress
+            // orchestrator, ziren-gpu pipeline/prover.rs):
+            //   * `main_traces` -> the ready-made name-keyed `PaddedMle` store via
+            //     `named_padded_traces`, padded to the SAME per-stage
+            //     `max_log_row_count` the free-fn used (the override reads the cube
+            //     back off the traces).  `|_| None` heights: width-0 device chips
+            //     become plain `dummy`s (provider fallback) — byte-identical to the
+            //     free-fn's `EagerHostLoader::new(raw)` construction.
+            //   * orientation (Msb) / dense_rev (`core_rev()==false`) / the
+            //     recursion AREA PIN (`None` on shrink) are sourced INSIDE the
+            //     override from self/consts — no longer threaded here.
+            //   * `precomputed_commit: None` — GPU lacks the precomputed jagged
+            //     commit; the digest above is extracted straight from the MerkleCap.
+            let bf_proof = self.shrink_prover.prove_shard_to_basefold(
+                zkm_pcs::ShardProveData {
+                    chips: &chips,
+                    preprocessed_traces: &preprocessed_traces,
+                    main_traces: zkm_pcs::named_padded_traces(
+                        chips.iter().map(|chip| chip.name()),
+                        main_traces,
+                        max_log_row_count as u32,
+                        |_| None,
+                    ),
+                    main_commitment: digest,
+                    public_values: data.public_values.clone(),
+                    device_traces: device_provider
+                        .as_ref()
+                        .map(|(p, _)| p.as_ref() as &dyn zkm_pcs::shard_level::DeviceTraceProvider),
+                    precomputed_commit: None,
+                },
                 &mut bf_challenger,
-                // Per-shard device traces when the shrink prover is
-                // device-resident; None on the CPU prover (legacy host path).
-                device_provider
-                    .as_ref()
-                    .map(|(p, _)| p.as_ref() as &dyn zkm_pcs::shard_level::DeviceTraceProvider),
-                // Both the CPU/host prover and the GPU device path emit
-                // MSB-folded proofs (resolve_gpu_fold_orientation() default).
-                zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
-                // band-cap carrier removal Phase B: SHRINK is a non-core stage
-                // (`core_rev == false`) → LEGACY bitrev orientation, byte-identical
-                // to the pre-carrier path (shrink never installed the carrier).
-                false,
-                // band-cap carrier removal Phase C: SHRINK never installed the
-                // recursion AREA PIN → NATURAL own-area (byte-identical to legacy).
-                None,
-                // GPU lacks the precomputed jagged commit; the digest
-                // above is extracted straight from the MerkleCap.
-                None,
             );
 
             // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): FNV-1a over
