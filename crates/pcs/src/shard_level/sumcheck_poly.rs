@@ -386,26 +386,13 @@ pub trait GpuZerocheckChallenger {
 // registries outright (rather than threading a perpetual `None`) both
 // kills the global dispatch state and keeps the host path byte-identical.
 
-// Stateful device-resident per-layer LogUp-GKR sumcheck. Layer
-// state stays on device across all rounds; only the per-round
-// partials + alpha cross PCIe.
-
-#[derive(Debug, Clone)]
-pub struct GpuLogupRoundResult {
-    pub univariate_polys: Vec<Vec<Ef4>>,
-    /// Built front-first via `insert(0, alpha)` to match host driver.
-    pub point: Vec<Ef4>,
-    pub final_eval: Ef4,
-    /// `[n0, d0, n1, d1]`, matching
-    /// `LogupRoundPolynomial::get_component_poly_evals`.
-    pub openings: [Ef4; 4],
-    /// Optional device-resident post-fold layer handle for the next round
-    /// (cross-call chain).  `None` means the hook couldn't stash post-fold
-    /// state device-resident; the caller falls back to host `gkr_transition`.
-    /// (Folded in from the retired `GpuLogupRoundResultV3` wrapper — always
-    /// `None` today since the cross-call chain is not yet wired.)
-    pub next_layer: Option<DeviceLayerHandle>,
-}
+// Device-resident per-layer LogUp-GKR round result: the scalar-only
+// `GpuLogupRoundResult` (univariate_polys/point/final_eval/openings) was a
+// GPU-only device-ABI type with ZERO host consumers; the AirProver seam
+// (Stage C) relocated it into ziren-gpu
+// (`zkm-gpu-basefold::logup_round_device`), so the host no longer defines it.
+// Its dead `next_layer` cross-call channel (always `None`) was dropped in the
+// same stage (see the `GPU_LOGUP_ROUND_HOOK` note below).
 
 // P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` hook (device-fold
 // per-layer LogUp-GKR round driver, transcript driven via `observe_ef` /
@@ -447,70 +434,19 @@ pub struct GpuLogupRoundResult {
 // (V2 logup-round hook retired in M3 — the device pack is the production
 // first-layer path; declines route to the V1 hook.)
 
-// V3 device-handle logup-round hook: SP1-aligned signature that
-// accepts an opaque device-buffer handle instead of host
-// `Vec<Ef4>`, eliminating the per-layer flatten_layer host marshal.
-// Parallel to V2; ziren-gpu downcasts the handle to its concrete
-// `DeviceLayerState` inside the hook.
-
-/// Type-erased handle; ziren-gpu owns the concrete type and
-/// downcasts inside the hook.
-#[derive(Clone)]
-pub struct DeviceLayerHandle(pub alloc::sync::Arc<dyn core::any::Any + Send + Sync>);
-
-impl core::fmt::Debug for DeviceLayerHandle {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("DeviceLayerHandle").finish_non_exhaustive()
-    }
-}
-
-// (The `GpuLogupRoundResultV3 { round, next_layer }` wrapper was folded into
-// the base `GpuLogupRoundResult` — `next_layer` is now a field there.)
-
 // P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK` hook (device-pack per-layer
-// LogUp-GKR round driver — accepts an opaque `DeviceLayerHandle` from a prior
-// layer + drives the concrete `&mut InnerChallenger`) moved to
+// LogUp-GKR round driver — drives the concrete `&mut InnerChallenger`) moved to
 // `ShardDeviceOps::logup_round` (see `crate::shard_level::device_ops`), threaded
 // POSITIONALLY into `prove_gkr_round` (the per-shard `dev` is in scope there →
 // the `try_logup_round_gpu` helper); the `OnceLock` + `register_/get_`
 // accessors + the `GpuLogupRoundProverFn` fn-ptr alias were dropped.
-// (`DeviceLayerHandle` above STAYS — the method's `input` param + the
-// cross-round `LOGUP_V3_NEXT_HANDLE` TLS chain still carry it; `Ef4` below
-// serves the remaining hooks / this module's local uses.)
-
-// TLS slot threading `DeviceLayerHandle` between V3 hook calls
-// within one shard's GKR walk. Orchestrator must `clear` at shard
-// boundaries to prevent the prior shard's terminal-layer handle
-// leaking into the next shard's first call.
-std::thread_local! {
-    static LOGUP_V3_NEXT_HANDLE: std::cell::RefCell<Option<DeviceLayerHandle>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-#[must_use]
-pub fn take_logup_v3_next_handle() -> Option<DeviceLayerHandle> {
-    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take())
-}
-
-/// Non-consuming check for a stashed V3 device-layer handle.
-///
-/// Used by `prove_gkr_round`'s lazy-pull fast path to decide — WITHOUT
-/// consuming the handle or pulling the device layer to host — whether the
-/// next V3 call will run fully device-resident (handle present → reads
-/// quadrants from device, no host cells needed).  `take_logup_v3_next_handle`
-/// still consumes it inside the V3 driver.
-#[must_use]
-pub fn peek_logup_v3_next_handle() -> bool {
-    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow().is_some())
-}
-
-pub fn publish_logup_v3_next_handle(handle: DeviceLayerHandle) {
-    LOGUP_V3_NEXT_HANDLE.with(|c| *c.borrow_mut() = Some(handle));
-}
-
-pub fn clear_logup_v3_next_handle() {
-    LOGUP_V3_NEXT_HANDLE.with(|c| c.borrow_mut().take());
-}
+//
+// The V3 device-handle channel — the opaque `DeviceLayerHandle`
+// (`Arc<dyn Any + Send + Sync>`) + the cross-round `LOGUP_V3_NEXT_HANDLE` TLS
+// (`take/peek/publish/clear_logup_v3_next_handle`) — was DEAD: the GPU device
+// pack never published a next-layer handle, so every `GpuLogupRoundResult` set
+// `next_layer: None` and the TLS always resolved to `None`.  The AirProver seam
+// (Stage C) dropped the whole channel.
 
 // ------------------------------------------------------------------
 // Device-built logup-round eq_row tables.

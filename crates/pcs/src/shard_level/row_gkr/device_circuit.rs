@@ -67,30 +67,6 @@ impl DeviceLayerHandle {
     pub fn inner(&self) -> &Arc<dyn AnyDeviceHandle> {
         &self.inner
     }
-
-    /// bridge to the V3 hook's untyped
-    /// [`crate::shard_level::sumcheck_poly::DeviceLayerHandle`]
-    /// (`Arc<dyn Any + Send + Sync>`).
-    ///
-    /// Both handle types ultimately wrap the same concrete payload
-    /// owned by the GPU crate; this method clones the `Arc` and
-    /// upcasts the trait object so the dispatch site can feed the
-    /// scope-attached handle into the V3 hook's `input:
-    /// Option<DeviceLayerHandle>` parameter without forcing the
-    /// caller to thread two distinct handle types through.
-    ///
-    /// Trait upcasting (`Arc<dyn AnyDeviceHandle>` →
-    /// `Arc<dyn Any + Send + Sync>`) is stable since rustc 1.86; the
-    /// `AnyDeviceHandle: Any + Send + Sync` supertrait bound makes
-    /// the upcast well-defined.
-    #[inline]
-    #[must_use]
-    pub fn to_sumcheck_handle(
-        &self,
-    ) -> crate::shard_level::sumcheck_poly::DeviceLayerHandle {
-        let any_arc: Arc<dyn core::any::Any + Send + Sync> = self.inner.clone();
-        crate::shard_level::sumcheck_poly::DeviceLayerHandle(any_arc)
-    }
 }
 
 impl core::fmt::Debug for DeviceLayerHandle {
@@ -586,17 +562,17 @@ std::thread_local! {
 ///
 /// 1. Pop a pre-materialized [`DeviceCircuitLayer`] from the scope's
 ///    installed [`DeviceLogupGkrCircuit`].
-/// 2. Bridge the layer's [`DeviceLayerHandle`] into the V3 hook's
-///    untyped handle parameter via
-///    [`DeviceLayerHandle::to_sumcheck_handle`].
+/// 2. Read the layer's [`DeviceLayerHandle`] shape metadata.
 /// 3. Skip the per-call `flatten_layer` + `cast_vec_ef_to_ef4` host
 ///    marshalling (~500 µs per round).
 ///
 /// **Type erasure rationale**: TLS slots cannot hold generic types,
 /// so we pin the slot to the single concrete `(KoalaBear, Ef4)`
 /// production scope.  Non-production callers (e.g. test code with a
-/// different EF) see `None` here and fall through to the existing
-/// `take_logup_v3_next_handle` path — byte-equivalent to legacy.
+/// different EF) see `None` here and fall through to the host-marshal
+/// path — byte-equivalent to legacy.  (The V3 device-handle bridge
+/// `to_sumcheck_handle` + the `LOGUP_V3_NEXT_HANDLE` TLS this note used
+/// to reference were dropped as dead in the AirProver seam Stage C.)
 ///
 /// **Safety contract**: the pointer is set exclusively by
 /// [`LogupTaskScopeGuard::enter_with_scope`] from a `&mut
@@ -744,9 +720,10 @@ impl Drop for LogupTaskScopeGuard {
         // when prior_ptr is None preserves the "no scope" state.
         LOGUP_TASK_SCOPE_PTR.with(|c| c.set(self.prior_ptr));
         LOGUP_TASK_SCOPE_ACTIVE.with(|c| c.set(self.prior));
-        // Clear the per-V3-call handle TLS — prevents the terminal
-        // layer's handle from leaking into the next shard's first call.
-        crate::shard_level::sumcheck_poly::clear_logup_v3_next_handle();
+        // (The per-V3-call `LOGUP_V3_NEXT_HANDLE` TLS that this Drop used to
+        // clear was DEAD — the GPU device pack never published a handle — and
+        // was removed with the rest of the V3 device-handle channel in the
+        // AirProver seam Stage C.)
     }
 }
 
@@ -996,29 +973,6 @@ mod tests {
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
     }
 
-    /// guard drop clears the V3 next-layer handle TLS, closing the
-    /// cross-shard race (the guard drop is the sole caller of
-    /// `clear_logup_v3_next_handle`).
-    #[test]
-    fn task_scope_guard_clears_v3_handle_on_drop() {
-        use crate::shard_level::sumcheck_poly::{
-            publish_logup_v3_next_handle, take_logup_v3_next_handle,
-            DeviceLayerHandle as V3Handle,
-        };
-        struct Tag;
-        // Install a fake handle as if the prior round had returned one.
-        publish_logup_v3_next_handle(V3Handle(Arc::new(Tag) as Arc<_>));
-        {
-            let _guard = LogupTaskScopeGuard::enter(42);
-            // Guard is alive — handle still observable to peek-like calls.
-        }
-        // Guard dropped — handle MUST be cleared.
-        assert!(
-            take_logup_v3_next_handle().is_none(),
-            "LogupTaskScopeGuard::drop should clear V3 next-handle TLS"
-        );
-    }
-
     /// `enter_with_scope` for the production
     /// `(KoalaBear, Ef4)` type installs the typed pointer so the
     /// dispatch site can pop layers via `with_production_scope_mut`.
@@ -1068,22 +1022,6 @@ mod tests {
             );
         }
         assert!(LogupTaskScopeGuard::active_circuit_id().is_none());
-    }
-
-    /// `to_sumcheck_handle` bridges the typed
-    /// `device_circuit::DeviceLayerHandle` to the untyped
-    /// `sumcheck_poly::DeviceLayerHandle` that the V3 hook accepts,
-    /// preserving the underlying Arc payload via trait upcasting.
-    #[test]
-    fn device_layer_handle_to_sumcheck_handle_bridges_arc() {
-        let h = make_handle(99, 4, 3);
-        let v3_handle = h.to_sumcheck_handle();
-        // The bridged handle's Arc<dyn Any + Send + Sync> downcasts
-        // back to the original TestHandle, confirming the upcast
-        // preserved the concrete payload.
-        let any_ref: &dyn core::any::Any = &*v3_handle.0;
-        let test = any_ref.downcast_ref::<TestHandle>().expect("downcast");
-        assert_eq!(test.tag, 99);
     }
 
     /// `install_circuit_from_payloads` builds a
@@ -1182,62 +1120,4 @@ mod tests {
         assert!(scope.next_layer().is_none());
     }
 
-    /// pop a layer from an installed scope via
-    /// `with_production_scope_mut`, bridge to a sumcheck handle, and
-    /// confirm the round-trip.  This mirrors what
-    /// `try_logup_round_gpu` does on the hot path once 
-    /// installs a circuit.
-    #[test]
-    fn dispatch_site_pop_and_bridge_roundtrip() {
-        type Ef4 = p3_field::extension::BinomialExtensionField<KoalaBear, 4>;
-        let input_data = DeviceInputData {
-            circuit_id: 200,
-            num_row_variables: 3,
-            num_interaction_variables: 2,
-            input_handle: None,
-        };
-        let layers = vec![
-            DeviceCircuitLayer::<KoalaBear, Ef4>::Materialized(
-                make_handle(701, 1, 2),
-                PhantomData,
-            ),
-            DeviceCircuitLayer::<KoalaBear, Ef4>::FirstLayer(
-                make_handle(702, 2, 2),
-                PhantomData,
-            ),
-        ];
-        let circuit =
-            DeviceLogupGkrCircuit::<KoalaBear, Ef4>::new(layers, input_data, 0);
-
-        let mut scope = LogupTaskScope::<KoalaBear, Ef4>::new(200);
-        scope.install_circuit(circuit);
-
-        let _guard = LogupTaskScopeGuard::enter_with_scope::<KoalaBear, Ef4>(&mut scope);
-
-        // First call: pops FirstLayer, bridges to a sumcheck handle.
-        let h1 = with_production_scope_mut(|s| {
-            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
-        })
-        .expect("scope active")
-        .expect("layer popped");
-        // Downcast back to confirm we got the FirstLayer's TestHandle.
-        let any_ref: &dyn core::any::Any = &*h1.0;
-        assert_eq!(any_ref.downcast_ref::<TestHandle>().unwrap().tag, 702);
-
-        // Second call: pops Materialized terminal layer.
-        let h2 = with_production_scope_mut(|s| {
-            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
-        })
-        .expect("scope active")
-        .expect("terminal layer popped");
-        let any_ref2: &dyn core::any::Any = &*h2.0;
-        assert_eq!(any_ref2.downcast_ref::<TestHandle>().unwrap().tag, 701);
-
-        // Third call: scope exhausted.
-        let empty = with_production_scope_mut(|s| {
-            s.next_layer().and_then(|l| l.as_handle().map(|h| h.to_sumcheck_handle()))
-        })
-        .expect("scope active");
-        assert!(empty.is_none(), "exhausted scope yields None");
-    }
 }
