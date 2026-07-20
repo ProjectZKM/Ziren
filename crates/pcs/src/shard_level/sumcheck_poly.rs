@@ -347,43 +347,15 @@ pub trait GpuZerocheckChallenger {
 // host keeps that analytic, transcript-critical finalize, so the Fiat-Shamir
 // transcript is byte-identical regardless of the dispatch.
 
-/// Per-chip input for the BATCHED device y-tuple hook (chip fusion):
-/// one fused device launch over ALL chips in a round.  Slices borrow the
-/// per-chip ZeroCheckPoly data; the hook must not retain them past the call.
-pub struct ZerocheckChipYTupleInput<'a> {
-    pub chip_name: &'a str,
-    pub main_cells: &'a [Ef4],
-    pub num_main_cols: usize,
-    pub prep_cells: &'a [Ef4],
-    pub num_prep_cols: usize,
-    pub gkr_powers: &'a [Ef4],
-    pub alpha: Ef4,
-    pub eq: &'a [Ef4],
-    /// Device-eq: `zeta[..dim-1]` — the point whose `partial_lagrange`
-    /// table (big-endian, `zeta_rest[0]` = MSB) is this round's eq weight
-    /// vector.  When `eq` is EMPTY (the `ZIREN_GPU_DEVICE_EQ=1` path) the
-    /// hook must build the `2^{zeta_rest.len()}` table ON DEVICE from this
-    /// point (reversed, for the LSB-first `partial_lagrange_ef` kernel)
-    /// instead of uploading a host table.  When `eq` is non-empty the hook
-    /// may ignore this field (legacy host-built table).
-    pub zeta_rest: &'a [Ef4],
-    pub num_real: usize,
-    /// Device-RESIDENT cells for this chip (the device-residency path): when
-    /// set, `main_cells`/`prep_cells` are EMPTY and the handle downcasts to
-    /// the provider's col-major device buffer (round 0:
-    /// `ColMajorMatrixDevice<KoalaBear>`; rounds >= 1: `DeviceEf4Cells`),
-    /// laid out `[main(nm) ++ prep(npc)]` with column stride = its row
-    /// count.  The fused hook reads it IN PLACE (pointer-array kernel) — no
-    /// host marshaling, no per-chip launch.
-    pub device_cells: Option<&'a (dyn core::any::Any + Send + Sync)>,
-}
-
 // P6 static dispatch: the `GPU_ZEROCHECK_BATCHED_YTUPLE` hook (one fused device
 // launch computing every real chip's (y_0,y_2,y_3,y_4) in a round) moved to
 // `ShardDeviceOps::zerocheck_batched_ytuple`, carried by `ZeroCheckPoly`; the
 // `OnceLock` + `register_/get_` accessors + the `GpuZerocheckBatchedYTupleFn`
-// fn-ptr alias were dropped.  `ZerocheckChipYTupleInput` (above) STAYS — it is
-// the method's per-chip input.
+// fn-ptr alias were dropped.  The method's per-chip input struct
+// `ZerocheckChipYTupleInput` was a GPU-only device-ABI type with ZERO host
+// consumers; the AirProver seam (Stage A) relocated it verbatim into ziren-gpu
+// (`zkm-gpu-core::basefold::zerocheck_ytuple_input`), so the host no longer
+// defines it.
 
 // P5 dead-hook removal: the `GPU_CONSTRAINT_EVAL_BATCHED` and
 // `GPU_CONSTRAINT_EVAL_CROSS_SHARD` `OnceLock` slots were removed — both had
