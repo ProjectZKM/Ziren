@@ -1544,11 +1544,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
                                 // RECURSION-LAYER AREA PIN (SP1-faithful, always
-                                // on — no env flag), band-cap carrier removal
-                                // Phase C: threaded EXPLICITLY as the `commit()`
-                                // `recursion_area_pin` param (was the
-                                // `RecursionAreaPinGuard` thread-local installed
-                                // here).  Pins this recursion proof's (normalize
+                                // on — no env flag): threaded EXPLICITLY as the
+                                // `commit()` `recursion_area_pin` param.  Pins
+                                // this recursion proof's (normalize
                                 // AND compose) jagged dense commit to a FIXED area
                                 // 2^RECURSION_LOG_TRACE_AREA so every recursion
                                 // child commits at a uniform num_stripes =
@@ -1583,8 +1581,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 let data = tracing::debug_span!("commit").in_scope(|| {
                                     // recursion (compress): own-chip-set commit (no
                                     // canonical-cluster missing-chip injection);
-                                    // recursion AREA PIN threaded explicitly
-                                    // (band-cap Phase C).
+                                    // recursion AREA PIN threaded explicitly.
                                     self.compress_prover.commit(&record, traces, None, recursion_area_pin)
                                 });
 

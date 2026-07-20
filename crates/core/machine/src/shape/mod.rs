@@ -1270,7 +1270,7 @@ pub mod tests {
         // Try to generate traces.
         let main_traces = prover.generate_traces(&record).unwrap();
 
-        // Try to commit the traces.  band-cap Phase C: no recursion AREA PIN
+        // Try to commit the traces.  No recursion AREA PIN
         // (CORE shape-probe → NATURAL own-area).
         let main_data = prover.commit(&record, main_traces, None, None);
 

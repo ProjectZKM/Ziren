@@ -43,10 +43,8 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     /// `commit()` from the per-stage source of truth
     /// (`StarkMachine::core_rev()` — `true` only on the CORE MIPS prove path).
     /// `open()` reads it off the shard data and threads it into the zerocheck +
-    /// jagged reduction so the whole prove stays in lockstep — this replaces
-    /// the former `current_use_rev()` / `UseRevGuard` thread-local carrier.
-    /// `false` on every recursion / shrink / wrap commit (byte-identical to
-    /// legacy).
+    /// jagged reduction so the whole prove stays in lockstep.
+    /// `false` on every recursion / shrink / wrap commit (byte-identical).
     pub rev: bool,
 }
 

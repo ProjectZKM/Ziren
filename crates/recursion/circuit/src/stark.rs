@@ -112,11 +112,9 @@ where
 {
     // Produce the basefold shard proof + matching VK using the
     // existing infrastructure.  The chip set and per-chip shapes
-    // come from the machine + shape pair.  band-cap carrier removal Phase C:
-    // this legacy (FRI-compose) path never had a `RecursionAreaPinGuard`
-    // installed on its call stack (the guard lived only in the basefold
-    // compress/wrap dummy builders), so the pin was always `None` here — pass
-    // `None` to preserve byte-behaviour.
+    // come from the machine + shape pair.  This legacy (FRI-compose) path
+    // is never a recursion-pinned commit, so pass `None` for the recursion
+    // AREA PIN to preserve byte-behaviour.
     let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape, None);
 
     // Build the empty FRI placeholder fields matching the real
@@ -233,10 +231,8 @@ where
 pub fn dummy_basefold_vk_and_shard_proof<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     shape: &OrderedShape,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN this dummy
-    // child must mirror, threaded EXPLICITLY (was the `RecursionAreaPinGuard`
-    // thread-local installed by the compress/wrap dummy builders around this
-    // call).  `Some(RECURSION_LOG_TRACE_AREA)` when the child being built is a
+    // The recursion-layer AREA PIN this dummy child must mirror.
+    // `Some(RECURSION_LOG_TRACE_AREA)` when the child being built is a
     // RECURSION (compress) proof (pinned dense → constant `jagged_n` / stripes);
     // `None` when it is a CORE/normalize child (NATURAL, byte-identical).
     recursion_area_pin: Option<usize>,

@@ -337,8 +337,7 @@ pub fn full_jagged_evaluation<EF: Field>(
     // the top prefix-sum bit for single/equal-height packings.
     let last = prefix_sums.last().copied().unwrap_or(0);
     let log_m = if last <= 1 { 0 } else { (last - 1).next_power_of_two().trailing_zeros() as usize };
-    // Band-cap carrier removal Phase C (recursion AREA-PIN retirement): the
-    // `claimed_sum` this closed form returns is INVARIANT to `num_bits` (as long
+    // The `claimed_sum` this closed form returns is INVARIANT to `num_bits` (as long
     // as `num_bits` is wide enough to hold every prefix sum).  The branching
     // program reads each prefix-sum bit via `get_ith_lsb`, which indexes from the
     // LSB end and returns ZERO both for positions beyond the array AND for the

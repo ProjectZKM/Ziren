@@ -466,10 +466,10 @@ pub mod outer_jagged_hooks {
             &chip_trace_views,
             mmcs,
             fri,
-            // band-cap carrier removal Phase B: outer/wrap prep commit is LEGACY
-            // bitrev (`use_rev = false`), byte-identical to the pre-carrier path.
+            // outer/wrap prep commit is LEGACY
+            // bitrev (`use_rev = false`), byte-identical.
             false,
-            // band-cap carrier removal Phase C: setup/preprocessed commit is never
+            // setup/preprocessed commit is never
             // a recursion prove commit → no AREA PIN (`None`), byte-identical.
             None,
         );

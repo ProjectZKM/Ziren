@@ -211,7 +211,7 @@ pub fn materialize_dense_jagged<F: Field>(
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
     // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
     // LEGACY bit-reversed (byte-identical to the recursion / shrink / wrap
-    // stages).  Replaces the former `current_use_rev()` thread-local carrier.
+    // stages).
     use_rev: bool,
 ) -> Vec<F> {
     // Performance optimization: pre-allocate the full output

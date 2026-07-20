@@ -765,10 +765,9 @@ fn stage0_forge_count_tamper_row_fibonacci() {
 }
 
 // ═════════════════════════════════════════════════════════════════════
-// STAGE 1 (band-cap retirement Phase 2) — ZERO-DEGREE MODEL SOUNDNESS.
+// STAGE 1 — ZERO-DEGREE MODEL SOUNDNESS.
 //
-// Phase 2 replaces the Phase-1 constraint-valid band-height-1 synthesized
-// missing-chip trace with a GENUINE HEIGHT-0 (0-row, full-width, zero)
+// The missing-chip trace is a GENUINE HEIGHT-0 (0-row, full-width, zero)
 // commit: a canonical-cluster chip a raw FIX-off shard lacks is committed
 // with `row_count = 0`, so its `degree` bits (`quotient[0]`) are ALL ZERO
 // (=> `full_geq == 1` => identity fraction (0,1) => excluded from the

@@ -223,9 +223,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
 
     /// Commit to the main traces.
     ///
-    /// `cluster_widths` (band-cap retirement Phase A) is the per-shard FULL
-    /// canonical-CLUSTER chip NAME -> trace WIDTH map, threaded EXPLICITLY (was
-    /// carried across this boundary by the `Height0MissingGuard` thread-local).
+    /// `cluster_widths` is the per-shard FULL
+    /// canonical-CLUSTER chip NAME -> trace WIDTH map, threaded EXPLICITLY.
     /// `Some(map)` (the CORE FIX-off path) => the commit injects a genuine
     /// HEIGHT-0 (0-row, full-width, zero) trace for each cluster chip this raw
     /// shard is MISSING (canonical cluster minus present), keeping the chip-SET
@@ -237,11 +236,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-        // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local the recursion
-        // prover installed around its commit+open).  `Some(RECURSION_LOG_TRACE_AREA)`
+        // The recursion-layer AREA PIN.  `Some(RECURSION_LOG_TRACE_AREA)`
         // on the RECURSION (compress) commit; `None` on CORE / shrink / wrap
-        // (byte-identical to legacy).
+        // (byte-identical).
         recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
@@ -486,15 +483,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         //     FIX-on recursion), so `num_variables()` IS the cube.
         let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
         let dense_rev = self.machine().core_rev();
-        // band-cap carrier removal Phase C: the recursion-layer AREA PIN is now
+        // The recursion-layer AREA PIN is
         // sourced INLINE on the prove path from the per-stage machine
         // discriminator `StarkMachine::pins_recursion_area()` — EXACTLY mirroring
         // how the `StarkGpuProver` device override sources it, and how `dense_rev`
         // is sourced from `core_rev()`.  `Some(RECURSION_LOG_TRACE_AREA)` on the
         // COMPRESS/reduce machine (pins the lazy jagged dense to `2^pin` → constant
         // `num_stripes`); `None` on CORE / shrink / wrap (NATURAL own-area,
-        // byte-identical to legacy).  This replaces the former eager-`commit()`
-        // recursion_area_pin, which is now inert on `CpuProver::commit`.
+        // byte-identical).
         let recursion_area_pin = if self.machine().pins_recursion_area() {
             Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
         } else {
@@ -792,7 +788,7 @@ where
             main_data,
             chip_ordering,
             public_values: record.public_values(),
-            // band-cap carrier removal Phase B: record the per-shard rev(zeta)
+            // Record the per-shard rev(zeta)
             // orientation from the per-stage source of truth
             // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS machine).
             rev: self.machine().core_rev(),
@@ -816,7 +812,7 @@ where
 
         let degrees = traces.iter().map(|trace| trace.height()).collect::<Vec<_>>();
 
-        // #P2S0 (band-cap retirement Phase 2): a genuinely-missing
+        // #P2S0: a genuinely-missing
         // canonical-cluster chip is committed as a 0-row matrix (height 0, not a
         // power of two), so `log2_strict_usize` would panic.  This legacy
         // `log_degree` field feeds ONLY the envelope `ShardProof.opened_values`
@@ -837,7 +833,7 @@ where
             chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
-        // #P2S0 (band-cap retirement Phase 2): `natural_domain_for_degree(0)`
+        // #P2S0: `natural_domain_for_degree(0)`
         // would panic (not-a-power-of-two).  `trace_domains` is legacy-FRI
         // scaffolding that is NEVER read after this point on the BaseFold path
         // (confirmed: no consumer in `open()`), so a 0-height chip maps to the
@@ -921,7 +917,7 @@ where
             // But cumulative sums are always observed (verifier does this unconditionally).
             for i in 0..chips.len() {
                 let local_sum = SC::Challenge::ZERO;
-                // #P2S0 (band-cap retirement Phase 2): a 0-row missing chip has
+                // #P2S0: a 0-row missing chip has
                 // no last row to read the septic digest from — it contributes the
                 // ZERO digest (no events, no cumulative-sum contribution).  Guard
                 // on `values.len() < 14` (NOT just `height() == 0`) so the guard is
@@ -1011,7 +1007,7 @@ where
                 .enumerate()
                 .map(|(i, (chip, log_degree))| {
                     // Extract cumulative sums matching what was observed into the transcript.
-                    // #P2S0 (band-cap retirement Phase 2): 0-row missing chip =>
+                    // #P2S0: 0-row missing chip =>
                     // ZERO digest.  `values.len() < 14` is the EXACT mirror of
                     // `chip_global_cumulative_sum` (`sz < 14 => zero`) — byte-identical
                     // for present global chips, panic-safe for any under-14 trace.

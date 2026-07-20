@@ -523,8 +523,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_col: &[InnerChallenge],
     z_trace: &[InnerChallenge],
     challenger: &mut C,
-    // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).
+    // The recursion-layer AREA PIN.
     // `Some(_)` (a recursion/compress commit, whose dense was pinned to
     // `2^RECURSION_LOG_TRACE_AREA`) => run the jagged-eval over the PINNED dense
     // (`half = z_trace.len() + 1`) so its structural-sumcheck dimension
@@ -557,8 +556,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     } else {
         (last - 1).next_power_of_two().trailing_zeros() as usize
     };
-    // RECURSION-LAYER AREA PIN (band-cap Phase C: explicit param, was a
-    // thread-local): when the caller passes `Some(_)` (a recursion/compress
+    // RECURSION-LAYER AREA PIN: when the caller passes `Some(_)` (a recursion/compress
     // commit, whose dense was pinned to `2^RECURSION_LOG_TRACE_AREA`), run the
     // jagged-eval over the PINNED dense rather than the natural column geometry,
     // so its dimension is CONSTANT across heterogeneous recursion children (the

@@ -105,8 +105,7 @@ pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 /// perf win is a core-trace property).  The pin is keyed by which machine is
 /// proving: the recursion (`compress`) prover passes
 /// `Some(RECURSION_LOG_TRACE_AREA)` as the `recursion_area_pin` param of
-/// `MachineProver::commit` (band-cap carrier removal Phase C — was the
-/// `RecursionAreaPinGuard` thread-local it installed around its commit+open), so
+/// `MachineProver::commit`, so
 /// [`precompute_jagged_basefold_commit_generic`] /
 /// [`precompute_jagged_basefold_commit`] bump `packing.log_dense_size` to
 /// `max(natural, RECURSION_LOG_TRACE_AREA)` and record it on
@@ -1245,13 +1244,11 @@ pub mod jagged {
         /// source of truth — `true` only on the CORE MIPS path).  Recorded on
         /// the committed data so the step-4 jagged reduction (host
         /// re-materialize + `y_per_chip`) uses the SAME orientation as the
-        /// commit, in lockstep — replaces the former `current_use_rev()`
-        /// thread-local carrier.  `false` on every recursion / shrink / wrap
-        /// commit (byte-identical to legacy).
+        /// commit, in lockstep.  `false` on every recursion / shrink / wrap
+        /// commit (byte-identical).
         pub rev: bool,
-        /// The recursion-layer AREA PIN this commit was built under (band-cap
-        /// carrier removal Phase C — replaces the former
-        /// `current_recursion_area_pin()` thread-local).  `Some(target_log)` on a
+        /// The recursion-layer AREA PIN this commit was built under.
+        /// `Some(target_log)` on a
         /// RECURSION (`compress`) commit: `packing.log_dense_size` was raised to
         /// `max(natural, target_log)` (a FIXED `2^target_log` committed area →
         /// constant `num_stripes`), and the step-4 jagged-eval must run over the
@@ -1307,8 +1304,7 @@ pub mod jagged {
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommit.rev` so the step-4 reduction stays in lockstep.
         use_rev: bool,
-        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).  See
+        // The recursion-layer AREA PIN.  See
         // the twin in `precompute_jagged_basefold_commit_generic`.
         recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommit {
@@ -1404,8 +1400,7 @@ pub mod jagged {
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommitGeneric.rev`.  `false` on the wrap/BN254 path.
         use_rev: bool,
-        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // EXPLICITLY (was the `current_recursion_area_pin()` thread-local).
+        // The recursion-layer AREA PIN.
         // `Some(target_log)` (a recursion/compress commit) => pin
         // `log_dense_size` to `max(natural, target_log)`; `None` (CORE / shrink /
         // wrap) => NATURAL own-area packing.
@@ -1614,7 +1609,7 @@ pub mod jagged {
         z_row: &[InnerChallenge],
         area: usize,
         challenger: &mut Ch,
-        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, read
+        // The recursion-layer AREA PIN, read
         // off the precomputed commit (`PrecomputedJaggedCommit.recursion_area_pin`)
         // and threaded into `prove_jagged_evaluation` so its half/round-count is
         // pin-consistent with the (pinned) commit.  `None` on CORE/shrink/wrap.
@@ -1718,9 +1713,9 @@ pub mod jagged {
         // provider-aware host fallback body captured the correct dense_q while
         // the provider was live).  It carries the dense_q forward so the
         // reduction below does not re-materialize from the (drained) provider.
-        // `recursion_area_pin` (band-cap Phase C) carries the recursion AREA PIN
+        // `recursion_area_pin` carries the recursion AREA PIN
         // forward so the step-4 jagged-eval half is pin-consistent with the
-        // (pinned) commit — read off the committed data, not a thread-local.
+        // (pinned) commit — read off the committed data.
         tracing::debug!(
             chips = n_chips,
             "jagged_pcs: using precomputed commit (Option B single-main-commit flow)",
@@ -1777,7 +1772,7 @@ pub mod jagged {
                 .map(|((_name, trace), r_row_c)| {
                     let h = trace.values.len() / trace.width.max(1);
                     let w = trace.width;
-                    // #P2S0 band-cap retirement: a genuine HEIGHT-0 (0-row) but
+                    // #P2S0: a genuine HEIGHT-0 (0-row) but
                     // FULL-WIDTH missing chip
                     // must still emit ONE column claim PER COLUMN (all zero),
                     // NOT an empty Vec.  `build_weight_table` and the verifier's

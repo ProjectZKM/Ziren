@@ -847,8 +847,7 @@ mod phase1_acceptance_gate {
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
         // This unit test uses the LEGACY bitrev convention (`use_rev = false`),
-        // matching the `use_rev_y = false` companion below — byte-identical to
-        // the pre-carrier-removal behaviour (no carrier was installed here).
+        // matching the `use_rev_y = false` companion below — byte-identical.
         let dense_q = crate::jagged::materialize_dense_jagged(&trace_views, packing.log_dense_size, false);
 
         // z_row: full max_log_row_count point (the shared zerocheck point).
@@ -882,7 +881,7 @@ mod phase1_acceptance_gate {
         // Mirror the production y orientation off the SAME orientation flag as
         // the companion `materialize_dense_jagged` above (`use_rev = false`), so
         // this test's commit and y stay consistent — LEGACY bitrev (the test's
-        // existing convention), byte-identical to the pre-carrier-removal path.
+        // existing convention), byte-identical.
         let use_rev_y = false;
         let y_per_chip: Vec<Vec<InnerChallenge>> = traces
             .iter()

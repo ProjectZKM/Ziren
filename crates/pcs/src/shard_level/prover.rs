@@ -63,19 +63,18 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
             <SC as crate::BasefoldRing>::BfMmcs,
         >,
     >,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
     // `PrecomputedJaggedCommit.rev` so the reduction stays in lockstep — covers
     // BOTH the device-hook and host-fallback build branches.
     use_rev: bool,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  Threaded to the
+    // The recursion-layer AREA PIN, threaded to the
     // host-fallback precompute (pins `log_dense_size`) and FORCED onto the built
     // `PrecomputedJaggedCommit.recursion_area_pin` so the OPEN-path jagged-eval
     // half reads it back in lockstep.  `Some(RECURSION_LOG_TRACE_AREA)` on the
     // GPU RECURSION (compress) lazy-commit path; `None` on every host / CORE /
-    // shrink / wrap path (byte-identical to legacy).
+    // shrink / wrap path (byte-identical).
     recursion_area_pin: Option<usize>,
 ) -> (
     Vec<RowMajorMatrixView<'t, Val<SC>>>,
@@ -163,7 +162,7 @@ where
         // hook builds its dense on-device under the SAME `use_rev`, but may not
         // stamp the flag — force it here so the step-4 reduction reads it back).
         precomputed.rev = use_rev;
-        // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
+        // FORCE the recursion AREA PIN onto the
         // built commit (the device hook pins `log_dense_size` device-side under
         // the SAME value, but may not stamp the field) so the OPEN-path
         // jagged-eval half reads it back in lockstep.
@@ -242,10 +241,9 @@ pub fn prove_shard_to_basefold<SC, A>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     orientation: FoldOrientation,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
+    // The per-shard rev(zeta) orientation.
     dense_rev: bool,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on the
+    // The recursion-layer AREA PIN.  `Some(_)` on the
     // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
@@ -518,10 +516,9 @@ pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     orientation: FoldOrientation,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation.
+    // The per-shard rev(zeta) orientation.
     dense_rev: bool,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  `Some(_)` on the
+    // The recursion-layer AREA PIN.  `Some(_)` on the
     // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
@@ -596,17 +593,15 @@ pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
     orientation: FoldOrientation,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to `maybe_auto_precompute`
     // (records it on the built `PrecomputedJaggedCommit.rev`) + the zerocheck,
-    // so the commit + zerocheck stay in lockstep.  Was the `current_use_rev()`
-    // thread-local carrier.
+    // so the commit + zerocheck stay in lockstep.
     dense_rev: bool,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `RecursionAreaPinGuard` thread-local).  Threaded to
+    // The recursion-layer AREA PIN, threaded to
     // `maybe_auto_precompute` (pins the lazy device/host commit + records the
     // field).  `Some(_)` on the GPU RECURSION (compress) lazy-commit path; `None`
-    // elsewhere (byte-identical to legacy).
+    // elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
     precomputed_commit: Option<
         crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
@@ -887,8 +882,7 @@ where
             // The shared per-chip trace-MLE built once above (covers ALL
             // chips) — the SOLE host main-trace source for this stage.
             shared_trace_mles,
-            // band-cap carrier removal Phase B: the per-shard rev(zeta)
-            // orientation (was the `current_use_rev()` carrier).
+            // The per-shard rev(zeta) orientation.
             dense_rev,
         )
     };

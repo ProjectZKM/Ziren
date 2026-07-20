@@ -546,8 +546,7 @@ impl ZKMWrapBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
                 >,
             >,
     {
-        // RECURSION-LAYER AREA PIN (band-cap carrier removal Phase C: explicit
-        // param, was a thread-local): the shrink program (built from this wrap
+        // RECURSION-LAYER AREA PIN: the shrink program (built from this wrap
         // dummy) verifies a single CHILD that is a RECURSION (compress) proof
         // committed at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`.
         // Pass `Some(RECURSION_LOG_TRACE_AREA)` so the dummy child bundle matches

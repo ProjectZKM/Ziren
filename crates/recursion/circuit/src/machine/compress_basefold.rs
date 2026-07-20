@@ -1155,10 +1155,9 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
                 >,
             >,
     {
-        // Recursion-layer area pin (dummy mirror), band-cap carrier removal
-        // Phase C: threaded EXPLICITLY as the `dummy_basefold_vk_and_shard_proof`
-        // `recursion_area_pin` param (was the `RecursionAreaPinGuard`
-        // thread-local installed here).  The compose (compress) program verifies
+        // Recursion-layer area pin (dummy mirror): threaded EXPLICITLY as the
+        // `dummy_basefold_vk_and_shard_proof` `recursion_area_pin` param.
+        // The compose (compress) program verifies
         // a batch of CHILD proofs that are themselves RECURSION proofs
         // (normalize / compose outputs), each committed by the recursion prover
         // at the FIXED pinned area `2^RECURSION_LOG_TRACE_AREA`; passing

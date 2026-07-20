@@ -83,11 +83,11 @@ pub fn prove_shard_zerocheck<SC, A>(
     // unexercised chip is a `dummy` (inner `None`, width 0): its cells come
     // from the device fold / provider-materialize fallback below.
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
+    // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()` — `true` only on the CORE MIPS path).
-    // Was the `current_use_rev()` thread-local carrier.  On the CORE path the
+    // On the CORE path the
     // whole proof is uniformly rev; every recursion / shrink / wrap prove is
-    // `false` (legacy, byte-identical).
+    // `false` (byte-identical).
     dense_rev: bool,
 ) -> (
     PartialSumcheckProof<Challenge<SC>>,

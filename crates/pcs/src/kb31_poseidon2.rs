@@ -613,12 +613,10 @@ pub mod koala_bear_poseidon2 {
             mmcs,
             fri,
             // Preprocessed-trace commit helper (setup / vk path): LEGACY bitrev
-            // orientation (`use_rev = false`), byte-identical to the
-            // pre-carrier-removal path (no carrier was installed here).
+            // orientation (`use_rev = false`), byte-identical.
             false,
-            // band-cap carrier removal Phase C: preprocessed / setup commit is
-            // never a recursion prove commit → no AREA PIN (`None`), byte-identical
-            // (no carrier was installed here).
+            // Preprocessed / setup commit is never a recursion prove commit
+            // → no AREA PIN (`None`), byte-identical.
             None,
         );
         bincode::serialize(&pre.commit.original_commitment)

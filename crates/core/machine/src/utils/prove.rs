@@ -757,15 +757,11 @@ where
                                 |(record, main_traces)| {
                                     let _span = span.enter();
 
-                                    // #P2S0 band-cap retirement (Stage 5): derive
-                                    // the FULL canonical CLUSTER this raw FIX-off
-                                    // shard lifts to (the SAME shape `fix_shape` +
+                                    // Derive the FULL canonical CLUSTER this raw
+                                    // FIX-off shard lifts to (the SAME shape `fix_shape` +
                                     // `canonicalize_shape_to_cluster` produce under
                                     // FIX_CORE_SHAPES=true) and its chip NAME -> width
-                                    // map, then pass it EXPLICITLY to `commit` (band-cap
-                                    // retirement Phase A — was carried across the
-                                    // `commit` trait boundary by a `Height0MissingGuard`
-                                    // thread-local).  The PCS commit
+                                    // map, then pass it EXPLICITLY to `commit`.  The PCS commit
                                     // (`commit_basefold_path`) derives the missing set
                                     // (canonical cluster minus present), and injects a
                                     // genuine HEIGHT-0 (0-row, full-width, zero) trace
@@ -796,10 +792,9 @@ where
                                                 .collect()
                                         });
 
-                                    // LOCKSTEP ORIENTATION (band-cap carrier removal
-                                    // Phase B): the per-shard rev(zeta) decision is no
-                                    // longer a thread-local carrier.  `commit()` reads
-                                    // it directly off the per-stage source of truth
+                                    // LOCKSTEP ORIENTATION: `commit()` reads the
+                                    // per-shard rev(zeta) decision directly off the
+                                    // per-stage source of truth
                                     // (`StarkMachine::core_rev()` — `true` for the CORE
                                     // MIPS machine) and records it on
                                     // `ShardMainData.rev` / `PrecomputedJaggedCommit.rev`;
@@ -808,12 +803,11 @@ where
                                     // so the whole CORE proof is uniformly rev and the
                                     // commit / zerocheck / reduction can never drift.
                                     // The recursion / shrink / wrap machines carry
-                                    // `core_rev() == false` (legacy, byte-identical).
+                                    // `core_rev() == false` (byte-identical).
                                     let t_commit = std::time::Instant::now();
-                                    // band-cap carrier removal Phase C: CORE never
-                                    // pins the recursion AREA (that is a compress-only
-                                    // geometry) → `None` (NATURAL own-area commit,
-                                    // byte-identical to the pre-carrier path).
+                                    // CORE never pins the recursion AREA (that is a
+                                    // compress-only geometry) → `None` (NATURAL own-area
+                                    // commit, byte-identical).
                                     let main_data =
                                         prover.commit(&record, main_traces, cluster_widths, None);
                                     let commit_ms = t_commit.elapsed().as_millis();
