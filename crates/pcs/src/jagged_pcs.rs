@@ -1240,38 +1240,6 @@ pub mod jagged {
         pub packing: crate::jagged::JaggedPacking<InnerVal>,
         pub commit: crate::jagged_pcs::JaggedCommitGeneric<MT>,
         pub prover_data: crate::jagged_pcs::JaggedProverDataGeneric<MT>,
-        /// Single shard-wide commit buffer: a type-erased OWNED carrier for
-        /// the device-resident dense polynomial the commit was built from
-        /// (SP1-parity — the buffer rides this struct across the
-        /// `commit_multilinears` return / `prove_trusted_evaluations` input
-        /// seams, replacing the former process-global `u64` handle registry).
-        /// `zkm-pcs` cannot name `DeviceBuffer` (no GPU dep), so it holds the
-        /// buffer type-erased as `Box<dyn Any + Send + Sync>` (matching the
-        /// outer `ShardMainData::precomputed_basefold` erasure); the GPU
-        /// reducer downcasts it back.  When `Some`, the step-4 reduction MOVES
-        /// it through the device hook so the SAME device buffer serves commit
-        /// + reduction (no host re-materialize, no H2D re-upload, no clone).
-        /// `None` on the host build path — behaviour unchanged.
-        pub dense_device: Option<alloc::boxed::Box<dyn core::any::Any + Send + Sync>>,
-        /// The CORRECT host-built dense_q that the commit was committed
-        /// over, carried forward to the step-4 reduction.  Populated ONLY
-        /// by the provider-aware HOST fallback commit body
-        /// (`precompute_jagged_basefold_commit_provider`), which runs when
-        /// the device commit hook DECLINES (e.g. the commit-NTT OOM
-        /// preflight) and re-materializes the device-resident chips from
-        /// the still-live (not-yet-drained) provider.  Without this, the
-        /// reduction would re-materialize the dense_q from the per-shard
-        /// provider — which the zerocheck-prepare `release_by_name`
-        /// drain-on-lookup has ALREADY DRAINED by reduction time →
-        /// WRONG dense_q → the jagged sumcheck reduction proof is built over
-        /// the wrong data → the verifier REJECTS the bundle.
-        /// Carrying the already-correct dense_q makes the decline path
-        /// byte-identical to the golden host/device commit.  `None` on the
-        /// happy path (the device commit fired → `dense_device` is
-        /// `Some` → the reduction takes the device buffer, never this) and on
-        /// the plain non-provider host build (its reduction re-materialize is
-        /// sound — no drain involved).
-        pub host_dense_q: Option<alloc::vec::Vec<crate::jagged_pcs::JaggedVal>>,
         /// The per-shard rev(zeta) orientation the dense commit was
         /// materialized under (from the per-stage `StarkMachine::core_rev()`
         /// source of truth — `true` only on the CORE MIPS path).  Recorded on
@@ -1392,7 +1360,7 @@ pub mod jagged {
         // re-materialized dense_q forward for the step-4 reduce.  The GPU
         // prover commits device-side in its `commit_multilinears` override
         // (SP1-parity, no host fallback) and produces its own carried dense_q.
-        PrecomputedJaggedCommit { packing, commit, prover_data, dense_device: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
+        PrecomputedJaggedCommit { packing, commit, prover_data, rev: use_rev, recursion_area_pin }
     }
 
     /// Provider-aware host precompute (used when commit-traces are not
@@ -1481,7 +1449,7 @@ pub mod jagged {
                 dense_traces, mmcs, dft, fri,
             )
         };
-        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device: None, host_dense_q: None, rev: use_rev, recursion_area_pin }
+        PrecomputedJaggedCommitGeneric { packing, commit, prover_data, rev: use_rev, recursion_area_pin }
     }
 
     /// **Prover-side one-call entry point** — full pipeline:
@@ -1761,8 +1729,6 @@ pub mod jagged {
             packing,
             commit,
             prover_data,
-            dense_device: _,
-            host_dense_q: _,
             rev: _,
             recursion_area_pin,
         } = precomputed;
@@ -2067,7 +2033,7 @@ pub mod jagged {
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
     {
         use p3_maybe_rayon::prelude::*;
-        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, dense_device: _, host_dense_q: _, rev: dense_rev, recursion_area_pin } = precomputed;
+        let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, rev: dense_rev, recursion_area_pin } = precomputed;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the row-eq embedding factor + empty-chip skip).
