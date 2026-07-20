@@ -427,7 +427,7 @@ where
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         // Host default — byte-identical to the former `None`-hook
         // (unregistered device commit) path in `maybe_auto_precompute_basefold`.
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
             named_inner,
             use_rev,
             recursion_area_pin,

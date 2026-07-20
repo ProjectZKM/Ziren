@@ -313,19 +313,11 @@ where
             .map(|d| (d.pcs_batch_data, d.interleaved_mles))
             .unzip();
 
-        // GPU dispatch hook for the
-        // **OPEN/prove** phase.  The COMMIT side is the `StarkGpuProver`
-        // override of `MachineProver::commit_multilinears` (device-side,
-        // no host fallback).  The OPEN side is
-        // wired one level up at `jagged_pcs::open_jagged_pcs`
-        // (statically-provided `GpuBasefoldOpenFn`) — the
-        // sister hook intercepts at the jagged-PCS entry so it can
-        // see the full `JaggedProverData` (including the
-        // commit-time metadata it needs to drive the device prove).
-        // No dispatch logic at this `stacked.rs` site; this comment
-        // stays as a navigation marker.
-        let _ = ();
-
+        // The OPEN/prove GPU hook lives one level up at
+        // `jagged_pcs::open_jagged_pcs` (a statically-provided
+        // `GpuBasefoldOpenFn`), where it can see the full `JaggedProverData`;
+        // there is no dispatch at this site.  (The COMMIT side is the
+        // `StarkGpuProver` override of `MachineProver::commit_multilinears`.)
         let basefold_proof = self.basefold_prover.prove_trusted_mle_evaluations(
             stack_point,
             mle_rounds,

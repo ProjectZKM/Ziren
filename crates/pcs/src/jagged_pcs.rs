@@ -1350,40 +1350,10 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // This host precompute leaves `host_dense_q = None`.  It is set only
-        // by the provider-aware DECLINE remat path
-        // (`precompute_jagged_basefold_commit_provider`), which carries the
-        // re-materialized dense_q forward for the step-4 reduce.  The GPU
-        // prover commits device-side in its `commit_multilinears` override
+        // This host precompute does not carry a re-materialized dense_q; the
+        // GPU prover commits device-side in its `commit_multilinears` override
         // (SP1-parity, no host fallback) and produces its own carried dense_q.
         PrecomputedJaggedCommit { packing, commit, prover_data, rev: use_rev, recursion_area_pin }
-    }
-
-    /// Provider-aware host precompute (used when commit-traces are not
-    /// eagerly copied device→host).  Identical to
-    /// [`precompute_jagged_basefold_commit`] but first
-    /// re-materializes any empty (device-resident) chip trace from the
-    /// per-shard provider, so the host commit body covers every chip's
-    /// real cells even when `commit_traces` no longer eagerly D2H's them.
-    /// This is the FALLBACK body for the device commit hook — taken
-    /// only on a CUDA error / unsupported geometry — so the slower host
-    /// re-materialize is acceptable and, critically, SOUND (no silently
-    /// dropped device-chip cells / zero commitment).
-    pub fn precompute_jagged_basefold_commit_provider(
-        chip_traces: &[ChipTraceView<'_>],
-        // The per-shard rev(zeta) orientation, threaded down (see
-        // `precompute_jagged_basefold_commit`).
-        use_rev: bool,
-        // Band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-        // down (was the `current_recursion_area_pin()` thread-local).
-        recursion_area_pin: Option<usize>,
-    ) -> PrecomputedJaggedCommit {
-        // Stage 5: the device-resident re-materialize DECLINE path is dead from
-        // the GPU prover (it commits device-side in its own device-native copy
-        // and never calls this host fn) and inert on the CPU prover (no
-        // provider, no empty device-resident chips), so this is a thin
-        // pass-through to the host precompute.
-        precompute_jagged_basefold_commit(chip_traces, use_rev, recursion_area_pin)
     }
 
     /// BaseFold-over-BN254 generic precompute: build the BaseFold commit

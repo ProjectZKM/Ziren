@@ -320,7 +320,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// jagged-PCS, returning the precomputed commit — the COMMIT
     /// static-dispatch OVERRIDE point (one trait method).  The DEFAULT body
     /// is the host commit
-    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider`]).
+    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]).
     /// A `StarkGpuProver` OVERRIDES this with the device dense-pack + BaseFold
     /// commit body (the `zkm_gpu_basefold::commit_dense::gpu_jagged_precompute_commit_hook`
     /// device path) — UNCONDITIONALLY on device, no host fallback (SP1-parity).
@@ -336,7 +336,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_provider(
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
             named_inner,
             use_rev,
             recursion_area_pin,
