@@ -2,7 +2,6 @@
 //! `PartialSumcheckProof` per shard.
 
 pub mod basefold_constraint_folder;
-pub mod device_first_layer_context;
 pub mod logup_gkr_prover;
 pub mod main_trace_loader;
 pub mod prover;
