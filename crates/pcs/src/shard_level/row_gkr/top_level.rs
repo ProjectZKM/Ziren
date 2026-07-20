@@ -47,24 +47,6 @@ where
     A: MachineAir<F>,
     Challenger: FieldChallenger<F> + 'static,
 {
-    // RAII LogUp-GKR task scope. When `with_production_scope_mut`
-    // returns `Some(...)` but `scope.next_layer()` is `None`, the V3
-    // dispatch falls through to the legacy TLS handle path.
-    // The scope MUST outlive its guard, and the guard MUST be held
-    // for the entire GKR walk + final V3 dispatch — stack ordering
-    // enforces both. The scope's `circuit` field stays `None` until
-    // the populator (further down) fires after `build_gkr_circuit`,
-    // because the ziren-gpu populator drains the layer-transition
-    // registry filled DURING `build_gkr_circuit`.
-    let mut logup_task_scope = super::device_circuit::LogupTaskScope::<F, EF>::new(
-        crate::jagged_pcs::allocate_gpu_layer_circuit_id(),
-    );
-
-    let _logup_task_scope_guard =
-        super::device_circuit::LogupTaskScopeGuard::enter_with_scope::<F, EF>(
-            &mut logup_task_scope,
-        );
-
     // Proof-of-work grinding. MUST run BEFORE sampling alpha/beta to
     // match the in-circuit verifier's `check_witness`, which is the FIRST
     // challenger op in `verify_logup_gkr` (recursion logup_gkr.rs:347). p3's
