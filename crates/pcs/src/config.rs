@@ -196,6 +196,24 @@ pub trait BasefoldRing: StarkGenericConfig {
     fn digest_felts(
         commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8];
+
+    /// Ring-native jagged BaseFold precompute for the INLINE lazy-commit path.
+    ///
+    /// Used by `maybe_auto_precompute_basefold` on the OUTER/wrap ring (whose
+    /// `BfMmcs = OuterValMmcs` cannot flow through the inner-only
+    /// `commit_multilinears` device seam).  This is a required method — NOT a
+    /// default — so the `Self::BfMmcs: Clone + 'static` bounds that
+    /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
+    /// needs are discharged INSIDE each concrete impl (where `Self::BfMmcs` is a
+    /// concrete `'static` MMCS), rather than propagating up the whole
+    /// shard-prover call chain.  It is EXACTLY the commit body the deleted
+    /// `commit_basefold_path` produced for the wrap ring (same MMCS / FRI config
+    /// / `use_rev` / `recursion_area_pin`), just built during the prove pass.
+    fn precompute_jagged_inline(
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
 }
 
 /// The BaseFold jagged-PCS commitment type for a `BasefoldRing`

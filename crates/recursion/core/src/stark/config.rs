@@ -280,6 +280,24 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         }
         out
     }
+
+    fn precompute_jagged_inline(
+        named_inner: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>],
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        // The wrap ring's BN254 jagged BaseFold precompute — EXACTLY the commit
+        // the deleted `commit_basefold_path` produced for OuterSC (same
+        // OuterValMmcs / wrap FRI config / `use_rev` / `recursion_area_pin`),
+        // now built INLINE during the prove pass.
+        zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
+            named_inner,
+            Self::bf_mmcs(),
+            Self::fri_config(),
+            use_rev,
+            recursion_area_pin,
+        )
+    }
 }
 
 /// The FRI config for testing recursion.

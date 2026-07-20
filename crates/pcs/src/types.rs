@@ -39,25 +39,6 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
-    /// Single-main-commit: the BaseFold jagged-PCS commit
-    /// produced up-front by `commit()` (KoalaBear/JaggedChallenger
-    /// config).  `main_commit` carries its 8-felt digest (preserving
-    /// the `Com<SC>` shape for the legacy fields) and `main_data`
-    /// carries a placeholder.  `open()` passes this to
-    /// `prove_shard_to_basefold` as `precomputed_commit`, which threads
-    /// it into the jagged-PCS body (skipping the double-commit
-    /// + in-band observe).  `None` in the legacy FRI path (BN254 wrap /
-    /// OuterSC), which has no jagged commit.
-    ///
-    /// First-class typed jagged commit (no `Box<dyn Any>` erasure) —
-    /// `PrecomputedJaggedCommit` is the concrete KoalaBear jagged-PCS
-    /// state; the type is independent of the `SC`/`M`/`P` generics so
-    /// it sits cleanly in the struct (the wrap simply holds `None`).
-    // BaseFold-over-BN254 wrap port: type-erased so it can carry either
-    // the inner PrecomputedJaggedCommit (=Generic<JaggedMmcs>) OR the wrap
-    // PrecomputedJaggedCommitGeneric<OuterValMmcs>. open() downcasts to
-    // PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
-    pub precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
     /// The per-shard rev(zeta) orientation, recorded on the committed data at
     /// `commit()` from the per-stage source of truth
     /// (`StarkMachine::core_rev()` — `true` only on the CORE MIPS prove path).
@@ -83,9 +64,8 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
             main_data,
             chip_ordering,
             public_values,
-            precomputed_basefold: None,
             // Default LEGACY orientation; the CORE commit path overwrites this
-            // to `machine.core_rev()` (via `commit_basefold_path`).
+            // to `machine.core_rev()`.
             rev: false,
         }
     }

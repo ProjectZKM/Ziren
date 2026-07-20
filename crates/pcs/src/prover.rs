@@ -130,16 +130,14 @@ where
     /// builds `chip_ordering`, and `shard_chips_ordered` replays it — so map
     /// order already equals the `chips` slice order.
     pub main_traces: std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
-    /// Ziren eager-precompute; SP1 computes inline via commit_traces (no field).
+    /// Placeholder digest slot; the jagged-PCS commit is built INLINE by
+    /// `maybe_auto_precompute_basefold` during the open/prove pass (like the GPU
+    /// / SP1), which OVERRIDES this value with the computed 8-felt digest.  The
+    /// caller passes any placeholder (`[ZERO; 8]`) since the lazy build discards
+    /// it on the always-inline path.
     pub main_commitment: [Val<SC>; 8],
     /// SP1: MainTraceData.public_values.
     pub public_values: Vec<Val<SC>>,
-    /// Ziren eager main pcs-data bundle; SP1 produces this inline (no field).
-    pub precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
-    >,
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -472,7 +470,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             main_traces,
             main_commitment,
             public_values,
-            precomputed_commit,
         } = data;
         // SP1-parity: source the three former carrier params from `self`/traces
         // (byte-identical to the values the driver used to thread in).
@@ -489,6 +486,20 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         //     FIX-on recursion), so `num_variables()` IS the cube.
         let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
         let dense_rev = self.machine().core_rev();
+        // band-cap carrier removal Phase C: the recursion-layer AREA PIN is now
+        // sourced INLINE on the prove path from the per-stage machine
+        // discriminator `StarkMachine::pins_recursion_area()` — EXACTLY mirroring
+        // how the `StarkGpuProver` device override sources it, and how `dense_rev`
+        // is sourced from `core_rev()`.  `Some(RECURSION_LOG_TRACE_AREA)` on the
+        // COMPRESS/reduce machine (pins the lazy jagged dense to `2^pin` → constant
+        // `num_stripes`); `None` on CORE / shrink / wrap (NATURAL own-area,
+        // byte-identical to legacy).  This replaces the former eager-`commit()`
+        // recursion_area_pin, which is now inert on `CpuProver::commit`.
+        let recursion_area_pin = if self.machine().pins_recursion_area() {
+            Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
+        } else {
+            None
+        };
         // Every `PaddedMle` in the map carries the SAME cube (both the
         // `padded_with_zeros` host chips and the `dummy` width-0 chips are built
         // with it), so any entry reports it.  An empty chip set never reaches a
@@ -538,12 +549,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             challenger,
             orientation,
             dense_rev,
-            // SP1-parity: the recursion AREA PIN is no longer a param — sourced
-            // as `None` here (inert on the host path: the caller always supplies
-            // `Some(precomputed_commit)`, so the LAZY precompute that would read
-            // the pin is skipped; the eager `commit()` recorded the real pin).
+            // Sourced from `pins_recursion_area()` above (SP1 / GPU parity).
+            recursion_area_pin,
+            // INLINE-commit: no eager precompute is threaded — the lazy
+            // `maybe_auto_precompute_basefold` builds the jagged commit during this
+            // prove pass (for BOTH the inner and the OUTER/wrap ring).
             None,
-            precomputed_commit,
             &crate::shard_level::prover::ProverJaggedEval(self),
         )
     }
@@ -702,45 +713,90 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-        recursion_area_pin: Option<usize>,
+        // UNUSED on the inline `commit` (SP1 / GPU parity): the jagged commit is
+        // built LAZILY in `open()` -> `prove_shard_to_basefold` ->
+        // `maybe_auto_precompute_basefold`, which sources the recursion AREA PIN
+        // from `self.machine().pins_recursion_area()` on the prove path.  Present
+        // only to satisfy the `MachineProver::commit` signature (mirrors the GPU
+        // `StarkGpuProver::commit`'s `_recursion_area_pin`).
+        _recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
+        // FIX-off MISSING-CHIP INJECTION (relocated verbatim from the deleted
+        // `commit_basefold_path`; EXACT mirror of the GPU `commit`): when
+        // `Some(cluster_widths)` is passed (the FIX-off predicate — CORE only),
+        // inject a genuine HEIGHT-0 (0-row, FULL-WIDTH, zero) `RowMajorMatrix` at
+        // each canonical-CLUSTER chip's width for every cluster chip this raw
+        // (event-driven) shard is MISSING.  The chip is then PRESENT in the
+        // committed set (VK intact — flows through `chip_ordering` ->
+        // `opened_values` AND the inline BaseFold commit packing) but commits
+        // NOTHING (`row_count:0`), so the degree-masked reconstruction excludes it
+        // (degree=0 => full_geq=1 => identity fraction (0,1)).  `None`
+        // (recursion / shrink / wrap / FIX-on) => own-chip-set commit
+        // (byte-identical to legacy).
+        if let Some(cluster_widths) = cluster_widths {
+            use std::collections::BTreeSet;
+            let present: BTreeSet<String> =
+                named_traces.iter().map(|(n, _)| n.clone()).collect();
+            for (name, width) in cluster_widths.iter() {
+                if !present.contains(name) {
+                    // 0 rows at full canonical width: `values` empty, `width == w`
+                    // => `RowMajorMatrix::height() == 0`.
+                    let w = (*width).max(1);
+                    named_traces.push((
+                        name.clone(),
+                        RowMajorMatrix::new(Vec::<Val<SC>>::new(), w),
+                    ));
+                }
+            }
+        }
+
+        // Name-order the commit (SP1 BTreeMap chip order) so the recursion
+        // verifier's compile-time name-order column_counts / opened_values match
+        // the committed column order.
+        named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
+
         let pcs = self.config().pcs();
 
-        // Single-main-commit gate — the KoalaBear/JaggedChallenger
-        // config skips the legacy FRI `pcs.commit(main_traces)` and
-        // instead computes the BaseFold jagged-PCS commit up-front
-        // (the same commit the shard-level prover's jagged-PCS body would
-        // otherwise produce).  Its 8-felt digest becomes the `main_commitment`
-        // observed in the prologue, eliminating the
-        // double-commit (FRI + BaseFold) on the same trace data.
-        // Both the inner (KoalaBear / JaggedChallenger) and
-        // the OUTER wrap (BN254 / MultiField32) rings commit via the BaseFold
-        // jagged-PCS up-front; the two-adic-quotient FRI commit path is not
-        // used.  Name-order the commit (SP1 BTreeMap chip
-        // order) so the recursion verifier's compile-time name-order
-        // column_counts / opened_values match the committed column order.
-        named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
-        commit_basefold_path::<SC, Self::DeviceMatrix, Self::DeviceProverData>(
-            pcs,
-            record.public_values(),
-            named_traces,
-            // band-cap retirement Phase A: the missing-chip cluster widths,
-            // threaded explicitly (was the `Height0MissingGuard` thread-local).
-            cluster_widths,
-            // band-cap carrier removal Phase B: the per-shard rev(zeta)
-            // orientation, read from the per-stage source of truth
-            // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS
-            // machine).  Threaded explicitly (was the `UseRevGuard` /
-            // `current_use_rev()` thread-local carrier).
-            self.machine().core_rev(),
-            // band-cap carrier removal Phase C: the recursion-layer AREA PIN,
-            // threaded from the caller (was the `RecursionAreaPinGuard`
-            // thread-local the recursion prover installed around commit+open).
-            recursion_area_pin,
-        )
+        // INLINE single commit (SP1 / GPU parity): the ONE real main-trace
+        // commitment is the BaseFold jagged-PCS commit produced LAZILY in
+        // `open()` -> `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`
+        // (which observes its 8-felt digest as `main_commitment`).  Here we only
+        // need a placeholder `main_commit` / `main_data`, produced by committing a
+        // single 1x1 dummy trace (microseconds) — EXACTLY the GPU `drop_fri_commit`
+        // single-commit path.  `open()`'s placeholder `pcs.open` runs against this
+        // `main_data`; the BaseFold verifier short-circuits before `pcs.verify`.
+        let dummy_trace: RowMajorMatrix<Val<SC>> =
+            RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
+        let dummy_domain = pcs.natural_domain_for_degree(1);
+        let (main_commit, main_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+
+        // Get the chip ordering (name-order, matching the commit + the recursion
+        // `opened_values.chips` BTreeMap order).
+        let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| (name.to_owned(), i))
+            .collect();
+
+        // Wrap each trace in `Arc::new` so the post-`open()` consumers hold
+        // refcounted handles (Self::DeviceMatrix == RowMajorMatrix<Val<SC>>).
+        let traces: Vec<std::sync::Arc<Self::DeviceMatrix>> =
+            named_traces.into_iter().map(|(_, trace)| std::sync::Arc::new(trace)).collect();
+
+        ShardMainData {
+            traces,
+            main_commit,
+            main_data,
+            chip_ordering,
+            public_values: record.public_values(),
+            // band-cap carrier removal Phase B: record the per-shard rev(zeta)
+            // orientation from the per-stage source of truth
+            // (`StarkMachine::core_rev()` — `true` only for the CORE MIPS machine).
+            rev: self.machine().core_rev(),
+        }
     }
 
     /// Prove the program for the given shard and given a commitment to the main data.
@@ -992,12 +1048,10 @@ where
             // envelope, but `Verifier::verify_shard` dispatches to
             // `BasefoldShardVerifier` whenever this field is `Some(_)`.
             //
-            // Single-main-commit: pass the precomputed
-            // BaseFold commit (stashed by `commit()` in
-            // `data.precomputed_basefold`) through to the shard-level
-            // prover, which routes it to the jagged-PCS body to
-            // skip the in-band commit step + observe.
-            let precomputed_basefold_taken = data.precomputed_basefold;
+            // INLINE-commit (SP1 / GPU parity): no eager precompute to thread —
+            // the jagged-PCS commit is built LAZILY inside
+            // `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`, which
+            // OVERRIDES `main_commitment` with the computed digest.
             // Pass `self` so the basefold producer routes
             // through the trait-method seam (`self.prove_shard_to_basefold` ->
             // `self.prove_trusted_evaluations`).  CpuProver path byte-identical.
@@ -1009,7 +1063,6 @@ where
                 &traces,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
-                precomputed_basefold_taken,
                 // SP1-parity: `dense_rev` no longer threaded — the prover's
                 // `prove_shard_to_basefold` sources it from `self.machine().core_rev()`
                 // (== `data.rev`, itself set by `commit()` from `core_rev()`).
@@ -1162,10 +1215,11 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     main_traces: &[std::sync::Arc<RowMajorMatrix<Val<SC>>>],
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
-    precomputed_basefold: Option<Box<dyn core::any::Any + Send + Sync>>,
     // SP1-parity: the per-shard rev(zeta) orientation (`dense_rev`) is no longer
     // threaded here — the prover's `prove_shard_to_basefold` sources it from
     // `self.machine().core_rev()` (== the `ShardMainData.rev` this used to carry).
+    // The jagged commit is no longer eager either — it is built INLINE inside
+    // `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`.
 ) -> Option<
     Box<
         crate::shard_level::shard_proof::BasefoldShardProof<
@@ -1241,68 +1295,13 @@ where
         })
         .collect();
 
-    // The precomputed BaseFold jagged-PCS commit produced
-    // up-front by `commit_basefold_path`.  Always present on this path:
-    // the helper's sole caller (`open()`) reaches it only inside the
-    // `use_basefold_path` branch, whose gate is byte-identical to the
-    // `commit()` gate that routes through `commit_basefold_path`, which
-    // unconditionally sets `Some(..)`.  Absence is unreachable → expect.
-    let precomputed_box = precomputed_basefold
-        .expect(
-            "try_prove_shard_to_basefold_boxed: precomputed_basefold must be Some on the \
-             basefold path (commit_basefold_path always sets it under the same TypeId gate)",
-        );
-    // Recover the precomputed commit from
-    // the type-erased box as PrecomputedJaggedCommitGeneric<SC::BfMmcs> — works
-    // for BOTH rings (inner BfMmcs=JaggedMmcs, outer BfMmcs=OuterValMmcs). The
-    // shard prover threads it generically; prove_trusted_evaluations dispatches the
-    // open per ring.
-    let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-        <SC as BasefoldRing>::BfMmcs,
-    > = *precomputed_box
-        .downcast::<crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as BasefoldRing>::BfMmcs,
-        >>()
-        .unwrap_or_else(|_| {
-            panic!(
-                "try_prove_shard_to_basefold_boxed: precomputed downcast to \
-                 PrecomputedJaggedCommitGeneric<SC::BfMmcs> failed"
-            )
-        });
-
-    // The 8-felt main-trace digest the prologue observed as `main_commit`.
-    // Per-ring projection of the BaseFold commitment (inner = MerkleCap root;
-    // outer = BN254 split_32) via BasefoldRing::digest_felts, then reinterpret
-    // [JaggedVal;8] as [Val<SC>;8] (JaggedVal == Val<SC> == KoalaBear for both
-    // rings — the only reinterpretation left).
-    let digest_jv_raw: [crate::jagged_pcs::JaggedVal; 8] =
-        <SC as BasefoldRing>::digest_felts(&precomputed.commit.original_commitment);
-
-    // ── SP1-faithful jagged HASH-BIND — THE FS-observed digest ─────
-    // This `digest` is what the transcript prologue observes as
-    // `main_commitment` (prover.rs `digest` -> prove_shard_to_basefold ->
-    // shard_level prologue).  Fold the per-chip (row_count, column_count)
-    // geometry into it:  modified = compress([raw_root, hash(counts)]).  The
-    // BaseFold open still binds the RAW root (carried in the bundle's commit +
-    // witnessed `jagged_original_commitment`); the host verifier Stage-3.5
-    // re-check recomputes this from `bundle.packing`.  INNER KoalaBear ring
-    // only (the challenger is JaggedChallenger; the outer BN254 wrap re-binds
-    // in its registered hook).  Default-ON; ZIREN_JAGGED_HASH_BIND=0 = legacy.
-    let digest_jv: [crate::jagged_pcs::JaggedVal; 8] = {
-        use core::any::TypeId;
-        let is_inner = TypeId::of::<SC::Challenger>()
-            == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
-        if is_inner {
-            crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
-                digest_jv_raw,
-                &precomputed.packing,
-            )
-        } else {
-            digest_jv_raw
-        }
-    };
-    let digest: [Val<SC>; 8] =
-        unsafe { core::ptr::read(&digest_jv as *const _ as *const [Val<SC>; 8]) };
+    // INLINE-commit (SP1 / GPU parity): the BaseFold jagged-PCS commit is built
+    // LAZILY inside `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`
+    // (which observes its 8-felt digest as `main_commitment`, and applies the
+    // SP1-faithful jagged HASH-BIND for the inner ring).  So there is no eager
+    // precompute to downcast, and no digest to compute up-front here: the
+    // `main_commitment` passed below is a placeholder that the lazy build
+    // OVERRIDES.
 
     // Clone the outer challenger so our shard-level run doesn't
     // perturb the legacy transcript state.
@@ -1385,285 +1384,16 @@ where
             // `PaddedMle` store (SP1's `Traces`); the trait method no longer
             // re-derives it from raw `RowMajorMatrix`es.
             main_traces: main_traces_named,
-            main_commitment: digest,
+            // Placeholder — OVERRIDDEN by the inline `maybe_auto_precompute_basefold`
+            // digest (SP1 / GPU parity: the commit is built during the prove pass).
+            main_commitment: [Val::<SC>::ZERO; 8],
             public_values,
             // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
             // and the recursion AREA PIN are sourced inside
             // `prove_shard_to_basefold` from the traces + self, not threaded here.
-            // This call always passes `Some(precomputed)`, so
-            // `maybe_auto_precompute_basefold` returns the supplied commit early
-            // WITHOUT rebuilding — the recursion AREA PIN was already recorded on
-            // `precomputed.recursion_area_pin` by the eager `commit()` path (and
-            // is read back in `prove_jagged_basefold_inner`), so the lazy-build
-            // pin the method sources internally is never consumed here.
-            precomputed_commit: Some(precomputed),
         },
         &mut shard_challenger,
     );
 
     Some(Box::new(proof))
-}
-
-/// Single-main-commit `commit()` body for the
-/// KoalaBear/JaggedChallenger config: compute the BaseFold jagged-PCS
-/// commit up-front (the same commit the shard-level prover would
-/// otherwise produce), seed `main_commit` with its 8-felt digest, and
-/// stash the precomputed-commit state in `precomputed_basefold` so
-/// `open()` / `try_prove_shard_to_basefold_boxed` can route it into
-/// the shard-level jagged-PCS body (skipping the
-/// double-commit + in-band observe).
-///
-/// Runs a *placeholder* `pcs.commit` on a single 1×1 dummy trace to
-/// satisfy the type signature of `main_data` — `open()` mirrors this
-/// with a placeholder `pcs.open`.  The placeholder cost is
-/// microseconds vs the seconds of a real main-trace FRI commit.
-/// `pub` so the `prover` crate's `WrapGpuProver` can drive the
-/// BaseFold-over-BN254 wrap commit through the same body.
-pub fn commit_basefold_path<SC, M, P>(
-    pcs: &<SC as StarkGenericConfig>::Pcs,
-    public_values: Vec<Val<SC>>,
-    named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
-    // band-cap retirement Phase A: the per-shard FULL canonical-CLUSTER chip
-    // NAME -> width map, threaded EXPLICITLY (was read from the
-    // `Height0MissingGuard` thread-local via `current_h0_cluster_widths()`).
-    // `Some(map)` (CORE FIX-off) => inject a HEIGHT-0 trace for each MISSING
-    // cluster chip; `None` (recursion / shrink / wrap / FIX-on) => own-chip-set
-    // commit (byte-identical to legacy).
-    cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-    // band-cap carrier removal Phase B: the per-shard rev(zeta) orientation
-    // (from `StarkMachine::core_rev()`).  Threaded to the precompute (dense
-    // materialize) and recorded on the returned `ShardMainData.rev` +
-    // `PrecomputedJaggedCommit.rev`, so `open()` and the step-4 reduction stay
-    // in lockstep.  `true` only on the CORE MIPS path (was the `UseRevGuard`
-    // carrier); `false` elsewhere (byte-identical to legacy).
-    use_rev: bool,
-    // band-cap carrier removal Phase C: the recursion-layer AREA PIN, threaded
-    // EXPLICITLY (was the `RecursionAreaPinGuard` / `current_recursion_area_pin()`
-    // thread-local).  `Some(RECURSION_LOG_TRACE_AREA)` on the RECURSION (compress)
-    // commit → pin the jagged dense to `2^pin` (constant `num_stripes` → enumerable
-    // compose VK); recorded on the returned `PrecomputedJaggedCommit.recursion_area_pin`
-    // so the open-path jagged-eval half stays in lockstep.  `None` elsewhere (CORE
-    // / shrink / wrap — NATURAL own-area, byte-identical to legacy).
-    recursion_area_pin: Option<usize>,
-) -> ShardMainData<SC, M, P>
-where
-    SC: StarkGenericConfig + BasefoldRing,
-    Val<SC>: 'static,
-    Com<SC>: 'static,
-    PcsProverData<SC>: 'static,
-    M: 'static,
-    P: 'static,
-    <SC as BasefoldRing>::BfMmcs:
-        p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone + Send + Sync + 'static>,
-    <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::ProverData<
-        p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-    >: Send + Sync + 'static,
-{
-    use core::any::Any;
-    
-
-    // Run the BaseFold pre-commit on the real main traces (transmuted
-    // to InnerVal — the TypeId gate in `commit()` already verified
-    // Val<SC> == InnerVal).
-    //
-    // SAFETY: the caller (`commit()` body's `use_basefold_path` gate)
-    // has type-gated on Val<SC> == InnerVal, so the transmute below
-    // reinterprets a Vec<(String, RowMajorMatrix<Val<SC>>)> as
-    // Vec<(String, RowMajorMatrix<InnerVal>)>.  Both element types
-    // have the same layout under the gate.
-    let mut named_traces_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> = unsafe {
-        let mut v = core::mem::ManuallyDrop::new(named_traces);
-        let ptr = v.as_mut_ptr();
-        let len = v.len();
-        let cap = v.capacity();
-        Vec::from_raw_parts(
-            ptr as *mut (String, RowMajorMatrix<crate::InnerVal>),
-            len,
-            cap,
-        )
-    };
-
-    // Height-agnostic recursion: the CPU host path precomputes the
-    // jagged commit HERE (inside `commit()`), so the canonical-CLUSTER
-    // missing-chip injection must be applied to the traces THIS commit packs --
-    // NOT only later in `prove_shard_to_basefold_with_loader` (which would be
-    // ignored on this path because `maybe_auto_precompute_basefold` returns early
-    // when a commit is already precomputed).  PRESENT chips stay at their ACTUAL
-    // raw heights (the `FIX_CORE_SHAPES=false` perf win); the STARK / jagged
-    // reduction prove at those raw heights.  `None` (no guard) => unchanged
-    // own-chip-set commit (recursion / shrink / wrap).
-    //
-    // The carrier is the FULL canonical CLUSTER chip NAME -> width, so besides
-    // the present chips it must ADD a trace for each canonical chip that this raw
-    // (event-driven) shard is MISSING — so the FIX-off chip-SET equals the FIX-on
-    // canonical cluster (which `canonicalize_shape_to_cluster` produces under
-    // FIX-on).  The missing chips are injected into `named_traces_inner` ITSELF
-    // (so they propagate to `data.traces` -> `chip_ordering` -> `open`'s
-    // `opened_values`): the recursion normalize verifier iterates
-    // `opened_values.chips`, so the proof's chip-SET (and hence its VK) MUST be
-    // the canonical cluster, matching the enum/vk_map dummy built from
-    // `sp.shape()` (= opened_values).
-    //
-    // Each missing chip is injected as a genuine HEIGHT-0 (0-row, full-width,
-    // zero) `RowMajorMatrix` at its canonical width: the chip is PRESENT in the
-    // committed set (VK intact) but commits NOTHING (no real cells), so the
-    // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
-    // identity fraction (0,1)) — no constraint-valid padding-row synthesis is
-    // needed.
-    if let Some(cluster_widths) = cluster_widths {
-        use std::collections::BTreeSet;
-        // #P2S0 band-cap retirement: inject a genuine HEIGHT-0 (0-row,
-        // FULL-WIDTH, zero) representation for each canonical-cluster chip this
-        // raw shard is MISSING (canonical cluster minus present), derived
-        // directly from the cluster chip-SET + widths (the `cluster_widths`
-        // param, keyed off the chip-SET — not any band value).
-        // A 0-row `RowMajorMatrix` of the chip's canonical width keeps the
-        // chip-SET (VK) intact (still present in `data.traces` ->
-        // `chip_ordering` -> `opened_values.chips`) while committing NOTHING
-        // (no real cells): pack_traces_jagged emits `row_count:0`, the shared
-        // trace-MLE becomes an empty inner (`num_real_entries()==0`), the
-        // zerocheck `main_height` reads 0 (=> `initial_geq=1`), the degree
-        // bits are all-zero, and the host degree-masked reconstruction
-        // excludes it (degree=0 => full_geq=1 => identity fraction (0,1)).
-        let present: BTreeSet<String> =
-            named_traces_inner.iter().map(|(n, _)| n.clone()).collect();
-        for (name, width) in cluster_widths.iter() {
-            if !present.contains(name) {
-                let w = (*width).max(1);
-                // 0 rows at full canonical width: `values` empty, `width==w`
-                // => `RowMajorMatrix::height()==0`.
-                named_traces_inner.push((
-                    name.clone(),
-                    RowMajorMatrix::new(Vec::<crate::InnerVal>::new(), w),
-                ));
-            }
-        }
-        // Keep name order stable (matches the name-order sort the commit and
-        // the recursion `opened_values.chips` BTreeMap expect).
-        named_traces_inner.sort_by(|(a, _), (b, _)| a.cmp(b));
-    }
-    // PRESENT chips stay at their natural raw height (no band-pad) so the
-    // committed packing offsets are raw-keyed.  This is the FIX-off path (a
-    // band-cap being installed IS the FIX-off predicate); FIX-on installs no
-    // band-cap and is byte-identical.  Missing chips were already injected
-    // above at band height (chip-SET / VK preserved).  Stays consistent with
-    // the open-path packing in prove_shard_to_basefold_with_loader.
-    let commit_named_inner: Vec<(String, RowMajorMatrix<crate::InnerVal>)> =
-        named_traces_inner.clone();
-
-    // Build the commit over the ring's BfMmcs
-    // (inner = Poseidon2-KoalaBear; wrap = Poseidon2-BN254 OuterValMmcs).
-    // SITE-1 trace-unification: the eager commit consumes BORROWED views over
-    // the owned `commit_named_inner` (kept alive until after the commit).
-    let commit_named_views = crate::jagged_pcs::jagged::views_over_owned(&commit_named_inner);
-    let precomputed = crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
-        <SC as BasefoldRing>::BfMmcs,
-    >(
-        &commit_named_views,
-        <SC as BasefoldRing>::bf_mmcs(),
-        <SC as BasefoldRing>::fri_config(),
-        use_rev,
-        recursion_area_pin,
-    );
-    drop(commit_named_views);
-    drop(commit_named_inner);
-
-    // Com<SC> == BfMmcs::Commitment for both rings (FRI commits via the
-    // val-mmcs root), so the BaseFold commitment IS Com<SC>. Carry it directly.
-    let commitment_any: Box<dyn Any> = Box::new(
-        crate::jagged_pcs::basefold_commit_digest_generic::<<SC as BasefoldRing>::BfMmcs>(
-            &precomputed.commit,
-        ),
-    );
-    // NOTE: this `Com<SC>` is the LEGACY-FRI placeholder commitment (24-byte,
-    // 6-felt) carried for API symmetry — it is NOT the BaseFold 8-felt digest
-    // the transcript observes.  The SP1 jagged HASH-BIND is applied to the REAL
-    // FS-observed 8-felt digest in `try_prove_shard_to_basefold_boxed`
-    // (the `digest_jv` block), NOT here.
-    let main_commit: Com<SC> = *commitment_any
-        .downcast::<Com<SC>>()
-        .unwrap_or_else(|_| {
-            panic!(
-                "commit_basefold_path: failed to downcast BfMmcs::Commitment to Com<SC> \
-                 (size_of Com<SC> = {})",
-                core::mem::size_of::<Com<SC>>(),
-            )
-        });
-
-    // Move named_traces back from the InnerVal alias (we still need
-    // them for the placeholder `pcs.commit` + the per-chip Arc list).
-    let named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)> = unsafe {
-        let mut v = core::mem::ManuallyDrop::new(named_traces_inner);
-        let ptr = v.as_mut_ptr();
-        let len = v.len();
-        let cap_ = v.capacity();
-        Vec::from_raw_parts(
-            ptr as *mut (String, RowMajorMatrix<Val<SC>>),
-            len,
-            cap_,
-        )
-    };
-
-    // Placeholder `pcs.commit` on a single 1×1 dummy trace.  Cheap
-    // (microseconds) but produces a valid `(_, PcsProverData<SC>)`
-    // pair so `main_data` has the right type and `open()` can drive a
-    // matching placeholder `pcs.open` against it.
-    let dummy_trace: RowMajorMatrix<Val<SC>> =
-        RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
-    let dummy_domain = pcs.natural_domain_for_degree(1);
-    let (_placeholder_commit, main_data_concrete): (
-        Com<SC>,
-        PcsProverData<SC>,
-    ) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
-    // Downcast PcsProverData<SC> to the generic P.  For CpuProver
-    // (the only consumer of this helper), P == PcsProverData<SC>
-    // (see the trait impl in this file's `MachineProver for CpuProver`
-    // block), so the downcast is sound under the TypeId gate.
-    let main_data_any: Box<dyn Any> = Box::new(main_data_concrete);
-    let main_data: P = *main_data_any
-        .downcast::<P>()
-        .unwrap_or_else(|_| {
-            panic!(
-                "commit_basefold_path: failed to downcast PcsProverData<SC> to generic P",
-            )
-        });
-
-    // Get the chip ordering.
-    let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| (name.to_owned(), i))
-        .collect();
-
-    // Wrap each trace in `Arc::new` — but we need the wrapper type to
-    // match `Self::DeviceMatrix = M` which for `CpuProver` is
-    // `RowMajorMatrix<Val<SC>>`.  Use Any-downcast on the Vec<Arc<...>>.
-    //
-    // SAFETY: caller's TypeId gate guarantees this `CpuProver`-shape
-    // monomorphization always has `M == RowMajorMatrix<Val<SC>>`.
-    let traces_rm: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>> = named_traces
-        .into_iter()
-        .map(|(_, trace)| std::sync::Arc::new(trace))
-        .collect();
-    let traces_any: Box<dyn Any> = Box::new(traces_rm);
-    let traces: Vec<std::sync::Arc<M>> = *traces_any
-        .downcast::<Vec<std::sync::Arc<M>>>()
-        .unwrap_or_else(|_| {
-            panic!(
-                "commit_basefold_path: failed to downcast Vec<Arc<RowMajorMatrix<Val<SC>>>> \
-                 to Vec<Arc<M>>",
-            )
-        });
-
-    ShardMainData {
-        traces,
-        main_commit,
-        main_data,
-        chip_ordering,
-        public_values,
-        precomputed_basefold: Some(Box::new(precomputed)),
-        // band-cap carrier removal Phase B: record the orientation on the shard
-        // data so `open()` reads it off the shard (not a thread-local).
-        rev: use_rev,
-    }
 }

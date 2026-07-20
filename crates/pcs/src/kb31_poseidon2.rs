@@ -230,6 +230,20 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2Inner {
     ) -> [crate::jagged_pcs::JaggedVal; 8] {
         crate::jagged_pcs::basefold_commit_digest_felts(commit)
     }
+
+    fn precompute_jagged_inline(
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
+            named_inner,
+            Self::bf_mmcs(),
+            Self::fri_config(),
+            use_rev,
+            recursion_area_pin,
+        )
+    }
 }
 
 // ── 128-bit StarkGenericConfig ────────────────────────────────────────────
@@ -347,6 +361,20 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2D5 {
         commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8] {
         crate::jagged_pcs::basefold_commit_digest_felts(commit)
+    }
+
+    fn precompute_jagged_inline(
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
+            named_inner,
+            Self::bf_mmcs(),
+            Self::fri_config(),
+            use_rev,
+            recursion_area_pin,
+        )
     }
 }
 
@@ -628,6 +656,20 @@ pub mod koala_bear_poseidon2 {
             commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
         ) -> [crate::jagged_pcs::JaggedVal; 8] {
             crate::jagged_pcs::basefold_commit_digest_felts(commit)
+        }
+
+        fn precompute_jagged_inline(
+            named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+            use_rev: bool,
+            recursion_area_pin: Option<usize>,
+        ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+            crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
+                named_inner,
+                Self::bf_mmcs(),
+                Self::fri_config(),
+                use_rev,
+                recursion_area_pin,
+            )
         }
     }
 

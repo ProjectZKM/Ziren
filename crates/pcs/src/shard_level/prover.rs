@@ -102,13 +102,22 @@ where
     if precomputed_commit.is_some() || !<SC as BasefoldRing>::use_basefold() {
         return (main_traces, main_commitment, precomputed_commit);
     }
+    // Both rings have Val == InnerVal (KoalaBear) and Challenge == InnerChallenge
+    // (KoalaBear^4) — the identities the `named_inner` relabel below relies on.
     debug_assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
-            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>()
-            && TypeId::of::<SC::Challenger>()
-                == TypeId::of::<crate::jagged_pcs::JaggedChallenger>(),
-        "maybe_auto_precompute_basefold: use_basefold()=true must imply the          inner KoalaBear/JaggedChallenger stack for the transmutes below",
+            && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
+        "maybe_auto_precompute_basefold: use_basefold()=true requires          Val==KoalaBear / Challenge==KoalaBear^4 (shared by inner + outer rings)",
     );
+    // Ring discriminator: the INNER ring (core/compress/shrink) uses the
+    // Poseidon2-KoalaBear `JaggedChallenger`; the OUTER/wrap ring uses the BN254
+    // `OuterChallenger` (and `BfMmcs = OuterValMmcs`).  The inner ring routes the
+    // commit through the `commit_multilinears` device seam (so a `StarkGpuProver`
+    // override is picked up); the outer ring — always host (the wrap never runs
+    // on the GPU) — builds via the `BasefoldRing::precompute_jagged_inline`
+    // trait method (which encapsulates the ring-generic `SC::BfMmcs` bounds).
+    let is_inner = TypeId::of::<SC::Challenger>()
+        == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
 
     // Build named InnerVal VIEWS by a zero-copy slice relabel of each borrowed
     // Val<SC> view (Val<SC> == InnerVal under the TypeId gate; identical layout,
@@ -132,71 +141,94 @@ where
         })
         .collect();
 
-    // Single shard-wide commit buffer, dispatched STATICALLY through the
-    // producer's `commit_multilinears` (Phase-1 static dispatch; was the
-    // `Option<fn>` device-vs-host `match` on `gpu_jagged_precompute_commit` /
-    // `gpu_basefold_commit`).  `ProverJaggedEval` routes to the prover's
-    // `MachineProver::commit_multilinears`: a `StarkGpuProver` OVERRIDE builds
-    // the dense pack + BaseFold commit device-side (resident chips D2D, host
-    // chips H2D once; dense buffer retained device-side for the step-4
-    // reduction), falling through to the provider-aware host commit on any
-    // CUDA / shape decline; the default (CpuProver / `FreeFnJaggedEval`) is the
-    // provider-aware host precompute — byte-identical to the former
-    // unregistered-hook path.
-    let mut precomputed = jagged_eval_producer.commit_multilinears(
-        &named_inner,
-        use_rev,
-        recursion_area_pin,
-    );
-    // Record the per-shard orientation on the built commit (the device
-    // hook builds its dense on-device under the SAME `use_rev`, but may not
-    // stamp the flag — force it here so the step-4 reduction reads it back).
-    precomputed.rev = use_rev;
-    // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
-    // built commit (the device hook pins `log_dense_size` device-side under
-    // the SAME value, but may not stamp the field) so the OPEN-path
-    // jagged-eval half reads it back in lockstep.
-    precomputed.recursion_area_pin = recursion_area_pin;
-    let raw_root_inner: [InnerVal; 8] =
-        crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
-
-    // ── SP1-faithful jagged HASH-BIND ──────────────────────────────
-    // Tie the per-chip (row_count, column_count) geometry to the commitment:
-    //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
-    // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
-    // below); the BaseFold opening still binds against `raw_root`, carried to
-    // the recursion lift via `BasefoldShardProof::jagged_original_commitment`.
-    // Jagged hash-bind is unconditional on this inner-ring build path
-    // (SP1-parity; was the ZIREN_JAGGED_HASH_BIND default-on gate).
-    let digest_inner: [InnerVal; 8] =
-        crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
-            raw_root_inner,
-            &precomputed.packing,
+    let (main_commitment, precomputed_generic): (
+        [Val<SC>; 8],
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        >,
+    ) = if is_inner {
+        // ── INNER ring (byte-identical to the pre-outer-extension path) ──
+        // Single shard-wide commit buffer, dispatched STATICALLY through the
+        // producer's `commit_multilinears`.  `ProverJaggedEval` routes to the
+        // prover's `MachineProver::commit_multilinears`: a `StarkGpuProver`
+        // OVERRIDE builds the dense pack + BaseFold commit device-side; the
+        // default (CpuProver / `FreeFnJaggedEval`) is the provider-aware host
+        // precompute (byte-identical to the former unregistered-hook path).
+        let mut precomputed = jagged_eval_producer.commit_multilinears(
+            &named_inner,
+            use_rev,
+            recursion_area_pin,
         );
+        // Record the per-shard orientation on the built commit (the device
+        // hook builds its dense on-device under the SAME `use_rev`, but may not
+        // stamp the flag — force it here so the step-4 reduction reads it back).
+        precomputed.rev = use_rev;
+        // band-cap carrier removal Phase C: FORCE the recursion AREA PIN onto the
+        // built commit (the device hook pins `log_dense_size` device-side under
+        // the SAME value, but may not stamp the field) so the OPEN-path
+        // jagged-eval half reads it back in lockstep.
+        precomputed.recursion_area_pin = recursion_area_pin;
+        let raw_root_inner: [InnerVal; 8] =
+            crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
+
+        // ── SP1-faithful jagged HASH-BIND (inner ring only) ────────────
+        // Tie the per-chip (row_count, column_count) geometry to the commitment:
+        //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
+        // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
+        // below); the BaseFold opening still binds against `raw_root`, carried to
+        // the recursion lift via `BasefoldShardProof::jagged_original_commitment`.
+        let digest_inner: [InnerVal; 8] =
+            crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
+                raw_root_inner,
+                &precomputed.packing,
+            );
+        // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the TypeId gate.
+        let main_commitment: [Val<SC>; 8] =
+            unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
+
+        // Inner build path: SC::BfMmcs == JaggedMmcs, so the concrete
+        // PrecomputedJaggedCommit IS PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
+        let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as crate::BasefoldRing>::BfMmcs,
+        > = {
+            let any: Box<dyn core::any::Any> = Box::new(precomputed);
+            *any.downcast().unwrap_or_else(|_| {
+                panic!(
+                    "maybe_auto_precompute_basefold: inner build path produces a \
+                     JaggedMmcs precompute == SC::BfMmcs"
+                )
+            })
+        };
+        (main_commitment, precomputed_generic)
+    } else {
+        // ── OUTER/wrap ring (BN254 OuterValMmcs) ───────────────────────
+        // Build the ring-native BaseFold precompute via the `BasefoldRing`
+        // trait method — EXACTLY the commit the deleted `commit_basefold_path`
+        // produced for OuterSC (same OuterValMmcs / wrap FRI config / `use_rev` /
+        // `recursion_area_pin`), now built INLINE during the prove pass.  The
+        // returned commit already stamps `rev` / `recursion_area_pin`.
+        let precomputed_generic = <SC as BasefoldRing>::precompute_jagged_inline(
+            &named_inner,
+            use_rev,
+            recursion_area_pin,
+        );
+        // Ring-generic digest: NO jagged hash-bind on the outer ring (the BN254
+        // wrap re-binds in its registered hook), EXACTLY as the deleted eager
+        // `try_prove_shard_to_basefold_boxed` outer path did.
+        let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
+            <SC as BasefoldRing>::digest_felts(&precomputed_generic.commit.original_commitment);
+        // SAFETY: [JaggedVal; 8] == [Val<SC>; 8] (JaggedVal == KoalaBear == Val<SC>).
+        let main_commitment: [Val<SC>; 8] = unsafe {
+            core::mem::transmute_copy::<[crate::jagged_pcs::JaggedVal; 8], [Val<SC>; 8]>(&digest_jv)
+        };
+        (main_commitment, precomputed_generic)
+    };
 
     // The borrowed `main_traces` views are returned unchanged (`named_inner`
     // only relabeled them to InnerVal for the commit build; no owned buffer to
     // move back).  They still borrow the shared `Arc<Mle>` store for the open.
     drop(named_inner);
 
-    // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the TypeId gate.
-    let main_commitment: [Val<SC>; 8] =
-        unsafe { core::mem::transmute_copy::<[InnerVal; 8], [Val<SC>; 8]>(&digest_inner) };
-
-    // This build path only runs for the inner ring (use_basefold + no
-    // host precompute); SC::BfMmcs == JaggedMmcs there, so the concrete
-    // precompute IS PrecomputedJaggedCommitGeneric<SC::BfMmcs>.
-    let precomputed_generic: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-        <SC as crate::BasefoldRing>::BfMmcs,
-    > = {
-        let any: Box<dyn core::any::Any> = Box::new(precomputed);
-        *any.downcast().unwrap_or_else(|_| {
-            panic!(
-                "maybe_auto_precompute_basefold: inner build path produces a \
-                 JaggedMmcs precompute == SC::BfMmcs"
-            )
-        })
-    };
     (main_traces, main_commitment, Some(precomputed_generic))
 }
 
