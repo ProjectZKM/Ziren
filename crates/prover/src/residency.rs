@@ -13,14 +13,18 @@
 //!
 //! ```text
 //! ZIREN_GPU_RESIDENCY=full   # all residency-side hooks/caches ON
-//! ZIREN_GPU_RESIDENCY=hybrid # safe default; hooks that regressed
-//!                            # production are OFF (cache audit, pre-warm)
+//! ZIREN_GPU_RESIDENCY=hybrid # default; the shape-keyed compose program
+//!                            # + compose-pk caches are ON (SP1-parity,
+//!                            # byte-neutral); pre-warm + cache audit OFF
 //! ZIREN_GPU_RESIDENCY=host   # all residency-side hooks/caches OFF
 //! ```
 //!
-//! `hybrid` is the safe default: program cache OFF, compose-pk cache OFF,
-//! pre-warm OFF, cache audit OFF.  `full` opts INTO all caches + pre-warm.
-//! `host` forces everything off (debugging / no-GPU paths).
+//! `hybrid` is the default: the SP1-parity per-shape compose program
+//! cache + compose-pk cache are ON (both keyed by the compose witness
+//! `shape_key()`, so hits are byte-identical to a fresh build/setup);
+//! pre-warm OFF (63.7s upfront), cache audit OFF.  `full` additionally
+//! opts INTO pre-warm.  `host` forces everything off (debugging /
+//! no-GPU paths).
 //!
 //! Backward compat: legacy env vars are still respected so existing
 //! benches don't break.  If any legacy var is set, the profile decision
@@ -45,21 +49,26 @@ pub enum GpuResidencyProfile {
 
 impl GpuResidencyProfile {
     /// Returns true when the compose host-pk cache should be consulted
-    /// (host side) and populated (GPU dispatch side).  ON for `full`
-    /// only — `hybrid` keeps it OFF.  The cache is documented as sound
-    /// by the recursion-phase GPU audit; long-lived GPU provers can opt
-    /// into `full` to enable it.
+    /// (host side) and populated (GPU dispatch side).  ON for `full` AND
+    /// `hybrid` (SP1-parity default): SP1 builds `(pk, vk)` once per
+    /// arity at startup (`RecursionProverData.compose_keys`).  The cache
+    /// is keyed by the compose witness `shape_key()` (NOT arity alone),
+    /// so a hit is byte-identical to a fresh `setup()`; see
+    /// `compose_pks_basefold_cache` field docs for the soundness
+    /// contract.  Only `host` disables it.
     pub fn allows_compose_pk_cache(self) -> bool {
-        matches!(self, Self::Full)
+        matches!(self, Self::Full | Self::Hybrid)
     }
 
-    /// Returns true when the per-arity compose recursion program cache
-    /// should be used.  ON for `full` only — off by default because
-    /// fix_shape proof bloat dominates cache savings on the shape spread
-    /// Ziren sees today.  Available as `full` opt-in for long-lived
-    /// provers where compile cost dominates.
+    /// Returns true when the per-shape compose recursion program cache
+    /// should be used.  ON for `full` AND `hybrid` (SP1-parity default):
+    /// SP1 builds the recursion program once per arity at startup
+    /// (`RecursionProverData.compose_programs`).  Ziren keys the cache by
+    /// the witness `shape_key()` (finer than arity) so a hit is always
+    /// the byte-identical program even when per-input shapes vary across
+    /// calls of the same arity.  Only `host` disables it.
     pub fn allows_program_cache(self) -> bool {
-        matches!(self, Self::Full)
+        matches!(self, Self::Full | Self::Hybrid)
     }
 
     /// Returns true when the cache-divergence audit should rebuild and
@@ -124,8 +133,8 @@ fn legacy_bool(var: &str) -> Option<bool> {
 }
 
 /// Compose host-pk cache — ON when `ZIREN_COMPOSE_PK_CACHE=1` (legacy)
-/// or when the profile allows it (default = `Hybrid` → OFF; only
-/// `Full` enables it).  Hybrid keeps audited-HEAD default behavior.
+/// or when the profile allows it (default `Hybrid` → ON; only `host`
+/// disables it).  `ZIREN_COMPOSE_PK_CACHE=0` forces it off.
 pub fn compose_pk_cache_enabled() -> bool {
     if let Some(v) = legacy_bool("ZIREN_COMPOSE_PK_CACHE") {
         return v;
@@ -134,7 +143,8 @@ pub fn compose_pk_cache_enabled() -> bool {
 }
 
 /// Compose recursion program cache — ON when `ZIREN_PROGRAM_CACHE=1`
-/// (legacy) or when the profile allows it (default = `Hybrid` → OFF).
+/// (legacy) or when the profile allows it (default `Hybrid` → ON; only
+/// `host` disables it).  `ZIREN_PROGRAM_CACHE=0` forces it off.
 pub fn program_cache_enabled() -> bool {
     if let Some(v) = legacy_bool("ZIREN_PROGRAM_CACHE") {
         return v;
@@ -167,15 +177,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_profile_matches_audited_head_behavior() {
-        // With no env set, the Hybrid profile MUST keep all four
-        // residency knobs OFF: program cache OFF, compose-pk cache OFF,
-        // pre-warm OFF, audit OFF.
+    fn default_profile_enables_shape_keyed_caches() {
+        // SP1-parity default: the Hybrid profile enables the two
+        // shape-keyed compose caches (program cache + compose-pk cache),
+        // both byte-neutral, while keeping the costly/opt-in knobs OFF
+        // (pre-warm = 63.7s upfront, cache audit = CI/dev tool).
         let profile = GpuResidencyProfile::Hybrid;
-        assert!(!profile.allows_program_cache());
+        assert!(profile.allows_program_cache());
+        assert!(profile.allows_compose_pk_cache());
         assert!(!profile.allows_program_cache_audit());
         assert!(!profile.allows_compose_prewarm());
-        assert!(!profile.allows_compose_pk_cache());
     }
 
     #[test]
