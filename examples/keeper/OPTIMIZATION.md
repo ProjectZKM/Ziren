@@ -82,3 +82,33 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_VERIFY_SHARD_CONCURRENCY` — max concurrent shard verifies
     (default **8**); raise to trade host RAM for verify parallelism.
+
+## LogUp-GKR first-layer device residency — skip giant-shard D2H (ziren-gpu)
+
+- **What.** The giant GKR first layer (nv=30 circuit layers) was computed
+  on-device, downloaded to a host `LayerState` (D2H ~1.5 s), then re-uploaded to
+  build the sumcheck slab. `ZIREN_GPU_FIRST_LAYER_RESIDENT` keeps the
+  first-layer split device-resident (device interaction-eval stash + device
+  MSB-split), skipping the giant first-layer D2H + host re-upload on the shards
+  that carry giant layers.
+- **Why byte-neutral.** The on-device split produces the identical
+  numerator/denominator quadrants as the host path — verified per-cell,
+  0-mismatch on the giant nv=30 layer. A latent uninitialized-memory bug in the
+  empty lower quadrants (device placeholder allocated but never written, vs the
+  host zero-pad) was fixed by zeroing the placeholder; without it the
+  giant-shard transcript diverged (coreVerify=0). The transcript never reads the
+  host materialization, so eliminating it is byte-identical.
+- **Measured** (tendermint 41-shard core proving, 2×GPU, skip-verify, RTX 5090):
+  - core proving wall: **~115.8 s → ~110.0 s (~−5.0%)** (3 runs each, zero
+    overlap — ON worst < OFF best, no OOM). The win is skipping the D2H +
+    re-upload on the ~2–3 giant shards; goat (no giant nv=30 layers) is a wash.
+- **Validated byte-identical.**
+  - fib core proof sha == golden `6278c091` with default (RESIDENT-on).
+  - goat single-GPU core sha identical default(on) == `=0`(off) == golden
+    `a7af7687` under the `RAYON_NUM_THREADS=1` oracle, both VERIFY OK.
+  - full-tendermint `coreVerify` RESIDENT-on: sha `32b38d48` (golden) + VERIFY
+    OK — end-to-end on the giant nv=30 device-MSB-split path (runnable via the
+    shard-verify concurrency cap above).
+- **Switches.**
+  - `ZIREN_GPU_FIRST_LAYER_RESIDENT` — default **on**; set `=0` (kill-switch)
+    for the legacy D2H + host-reupload path.
