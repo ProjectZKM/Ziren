@@ -894,13 +894,36 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 })
             };
 
-            proof
-                .shard_proofs
-                .par_iter()
-                .enumerate()
-                .filter_map(|(i, shard_proof)| verify_one(i, shard_proof).err().map(|_| i))
-                .min()
-                .map(|i| verify_one(i, &proof.shard_proofs[i]))
+            // Bound how many shard verifies run concurrently. Each shard verify
+            // allocates a large transient (padded-dense-sized) buffer; an
+            // unbounded `par_iter` over all shards materializes one per shard at
+            // once (a 41-shard TM proof -> ~700 GB peak host RSS -> OOM).
+            // Capping concurrency bounds peak host memory to ~cap x per-shard
+            // while preserving the EXACT verdict: shards are independent, and we
+            // still collect ALL failures and re-verify the lowest-index one
+            // serially for the identical typed error.
+            let cap = std::env::var("ZIREN_VERIFY_SHARD_CONCURRENCY")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .filter(|&k| k > 0)
+                .unwrap_or(8);
+
+            let n = proof.shard_proofs.len();
+            let mut failures: Vec<usize> = Vec::new();
+            let mut start = 0usize;
+            while start < n {
+                let end = (start + cap).min(n);
+                let mut chunk_failures: Vec<usize> = proof.shard_proofs[start..end]
+                    .par_iter()
+                    .enumerate()
+                    .filter_map(|(j, shard_proof)| {
+                        verify_one(start + j, shard_proof).err().map(|_| start + j)
+                    })
+                    .collect();
+                failures.append(&mut chunk_failures);
+                start = end;
+            }
+            failures.into_iter().min().map(|i| verify_one(i, &proof.shard_proofs[i]))
         });
 
         if let Some(result) = failed_shard {
