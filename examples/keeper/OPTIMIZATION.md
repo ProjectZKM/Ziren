@@ -112,3 +112,37 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_FIRST_LAYER_RESIDENT` — default **on**; set `=0` (kill-switch)
     for the legacy D2H + host-reupload path.
+
+## Single-GPU inline basefold — eliminate the host trace re-upload (ziren-gpu)
+
+- **What.** On single-GPU the deferred basefold queue pinned the device-trace
+  provider at cap=2 (the 2 captured shards' traces are held until their deferred
+  basefolds, which run only after *all* core proving). Shards 2..N then freed
+  their device traces post-GKR and **re-uploaded** host `main_traces` (col-major
+  transpose + H2D) for the reduce — ~20 s. `ZIREN_GPU_SINGLE_GPU_INLINE_BASEFOLD`
+  runs each shard's basefold reduce **inline** (immediately after its
+  core-proving + open) when `n_gpus==1`, so the shard's captured device traces
+  feed its reduce directly (no re-upload) and release before the next shard
+  (only 1 shard's traces resident).
+- **Why single-GPU-only.** The deferral exists to overlap core-proving (GPU A)
+  with basefold (GPU B) on multi-GPU. On one GPU both share the GPU — deferral
+  buys no overlap, only the queue + re-upload penalty. The multi-GPU deferred
+  path is untouched (the inline branch is `n_gpus==1 && gate` only).
+- **Why byte-neutral.** The captured device traces are the same host source in
+  the same col-major layout as the re-uploaded ones → identical reduce input →
+  identical proof.
+- **Measured** (tendermint 41-shard core, single-GPU, skip-verify, RTX 5090):
+  - core proving wall: **~154.8 s → ~126.2 s (−28.6 s, −18.5%)** (3 runs each,
+    zero overlap — ON worst < OFF best); GPU util 21% → 27%.
+  - re-upload count **39 → 0**; net win exceeds the 20.3 s re-upload (also drops
+    the host col-major transpose + serialization). Peak VRAM 26.3 GB = baseline
+    (only 1 shard's traces resident), no OOM.
+- **Validated byte-identical.**
+  - fib core sha == golden `6278c091`; fib compress sha == `fb48a684`
+    (default-on == `=0`-off).
+  - goat single-GPU core sha `a7af7687` default(on) == off under
+    `RAYON_NUM_THREADS=1`, coreVerify=1.
+  - full-tendermint coreVerify: sha `32b38d48` (golden) + VERIFY OK.
+- **Switches.**
+  - `ZIREN_GPU_SINGLE_GPU_INLINE_BASEFOLD` — default **on** (`n_gpus==1` only);
+    set `=0` (kill-switch) for the legacy deferred + re-upload path.
