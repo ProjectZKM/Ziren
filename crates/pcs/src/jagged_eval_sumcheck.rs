@@ -352,6 +352,7 @@ struct StructuralJaggedEvalProver<'a> {
     round_num: usize,
     num_dimensions: usize,
     half: InnerChallenge,
+    par: bool,
 }
 
 impl<'a> StructuralJaggedEvalProver<'a> {
@@ -360,6 +361,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
         z_trace: Vec<InnerChallenge>,
         merged_prefix_sums: &'a [Vec<InnerChallenge>],
         z_col_eq_vals: &'a [InnerChallenge],
+        par: bool,
     ) -> Self {
         let num_chips = merged_prefix_sums.len();
         let num_dimensions =
@@ -373,6 +375,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
             round_num: 0,
             num_dimensions,
             half: InnerChallenge::from_u8(2).inverse(),
+            par,
         }
     }
 
@@ -422,29 +425,69 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     /// Compute (y_0, y_half) — sums of all chip contributions at
     /// lambda = 0 and lambda = 1/2.
     fn compute_round_evals(&self) -> (InnerChallenge, InnerChallenge) {
-        self.merged_prefix_sums
-            .iter()
-            .zip(self.z_col_eq_vals.iter())
-            .zip(self.intermediate_eq_full_evals.iter())
-            .map(|((mps, &zc), &ie)| {
-                let y_0 = self.eval_chip(InnerChallenge::ZERO, mps, zc, ie);
-                let y_half = self.eval_chip(self.half, mps, zc, ie);
-                (y_0, y_half)
+        // Field addition is associative + commutative, so a parallel tree-reduce
+        // over the independent per-column contributions is BYTE-IDENTICAL to the
+        // sequential fold.  Gated (default ON) via ZIREN_JAGGED_EVAL_PAR.
+        if self.par {
+            use rayon::prelude::*;
+            jeval_pool().install(|| {
+                self.merged_prefix_sums
+                    .par_iter()
+                    .zip(self.z_col_eq_vals.par_iter())
+                    .zip(self.intermediate_eq_full_evals.par_iter())
+                    .map(|((mps, &zc), &ie)| {
+                        let y_0 = self.eval_chip(InnerChallenge::ZERO, mps, zc, ie);
+                        let y_half = self.eval_chip(self.half, mps, zc, ie);
+                        (y_0, y_half)
+                    })
+                    .reduce(
+                        || (InnerChallenge::ZERO, InnerChallenge::ZERO),
+                        |(a, b), (c, d)| (a + c, b + d),
+                    )
             })
-            .fold(
-                (InnerChallenge::ZERO, InnerChallenge::ZERO),
-                |(a, b), (c, d)| (a + c, b + d),
-            )
+        } else {
+            self.merged_prefix_sums
+                .iter()
+                .zip(self.z_col_eq_vals.iter())
+                .zip(self.intermediate_eq_full_evals.iter())
+                .map(|((mps, &zc), &ie)| {
+                    let y_0 = self.eval_chip(InnerChallenge::ZERO, mps, zc, ie);
+                    let y_half = self.eval_chip(self.half, mps, zc, ie);
+                    (y_0, y_half)
+                })
+                .fold(
+                    (InnerChallenge::ZERO, InnerChallenge::ZERO),
+                    |(a, b), (c, d)| (a + c, b + d),
+                )
+        }
     }
 
     /// Update `intermediate_eq_full_evals` after sampling `alpha` for
     /// the current round.  Mirrors SP1's `fix_last_variable`.
     fn fold(&mut self, alpha: InnerChallenge) {
-        for (k, mps) in self.merged_prefix_sums.iter().enumerate() {
-            let bit = mps[mps.len() - 1 - self.round_num];
-            // EQ(alpha, bit) = alpha*bit + (1-alpha)*(1-bit)
-            let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
-            self.intermediate_eq_full_evals[k] *= factor;
+        let round_num = self.round_num;
+        if self.par {
+            use rayon::prelude::*;
+            // Per-column updates are independent -> BYTE-IDENTICAL parallel map.
+            let inter = &mut self.intermediate_eq_full_evals;
+            let mps_all = self.merged_prefix_sums;
+            jeval_pool().install(|| {
+                inter
+                    .par_iter_mut()
+                    .zip(mps_all.par_iter())
+                    .for_each(|(acc, mps)| {
+                        let bit = mps[mps.len() - 1 - round_num];
+                        let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
+                        *acc *= factor;
+                    });
+            });
+        } else {
+            for (k, mps) in self.merged_prefix_sums.iter().enumerate() {
+                let bit = mps[mps.len() - 1 - round_num];
+                // EQ(alpha, bit) = alpha*bit + (1-alpha)*(1-bit)
+                let factor = alpha * bit + (InnerChallenge::ONE - alpha) * (InnerChallenge::ONE - bit);
+                self.intermediate_eq_full_evals[k] *= factor;
+            }
         }
         // SP1 parity: rhos accumulate via add_dimension = insert at FRONT
         // (slop Point::add_dimension = values.insert(0, .)), newest-first.
@@ -461,6 +504,39 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
 /// log_m up to ~30.
+fn jagged_eval_par_enabled() -> bool {
+    // Default ON (proven byte-identical — field addition is associative, so the
+    // tree-reduce == the sequential fold).  Kill-switch: ZIREN_JAGGED_EVAL_PAR=0
+    // (or false) forces the legacy sequential path.
+    std::env::var("ZIREN_JAGGED_EVAL_PAR")
+        .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
+        .unwrap_or(true)
+}
+
+// Dedicated rayon pool for the jagged-eval structural sumcheck.  The jagged-eval
+// runs INSIDE the single-thread basefold worker pool, so a bare `par_iter` there
+// stays sequential; installing on this pool routes the per-column inner loops to
+// all host cores while the GPU is idle.  Byte-neutral: field addition is
+// associative/commutative, so the tree-reduce equals the sequential fold
+// regardless of thread count.
+static JEVAL_POOL: std::sync::OnceLock<rayon::ThreadPool> = std::sync::OnceLock::new();
+fn jeval_pool() -> &'static rayon::ThreadPool {
+    JEVAL_POOL.get_or_init(|| {
+        let n = std::env::var("ZIREN_JAGGED_EVAL_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&x| x > 0)
+            .unwrap_or_else(|| {
+                std::thread::available_parallelism().map(|x| x.get()).unwrap_or(16)
+            });
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(n)
+            .thread_name(|i| format!("jeval-{i}"))
+            .build()
+            .expect("build jeval rayon pool")
+    })
+}
+
 fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_row: &[InnerChallenge],
     z_trace: &[InnerChallenge],
@@ -474,11 +550,16 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     } else {
         merged_prefix_sums[0].len()
     };
+    // Parallelize the per-column inner loops of the structural sumcheck across
+    // host cores (byte-identical; default ON, kill-switch ZIREN_JAGGED_EVAL_PAR=0).  The
+    // 64-column floor skips tiny shards where the pool hand-off would dominate.
+    let par = jagged_eval_par_enabled() && merged_prefix_sums.len() >= 64;
     let mut prover = StructuralJaggedEvalProver::new(
         z_row.to_vec(),
         z_trace.to_vec(),
         merged_prefix_sums,
         z_col_eq_vals,
+        par,
     );
 
     let mut univariate_polys = Vec::with_capacity(n);
