@@ -60,3 +60,25 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_EQ_INCREMENTAL` — default **on**; set `=0` (kill-switch) for the
     legacy naive build.
+
+## Shard-verify concurrency cap — bound peak host RAM (host)
+
+- **What.** Core-proof verification (`crates/pcs/src/machine.rs`) verified all
+  shard proofs with a single unbounded `par_iter` over `shard_proofs`. Each
+  `verify_shard` allocates a large transient (padded-dense-sized, ~18–20 GB)
+  buffer; with a 41-shard tendermint proof on a high-core host all shards
+  allocate at once → **~726 GB peak host RSS → OOM (RC=137)**. Replaced with a
+  **chunked bounded-parallel** verify: at most `cap` shards verify concurrently.
+- **Why byte-neutral.** Shards are independent. The chunked path collects the
+  same set of failing shard indices, takes the same lowest index, and
+  re-verifies it serially for the identical typed error. For `n ≤ cap` it
+  reduces to exactly the original single `par_iter` (fib and other small proofs
+  are bit-identical). This bounds memory only — verify is not a perf target.
+- **Measured** (tendermint 41-shard core proof, with verify):
+  - peak host RSS: **~726 GB (OOM) → ~156 GB** at cap=8 (~44 GB at cap=1).
+  - core proof sha **32b38d48** (golden) preserved; VERIFY OK.
+  - Unblocks full-tendermint `coreVerify` as an end-to-end byte-oracle
+    (previously un-runnable due to the OOM).
+- **Switches.**
+  - `ZIREN_VERIFY_SHARD_CONCURRENCY` — max concurrent shard verifies
+    (default **8**); raise to trade host RAM for verify parallelism.
