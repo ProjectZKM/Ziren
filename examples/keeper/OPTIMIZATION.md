@@ -146,3 +146,23 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_SINGLE_GPU_INLINE_BASEFOLD` — default **on** (`n_gpus==1` only);
     set `=0` (kill-switch) for the legacy deferred + re-upload path.
+
+## output_extract empty-chip skip — no full-cube eval for zero openings (ziren-gpu)
+
+- **What.** In output_extract, chips that are unexercised on a shard (height 0,
+  e.g. SyscallCore/SyscallInstrs/DivRem/CloClz on programs that don't hit them)
+  still ran the SP1-parity full-point opening — `pm.eval_at` over the 2^22 cube
+  (building the full eq-table) — for an opening that is provably the zero
+  vector. `ZIREN_GPU_OE_EMPTY_SKIP` emits the zero vector directly for empty
+  chips, skipping both the main- and full-point evals.
+- **Why byte-neutral.** A zero-padded (height-0) MLE evaluates to 0 at any
+  point, so the emitted zero vector equals the real eval bit-for-bit
+  (asserted cell-by-cell under `ZIREN_GPU_OUTPUT_EXTRACT_VERIFY=1`, 0 mismatch).
+- **Measured** (tendermint 41-shard core, single-GPU): output_extract
+  **~4.09 s → ~2.86 s (~1.2 s)**; small (~1% core, within wall-noise) because
+  the inline-basefold provider capture already routes the non-empty chips to the
+  device path — this removes the residual empty-chip host waste.
+- **Validated.** fib core `6278c091` + fib compress `fb48a684`; goat RAYON=1
+  on==off `a7af7687`; full-TM coreVerify `32b38d48` + VERIFY OK.
+- **Switches.**
+  - `ZIREN_GPU_OE_EMPTY_SKIP` — default **on**; `=0` restores the full eval.
