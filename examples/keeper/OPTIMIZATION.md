@@ -241,3 +241,28 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_ZEROCHECK_FOLD_NOSYNC` — default **on**; `=0` restores the
     per-round fold sync.
+
+## Jagged fold+sum scratch pool — cut per-round cudaMallocAsync churn (ziren-gpu)
+
+- **What.** The fused jagged LogUp-GKR fold+sum round fn
+  (`gpu_jagged_circuit_fold_and_sum_resident`) allocated + freed 7 device
+  scratch buffers (5 metadata uploads + `col_index` + `partials`) **every
+  round** — the churniest safely-reusable `cudaMallocAsync` site in core
+  proving. `ZIREN_GPU_BUFREUSE` adds a thread-local `JhrFoldScratch` pool
+  (mirroring the zerocheck device-state pool) that reuses those buffers across
+  rounds, rebuilding only on stream-handle change or capacity growth. The
+  retained per-round output slab (`out_dev`, next round's input) and the
+  retained layer-registry buffers are left freshly allocated (not poolable).
+- **Why byte-neutral.** Reuse only — the kernel launch/readback path is
+  identical between pooled and unpooled; metadata is refilled by H2D memcpy
+  (no alloc). No math changes.
+- **Measured** (goat 9-shard core, RAYON=1): total `cudaMallocAsync`
+  **46,985 → 35,015 (−25.5%)**. The wall gain (~0.6 s) is below single-run
+  noise; the value is the reduced allocation-API overhead (compounds with the
+  other marshalling reductions). The mempool `release_threshold` is already
+  `UINT64_MAX` (SP1-aligned), so this attacks the call *count*, not driver
+  round-trips.
+- **Validated byte-identical.** fib core `6278c091` on==off; goat RAYON=1 core
+  `a7af7687` default(on) == `=0`(off), deterministic across runs; verify OK.
+- **Switches.**
+  - `ZIREN_GPU_BUFREUSE` — default **on**; `=0` restores per-round allocation.
