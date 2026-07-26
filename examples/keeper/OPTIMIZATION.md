@@ -166,3 +166,29 @@ delta, how it was validated, and the enable/kill-switch.
   on==off `a7af7687`; full-TM coreVerify `32b38d48` + VERIFY OK.
 - **Switches.**
   - `ZIREN_GPU_OE_EMPTY_SKIP` — default **on**; `=0` restores the full eval.
+
+## FRI query-open bulk gather — eliminate 2.1M tiny D2H copies (ziren-gpu)
+
+- **What.** The FRI query-phase leaf-row openings in basefold-open pulled each
+  opened felt to host **one at a time** (`for query { for leaf { for col in
+  0..W { copy_device_to_host(1) } } }`) — ~2.1M tiny (median 640 ns) D2H copies
+  per tendermint core proof, stalling the GPU on host round-trips (nsys: this
+  was 100% of the core's tiny-scalar D2H). The single-leaf FRI-round path
+  already had a byte-identical device bulk-gather (`device_leaf_row_openings`:
+  one `gatherLeafRows` kernel + one bulk D2H); `ZIREN_GPU_FRI_QUERY_D2H_BULK`
+  now extends it to both multi-leaf open paths (`component_poly_open_multi_leaf`
+  + ROOTB codewords), per-felt fallback preserved.
+- **Why byte-neutral.** The gather kernel copies the identical opened rows in
+  the identical order; only the transport (one bulk D2H vs millions of 1-felt
+  copies) changes.
+- **Measured** (tendermint 41-shard core, single-GPU, RTX 5090):
+  - basefold_open tiny D2H copies **2,123,872 → 0** (sync `cudaMemcpy`
+    218,705 → 29).
+  - core proving wall **~124.2 s → ~108.2 s (−16.0 s, −12.9%)** (3 runs, zero
+    overlap). GPU util ~24% → ~27%.
+- **Validated byte-identical.** fib core `6278c091` + fib compress `fb48a684`;
+  goat RAYON=1 on==off `a7af7687`, coreVerify=1; full-TM coreVerify `32b38d48`
+  + VERIFY OK.
+- **Switches.**
+  - `ZIREN_GPU_FRI_QUERY_D2H_BULK` — default **on**; `=0` restores the per-felt
+    copies.
