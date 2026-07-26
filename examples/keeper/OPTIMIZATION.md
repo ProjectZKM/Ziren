@@ -192,3 +192,29 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_FRI_QUERY_D2H_BULK` — default **on**; `=0` restores the per-felt
     copies.
+
+## Giant FirstLayer slab — device-resident build, no per-shard re-upload (ziren-gpu)
+
+- **What.** The giant nv=30 LogUp-GKR FirstLayer is `LayerState::Host`, so its
+  jagged sumcheck slab was built by uploading the host numerator/denominator
+  quadrant tables every shard (`build_jhr_slab_from_host_layer`, ~2.4 GB/shard,
+  99.8 GB/run — the #1 layer_transitions H2D source). `ZIREN_GPU_FIRST_LAYER_SLAB_DEVICE`
+  builds the slab from the device-resident first-layer stash instead:
+  `peek_first_layer_stash` → `split_first_layer_device_from_buffers` → a
+  base-field-aware inline-widen pack (new device F→Ef4 widen kernel folded into
+  `build_jhr_slab_on_device`) → slab. No H2D. Byte-identical host fallback on
+  any decline.
+- **Why byte-neutral.** The device split (uninit-placeholder-fixed) and the
+  device slab pack are the same math as the host path — asserted per-shard
+  device-slab == host-slab (`ZIREN_GPU_JHR_SLAB_DEVICE_VERIFY`) during bring-up;
+  only the transport (build-on-device vs upload-host-quadrants) changes.
+- **Measured** (tendermint 41-shard, single-GPU, RTX 5090): eliminates the
+  99.8 GB/run giant-layer H2D; total-wall ~377 s → ~359 s (−18 s; the
+  core-prove share is larger, diluted by unchanged tracegen). Peak VRAM
+  24.7–26.4 GB (< 32), no OOM.
+- **Validated byte-identical.** fib core `6278c091` on==off; fib compress
+  `fb48a684` on==off; goat RAYON=1 core `a7af7687` on==off (VERIFY OK); full-TM
+  coreVerify `32b38d48` byte-identical across 3 runs.
+- **Switches.**
+  - `ZIREN_GPU_FIRST_LAYER_SLAB_DEVICE` — default **on**; `=0` (kill-switch)
+    restores the host-quadrant upload.
