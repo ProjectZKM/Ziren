@@ -218,3 +218,26 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_FIRST_LAYER_SLAB_DEVICE` — default **on**; `=0` (kill-switch)
     restores the host-quadrant upload.
+
+## Zerocheck fold — elide redundant per-round sync (ziren-gpu)
+
+- **What.** The device-resident zerocheck sumcheck did **two** blocking
+  `cudaStreamSynchronize` per round: one in `round_reduce` (before reading the
+  2-element result to host for Fiat-Shamir — a genuine data dependency, kept)
+  and one in `fold_msb` (after the in-place MSB fold). The `fold_msb` sync was
+  **redundant**: same-stream ordering guarantees the next round's `round_reduce`
+  reduce kernel (issued on the same `self.stream`) observes the fold's write,
+  and the host-side buffer swap + `set_len` are pointer/length bookkeeping only.
+  `ZIREN_GPU_ZEROCHECK_FOLD_NOSYNC` elides it — halving the per-round zerocheck
+  blocking syncs.
+- **Why byte-neutral.** Ordering-only change; the elided sync guarded nothing
+  that CUDA same-stream ordering doesn't already guarantee. No math changes.
+- **Measured.** Removes ~half of zerocheck's blocking `cudaStreamSynchronize`
+  (profiled at ~12 K/run — the largest single sync source), directly attacking
+  the ~22% of GPU-idle that is blocking syncs.
+- **Validated byte-identical + deterministic.** fib core `6278c091` on==off;
+  goat RAYON=1 gate-on ×3 all `a7af7687` == off (no async race); full-TM core
+  `32b38d48` + CORE VERIFY OK.
+- **Switches.**
+  - `ZIREN_GPU_ZEROCHECK_FOLD_NOSYNC` — default **on**; `=0` restores the
+    per-round fold sync.
