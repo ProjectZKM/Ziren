@@ -266,3 +266,33 @@ delta, how it was validated, and the enable/kill-switch.
   `a7af7687` default(on) == `=0`(off), deterministic across runs; verify OK.
 - **Switches.**
   - `ZIREN_GPU_BUFREUSE` — default **on**; `=0` restores per-round allocation.
+
+## GKR first-transition device-residency — no D2H round-trip (ziren-gpu)
+
+- **What.** The first LogUp-GKR F→EF layer transition
+  (`device_first_transition_native`) computes its output on-device
+  (`transition_layer_first_device` returns a `DeviceEfLayer`) but then pulled
+  every per-chip quadrant to host (D2H) to build a host `LogUpGkrCpuLayer`,
+  which `try_run_device_path` immediately re-uploaded (H2D) to start the device
+  layer walk — a redundant device→host→device round-trip.
+  `ZIREN_GPU_FIRST_TRANSITION_DEVICE` keeps the transition output
+  device-resident: it collects the per-chip `DeviceEfLayer`s (no pull), registers
+  them directly in the layer registry via a new device-source init
+  (`gpu_layer_init_from_device`, byte-identical to the host `gpu_layer_init_hook`
+  path — same `pack_per_chip_to_wholesale` / `WholesaleSource::Init`), and threads
+  the `(circuit_id, handle)` to `try_run_device_path` via a thread-local, which
+  then skips its own upload + fit-preflight.
+- **Why byte-neutral.** The device buffers moved into the registry are the exact
+  transition output the host path would pull then re-upload (a lossless
+  round-trip); the registry packed state is produced by the identical
+  `pack_per_chip_to_wholesale`. This is the first slice of SP1's device-resident
+  GKR layer model (`Tensor<_, TaskScope>` layers, no host round-trip).
+- **Measured** (tendermint 41-shard core, single-GPU, skip-verify, 3 runs):
+  - core proving wall **~249.3 s → ~219.0 s (−30.3 s, −12.2%)**, zero overlap
+    (ON worst 224 s < OFF best 243 s).
+- **Validated byte-identical.** fib core `6278c091` + fib compress `fb48a684`
+  (default-on == `=0`-off); goat RAYON=1 core `a7af7687` on==off; full-TM
+  coreVerify `32b38d48` + CORE VERIFY OK (giant nv=30 layer).
+- **Switches.**
+  - `ZIREN_GPU_FIRST_TRANSITION_DEVICE` — default **on**; `=0` (kill-switch)
+    restores the D2H-pull + H2D-reupload path.
