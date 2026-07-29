@@ -48,6 +48,7 @@
 
 
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use p3_challenger::FieldChallenger;
 use p3_field::{Field, PrimeCharacteristicRing};
@@ -58,6 +59,80 @@ use crate::jagged_branching_program::{
 };
 use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
 use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
+
+// ===========================================================================
+// Device jagged-eval round-engine seam (ZIREN_GPU_JAGGED_EVAL_DEVICE).
+//
+// The structural jagged-eval sumcheck's per-round polynomial COMPUTE (the
+// branching-program eval over all columns, ~O(N × num_cols) host work) can be
+// off-loaded to a device (CUDA) implementation supplied by `ziren-gpu`, while
+// the Fiat-Shamir challenger stays HOST-side (per-round observe/sample).  The
+// seam is a per-thread factory installed by `ziren-gpu` immediately around its
+// device-path `prove_jagged_basefold_linear_core` call.  When NO factory is
+// installed (the default, and every pure-host build), the sumcheck runs the
+// exact legacy host path below — byte-identical to today.
+// ===========================================================================
+
+/// Setup inputs handed to a device jagged-eval round engine when it is built.
+/// All the derived per-shard geometry the device kernels need; the challenger
+/// is deliberately absent (it stays host-side).
+pub struct JaggedEvalSetup<'a> {
+    /// Column prefix sums (offsets); length = num_columns + 1.
+    pub offsets: &'a [usize],
+    /// Bit-width per prefix sum (= `half`); the sumcheck dimension is `2*half`.
+    pub half: usize,
+    /// Sumcheck dimension `n = 2*half` (= round count).
+    pub num_dimensions: usize,
+    /// Row-direction challenge point (branching-program `z_row`).
+    pub z_row: &'a [InnerChallenge],
+    /// Trace-direction challenge point (branching-program `z_index` / `z_trace`).
+    pub z_trace: &'a [InnerChallenge],
+    /// Per-column EQ weights (`z_col_lagrange[..num_columns]`).
+    pub z_col_eq_vals: &'a [InnerChallenge],
+}
+
+/// A device (or alternative) engine that reproduces the per-round jagged-eval
+/// round polynomial evals + fold, replacing the host
+/// [`StructuralJaggedEvalProver`].  The engine tracks its own round counter and
+/// accumulated challenges internally (mirroring the host prover); the caller
+/// only feeds it the sampled `alpha` each round.  Field arithmetic is exact, so
+/// a correct engine is BYTE-IDENTICAL to the host prover.
+pub trait JaggedEvalRoundEngine {
+    /// `(y_0, y_{1/2})` for the current internal round (round counter starts 0).
+    fn compute_round_evals(&mut self) -> (InnerChallenge, InnerChallenge);
+    /// Fold the running EQ product against `alpha`; advance to the next round.
+    fn fold(&mut self, alpha: InnerChallenge);
+}
+
+type JaggedEvalEngineFactory =
+    Box<dyn Fn(&JaggedEvalSetup) -> Box<dyn JaggedEvalRoundEngine> + Send>;
+
+thread_local! {
+    static JAGGED_EVAL_ENGINE_FACTORY: RefCell<Option<(JaggedEvalEngineFactory, bool)>> =
+        const { RefCell::new(None) };
+}
+
+/// RAII guard that clears the installed factory on drop (panic-safe).
+pub struct JaggedEvalEngineGuard(());
+impl Drop for JaggedEvalEngineGuard {
+    fn drop(&mut self) {
+        JAGGED_EVAL_ENGINE_FACTORY.with(|c| *c.borrow_mut() = None);
+    }
+}
+
+/// Install a device jagged-eval round-engine factory for the CURRENT thread.
+/// `verify = true` runs BOTH the host and device provers in lockstep and
+/// asserts per-round bit-identity (the `..._VERIFY` sub-gate).  The returned
+/// guard clears the factory when dropped, so the effect is scoped to the guard
+/// lifetime.  Concurrent shard threads each install their own (thread-local).
+#[must_use]
+pub fn install_jagged_eval_device_engine(
+    factory: JaggedEvalEngineFactory,
+    verify: bool,
+) -> JaggedEvalEngineGuard {
+    JAGGED_EVAL_ENGINE_FACTORY.with(|c| *c.borrow_mut() = Some((factory, verify)));
+    JaggedEvalEngineGuard(())
+}
 
 /// Jagged-eval sub-protocol proof — wraps a [`PartialSumcheckProof`]
 /// over the polynomial defined in this module's docs.
@@ -596,6 +671,94 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
 }
 
+/// Engine-driven variant of [`structural_jagged_eval_sumcheck`] used on the
+/// `ziren-gpu` device path (`ZIREN_GPU_JAGGED_EVAL_DEVICE`).  The per-round
+/// polynomial evals + fold are delegated to `engine` (a device kernel); the
+/// challenger observe/sample/interpolate stay HOST-side and identical to the
+/// host prover.  With `verify = true`, a shadow host [`StructuralJaggedEvalProver`]
+/// runs in lockstep and each round's `(y_0, y_{1/2})` (plus the final `rhos`) is
+/// asserted bit-identical — panicking loudly with the round index and both
+/// values on any mismatch (the `..._VERIFY` sub-gate).  Because field arithmetic
+/// is exact, a correct engine yields a BYTE-IDENTICAL transcript + proof.
+#[allow(clippy::too_many_arguments)]
+fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger<InnerVal>>(
+    engine: &mut dyn JaggedEvalRoundEngine,
+    z_row: &[InnerChallenge],
+    z_trace: &[InnerChallenge],
+    merged_prefix_sums: &[Vec<InnerChallenge>],
+    z_col_eq_vals: &[InnerChallenge],
+    claimed_sum: InnerChallenge,
+    challenger: &mut C,
+    verify: bool,
+) -> PartialSumcheckProof<InnerChallenge> {
+    let n = if merged_prefix_sums.is_empty() { 0 } else { merged_prefix_sums[0].len() };
+
+    // Shadow host prover: built ONLY in verify mode, run in lockstep as the
+    // bit-identity oracle.  Uses the exact same `par` gate as the host path.
+    let par = jagged_eval_par_enabled() && merged_prefix_sums.len() >= 64;
+    let mut host_prover = if verify {
+        Some(StructuralJaggedEvalProver::new(
+            z_row.to_vec(),
+            z_trace.to_vec(),
+            merged_prefix_sums,
+            z_col_eq_vals,
+            par,
+        ))
+    } else {
+        None
+    };
+
+    let mut univariate_polys = Vec::with_capacity(n);
+    let mut current_claim = claimed_sum;
+    // Accumulated challenges in SP1 prepend order (newest-first) — mirrors the
+    // host prover's `rhos` and the in-circuit half-split verifier ordering.
+    let mut rhos_out: Vec<InnerChallenge> = Vec::with_capacity(n);
+
+    for round in 0..n {
+        let (y_0, y_half) = engine.compute_round_evals();
+
+        if let Some(hp) = host_prover.as_ref() {
+            let (h_0, h_half) = hp.compute_round_evals();
+            assert!(
+                h_0 == y_0 && h_half == y_half,
+                "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: round {round} mismatch \
+                 (n={n}, num_cols={}): host y_0={h_0:?} y_half={h_half:?} \
+                 device y_0={y_0:?} y_half={y_half:?}",
+                merged_prefix_sums.len(),
+            );
+        }
+
+        let y_1 = current_claim - y_0;
+        let poly = univariate_from_three_evals(y_0, y_half, y_1);
+
+        for &c in &poly.coefficients {
+            challenger.observe_algebra_element(c);
+        }
+        let alpha: InnerChallenge = challenger.sample_algebra_element();
+        current_claim = poly.eval_at_point(alpha);
+        univariate_polys.push(poly);
+
+        engine.fold(alpha);
+        if let Some(hp) = host_prover.as_mut() {
+            hp.fold(alpha);
+        }
+        rhos_out.insert(0, alpha);
+    }
+
+    if let Some(hp) = host_prover.as_ref() {
+        assert!(
+            hp.rhos == rhos_out,
+            "ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY: final rhos mismatch"
+        );
+    }
+
+    PartialSumcheckProof {
+        univariate_polys,
+        claimed_sum,
+        point_and_eval: (rhos_out, current_claim),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 // Generic over the challenger (FieldChallenger only) so the BN254 wrap reuses it.
 pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
@@ -683,14 +846,45 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
 
     // Production path (any size) — SP1's structural prover.
     // O(N × num_cols) per the fold structure; feasible at all scales.
-    let partial_sumcheck_proof = structural_jagged_eval_sumcheck(
-        z_row,
-        z_trace,
-        &merged_prefix_sums,
-        &z_col_eq_vals,
-        claimed_sum,
-        challenger,
-    );
+    //
+    // ZIREN_GPU_JAGGED_EVAL_DEVICE seam: when `ziren-gpu` has installed a device
+    // round-engine factory for this thread, off-load the per-round polynomial
+    // COMPUTE to the device (the challenger stays host-side).  With NO factory
+    // installed (default / pure-host), fall through to the exact legacy host
+    // path — byte-identical to today.
+    let engine_and_verify = JAGGED_EVAL_ENGINE_FACTORY.with(|c| {
+        c.borrow().as_ref().map(|(factory, verify)| {
+            let setup = JaggedEvalSetup {
+                offsets: prefix_sums,
+                half,
+                num_dimensions: n,
+                z_row,
+                z_trace,
+                z_col_eq_vals: &z_col_eq_vals,
+            };
+            (factory(&setup), *verify)
+        })
+    });
+    let partial_sumcheck_proof = match engine_and_verify {
+        Some((mut engine, verify)) => structural_jagged_eval_sumcheck_with_engine(
+            &mut *engine,
+            z_row,
+            z_trace,
+            &merged_prefix_sums,
+            &z_col_eq_vals,
+            claimed_sum,
+            challenger,
+            verify,
+        ),
+        None => structural_jagged_eval_sumcheck(
+            z_row,
+            z_trace,
+            &merged_prefix_sums,
+            &z_col_eq_vals,
+            claimed_sum,
+            challenger,
+        ),
+    };
 
     // For small workloads (n ≤ NAIVE_SUMCHECK_MAX_N) the naive path
     // remains as a debug cross-check.  Skip in release for speed.
