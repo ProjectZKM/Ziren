@@ -296,3 +296,57 @@ delta, how it was validated, and the enable/kill-switch.
 - **Switches.**
   - `ZIREN_GPU_FIRST_TRANSITION_DEVICE` — default **on**; `=0` (kill-switch)
     restores the D2H-pull + H2D-reupload path.
+
+## GKR first-layer stash-only host materialization — no D2H + no host MSB-split (ziren-gpu)
+
+- **What.** On a fully device-stashed shard, `generate_first_layer_native` used to
+  pull every per-chip first-layer quadrant to host (D2H) and run the host MSB-split
+  to build the host `LogUpGkrCpuLayer` — even though the resident consumers
+  (`device_first_transition` RESIDENT, the giant-slab `try_build_first_layer_slab_from_stash`,
+  and the nv28 pack) already device-split the SAME stash buffers and read only the
+  per-quadrant metadata (num_real_rows / num_interactions). `ZIREN_GPU_FIRST_LAYER_STASH_ONLY`
+  builds a METADATA-ONLY host first layer (real dims derived from the resident stash
+  buffer length; empty cells; no device split, no quadrant D2H) for every non-terminal
+  Kb/Ef4 chip whose stash entry is valid, and fires the core-side full-table D2H skip
+  (`first_layer_device_split_enabled`) on the same gate.
+- **Why byte-neutral.** The empty host cells are produced ONLY when the shard is fully
+  device-stashed — exactly when the device path handles it and never reads those cells
+  (it reads only the stash metadata). A post-loop safety net checks
+  `peek_first_layer_stash().len() == chips.len()`; any subset/mixed shard materializes the
+  real quadrants from the SAME stash buffers via the device-split (HOSTPIECE) path — still
+  no full-table D2H — before the giant-slab could read empty cells. Guarded to
+  `num_row_variables >= 3` and `!FIRST_LAYER_VERIFY`. This captures the Phase-1 reducible
+  host first-layer ceiling (~28.6 s / 41-shard TM: ie_d2h 14.0 s + host msb_split 14.6 s;
+  ie_compute 12.4 s stays on-device, the part SP1 also pays).
+- **Measured** (tendermint 41-shard core, single-GPU, skip-verify, 3 clean pairs):
+  - core proving **208.9 s -> 174.4 s (-34.5 s, -16.5%)**, ~438 vs ~359 kHz; zero overlap
+    (ON worst 176.1 s < OFF best 206.7 s). ~38/41 shards fully_stashed (win), 3 patched.
+- **Validated byte-identical.** full-TM core `32b38d48` on==off (RAYON=1 isolating control
+  + 5 default-rayon runs); goat RAYON=1 core `a7af7687` on==off + CORE VERIFY OK; fib core
+  `6278c091` + fib compress `fb48a684` on==off.
+- **Switches.**
+  - `ZIREN_GPU_FIRST_LAYER_STASH_ONLY` — default **on**; `=0` (kill-switch) restores the
+    host first-layer D2H-pull + host MSB-split.
+  - `ZIREN_IE_PROF` — byte-neutral profiling instrument (default off) splitting first-layer
+    `interaction_eval` into device-compute vs D2H.
+
+## Commit-MLE-resident open — SP1 drop-as-you-go input-stripe free (ziren-gpu)
+
+- **What.** The `ZIREN_GPU_COMMIT_MLE_RESIDENT` open path (default on) borrowed ALL resident
+  row-major input stripes for the whole reencode loop and materialized every col-major MLE +
+  reencoded codeword at once, so its peak VRAM was (all input stripes) + (all outputs) —
+  OOMing under tight/contended VRAM (the resident path has no host fallback by design).
+  `ZIREN_GPU_MLE_RESIDENT_FREE_INPUT` CONSUMES each resident input stripe and frees it
+  (stream-ordered `cudaFreeAsync` -> mempool) as soon as its col-major MLE + codeword are
+  produced, so the reencode peak is (one input stripe) + outputs.
+- **Why byte-neutral.** Identical `try_to_column_major` + `encode_batch_device_resident`
+  kernels and values on every stripe; only the free timing changes — each stripe's outputs
+  are produced before its input is freed, and stripes are independent. This aligns the
+  resident open with SP1's `fri.rs`/`encoder.rs` discipline (drop codeword after commit under
+  `drop_traces`, TaskScope pool reuse).
+- **Measured.** Peak VRAM drops by the resident input-stripe footprint (frees each consumed
+  stripe instead of holding the whole set), letting the resident open survive tighter VRAM.
+- **Validated byte-identical.** fib core `6278c091` on==off; goat RAYON=1 core `a7af7687`
+  on==off; full-TM core `32b38d48` on==off.
+- **Switches.**
+  - `ZIREN_GPU_MLE_RESIDENT_FREE_INPUT` — default **on**; `=0` restores the hold-all borrow.
