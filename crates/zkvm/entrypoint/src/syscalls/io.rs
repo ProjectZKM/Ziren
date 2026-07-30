@@ -2,10 +2,13 @@ cfg_if::cfg_if! {
     if #[cfg(target_os = "zkvm")] {
         use core::arch::asm;
         use crate::zkvm;
-        use sha2::digest::Update;
         use zkm_primitives::consts::fd::FD_PUBLIC_VALUES;
     }
 }
+
+// `blake3::Hasher::update` is an inherent method; `Sha256`'s comes from this trait.
+#[cfg(all(target_os = "zkvm", not(feature = "imm-wrap-vk")))]
+use sha2::digest::Update;
 
 /// Write `nbytes` of data to the prover to a given file descriptor `fd` from `write_buf`.
 #[allow(unused_variables)]

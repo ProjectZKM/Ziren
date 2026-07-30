@@ -845,6 +845,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "blake3"
+version = "1.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.6",
+ "cc",
+ "cfg-if",
+ "constant_time_eq 0.4.2",
+ "cpufeatures 0.3.0",
+]
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1463,7 +1477,7 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7",
 ]
 
 [[package]]
@@ -3444,6 +3458,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "imm-wrap-vk-add"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm",
+]
+
+[[package]]
+name = "imm-wrap-vk-add-host"
+version = "1.1.0"
+dependencies = [
+ "blake3",
+ "p3-field",
+ "sha2 0.10.8",
+ "zkm-build",
+ "zkm-sdk",
+ "zkm-stark",
+]
+
+[[package]]
 name = "impl-codec"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3745,7 +3778,7 @@ dependencies = [
  "once_cell",
  "sha2 0.10.8",
  "signature",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7",
 ]
 
 [[package]]
@@ -4453,7 +4486,7 @@ dependencies = [
  "hex",
  "primeorder",
  "sha2 0.10.8",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7",
 ]
 
 [[package]]
@@ -5861,7 +5894,7 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7",
 ]
 
 [[package]]
@@ -6760,7 +6793,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7",
 ]
 
 [[package]]
@@ -8754,9 +8787,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-lib"
+version = "1.2.7"
+source = "git+https://github.com/ProjectZKM/Ziren#e6945a76b084e87570b7be55e4479ce98603f43a"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2 0.10.8",
+ "zkm-primitives 1.2.7",
+]
+
+[[package]]
 name = "zkm-primitives"
-version = "1.2.4"
-source = "git+https://github.com/ProjectZKM/Ziren#1d43121312d4b93c0989984bf0c7ab77d9a0ce04"
+version = "1.2.5"
 dependencies = [
  "bincode",
  "hex",
@@ -9064,6 +9109,7 @@ name = "zkm-zkvm"
 version = "1.2.7"
 dependencies = [
  "bincode",
+ "blake3",
  "cfg-if",
  "critical-section",
  "embedded-alloc",

@@ -1,0 +1,20 @@
+[package]
+name = "imm-wrap-vk-add-host"
+version = { workspace = true }
+edition = { workspace = true }
+default-run = "imm-wrap-vk-add-host"
+publish = false
+
+[dependencies]
+zkm-sdk = { workspace = true }
+zkm-stark = { workspace = true }
+p3-field = { workspace = true }
+blake3 = { workspace = true }
+sha2 = { workspace = true }
+
+[build-dependencies]
+zkm-build = { workspace = true }
+
+[[bin]]
+name = "imm-wrap-vk-add-host"
+path = "src/main.rs"

@@ -1,0 +1,13 @@
+[package]
+name = "imm-wrap-vk-add"
+version = "1.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+zkm-zkvm = { path = "../../../crates/zkvm/entrypoint", features = ["embedded"] }
+
+[features]
+# Forwarded so `ZKM_IMM_WRAP_VK=1` (handled by `zkm-build`) can switch this guest to hash its
+# public values with BLAKE3 instead of SHA256.
+imm-wrap-vk = ["zkm-zkvm/imm-wrap-vk"]
