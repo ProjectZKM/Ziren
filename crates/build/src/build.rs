@@ -81,6 +81,11 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     // Activate the build command if the dependencies change.
     cargo_rerun_if_changed(&metadata, program_dir);
 
+    // Also rebuild if `ZKM_IMM_WRAP_VK` changes, since it decides whether the guest is built with
+    // the `imm-wrap-vk` feature. Cargo only tracks what's declared here, so without this the guest
+    // would stay stale (built in the old mode) whenever the env var changes but no source changes.
+    println!("cargo:rerun-if-env-changed=ZKM_IMM_WRAP_VK");
+
     // Check if RUSTC_WORKSPACE_WRAPPER is set to clippy-driver (i.e. if `cargo clippy` is the
     // current compiler). If so, don't execute `cargo ziren build` because it breaks
     // rust-analyzer's `cargo clippy` feature.

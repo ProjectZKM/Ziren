@@ -1,17 +1,17 @@
-use sha2::{Digest, Sha256};
 use substrate_bn::Fr;
+use zkm_primitives::io::ZKMPublicValues;
 
 use crate::error::Error;
 
 /// Hashes the public inputs in the same format as the Plonk and Groth16 verifiers.
 pub fn hash_public_inputs(public_inputs: &[u8]) -> [u8; 32] {
-    let mut result = Sha256::digest(public_inputs);
+    let mut result = ZKMPublicValues::from(public_inputs).hash();
 
     // The Plonk and Groth16 verifiers operate over a 254 bit field, so we need to zero
     // out the first 3 bits. The same logic happens in the Ziren Ethereum verifier contract.
     result[0] &= 0x1F;
 
-    result.into()
+    result
 }
 
 /// Formats the Ziren vkey hash and public inputs for use in either the Plonk or Groth16 verifier.

@@ -114,21 +114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy-signer"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43f447aefab0f1c0649f71edc33f590992d4e122bc35fb9cdbbf67d4421ace85"
-dependencies = [
- "alloy-primitives",
- "async-trait",
- "auto_impl",
- "either",
- "elliptic-curve",
- "k256",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7972,6 +7957,7 @@ name = "zkm-primitives"
 version = "1.2.7"
 dependencies = [
  "bincode",
+ "blake3",
  "hex",
  "lazy_static",
  "num-bigint 0.4.6",
@@ -7982,6 +7968,7 @@ dependencies = [
  "p3-symmetric",
  "serde",
  "sha2",
+ "tracing",
 ]
 
 [[package]]
@@ -8161,7 +8148,6 @@ name = "zkm-sdk"
 version = "1.2.7"
 dependencies = [
  "alloy-primitives",
- "alloy-signer",
  "anyhow",
  "async-trait",
  "bincode",

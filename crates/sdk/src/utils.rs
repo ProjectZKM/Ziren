@@ -2,11 +2,11 @@
 //!
 //! A collection of utilities for the Ziren SDK.
 
-use alloy_signer::k256::sha2::{Digest, Sha256};
 use p3_field::{FieldAlgebra, PrimeField};
 use p3_koala_bear::KoalaBear;
 use zkm_core_machine::io::ZKMStdin;
 pub use zkm_core_machine::utils::setup_logger;
+use zkm_primitives::io::ZKMPublicValues;
 use zkm_prover::utils::koalabear_bytes_to_bn254;
 use zkm_prover::{HashableKey, ZKMVerifyingKey};
 
@@ -52,8 +52,8 @@ pub fn compute_groth16_public_values(
 }
 
 pub fn committed_public_values(guest_committed_values: &[u8]) -> String {
-    // Calculate the SHA-256 hash of the input bytes.
-    let hash_result: [u8; 32] = Sha256::digest(guest_committed_values).into();
+    // Hash the input bytes (BLAKE3 in `imm-wrap-vk` mode, SHA256 otherwise).
+    let hash_result = ZKMPublicValues::from(guest_committed_values).hash();
 
     // Convert the [u8; 32] hash result into a [KoalaBear; 32] array.
     let committed_values_digest_bytes = hash_result.map(KoalaBear::from_canonical_u8);

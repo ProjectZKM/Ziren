@@ -34,10 +34,8 @@ fn main() {
     let (_, report) = client.execute(ELF, &stdin).run().unwrap();
     println!("executed program with {} cycles", report.total_instruction_count());
 
-    // Core mode is the default proof kind, and already carries the committed public-values
-    // digest in the last shard's public values, so there is no need for a compressed proof here.
     let (pk, vk) = client.setup(ELF);
-    let proof = client.prove(&pk, stdin).run().unwrap();
+    let proof = client.prove(&pk, stdin).compressed().run().unwrap();
     println!("generated proof");
 
     let mut public_values = proof.public_values.clone();
@@ -47,19 +45,17 @@ fn main() {
     println!("{a_out} + {b_out} = {sum}");
     assert_eq!(sum, a + b);
 
-    // client.verify(&proof, &vk).expect("verification failed");
+    client.verify(&proof, &vk).expect("verification failed");
 
-    // Pull the digest the guest actually committed to out of the last shard, and compare it
+    // Also pull the digest the guest actually committed to out of the proof, and compare it
     // against an independently computed hash of the raw public values, using whichever
-    // algorithm this guest build should have used. This checks the guest hasher itself, rather
-    // than relying on the host-side verification path (which does not yet branch on
-    // `imm-wrap-vk` mode).
-    let ZKMProof::Core(shard_proofs) = &proof.proof else {
-        panic!("expected a core proof");
+    // algorithm this guest build should have used. This checks the guest hasher itself directly,
+    // in addition to the host-side verification path above.
+    let ZKMProof::Compressed(compressed_proof) = &proof.proof else {
+        panic!("expected a compressed proof");
     };
-    let last_shard = shard_proofs.last().expect("proof has no shards");
     let proof_public_values: &PublicValues<Word<_>, _> =
-        last_shard.public_values.as_slice().borrow();
+        compressed_proof.proof.public_values.as_slice().borrow();
     let committed_value_digest: Vec<u8> = proof_public_values
         .committed_value_digest
         .iter()
