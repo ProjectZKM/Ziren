@@ -253,10 +253,16 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
                 })
                 .map(|event| row_fn(event, None))
                 .collect::<Vec<_>>(),
+            // `all_events()` iterates the deterministic-ordered event map; collect
+            // the rows in that source order.  A previous `.par_bridge()` here was
+            // UNORDERED, so under RAYON_NUM_THREADS>1 the SyscallPrecompile trace
+            // rows came out in a nondeterministic order -> nondeterministic proof
+            // -> `zerocheck rlc_eval != point_and_eval` verify-fail.  Sequential is
+            // byte-identical to the RAYON=1 golden (par_bridge was already
+            // sequential there) at negligible cost for this small chip.
             SyscallShardKind::Precompile => input
                 .precompile_events
                 .all_events()
-                .par_bridge()
                 .map(|(event, precompile)| row_fn(event, Some(precompile)))
                 .collect::<Vec<_>>(),
         };
