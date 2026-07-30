@@ -7,10 +7,9 @@ publish = false
 
 [dependencies]
 zkm-sdk = { workspace = true }
-zkm-stark = { workspace = true }
-p3-field = { workspace = true }
 blake3 = { workspace = true }
 sha2 = { workspace = true }
+num-bigint = "0.4.6"
 
 [build-dependencies]
 zkm-build = { workspace = true }

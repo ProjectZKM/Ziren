@@ -106,8 +106,13 @@ impl AsRef<[u8]> for ZKMPublicValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    // `zkm_imm_wrap_vk_mode()` reads a process-wide env var, so any test that touches it is
+    // `#[serial]` to avoid racing with the others in this module.
 
     #[test]
+    #[serial]
     fn test_hash_public_values() {
         let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let test_bytes = hex::decode(test_hex).unwrap();
@@ -120,5 +125,28 @@ mod tests {
         let expected_hash_biguint = BigUint::from_bytes_be(&hex::decode(expected_hash).unwrap());
 
         assert_eq!(hash, expected_hash_biguint);
+    }
+
+    #[test]
+    #[serial]
+    fn test_hash_public_values_imm_wrap_vk() {
+        std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
+        let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let test_bytes = hex::decode(test_hex).unwrap();
+
+        let mut public_values = ZKMPublicValues::new();
+        public_values.write_slice(&test_bytes);
+
+        let hash = public_values.hash();
+        let expected_hash = *blake3::hash(&test_bytes).as_bytes();
+        assert_eq!(hash, expected_hash);
+
+        let hash_bn254 = public_values.hash_bn254();
+        let mut expected_masked = expected_hash;
+        expected_masked[0] &= 0b00011111;
+        assert_eq!(hash_bn254, BigUint::from_bytes_be(&expected_masked));
+
+        std::env::remove_var("ZKM_IMM_WRAP_VK");
     }
 }

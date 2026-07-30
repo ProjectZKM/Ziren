@@ -552,6 +552,116 @@ mod tests {
         );
     }
 
+    /// BLAKE3-mode version of [`test_groth16_public_values`]: the guest is always built with the
+    /// `imm-wrap-vk` feature (see `test-artifacts/guests/hello-world-imm-wrap-vk`), and
+    /// `ZKM_IMM_WRAP_VK` is set so the host hashes with BLAKE3 to match.
+    ///
+    /// Mutates the process-wide `ZKM_IMM_WRAP_VK` env var, so this is `#[ignore]`d like other
+    /// env-var-dependent e2e tests in this codebase (e.g. `zkm-verifier`'s
+    /// `test_e2e_verify_groth16`); run explicitly with `-- --ignored`.
+    #[test]
+    #[ignore]
+    fn test_groth16_public_values_imm_wrap_vk() {
+        std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_IMM_WRAP_VK_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let proof = client.prove(&pk, stdin).groth16().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+
+        let string_input = b"hello world".to_vec();
+        let guest_committed_values = bincode::serialize(&string_input).unwrap();
+        assert_eq!(proof.public_values.as_ref(), guest_committed_values);
+
+        let inner_proof = match proof.proof.clone() {
+            Groth16(proof) => proof,
+            _ => panic!("expected a compressed proof"),
+        };
+
+        let vk_hash = vk.hash_bn254().as_canonical_biguint().to_string();
+        assert_eq!(vk_hash, inner_proof.public_inputs[0], "vk hash does not match");
+
+        let committed_public_values = committed_public_values(proof.public_values.as_ref());
+        assert_eq!(
+            committed_public_values, inner_proof.public_inputs[1],
+            "committed public values does not match"
+        );
+    }
+
+    /// Verifies the guest/host mode-mismatch check in `CpuProver`'s `prove_impl`/
+    /// `compress_to_groth16`: proving a guest that was built with `imm-wrap-vk` (BLAKE3), while
+    /// the host does not believe it's in that mode (`ZKM_IMM_WRAP_VK` unset), should fail fast
+    /// with a clear error -- before ever reaching the Go/gnark proving step, so this test is cheap
+    /// to run despite exercising the Groth16 path.
+    #[test]
+    #[ignore]
+    fn test_groth16_guest_host_mode_mismatch() {
+        std::env::remove_var("ZKM_IMM_WRAP_VK");
+
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_IMM_WRAP_VK_ELF;
+        let (pk, _vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        let err = client.prove(&pk, stdin).groth16().run().unwrap_err();
+        assert!(
+            err.to_string().contains("guest committed-values digest doesn't match"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// BLAKE3-mode version of [`test_e2e_core`]: the guest is always built with the
+    /// `imm-wrap-vk` feature, and `ZKM_IMM_WRAP_VK` is set so `client.verify()` checks the
+    /// committed public-values digest with BLAKE3 to match.
+    #[test]
+    #[ignore]
+    fn test_e2e_core_imm_wrap_vk() {
+        std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
+        utils::setup_logger();
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_IMM_WRAP_VK_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let mut proof = client.prove(&pk, stdin).run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+
+        // Test invalid public values.
+        proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
+        if client.verify(&proof, &vk).is_ok() {
+            panic!("verified proof with invalid public values")
+        }
+    }
+
+    /// BLAKE3-mode version of [`test_e2e_compressed`].
+    #[test]
+    #[ignore]
+    fn test_e2e_compressed_imm_wrap_vk() {
+        std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
+        utils::setup_logger();
+        let client = ProverClient::cpu();
+        let elf = test_artifacts::HELLO_WORLD_IMM_WRAP_VK_ELF;
+        let (pk, vk) = client.setup(elf);
+        let stdin = ZKMStdin::new();
+
+        // Generate proof & verify.
+        let mut proof = client.prove(&pk, stdin).compressed().run().unwrap();
+        client.verify(&proof, &vk).unwrap();
+
+        // Test invalid public values.
+        proof.public_values = ZKMPublicValues::from(&[255, 4, 84]);
+        if client.verify(&proof, &vk).is_ok() {
+            panic!("verified proof with invalid public values")
+        }
+    }
+
     #[test]
     fn test_compress_to_groth16() {
         utils::setup_logger();

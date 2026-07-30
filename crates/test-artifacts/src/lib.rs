@@ -5,6 +5,7 @@ use zkm_build::include_elf;
 pub const SHA2_RUST_ELF: &[u8] = include_elf!("sha2-rust");
 pub const FIBONACCI_ELF: &[u8] = include_elf!("fibonacci");
 pub const HELLO_WORLD_ELF: &[u8] = include_elf!("hello-world");
+pub const HELLO_WORLD_IMM_WRAP_VK_ELF: &[u8] = include_elf!("hello-world-imm-wrap-vk");
 
 pub const POSEIDON2_PERMUTE_ELF: &[u8] = include_elf!("poseidon2-permute-test");
 

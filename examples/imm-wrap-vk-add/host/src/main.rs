@@ -1,9 +1,6 @@
-use core::borrow::Borrow;
-
-use p3_field::PrimeField32;
+use num_bigint::BigUint;
 use sha2::{Digest, Sha256};
 use zkm_sdk::{include_elf, utils, ProverClient, ZKMProof, ZKMStdin};
-use zkm_stark::{air::PublicValues, Word};
 
 /// The ELF we want to execute inside the zkVM.
 ///
@@ -35,7 +32,7 @@ fn main() {
     println!("executed program with {} cycles", report.total_instruction_count());
 
     let (pk, vk) = client.setup(ELF);
-    let proof = client.prove(&pk, stdin).compressed().run().unwrap();
+    let proof = client.prove(&pk, stdin).groth16().run().unwrap();
     println!("generated proof");
 
     let mut public_values = proof.public_values.clone();
@@ -47,30 +44,29 @@ fn main() {
 
     client.verify(&proof, &vk).expect("verification failed");
 
-    // Also pull the digest the guest actually committed to out of the proof, and compare it
-    // against an independently computed hash of the raw public values, using whichever
+    // Also pull the committed-values digest out of the Groth16 proof's own public inputs, and
+    // compare it against an independently computed hash of the raw public values, using whichever
     // algorithm this guest build should have used. This checks the guest hasher itself directly,
-    // in addition to the host-side verification path above.
-    let ZKMProof::Compressed(compressed_proof) = &proof.proof else {
-        panic!("expected a compressed proof");
+    // in addition to the host-side verification path above (rather than reusing
+    // `ZKMPublicValues::hash_bn254()`, which is the same function under test).
+    let ZKMProof::Groth16(groth16_proof) = &proof.proof else {
+        panic!("expected a groth16 proof");
     };
-    let proof_public_values: &PublicValues<Word<_>, _> =
-        compressed_proof.proof.public_values.as_slice().borrow();
-    let committed_value_digest: Vec<u8> = proof_public_values
-        .committed_value_digest
-        .iter()
-        .flat_map(|w| w.0.iter().map(|x| x.as_canonical_u32() as u8))
-        .collect();
+    let committed_value_digest = &groth16_proof.public_inputs[1];
 
     let raw_public_values = proof.public_values.as_slice();
-    let expected_digest: Vec<u8> = if imm_wrap_vk_mode {
-        blake3::hash(raw_public_values).as_bytes().to_vec()
+    let mut hash: [u8; 32] = if imm_wrap_vk_mode {
+        blake3::hash(raw_public_values).into()
     } else {
-        Sha256::digest(raw_public_values).to_vec()
+        Sha256::digest(raw_public_values).into()
     };
+    // Mask the top 3 bits, matching the BN254 scalar field encoding used for Groth16 public
+    // inputs (same masking `ZKMPublicValues::hash_bn254()` applies internally).
+    hash[0] &= 0b00011111;
+    let expected_digest = BigUint::from_bytes_be(&hash).to_string();
 
     assert_eq!(
-        committed_value_digest, expected_digest,
+        *committed_value_digest, expected_digest,
         "committed public-values digest does not match {} of the raw public values",
         if imm_wrap_vk_mode { "BLAKE3" } else { "SHA256" }
     );

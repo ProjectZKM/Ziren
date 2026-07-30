@@ -7967,6 +7967,7 @@ dependencies = [
  "p3-poseidon2",
  "p3-symmetric",
  "serde",
+ "serial_test",
  "sha2",
  "tracing",
 ]
