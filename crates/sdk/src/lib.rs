@@ -582,7 +582,10 @@ mod tests {
             _ => panic!("expected a compressed proof"),
         };
 
-        let vk_hash = vk.hash_bn254().as_canonical_biguint().to_string();
+        // In `imm-wrap-vk` mode, `vkey_hash` is combined with `vk_commitment`/`pc_start`
+        // (see `hash_vkey_with_part_vk`), so it isn't just `vk.hash_bn254()` like in normal mode
+        // -- reuse the same mode-aware computation `client.verify()` already uses internally.
+        let vk_hash = zkm_prover::verify::groth16_vk_hash(&vk).unwrap().to_string();
         assert_eq!(vk_hash, inner_proof.public_inputs[0], "vk hash does not match");
 
         let committed_public_values = committed_public_values(proof.public_values.as_ref());

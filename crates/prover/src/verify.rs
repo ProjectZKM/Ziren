@@ -495,7 +495,7 @@ pub fn verify_groth16_bn254_public_inputs(
 }
 
 /// Compute the verification key hash committed into Groth16 public inputs.
-fn groth16_vk_hash(vk: &ZKMVerifyingKey) -> Result<BigUint> {
+pub fn groth16_vk_hash(vk: &ZKMVerifyingKey) -> Result<BigUint> {
     const PART_STARK_VK_BYTES: &[u8] = include_bytes!("../../verifier/bn254-vk/part_stark_vk.bin");
 
     let vk_hash = vk.hash_bn254();
