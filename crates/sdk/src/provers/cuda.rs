@@ -82,8 +82,8 @@ impl CudaProver {
         // process currently expects (see `zkm_imm_wrap_vk_mode`), before spending time on the
         // (potentially expensive) Plonk/Groth16/DvSnark proving below. A mismatch here means the
         // guest ELF was built in a different mode than this prover currently believes.
-        let actual_digest =
-            zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof).as_canonical_biguint();
+        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
+            .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
         if actual_digest != expected_digest {
             anyhow::bail!(
@@ -170,8 +170,8 @@ impl CudaProver {
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
 
         // See the equivalent check in `prove_with_cycles` for why this is here.
-        let actual_digest =
-            zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof).as_canonical_biguint();
+        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
+            .as_canonical_biguint();
         let expected_digest = public_values.hash_bn254();
         if actual_digest != expected_digest {
             anyhow::bail!(

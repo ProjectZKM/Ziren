@@ -26,8 +26,8 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
     unsafe {
         // When we halt, we retrieve the public values finalized digest.  This is the hash of all
         // the bytes written to the public values fd.
-        let hasher = core::mem::take(&mut *core::ptr::addr_of_mut!(zkvm::PUBLIC_VALUES_HASHER))
-            .unwrap();
+        let hasher =
+            core::mem::take(&mut *core::ptr::addr_of_mut!(zkvm::PUBLIC_VALUES_HASHER)).unwrap();
         cfg_if::cfg_if! {
             if #[cfg(feature = "imm-wrap-vk")] {
                 let pv_digest_bytes: [u8; 32] = *hasher.finalize().as_bytes();
