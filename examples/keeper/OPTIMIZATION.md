@@ -350,3 +350,71 @@ delta, how it was validated, and the enable/kill-switch.
   on==off; full-TM core `32b38d48` on==off.
 - **Switches.**
   - `ZIREN_GPU_MLE_RESIDENT_FREE_INPUT` — default **on**; `=0` restores the hold-all borrow.
+
+## ROOTB digest-resident commit — drop the bulk Merkle digest-layer D2H (ziren-gpu)
+
+- **What.** The streaming dense commit's `finalize` copied EVERY device Merkle digest
+  layer back to host (`digest_layers_dev.iter().map(|l| l.to_host()).collect()`,
+  `basefold/src/commit_dense.rs`). Measured on tendermint core: **0.537 GB per shard,
+  19.9 GB per run = 83% of ALL device→host traffic in the prover**, costing ~113 ms of
+  the ~232 ms commit-dense hook — its single largest item, at a PCIe-saturated
+  ~4.75 GB/s. Under ROOTB the commit now keeps only the layers small enough to be
+  top-of-tree and leaves the bulk lower layers EMPTY on host.
+- **Attribution note.** A prior investigation attributed this traffic to the codeword
+  spill `leaves_host.push(codeword.to_host())` in the same file and believed
+  `rootb_resident` was gated off. Both were wrong: `rootb_resident` is default-ON
+  (`= streaming && open_path_device_enabled() && retain_enabled()`, the latter two
+  default-true), which makes that `push` provably DEAD CODE — confirmed at runtime by
+  `ZIREN_PROF=1` reporting `rootb=true, codeword_d2h_ms=0` on every shard. The bytes
+  were always the digest-layer `collect`.
+- **Why it was dead weight.** Under ROOTB the same layers are RETAINED device-side and
+  handed to the open via `register_streaming_digests`, so every FRI sibling path is
+  gathered on device. The host `MerkleTree` is already LEAFLESS there and touches only
+  the TOP of the tree: `cap(0)` and `root()` both read `digest_layers.last()`, and
+  `cap()` reads ONE layer, never a range. At `log_dense=29` the chain is 24 layers /
+  512 MiB of which the host reads **32 bytes**; layer 0 alone is 256 MiB (one digest per
+  codeword row).
+- **Why byte-neutral.** Nothing on the host reads a skipped layer. The layer COUNT is
+  preserved (empty `Vec`s hold the positions) so the `arity_schedule` derived from
+  `host_digest_layers.len()` and every layer index are unchanged. The host MMCS
+  `open_batch` fallback is unreachable under ROOTB and in any case panics on the empty
+  `leaves` ("No committed matrices?") before it would index a digest layer, so the trim
+  cannot turn a working path into a wrong one. The trim is conditioned on
+  `rootb_resident`, so a regression to non-ROOTB (`ZIREN_GPU_OPEN_PATH_DEVICE=0` /
+  `ZIREN_GPU_OPEN_DEVICE_RETAIN=0`) restores the full copy the then-live host
+  `open_batch` needs; the legacy accumulate-all branch is untouched.
+- **Measured** (tendermint core, `ZIREN_PROF=1`): `finalize` **113 → 2 ms/shard**,
+  commit-dense hook **232 → 120 ms/shard (−48%)**, 508 MB/shard of D2H skipped
+  (18.8 GB/run). **TM R16 kHz 1033.1 → 1137.3 (+10.1%)**, 3 paired concurrent reps,
+  verify ON, zero overlap between arms (canon best 1078.2 < fix worst 1118.4).
+  The kHz gain exceeds the ~6% the PCIe time alone predicts because the skipped
+  `to_host()` also removes a 512 MB host `Vec` allocation + page-fault per shard.
+- **Validated byte-identical** (host `c1723c31`, ziren-gpu `6daa39a`, isolating control
+  vs canonical, verify ON): TM core `8b27f7e5ea510d95` (37 shards), goat core
+  `a18399929adf02fa` (9 shards), fib core `6278c091f7e8bd91` — all canon == fix.
+  RAYON>1 race check: TM R8 ×3 all == R1 sha, all verify OK.
+  Recursion checked too (core-only validation cannot see a recursion regression):
+  fib **compress** `68ed25eb3ab496f4` canon == fix, COMPRESS VERIFY OK both arms.
+- **Switches.**
+  - `ZIREN_GPU_ROOTB_HOST_DIGEST_MAX` — per-layer digest-count threshold, default
+    **65536** (2 MiB); `=0` restores the full host copy for A/B parity.
+  - `ZIREN_GPU_STREAMING_COMMIT_PARITY=1` asserts the host copy of every layer against a
+    rebuilt legacy tree, so the full copy is kept automatically whenever it is armed.
+
+## MEASURED NEGATIVE — batching the per-column `eval_at` dot launches (ziren-gpu)
+
+Recorded so it is not retried blind. `eval_columns_with_eq_raw`
+(`core/src/basefold/batched_trace_eval.rs`) issues one
+`dot_product_base_ef_koala_bear` launch per trace column — ~1900 launches/shard, each
+into a grid capped at 64 blocks = 26% of the 170 SMs — which looks like an obvious
+launch-storm/occupancy win. It is not.
+
+A byte-identical batched kernel (`dotProductBaseEfChipBatched`, column index carried in
+`blockIdx.y`, so a chip is ONE launch of `width * gridSize` blocks; `gridDim.x` and
+therefore the grid-stride slice, the per-block tree reduction, and the
+`col * MAX_DOT_GRID_SIZE + blockIdx.x` output slot are all unchanged) reproduced every
+golden — TM core `8b27f7e5ea510d95`, goat `a18399929adf02fa`, fib `6278c091f7e8bd91` —
+but measured **kHz 1104.9 → 1085.8, mean −1.7%** over 3 paired concurrent reps
+(−0.8%, −5.9%, +1.8%; arms overlapping). The launches evidently are not on the critical
+path, so removing their overhead buys nothing and the wider grid appears to cost a little
+locality. Not landed.
