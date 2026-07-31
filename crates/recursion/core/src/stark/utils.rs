@@ -28,15 +28,12 @@ pub fn zkm_dev_mode() -> bool {
 /// inputs for verification.
 ///
 /// By default, the variable is disabled.
+///
+/// Delegates to `zkm_primitives::io::zkm_imm_wrap_vk_mode` so there is a single canonical source of
+/// truth: this crate's `imm-wrap-vk` feature forwards to `zkm-primitives/imm-wrap-vk` (see this
+/// crate's `Cargo.toml`), so enabling either crate's feature enables both.
 pub fn zkm_imm_wrap_vk_mode() -> bool {
-    let value = std::env::var("ZKM_IMM_WRAP_VK").unwrap_or_else(|_| "false".to_string());
-    let enabled = value == "1" || value.to_lowercase() == "true" || cfg!(feature = "imm-wrap-vk");
-    if enabled {
-        tracing::warn!(
-            "`ZKM_IMM_WRAP_VK` environment variable or `imm-wrap-vk` feature is enabled."
-        );
-    }
-    enabled
+    zkm_primitives::io::zkm_imm_wrap_vk_mode()
 }
 
 /// Combine the base vkey hash with `vk_commitment` and `pc_start` using a Poseidon2 permutation.
