@@ -13,13 +13,22 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
-/// The default per-shard trace-AREA cap (raw main-trace cells), mirroring SP1's
-/// `ELEMENT_THRESHOLD` (sp1 crates/core/executor/src/opts.rs:12 = `(1 << 28) + (1 << 27)`).
-/// A shard is closed as soon as its accumulated (un-padded) main-trace cell count
+/// The default per-shard trace-AREA cap (raw main-trace cells). A shard is closed as
+/// soon as its accumulated (un-padded) main-trace cell count
 /// `Σ_chip event_counts[chip] × costs[chip]` reaches this, keeping dense (precompile/CPU-heavy)
 /// shards under the per-shard dense-area budget (log_dense ≤ 29) that the cycle / 24-bit-clk /
 /// height splits alone let run to log_dense = 30. Env-overridable via `ELEMENT_THRESHOLD`.
-pub const ELEMENT_THRESHOLD: usize = (1 << 28) + (1 << 27);
+///
+/// NOT SP1's constant. SP1 uses `(1 << 28) + (1 << 27)` (sp1
+/// crates/core/executor/src/opts.rs:12), but that is calibrated against SP1's
+/// RISC-V trace density AND against a `Chip::cost()` of `preprocessed + main`.
+/// Ziren's MIPS trace is ~2.2x denser per cycle, so an SP1-sized area does not
+/// fit a 32 GB device: at `(1 << 28) + (1 << 27)` the resident jagged fold+sum
+/// kernel (ziren-gpu basefold/src/logup_round_device.rs) CUDA-OOMs on both
+/// tendermint and goat. The value below is the largest budget measured to fit
+/// BOTH (goat OOMs at `1 << 28`, so the headroom above it is thin — re-measure
+/// peak VRAM before raising it).
+pub const ELEMENT_THRESHOLD: usize = (1 << 27) + (1 << 26) + (1 << 25) + (1 << 24);
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
