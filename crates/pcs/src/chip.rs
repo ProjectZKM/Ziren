@@ -143,6 +143,22 @@ where
     }
 
     /// Returns the cost of a row in the chip.
+    ///
+    /// This is the per-row cell count of the trace the prover actually
+    /// *materializes and commits*: preprocessed + main. It is the unit of the
+    /// per-shard trace-AREA budget (`ELEMENT_THRESHOLD`), which the executor
+    /// accumulates as `Σ_chip event_counts[chip] × cost(chip)` and compares
+    /// against the size the jagged dense commitment is sized for.
+    ///
+    /// It deliberately does NOT include the permutation or quotient widths
+    /// (SP1 parity: `sp1 crates/hypercube/src/chip.rs` `cost()` is likewise
+    /// `preprocessed + main`). Charging `4·perm + 4·quot` on top inflated the
+    /// charge against a dense that only ever holds preprocessed + main: the
+    /// measured inflation is ~1.75× for the tendermint and goat chip mixes, so
+    /// shards were split ~1.75× earlier than the commitment shape required.
+    ///
+    /// `ELEMENT_THRESHOLD` is calibrated against this definition and must be
+    /// re-derived whenever it changes — see `zkm_pcs::opts::ELEMENT_THRESHOLD`.
     #[inline]
     pub fn cost(&self) -> u64
     where
@@ -150,9 +166,7 @@ where
     {
         let preprocessed_cols = self.preprocessed_width();
         let main_cols = self.width();
-        let permutation_cols = self.permutation_width() * 4;
-        let quotient_cols = self.quotient_width() * 4;
-        (preprocessed_cols + main_cols + permutation_cols + quotient_cols) as u64
+        (preprocessed_cols + main_cols) as u64
     }
 
     /// Returns the width of the quotient polynomial.
