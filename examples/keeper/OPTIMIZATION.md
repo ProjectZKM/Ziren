@@ -790,3 +790,87 @@ locality. Not landed.
   suggests. `next_multiple_of_32` (the entry above) has now taken the padding
   half of that; the other half — absorbing the `Cpu` chip into the opcode chips,
   as SP1 does (SP1 has no CPU chip) — is still open.
+
+## GKRDRAIN post-walk mempool trim — delete the per-shard `cudaMemPoolTrimTo` (ziren-gpu)
+
+- **What.** The post-walk GKR fold-pool drain
+  (`LogupGkrDevicePool::release_data_buffers` in `basefold/src/logup_round_device.rs`,
+  reached once per shard from `drain_pool_for_devices` at the row_gkr→jagged_pcs
+  boundary) ended with an **unconditional `cudaMemPoolTrimTo(pool, 0)`**. It is now
+  gated behind `ZIREN_GPU_GKRDRAIN_TRIM`, default **off**. The stream sync that makes
+  the queued `cudaFreeAsync`s land is kept — only the unmap to the OS is gated.
+- **How it was found.** An nsys **CUDA-API** trace was intersected with the GPU-op
+  trace, so every GPU-idle gap could be attributed to the host API call in flight
+  (or to "no CUDA API at all" = pure host compute). `cudaMemPoolTrimTo` appeared
+  **34-35 times per tendermint core run — exactly once per shard — at a mean
+  29.7-42.3 ms**, i.e. **1.0-1.5 s of pure GPU idle**, making it the single largest
+  named CUDA-API stall in the run.
+- **Why it is redundant.** The drain exists so the downstream jagged-reduce /
+  DROP_LDES VRAM preflight sees the terminal GKR flat as free. Every live preflight
+  in the prover already reads `cuda_mem_get_info_pool_aware()` —
+  `jagged_sumcheck.rs` (the reduce this drain exists for), `commit_dense.rs`,
+  `layer_transition_dispatch.rs`, and the H32 preflight — and that helper **adds the
+  pool's cached-but-unused bytes to OS-free**, returning exactly the number the trim
+  was manufacturing. An audit found **no** raw `cudaMemGetInfo().free` consumer on
+  the prove path (the two remaining call sites read only `.total`).
+- **It was also self-defeating.** Trimming to 0 unmaps the mempool's pages, so the
+  next shard's `cudaMallocAsync`s re-fault them back in. The same profile shows
+  `cudaMallocAsync` costing **0.645-1.025 ms per call** against a warm-pool
+  expectation of single-digit microseconds — which is why the measured win is
+  roughly double the trim's own 1.0-1.5 s.
+- **Same anti-pattern, third site.** Two sibling sites had already been disabled by
+  measurement — `prover/src/core_multi_gpu.rs` post-shard trim ("41.3 ms per shard")
+  and `core/src/basefold/device_shard_traces.rs` free-traces trim ("26.9 ms, twice
+  per shard"). This one was simply missed.
+- **Why byte-neutral.** A trim only unmaps pages backing no live allocation, so no
+  buffer contents, launch order or transcript value can depend on it. The preflights
+  that *could* branch on free VRAM read the pool-aware number, which is invariant
+  under trimming.
+- **Measured** (tendermint core, R16, verify ON, paired concurrent, 5 reps across
+  **both** arm/GPU orientations to cancel per-GPU bias):
+
+  | orientation | CTRL s | FIX s | delta | speedup |
+  |---|---|---|---|---|
+  | CTRL@gpu4 / FIX@gpu5 rep1 | 38.004 | 35.036 | -7.81% | 1.0847 |
+  | CTRL@gpu4 / FIX@gpu5 rep2 | 38.528 | 35.585 | -7.64% | 1.0827 |
+  | CTRL@gpu4 / FIX@gpu5 rep3 | 39.763 | 34.193 | -14.01% | 1.1629 |
+  | FIX@gpu4 / CTRL@gpu5 rep1 | 41.463 | 38.319 | -7.58% | 1.0820 |
+  | FIX@gpu4 / CTRL@gpu5 rep2 | 40.974 | 36.970 | -9.77% | 1.1083 |
+
+  Core time **-9.4% mean / -7.8% median**; throughput **+10.4% mean, +8.5% median**
+  (stdev 0.035, every rep favours FIX, no overlap). Against the 1894 kHz TM R16
+  baseline that is **~2054 kHz median / ~2091 kHz mean**.
+  Peak VRAM neutral: CTRL max 22422 MiB (68.8%), FIX max 22806 MiB (69.9%); verify
+  OK on all 10 runs.
+- **Validated byte-identical.** Byte gate ALL-GREEN vs the four goldens with verify
+  ON — fib `ed4f7359e6ef5092`, goat `7fee60eb4b326632`, tendermint
+  `805904a19c67952a` (35 shards), fib compress `42ad2ade04bf93dc`. RAYON>1 race
+  gate: tendermint R8 x3 and goat R8 x3 each produced a single distinct sha equal to
+  the golden, with verify OK (6/6).
+- **Switches.**
+  - `ZIREN_GPU_GKRDRAIN_TRIM` — default **off**; `=1` restores the legacy per-shard
+    trim.
+
+## Note — GPU-idle anatomy of the core prove loop, and what it is NOT
+
+Recorded because a previous attribution pointed at the wrong mechanism and cost time.
+
+- The often-quoted "**12,445 D2H→H2D host gaps at a mean 1.67 ms**" is a **mean
+  dominated by outliers and by process startup**. In the raw nsys span, **one single
+  12.57 s gap at t=0.985 s — before any proving work — is 60% of that 20.8 s total.**
+  Restricted to the steady-state proving window the same statistic is **6.24 s over
+  12,438 gaps, mean 0.50 ms**, and it is strongly bimodal: **12,268 gaps contribute
+  0.82 s combined** (microsecond launch dust, not actionable) while **~170 gaps of
+  >=10 ms contribute 5.05 s**. There is no recurring 1.67 ms host stall.
+- Attributing the steady-state idle (17.5 s) against the CUDA-API trace:
+  gaps >=10 ms hold 12.0 s of it, of which only **29% is inside any CUDA API** and
+  **71% (8.5 s) is pure host compute with no CUDA call in flight**.
+- The named CUDA-API idle was `cudaMemPoolTrimTo` 1.01 s (fixed by the entry above),
+  `cudaMallocAsync` ~2.7 s (largely a knock-on of the trim), `cudaStreamSynchronize`
+  ~0.9 s and `cudaMemcpyAsync` ~0.9 s (bulk pageable transfer time, and pinned
+  staging has already been measured as a negative).
+- The pure-host remainder is **diffuse, not one dependency**: ~15 distinct bounding
+  op signatures at 0.05-0.9 s each. The largest single in-scope cluster is the JHR
+  slab build (`buildJhrSlabKernel` / `buildJhrSlabKernelBaseNum` → next H2D,
+  ~1.5 s, about one per shard); tracegen kernels → next H2D account for ~2.1 s.
+  Closing the rest needs many small host-work removals, not one lever.
