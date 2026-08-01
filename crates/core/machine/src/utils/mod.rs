@@ -125,6 +125,35 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
     }
 }
 
+/// SP1-parity padded height: the next multiple of 32 that is `>= n` and
+/// `>= 32`.  If `fixed_power` is set, behaves exactly like
+/// [`next_power_of_two`] (a pinned shape height is still `2^power`).
+///
+/// The jagged PCS commits every chip at its RAW row count
+/// (`compute_jagged_metadata_from_dims`), and the zerocheck / LogUp-GKR treat
+/// rows beyond the real height as VIRTUAL zero rows (`VirtualGeq` carries the
+/// raw height as an arbitrary integer threshold), so a committed height never
+/// needed to be a power of two.  `next_power_of_two` was therefore charging up
+/// to a 2x area tax on every core chip; SP1 pads to a multiple of 32 instead.
+pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
+    match fixed_power {
+        Some(_) => next_power_of_two(n, fixed_power, chip),
+        None => n.next_multiple_of(32).max(32),
+    }
+}
+
+/// [`pad_rows_fixed`] with the SP1-parity [`next_multiple_of_32`] padding.
+pub fn pad_rows_mult32<R: Clone>(
+    rows: &mut Vec<R>,
+    row_fn: impl Fn() -> R,
+    size_log2: Option<usize>,
+    chip: &str,
+) {
+    let nb_rows = rows.len();
+    let dummy_row = row_fn();
+    rows.resize(next_multiple_of_32(nb_rows, size_log2, chip), dummy_row);
+}
+
 pub fn chunk_vec<T>(mut vec: Vec<T>, chunk_size: usize) -> Vec<Vec<T>> {
     let mut result = Vec::new();
     while !vec.is_empty() {

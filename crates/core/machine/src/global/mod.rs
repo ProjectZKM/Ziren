@@ -24,7 +24,7 @@ use zkm_pcs::{
 
 use crate::{
     operations::{GlobalAccumulationOperation, GlobalLookupOperation},
-    utils::{indices_arr, next_power_of_two, zeroed_f_vec},
+    utils::{indices_arr, next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 use zkm_derive::AlignedBorrow;
@@ -113,7 +113,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
         let events = &input.global_lookup_events;
         let nb_rows = events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(
+        let padded_nb_rows = next_multiple_of_32(
             nb_rows,
             size_log2,
             <GlobalChip as MachineAir<F>>::name(self).as_str(),

@@ -32,19 +32,9 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         let n_real_rows = input.cpu_events.len();
         let padded_nb_rows = if let Some(shape) = &input.shape {
             shape.height(&self.id()).unwrap()
-        } else if n_real_rows < 32 {
-            32
         } else {
-            // SP1-parity padding (`next_multiple_of_32`).  The jagged PCS
-            // commits every chip at its RAW row count
-            // (`compute_jagged_metadata_from_dims`), and the zerocheck /
-            // LogUp-GKR treat rows beyond the real height as VIRTUAL zero rows
-            // (`VirtualGeq` carries the raw height as an arbitrary threshold),
-            // so the committed height never needed to be a power of two.  The
-            // `Cpu` chip is the tallest chip in a core shard by a wide margin,
-            // so `next_power_of_two` was paying up to a 2x area tax on ~62% of
-            // all committed cells.
-            n_real_rows.next_multiple_of(32)
+            // SP1-parity padding: see `utils::next_multiple_of_32`.
+            crate::utils::next_multiple_of_32(n_real_rows, None, "Cpu")
         };
         Some(padded_nb_rows)
     }

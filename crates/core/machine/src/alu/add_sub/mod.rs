@@ -21,7 +21,7 @@ use zkm_pcs::{
 
 use crate::{
     operations::AddOperation,
-    utils::{next_power_of_two, zeroed_f_vec},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -76,7 +76,7 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.add_sub_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <AddSubChip as MachineAir<F>>::name(self).as_str(),
@@ -378,7 +378,7 @@ mod tests {
     fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
         use rayon::slice::ParallelSlice;
 
-        use crate::utils::pad_rows_fixed;
+        use crate::utils::pad_rows_mult32;
 
         type F = KoalaBear;
 
@@ -408,7 +408,7 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_fixed(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
+        pad_rows_mult32(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)
