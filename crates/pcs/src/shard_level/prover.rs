@@ -958,6 +958,7 @@ where
         &trace_at_z,
         &logup_gkr_proof.logup_evaluations,
         &open_heights,
+        dense_rev,
     );
 
     // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
@@ -1250,6 +1251,11 @@ pub fn compute_residual_y_openings<SC, A>(
     // source.  An empty / short slice (host callers that don't precompute it)
     // tolerates `.get` → falls back to 0 (unexercised).
     heights: &[Option<usize>],
+    // The shard's rev(zeta) orientation (`dense_rev`).  Under `use_rev` BOTH
+    // the zerocheck residual and the jagged `y_per_chip` read NATURAL rows, so
+    // the reuse is valid for ANY height; only the LEGACY (`!use_rev`) bitrev
+    // convention needs a power-of-two height.
+    use_rev: bool,
 ) -> Option<Vec<Vec<Challenge<SC>>>>
 where
     SC: StarkGenericConfig,
@@ -1302,7 +1308,7 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
-        if !h.is_power_of_two() {
+        if !use_rev && !h.is_power_of_two() {
             ok = false;
             break;
         }
