@@ -603,3 +603,69 @@ but measured **kHz 1104.9 → 1085.8, mean −1.7%** over 3 paired concurrent re
 (−0.8%, −5.9%, +1.8%; arms overlapping). The launches evidently are not on the critical
 path, so removing their overhead buys nothing and the wider grid appears to cost a little
 locality. Not landed.
+
+## MemoryInstrs union chip split into per-width chips + inlined address add
+
+- **What.** The 14 MIPS memory opcodes shared one 79-column, 14-selector union
+  chip (`MemoryInstrs`). A jagged commitment pays `rows x columns`, so every
+  `LW` row also paid for the store-masking flags, the sign-extension gadget and
+  the unaligned-load scratch it never touched. The union is replaced by five
+  chips partitioned by access width and direction, each embedding a shared
+  57-column `MemoryInstrCommonCols`
+  (`crates/core/machine/src/memory/instructions/`):
+
+  | chip | opcodes | columns |
+  |---|---|---|
+  | `LoadNarrow` | LB LBU LH LHU | 68 |
+  | `LoadWord` | LW LL | 59 |
+  | `StoreNarrow` | SB SH | 62 |
+  | `StoreWord` | SW SC | 59 |
+  | `MemoryUnaligned` | LWL LWR SWL SWR | 64 |
+
+- **Two dependency rows also disappear.**
+  - The effective address is proven inline with an `AddOperation` (value + 3
+    carries, inside the shared block) instead of `send_alu(ADD, ..)`, removing
+    one 19-cell `AddSub` row per memory instruction.
+  - Narrow signed loads sign-extend by filling the high bytes with `0xFF`
+    instead of `send_alu(SUB, ..)`, removing one more `AddSub` row per negative
+    `LB`/`LH`.
+  - Also dropped: the witnessed `addr_aligned` column (now the expression
+    `addr_word.reduce() - addr_ls_two_bits`), and for the word-aligned chips the
+    three offset flags and the separate `unsigned_mem_val` word.
+
+- **Measured** (tendermint core, paired concurrent, ziren-gpu `55ff0fa`,
+  RTX 5090, verify ON, committed main-trace cells via the `ZIREN_DENSITY_LOG=1`
+  probe summed over all shards):
+
+  | | control `e4c86205` | split | delta |
+  |---|---|---|---|
+  | shards | 37 | 35 | −5.4% |
+  | committed cells | 14,850,284,592 | 13,710,257,744 | **−7.68%** |
+  | memory-instruction chips | 2,733,637,632 | 2,023,653,510 | −26.0% |
+  | `AddSub` | 1,414,529,024 | 667,418,624 | −52.8% |
+  | memory + `AddSub` | 4,148,166,656 | 2,691,072,134 | **−35.1%** |
+  | `Cpu` | 9,269,411,840 | 9,554,624,512 | +3.1% |
+
+  The `AddSub` chip drops a full binade (2^21 → 2^20 on 33+ shards): more than
+  half of all `AddSub` rows were memory-address dependencies. The memory family
+  drops two binades (one chip at 2^20 → 2^18/2^18/2^17/2^15/2^15), so the split
+  also recovers padding the union wasted. `Cpu` rises 3.1% because with fewer,
+  fuller shards more of them land on the `next_power_of_two` step at 2^22 —
+  that step function eats ~20% of the raw saving.
+
+- **Validated.** Not byte-identical by construction (the AIR, and therefore the
+  VK, changed). `CORE VERIFY OK` on fib, goat and tendermint; new shas
+  deterministic across repeats. `cargo test -p zkm-core-machine --lib` shows no
+  new failure against the same suite run on unmodified `e4c86205`.
+
+- **Switch.** None — this is unconditional, SP1-shaped. `ZIREN_DENSITY_LOG=1`
+  (added with this change, `crates/pcs/src/shard_level/prover.rs`) prints the
+  per-shard committed-cell count and per-chip log heights for attribution.
+
+- **Note for the next density step.** The probe shows `Cpu` alone is **62-69%**
+  of all committed cells, far more than the instruction-side share suggests,
+  because it is padded to `next_power_of_two` at 2^22 while shards carry ~2.1M
+  cycles — roughly a 1.9x padding factor on the single widest tall chip. Two
+  independent levers follow from that: absorbing the `Cpu` chip into the opcode
+  chips (SP1 has no CPU chip), and padding to `next_multiple_of_32` (SP1's rule)
+  instead of `next_power_of_two`.
