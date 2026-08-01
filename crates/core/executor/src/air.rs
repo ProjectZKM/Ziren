@@ -104,13 +104,13 @@ pub enum MipsAirId {
     /// The SyscallInstructionChip.
     SyscallInstrs = 38,
     /// The narrow (sub-word) load chip: `LB`, `LBU`, `LH`, `LHU`.
-    MemoryLoadNarrow = 54,
+    LoadNarrow = 54,
     /// The word-aligned load chip: `LW`, `LL`.
-    MemoryLoadWord = 55,
+    LoadWord = 55,
     /// The narrow (sub-word) store chip: `SB`, `SH`.
-    MemoryStoreNarrow = 56,
+    StoreNarrow = 56,
     /// The word-aligned store chip: `SW`, `SC`.
-    MemoryStoreWord = 57,
+    StoreWord = 57,
     /// The unaligned load/store chip: `LWL`, `LWR`, `SWL`, `SWR`.
     MemoryUnaligned = 58,
     /// The MiscInstrsChip.
@@ -151,10 +151,10 @@ impl MipsAirId {
             MipsAirId::MemoryLocal,
             MipsAirId::Branch,
             MipsAirId::Jump,
-            MipsAirId::MemoryLoadNarrow,
-            MipsAirId::MemoryLoadWord,
-            MipsAirId::MemoryStoreNarrow,
-            MipsAirId::MemoryStoreWord,
+            MipsAirId::LoadNarrow,
+            MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow,
+            MipsAirId::StoreWord,
             MipsAirId::MemoryUnaligned,
             MipsAirId::SyscallInstrs,
             MipsAirId::MovCond,
@@ -211,10 +211,10 @@ impl MipsAirId {
             Self::Branch => "Branch",
             Self::Jump => "Jump",
             Self::SyscallInstrs => "SyscallInstrs",
-            Self::MemoryLoadNarrow => "LoadNarrow",
-            Self::MemoryLoadWord => "LoadWord",
-            Self::MemoryStoreNarrow => "StoreNarrow",
-            Self::MemoryStoreWord => "StoreWord",
+            Self::LoadNarrow => "LoadNarrow",
+            Self::LoadWord => "LoadWord",
+            Self::StoreNarrow => "StoreNarrow",
+            Self::StoreWord => "StoreWord",
             Self::MemoryUnaligned => "MemoryUnaligned",
             Self::MiscInstrs => "MiscInstrs",
             Self::MemoryGlobalInit => "MemoryGlobalInit",
