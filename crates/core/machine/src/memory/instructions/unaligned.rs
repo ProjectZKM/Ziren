@@ -24,7 +24,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryCols,
-    utils::next_power_of_two,
+    utils::next_multiple_of_32,
     CoreChipError,
 };
 
@@ -246,7 +246,7 @@ impl<F: PrimeField32> MachineAir<F> for MemoryUnalignedChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        Some(next_power_of_two(
+        Some(next_multiple_of_32(
             input.memory_unaligned_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <Self as MachineAir<F>>::name(self).as_str(),
