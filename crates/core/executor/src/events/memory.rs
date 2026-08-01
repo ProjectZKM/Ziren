@@ -204,6 +204,35 @@ impl From<MemoryWriteRecord> for MemoryRecordEnum {
     }
 }
 
+/// Memory Bump Event.
+///
+/// A *shadow read* of a register, emitted the first time that register is touched in a shard.  It
+/// advances the register's memory-argument timestamp from the previous shard's
+/// `(prev_shard, prev_timestamp)` to `(shard, 0)` without changing its value.
+///
+/// Because `clk` restarts at 0 every shard and register accesses always sit at a sub-cycle
+/// position in `1..=4` (`MemoryAccessPosition::{C, B, A, HI}`), `(shard, 0)` is strictly below
+/// every real register access in the shard, so the shadow read is always the *first* link of the
+/// shard's access chain for that register.
+///
+/// The point of the bump is that every *subsequent* register access in the shard then has
+/// `prev_shard == shard`, which is what lets [`crate::events::MemoryAccessPosition`]-indexed
+/// register columns drop `prev_shard`, `compare_clk` and `diff_8bit_limb` (9 columns -> 6).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[repr(C)]
+pub struct MemoryBumpEvent {
+    /// The register address.  Always `< NUM_REGISTERS`.
+    pub addr: u32,
+    /// The shard the register is bumped *into*.  The shadow read happens at `(shard, 0)`.
+    pub shard: u32,
+    /// The value held by the register.  A shadow read leaves it unchanged.
+    pub value: u32,
+    /// The shard of the register's previous access.
+    pub prev_shard: u32,
+    /// The timestamp of the register's previous access.
+    pub prev_timestamp: u32,
+}
+
 /// Memory Local Event.
 ///
 /// This object encapsulates the information needed to prove a memory access operation within a

@@ -65,6 +65,7 @@ fn core_base_chips() -> &'static [&'static str] {
         "StoreWord",
         "MemoryUnaligned",
         "MemoryLocal",
+        "MemoryBump",
         "MovCond",
         "MiscInstrs",
         "SyscallInstrs",

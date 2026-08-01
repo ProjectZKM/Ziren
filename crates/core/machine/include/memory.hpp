@@ -33,6 +33,71 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_access(
     self.diff_8bit_limb = F::from_canonical_u32(diff_8bit_limb);
 }
 
+// ---------------------------------------------------------------------------
+// Register accesses.
+//
+// The `MemoryBump` chip guarantees `prev_shard == shard` for every register
+// access (it inserts a shadow read at `(shard, 0)` on the register's first
+// touch in the shard).  So a register access witnesses neither `prev_shard`
+// nor `compare_clk` nor the high limb of the timestamp difference -- the high
+// limb is a linear expression in the AIR.  9 columns -> 6.
+// ---------------------------------------------------------------------------
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_access(
+    RegisterAccessCols<F>& self,
+    const uint32_t timestamp,
+    const uint32_t prev_timestamp,
+    const uint32_t value
+) {
+    write_word_from_u32_v2<F>(self.value, value);
+    self.prev_clk = F::from_canonical_u32(prev_timestamp);
+
+    const uint32_t diff_minus_one = timestamp - prev_timestamp - 1;
+    const uint16_t diff_16bit_limb = (uint16_t)(diff_minus_one & 0xffff);
+    self.diff_16bit_limb = F::from_canonical_u16(diff_16bit_limb).val;
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void
+populate_register_read(RegisterReadCols<F>& self, const MemoryReadRecord& record) {
+    populate_register_access<F>(self.access, record.timestamp, record.prev_timestamp, record.value);
+}
+
+template<class F>
+__ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_register_read_write(
+    RegisterReadWriteCols<F>& self,
+    const OptionMemoryRecordEnum& record
+) {
+    if (record.tag == OptionMemoryRecordEnumTag::None) {
+        return;
+    }
+    switch (record.tag) {
+        case OptionMemoryRecordEnumTag::Read:
+            write_word_from_u32_v2<F>(self.prev_value, record.read.value);
+            populate_register_access<F>(
+                self.access,
+                record.read.timestamp,
+                record.read.prev_timestamp,
+                record.read.value
+            );
+            break;
+        case OptionMemoryRecordEnumTag::Write:
+            write_word_from_u32_v2<F>(self.prev_value, record.write.prev_value);
+            populate_register_access<F>(
+                self.access,
+                record.write.timestamp,
+                record.write.prev_timestamp,
+                record.write.value
+            );
+            break;
+        default:
+            // Unreachable. `None` case guarded above.
+            assert(false);
+            break;
+    }
+}
+
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ void
 populate_read(MemoryReadCols<F>& self, const MemoryReadRecord& record) {

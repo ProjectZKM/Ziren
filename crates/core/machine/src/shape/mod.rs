@@ -297,6 +297,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::StoreNarrow
                 | MipsAirId::StoreWord
                 | MipsAirId::MemoryUnaligned
+                | MipsAirId::MemoryBump
                 | MipsAirId::SyscallInstrs
                 | MipsAirId::DivRem
                 | MipsAirId::AddSub
@@ -353,6 +354,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::MemoryBump,
             MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
@@ -410,6 +412,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
+            MipsAirId::MemoryBump,
             MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
         ];
         let mut heights: Vec<(MipsAirId, usize)> =
@@ -1176,6 +1179,10 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
 
     let memory_local_log_height = shape.log2_height(&MipsAirId::MemoryLocal);
     maybe_log2_heights.insert(MipsAirId::MemoryLocal, heuristic(memory_local_log_height, 0));
+
+    // The bump chip has at most `NUM_REGISTERS` rows per shard, so a single small band suffices.
+    let memory_bump_log_height = shape.log2_height(&MipsAirId::MemoryBump);
+    maybe_log2_heights.insert(MipsAirId::MemoryBump, heuristic(memory_bump_log_height, 0));
 
     let divrem_log_height = shape.log2_height(&MipsAirId::DivRem);
     maybe_log2_heights.insert(MipsAirId::DivRem, heuristic(divrem_log_height, 1));

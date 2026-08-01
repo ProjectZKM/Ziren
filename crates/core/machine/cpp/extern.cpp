@@ -26,6 +26,11 @@ extern void memory_local_event_to_row_koalabear(const MemoryLocalEvent* event, S
     memory_local::event_to_row<kb31_t, kb31_septic_extension_t>(event, cols_kb31);
 }
 
+extern void memory_bump_event_to_row_koalabear(const MemoryBumpEvent* event, MemoryBumpCols<KoalaBearP3>* cols) {
+    MemoryBumpCols<kb31_t>* cols_kb31 = reinterpret_cast<MemoryBumpCols<kb31_t>*>(cols);
+    memory_bump::event_to_row<kb31_t>(*event, *cols_kb31);
+}
+
 extern void memory_global_event_to_row_koalabear(const MemoryInitializeFinalizeEvent* event, const bool is_receive, MemoryInitCols<KoalaBearP3>* cols) {
     MemoryInitCols<kb31_t>* cols_kb31 = reinterpret_cast<MemoryInitCols<kb31_t>*>(cols);
     memory_global::event_to_row<kb31_t, kb31_septic_extension_t>(event, is_receive, cols_kb31);

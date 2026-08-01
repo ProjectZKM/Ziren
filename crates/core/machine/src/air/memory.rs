@@ -1,14 +1,14 @@
 use std::iter::once;
 
 use p3_air::AirBuilder;
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{Field, PrimeCharacteristicRing};
 use zkm_core_executor::ByteOpcode;
 use zkm_pcs::{
     air::{AirLookup, BaseAirBuilder, ByteAirBuilder, LookupScope},
     LookupKind,
 };
 
-use crate::memory::{MemoryAccessCols, MemoryCols};
+use crate::memory::{MemoryAccessCols, MemoryCols, RegisterCols};
 
 pub trait MemoryAirBuilder: BaseAirBuilder {
     /// Constrain a memory read or write.
@@ -57,6 +57,88 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
         // The current values get "received", i.e. multiplicity = -1
         self.receive(
             AirLookup::new(current_values, do_check.clone(), LookupKind::Memory),
+            LookupScope::Local,
+        );
+    }
+
+    /// Constrain a register read or write.
+    ///
+    /// Registers share the memory argument and the memory address space with real memory, but the
+    /// `MemoryBump` chip guarantees that the previous access to a register is always in the
+    /// *current* shard: it inserts a shadow read at `(shard, 0)` on the register's first touch in
+    /// the shard, and `(shard, 0)` is strictly below every real register access (those sit at the
+    /// sub-cycle positions `1..=4` and `clk` restarts at 0 each shard).
+    ///
+    /// So `prev_shard` is not witnessed — it *is* `shard` — the `compare_clk` branch collapses to
+    /// the clk comparison, and only the low limb of the timestamp difference is witnessed.  See
+    /// [`crate::memory::RegisterAccessCols`].
+    fn eval_register_access<E: Into<Self::Expr> + Clone>(
+        &mut self,
+        shard: impl Into<Self::Expr>,
+        clk: impl Into<Self::Expr>,
+        addr: impl Into<Self::Expr>,
+        register_access: &impl RegisterCols<E>,
+        do_check: impl Into<Self::Expr>,
+    ) {
+        let do_check: Self::Expr = do_check.into();
+        let shard: Self::Expr = shard.into();
+        let clk: Self::Expr = clk.into();
+        let access = register_access.access();
+
+        self.assert_bool(do_check.clone());
+
+        let prev_clk: Self::Expr = access.prev_clk.clone().into();
+
+        // Verify that the current access time is greater than the previous's.  Because
+        // `prev_shard == shard`, this is always a clk comparison:
+        //
+        //   assert `0 <= clk - prev_clk - 1 < 2^24`
+        //
+        // decomposed as `diff_16bit_limb + diff_8bit_limb * 2^16`.  Only the low limb is a
+        // column; the high limb is recovered as the linear expression below and range-checked as
+        // a byte in place, which is what makes the check cost one column instead of two.
+        let diff_minus_one = clk.clone() - prev_clk.clone() - Self::Expr::ONE;
+        let diff_16bit_limb: Self::Expr = access.diff_16bit_limb.clone().into();
+        let diff_8bit_limb = (diff_minus_one - diff_16bit_limb.clone())
+            * Self::F::from_u32(1 << 16).inverse();
+
+        self.send_byte(
+            Self::Expr::from_u8(ByteOpcode::U16Range as u8),
+            diff_16bit_limb,
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            do_check.clone(),
+        );
+        self.send_byte(
+            Self::Expr::from_u8(ByteOpcode::U8Range as u8),
+            Self::Expr::ZERO,
+            Self::Expr::ZERO,
+            diff_8bit_limb,
+            do_check.clone(),
+        );
+
+        // Add to the memory argument, with `prev_shard` substituted by `shard`.
+        let addr = addr.into();
+        let prev_values = once(shard.clone())
+            .chain(once(prev_clk))
+            .chain(once(addr.clone()))
+            .chain(register_access.prev_value().clone().map(Into::into))
+            .collect();
+        let current_values = once(shard)
+            .chain(once(clk))
+            .chain(once(addr))
+            .chain(register_access.value().clone().map(Into::into))
+            .collect();
+
+        // The previous values get sent with multiplicity = 1, for "read".
+        self.send(
+            AirLookup::new(prev_values, do_check.clone(), LookupKind::Memory),
+            LookupScope::Local,
+        );
+
+        // The current values get "received", i.e. multiplicity = -1
+        self.receive(
+            AirLookup::new(current_values, do_check, LookupKind::Memory),
             LookupScope::Local,
         );
     }

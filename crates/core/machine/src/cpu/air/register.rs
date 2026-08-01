@@ -4,7 +4,7 @@ use zkm_pcs::air::ZKMAirBuilder;
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder},
     cpu::{columns::CpuCols, CpuChip},
-    memory::MemoryCols,
+    memory::RegisterCols,
 };
 use zkm_core_executor::events::MemoryAccessPosition;
 
@@ -25,7 +25,7 @@ impl CpuChip {
             .assert_word_eq(local.op_c_val(), local.instruction.op_c);
 
         // If they are not immediates, read `b` and `c` from memory.
-        builder.eval_memory_access(
+        builder.eval_register_access(
             local.shard,
             clk.clone() + AB::F::from_u32(MemoryAccessPosition::B as u32),
             local.instruction.op_b[0],
@@ -33,7 +33,7 @@ impl CpuChip {
             AB::Expr::ONE - local.instruction.imm_b,
         );
 
-        builder.eval_memory_access(
+        builder.eval_register_access(
             local.shard,
             clk.clone() + AB::F::from_u32(MemoryAccessPosition::C as u32),
             local.instruction.op_c[0],
@@ -56,7 +56,7 @@ impl CpuChip {
 
         // Write the `a` or the result to the first register described in the instruction unless
         // we are performing a branch or a store.
-        builder.eval_memory_access(
+        builder.eval_register_access(
             local.shard,
             clk.clone() + AB::F::from_u32(MemoryAccessPosition::A as u32),
             local.instruction.op_a,

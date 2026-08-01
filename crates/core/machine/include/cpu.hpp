@@ -80,12 +80,12 @@ __ZKM_HOSTDEV__ void event_to_row(
     }
 
     // Populate memory accesses for a, b, and c.
-    memory::populate_read_write<F>(cols.op_a_access, event.a_record);
+    memory::populate_register_read_write<F>(cols.op_a_access, event.a_record);
     if (event.b_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_read<F>(cols.op_b_access, event.b_record.read);
+        memory::populate_register_read<F>(cols.op_b_access, event.b_record.read);
     }
     if (event.c_record.tag == OptionMemoryRecordEnumTag::Read) {
-        memory::populate_read<F>(cols.op_c_access, event.c_record.read);
+        memory::populate_register_read<F>(cols.op_c_access, event.c_record.read);
     }
 
     bool is_halt = false;

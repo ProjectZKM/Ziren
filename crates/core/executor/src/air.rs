@@ -121,6 +121,8 @@ pub enum MipsAirId {
     MemoryGlobalFinalize = 42,
     /// The memory local chip.
     MemoryLocal = 43,
+    /// The memory bump chip: one shadow read per (register, shard).
+    MemoryBump = 59,
     /// The global chip.
     Global = 44,
     /// The byte chip.
@@ -149,6 +151,7 @@ impl MipsAirId {
             MipsAirId::ShiftRight,
             MipsAirId::DivRem,
             MipsAirId::MemoryLocal,
+            MipsAirId::MemoryBump,
             MipsAirId::Branch,
             MipsAirId::Jump,
             MipsAirId::LoadNarrow,
@@ -220,6 +223,7 @@ impl MipsAirId {
             Self::MemoryGlobalInit => "MemoryGlobalInit",
             Self::MemoryGlobalFinalize => "MemoryGlobalFinalize",
             Self::MemoryLocal => "MemoryLocal",
+            Self::MemoryBump => "MemoryBump",
             Self::Global => "Global",
             Self::Byte => "Byte",
             Self::SysLinux => "SysLinux",

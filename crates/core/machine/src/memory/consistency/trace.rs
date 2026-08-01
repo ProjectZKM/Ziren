@@ -3,7 +3,89 @@ use zkm_core_executor::events::{
     ByteRecord, MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord,
 };
 
-use super::{MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols};
+use super::{
+    MemoryAccessCols, MemoryReadCols, MemoryReadWriteCols, MemoryWriteCols, RegisterAccessCols,
+    RegisterReadCols, RegisterReadWriteCols,
+};
+
+impl<F: PrimeField32> RegisterReadCols<F> {
+    pub fn populate(&mut self, record: MemoryReadRecord, output: &mut impl ByteRecord) {
+        self.access.populate_access(
+            record.timestamp,
+            record.prev_timestamp,
+            record.value,
+            record.shard,
+            record.prev_shard,
+            output,
+        );
+    }
+}
+
+impl<F: PrimeField32> RegisterReadWriteCols<F> {
+    pub fn populate(&mut self, record: MemoryRecordEnum, output: &mut impl ByteRecord) {
+        match record {
+            MemoryRecordEnum::Read(r) => {
+                self.prev_value = r.value.into();
+                self.access.populate_access(
+                    r.timestamp,
+                    r.prev_timestamp,
+                    r.value,
+                    r.shard,
+                    r.prev_shard,
+                    output,
+                );
+            }
+            MemoryRecordEnum::Write(w) => {
+                self.prev_value = w.prev_value.into();
+                self.access.populate_access(
+                    w.timestamp,
+                    w.prev_timestamp,
+                    w.value,
+                    w.shard,
+                    w.prev_shard,
+                    output,
+                );
+            }
+        }
+    }
+}
+
+impl<F: PrimeField32> RegisterAccessCols<F> {
+    /// Populate a register access.
+    ///
+    /// `prev_shard` is only taken to assert the `MemoryBump` invariant in debug builds — it is not
+    /// witnessed, because it is guaranteed to equal `shard`.
+    pub(crate) fn populate_access(
+        &mut self,
+        timestamp: u32,
+        prev_timestamp: u32,
+        value: u32,
+        shard: u32,
+        prev_shard: u32,
+        output: &mut impl ByteRecord,
+    ) {
+        debug_assert_eq!(
+            shard, prev_shard,
+            "register access at addr-time {timestamp} has prev_shard {prev_shard} != shard \
+             {shard}: the MemoryBump shadow read is missing"
+        );
+        let _ = (shard, prev_shard);
+        self.value = value.into();
+        self.prev_clk = F::from_u32(prev_timestamp);
+
+        let diff_minus_one = timestamp.wrapping_sub(prev_timestamp).wrapping_sub(1);
+        let diff_16bit_limb = (diff_minus_one & 0xffff) as u16;
+        self.diff_16bit_limb = F::from_u16(diff_16bit_limb);
+        let diff_8bit_limb = (diff_minus_one >> 16) & 0xff;
+
+        // Add a byte table lookup with the 16Range op.
+        output.add_u16_range_check(diff_16bit_limb);
+
+        // Add a byte table lookup with the U8Range op.  The high limb is a linear expression in
+        // the AIR, not a column, but it is still range-checked.
+        output.add_u8_range_check(0, diff_8bit_limb as u8);
+    }
+}
 
 impl<F: PrimeField32> MemoryWriteCols<F> {
     pub fn populate(&mut self, record: MemoryWriteRecord, output: &mut impl ByteRecord) {

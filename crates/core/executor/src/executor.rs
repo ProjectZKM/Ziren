@@ -21,8 +21,9 @@ use crate::{
     estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
-        MemoryAccessPosition, MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryReadRecord,
-        MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent, MovCondEvent, SyscallEvent,
+        MemoryAccessPosition, MemoryBumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
+        MemoryReadRecord, MemoryRecord, MemoryRecordEnum, MemoryWriteRecord, MiscEvent,
+        MovCondEvent, SyscallEvent,
     },
     hook::{HookEnv, HookRegistry},
     memory::{Entry, Memory},
@@ -857,6 +858,7 @@ impl<'a> Executor<'a> {
         let prev_record = *record;
         record.shard = shard;
         record.timestamp = timestamp;
+        let cur_record = *record;
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
             upsert_local_mem(
                 local_memory_access,
@@ -864,18 +866,57 @@ impl<'a> Executor<'a> {
                 &mut self.local_memory_access,
                 addr,
                 prev_record,
-                *record,
+                cur_record,
                 true, // is_register
             );
         }
-        // Construct the memory read record.
+        // Construct the memory read record.  The witnessed previous timestamp is the *bumped* one
+        // (see `bump_register_timestamp`), so it is always in the current shard.
+        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
         MemoryReadRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
-            prev_record.shard,
-            prev_record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
+    }
+
+    /// Emit a register timestamp bump (a "shadow read") if this is the first touch of `addr` in
+    /// the current shard, and return the `(prev_shard, prev_timestamp)` that the register access
+    /// columns should witness.
+    ///
+    /// Registers carry their `(shard, clk)` across shard boundaries, so the first touch of a
+    /// register in a shard would otherwise witness `prev_shard < shard` and the access would have
+    /// to compare *shards* rather than clks.  The bump inserts a shadow read at `(shard, 0)`,
+    /// which is strictly below every real register access in the shard (those live at sub-cycle
+    /// positions `1..=4`, and `clk` restarts at 0 each shard), so it is always the first link of
+    /// the shard's access chain for that register.
+    ///
+    /// The resulting invariant — every register access has `prev_shard == shard` — is what lets
+    /// `RegisterAccessCols` drop `prev_shard`, `compare_clk` and `diff_8bit_limb` (9 columns to
+    /// 6).  The dropped shard comparison is paid for exactly once per (register, shard) by the
+    /// `MemoryBump` chip instead of once per first-touch.
+    #[inline]
+    fn bump_register_timestamp(
+        &mut self,
+        addr: u32,
+        shard: u32,
+        prev_record: MemoryRecord,
+    ) -> (u32, u32) {
+        if self.unconstrained || prev_record.shard == shard {
+            return (prev_record.shard, prev_record.timestamp);
+        }
+        if self.executor_mode == ExecutorMode::Trace {
+            self.record.bump_memory_events.push(MemoryBumpEvent {
+                addr,
+                shard,
+                value: prev_record.value,
+                prev_shard: prev_record.shard,
+                prev_timestamp: prev_record.timestamp,
+            });
+        }
+        (shard, 0)
     }
 
     /// Write a word to memory and create an access record.
@@ -1047,6 +1088,7 @@ impl<'a> Executor<'a> {
         record.shard = shard;
         record.timestamp = timestamp;
 
+        let cur_record = *record;
         if !self.unconstrained && self.executor_mode == ExecutorMode::Trace {
             upsert_local_mem(
                 local_memory_access,
@@ -1054,7 +1096,7 @@ impl<'a> Executor<'a> {
                 &mut self.local_memory_access,
                 addr,
                 prev_record,
-                *record,
+                cur_record,
                 true, // is_register
             );
         }
@@ -1076,14 +1118,16 @@ impl<'a> Executor<'a> {
             });
         }
 
-        // Construct the memory write record.
+        // Construct the memory write record.  The witnessed previous timestamp is the *bumped*
+        // one (see `bump_register_timestamp`), so it is always in the current shard.
+        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
         MemoryWriteRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
             prev_record.value,
-            prev_record.shard,
-            prev_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
     }
 
@@ -1144,6 +1188,7 @@ impl<'a> Executor<'a> {
         record.shard = shard;
         record.timestamp = timestamp;
 
+        let cur_record = *record;
         if !self.unconstrained {
             // FIX: rw_traced is register write — must go
             // through upsert_local_mem with is_register=true so the event lands in
@@ -1156,19 +1201,21 @@ impl<'a> Executor<'a> {
                 &mut self.local_memory_access,
                 addr,
                 prev_record,
-                *record,
+                cur_record,
                 true, // is_register
             );
         }
 
-        // Construct the memory write record.
+        // Construct the memory write record.  The witnessed previous timestamp is the *bumped*
+        // one (see `bump_register_timestamp`), so it is always in the current shard.
+        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
         MemoryWriteRecord::new(
-            record.value,
-            record.shard,
-            record.timestamp,
+            cur_record.value,
+            cur_record.shard,
+            cur_record.timestamp,
             prev_record.value,
-            prev_record.shard,
-            prev_record.timestamp,
+            prev_shard,
+            prev_timestamp,
         )
     }
 

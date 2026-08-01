@@ -17,9 +17,9 @@ use std::{mem::take, str::FromStr, sync::Arc};
 use crate::{
     events::{
         AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, CpuEvent,
-        GlobalLookupEvent, JumpEvent, MemInstrEvent, MemoryInitializeFinalizeEvent,
-        MemoryLocalEvent, MemoryRecordEnum, MiscEvent, MovCondEvent, PrecompileEvent,
-        PrecompileEvents, SyscallEvent,
+        GlobalLookupEvent, JumpEvent, MemInstrEvent, MemoryBumpEvent,
+        MemoryInitializeFinalizeEvent, MemoryLocalEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
+        PrecompileEvent, PrecompileEvents, SyscallEvent,
     },
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
     MipsAirId, Program,
@@ -79,6 +79,11 @@ pub struct ExecutionRecord {
     pub global_memory_finalize_events: Vec<MemoryInitializeFinalizeEvent>,
     /// A trace of all the shard's local memory events.
     pub cpu_local_memory_access: Vec<MemoryLocalEvent>,
+    /// A trace of the register timestamp bumps (shadow reads) for this shard.
+    ///
+    /// One entry per register touched in the shard, emitted on its first touch.  See
+    /// [`MemoryBumpEvent`].
+    pub bump_memory_events: Vec<MemoryBumpEvent>,
     /// A trace of all the syscall events.
     pub syscall_events: Vec<SyscallEvent>,
     /// A trace of all the global lookup events.
@@ -444,6 +449,7 @@ impl MachineRecord for ExecutionRecord {
             self.global_memory_finalize_events.len(),
         );
         stats.insert("local_memory_access_events".to_string(), self.cpu_local_memory_access.len());
+        stats.insert("bump_memory_events".to_string(), self.bump_memory_events.len());
         if !self.cpu_events.is_empty() {
             stats.insert("byte_lookups".to_string(), self.byte_lookups.len());
         }
@@ -484,6 +490,7 @@ impl MachineRecord for ExecutionRecord {
         self.global_memory_initialize_events.append(&mut other.global_memory_initialize_events);
         self.global_memory_finalize_events.append(&mut other.global_memory_finalize_events);
         self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
+        self.bump_memory_events.append(&mut other.bump_memory_events);
         self.global_lookup_events.append(&mut other.global_lookup_events);
     }
 

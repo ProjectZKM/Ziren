@@ -2,7 +2,7 @@ use enum_map::EnumMap;
 use hashbrown::HashMap;
 use p3_koala_bear::KoalaBear;
 
-use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, MipsAirId, Opcode};
+use crate::{events::NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC, MipsAirId, Opcode, NUM_REGISTERS};
 
 const BYTE_NUM_ROWS: u64 = 1 << 16;
 const MAX_PROGRAM_SIZE: u64 = 1 << 22;
@@ -54,6 +54,10 @@ pub fn estimate_mips_lde_size(
     // Compute the memory local chip contribution.
     cells += (num_events_per_air[MipsAirId::MemoryLocal]).next_power_of_two()
         * costs_per_air[&MipsAirId::MemoryLocal];
+
+    // Compute the memory bump chip contribution.
+    cells += (num_events_per_air[MipsAirId::MemoryBump]).next_power_of_two()
+        * costs_per_air[&MipsAirId::MemoryBump];
 
     // Compute the branch chip contribution.
     cells += (num_events_per_air[MipsAirId::Branch]).next_power_of_two()
@@ -140,6 +144,10 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::MemoryLocal] =
         touched_addresses.div_ceil(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64);
 
+    // Compute the number of events in the memory bump chip: at most one shadow read per
+    // register per shard.
+    events_counts[MipsAirId::MemoryBump] = NUM_REGISTERS as u64;
+
     // Compute the number of events in the branch chip.
     events_counts[MipsAirId::Branch] = opcode_counts[Opcode::BEQ]
         + opcode_counts[Opcode::BNE]
@@ -218,6 +226,8 @@ pub fn pad_mips_event_counts(
         MipsAirId::DivRem => *v += 4 * num_cycles,
         MipsAirId::Lt => *v += 2 * num_cycles,
         MipsAirId::MemoryLocal => *v += 64 * num_cycles,
+        // Bounded by the register count, not by the cycle count.
+        MipsAirId::MemoryBump => *v += NUM_REGISTERS as u64,
         MipsAirId::Branch => *v += 8 * num_cycles,
         MipsAirId::Jump => *v += 2 * num_cycles,
         MipsAirId::SyscallInstrs => *v += num_cycles,

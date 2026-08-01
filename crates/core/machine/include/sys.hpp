@@ -7,6 +7,7 @@
 #include "div_rem.hpp"
 #include "lt.hpp"
 #include "jump.hpp"
+#include "memory_bump.hpp"
 #include "memory_local.hpp"
 #include "memory_global.hpp"
 #include "memory_instrs.hpp"

@@ -3,7 +3,7 @@ use crate::syscall::precompiles::boolean_circuit_garble::{
 };
 use crate::{
     global::GlobalChip,
-    memory::{MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
+    memory::{MemoryBumpChip, MemoryChipType, MemoryLocalChip, NUM_LOCAL_MEMORY_ENTRIES_PER_ROW},
     syscall::precompiles::{
         fptower::{Fp2AddSubAssignChip, Fp2MulAssignChip, FpOpChip},
         poseidon2::Poseidon2PermuteChip,
@@ -131,6 +131,8 @@ pub enum MipsAir<F: PrimeField32> {
     MemoryGlobalFinal(MemoryGlobalChip),
     /// A table for the local memory state.
     MemoryLocal(MemoryLocalChip),
+    /// A table that bumps each touched register's timestamp into the current shard.
+    MemoryBump(MemoryBumpChip),
     /// A table for all the syscall invocations.
     SyscallCore(SyscallChip),
     /// A table for all the precompile invocations.
@@ -478,6 +480,10 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(memory_local.name(), memory_local.cost());
         chips.push(memory_local);
 
+        let memory_bump = Chip::new(MipsAir::MemoryBump(MemoryBumpChip::new()));
+        costs.insert(memory_bump.name(), memory_bump.cost());
+        chips.push(memory_bump);
+
         let global = Chip::new(MipsAir::Global(GlobalChip));
         costs.insert(global.name(), global.cost());
         chips.push(global);
@@ -542,6 +548,7 @@ impl<F: PrimeField32> MipsAir<F> {
                     .into_iter()
                     .count(),
             ),
+            (MipsAirId::MemoryBump, record.bump_memory_events.len()),
             (MipsAirId::CloClz, record.cloclz_events.len()),
             (
                 MipsAirId::Global,
@@ -612,6 +619,7 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::MovCond(MovCondChip::default()),
             MipsAir::MiscInstrs(MiscInstrsChip::default()),
             MipsAir::MemoryLocal(MemoryLocalChip::new()),
+            MipsAir::MemoryBump(MemoryBumpChip::new()),
             MipsAir::Global(GlobalChip),
             MipsAir::SyscallCore(SyscallChip::core()),
         ]
@@ -805,6 +813,7 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),
+            Self::MemoryBump(_) => unreachable!("Invalid for memory bump"),
             Self::Global(_) => unreachable!("Invalid for global chip"),
             // Self::ProgramMemory(_) => unreachable!("Invalid for memory program"),
             Self::Program(_) => unreachable!("Invalid for core chip"),

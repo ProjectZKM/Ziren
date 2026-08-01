@@ -1,8 +1,10 @@
+mod bump;
 mod consistency;
 mod global;
 mod instructions;
 mod local;
 
+pub use bump::*;
 pub use consistency::*;
 pub use global::*;
 pub use instructions::*;

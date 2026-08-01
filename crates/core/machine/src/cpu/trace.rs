@@ -15,7 +15,7 @@ use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use tracing::instrument;
 
 use super::{columns::NUM_CPU_COLS, CpuChip};
-use crate::{cpu::columns::CpuCols, memory::MemoryCols, utils::zeroed_f_vec, CoreChipError};
+use crate::{cpu::columns::CpuCols, memory::RegisterCols, utils::zeroed_f_vec, CoreChipError};
 
 impl<F: PrimeField32> MachineAir<F> for CpuChip {
     type Record = ExecutionRecord;

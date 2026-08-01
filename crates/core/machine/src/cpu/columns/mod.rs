@@ -6,7 +6,7 @@ use std::mem::{size_of, transmute};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::Word;
 
-use crate::memory::{MemoryCols, MemoryReadCols, MemoryReadWriteCols};
+use crate::memory::{RegisterCols, RegisterReadCols, RegisterReadWriteCols};
 
 pub const NUM_CPU_COLS: usize = size_of::<CpuCols<u8>>();
 
@@ -71,9 +71,9 @@ pub struct CpuCols<T: Copy> {
     /// Operand values, either from registers or immediate values.
     pub op_a_value: Word<T>,
     pub hi_or_prev_a: Word<T>,
-    pub op_a_access: MemoryReadWriteCols<T>,
-    pub op_b_access: MemoryReadCols<T>,
-    pub op_c_access: MemoryReadCols<T>,
+    pub op_a_access: RegisterReadWriteCols<T>,
+    pub op_b_access: RegisterReadCols<T>,
+    pub op_c_access: RegisterReadCols<T>,
 
     /// Selector to label whether this row is a non padded row.
     pub is_real: T,
