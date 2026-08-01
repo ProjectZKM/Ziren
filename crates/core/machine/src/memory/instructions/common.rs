@@ -29,7 +29,7 @@ use zkm_core_executor::{
 use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
-    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    air::ZKMCoreAirBuilder,
     memory::MemoryReadWriteCols,
     operations::{AddOperation, IsZeroOperation, KoalaBearWordRangeChecker},
     utils::zeroed_f_vec,
