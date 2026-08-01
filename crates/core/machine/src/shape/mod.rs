@@ -1405,6 +1405,7 @@ pub mod tests {
             ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
             ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
             ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
+            ("MemoryBump", 1),
             ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
             ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
             ("SyscallInstrs", 10),
@@ -1763,13 +1764,14 @@ pub mod tests {
             MipsAirId::DivRem,
             MipsAirId::SyscallCore,
             MipsAirId::SyscallInstrs,
+            MipsAirId::MemoryBump,
         ] {
             assert!(canon.contains(&must), "canonicalize must add {must:?}");
         }
         assert_eq!(
             canon.len(),
-            raw_len + 4,
-            "canonicalized main_exec must add exactly the 4 optional chips, got {}",
+            raw_len + 5,
+            "canonicalized main_exec must add exactly the 5 optional chips, got {}",
             canon.len()
         );
         // Originals preserved at their real heights.

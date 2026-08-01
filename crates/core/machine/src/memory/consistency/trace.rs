@@ -69,7 +69,6 @@ impl<F: PrimeField32> RegisterAccessCols<F> {
             "register access at addr-time {timestamp} has prev_shard {prev_shard} != shard \
              {shard}: the MemoryBump shadow read is missing"
         );
-        let _ = (shard, prev_shard);
         self.value = value.into();
         self.prev_clk = F::from_u32(prev_timestamp);
 
