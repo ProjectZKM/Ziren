@@ -436,9 +436,15 @@ delta, how it was validated, and the enable/kill-switch.
 - **Measured** (goat 9-shard core, RAYON=1): total `cudaMallocAsync`
   **46,985 → 35,015 (−25.5%)**. The wall gain (~0.6 s) is below single-run
   noise; the value is the reduced allocation-API overhead (compounds with the
-  other marshalling reductions). The mempool `release_threshold` is already
-  `UINT64_MAX` (SP1-aligned), so this attacks the call *count*, not driver
+  other marshalling reductions). This attacks the call *count*, not driver
   round-trips.
+  **Correction (measured later):** the claim originally made here — that the
+  mempool `release_threshold` "is already `UINT64_MAX` (SP1-aligned)" — is **false
+  on a 32 GiB card**. `cuda_setup_mem_pool` (`cuda/utils/runtime.cuh`) classifies
+  the RTX 5090 as a *small* card and sets the threshold to `total/2` (~16 GiB); see
+  the release-threshold entry below. Per-call `cudaMallocAsync` latency therefore
+  *was* a real cost, which is why the GKRDRAIN trim removal below buys ~2.7 s of
+  `cudaMallocAsync` time at an unchanged call count.
 - **Validated byte-identical.** fib core `6278c091` on==off; goat RAYON=1 core
   `a7af7687` default(on) == `=0`(off), deterministic across runs; verify OK.
 - **Switches.**
@@ -814,10 +820,20 @@ locality. Not landed.
   was manufacturing. An audit found **no** raw `cudaMemGetInfo().free` consumer on
   the prove path (the two remaining call sites read only `.total`).
 - **It was also self-defeating.** Trimming to 0 unmaps the mempool's pages, so the
-  next shard's `cudaMallocAsync`s re-fault them back in. The same profile shows
-  `cudaMallocAsync` costing **0.645-1.025 ms per call** against a warm-pool
-  expectation of single-digit microseconds — which is why the measured win is
-  roughly double the trim's own 1.0-1.5 s.
+  next shard's `cudaMallocAsync`s re-fault them back in — which is why the measured
+  win is roughly triple the trim's own cost. Confirmed by profiling **both** arms on
+  the same workload:
+
+  | CUDA API | canonical | Lever 1 |
+  |---|---|---|
+  | `cudaMemPoolTrimTo` | 35 calls / **1.038 s** | **0 calls** |
+  | `cudaMallocAsync` | 189,061 calls / **5.147 s** | 189,061 calls / **2.451 s** |
+  | mean per `cudaMallocAsync` | 0.027 ms | **0.013 ms** |
+
+  The allocation **count is identical (189,061 both)** — nothing about the
+  allocation pattern changed, only the driver latency per call. Total CUDA-API time
+  removed **3.73 s**, which matches the independently measured core-loop delta
+  (9.43% of ~38.8 s = 3.66 s).
 - **Same anti-pattern, third site.** Two sibling sites had already been disabled by
   measurement — `prover/src/core_multi_gpu.rs` post-shard trim ("41.3 ms per shard")
   and `core/src/basefold/device_shard_traces.rs` free-traces trim ("26.9 ms, twice
@@ -850,6 +866,43 @@ locality. Not landed.
 - **Switches.**
   - `ZIREN_GPU_GKRDRAIN_TRIM` — default **off**; `=1` restores the legacy per-shard
     trim.
+
+## MEASURED, NOT LANDED — cudaMallocAsync release threshold diverges from SP1 (ziren-gpu)
+
+- **The divergence.** `cuda_setup_mem_pool` (`cuda/utils/runtime.cuh`) computes
+  `total_gib_with_pad = (uint64_t)(total_bytes / GiB) + 4` and, when
+  `total_gib_with_pad <= 36`, sets `cudaMemPoolAttrReleaseThreshold = total/2`
+  instead of `UINT64_MAX`. On an RTX 5090 (31.84 GiB) that is `31 + 4 = 35 <= 36`
+  → **small card → ~16 GiB threshold**. Steady-state peak VRAM is ~22 GiB, i.e.
+  permanently above the threshold, so the pool returns pages to the OS and
+  re-faults them continuously.
+- **SP1 does not do this.** `sp1-gpu/crates/cuda/src/task.rs:152` sets
+  `mem_release_threshold: u64::MAX` and **no caller ever overrides it** — SP1 has no
+  small-card mempool policy on any card. The `gpu_memory_gb <= 30` line this code
+  cites (`prover_components/src/builder.rs:41`) governs SP1's *shard* threshold, a
+  different knob. The Ziren code also contradicts **its own comment**, which says
+  "on large cards (>30 GB) keep the legacy UINT64_MAX" — a 32 GB card is >30 GB.
+- **Measured** (tendermint core R16, verify ON, paired concurrent, 3 reps, stacked
+  on the GKRDRAIN lever above; `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES` =
+  `u64::MAX`):
+
+  | rep | default (~16 GiB) | `u64::MAX` | delta | peak VRAM |
+  |---|---|---|---|---|
+  | 1 | 35.340 s | 34.547 s | -2.24% | 20067 → 23734 MiB |
+  | 2 | 35.531 s | 33.685 s | -5.20% | 21827 → 24406 MiB |
+  | 3 | 36.529 s | 33.063 s | -9.49% | 20611 → 23734 MiB |
+
+  **+6.1% mean throughput** on top of the GKRDRAIN lever (combined ~+17% vs
+  canonical, ~2218 kHz against the 1894 kHz baseline), at the cost of
+  **peak VRAM 66.9% → 74.8%**.
+- **Byte-neutral** — the four goldens reproduce with the env set (verify ON).
+- **NOT landed, deliberately.** The same comment block records the reason the policy
+  exists: *"V3+LT both ON OOMs at 32 GB on reth without an aggressive release
+  threshold"* — i.e. the recorded failure is on **exactly this card class**, on a
+  workload (reth) that cannot be exercised here. Trading +6% for +8 points of peak
+  VRAM against a known OOM counter-example is a call for whoever can run reth.
+  The switch already exists and needs no code change:
+  `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES=18446744073709551615`.
 
 ## Note — GPU-idle anatomy of the core prove loop, and what it is NOT
 
