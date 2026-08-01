@@ -23,7 +23,7 @@ use crate::{air::WordAirBuilder, CoreChipError};
 
 use crate::operations::IsZeroWordOperation;
 
-use crate::utils::{next_power_of_two, zeroed_f_vec};
+use crate::utils::{next_multiple_of_32, zeroed_f_vec};
 
 /// The number of main trace columns for `MovCondChip`.
 pub const NUM_MOV_COND_COLS: usize = size_of::<MovCondCols<u8>>();
@@ -80,7 +80,7 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.movcond_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <MovCondChip as MachineAir<F>>::name(self).as_str(),

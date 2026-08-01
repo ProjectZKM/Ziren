@@ -18,7 +18,7 @@ use zkm_pcs::air::AirLookup;
 use zkm_pcs::air::{LookupScope, MachineAir, ZKMAirBuilder};
 use zkm_pcs::LookupKind;
 
-use crate::{utils::next_power_of_two, CoreChipError};
+use crate::{utils::next_multiple_of_32, CoreChipError};
 
 /// The number of main trace columns for `SyscallChip`.
 pub const NUM_SYSCALL_COLS: usize = size_of::<SyscallCols<u8>>();
@@ -193,7 +193,7 @@ impl<F: PrimeField32> MachineAir<F> for SyscallChip {
         };
         let nb_rows = events.len();
         let size_log2 = input.fixed_log2_rows::<F, _>(self);
-        let padded_nb_rows = next_power_of_two(
+        let padded_nb_rows = next_multiple_of_32(
             nb_rows,
             size_log2,
             <SyscallChip as MachineAir<F>>::name(self).as_str(),

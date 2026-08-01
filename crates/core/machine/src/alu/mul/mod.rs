@@ -52,7 +52,7 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     alu::mul::utils::get_msb,
     memory::{MemoryCols, MemoryReadWriteCols},
-    utils::{next_power_of_two, zeroed_f_vec},
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -154,7 +154,7 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.mul_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <MulChip as MachineAir<F>>::name(self).as_str(),
@@ -579,7 +579,7 @@ mod tests {
     #[cfg(feature = "sys")]
     fn generate_trace_ffi(input: &ExecutionRecord) -> RowMajorMatrix<KoalaBear> {
         use super::{MulCols, NUM_MUL_COLS};
-        use crate::utils::next_power_of_two;
+        use crate::utils::next_multiple_of_32;
         use crate::utils::zeroed_f_vec;
         use p3_koala_bear::KoalaBear;
         use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -587,7 +587,7 @@ mod tests {
 
         type F = KoalaBear;
 
-        let padded_nb_rows = next_power_of_two(input.mul_events.len(), None, "Mul");
+        let padded_nb_rows = next_multiple_of_32(input.mul_events.len(), None, "Mul");
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_MUL_COLS);
         let nb_rows = input.mul_events.len();
         let chunk_size = std::cmp::max((nb_rows + 1) / num_cpus::get(), 1);

@@ -27,7 +27,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
-    utils::{next_power_of_two, pad_rows_fixed},
+    utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
 
@@ -86,7 +86,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let nb_rows = next_power_of_two(
+        let nb_rows = next_multiple_of_32(
             input.cloclz_events.len(),
             input.fixed_log2_rows::<F, _>(self),
             <CloClzChip as MachineAir<F>>::name(self).as_str(),
@@ -134,7 +134,7 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
         }
 
         // Pad the trace to a power of two depending on the proof shape in `input`.
-        pad_rows_fixed(
+        pad_rows_mult32(
             &mut rows,
             || [F::ZERO; NUM_CLOCLZ_COLS],
             input.fixed_log2_rows::<F, _>(self),
