@@ -634,8 +634,10 @@ locality. Not landed.
     three offset flags and the separate `unsigned_mem_val` word.
 
 - **Measured** (tendermint core, paired concurrent, ziren-gpu `55ff0fa`,
-  RTX 5090, verify ON, committed main-trace cells via the `ZIREN_DENSITY_LOG=1`
-  probe summed over all shards):
+  RTX 5090, verify ON, committed main-trace cells from a temporary per-shard
+  probe over `packing.total_values`, summed over all shards; measured before
+  the `next_multiple_of_32` padding lever landed, so the control here is the
+  old `next_power_of_two` shape):
 
   | | control `e4c86205` | split | delta |
   |---|---|---|---|
@@ -653,44 +655,48 @@ locality. Not landed.
   fuller shards more of them land on the `next_power_of_two` step at 2^22 —
   that step function eats ~20% of the raw saving.
 
-- **kHz** (tendermint, `RAYON_NUM_THREADS=16`, verify ON, 3 paired concurrent
-  runs, control on GPU 3 and split on GPU 5, taken from the prover's own
-  `summary: ... khz=` line, which is prove-only — `proving_start.elapsed()`,
-  before verify):
+- **kHz, as landed** (tendermint, `RAYON_NUM_THREADS=16`, verify ON, 3 reps of
+  a 3-way concurrent run on separate GPUs — canonical / padding-only /
+  padding+split — taken from the prover's own `summary: ... khz=` line, which
+  is prove-only, `proving_start.elapsed()`, before verify). Baseline is host
+  `9cc710bd` + ziren-gpu `a296e5c`; the "padding" arm is the
+  `next_multiple_of_32` entry above:
 
-  | run | control | split | delta |
+  | rep | canonical | + padding | + padding + split |
   |---|---|---|---|
-  | 1 | 1281.05 | 1375.31 | +7.4% |
-  | 2 | 1298.80 | 1372.64 | +5.7% |
-  | 3 | 1197.10 | 1366.62 | +14.2% |
-  | **median** | **1281.05** | **1372.64** | **+7.15%** |
+  | 1 | 1382.60 | 1595.50 | 1761.54 |
+  | 2 | 1356.07 | 1589.87 | 1739.56 |
+  | 3 | 1366.20 | 1581.86 | 1748.07 |
+  | **median** | **1366.20** | **1589.87** | **1748.07** |
+  | vs canonical | — | +16.4% | **+27.9%** |
 
-  The split arm is far more stable (spread 0.6%) than the control (8.5%);
-  control run 3 is a contention outlier. Taking the median, **−7.68% committed
-  cells buys +7.2% kHz** — very nearly the 1:1 conversion the area-bound model
-  predicts. Proof size also drops 57,453,225 → 55,020,471 bytes (−4.2%).
+  The split adds **+9.95%** on top of the padding lever (median 1589.87 →
+  1748.07), close to the +7.15% it measured standalone — the two compose. All
+  three arms are cleanly separated with no overlap between any pair of arms.
+  Shards 37 → 35, proof bytes 57,453,225 → 54,978,345 (padding) →
+  52,685,015 (**−8.3%** combined).
 
-- **VRAM went UP.** Peak on a TM R16 run: control 28,957-29,053 MiB, split
-  28,726-**31,734** MiB of 32,607 (97.3%). The freed area is spent on bigger
-  shards, so the headroom that was ~11% is now ~3%. Anything that further
-  raises per-shard area needs to budget for this.
+- **VRAM — the split alone pushed peak to 31,734 MiB of 32,607 (97.3%), which
+  is why it was held.** Stacked on the `next_multiple_of_32` padding lever the
+  peak is **22,211 MiB (68.1%)**: padding-only 21,341, padding+split 22,211,
+  canonical 29,808 (per-run max over the three reps). The split still spends
+  ~0.9 GB of the area the padding freed, but the combination is 7.6 GB below
+  canonical, so the 97% ceiling that blocked this change is gone.
 
 - **Validated.** Not byte-identical by construction (the AIR, and therefore the
-  VK, changed). `CORE VERIFY OK` on fib, goat and tendermint; new shas
-  deterministic across repeats (tendermint identical over 7 runs and across
-  `RAYON_NUM_THREADS` 8 and 16, so the split is race-free). Recursion
-  re-validated end to end: goat core -> compress -> shrink -> wrap_bn254 all
-  pass with verification at each stage. `cargo test -p zkm-core-machine --lib`
-  shows no new failure against the same suite run on unmodified `e4c86205`.
+  VK, changed). Control arm reproduced current canonical exactly first
+  (fib `6278c091f7e8bd91`, goat `a18399929adf02fa`, TM `8b27f7e5ea510d95`).
+  New shas, all `CORE VERIFY OK`, deterministic at RAYON=8 (fib ×2, goat ×2,
+  TM ×3): fib `ed4f7359e6ef5092`, goat `7fee60eb4b326632`,
+  TM `805904a19c67952a` (35 shards). Recursion re-validated end to end on goat:
+  core → compress → shrink → **wrap**, VERIFY OK at every stage.
+  `cargo test -p zkm-core-machine --lib` shows no new failure against the same
+  suite run on unmodified canonical.
 
-- **Switch.** None — this is unconditional, SP1-shaped. `ZIREN_DENSITY_LOG=1`
-  (added with this change, `crates/pcs/src/shard_level/prover.rs`) prints the
-  per-shard committed-cell count and per-chip log heights for attribution.
+- **Switch.** None — this is unconditional, SP1-shaped.
 
-- **Note for the next density step.** The probe shows `Cpu` alone is **62-69%**
-  of all committed cells, far more than the instruction-side share suggests,
-  because it is padded to `next_power_of_two` at 2^22 while shards carry ~2.1M
-  cycles — roughly a 1.9x padding factor on the single widest tall chip. Two
-  independent levers follow from that: absorbing the `Cpu` chip into the opcode
-  chips (SP1 has no CPU chip), and padding to `next_multiple_of_32` (SP1's rule)
-  instead of `next_power_of_two`.
+- **Note for the next density step.** `Cpu` was **62-69%** of all committed
+  cells before the padding lever, far more than the instruction-side share
+  suggests. `next_multiple_of_32` (the entry above) has now taken the padding
+  half of that; the other half — absorbing the `Cpu` chip into the opcode chips,
+  as SP1 does (SP1 has no CPU chip) — is still open.
