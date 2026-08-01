@@ -54,7 +54,11 @@ fn main() {
     trace.finalize(exec_a.state.global_clk);
     let records_a = std::mem::take(&mut exec_a.records);
     let cpu_a: usize = records_a.iter().map(|r| r.cpu_events.len()).sum();
-    let mem_a: usize = records_a.iter().map(|r| r.memory_instr_events.len()).sum();
+    let mem_a: usize = records_a.iter().map(|r| (r.memory_load_narrow_events.len()
+                + r.memory_load_word_events.len()
+                + r.memory_store_narrow_events.len()
+                + r.memory_store_word_events.len()
+                + r.memory_unaligned_events.len())).sum();
 
     eprintln!(
         "[probe-A] sequential: shards={} cpu_events={} mem_instr={} chunks={}",
@@ -75,7 +79,11 @@ fn main() {
         &trace,
     ).expect("parallel replay");
     let cpu_b: usize = records_b.iter().map(|r| r.cpu_events.len()).sum();
-    let mem_b: usize = records_b.iter().map(|r| r.memory_instr_events.len()).sum();
+    let mem_b: usize = records_b.iter().map(|r| (r.memory_load_narrow_events.len()
+                + r.memory_load_word_events.len()
+                + r.memory_store_narrow_events.len()
+                + r.memory_store_word_events.len()
+                + r.memory_unaligned_events.len())).sum();
     eprintln!(
         "[probe-B] parallel:   shards={} cpu_events={} mem_instr={}",
         records_b.len(), cpu_b, mem_b,
@@ -102,8 +110,16 @@ fn main() {
         for i in 0..max {
             let a_cpu = records_a.get(i).map(|r| r.cpu_events.len()).unwrap_or(0);
             let b_cpu = records_b.get(i).map(|r| r.cpu_events.len()).unwrap_or(0);
-            let a_mem = records_a.get(i).map(|r| r.memory_instr_events.len()).unwrap_or(0);
-            let b_mem = records_b.get(i).map(|r| r.memory_instr_events.len()).unwrap_or(0);
+            let a_mem = records_a.get(i).map(|r| (r.memory_load_narrow_events.len()
+                + r.memory_load_word_events.len()
+                + r.memory_store_narrow_events.len()
+                + r.memory_store_word_events.len()
+                + r.memory_unaligned_events.len())).unwrap_or(0);
+            let b_mem = records_b.get(i).map(|r| (r.memory_load_narrow_events.len()
+                + r.memory_load_word_events.len()
+                + r.memory_store_narrow_events.len()
+                + r.memory_store_word_events.len()
+                + r.memory_unaligned_events.len())).unwrap_or(0);
             let mark = if a_cpu != b_cpu || a_mem != b_mem { "✗" } else { "·" };
             eprintln!(
                 "  shard[{i}] {mark} cpu A={a_cpu} B={b_cpu}  mem A={a_mem} B={b_mem}",

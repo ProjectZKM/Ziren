@@ -51,8 +51,16 @@ pub struct ExecutionRecord {
     pub lt_events: Vec<AluEvent>,
     /// A trace of the CLO and CLZ events.
     pub cloclz_events: Vec<AluEvent>,
-    /// A trace of the memory instructions.
-    pub memory_instr_events: Vec<MemInstrEvent>,
+    /// A trace of the narrow (sub-word) loads: `LB`, `LBU`, `LH`, `LHU`.
+    pub memory_load_narrow_events: Vec<MemInstrEvent>,
+    /// A trace of the word-aligned loads: `LW`, `LL`.
+    pub memory_load_word_events: Vec<MemInstrEvent>,
+    /// A trace of the narrow (sub-word) stores: `SB`, `SH`.
+    pub memory_store_narrow_events: Vec<MemInstrEvent>,
+    /// A trace of the word-aligned stores: `SW`, `SC`.
+    pub memory_store_word_events: Vec<MemInstrEvent>,
+    /// A trace of the unaligned loads/stores: `LWL`, `LWR`, `SWL`, `SWR`.
+    pub memory_unaligned_events: Vec<MemInstrEvent>,
     /// A trace of the branch events.
     pub branch_events: Vec<BranchEvent>,
     /// A trace of the jump events.
@@ -96,8 +104,16 @@ impl ExecutionRecord {
     pub fn new(program: Arc<Program>) -> Self {
         let cpu_events = Vec::with_capacity(1 << 22);
         let add_sub_events = Vec::with_capacity(1 << 22);
-        let memory_instr_events = Vec::with_capacity(1 << 21);
-        Self { program, cpu_events, memory_instr_events, add_sub_events, ..Default::default() }
+        let memory_load_word_events = Vec::with_capacity(1 << 21);
+        let memory_store_word_events = Vec::with_capacity(1 << 21);
+        Self {
+            program,
+            cpu_events,
+            memory_load_word_events,
+            memory_store_word_events,
+            add_sub_events,
+            ..Default::default()
+        }
     }
 
     #[must_use]
@@ -134,7 +150,10 @@ impl ExecutionRecord {
         result.divrem_events.reserve(reservation_size);
         result.cloclz_events.reserve(reservation_size);
         // Memory + branch + jump + misc are also common per-shard event sinks.
-        result.memory_instr_events.reserve(reservation_size);
+        result.memory_load_word_events.reserve(reservation_size);
+        result.memory_store_word_events.reserve(reservation_size);
+        result.memory_load_narrow_events.reserve(reservation_size / 4);
+        result.memory_store_narrow_events.reserve(reservation_size / 4);
         result.branch_events.reserve(reservation_size);
         result.jump_events.reserve(reservation_size);
         result.movcond_events.reserve(reservation_size);
@@ -397,7 +416,17 @@ impl MachineRecord for ExecutionRecord {
         stats.insert("divrem_events".to_string(), self.divrem_events.len());
         stats.insert("lt_events".to_string(), self.lt_events.len());
         stats.insert("cloclz_events".to_string(), self.cloclz_events.len());
-        stats.insert("memory_instr_events".to_string(), self.memory_instr_events.len());
+        stats.insert(
+            "memory_load_narrow_events".to_string(),
+            self.memory_load_narrow_events.len(),
+        );
+        stats.insert("memory_load_word_events".to_string(), self.memory_load_word_events.len());
+        stats.insert(
+            "memory_store_narrow_events".to_string(),
+            self.memory_store_narrow_events.len(),
+        );
+        stats.insert("memory_store_word_events".to_string(), self.memory_store_word_events.len());
+        stats.insert("memory_unaligned_events".to_string(), self.memory_unaligned_events.len());
         stats.insert("branch_events".to_string(), self.branch_events.len());
         stats.insert("jump_events".to_string(), self.jump_events.len());
         stats.insert("misc_events".to_string(), self.misc_events.len());
@@ -433,7 +462,11 @@ impl MachineRecord for ExecutionRecord {
         self.divrem_events.append(&mut other.divrem_events);
         self.lt_events.append(&mut other.lt_events);
         self.cloclz_events.append(&mut other.cloclz_events);
-        self.memory_instr_events.append(&mut other.memory_instr_events);
+        self.memory_load_narrow_events.append(&mut other.memory_load_narrow_events);
+        self.memory_load_word_events.append(&mut other.memory_load_word_events);
+        self.memory_store_narrow_events.append(&mut other.memory_store_narrow_events);
+        self.memory_store_word_events.append(&mut other.memory_store_word_events);
+        self.memory_unaligned_events.append(&mut other.memory_unaligned_events);
         self.branch_events.append(&mut other.branch_events);
         self.jump_events.append(&mut other.jump_events);
         self.movcond_events.append(&mut other.movcond_events);

@@ -1,0 +1,169 @@
+//! The word-aligned stores: `SW` and `SC`.
+//!
+//! Like the word loads, the offset must be zero, so no offset flags are
+//! witnessed and no masking is needed.
+
+use std::{
+    borrow::{Borrow, BorrowMut},
+    mem::size_of,
+};
+
+use hashbrown::HashMap;
+use itertools::Itertools;
+use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_matrix::dense::RowMajorMatrix;
+use zkm_core_executor::{
+    events::{ByteLookupEvent, ByteRecord, MemInstrEvent},
+    ExecutionRecord, Opcode, Program,
+};
+use zkm_derive::{AlignedBorrow, PicusAnnotations};
+use zkm_pcs::{air::MachineAir, PicusInfo};
+
+use crate::{
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
+    memory::MemoryCols,
+    utils::next_power_of_two,
+    CoreChipError,
+};
+
+use super::common::{
+    assert_word_aligned, eval_memory_common, generate_memory_trace, receive_memory_instruction,
+    MemoryInstrCommonCols,
+};
+
+pub const NUM_STORE_WORD_COLS: usize = size_of::<StoreWordColumns<u8>>();
+
+/// A chip for the word-aligned store instructions.
+#[derive(Default)]
+pub struct StoreWordChip;
+
+/// The column layout for `SW` and `SC`.
+#[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
+#[repr(C)]
+pub struct StoreWordColumns<T> {
+    /// The columns shared by all memory instructions.
+    pub common: MemoryInstrCommonCols<T>,
+
+    /// Whether this is a store word instruction.
+    #[picus(selector)]
+    pub is_sw: T,
+    /// Whether this is a store conditional instruction.
+    #[picus(selector)]
+    pub is_sc: T,
+}
+
+impl<F> BaseAir<F> for StoreWordChip {
+    fn width(&self) -> usize {
+        NUM_STORE_WORD_COLS
+    }
+}
+
+impl<AB> Air<AB> for StoreWordChip
+where
+    AB: ZKMCoreAirBuilder,
+    AB::Var: Sized,
+{
+    #[inline(never)]
+    fn eval(&self, builder: &mut AB) {
+        let main = builder.main();
+        let local = main.current_slice();
+        let local: &StoreWordColumns<AB::Var> = (*local).borrow();
+        let common = &local.common;
+
+        // SAFETY: both selectors are boolean and so is their sum.
+        let is_real = local.is_sw + local.is_sc;
+        builder.assert_bool(local.is_sw);
+        builder.assert_bool(local.is_sc);
+        builder.assert_bool(is_real.clone());
+
+        eval_memory_common(builder, common, is_real.clone());
+        assert_word_aligned(builder, common, is_real.clone());
+
+        let a_val = common.op_a_value;
+        let mem_val = *common.memory_access.value();
+
+        // `SW` writes `op_a` unmasked.
+        builder.when(local.is_sw).assert_word_eq(mem_val, a_val);
+
+        // `SC` writes the *previous* `op_a` and sets `op_a = 1`.
+        builder.when(local.is_sc).assert_word_eq(mem_val, common.prev_a_val);
+        builder.when(local.is_sc).assert_one(a_val[0]);
+        builder.when(local.is_sc).assert_zero(a_val[1]);
+        builder.when(local.is_sc).assert_zero(a_val[2]);
+        builder.when(local.is_sc).assert_zero(a_val[3]);
+
+        let opcode = local.is_sw * Opcode::SW.as_field::<AB::F>()
+            + local.is_sc * Opcode::SC.as_field::<AB::F>();
+
+        // SAFETY: `SW` keeps `op_a` immutable; `SC` writes it.
+        receive_memory_instruction(builder, common, opcode, local.is_sw.into(), is_real);
+    }
+}
+
+impl StoreWordChip {
+    fn event_to_row<F: PrimeField32>(
+        &self,
+        event: &MemInstrEvent,
+        cols: &mut StoreWordColumns<F>,
+        blu: &mut impl ByteRecord,
+    ) {
+        cols.common.populate(event, blu);
+        cols.is_sw = F::from_bool(matches!(event.opcode, Opcode::SW));
+        cols.is_sc = F::from_bool(matches!(event.opcode, Opcode::SC));
+        debug_assert!(matches!(event.opcode, Opcode::SW | Opcode::SC));
+    }
+}
+
+impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
+    type Record = ExecutionRecord;
+    type Program = Program;
+    type Error = CoreChipError;
+
+    fn name(&self) -> String {
+        "StoreWord".to_string()
+    }
+
+    fn picus_info(&self) -> PicusInfo {
+        StoreWordColumns::<u8>::picus_info()
+    }
+
+    fn num_rows(&self, input: &Self::Record) -> Option<usize> {
+        Some(next_power_of_two(
+            input.memory_store_word_events.len(),
+            input.fixed_log2_rows::<F, _>(self),
+            <Self as MachineAir<F>>::name(self).as_str(),
+        ))
+    }
+
+    fn generate_trace(
+        &self,
+        input: &ExecutionRecord,
+        output: &mut ExecutionRecord,
+    ) -> Result<RowMajorMatrix<F>, Self::Error> {
+        let padded_nb_rows = <Self as MachineAir<F>>::num_rows(self, input).unwrap();
+        let (trace, blu_events) = generate_memory_trace(
+            &input.memory_store_word_events,
+            padded_nb_rows,
+            NUM_STORE_WORD_COLS,
+            |event, row, blu: &mut HashMap<ByteLookupEvent, usize>| {
+                let cols: &mut StoreWordColumns<F> = row.borrow_mut();
+                self.event_to_row(event, cols, blu);
+            },
+        );
+        output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
+        Ok(trace)
+    }
+
+    fn included(&self, shard: &Self::Record) -> bool {
+        if let Some(shape) = shard.shape.as_ref() {
+            shape.included::<F, _>(self)
+        } else {
+            !shard.memory_store_word_events.is_empty()
+        }
+    }
+
+    fn local_only(&self) -> bool {
+        true
+    }
+}

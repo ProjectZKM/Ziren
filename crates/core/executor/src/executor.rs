@@ -16,7 +16,7 @@ use crate::{
     context::ZKMContext,
     dependencies::{
         emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
-        emit_jump_dependencies, emit_memory_dependencies, emit_misc_dependencies,
+        emit_jump_dependencies, emit_misc_dependencies,
     },
     estimate_mips_event_counts, estimate_mips_lde_size,
     events::{
@@ -1484,12 +1484,20 @@ impl<'a> Executor<'a> {
             prev_a_val,
         };
 
-        self.record.memory_instr_events.push(event);
-        emit_memory_dependencies(
-            self,
-            event,
-            self.memory_accesses.memory.expect("Must have memory access").current_record(),
-        );
+        // Partition the event by access width/direction: each memory chip owns the
+        // opcodes whose column layout it is shaped for.
+        match opcode {
+            Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU => {
+                self.record.memory_load_narrow_events.push(event);
+            }
+            Opcode::LW | Opcode::LL => self.record.memory_load_word_events.push(event),
+            Opcode::SB | Opcode::SH => self.record.memory_store_narrow_events.push(event),
+            Opcode::SW | Opcode::SC => self.record.memory_store_word_events.push(event),
+            Opcode::LWL | Opcode::LWR | Opcode::SWL | Opcode::SWR => {
+                self.record.memory_unaligned_events.push(event);
+            }
+            _ => unreachable!("non-memory opcode {opcode:?} in emit_mem_instr_event"),
+        }
     }
 
     /// Emit a branch event.

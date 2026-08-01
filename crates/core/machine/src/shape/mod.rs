@@ -292,7 +292,11 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::Jump
                 | MipsAirId::MovCond
                 | MipsAirId::MiscInstrs
-                | MipsAirId::MemoryInstrs
+                | MipsAirId::MemoryLoadNarrow
+                | MipsAirId::MemoryLoadWord
+                | MipsAirId::MemoryStoreNarrow
+                | MipsAirId::MemoryStoreWord
+                | MipsAirId::MemoryUnaligned
                 | MipsAirId::SyscallInstrs
                 | MipsAirId::DivRem
                 | MipsAirId::AddSub
@@ -344,7 +348,9 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // memory heights for the packed branch (same as MipsAir::memory_heights).
         let core_ids = [
             MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::MemoryInstrs, MipsAirId::SyscallInstrs,
+            MipsAirId::MiscInstrs, MipsAirId::MemoryLoadNarrow, MipsAirId::MemoryLoadWord,
+            MipsAirId::MemoryStoreNarrow, MipsAirId::MemoryStoreWord,
+            MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
             MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
@@ -399,7 +405,9 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         }
         let core_ids = [
             MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::MemoryInstrs, MipsAirId::SyscallInstrs,
+            MipsAirId::MiscInstrs, MipsAirId::MemoryLoadNarrow, MipsAirId::MemoryLoadWord,
+            MipsAirId::MemoryStoreNarrow, MipsAirId::MemoryStoreWord,
+            MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
             MipsAirId::CloClz, MipsAirId::Global, MipsAirId::SyscallCore,
@@ -1196,8 +1204,16 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     let syscall_log_height = shape.log2_height(&MipsAirId::SyscallInstrs);
     maybe_log2_heights.insert(MipsAirId::SyscallInstrs, heuristic(syscall_log_height, 0));
 
-    let memory_log_height = shape.log2_height(&MipsAirId::MemoryInstrs);
-    maybe_log2_heights.insert(MipsAirId::MemoryInstrs, heuristic(memory_log_height, 0));
+    for memory_id in [
+        MipsAirId::MemoryLoadNarrow,
+        MipsAirId::MemoryLoadWord,
+        MipsAirId::MemoryStoreNarrow,
+        MipsAirId::MemoryStoreWord,
+        MipsAirId::MemoryUnaligned,
+    ] {
+        let memory_log_height = shape.log2_height(&memory_id);
+        maybe_log2_heights.insert(memory_id, heuristic(memory_log_height, 0));
+    }
 
     let movcond_log_height = shape.log2_height(&MipsAirId::MovCond);
     maybe_log2_heights.insert(MipsAirId::MovCond, heuristic(movcond_log_height, 0));
@@ -1302,7 +1318,7 @@ pub mod tests {
         let mut want: Vec<(String, usize)> = vec![
             ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
             ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
             ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
             ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
             ("SyscallInstrs", 10),
@@ -1362,7 +1378,7 @@ pub mod tests {
         let raw: BTreeMap<String, usize> = [
             ("AddSub", 4860), ("Bitwise", 2127), ("Branch", 1121), ("CloClz", 1),
             ("Cpu", 8369), ("DivRem", 1000), ("Global", 450), ("Jump", 70),
-            ("Lt", 3296), ("MemoryInstrs", 501), ("MemoryLocal", 51),
+            ("Lt", 3296), ("LoadNarrow", 501), ("LoadWord", 501), ("StoreNarrow", 501), ("StoreWord", 501), ("MemoryUnaligned", 501), ("MemoryLocal", 51),
             ("MiscInstrs", 0), ("MovCond", 26), ("Mul", 1003), ("ShiftLeft", 107),
             ("ShiftRight", 30), ("SyscallCore", 24), ("SyscallInstrs", 24),
             // Preprocessed raw heights (Program from its instruction count band,
@@ -1381,7 +1397,7 @@ pub mod tests {
         let mut want: Vec<(String, usize)> = vec![
             ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
             ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
             ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
             ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
             ("SyscallInstrs", 10),
@@ -1470,7 +1486,7 @@ pub mod tests {
         let mut want: Vec<(String, usize)> = vec![
             ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
             ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
             ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
             ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
             ("SyscallInstrs", 10),
@@ -1525,7 +1541,8 @@ pub mod tests {
         // here used as a FIXED chip-set whose RAW heights we sweep.
         let names: Vec<&str> = vec![
             "AddSub", "Bitwise", "Branch", "CloClz", "Cpu", "DivRem", "Global",
-            "Jump", "Lt", "MemoryInstrs", "MemoryLocal", "MiscInstrs", "MovCond",
+            "Jump", "Lt", "LoadNarrow", "LoadWord", "StoreNarrow", "StoreWord",
+            "MemoryUnaligned", "MemoryLocal", "MiscInstrs", "MovCond",
             "Mul", "ShiftLeft", "ShiftRight", "SyscallCore", "SyscallInstrs",
         ];
         // Several RAW height profiles, ALL with the SAME chip-set present (every
@@ -1540,7 +1557,7 @@ pub mod tests {
                     let v = match *n {
                         "Cpu" => cpu,
                         "AddSub" | "Lt" | "Mul" | "DivRem" => big,
-                        "Bitwise" | "Branch" | "MemoryInstrs" | "Global" => mid,
+                        "Bitwise" | "Branch" | "LoadNarrow" | "LoadWord" | "StoreNarrow" | "StoreWord" | "MemoryUnaligned" | "Global" => mid,
                         _ => small,
                     };
                     m.insert(n.to_string(), v.max(1));
@@ -1709,7 +1726,11 @@ pub mod tests {
             (MipsAirId::Global, 16),
             (MipsAirId::Jump, 17),
             (MipsAirId::Lt, 18),
-            (MipsAirId::MemoryInstrs, 20),
+            (MipsAirId::MemoryLoadNarrow, 20),
+            (MipsAirId::MemoryLoadWord, 20),
+            (MipsAirId::MemoryStoreNarrow, 20),
+            (MipsAirId::MemoryStoreWord, 20),
+            (MipsAirId::MemoryUnaligned, 20),
             (MipsAirId::MemoryLocal, 17),
             (MipsAirId::MiscInstrs, 17),
             (MipsAirId::MovCond, 17),
