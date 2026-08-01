@@ -120,8 +120,43 @@ where
         height <= domain,
         "trace height ({height}) must be <= 2^|eval_point| ({domain})"
     );
-    let eq = eq_mle_table::<EF>(eval_point);
-    debug_assert_eq!(eq.len(), domain);
+    // ── GPU-IDLE lever (gate `ZIREN_GPU_EQ_TRUNC`) ──────────────────────
+    // Only rows `[0, height)` are ever summed below, so only the FIRST
+    // `height` eq-table entries are ever read — yet the table is built over
+    // the whole `2^|eval_point|` cube.  That is ruinous for the full-point
+    // openings (`*_evals_full` in the LogUp-GKR output-extract), where
+    // `eval_point` is the full `max_log_row_count` trace point while the
+    // trace being opened (notably every PREPROCESSED trace) is far shorter:
+    // a 2^22-row cube table gets built to read its first few thousand
+    // entries, per chip, per shard, on the host with the GPU idle.
+    //
+    // MEASURED (sub-instrumented `logup_gkr_output_extract`, goat core): the
+    // full-point PREPROCESSED evaluation costs 78-96 ms of worker time per
+    // shard and — the decisive signature — does NOT scale with chip count
+    // (25 chips -> 96 ms, 4 chips -> 88 ms) while the main-trace evaluations
+    // do (25 chips -> 114/131 ms, 4 chips -> 0.0/4.2 ms).  On a 4-chip shard
+    // it is essentially the entire span wall.  That is the fixed
+    // `O(2^|eval_point|)` table build, not trace work.
+    //
+    // `eq_mle_table` maps index bit `i` to `eval_point[i]`, so every
+    // `row < 2^k` has all bits `>= k` zero and therefore
+    //     eq[row] == (prod_{i>=k} (1 - r_i)) * eq_k[row],
+    // with `eq_k = eq_mle_table(&eval_point[..k])`.  Building the size-`2^k`
+    // table and folding the constant tail into the per-column accumulator is
+    // EXACT — field multiplication is associative and distributes over the
+    // sum, so `tail * sum(eq_k[row] * x_row) == sum(eq[row] * x_row)` with no
+    // rounding — and turns the build from `O(2^|eval_point|)` into
+    // `O(height)`.
+    let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
+    let (eq, tail) = if eq_trunc_enabled() && k < eval_point.len() {
+        let tail = eval_point[k..]
+            .iter()
+            .fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
+        (eq_mle_table::<EF>(&eval_point[..k]), tail)
+    } else {
+        (eq_mle_table::<EF>(eval_point), EF::ONE)
+    };
+    debug_assert!(eq.len() >= height);
 
     // Performance optimization: parallelize the per-column
     // MLE evaluation. Each column is an independent dot product
@@ -137,9 +172,15 @@ where
             for row in 0..height {
                 acc += eq[row] * EF::from(trace[row * width + col]);
             }
-            acc
+            acc * tail
         })
         .collect()
+}
+
+/// Kill-switch gate for the truncated eq-table build above.
+fn eq_trunc_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var("ZIREN_GPU_EQ_TRUNC").as_deref().unwrap_or("0") == "1")
 }
 
 
