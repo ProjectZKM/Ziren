@@ -1528,6 +1528,29 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
+    // Trace-DENSITY probe (opt-in, `ZIREN_DENSITY_LOG=1`).  `total_values` is
+    // the exact count of committed main-trace cells for this shard (the area
+    // the jagged dense is built over), and `chip_infos` carries the RAW
+    // per-chip `row_count` / `column_count` the packing was built from — so a
+    // post-hoc per-chip `rows x cols` breakdown is exact, not inferred from
+    // log heights.  Diagnostic only: nothing branches on it.
+    if std::env::var("ZIREN_DENSITY_LOG").as_deref() == Ok("1") {
+        if let crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) = &evaluation_proof
+        {
+            let chips = bundle
+                .packing
+                .chip_infos
+                .iter()
+                .map(|ci| format!("{}={}x{}", ci.name, ci.row_count, ci.column_count))
+                .collect::<Vec<_>>()
+                .join(",");
+            eprintln!(
+                "[density] total_values={} log_dense={} chips={}",
+                bundle.packing.total_values, bundle.packing.log_dense_size, chips
+            );
+        }
+    }
+
     // SP1-faithful jagged hash-bind: carry the RAW BaseFold root (the value the
     // BaseFold opening binds against) while the FS-observed `main_commitment`
     // is the MODIFIED digest.  Fall back to `main_commitment` on the
