@@ -177,10 +177,12 @@ where
         .collect()
 }
 
-/// Kill-switch gate for the truncated eq-table build above.
+/// Kill-switch gate for the truncated eq-table build above.  Default ON:
+/// the ON arm was byte-gated green on all four goldens (fib, goat,
+/// tendermint, fib compress) with verify ON.  Set to `0` to disable.
 fn eq_trunc_enabled() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("ZIREN_GPU_EQ_TRUNC").as_deref().unwrap_or("0") == "1")
+    *ON.get_or_init(|| std::env::var("ZIREN_GPU_EQ_TRUNC").as_deref().unwrap_or("1") == "1")
 }
 
 
