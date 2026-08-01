@@ -9,7 +9,6 @@
 #include "jump.hpp"
 #include "memory_local.hpp"
 #include "memory_global.hpp"
-#include "memory_instrs.hpp"
 #include "misc_instrs.hpp"
 #include "mov_cond.hpp"
 #include "mul.hpp"
