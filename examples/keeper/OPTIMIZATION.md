@@ -457,6 +457,48 @@ delta, how it was validated, and the enable/kill-switch.
   where the regen would actually have run). `RAYON_NUM_THREADS` sizes the
   dedicated pool.
 
+## Per-shard host trace store — free it on a reaper thread (ziren-gpu)
+
+- **What.** `prove_shard_to_basefold_with_provider`
+  (`shard-prover/src/lib.rs`) owns the shard's host trace store — the
+  `BTreeMap<String, PaddedMle>` handed in on `ShardProveData::main_traces` plus
+  the `shared_trace_mles` view of it. On tendermint core that is **1.47 GiB per
+  shard**, and dropping it at the end of the call costs **70 ms/shard
+  (2.6 s/run)** of single-threaded page teardown ON THE CALLER. Single-GPU runs
+  take the inline-basefold path, so that is 70 ms/shard with the GPU idle before
+  the next shard's commit can start. The store is now handed to a dedicated
+  reaper thread (`core/src/reaper.rs`) so the teardown overlaps the next shard's
+  device work.
+- **How it was found.** Sub-instrumenting the whole per-shard path showed
+  `B4_bf_prove` (1070.0 ms/shard) exceeded the sum of its own stages
+  (`C0..C8` = 1010.2 ms/shard) by 59.8 ms/shard with nothing in between; adding an
+  explicit `drop` mark accounted for all of it (`CA_trace_store_drop`
+  69.8 ms/shard, n=37).
+- **Why byte-neutral.** A pure lifetime change: the value is dropped exactly
+  once, on another thread, slightly later. Nothing in the prove path reads it
+  after this point (the borrowed `commit_traces` / `eager_device_remat` views are
+  dropped first, in order). The queue is bounded at 2, and a full queue falls
+  back to the inline drop, so pending host RAM is bounded by two shards' stores
+  and the path degrades to the previous behaviour rather than growing.
+- **MEASURED NEGATIVE first — glibc allocator tuning.** Recorded so it is not
+  retried. `MALLOC_MMAP_THRESHOLD_=2 GiB` + `MALLOC_TRIM_THRESHOLD_=2 GiB` (the
+  gate binary links plain glibc malloc, no jemalloc) was expected to keep the
+  ~19 × 77 MiB regions on the heap instead of `munmap`ing them. It did nothing:
+  `CA_trace_store_drop` **69.8 → 76.2 ms/shard** (worse) and TM kHz
+  **1292.2 → 1281.2**. The teardown is not `malloc_trim`; it is the page work
+  itself, which is why moving it to another core is what pays.
+- **Measured** (tendermint core R16, verify ON, 3 paired concurrent reps on
+  separate GPUs, measured ON TOP of the regen-overlap lever):
+  **kHz 1332.8/1280.2/1265.3 → 1389.2/1357.7/1349.0, mean 1292.8 → 1365.3
+  (+5.6%)**, zero overlap between arms (base best 1332.8 < fix worst 1349.0).
+  The removed 2.6 s of a ~58 s proving wall predicts +4.4%. Peak VRAM unchanged
+  (27901/27901/28029 → 29021/28125/28445 MiB, inside the canonical run-to-run
+  spread of 27389-29053).
+- **Validated byte-identical** (isolating control, verify ON): TM core
+  `8b27f7e5ea510d95` in all 6 runs, goat core `a18399929adf02fa`, fib core
+  `6278c091f7e8bd91`; RAYON>1 race check TM R8 ×3 + goat R8 ×3 all == the R16 sha.
+- **Switches.** None; `REAPER_QUEUE` (const, 2) bounds the in-flight junk.
+
 ## MEASURED NEGATIVE — batching the per-column `eval_at` dot launches (ziren-gpu)
 
 Recorded so it is not retried blind. `eval_columns_with_eq_raw`
