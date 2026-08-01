@@ -292,10 +292,10 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
                 | MipsAirId::Jump
                 | MipsAirId::MovCond
                 | MipsAirId::MiscInstrs
-                | MipsAirId::MemoryLoadNarrow
-                | MipsAirId::MemoryLoadWord
-                | MipsAirId::MemoryStoreNarrow
-                | MipsAirId::MemoryStoreWord
+                | MipsAirId::LoadNarrow
+                | MipsAirId::LoadWord
+                | MipsAirId::StoreNarrow
+                | MipsAirId::StoreWord
                 | MipsAirId::MemoryUnaligned
                 | MipsAirId::SyscallInstrs
                 | MipsAirId::DivRem
@@ -348,8 +348,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // memory heights for the packed branch (same as MipsAir::memory_heights).
         let core_ids = [
             MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::MemoryLoadNarrow, MipsAirId::MemoryLoadWord,
-            MipsAirId::MemoryStoreNarrow, MipsAirId::MemoryStoreWord,
+            MipsAirId::MiscInstrs, MipsAirId::LoadNarrow, MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow, MipsAirId::StoreWord,
             MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
@@ -405,8 +405,8 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         }
         let core_ids = [
             MipsAirId::Cpu, MipsAirId::Branch, MipsAirId::Jump, MipsAirId::MovCond,
-            MipsAirId::MiscInstrs, MipsAirId::MemoryLoadNarrow, MipsAirId::MemoryLoadWord,
-            MipsAirId::MemoryStoreNarrow, MipsAirId::MemoryStoreWord,
+            MipsAirId::MiscInstrs, MipsAirId::LoadNarrow, MipsAirId::LoadWord,
+            MipsAirId::StoreNarrow, MipsAirId::StoreWord,
             MipsAirId::MemoryUnaligned, MipsAirId::SyscallInstrs,
             MipsAirId::DivRem, MipsAirId::AddSub, MipsAirId::Bitwise, MipsAirId::Mul,
             MipsAirId::ShiftRight, MipsAirId::ShiftLeft, MipsAirId::Lt, MipsAirId::MemoryLocal,
@@ -1205,10 +1205,10 @@ fn derive_cluster_from_maximal_shape(shape: &Shape<MipsAirId>) -> ShapeCluster<M
     maybe_log2_heights.insert(MipsAirId::SyscallInstrs, heuristic(syscall_log_height, 0));
 
     for memory_id in [
-        MipsAirId::MemoryLoadNarrow,
-        MipsAirId::MemoryLoadWord,
-        MipsAirId::MemoryStoreNarrow,
-        MipsAirId::MemoryStoreWord,
+        MipsAirId::LoadNarrow,
+        MipsAirId::LoadWord,
+        MipsAirId::StoreNarrow,
+        MipsAirId::StoreWord,
         MipsAirId::MemoryUnaligned,
     ] {
         let memory_log_height = shape.log2_height(&memory_id);
@@ -1726,10 +1726,10 @@ pub mod tests {
             (MipsAirId::Global, 16),
             (MipsAirId::Jump, 17),
             (MipsAirId::Lt, 18),
-            (MipsAirId::MemoryLoadNarrow, 20),
-            (MipsAirId::MemoryLoadWord, 20),
-            (MipsAirId::MemoryStoreNarrow, 20),
-            (MipsAirId::MemoryStoreWord, 20),
+            (MipsAirId::LoadNarrow, 20),
+            (MipsAirId::LoadWord, 20),
+            (MipsAirId::StoreNarrow, 20),
+            (MipsAirId::StoreWord, 20),
             (MipsAirId::MemoryUnaligned, 20),
             (MipsAirId::MemoryLocal, 17),
             (MipsAirId::MiscInstrs, 17),

@@ -69,10 +69,10 @@ pub fn estimate_mips_lde_size(
 
     // Compute the memory-instruction chip contributions.
     for air in [
-        MipsAirId::MemoryLoadNarrow,
-        MipsAirId::MemoryLoadWord,
-        MipsAirId::MemoryStoreNarrow,
-        MipsAirId::MemoryStoreWord,
+        MipsAirId::LoadNarrow,
+        MipsAirId::LoadWord,
+        MipsAirId::StoreNarrow,
+        MipsAirId::StoreWord,
         MipsAirId::MemoryUnaligned,
     ] {
         cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
@@ -154,15 +154,15 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::JumpDirect];
 
     // Compute the number of events in the memory-instruction chips.
-    events_counts[MipsAirId::MemoryLoadNarrow] = opcode_counts[Opcode::LB]
+    events_counts[MipsAirId::LoadNarrow] = opcode_counts[Opcode::LB]
         + opcode_counts[Opcode::LBU]
         + opcode_counts[Opcode::LH]
         + opcode_counts[Opcode::LHU];
-    events_counts[MipsAirId::MemoryLoadWord] =
+    events_counts[MipsAirId::LoadWord] =
         opcode_counts[Opcode::LW] + opcode_counts[Opcode::LL];
-    events_counts[MipsAirId::MemoryStoreNarrow] =
+    events_counts[MipsAirId::StoreNarrow] =
         opcode_counts[Opcode::SB] + opcode_counts[Opcode::SH];
-    events_counts[MipsAirId::MemoryStoreWord] =
+    events_counts[MipsAirId::StoreWord] =
         opcode_counts[Opcode::SW] + opcode_counts[Opcode::SC];
     events_counts[MipsAirId::MemoryUnaligned] = opcode_counts[Opcode::LWL]
         + opcode_counts[Opcode::LWR]
@@ -221,10 +221,10 @@ pub fn pad_mips_event_counts(
         MipsAirId::Branch => *v += 8 * num_cycles,
         MipsAirId::Jump => *v += 2 * num_cycles,
         MipsAirId::SyscallInstrs => *v += num_cycles,
-        MipsAirId::MemoryLoadNarrow => *v += 8 * num_cycles,
-        MipsAirId::MemoryLoadWord => *v += 8 * num_cycles,
-        MipsAirId::MemoryStoreNarrow => *v += 8 * num_cycles,
-        MipsAirId::MemoryStoreWord => *v += 8 * num_cycles,
+        MipsAirId::LoadNarrow => *v += 8 * num_cycles,
+        MipsAirId::LoadWord => *v += 8 * num_cycles,
+        MipsAirId::StoreNarrow => *v += 8 * num_cycles,
+        MipsAirId::StoreWord => *v += 8 * num_cycles,
         MipsAirId::MemoryUnaligned => *v += 8 * num_cycles,
         MipsAirId::MiscInstrs => *v += 8 * num_cycles, // TODO: Check this value.
         MipsAirId::CloClz => *v += 3 * num_cycles,     // TODO: Check this value.
