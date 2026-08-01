@@ -401,6 +401,62 @@ delta, how it was validated, and the enable/kill-switch.
   - `ZIREN_GPU_STREAMING_COMMIT_PARITY=1` asserts the host copy of every layer against a
     rebuilt legacy tree, so the full copy is kept automatically whenever it is armed.
 
+## Device-chip host trace regen — run it concurrently with the GPU commit (ziren-gpu)
+
+- **What.** After `commit` returns, `prove_one_core_shard`
+  (`prover/src/core_multi_gpu.rs`) builds the BaseFold snapshot, and every
+  device-generated chip (one whose trace was produced by `generate_trace_device`
+  and therefore has no host copy) has its host trace RE-MATERIALIZED on CPU by
+  `regen_one` → `MachineAir::generate_trace`. On tendermint core R16 that is
+  **19 of 20 chips, 1.47 GiB and 132 ms per shard (4.9 s/run)**, and it runs with
+  the GPU IDLE: single-GPU runs take the inline-basefold path, so the pool worker
+  cannot start the next shard's commit until the regen finishes. It is now
+  started CONCURRENTLY with the GPU commit and handed to the classify pass.
+- **Why it cannot just be deleted.** The regen exists because the device-fold
+  sentinel (which replaces a device chip's host trace with an empty matrix) is
+  disabled whenever `cluster_widths.is_some()` — the FIX-off natural-commit path,
+  which is what tendermint/goat run. Confirmed at runtime:
+  `cdf=true, np_prep=true, provider_names=20, want_dt=true` but
+  `cluster_widths.is_some()=true`, so the sentinel arm never fires and all 19
+  device chips take the `generate_trace` arm. Under FIX-on the sentinel empties
+  them, so the pre-regen is skipped there (it would be pure waste).
+- **Why a DEDICATED pool, on a scoped OS thread.** The first attempt used
+  `rayon::join(commit, pre_regen)` on the global pool and measured **net zero**
+  (TM kHz 1169.8 → 1160.4). Sub-instrumentation showed exactly why: over the
+  first 9 shards, canonical was `stark_commit 2398 ms + regen 1205 ms = 3603 ms`
+  and the `rayon::join` build was `stark_commit 3615 ms + regen 17 ms` — the regen
+  time moved wholesale INTO `commit`, with zero overlap. `commit` drives its
+  per-chip H2D copies and `generate_trace_device` dispatch through `par_iter` on
+  the global pool, so a co-scheduled regen starves the device dispatch of workers
+  by exactly what the overlap would save. Running the regen on its own
+  `rayon::ThreadPool` from a `std::thread::scope` thread leaves the global pool
+  free and the overlap materializes.
+- **Why byte-neutral.** Every chip in `machine.shard_chips(&record)` is by
+  definition `included(&record)`, so `regen_one`'s height-0 cluster arm cannot
+  apply to it and the pre-regenerated matrix is exactly what its `generate_trace`
+  arm would have produced — same pure call, same `ExecutionRecord`, which `commit`
+  only borrows. The map is consulted only where the original code would have
+  regenerated (`host.or_else(...)`, after the sentinel check), so a chip absent
+  from it takes the original inline path unchanged.
+- **Measured** (tendermint core R16, verify ON, 3 paired concurrent reps on
+  separate GPUs): per-shard regen **4.2-4.9 s/run → 5-27 ms/run**.
+  **TM kHz 1215.6/1137.5/1226.9 → 1346.4/1299.9/1226.6, mean 1193.3 → 1291.0
+  (+8.2%)**; the removed 4.5 s of a ~60 s proving wall predicts +7.5%, so the
+  measurement is exactly the mechanism. goat core, 3 paired reps:
+  **306.0/288.2/… → 323.2/311.3/… (+5.6%, +8.0%)**. Peak VRAM unchanged
+  (TM 29053/27645/27389 → 28829/26973/27933 MiB).
+- **Validated byte-identical** (isolating control vs canonical, verify ON,
+  ziren-gpu `55ff0fa` base): TM core `8b27f7e5ea510d95` (37 shards), goat core
+  `a18399929adf02fa` (9 shards), fib core `6278c091f7e8bd91` — all canon == fix,
+  every run CORE VERIFY OK. Recursion gate (core-only validation cannot see a
+  recursion regression): fib **compress** `68ed25eb3ab496f4` canon == fix, both
+  arms COMPRESS VERIFY OK. RAYON>1 race check: TM R8 ×3 + goat R8 ×3 all == the
+  R16 sha, all verify OK.
+- **Switches.** None — the path is unconditional, gated only on the structural
+  predicate `cluster_widths.is_some() || !core_device_fold_enabled()` (i.e. only
+  where the regen would actually have run). `RAYON_NUM_THREADS` sizes the
+  dedicated pool.
+
 ## MEASURED NEGATIVE — batching the per-column `eval_at` dot launches (ziren-gpu)
 
 Recorded so it is not retried blind. `eval_columns_with_eq_raw`
