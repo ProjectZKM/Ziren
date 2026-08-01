@@ -824,9 +824,22 @@ where
         // `commit` and hence injects 0-row missing chips); compress/shrink/wrap never produce
         // a height-0 trace, so this guard is a strict no-op (byte-identical)
         // there.
+        // A non-power-of-two height (SP1-parity `next_multiple_of_32` core
+        // padding) would ALSO panic here, so use the CEIL log — the same
+        // formula `build_chip_log_heights` / the GKR `log_degree` extract use.
+        // Byte-identical for every power-of-two height (the only case that
+        // reached this line before).
         let log_degrees = degrees
             .iter()
-            .map(|degree| if *degree == 0 { 0 } else { log2_strict_usize(*degree) })
+            .map(|degree| {
+                if *degree == 0 {
+                    0
+                } else if degree.is_power_of_two() {
+                    log2_strict_usize(*degree)
+                } else {
+                    (usize::BITS - degree.leading_zeros()) as usize
+                }
+            })
             .collect::<Vec<_>>();
 
         let _log_quotient_degrees =

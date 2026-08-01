@@ -294,10 +294,18 @@ where
         // bytes / non-core stages), fall back to the legacy trailing
         // opening + embed_LEAD so this path stays additive; in that case
         // the legacy bitrev anchor is used (see the cells/anchor branch).
+        // CEIL log — must match the verifier's `ChipEvaluation::log_degree`
+        // source (`row_gkr::top_level`: `h.next_power_of_two().trailing_zeros()`)
+        // and `build_chip_log_heights`.  `trailing_zeros` agreed only for
+        // power-of-two heights; under the SP1-parity `next_multiple_of_32` core
+        // padding it would silently disagree with the verifier's `embed_LEAD`.
+        // Byte-identical for every power-of-two height.
         let log_h = if main_height == 0 {
             0usize
-        } else {
+        } else if main_height.is_power_of_two() {
             (main_height as u64).trailing_zeros() as usize
+        } else {
+            (usize::BITS - main_height.leading_zeros()) as usize
         };
         if log_h > num_variables as usize {
             eprintln!(

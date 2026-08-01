@@ -1537,11 +1537,17 @@ where
     if std::env::var("ZIREN_DENSITY_LOG").as_deref() == Ok("1") {
         if let crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) = &evaluation_proof
         {
-            let chips = bundle
-                .packing
-                .chip_infos
+            let rc = row_counts.first().cloned().unwrap_or_default();
+            let cc = &bundle.packing.column_counts;
+            let names: Vec<&String> = chip_cumulative_sums.keys().collect();
+            let chips = cc
                 .iter()
-                .map(|ci| format!("{}={}x{}", ci.name, ci.row_count, ci.column_count))
+                .enumerate()
+                .map(|(i, w)| {
+                    let h = rc.get(i).copied().unwrap_or(0);
+                    let n = names.get(i).map_or_else(|| format!("#{i}"), |s| (*s).clone());
+                    format!("{n}={h}x{w}")
+                })
                 .collect::<Vec<_>>()
                 .join(",");
             eprintln!(
