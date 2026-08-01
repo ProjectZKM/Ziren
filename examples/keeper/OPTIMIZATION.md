@@ -1009,9 +1009,21 @@ locality. Not landed.
   it becomes a silent device-side use-after-free.
 - **And it is the wrong tool regardless.** It would cost **90.7% peak VRAM** to
   remove the same stall the bounded release threshold removes at **70.6%**.
-- **Recommendation:** delete the feature (SP1 has no arena; it uses the stream-ordered
-  mempool with a permissive release threshold), rather than finish it. Kept for now
-  with the zero-length assert fixed so the next reader hits the real blocker first.
+- **REMOVED (Aug 2), ziren-gpu `cleanup/remove-prealloc-arena`.** The feature is
+  deleted rather than finished — SP1 has no arena; it uses the stream-ordered mempool
+  with a permissive release threshold, which is what the entry above already lands.
+  Gone: the `pre-alloc` cargo feature in `zkm-gpu-core` / `-shard-prover` / `-perf` /
+  `-server`, all 57 `#[cfg(feature = "pre-alloc")]` sites, `core/src/allocator/`'s
+  `Mallocator` + `holder.rs` + `device.rs`, the 14 `unimplemented!` trace-gen branches,
+  and `DeviceBuffer`'s `allocation` slot (so `Drop` is now unconditionally
+  stream-ordered `free_async`). **Kept** — the identically-named but unrelated
+  **host** `pre-alloc` feature on `zkm-core-executor` / `zkm-core-machine`
+  (`ExecutionRecord::new`'s `Vec::with_capacity` reservations, unconditionally ON via
+  ziren-gpu's root `Cargo.toml`), and `core/src/allocator/{host,tracker,
+  allocation_data}.rs` + the generic `StaticAllocator`, which serve the separate
+  `pinned-pages` host pool. Byte-neutral: fib `7c780d9f59d728b5`, goat
+  `8aa10f1942b71b62`, tendermint `7190969b1feae13a` (33 shards), fib compress
+  `c80d70d835a42aee`, verify ON, isolating control against the same tree.
 
 ## Note — GPU-idle anatomy of the core prove loop, and what it is NOT
 
