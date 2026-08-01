@@ -927,3 +927,65 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
   slab build (`buildJhrSlabKernel` / `buildJhrSlabKernelBaseNum` → next H2D,
   ~1.5 s, about one per shard); tracegen kernels → next H2D account for ~2.1 s.
   Closing the rest needs many small host-work removals, not one lever.
+
+## CpuChip device trace-gen — recycled host staging vector (ziren-gpu)
+
+- **What.** `CpuChip::generate_trace_device` (ziren-gpu `core/src/tracegen/core.rs`)
+  built TWO fresh host `Vec`s per shard before it could launch anything: the
+  `CpuEvent -> CpuEventFfi` conversion (`cpu_events.len() * 284` bytes) and a
+  per-event `program.fetch(pc)` gather (`cpu_events.len() * 24` bytes), each
+  followed by a pageable H2D. Two changes:
+  1. the `CpuEventFfi` staging vector is RECYCLED from a bounded 2-entry pool
+     (`rayon::collect_into_vec` reuses the retained allocation);
+  2. the per-event instruction gather is replaced by a DEVICE-RESIDENT program
+     instruction table, uploaded once per (device, program) and indexed in the
+     kernel by `(pc - pc_base) / 4`.
+- **Why (mechanism measured, not inferred).** Per-phase instrumentation on
+  tendermint R16 (35 shards, 2.22 M cpu events/shard, mean per shard):
+
+  | phase | canonical |
+  |---|---|
+  | `CpuEvent -> CpuEventFfi` conversion | **104.6 ms** |
+  | H2D events (612 MB, pageable) | 24.0 ms |
+  | `program.fetch` gather | 4.9 ms |
+  | H2D instructions (53 MB) | 2.2 ms |
+  | device alloc + kernel launch | 0.7 ms |
+  | **chip total** | **143.0 ms** |
+
+  Re-running the IDENTICAL conversion a second time into the SAME, already-mapped
+  allocation costs **6.3 ms** with 19.5 K minor page faults, against **104.6 ms**
+  with 439 K minor faults for the fresh one. So **~98 of the 104.6 ms is not
+  conversion work at all** — it is the kernel faulting in and zero-filling a fresh
+  612 MB anonymous mapping that is then overwritten byte-for-byte. glibc serves an
+  allocation that large with `mmap` and returns it with `munmap` on drop, so every
+  shard re-pays it (THP is `madvise` on the bench box, so 612 MB = ~150 K 4 KB
+  faults). This also refutes the standing guess that the per-event
+  `program.fetch(pc)` was the expensive part: `Program::fetch` is a plain slice
+  index, and the whole second pass (gather + its H2D) is 7.1 ms, 5% of the chip.
+- **Measured** (tendermint R16, verify ON, 3 paired concurrent reps, canonical on
+  GPU 6 / lever on GPU 7, ziren-gpu `eeeb735` + host `2b80461c`):
+
+  | rep | canonical kHz | +recycle+table kHz | delta |
+  |---|---|---|---|
+  | 1 | 2010.35 | 2272.70 | +13.05% |
+  | 2 | 2015.60 | 2250.41 | +11.65% |
+  | 3 | 1993.18 | 2198.83 | +10.32% |
+  | mean | **2006.38** | **2240.65** | **+11.68%** |
+
+  Zero overlap (worst lever rep 2198.83 > best canonical rep 2015.60). Core prove
+  loop 37.6 s -> 33.7 s. Peak VRAM 22105 -> 21443 MiB (unchanged within sampling).
+  The staging-recycle alone measured +11.93% over its own 3 paired reps; the
+  program-table commit stacked on it is **null within noise** on kHz and is kept
+  for the removed host pass and the -53 MB/shard of PCIe traffic, not for a
+  measurable kHz gain.
+- **Validated byte-identical.** Isolating control against the canonical arm, verify
+  ON: fib core `ed4f7359e6ef5092`, goat core `7fee60eb4b326632` (9 shards),
+  tendermint core `805904a19c67952a` (35 shards), fib compress `42ad2ade04bf93dc`.
+  RAYON_NUM_THREADS=8 determinism: tendermint 3/3 and goat 3/3 identical shas with
+  CORE VERIFY OK.
+- **Switches.** None — both are unconditional (SP1 shape: no gate flag).
+
+- **NOT LANDED:** the stacked device-resident program-table commit measured **null within
+  noise** on kHz (L2 alone +11.93%, L2+L1 +11.68%), so only the staging-vector recycle shipped
+  (`1ab76e6`). The program table remains available on the agent branch if its −53 MB/shard of
+  PCIe ever becomes load-bearing; note its program-replacement path is unexercised by any gate.
