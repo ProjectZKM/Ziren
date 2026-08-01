@@ -1708,14 +1708,14 @@ pub mod tests {
 
     /// canonicalize_shape_to_cluster must pad a raw event-driven
     /// main_exec shard (missing the optional CloClz/DivRem/Syscall* chips) UP
-    /// to the full 20-chip main_exec cluster, so the GPU multi-shard prove path
+    /// to the full main_exec cluster, so the GPU multi-shard prove path
     /// (which calls this) presents the canonical chip set to the recursion
     /// vk_map. Without this, the raw
     /// 16/18-chip variants produce normalize vks not in the map ("vk not
     /// allowed").
     #[test]
     fn canonicalize_pads_main_exec_to_cluster() {
-        // A raw main_exec-family shard with only 16 of the 20 chips
+        // A raw main_exec-family shard missing the four optional chips
         // (no CloClz, DivRem, SyscallCore, SyscallInstrs — event-driven drop).
         let raw: Vec<(MipsAirId, usize)> = vec![
             (MipsAirId::AddSub, 21),
@@ -1743,13 +1743,14 @@ pub mod tests {
             &raw.iter().map(|(k, h)| (*k, *h)).collect::<Vec<_>>(),
         );
         let mut record = create_dummy_record(&shape);
-        assert_eq!(record.shape.as_ref().unwrap().len(), 16, "precondition: raw 16 chips");
+        let raw_len = record.shape.as_ref().unwrap().len();
+        assert_eq!(raw_len, raw.len(), "precondition: the raw shape has every listed chip");
 
         canonicalize_shape_to_cluster(&mut record);
 
         let canon = record.shape.as_ref().unwrap();
-        // The full main_exec cluster has 20 chips; the 4 event-driven ones must
-        // now be present (at log-height 1) while the originals are untouched.
+        // The four event-driven chips must now be present (at log-height 1)
+        // while the originals are untouched.
         for must in [
             MipsAirId::CloClz,
             MipsAirId::DivRem,
@@ -1758,7 +1759,12 @@ pub mod tests {
         ] {
             assert!(canon.contains(&must), "canonicalize must add {must:?}");
         }
-        assert_eq!(canon.len(), 20, "canonicalized main_exec must have 20 chips, got {}", canon.len());
+        assert_eq!(
+            canon.len(),
+            raw_len + 4,
+            "canonicalized main_exec must add exactly the 4 optional chips, got {}",
+            canon.len()
+        );
         // Originals preserved at their real heights.
         assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::Cpu).unwrap().1, 21);
         assert_eq!(*canon.iter().find(|(k, _)| **k == MipsAirId::AddSub).unwrap().1, 21);
