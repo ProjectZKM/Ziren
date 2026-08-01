@@ -90,6 +90,96 @@ delta, how it was validated, and the enable/kill-switch.
   precompiles) need the ziren-gpu tracegen mirror updated in lockstep before
   they can be relaxed.
 
+## Global cumulative sum — parallel fold, off the serial critical path (host)
+
+- **What.** `ExecutionRecord::public_values()`
+  (`crates/core/executor/src/record.rs`) re-derives `global_cumulative_sum` by
+  folding **every** `GlobalLookupEvent` into a septic-curve running sum. The
+  fold was **serial**. It sits on the shard prover's critical path: the GPU
+  `commit()` calls it in its `construct main data` step (ziren-gpu
+  `shard-prover/src/lib.rs`), i.e. AFTER the device trace-gen has been
+  dispatched, so the whole prove window stalls on one core with the GPU idle.
+  Changed to a parallel fold.
+
+- **How it was found (this was the whole question).** Profiling the **idle**,
+  not the kernels: `nsys` CUDA trace + per-phase host wall marks on the
+  coordinator thread, splitting each shard into (a) blocked on `records_rx`,
+  (b) the core commit+open leg, (c) the inline basefold leg. On goat the core
+  leg was **11.10 s wall at 3.0% GPU busy** — only 725 device ops for all 9
+  shards, and 95% of its idle sat in 128 gaps of mean 79.7 ms bracketed
+  `D2H -> D2H`. Splitting `commit()` internally showed the cost was **not**
+  the trace-gen fan-out (0.71 s) nor the Merkle commit (0.01 s) but
+  `shard.public_values()`: **10.27 s of goat's 18.20 s core prove loop (56%)**
+  and **3.73 s of tendermint's 38.99 s (10%)**. `rx_wait` was 0.00 s — the
+  executor/trace-gen pipeline was never the limiter.
+
+- **Why it is byte-neutral.** The per-event cost is `lift_x` (a square root in
+  the degree-7 extension), a pure function of the event.
+  `SepticCurveComplete`'s `Add` (`crates/pcs/src/septic_curve.rs`) is the
+  COMPLETE curve group law — it handles infinity, `x1 != x2`, doubling and
+  `P + (-P)` — so the accumulation is over an **abelian group**:
+  associativity + commutativity make any reduction tree yield the identical
+  digest, and field arithmetic is exact (no floating point), so this is
+  byte-identical rather than merely numerically equivalent. The seed is the
+  `SepticDigest::zero()` OFFSET (not the group identity), so it is added to
+  the reduced result rather than used as the reduce identity.
+
+- **SP1 parity.** SP1 never re-derives this on the prove path: its
+  `public_values()` is a pure read of an incrementally-maintained
+  `Arc<Mutex<SepticDigest<u32>>>` (`crates/core/executor/src/record.rs`).
+  The reduction used here also mirrors what this codebase already does for the
+  SAME accumulation in `GlobalChip::generate_trace`
+  (`crates/core/machine/src/global/mod.rs`, `into_par_iter().with_min_len(1 << 15)`)
+  and `Program::global_cumulative_sum` (`crates/core/executor/src/program.rs`).
+
+- **Measured** (single RTX 5090, verify ON, `RAYON_NUM_THREADS=16`,
+  isolating control = identical ziren-gpu tree, one variable = `record.rs`):
+
+  | | goat (9 shards) | tendermint (35 shards) |
+  |---|---|---|
+  | `public_values()` before | 10.27 s | 3.73 s |
+  | `public_values()` after  | 0.96 s  | — |
+  | core prove loop before   | 18.20 s | 38.99 s |
+  | core prove loop after    | 9.20 s (**1.98x**) | — |
+
+  Tendermint R16 `prove_core` wall, **paired concurrent** CTRL vs FIX, 3 reps
+  each on two runs (ziren-gpu `1ddf43d` then `eeeb735`):
+
+  | run | rep1 | rep2 | rep3 | mean | delta |
+  |---|---|---|---|---|---|
+  | `1ddf43d` CTRL | 40.907 | 41.997 | 40.999 | 41.301 | |
+  | `1ddf43d` FIX  | 37.799 | 37.234 | 37.436 | 37.490 | **-9.2%** |
+  | `eeeb735` CTRL | 43.108 | 42.506 | 41.648 | 42.421 | |
+  | `eeeb735` FIX  | 41.671 | 40.456 | 37.325 | 39.817 | **-6.1%** |
+
+  Core kHz (75.4M cycles): 1825 -> 2011 (`1ddf43d`), 1777 -> 1894 (`eeeb735`).
+  The spread between the two runs is host-CPU contention — the win is a
+  parallel host fold, so it shrinks when cores are shared. goat, where the
+  fold is 56% of the loop rather than 10%, gains ~2x regardless.
+
+- **Peak VRAM.** Unchanged: 20,067-22,358 MiB of 32,607 across both arms and
+  all reps (the reading order flips between arms rep to rep, i.e. sampling
+  jitter, not a systematic shift). This lever allocates nothing.
+
+- **Validated.** Byte-identical on both ziren-gpu tips: fib
+  `ed4f7359e6ef5092`, goat `7fee60eb4b326632`, tendermint `805904a19c67952a`
+  (35 shards), fib compress `42ad2ade04bf93dc`, all `VERIFY OK`.
+  RAYON>1 determinism (`RAYON_NUM_THREADS=8`, the risky class for a fold that
+  is now parallel): tendermint x3 and goat x3 all reproduced the R16 golden
+  exactly — i.e. the digest is independent of the thread count.
+
+- **Switch.** None — unconditional, SP1-shaped.
+
+- **What is left in that window.** After this lever tendermint's core
+  commit+open leg still carries `CpuChip::generate_trace_device`
+  (ziren-gpu `core/src/tracegen/core.rs`): two full host `par_iter`
+  materializations over `cpu_events` per shard (the event conversion and a
+  per-event `program.fetch(pc)`), 5.80 s of tendermint's 38.99 s loop, again
+  with the GPU near-idle. The basefold leg is now the dominant term
+  (28.42 s of 38.99 s, ~44% GPU busy): 357k device ops with a mean 1.67 ms
+  host gap on the `D2H -> H2D` transition, 12,445 times per run — host-issue
+  bound, not kernel bound.
+
 ## Jagged-eval structural sumcheck — host-core parallelization
 
 - **What.** `structural_jagged_eval_sumcheck` (`crates/pcs/src/jagged_eval_sumcheck.rs`)

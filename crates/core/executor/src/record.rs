@@ -515,20 +515,53 @@ impl MachineRecord for ExecutionRecord {
 /// the last real `GlobalChip` row sends on the GlobalAccumulation bus.  The
 /// septic curve is over the base field, so this is computed over `KoalaBear`
 /// and stored as canonical `u32` coordinates (lifted to `F` by `to_vec`).
+///
+/// PERF: this runs on the shard prover's critical path — `public_values()` is
+/// called from the GPU `commit()` (`ziren-gpu` `shard-prover/src/lib.rs`, the
+/// `construct main data` step), i.e. AFTER the device trace-gen has been
+/// dispatched, so a serial fold here stalls the whole prove window with the GPU
+/// idle.  Measured on this box (single RTX 5090, `nsys` + host phase marks):
+/// the serial fold cost 10.27 s of goat's 18.20 s core prove loop (56%) and
+/// 3.73 s of tendermint's 38.99 s (10%), during which the GPU ran at ~3%.
+///
+/// The per-event work (`lift_x` — a square root in the degree-7 extension) is a
+/// pure function of the event, and `SepticCurveComplete`'s `Add` is the COMPLETE
+/// curve group law (it handles infinity, `x1 != x2`, doubling and `P + (-P)`),
+/// so the fold is over an abelian group: associativity + commutativity make any
+/// reduction tree yield the bit-identical digest.  Field arithmetic is exact
+/// (no floating point), so this is byte-neutral, not merely
+/// numerically-equivalent.
+///
+/// Mirrors the reduction the rest of the codebase already uses for exactly this
+/// accumulation — `GlobalChip::generate_trace`
+/// (`crates/core/machine/src/global/mod.rs`, `into_par_iter().with_min_len(1 <<
+/// 15)`) and `Program::global_cumulative_sum`
+/// (`crates/core/executor/src/program.rs`, `into_par_iter().reduce(||
+/// SepticCurveComplete::Infinity, ...)`).  `with_min_len` keeps small shards on
+/// a single worker so the rayon split cost cannot dominate.
 fn compute_global_cumulative_sum(events: &[GlobalLookupEvent]) -> SepticDigest<u32> {
     use p3_field::BasedVectorSpace;
     use p3_koala_bear::KoalaBear;
+    use p3_maybe_rayon::prelude::{
+        IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    };
     type F = KoalaBear;
 
-    let mut acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0);
-    for event in events {
-        let x_start =
-            SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(event.message[i]))
-                + SepticExtension::from(F::from_u32((event.kind as u32) << 16));
-        let (point, _offset) = SepticCurve::<F>::lift_x(x_start);
-        let point = if event.is_receive { point } else { point.neg() };
-        acc = acc + SepticCurveComplete::Affine(point);
-    }
+    let acc = events
+        .par_iter()
+        .with_min_len(1 << 12)
+        .map(|event| {
+            let x_start =
+                SepticExtension::<F>::from_basis_coefficients_fn(|i| F::from_u32(event.message[i]))
+                    + SepticExtension::from(F::from_u32((event.kind as u32) << 16));
+            let (point, _offset) = SepticCurve::<F>::lift_x(x_start);
+            let point = if event.is_receive { point } else { point.neg() };
+            SepticCurveComplete::Affine(point)
+        })
+        .reduce(|| SepticCurveComplete::Infinity, |a, b| a + b);
+    // Seed with the `SepticDigest::zero()` OFFSET (not the group identity) —
+    // added last so the offset lands exactly where the serial fold put it.
+    let acc = SepticCurveComplete::Affine(SepticDigest::<F>::zero().0) + acc;
     let final_digest = acc.point();
     SepticDigest(SepticCurve::convert(final_digest, |x: F| x.as_canonical_u32()))
 }
