@@ -1733,6 +1733,102 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   the slab layout directly would delete the kernel and ~1 680
   per-chip allocations per shard.
 
+## LogUp-GKR round wire `eq_row` — device-built, host table deleted (ziren-gpu)
+
+- **What.** `prove_logup_round_gpu_wholesale_jagged_device_slab` (ziren-gpu
+  `basefold/src/logup_round_device.rs`) materialised the `2^num_row_vars`
+  LSB-first partial-Lagrange `eq_row` table **on the host** for every GKR
+  layer, cloned it into `JhrState`, and H2D'd it whole — up to 2^21 Ef4 =
+  32 MiB on the giant layers. It now builds that table on device with the
+  existing `partialLagrangeNaiveEf` kernel from the tiny `row_point`
+  (`build_eq_row_device_from_point`), which the non-slab wire already used in
+  production. The `2^n`-incremental host build above made this loop ~15×
+  cheaper; this removes it from the critical path entirely.
+- **Why the host table has no reader left.** With `ZIREN_GPU_JHR_COLIDX_EQROW`
+  on (default) `jhr_drive_resident` folds `eq_row` **on device, in place**, and
+  `fold_scalars_only` deliberately leaves the host `Vec` stale. Its only three
+  remaining uses were (1) `.len().trailing_zeros()` → `row_point.len()`,
+  (2) `jhr_last_coords_reconstruct` → the `last_coords_hint` is *always*
+  threaded on this path, and (3) one `to_device_async` → the device build.
+- **Why byte-neutral.** `partialLagrangeNaiveEf` computes
+  `value = 1; for k in 0..dim { value *= (i>>k)&1 ? p[k] : 1 - p[k] }` — the
+  same factors accumulated in the same `k` order as the host builder, over
+  exact KoalaBear-extension arithmetic. No reduction, no reassociation, no
+  approximation.
+- **How it was found — and a span-name correction.** The ranked host-idle
+  table attributed 64.4 ms/shard of GPU idle to `logup_gkr_layer_transitions`
+  and read that as the per-chip transition launch fan-out. It is not: the
+  418 `layerTransitionEf` launches live in `logup_gkr_first_layer`
+  (`device_logup_gkr.rs:342`); `logup_gkr_layer_transitions`
+  (`device_logup_gkr.rs:433`) is the GKR sumcheck **round** loop. Measured per
+  shard (nsys + NVTX, tendermint core, 33 shards, RTX 5090):
+
+  | span | span ms | busy ms | idle ms | occupancy |
+  |---|---|---|---|---|
+  | `logup_gkr_first_layer` (all transitions) | 49.2 | 40.3 | **8.9** | 0.82 |
+  | `logup_gkr_layer_transitions` (round loop) | 184.0 | 82.1 | **101.9** | 0.45 |
+  | `logup_gkr_output_extract` | 24.4 | 16.4 | 8.0 | 0.67 |
+
+  Inside the round loop, 73% of all idle (68.6 ms/shard) sat in just
+  21 gaps/shard, every one of them starting the instant `buildJhrSlabKernel`
+  retired and ending at an H2D of exactly the eq-table size — and doubling per
+  layer in lockstep with `2^num_row_vars` (0.86, 1.70, 3.43, 9.74, 16.03,
+  34.37 ms against H2Ds of 1, 2, 4, 8, 16, 32 MiB).
+- **Measured** (host timers, same tendermint run, per shard):
+  - `eq_row` host build **54.23 ms → 0.00 ms**
+  - `eq_row` clone into `JhrState` **8.53 ms → 0.00 ms**
+  - `eq_row` H2D **2.09 ms → 0.11 ms** (now the device build launch)
+  - **64.7 ms/shard of host critical path removed**; 4 067 202 Ef4 (65 MB) of
+    host-materialised table per shard gone. `eq_int` (the interaction table,
+    0.15 ms/shard) is left on host — it is `cols`-sized, not `rows`-sized.
+- **And it converts** (nsys, same program, before → after, per shard). Unlike
+  the coalescing entry above, the removed time was host critical path, so the
+  idle drop turned 1:1 into span:
+
+  | | before | after |
+  |---|---|---|
+  | `logup_gkr_layer_transitions` span | 184.0 ms | **117.0 ms** |
+  | …its GPU idle | 101.9 ms | **36.5 ms** |
+  | …its occupancy | 0.446 | **0.688** |
+  | `buildJhrSlab*` → next-H2D idle | 68.6 ms | **3.6 ms** |
+  | H2D bytes in that span | 227.7 MB | **160.6 MB** |
+  | `CORE_PROVE` span | 740.9 ms | **669.3 ms** |
+  | `CORE_PROVE` occupancy | 0.483 | **0.510** |
+- **kHz** (tendermint core, `RAYON_NUM_THREADS=16`, verify **on**, 4 paired
+  concurrent runs — 2 with control on GPU3 / fix on GPU4 and 2 with the arms
+  swapped, so GPU asymmetry is controlled):
+
+  | pair | layout | control | fix | Δ |
+  |---|---|---|---|---|
+  | 1 | ctrl@3 fix@4 | 2 970 | 3 322 | +11.9% |
+  | 2 | ctrl@3 fix@4 | 3 082 | 3 408 | +10.6% |
+  | 3 | fix@3 ctrl@4 | 3 067 | 3 320 | +8.3% |
+  | 4 | fix@3 ctrl@4 | 3 065 | 3 319 | +8.3% |
+  | **mean** | | **3 046 kHz** | **3 342 kHz** | **+9.7%** |
+
+  Fix ahead in **4/4** pairs, in both GPU layouts. Peak VRAM unchanged
+  (23.6–24.3 GiB either way). Excluding pair 1's low control rep (2 970, the
+  first run of the block) the mean delta is +8.8%.
+- **Switch.** `ZIREN_GPU_JHR_EQROW_DEVICE`, **default ON**; `=0` is the kill
+  switch back to the host build + upload.
+- **Two measured negatives from the same investigation.**
+  - *Batching the per-chip transition launches* (418 → 20 via a
+    `blockIdx.z = chip` pointer-array kernel, the shape
+    `zerocheckJaggedCxFusedChipsPtrs` uses) was **not built**: host timers put
+    the whole launch-dispatch cost at **1.6 ms/shard** (0.78 ms across 487 EF
+    transition launches + 0.31 ms across 24 first-transition launches), inside
+    a span with only 8.9 ms/shard of idle at 0.82 occupancy. The full per-chip
+    fan-out costs 22.8 ms/shard of host wall, but it is 5.1 ms of
+    `cudaMallocAsync` (1 947 of them) and 16.2 ms of *blocking sync*, not
+    dispatch.
+  - *Collapsing those blocking syncs to one per layer* (136 → 20 in the
+    transition hook, 24 → 1 in the first transition) was built, measured and
+    **dropped**: `t_sync` 6.51 → 5.43 ms/shard and core wall 22.236 → 22.175 s
+    (+0.27%, inside the ±5% run-to-run noise). A sync is time spent *waiting
+    for the GPU*, not host work — removing it moves where the host blocks
+    without removing anything from the critical path, exactly as the
+    "removing device work does not move kHz" rule predicts.
+
 ## Species sweep — a host-built table whose consumer moved to the device, but the producer did not (ziren-gpu)
 
 - **The species.** Two independent sweeps on the same day found the same
