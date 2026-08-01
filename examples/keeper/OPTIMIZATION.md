@@ -1186,3 +1186,90 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
   (9 shards), tendermint `805904a19c67952a` (35 shards), fib compress
   `42ad2ade04bf93dc`.
 - **Switches.** None — unconditional.
+
+## SP1 `MemoryBump` shadow read: register access columns 9 -> 6 (Cpu 68 -> 59)
+
+- **Where.** `crates/core/machine/src/memory/bump.rs` (new chip),
+  `crates/core/machine/src/memory/consistency/{columns,trace}.rs`
+  (`RegisterAccessCols` / `RegisterRead{,Write}Cols`),
+  `crates/core/machine/src/air/memory.rs` (`eval_register_access`),
+  `crates/core/machine/src/cpu/{columns/mod.rs,air/register.rs}`,
+  `crates/core/executor/src/executor.rs` (`bump_register_timestamp`).
+- **What.** Register accesses used the general 9-column `MemoryAccessCols`:
+  `value(4) + prev_shard + prev_clk + compare_clk + diff_16bit_limb +
+  diff_8bit_limb`.  Three of those columns exist only for the case where the
+  register's previous access was in an *earlier shard*, so the ordering argument
+  has to compare shards instead of clks.  That case happens exactly once per
+  (register, shard) — but the columns were paid on every register access of
+  every cycle, and `Cpu` has three (`op_a` read-write, `op_b` read, `op_c` read).
+
+  Port of SP1's fix: pay the shard comparison once per (register, shard) in a
+  dedicated `MemoryBump` chip and drop it everywhere else.  The executor emits a
+  `MemoryBumpEvent` on a register's first touch in a shard and rewrites the
+  witnessed `(prev_shard, prev_clk)` of that access to `(shard, 0)`; the chip
+  proves the corresponding shadow read at `(shard, 0)` with the full
+  `MemoryAccessCols`.
+- **Why it is sound.** `clk` restarts at 0 each shard and register accesses live
+  at sub-cycle positions `1..=4` (`MemoryAccessPosition::{C,B,A,HI}`), so
+  `(shard, 0)` is strictly below every real register access.  In the per-address
+  memory-argument chain the only edge that can leave the incoming
+  `(initial_shard, initial_clk)` node is the bump edge (register-access edges all
+  have source shard = the current shard), and the only edge that can leave
+  `(shard_b, 0)` is a register access, which forces `shard_b == shard`.  So the
+  shadow read is forced to be first, exactly once, and cannot be spliced in
+  mid-shard.  The chip range-checks `addr < NUM_REGISTERS`, which is what keeps
+  that argument register-only: general memory *can* be accessed at sub-cycle
+  position 0, so a bump there could reset a chain mid-shard.
+- **Columns.** `Cpu` **68 -> 59**.  `MemoryBump` is 12 columns and at most
+  `NUM_REGISTERS = 36` rows per shard (64 after `next_multiple_of_32`), i.e.
+  768 cells/shard = 0.0003% of the trace.
+- **Measured density** (tendermint, 75 438 907 cycles, GPU commit path):
+
+  | | committed cells | cells/cycle | `Cpu` cells | shards | core proof bytes |
+  |---|---|---|---|---|---|
+  | control | 8 207 368 928 | 108.79 | 5 129 846 016 (62.5%) | 35 | 52 685 015 |
+  | this change | 7 525 880 256 | **99.76** | 4 450 895 808 (59.1%) | **33** | 49 637 292 |
+  | delta | **-8.30%** | **-8.30%** | -13.24% | -2 | -5.79% |
+
+  The `Cpu` drop is exactly 9/68 = 13.24%, and it accounts for essentially the
+  whole total (679 M of the 681 M cells removed).
+- **Measured kHz — NULL.** Tendermint core, verify ON, `RAYON_NUM_THREADS=16`,
+  4 paired concurrent reps with the arms swapped between GPUs 6 and 7:
+
+  | rep | control kHz | bump kHz | delta |
+  |---|---|---|---|
+  | 1 | 2481.2 | 2446.9 | -1.4% |
+  | 2 | 2416.4 | 2419.5 | +0.1% |
+  | 3 | 2203.1 | 2318.5 | +5.2% |
+  | 4 | 2359.0 | 2333.2 | -1.1% |
+  | mean | **2360.4** | **2378.4** | **+0.76%** |
+
+  +0.76% is inside the ±1.5-3% paired-rep noise floor on this box.  **Do not
+  read this as a core-proving win.**  An 8.3% area cut not moving core kHz is
+  consistent with the standing measurement that the GPU is only ~24% busy during
+  core proving: the core segment is pipeline-bound, not area-bound.
+
+  Where the area *does* show up is the **end-to-end wall** (execute + core prove
+  + verify), which is lower in 4/4 reps: 126.56/123.68/120.12/126.88 s control
+  vs 115.86/119.61/115.23/114.95 s, mean 124.31 -> 116.41 s = **-6.4%**.  That is
+  the 35 -> 33 shard drop landing on verify, which is the larger of the two
+  segments.
+- **Peak VRAM: NO resolvable change — do not claim one.**  Control
+  20803/18531/18531/20067 MiB vs 21861/20581/18533/22789 MiB.  The within-arm
+  spread (~4 GB) exceeds the between-arm difference, and an earlier pair on
+  GPUs 4/6 put the control 5 GB *higher* (27522 vs 22309).
+- **This is byte-changing.**  New goldens, deterministic over 2 runs each:
+  fib `7c780d9f59d728b5` (1 shard), goat `8aa10f1942b71b62` (9 shards),
+  tendermint `7190969b1feae13a` (33 shards), fib compress `c80d70d835a42aee`.
+  All `CORE VERIFY OK`.  Recursion re-validated end to end on goat:
+  core -> compress -> shrink -> wrap, `VERIFY OK` at every stage.
+- **ziren-gpu needs no changes.**  The device CPU trace kernel calls
+  `zkm_core_machine_sys::cpu::event_to_row` out of the host repo's
+  `include/cpu.hpp`, whose `CpuCols<F>` is cbindgen-generated from the Rust
+  struct, and the executor rewrites `prev_shard`/`prev_clk` inside the FFI
+  records — so the column change propagates automatically.  `MemoryBump` has no
+  device kernel and falls through the `_ => Some(self.generate_trace(..))` arm in
+  `core/src/tracegen/mod.rs`, i.e. it is host-generated like the precompile
+  chips; at 64 rows/shard that is not measurable.  A device kernel is available
+  as a follow-up if it ever shows up in a profile.
+- **Switches.** None — unconditional.
