@@ -867,7 +867,7 @@ locality. Not landed.
   - `ZIREN_GPU_GKRDRAIN_TRIM` — default **off**; `=1` restores the legacy per-shard
     trim.
 
-## MEASURED, NOT LANDED — cudaMallocAsync release threshold diverges from SP1 (ziren-gpu)
+## Small-card mempool release threshold raised above the working set (ziren-gpu)
 
 - **The divergence.** `cuda_setup_mem_pool` (`cuda/utils/runtime.cuh`) computes
   `total_gib_with_pad = (uint64_t)(total_bytes / GiB) + 4` and, when
@@ -896,13 +896,122 @@ locality. Not landed.
   canonical, ~2218 kHz against the 1894 kHz baseline), at the cost of
   **peak VRAM 66.9% → 74.8%**.
 - **Byte-neutral** — the four goldens reproduce with the env set (verify ON).
-- **NOT landed, deliberately.** The same comment block records the reason the policy
-  exists: *"V3+LT both ON OOMs at 32 GB on reth without an aggressive release
-  threshold"* — i.e. the recorded failure is on **exactly this card class**, on a
-  workload (reth) that cannot be exercised here. Trading +6% for +8 points of peak
-  VRAM against a known OOM counter-example is a call for whoever can run reth.
-  The switch already exists and needs no code change:
-  `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES=18446744073709551615`.
+
+### Landed as a *bounded* threshold, not `u64::MAX` (Aug 01)
+
+- **Mechanism, confirmed independently** (nsys, tendermint core, 35 shards):
+  `cudaMallocAsync` costs 2.384 s over 189,061 calls — but the cost is **not**
+  per-call overhead. 184,548 calls (97.6%) take <10 µs and total only **264 ms**;
+  **298 calls take >1 ms and total 1.61 s — 68% of the whole figure**, 276 of them
+  on the driving thread, with a **median GPU-busy fraction of 0% during the call**
+  (host blocked, GPU idle ⇒ on the critical path). They are spread uniformly at
+  ~10/s from the first shard to the last (**~46 ms/shard**), i.e. a steady-state
+  per-shard tax, not a warm-up. Scoped to the GPU-active window (41.9 s under nsys),
+  the union wall time with ≥1 thread inside `cudaMallocAsync` is 1.90 s (4.5%), and
+  the GPU-idle subset — the malloc-only ceiling — is 1.52 s (**3.6%**).
+- **⇒ "189k allocations is the anomaly" is the WRONG diagnosis.** Pooling buffers to
+  cut the call count attacks the 11% of the cost that lives in the fast calls. The
+  count is invariant under the fix (see the table below): both arms issue exactly
+  189,061.
+- **The landed change** (`cuda/utils/runtime.cuh`): keep the small-card cap but put
+  it **above** the working set — reserve a fixed 6 GiB that always stays releasable
+  to the OS, i.e. `threshold = total − 6 GiB` (floored at `total/2`). On a 31.84 GiB
+  card that is **15.92 GiB → 25.84 GiB**. The observed high-water is 22.5 GiB, below
+  the new cap, so on these workloads it never fires; a heavier workload (the reth
+  case the policy defends) still gets a hard 6 GiB of OS-releasable headroom, which
+  the unconditional `u64::MAX` SP1 uses would not give it.
+- **Both-arms CUDA-API confirmation** (same nsys config, one run each):
+
+  | CUDA API | canonical | bounded threshold |
+  |---|---|---|
+  | `cudaMallocAsync` | 189,061 / **2.573 s** | 189,061 / **1.424 s** |
+  | mean per `cudaMallocAsync` | 13.61 µs | **7.53 µs** |
+  | `cudaMallocAsync` calls >1 ms | 327 / **1.765 s** | 142 / **0.661 s** |
+  | `cudaStreamSynchronize` | 32,877 / 16.109 s | 32,877 / **14.898 s** |
+  | `cudaMemcpyAsync` | 143,054 / 13.945 s | 143,054 / **9.953 s** |
+  | `cudaFreeAsync` | 185,093 / 0.165 s | 185,093 / 0.440 s |
+  | GPU-active window | 43.55 s | **41.47 s** |
+
+  **Every call count is identical** — mallocs, frees, syncs, copies, launches,
+  memsets. Nothing about the allocation or transfer pattern changed, only the driver
+  latency per call. Net CUDA-API host time removed ≈ **5.8 s**. `cudaMemcpyAsync`
+  drops the most (−3.99 s) because the H2D *destinations* are re-faulted pages too —
+  which is why the measured win exceeds the malloc-only 3.6% ceiling.
+- **kHz** (tendermint core, `RAYON_NUM_THREADS=16`, verify ON, paired concurrent,
+  arms swapped between GPUs each rep, 6 reps across two runs; 75.4M cycles):
+
+  | rep | canonical s | bounded s | kHz | delta |
+  |---|---|---|---|---|
+  | e2-1 | 31.101 | 29.852 | 2424 → 2526 | +4.18% |
+  | e2-2 | 30.631 | 29.642 | 2462 → 2544 | +3.34% |
+  | e2-3 | 33.222 | 31.070 | 2269 → 2427 | +6.93% |
+  | e3-1 | 31.391 | 30.075 | 2402 → 2507 | +4.38% |
+  | e3-2 | 32.547 | 30.876 | 2317 → 2442 | +5.41% |
+  | e3-3 | 33.963 | 30.950 | 2220 → 2436 | +9.73% |
+  | **mean** | **32.143** | **30.411** | **2346 → 2479** | **+5.7%** |
+
+  Every rep favours the fix; min +3.34%, above the ±1.5–3% paired noise floor.
+- **Peak VRAM** (2 Hz sampling, of 32607 MiB):
+
+  | arm | peak per rep (MiB) | peak % | median residency |
+  |---|---|---|---|
+  | canonical | 21571 / 22083 / 22243 / 23011 | 66.2–70.6% | 18531 MiB |
+  | bounded | 23011 / 23011 / 23011 / 23516 | 70.6–72.1% | 23011 MiB |
+
+  Peak rises by at most **1.5 points** — materially cheaper than the +8 points
+  `u64::MAX` cost. What actually changes is that the canonical arm **sawtooths**
+  (18.5 GiB median, 21.5–23.0 GiB peaks) while the bounded arm holds a flat
+  23011 MiB. The sawtooth *is* the release/re-fault cycle, visible directly in the
+  VRAM trace.
+- **Byte-green.** fib `ed4f7359e6ef5092`, goat `7fee60eb4b326632`, tendermint
+  `805904a19c67952a` (35 shards), fib compress `42ad2ade04bf93dc`, verify ON,
+  isolating control against the same tree without the change. RAYON>1 race gate:
+  tendermint R8 ×3 and goat R8 ×3 each a single distinct sha equal to the golden,
+  verify OK (6/6).
+- **Open question, unchanged.** The reth OOM the policy defends still cannot be
+  exercised here. The bounded form is a strictly safer landing than `u64::MAX`
+  (it keeps a hard cap) and strictly faster than `total/2`, but whether 6 GiB of
+  releasable headroom is enough for reth is untested. `6 GiB` is the knob.
+- **Switch.** `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES` still overrides
+  unconditionally; `=17093804032` restores the previous `total/2` behaviour on a
+  32 GiB card.
+
+## MEASURED, NOT VIABLE — the ziren-gpu `pre-alloc` arena feature
+
+- **What it is.** `--features pre-alloc` swaps the CUDA stream-ordered allocator for
+  a static arena: `Mallocator::new` (`core/src/allocator/mod.rs`) takes `free − 2 GiB`
+  in **one** `cudaMalloc` and hands out 4 MiB-chunked sub-ranges through a best-fit
+  `AllocationsTracker` behind a global `Arc<Mutex<_>>`. Measured reservation on an
+  RTX 5090: **`device_allocator_mem_size: 28.87 GiB` of 31.84 = 90.7% of the card,
+  at prover construction**, before any proving. It also hard-`panic!`s if free VRAM
+  is under 22 GiB.
+- **It does not compile-fail; it runs-fail.** `cargo build --features pre-alloc`
+  succeeds. Every program then aborts on the first shard:
+  1. `assert_ne!(size, 0)` in `Mallocator::alloc` — the current trace-gen/commit
+     paths request zero-length device buffers, which `cudaMallocAsync(0)` accepts.
+     Fixed (one branch in `DeviceBuffer::with_capacity_in`), and then:
+  2. `core/src/tracegen/core.rs` carries **14** `unimplemented!("Pre-allocation not
+     implemented for <Chip> yet")` panics — LoadNarrow, LoadWord, StoreNarrow,
+     StoreWord, Branch, Jump, Mul, DivRem, ShiftLeft, ShiftRight, MovCond,
+     MemoryUnaligned, MiscInstrs, SyscallInstrs. **All 14 are on the core prove
+     path**, so fib / goat / tendermint / fib-compress all SIGABRT.
+- **Completing it is not mechanical.** Arena-backed buffers **free on the host at
+  `Drop`, not stream-ordered** — `DeviceBuffer::drop` skips `stream.free_async` when
+  `allocation.is_some()` and `StaticAllocation::drop` returns the range to the
+  tracker immediately. Every buffer therefore needs its lifetime manually extended
+  past its last kernel; that is what `MemoryHolder`
+  (`core/src/allocator/holder.rs`) and the `#[cfg(feature = "pre-alloc")]
+  stream.sync_event()?` / `hold_alu` / `hold_global` / `hold_mem_local` /
+  `hold_mem_global` call sites exist for. `MemoryHolder` is a **hard-coded struct
+  with one typed slot per event type**; the 14 missing chips have event types no
+  holder covers, so finishing the feature means adding 14 typed fields + 14 `hold_*`
+  functions + drop-point wiring, and every future chip must remember to register or
+  it becomes a silent device-side use-after-free.
+- **And it is the wrong tool regardless.** It would cost **90.7% peak VRAM** to
+  remove the same stall the bounded release threshold removes at **70.6%**.
+- **Recommendation:** delete the feature (SP1 has no arena; it uses the stream-ordered
+  mempool with a permissive release threshold), rather than finish it. Kept for now
+  with the zero-length assert fixed so the next reader hits the real blocker first.
 
 ## Note — GPU-idle anatomy of the core prove loop, and what it is NOT
 
