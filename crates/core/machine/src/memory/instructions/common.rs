@@ -15,11 +15,12 @@
 use std::mem::size_of;
 
 use hashbrown::HashMap;
-use p3_field::PrimeField32;
+use p3_air::AirBuilder;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
-use zkm_pcs::{air::ZKMAirBuilder, Word};
+use zkm_pcs::{air::ZKMAirBuilder, PicusInfo, Word};
 
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, MemInstrEvent, MemoryAccessPosition},
@@ -28,7 +29,7 @@ use zkm_core_executor::{
 use zkm_primitives::consts::WORD_SIZE;
 
 use crate::{
-    air::ZKMCoreAirBuilder,
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     memory::MemoryReadWriteCols,
     operations::{AddOperation, IsZeroOperation, KoalaBearWordRangeChecker},
     utils::zeroed_f_vec,
