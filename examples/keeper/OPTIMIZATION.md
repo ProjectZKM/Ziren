@@ -3,6 +3,87 @@
 Log of measured prover optimizations. Each entry: what changed, the measured
 delta, how it was validated, and the enable/kill-switch.
 
+## Core trace padding — SP1-parity `next_multiple_of_32` (host)
+
+- **What.** Every core chip padded its trace to `next_power_of_two(events)`
+  (`crates/core/machine/src/utils/mod.rs`, `cpu/trace.rs`). SP1 pads to
+  `next_multiple_of_32`. Added `utils::next_multiple_of_32` / `pad_rows_mult32`
+  and switched the whole core chip set (`Cpu`, ALU, control-flow, memory
+  instrs, memory local/global, `Global`, syscall) to it.
+- **Why it is sound (this was the whole question).** The jagged PCS commits
+  every chip at its **raw** row count — `compute_jagged_metadata_from_dims`
+  (`crates/pcs/src/jagged.rs:154`) accumulates `total_values += height` with no
+  rounding — and the shard zerocheck / LogUp-GKR treat rows beyond the real
+  height as **virtual** rows: `VirtualGeq::new(main_height as u32, …)`
+  (`shard_level/zerocheck_prover.rs`) carries the height as an **arbitrary
+  integer threshold**, and its `threshold & 1 == 1` fold branch exists
+  precisely to handle a boundary that falls inside a row pair. The sumcheck
+  round count is the shard-uniform `max_log_row_count`, never a per-chip log.
+  So a committed height never needed to be a power of two; the `2^k` padding
+  was pure waste. `Program` (its PREPROCESSED trace feeds the vk and the
+  ziren-gpu preprocessed mirror), `Byte` (fixed 2^16) and the precompiles
+  (their ziren-gpu device tracegen mirrors hard-code `next_power_of_two`, so
+  relaxing only the host would diverge) are deliberately left on `2^k`.
+- **Double implementation.** No CUDA-side edit was needed: every relaxed
+  chip's `num_rows_device` delegates to the host `MachineAir::num_rows`
+  (ziren-gpu `core/src/tracegen/mod.rs`), and the tracegen kernels are
+  grid-stride loops over `trace.height`.
+- **Three non-pow2 landmines fixed alongside** (all byte-identical for
+  power-of-two heights):
+  - `crates/pcs/src/prover.rs` `log_degrees` used `log2_strict_usize`, which
+    **panics** on a non-pow2 height → ceil-log. Same for the ziren-gpu mirror
+    `natural_domain_for_degree` (`shard-prover/src/lib.rs`), which is where the
+    first run aborted.
+  - `shard_level/zerocheck_prover.rs` derived the legacy `embed_LEAD` `log_h`
+    with `trailing_zeros` while the verifier sources it from
+    `h.next_power_of_two().trailing_zeros()` → silent disagreement.
+  - `recursion/circuit/src/shard_proof_variable_lift.rs`
+    `chip_height_bits_from_opened_degrees` recomposed
+    `log_h = Σ degree[i]·(dlen-1-i)`, valid only when the witnessed height is
+    **one-hot**. With several bits set it silently diverges from the host
+    prologue observe → whole-shard Fiat-Shamir desync in compress. Replaced
+    with a ceil-log derived from the bits (`Σ seen − seen[last] + extra`); the
+    op sequence stays value-independent so the program is still
+    chip-set-determined.
+- **Residual-y guard relaxed.** `compute_residual_y_openings` (host +
+  ziren-gpu `shard_helpers.rs`) declined the whole shard on any non-pow2
+  height, forcing the device `y_per_chip` recompute — which is **wrong** for a
+  non-pow2 height (TM rejected `jagged sumcheck round 0 identity` on one shard,
+  and proving was 2.4× slower). Under the rev(zeta) core orientation both the
+  zerocheck residual and the jagged `y_per_chip` read NATURAL rows, so the
+  reuse is valid at any height; the guard now only fires on the legacy
+  (`!use_rev`) bitrev convention. **NOTE: the device `y_per_chip` recompute
+  fallback (`ZIREN_ZC_RESIDUAL_Y=0`) remains latently wrong for non-pow2
+  heights.**
+- **Measured** (tendermint, 37 shards, single RTX 5090, `ZIREN_DENSITY_LOG=1`):
+  - committed main-trace cells **14,850,284,592 → 9,131,729,664 (−38.5%)**
+    (`Cpu` alone 9,269,411,840 → 5,129,846,016; `Cpu` was **62.4%** of all cells)
+  - the number that actually pays: the **padded dense** the BaseFold commit /
+    FRI / jagged reduction run over — `Σ 2^log_dense_size` across shards —
+    **19,327,352,832 → 9,797,894,144 (−49.3%)**, because per-shard totals cross
+    back under `2^28` (`log_dense` 29 → 28 on 35 of 37 shards). The `Cpu`-only
+    variant cut cells −27.9% but left every shard at `log_dense=29`, so it only
+    bought **+7.9% kHz**; taking the whole chip set across the 2^28 boundary is
+    what makes it a step change.
+  - **TM R16 kHz 1275.6 → 1541.1 (+20.8%)**, 3 paired concurrent reps each
+    (canon 1271.5/1285.2/1270.0, fix 1513.8/1594.3/1515.2), verify ON, zero
+    overlap between arms (canon best 1285.2 < fix worst 1513.8).
+  - **peak VRAM 28,893 → 21,469 MiB (−25.7%)** (per-run max over the three reps;
+    best single run 20,189) — restores ~8.7 GB of headroom
+    on a 32,607 MiB card.
+  - shard count unchanged (37); proof bytes 57,453,225 → 54,978,345.
+- **Validated.** Byte-CHANGING by design; goldens move. Control arm reproduced
+  canonical exactly first (fib `6278c091f7e8bd91`, goat `a18399929adf02fa`,
+  TM `8b27f7e5ea510d95`). New shas, deterministic ×2 at RAYON=8, all
+  `CORE VERIFY OK`: fib `1f265cd2386965f0`, goat `8326a92a723a354d`,
+  TM `8ca053c5e1baa561`. Recursion re-validated end to end on goat:
+  core → compress → shrink → **wrap**, VERIFY OK at every stage.
+- **Switches.** None — unconditional, SP1-shaped. Kill-switch is reverting the
+  `next_multiple_of_32` call sites to `next_power_of_two`.
+- **Follow-up.** The remaining `2^k` chips (`Program` preprocessed, `Byte`, the
+  precompiles) need the ziren-gpu tracegen mirror updated in lockstep before
+  they can be relaxed.
+
 ## Jagged-eval structural sumcheck — host-core parallelization
 
 - **What.** `structural_jagged_eval_sumcheck` (`crates/pcs/src/jagged_eval_sumcheck.rs`)
