@@ -3448,3 +3448,127 @@ threshold: at 27 of 31.8 GiB the pool's retained slack competes with the live
 working set, and that costs more than the driver round-trips it avoids. Do not
 re-open by raising the threshold; the allocator lever is the **call count**
 (10,111/shard, 4937 of them on the coordinator), not the pool policy.
+
+
+## Where the prover's host->device bytes ACTUALLY go (tendermint core, measured)
+
+The previous entry closed with "the largest remaining H2D item becomes
+commit+dense", and a follow-up scoping pass INFERRED that the residual was the
+per-chip host-trace upload at `shard-prover/src/lib.rs` (`mat.to_device_async`),
+reachable by flipping the 26 default-OFF precompile device-trace-gen gates,
+because "tendermint is sha256/ed25519-heavy".
+
+**Both halves of that inference are wrong, and the correction is the main
+result here.**
+
+### How it was measured
+Every host->device copy in the prover funnels through exactly TWO Rust wrappers
+over the CUDA FFI — `device::memory::copy_host_to_device` (sync) and
+`CudaStream::cuda_memcpy_host_to_device_async`.  A new module
+`core/src/device/h2d_prof.rs` (`ZIREN_GPU_H2D_PROF`, default OFF, one cached
+bool branch when off) hooks both, so the totals are the COMPLETE byte volume of
+the process — nothing sampled, nothing estimated, and unattributed copies land
+in an explicit `~unlabeled` bucket rather than disappearing.  Attribution is by
+a thread-local label scope, plus (mode `2`) a symbolised backtrace for every
+copy >= 1 MiB.
+
+The numbers below reproduced EXACTLY (25.6084 GiB in 98,111 calls) across four
+independent runs and three different binaries, and the instrumented binary is
+byte-neutral: tendermint core sha `7190969b1feae13a`, 33 shards, verify OK.
+
+### The answer: tendermint core, 33 shards, 1 GPU, canonical
+
+| # | source | MiB | share |
+|---|---|---|---|
+| 1 | **device trace-gen EVENT uploads** (`generate_trace_device`) | **14493.3** | **55.3%** |
+| 2 | LogUp-GKR (`jhr_slab_device::upload_quadrant` + `jhr_drive_resident`) | 7049.8 | 26.9% |
+| 3 | jagged reduction round-0 `row_eq` table | 2112.0 | 8.1% |
+| 4 | zerocheck (`fold_odd_on_host` + `prepare_cells_hook`) | 1182.3 | 4.5% |
+| 5 | copies < 1 MiB (96,872 of them) | 610.6 | 2.3% |
+| 6 | `interaction_eval::run_on_device_with_main` | 561.0 | 2.1% |
+| 7 | setup: proving-key merkle trees | 97.0 | 0.4% |
+| 8 | **commit host-trace upload — the INFERRED site** | **33.1** | **0.13%** |
+
+Item 1 breaks down as `CpuChip` 11511.1 MiB (45.0% of ALL H2D, in two uploads
+per shard: the `CpuEventFfi` array 9784.4 MiB and the per-cycle fetched
+`instrs` array 1726.7 MiB), then AddSub 859.3, LoadWord 773.4, StoreWord 642.7,
+Lt 209.7, Mul 168.1, Bitwise 114.3, ShiftLeft 67.1, ShiftRight 63.4.
+
+So "device trace-gen" does not remove PCIe traffic — it MOVES it from a trace
+upload to an EVENT upload.  That is still a large net win (see the goat
+measurement below), but it means the dominant H2D in the prover is the events
+themselves, not any commit-path matrix.
+
+### Why the precompile-gate inference could not have helped tendermint
+Tendermint's 33 shards contain **ZERO precompile chips**.  The complete
+device-trace-gen chip set observed is AddSub, Bitwise, Branch, Byte, CloClz,
+Cpu, Global, Jump, LoadNarrow, LoadWord, MemoryGlobal, MemoryUnaligned,
+MiscInstrs, Mul, ShiftLeft, ShiftRight, StoreNarrow, StoreWord; the only
+host-uploaded traces are `Program` (33.0 MiB total — width-1 multiplicity) and
+`MemoryBump` (0.094 MiB), plus height-0 canonical-cluster stubs at 0 bytes.
+The tendermint guest does not use the precompile syscalls at all, so every one
+of the 26 gates is a no-op on the canonical kHz benchmark.
+
+### Per-gate audit of the 26 precompile device-trace-gen gates
+All 26 (`ZIREN_GPU_{SHA_EXTEND,SHA_COMPRESS,UINT256_MUL,BN254_FP,BLS12381_FP,
+SECP256K1_ADD,SECP256R1_ADD,BN254_ADD,BLS12381_ADD,SECP256K1_DOUBLE,
+SECP256R1_DOUBLE,BN254_DOUBLE,BLS12381_DOUBLE,BN254_FP2_ADDSUB,
+BLS12381_FP2_ADDSUB,BN254_FP2_MUL,BLS12381_FP2_MUL,U256X2048_MUL,ED25519_ADD,
+ED25519_DECOMPRESS,SECP256K1_DECOMPRESS,SECP256R1_DECOMPRESS,
+BLS12381_DECOMPRESS,BOOLEAN_CIRCUIT_GARBLE,POSEIDON2_PERMUTE,KECCAK_SPONGE,
+SYSLINUX}_MAIN_DEVICE`) were landed together in the June "TGEN62" port series.
+Each one has: a CUDA kernel, a `DeviceAir` impl, `generate_trace_host` /
+`generate_trace_device` / `num_rows_device` arms, and a
+`test_*_generate_trace_parity` asserting byte-identity with the host trace.
+
+**None is OFF for a known bug, OOM, or missing feature.**  Every one is OFF
+purely because of the standing landing convention (new work lands behind a
+default-OFF gate, and nobody ever ran the flip).  The `num_rows_device` padding
+formulas were re-checked against the current host `generate_trace` for all of
+them and all match — including the two easy-to-get-wrong cases: Weierstrass
+add/double use `.max(4)` (host: `max(events.next_power_of_two(), 4)`) rather
+than the `.max(16)` the rest use, and KeccakSponge / BooleanCircuitGarble use a
+bare `next_power_of_two` with `0 -> 0` (matching their host `num_padded_rows`).
+Precompiles still pad with `pad_rows_fixed` (power-of-two), NOT the
+`next_multiple_of_32` the core chips moved to, so the formulas are current.
+
+Practical blocker for re-running the parity tests today:
+`cargo test -p zkm-gpu-core --lib` does not compile (pre-existing, unrelated —
+`core/src/tracegen/core.rs` references `LoadWordChip` and
+`ExecutionRecord::memory_instr_events`, absent from the host executor).
+
+### Measured A/B on the one program where the gates bite: goat
+goat DOES have precompile shards (KeccakSponge, ShaExtend, ShaCompress).
+Arms differ only in the three gates goat exercises, verify ON:
+
+| arm | core sha | total H2D | KeccakSponge upload | ShaCompress | ShaExtend |
+|---|---|---|---|---|---|
+| OFF (canonical) | `8aa10f1942b71b62` | 5.6858 GiB | 659.250 MiB | 0.255 MiB | 0.162 MiB |
+| ON  | `8aa10f1942b71b62` | **5.0419 GiB** | **0** | **0** | **0** |
+
+**BYTE-IDENTICAL (same golden), -0.6439 GiB/run = -11.3% of goat's H2D.**  The
+device path adds only 18 extra small event copies, so the trace upload really
+is eliminated rather than relocated.  This is the "eliminate, don't accelerate"
+shape — it just does not apply to tendermint.
+
+Still host-uploaded on goat after the flip, because no device port exists for
+them at all: `Program` (36.0 MiB), `KeccakSpongeControl` (8.6 MiB),
+`ShaCompressControl`, `ShaExtendControl`, `MemoryBump`.  The `*Control` chips
+and `Program`/`MemoryBump` have no `DeviceAir` arm in `core/src/tracegen/mod.rs`.
+
+kHz for these arms was a single run each under box contention (535 -> 603) and
+is NOT reported as a result; the byte reduction and the byte gate are.
+
+### Negatives / non-findings
+- The prior "~14.92 GB commit+dense" figure was right in MAGNITUDE (item 1 is
+  14.49 GiB) but wrong in MECHANISM: it is device-trace-gen event uploads,
+  not the commit's host-trace upload, which is 33.1 MiB — 0.13%, i.e. 440x
+  smaller than the item it was identified with.
+- The commit path's PCIe is, for practical purposes, already gone.  After the
+  zerocheck commit-pack-reuse fix, `commit()` + the commit-dense hook together
+  move 33.1 MiB per tendermint run.  There is no commit-path lever left.
+- `basefold/src/fri.rs` `fold_round` and `encode_and_commit` still round-trip
+  through host (`to_host_naive()` -> `to_device_async()` -> `encode_batch`'s own
+  host scatter) — but both are DEAD in the prove path (`commit_phase_round`
+  uses `fold_codeword_fri_host`, and `encode_and_commit` has only test
+  callers).  Not a lever; worth deleting as dead code.
