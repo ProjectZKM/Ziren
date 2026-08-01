@@ -157,6 +157,7 @@ mod sys {
             .include_item("MovCondCols")
             .include_item("MulCols")
             .include_item("Opcode")
+            .include_item("OptionMemoryReadRecord")
             .include_item("OptionMemoryRecordEnum")
             .include_item("OptionMemoryRecordEnumTag")
             .include_item("OptionU32")

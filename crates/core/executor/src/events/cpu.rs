@@ -70,20 +70,16 @@ pub struct CpuEventFfi {
     pub a_record: OptionMemoryRecordEnum,
     /// The second operand.
     pub b: u32,
-    /// The second operand memory record.
-    pub b_record: OptionMemoryRecordEnum,
+    /// The second operand memory record.  Only the READ arm is ever consumed
+    /// (`cpu::event_to_row` populates `op_b_access` from `b_record.read` under
+    /// a `tag == Read` guard), so this is the narrow read-only mirror.
+    pub b_record: OptionMemoryReadRecord,
     /// The third operand.
     pub c: u32,
-    /// The third operand memory record.
-    pub c_record: OptionMemoryRecordEnum,
+    /// The third operand memory record (READ arm only — see `b_record`).
+    pub c_record: OptionMemoryReadRecord,
     /// The fourth operand.
     pub hi: OptionU32,
-    /// The fourth operand memory record.
-    pub hi_record: OptionMemoryRecordEnum,
-    /// The memory record.
-    pub memory_record: OptionMemoryRecordEnum,
-    /// The exit code.
-    pub exit_code: u32,
 }
 
 impl From<&CpuEvent> for CpuEventFfi {
@@ -101,9 +97,42 @@ impl From<&CpuEvent> for CpuEventFfi {
             c: event.c,
             c_record: event.c_record.into(),
             hi: event.hi.into(),
-            hi_record: event.hi_record.into(),
-            memory_record: event.memory_record.into(),
-            exit_code: event.exit_code,
+        }
+    }
+}
+
+/// FFI mirror of `Option<MemoryRecordEnum>` that carries ONLY the read arm.
+///
+/// `CpuEventFfi`'s `b_record` / `c_record` are consumed exclusively by
+/// `zkm_core_machine_sys::cpu::event_to_row`, which reads `.tag` and — under a
+/// `tag == Read` guard — `.read`.  The `MemoryWriteRecord` arm is dead weight
+/// there, so carrying it costs 24 B per operand per cycle in both the host
+/// conversion and the pageable H2D of the per-shard event array.
+///
+/// A `Write` record maps to `tag == Write` with a default `read`, exactly as
+/// the wide `OptionMemoryRecordEnum` did, so the consumer's guard behaves
+/// identically.
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[repr(C)]
+pub struct OptionMemoryReadRecord {
+    pub tag: OptionMemoryRecordEnumTag,
+    pub read: MemoryReadRecord,
+}
+
+impl From<Option<MemoryRecordEnum>> for OptionMemoryReadRecord {
+    fn from(record: Option<MemoryRecordEnum>) -> Self {
+        match record {
+            Some(MemoryRecordEnum::Read(read)) => {
+                OptionMemoryReadRecord { tag: OptionMemoryRecordEnumTag::Read, read }
+            }
+            Some(MemoryRecordEnum::Write(_)) => OptionMemoryReadRecord {
+                tag: OptionMemoryRecordEnumTag::Write,
+                read: MemoryReadRecord::default(),
+            },
+            None => OptionMemoryReadRecord {
+                tag: OptionMemoryRecordEnumTag::None,
+                read: MemoryReadRecord::default(),
+            },
         }
     }
 }
@@ -147,3 +176,8 @@ pub enum OptionMemoryRecordEnumTag {
     Write,
     None,
 }
+
+// The GPU tracegen ships one `CpuEventFfi` per executed cycle over a pageable
+// H2D every shard, so its width is directly on the prover's critical path.
+// Guard the shrink (284 B -> 136 B) against accidental regrowth.
+const _: () = assert!(core::mem::size_of::<CpuEventFfi>() == 136);

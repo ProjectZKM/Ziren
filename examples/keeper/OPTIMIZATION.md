@@ -989,3 +989,200 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
   noise** on kHz (L2 alone +11.93%, L2+L1 +11.68%), so only the staging-vector recycle shipped
   (`1ab76e6`). The program table remains available on the agent branch if its −53 MB/shard of
   PCIe ever becomes load-bearing; note its program-replacement path is unexercised by any gate.
+
+## Pre-regen rayon pool — cap applied regardless of RAYON_NUM_THREADS (ziren-gpu)
+
+- **What.** `pre_regen_pool` (ziren-gpu `prover/src/core_multi_gpu.rs`) builds the
+  dedicated rayon pool used for the pre-commit host trace regen. It read
+  `RAYON_NUM_THREADS` directly but applied its `.min(16)` cap **only on the
+  `available_parallelism()` fallback path**, so an explicit
+  `RAYON_NUM_THREADS=N` sized the pool at N. The cap now applies regardless of
+  provenance (`.clamp(1, 16)`).
+- **Why (mechanism).** The pool is deliberately kept OFF the global rayon pool so
+  it cannot starve `commit()`'s `par_iter` — which is what makes the regen
+  overlap a win rather than a wash. But that also means it runs CONCURRENTLY
+  with the global pool's device dispatch, so sizing BOTH from an unclamped
+  `RAYON_NUM_THREADS` double-subscribes the host: on this 124-core box
+  `RAYON_NUM_THREADS=124` spawns 124 pre-regen workers alongside 124 global
+  workers. `pre_regen_pool` is the ONLY code site in either repo that reads
+  `RAYON_NUM_THREADS` (the global pool is sized by rayon itself), so at a fixed
+  `RAYON_NUM_THREADS` the pool size is the only behavioural difference between
+  the arms and the effect is attributable to it alone.
+- **Measured** (tendermint core, verify ON, paired concurrent, arms swapped each
+  rep, ziren-gpu `1ab76e6` + host `08968db2`):
+
+  RAYON_NUM_THREADS=16 — expected no-op, and is one:
+
+  | rep | canonical kHz | capped kHz | delta |
+  |---|---|---|---|
+  | 1 | 2248.88 | 2261.35 | +0.55% |
+  | 2 | 2373.63 | 2327.64 | -1.94% |
+  | 3 | 2436.57 | 2362.78 | -3.03% |
+  | mean | **2353.03** | **2317.26** | **-1.52%** |
+
+  The deltas alternate sign and the arms are behaviourally IDENTICAL here
+  (`min(16)` and `clamp(1,16)` both yield 16), so this is pure measurement
+  noise and it calibrates the 3-rep paired noise floor on this box at about
+  +-1.5-3%.
+
+  RAYON_NUM_THREADS=124 — the case the cap exists for:
+
+  | rep | canonical kHz | capped kHz | delta |
+  |---|---|---|---|
+  | 1 | 1411.57 | 1824.53 | +29.26% |
+  | 2 | 1218.93 | 1782.45 | +46.23% |
+  | 3 | 1223.50 | 1857.27 | +51.80% |
+  | mean | **1284.67** | **1821.42** | **+41.78%** |
+
+  3/3 reps positive with ZERO overlap (worst capped rep 1782.45 > best
+  uncapped rep 1411.57). Equivalently, leaving the pool uncapped costs
+  **-29.5%**. Direct confirmation of the mechanism, read live from `/proc`
+  during the paired run: the uncapped arm carries **124** threads named
+  `zkm-pre-regen-*`, the capped arm **16** (and the `RAYON_NUM_THREADS=8`
+  determinism run carries 8).
+
+  For scale, `RAYON_NUM_THREADS=124` is still worse than the tuned
+  `RAYON_NUM_THREADS=16` even after the fix (1821 vs 2317 kHz) because the
+  GLOBAL pool at 124 is independently harmful; the cap only removes the
+  pre-regen half of that.
+
+- **Validated byte-identical.** Isolating control against the canonical arm,
+  verify ON: fib `ed4f7359e6ef5092`, goat `7fee60eb4b326632` (9 shards),
+  tendermint `805904a19c67952a` (35 shards), fib compress `42ad2ade04bf93dc`.
+  `RAYON_NUM_THREADS=8` determinism: tendermint 3/3 and goat 3/3 identical shas
+  with CORE VERIFY OK.
+- **Switches.** None — unconditional.
+- **Note.** This is a robustness fix, not a throughput win at the tuned setting.
+  `RAYON_NUM_THREADS=16` remains the right value to pin; the cap only removes
+  the cliff for anyone who runs with a larger or unset-then-inherited value.
+## ByteChip device trace-gen — REFUTED as a host lever (ziren-gpu)
+
+- **Claim tested.** `ByteChip::generate_trace_device` (ziren-gpu
+  `core/src/tracegen/core.rs`) was ranked the #2 per-shard trace-gen cost at
+  **32.7 ms/shard**, and was expected to have the same root cause as the CpuChip
+  lever: three fresh host `Vec`s built from a SEQUENTIAL `hashbrown::HashMap`
+  walk, then a blocking `stream.sync_event()`.
+- **Refuted.** Per-phase instrumentation (tendermint R16, 35 shards, mean per
+  shard, shard 1 excluded as CUDA-lazy-init) shows the host work is negligible
+  and the allocations are free:
+
+  | phase | canonical |
+  |---|---|
+  | `Vec::with_capacity` x3 | **0.00 ms** |
+  | HashMap walk + fill (231 K entries) | 6.92 ms |
+  | H2D x3 (~2.1 MB total) | **23.92 ms** |
+  | trace alloc | 0.01 ms |
+  | memset + kernel launch | 0.04 ms |
+  | `stream.sync_event()` | 5.52 ms |
+  | buffer drop | 0.01 ms |
+  | **chip total** | **36.42 ms** |
+
+  The briefed mechanism (a fresh large anonymous mmap being faulted in and
+  zero-filled) does **not** apply here: the three vectors total ~2.1 MB, three
+  orders of magnitude below the CpuChip array's 612 MB, and their allocation
+  measures 0.00 ms.
+- **Mechanism actually confirmed — CUDA stream backlog, not ByteChip work.**
+  Splitting the H2D into device-alloc vs host->device-copy puts essentially all
+  of it in the FIRST copy, and none in the allocations:
+
+  | | a1 | c1 | a2 | c2 | a3 | c3 |
+  |---|---|---|---|---|---|---|
+  | mean ms | 0.03 | **22.15** | 0.02 | 4.01 | 0.01 | 1.02 |
+
+  `c1` moves 924 KB in 22.15 ms — 42 MB/s, two orders of magnitude below this
+  box's pageable H2D rate, so it is not a transfer cost. The decisive test is a
+  TIMED `stream.sync_event()` inserted at chip ENTRY: the wait moves wholesale
+  into that sync (**presync 27.28 ms**) and the H2D collapses to **0.08-0.40 ms
+  on 20 of 35 shards** (mean 15.47 ms, the remainder being backlog re-accumulated
+  by other threads between the sync and the copy). The `iter` phase also drops
+  6.92 -> 2.15 ms once the thread is not competing with the drain.
+
+  So ByteChip's own cost is **~3.5 ms/shard** (walk 2.15 + drained H2D ~0.2 +
+  alloc 0.43 + launch 0.04 + sync 0.67); the other **~33 ms is the host thread
+  blocking on the CUDA stream's queued backlog**, which merely surfaces at
+  whichever device call the chip makes first.
+- **Not landed, and not worth landing.** Forcing the drain explicitly every shard
+  left total core time unchanged — **31.78 s (presync ON) vs 31.89 s (OFF)**,
+  0.3% apart — i.e. the wait is not recoverable by restructuring ByteChip; it
+  relocates. Parallelizing the HashMap walk addresses at most 2.15 ms/shard of a
+  ~970 ms/shard budget (0.2%), well under the +-19% box-load noise floor, and the
+  three-copies-to-one fusion addresses ~0.2 ms of genuine transfer. The kernel's
+  scatter is an `atomicAdd` in a prime field (associative and commutative), so a
+  parallel walk **would** be byte-safe if it were ever worth doing.
+- **Follow-up this exposes.** ~27 ms/shard of host time is spent blocked on
+  stream backlog. That is a real and much larger target than any single chip's
+  trace-gen, but it belongs to stream/queue depth management, not to ByteChip.
+  Note it is NOT a pinned-staging problem (pinned staging is already refuted);
+  the first copy blocks because the stream has queued work outstanding.
+## CpuEventFfi shrunk 284 B -> 136 B (host)
+
+- **What.** `CpuEventFfi` (`crates/core/executor/src/events/cpu.rs`) is the FFI
+  mirror of `CpuEvent` that the GPU tracegen ships ONE OF PER EXECUTED CYCLE
+  over a pageable H2D every shard. Three fields are dropped and two are
+  narrowed:
+  - dropped: `memory_record` (48 B), `hi_record` (48 B), `exit_code` (4 B);
+  - narrowed: `b_record` / `c_record` from `OptionMemoryRecordEnum` (48 B) to a
+    new `OptionMemoryReadRecord` (24 B) carrying only `{tag, read}`.
+
+  284 B -> 136 B, a 52.1% cut, guarded by
+  `const _: () = assert!(size_of::<CpuEventFfi>() == 136)`.
+- **Why it is safe (verified against the consumer, not assumed).**
+  `zkm_core_machine_sys::cpu::event_to_row` (`crates/core/machine/include/cpu.hpp`,
+  121 lines) is the ONLY consumer of the struct — it is what both the CUDA
+  kernel (`core_cpu_generate_trace_kernel`) and the host `extern.cpp` shim call.
+  Reading it exhaustively, it touches `clk`, `pc`, `next_pc`, `next_next_pc`,
+  `recv_next_pc`, `a`, `b`, `c`, `hi`, the full `a_record` (via
+  `populate_read_write`), and `b_record`/`c_record` ONLY as `.tag` and `.read`
+  under a `tag == Read` guard. `memory_record`, `hi_record` and `exit_code` have
+  ZERO references; the `.write` arms of `b_record`/`c_record` have zero
+  references. Note the halt detection reads `cols.op_a_access.prev_value`, NOT
+  `exit_code`, so dropping `exit_code` does not touch it.
+
+  `CpuEventFfi` is also GPU-only on the host side: `CpuChip::generate_trace` uses
+  the native Rust `event_to_row`, and the only caller of the
+  `cpu_event_to_row_koalabear` extern is `generate_trace_ffi` inside
+  `#[cfg(test)] mod tests` in `crates/core/machine/src/cpu/trace.rs`.
+
+  Field NAMES and the tag enum are preserved, so `include/cpu.hpp` needs NO
+  change; only `build.rs` gains an `include_item("OptionMemoryReadRecord")` so
+  cbindgen exports the new type.
+- **Effect.** Halves both the per-shard `CpuEvent -> CpuEventFfi` conversion and
+  the pageable H2D of the event array (612 MB/shard -> 293 MB/shard on
+  tendermint at 2.22 M cpu events/shard).
+- **Measured** (tendermint core, verify ON, paired concurrent, arms swapped,
+  control = the same tree WITHOUT the shrink):
+
+  | rep | control kHz | shrunk kHz | delta | control RSS GB | shrunk RSS GB |
+  |---|---|---|---|---|---|
+  | 1 | 2311.31 | 2312.44 | +0.05% | 87.92 | 82.28 |
+  | 2 | 2352.61 | 2344.20 | -0.36% | 86.06 | 83.93 |
+  | 3 | 2302.91 | 2236.28 | -2.89% | 86.91 | 85.05 |
+  | mean | **2322.28** | **2297.64** | **-1.06%** | **86.96** | **83.75** |
+
+  **kHz is NULL** — -1.06% sits inside the +-1.5-3% paired 3-rep noise floor
+  measured on this box by a known no-op control (see the pre-regen-pool entry's
+  RAYON_NUM_THREADS=16 table, which moved -1.52% with behaviourally identical
+  arms). Do not read the shrink as a throughput win.
+
+  What it DOES buy, consistently and in the same paired runs:
+  - **host RSS -3.21 GB** (86.96 -> 83.75 GB, lower in 3/3 reps);
+  - **-52% of a 612 MB/shard pageable H2D** (612 -> 293 MB on tendermint).
+
+  **Peak VRAM: NO resolvable change — do not claim one.** Measured three ways:
+  a sequential pair put the shrunk arm 1504 MiB LOWER (22083 -> 20579), then two
+  paired-concurrent reps with the GPUs swapped put it 1632 and 2560 MiB HIGHER
+  (20579 vs 22211; 20515 vs 23075). Each arm spans ~2 GB across its own reps, so
+  the between-arm difference is inside the within-arm spread. The initial
+  "-1.5 GB VRAM win" was an artifact of comparing two runs under different box
+  load; controlling for it removed the effect. If VRAM headroom is load-bearing
+  this needs many more reps than 3.
+
+  This is consistent with the already-documented finding that the CpuChip
+  conversion cost was the mmap fault-in rather than the conversion arithmetic:
+  once the staging vector is recycled the remaining per-shard cost is small, so
+  halving its width moves memory footprint rather than wall time.
+
+- **Validated byte-identical.** fib `ed4f7359e6ef5092`, goat `7fee60eb4b326632`
+  (9 shards), tendermint `805904a19c67952a` (35 shards), fib compress
+  `42ad2ade04bf93dc`.
+- **Switches.** None — unconditional.
