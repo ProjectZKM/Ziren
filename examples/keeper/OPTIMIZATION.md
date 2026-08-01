@@ -653,10 +653,35 @@ locality. Not landed.
   fuller shards more of them land on the `next_power_of_two` step at 2^22 —
   that step function eats ~20% of the raw saving.
 
+- **kHz** (tendermint, `RAYON_NUM_THREADS=16`, verify ON, 3 paired concurrent
+  runs, control on GPU 3 and split on GPU 5, taken from the prover's own
+  `summary: ... khz=` line, which is prove-only — `proving_start.elapsed()`,
+  before verify):
+
+  | run | control | split | delta |
+  |---|---|---|---|
+  | 1 | 1281.05 | 1375.31 | +7.4% |
+  | 2 | 1298.80 | 1372.64 | +5.7% |
+  | 3 | 1197.10 | 1366.62 | +14.2% |
+  | **median** | **1281.05** | **1372.64** | **+7.15%** |
+
+  The split arm is far more stable (spread 0.6%) than the control (8.5%);
+  control run 3 is a contention outlier. Taking the median, **−7.68% committed
+  cells buys +7.2% kHz** — very nearly the 1:1 conversion the area-bound model
+  predicts. Proof size also drops 57,453,225 → 55,020,471 bytes (−4.2%).
+
+- **VRAM went UP.** Peak on a TM R16 run: control 28,957-29,053 MiB, split
+  28,726-**31,734** MiB of 32,607 (97.3%). The freed area is spent on bigger
+  shards, so the headroom that was ~11% is now ~3%. Anything that further
+  raises per-shard area needs to budget for this.
+
 - **Validated.** Not byte-identical by construction (the AIR, and therefore the
   VK, changed). `CORE VERIFY OK` on fib, goat and tendermint; new shas
-  deterministic across repeats. `cargo test -p zkm-core-machine --lib` shows no
-  new failure against the same suite run on unmodified `e4c86205`.
+  deterministic across repeats (tendermint identical over 7 runs and across
+  `RAYON_NUM_THREADS` 8 and 16, so the split is race-free). Recursion
+  re-validated end to end: goat core -> compress -> shrink -> wrap_bn254 all
+  pass with verification at each stage. `cargo test -p zkm-core-machine --lib`
+  shows no new failure against the same suite run on unmodified `e4c86205`.
 
 - **Switch.** None — this is unconditional, SP1-shaped. `ZIREN_DENSITY_LOG=1`
   (added with this change, `crates/pcs/src/shard_level/prover.rs`) prints the
