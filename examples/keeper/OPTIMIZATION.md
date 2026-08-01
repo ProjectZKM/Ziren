@@ -1494,3 +1494,136 @@ only reason the lever fails.  Declined heights are all multiples of 32
 root cause for the ~29 GB zerocheck H2D.  Restoring it needs the non-pow2 case
 served as a device D2D + device bitrev (the guard exists because only pow2
 heights are bit-reversed in the commit pack), not simply relaxing the guard.
+
+**RESOLVED — see the next section.**  The counters above reproduce exactly
+(25 hits / 82 declined / 0 absent).  The proposed remedy was WRONG, though:
+no bit-reversal is needed at all, because on the CORE path the commit pack
+already stores every chip in the row order the zerocheck wants.
+
+## Zerocheck commit-pack reuse restored for non-pow2 heights (ziren-gpu)
+
+The single largest H2D in the prover was the zerocheck `prepare` upload of each
+chip's main trace (`upload_and_prepare_host_cells`, "y_per_chip"): **29.13 GB
+per tendermint run, 53% of all H2D**, 100% pageable (CUPTI-level figure; the
+`ZcPrepProf` byte counter at the upload site itself measures 25.739 GiB, the
+difference being what CUPTI attributes to the same site's staging).
+
+That traffic was already supposed to be gone.  `ZIREN_GPU_ZC_VIEW_BY_NAME`
+(ziren-gpu `55ff0fa`) serves `prepare` from the shard's own commit-jagged pack —
+the chip is ALREADY on the device in exactly the orientation zerocheck wants —
+instead of moving the host trace across PCIe a second time.  It regressed to
+**77% dead** when trace padding relaxed from `next_power_of_two` to the
+SP1-parity `next_multiple_of_32`, because `commit_dense_view_for_name` declined
+unless `poly_size.is_power_of_two()`.
+
+### Mechanism confirmed by sub-instrumentation BEFORE the fix
+`ZcPrepProf` gained a miss classification (`decl_pow2` / `decl_orient` /
+`absent` / `hit_nonpow2` / `stash_max`).  goat core, gate OFF:
+
+| | view hits | host uploads | declined by pow2 | absent |
+|---|---|---|---|---|
+| goat, 9 shards | 25 | 82 | **82** | **0** |
+| tendermint, 33 shards | 63 | 519 | **519** | **0** |
+
+**Every fallback is the pow2 guard; none is a missing name** — the chips ARE in
+the pack.  Zerocheck H2D was 3299.6 MiB/run (goat) and 25.739 GiB/run (tm).
+
+### The guard was the wrong question, and no bitrev is needed
+The earlier read was that non-pow2 coverage would need "a device D2D **plus a
+device bit-reversal**", because only pow2 heights are bit-reversed in the pack.
+That is not so.  `from_device_traces_commit_jagged` bit-reverses only pow2(>1)
+heights and only under the LEGACY orientation; under the CORE rev(zeta)
+orientation (`StarkMachine::new_core_rev`) it stores **every** chip NATURAL at
+any height.  The zerocheck `prepare` wants NATURAL rows under that same
+`use_rev` — and `ColMajorMatrixDevice::bit_reverse_rows` itself *asserts* a pow2
+height, so the bit-reversing branch is only ever reached with pow2 heights
+anyway.  On the CORE path the pack therefore already holds *exactly* the bytes
+`prepare` would produce, at every height.
+
+So the height test is replaced by the row-order test it was always a proxy for.
+`TraceDenseData` records the orientation it was built under (`commit_rev`), and:
+
+| | pow2(>1) | any other height |
+|---|---|---|
+| `commit_rev == true` (CORE) | NATURAL | NATURAL |
+| `commit_rev == false` (legacy) | BIT-REVERSED | NATURAL |
+
+reuse is allowed iff `use_rev == commit_rev` and (`use_rev` or pow2).  Cost: one
+D2D that was happening anyway.  No new kernel, no new bytes.
+
+The new lookup also walks the stash MOST-RECENT-FIRST and requires an exact dims
+match.  The stash is process-global and a chip NAME is not shard-unique (unlike
+the pointer-keyed lookup, where a device address identifies the shard), so this
+pins the view to the shard being opened.  Measured `stash_max=1` — only one pack
+is ever live, so no aliasing was reachable in practice either.
+
+### Byte-identity proven directly, including non-pow2
+`ZIREN_ZC_VIEW_VERIFY=1` runs BOTH paths and compares them element-by-element;
+it now uses the orientation-keyed lookup so it covers non-pow2 too.  goat core:
+**106/106 chips clean, 82 of them non-pow2, zero mismatches**, `rev=true` on
+every line (confirming the CORE path is uniformly rev).
+
+### Effect
+Zerocheck H2D per run, measured by the `ZcPrepProf` byte counter at the
+upload site, **verify ON**:
+
+| program | gate OFF | gate ON | view hits OFF→ON | host uploads OFF→ON |
+|---|---|---|---|---|
+| goat (9 shards) | 3299.6 MiB | 45.5 MiB (**-98.6%**) | 25 → 107 | 82 → 0 |
+| tendermint (33 shards) | **25.739 GiB** | **0.103 GiB (-99.6%)** | 63 → 582 | 519 → 0 |
+
+On tendermint that is **-25.64 GiB (-27.5 GB) of pageable H2D per run**, against
+a previously measured whole-run H2D of ~55 GB — i.e. total prover H2D
+roughly halves, and the largest remaining H2D item becomes commit+dense.
+
+Tendermint core kHz, **verify ON**, same binary, arms ALTERNATED on one GPU
+(never concurrent), 3 runs each:
+
+| arm | run 1 | run 2 | run 3 | mean | core secs (mean) |
+|---|---|---|---|---|---|
+| off | 2292 | 2431 | 2480 | 2401 | 31.45 |
+| on  | 2472 | 2632 | 2614 | **2573** | **29.35** |
+
+**2401 -> 2573 kHz = +7.2%** (core 31.45 -> 29.35 s, -6.7%).  Pairwise, which
+is the drift-robust reading because the arms alternate: **+7.9% / +8.3% /
++5.4%**.
+
+Honest caveat: the arms are NOT cleanly separated at the extremes — the slowest
+ON run (2472) sits just under the fastest OFF run (2480).  The box carried a
+load average of ~17 from other tenants throughout, and OFF run 1 (2292) is a
+contention outlier.  Every alternating pair puts ON ahead, and the byte volume
+removed is not in doubt.
+
+Whole-wall GPU sampling (`nvidia-smi dmon`, GPU under test only; the window
+includes the ~170 s host-side verify, so these are diluted and are NOT
+"GPU busy during proving"): sm_avg 10.5/10.6/10.9% OFF vs 11.2/12.5/11.0% ON.
+
+### Byte gate + determinism
+Byte gate GREEN with the gate OFF **and** ON, verify ON, on every program:
+fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`, tendermint `7190969b1feae13a`
+(shard counts unchanged: 1 / 9 / 33).  Zerocheck is transcript-sensitive, so
+also gated for determinism at `RAYON_NUM_THREADS=8`, gate ON, 3 runs each:
+fib 3/3 and goat 3/3 produced a SINGLE distinct sha.
+
+The recursion stack was gated too (the historical blind spot of validating core
+only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
+`c80d70d835a42aee` — unchanged, both verifying.
+
+### Negatives / non-findings recorded
+- The sibling POINTER-keyed lookup (`commit_dense_view_for_src`) carries the
+  same pow2 guard, but widening it wins **nothing**: its fallback is
+  `m.clone_async()`, a full-trace D2D of exactly the size the view path would
+  copy.  No PCIe is involved on either branch.  Not pursued.
+- Chips with preprocessed columns (`num_prep_cols > 0`) still H2D their main
+  trace on the host-cell path.  Measured residual after the fix: **0.103 GiB
+  per tendermint run** — 0.4% of what the pow2 guard was costing.  Not worth
+  rerouting.
+- `cargo test -p zkm-gpu-core --lib` does not compile, PRE-EXISTING and
+  unrelated: `core/src/tracegen/core.rs` references `LoadWordChip` and
+  `ExecutionRecord::memory_instr_events`, neither of which exists in the
+  current host executor.  This blocks running the in-tree `dense_trace` unit
+  tests; the lib itself builds clean.
+- `nvidia-smi dmon -s u` emits one row PER GPU with columns
+  `Time gpu sm mem ...`; averaging column 2 averages the GPU *index*, not
+  `sm%`, and averaging across all rows mixes in every other tenant's card.
+  Filter to the GPU under test and read column 3.
