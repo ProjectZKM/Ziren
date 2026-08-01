@@ -1750,3 +1750,110 @@ is NOT reported as a result; the byte reduction and the byte gate are.
   host scatter) — but both are DEAD in the prove path (`commit_phase_round`
   uses `fold_codeword_fri_host`, and `encode_and_commit` has only test
   callers).  Not a lever; worth deleting as dead code.
+
+## Fused jagged round-0 `row_eq` built on device instead of shipped over PCIe (ziren-gpu)
+
+`try_round0_device_fused` uploads three "small" tables.  Two of them really are
+small; `row_eq` is not — it is `2^max_log_row` EF4, **64 MiB on a tendermint
+core shard**, uploaded once per shard.  Measured with `ZIREN_GPU_H2D_PROF` on
+the canonical 33-shard run that is **2.0625 GiB/run = 8.05% of ALL host->device
+bytes** — the largest single H2D item outside device trace-gen and LogUp-GKR,
+and 62x larger than the entire commit host-trace upload it was previously
+conflated with.
+
+It never needed to travel: `row_eq` is a pure function of the
+`max_log_row`-element row point, and both builders index it LSB-first.
+
+    host:   row_eq = eq_mle_table(rev(z_row))
+            eq_mle_table(r) doubles once per r_i, writing lo[j] at index j and
+            hi[j] at index j + 2^i  =>  r_i drives index bit i, i.e.
+            eq_mle_table(r)[idx] = PROD_i (bit_i(idx) ? r_i : 1-r_i)
+    device: partial_lagrange_ef_koala_bear(point)[idx]
+                                 = PROD_k (bit_k(idx) ? point[k] : 1-point[k])
+
+So the existing device kernel, fed the SAME point the host feeds
+`eq_mle_table` — `rev(z_row)` — reproduces the table bit-for-bit.
+`FusedWeightInputs` now carries that already-reversed point as `row_eq_point`
+(352 bytes) so no caller has to re-derive the orientation.
+
+**The orientation is load-bearing, and getting it wrong is silent.**  The first
+attempt fed the un-reversed `z_row`.  That builds a perfectly valid-looking but
+DIFFERENT eq table; H2D dropped by exactly the predicted 2.0625 GiB, the run
+completed all 33 shards, and the damage only surfaced as a changed proof:
+tendermint core sha `da45920c8955c39e` instead of the golden
+`7190969b1feae13a`, aborting in verify.  `ZIREN_GPU_JAGGED_ROW_EQ_DEVICE_VERIFY=1`
+now builds BOTH tables and asserts bit-identity every shard so that failure
+mode cannot come back quietly.
+
+Falls back to the legacy upload when the kill switch is set, when the point is
+absent/mismatched, or on any device error — always byte-identical.
+Kill switch: `ZIREN_GPU_JAGGED_ROW_EQ_DEVICE=0`.
+
+### Measured (tendermint core, 33 shards, 1 GPU, verify ON, same binary)
+
+| arm | H2D per run | core sha | verify |
+|---|---|---|---|
+| lever ON (new default) | **23.5459 GiB** | `7190969b1feae13a` | OK |
+| lever OFF (kill switch) | 25.6084 GiB | `7190969b1feae13a` | OK |
+
+**-2.0625 GiB/run (-8.05%), byte-identical.**
+
+### Byte gate + determinism
+Final tree, verify ON: fib `7c780d9f59d728b5` (1 shard), goat
+`8aa10f1942b71b62` (9), tendermint `7190969b1feae13a` (33) — with the lever ON,
+with the kill switch OFF, and with the per-shard bit-identity assert armed.
+`RAYON_NUM_THREADS=8` determinism, tendermint, lever ON, 3 runs: a SINGLE
+distinct sha (`7190969b1feae13a`), 3/3.
+
+kHz was NOT resolvable for this lever: single alternating runs put ON at 2457
+and OFF at 2531 on a box carrying other tenants, i.e. inside the noise the
+harness already measured at 15-19%.  2 GiB at the 19-33 GB/s pageable rate this
+prover gets is ~60-110 ms spread over a ~30 s core wall — below what wall-clock
+A/B can see here.  The byte reduction is the result; the kHz is not claimed.
+
+## Provider-coverage tripwire on the commit-dense fast path (ziren-gpu)
+
+`gpu_jagged_precompute_commit_hook` takes the pre-built single-buffer path only
+when EVERY chip is device-resident.  ONE chip missing from the provider demotes
+the whole shard to `repack_commit_jagged`, which (a) host-packs and H2D-uploads
+every chip — up to ~1.05 GiB/shard — and (b) never calls
+`publish_commit_dense`, so the zerocheck commit-pack reuse silently falls back
+to a per-chip host upload as well.
+
+The proof bytes are identical either way, so **a byte gate cannot see any of
+this**.  That is exactly how a landed, default-ON, byte-neutral lever
+(`ZIREN_GPU_ZC_VIEW_BY_NAME`) went dark for weeks after an unrelated padding
+change.  Levers that rest on a shape invariant — pow2, alignment, naming,
+provider coverage — need a counter or an assert, not just a gate.
+
+Added: process-cumulative counters `commit_dense_path_counts()` ->
+`(shards, prebuilt, repack, hostpack_chips, hostpack_bytes)` printed by the
+existing `ZIREN_PROF` dump (`repack == 0` is the healthy invariant), a
+warn-once at the demotion site naming the offending chips and the byte cost,
+and an H2D attribution scope on the host-pack arm so the bytes appear per chip.
+
+Measured healthy on every configuration tested: `repack=0` with
+`prebuilt=shards` on fib (1), goat (9) and tendermint (33), and zero host-pack
+H2D bytes on all of them.
+
+### Why the notices go to stderr, not `tracing` (multi-GPU hazard, PRE-EXISTING)
+Under the multi-GPU process-per-GPU core spawner the worker child's **STDOUT is
+the framed result protocol** (`core_multi_gpu.rs`,
+`read_framed(&mut worker.stdout)`), while `init_tracer` builds a
+`tracing_subscriber::fmt::Subscriber` whose default writer is **STDOUT**.  So
+ANY tracing record emitted inside a worker child is interleaved into the
+protocol stream and the parent stalls in `read_framed`.
+
+Reproduced: tendermint core, `CUDA_VISIBLE_DEVICES=6,7`,
+`ZKM_GPU_DEVICES=0,1`, `RUST_LOG=info` — the run stalls at 4/33 shards with
+BOTH GPUs at 0% and the box otherwise idle.  This is independent of any change
+here (it is a property of `init_tracer` + the spawner), but it means:
+
+* multi-GPU core runs cannot be observed with `RUST_LOG` at all; and
+* every existing `tracing::warn!` on a per-shard path — including
+  `"#47 prebuild_commit_dense failed; falling back to re-pack"` a few lines
+  above the new guard — is a latent protocol-corruption hazard on multi-GPU.
+
+The child's stderr is inherited, so `eprintln!` reaches the operator on every
+configuration.  Worth fixing centrally by pointing `init_tracer`'s fmt writer
+at stderr.
