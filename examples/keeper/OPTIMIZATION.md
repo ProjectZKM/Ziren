@@ -1627,3 +1627,108 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   `Time gpu sm mem ...`; averaging column 2 averages the GPU *index*, not
   `sm%`, and averaging across all rows mixes in every other tenant's card.
   Filter to the GPU under test and read column 3.
+## LogUp-GKR layer transition — coalesce the thread→cell map, fuse out the MSB split (ziren-gpu)
+
+- **What.** The three per-chip GKR layer-transition kernels in
+  `cuda/basefold/layer_transition.cu` (`layerTransitionEf`,
+  `layerTransitionFirst`, `splitFirstLayerByRowMsb`) all launch a
+  `block(TX=64, TY=4)` grid with `threadIdx.x -> row k` and
+  `threadIdx.y -> interaction i`.  Every quadrant is stored row-major
+  `cell[row * num_interactions + i]`, so a warp spans **32 consecutive
+  rows at a fixed interaction column** — its 32 accesses are
+  `num_interactions * sizeof(cell)` bytes apart.  The GPU fetches one
+  32-byte sector per access: **2× over-fetch** on the 16-byte `Ef4`
+  cells and **8× over-fetch** on the 4-byte `KoalaBear` cells.
+  Added flat one-thread-per-output-cell twins (`*Linear`) that recover
+  `(k, i) = (t / ni, t % ni)` from a linear index, so consecutive threads
+  touch consecutive cells of the same row.
+- **Plus a fusion.** The MSB split is a pure index transform —
+  `n0[row] == numer[row]` and `n1[row] == numer[row + half_logical]` —
+  so the `F -> EF` first transition can read the *unsplit* first-layer
+  table directly.  `layerTransitionFirstFusedLinear` does the split
+  inline; on the device-resident path the `splitFirstLayerByRowMsb`
+  launch and its four intermediate quadrant allocations per chip
+  disappear entirely.
+- **Why this is the SP1 shape.** SP1's transition
+  (`logUpCircuitTransition`, `sp1-gpu/crates/sys/lib/logup_gkr/execution.cu:9-19`)
+  is a flat grid-stride loop over one packed jagged buffer and is fully
+  coalesced; it also has no split kernel at all because
+  `first_layer_transition` writes the packed layout directly
+  (`sp1-gpu/crates/logup_gkr/src/execution.rs:72-115`).
+- **Measured** (tendermint core, 33 shards, verify ON, RTX 5090, nsys,
+  ms **per shard** inside the GKR window):
+
+  | kernel | OFF | ON | speedup |
+  |---|---|---|---|
+  | `layerTransitionEf` → `…EfLinear` (13 780 launches) | 21.79 | 7.46 | 2.92× |
+  | `layerTransitionFirst` → `…FirstFusedLinear` (689) | 14.40 | 2.46 | — |
+  | `splitFirstLayerByRowMsb` (1378 → 689 launches) | 17.75 | 1.92 | — |
+  | **transition stack total** | **53.94** | **11.84** | **4.56×** |
+  | GKR-window busy | 169.75 | 125.67 | −26.0% |
+  | GKR-window span | 292.1 | 241.4 | −17.4% |
+  | whole-trace GPU union busy (33 shards) | 15.78 s | 14.19 s | −10.1% |
+
+  The gate demonstrably fires: every launch is renamed in the trace
+  (`layerTransitionEfLinear` 13 780, `layerTransitionFirstFusedLinear`
+  689, `splitFirstLayerByRowMsbLinear` 689) and the split launch count
+  halves.
+- **Stage accounting** (tendermint = 75 438 907 cycles / 33 shards =
+  2.286 Mcyc per shard, so the per-shard figures above convert directly
+  to the ms/Mcyc units the SP1 head-to-head uses):
+
+  | | Ziren before | Ziren after | SP1 |
+  |---|---|---|---|
+  | LogUp-GKR, ms/Mcyc | 74.25 | **54.97** | 21.24 |
+  | ratio vs SP1 | 3.50× | **2.59×** | 1.00× |
+
+  That is **36% of the LogUp-GKR excess closed** (53.0 → 33.7 ms/Mcyc)
+  and takes the whole-prover device-work-per-cycle factor from 1.98× to
+  **1.76×**.  74.25 measured here against the head-to-head's 73.36
+  independently confirms that this nsys window *is* that study's
+  LogUp-GKR stage.
+- **Measured kHz — NULL.  Do not claim a kHz win.**  Paired alternating
+  A/B, solo on one GPU, tendermint core, verify ON, kill switch as the
+  control arm, on the current canonical base:
+
+  | rep | OFF kHz | ON kHz | delta |
+  |---|---|---|---|
+  | 1 | 2642 | 2604 | −1.4% |
+  | 2 | 2616 | 2794 | +6.8% |
+  | 3 | 2232 (outlier) | 2629 | +17.8% |
+  | 4 | 2687 | 2603 | −3.1% |
+  | 5 | 2568 | 2578 | +0.4% |
+  | 6 | 2482 | 2432 | −2.0% |
+  | mean of 1,2,4,5,6 | **2599** | **2602** | **+0.1%** |
+
+  Rep 3's OFF wall (33.8 s) is the slowest of all twelve and coincided
+  with another tenant on GPUs 6/7; dropped.  On the *previous* base an
+  earlier 4-rep paired A/B had ON ahead in 4/4 (mean −1.86% wall), so
+  the honest reading is **somewhere between null and ~2%, not
+  resolvable above the ±3-7% run-to-run noise on this box**.
+- **Why the device win does not convert.**  The GKR window's own
+  occupancy *fell*, 0.575 → 0.512: busy dropped 26% but span only 17%,
+  so most of the freed device time became idle.  Core proving is
+  pipeline-bound (whole-trace GPU busy fraction ≈ 0.43), exactly as
+  recorded for the `MemoryBump` area cut above.  The change is still
+  worth having — the SP1 gap factorises as *device-work-per-cycle ×
+  occupancy*, and this moves the first factor 1.98× → 1.76× — but it
+  will only show up in kHz once the occupancy factor is attacked.
+- **Byte-neutral.**  Every output cell is produced by exactly one thread
+  from the same operands in the same multiply/add order; no reduction,
+  no atomic, no cross-thread communication.  Validated ON **and** OFF,
+  3 runs each plus 4 more ON in the A/B, all `CORE VERIFY OK` with the
+  exact goldens fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`,
+  tendermint `7190969b1feae13a`; plus a `RAYON_NUM_THREADS=8`
+  determinism gate, 3 runs per program, single distinct sha each.
+- **Switch.** `ZIREN_GPU_GKR_COALESCED_TRANSITION`, **default ON**;
+  `=0` is the kill switch back to the 2-D kernels + separate split
+  launch.
+- **Next in this stage (measured, not done).**  `buildJhrSlabKernel` +
+  `buildJhrSlabKernelBaseNum` are **22.3 ms/shard** (17.8% of the
+  post-change GKR busy) and are pure duplication: the layer is
+  materialised once as per-chip 4-quadrant buffers by the transition and
+  again as a jagged slab by the sumcheck, once per GKR round.  SP1 pays
+  zero for this because `JaggedMle<JaggedGkrLayer>` *is* both the
+  transition output and the sumcheck input.  Having the transition write
+  the slab layout directly would delete the kernel and ~1 680
+  per-chip allocations per shard.
