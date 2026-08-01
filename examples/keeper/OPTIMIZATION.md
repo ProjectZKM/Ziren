@@ -1270,6 +1270,8 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
 
 ## CpuChip device trace-gen — recycled host staging vector (ziren-gpu)
 
+## CpuChip device trace-gen — recycled host staging vector + device-resident program table (ziren-gpu)
+
 - **What.** `CpuChip::generate_trace_device` (ziren-gpu `core/src/tracegen/core.rs`)
   built TWO fresh host `Vec`s per shard before it could launch anything: the
   `CpuEvent -> CpuEventFfi` conversion (`cpu_events.len() * 284` bytes) and a
@@ -1324,6 +1326,7 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
   RAYON_NUM_THREADS=8 determinism: tendermint 3/3 and goat 3/3 identical shas with
   CORE VERIFY OK.
 - **Switches.** None — both are unconditional (SP1 shape: no gate flag).
+<<<<<<< HEAD
 
 - **NOT LANDED:** the stacked device-resident program-table commit measured **null within
   noise** on kHz (L2 alone +11.93%, L2+L1 +11.68%), so only the staging-vector recycle shipped
@@ -3679,3 +3682,5 @@ here (it is a property of `init_tracer` + the spawner), but it means:
 The child's stderr is inherited, so `eprintln!` reaches the operator on every
 configuration.  Worth fixing centrally by pointing `init_tracer`'s fmt writer
 at stderr.
+=======
+>>>>>>> 7621bfee (docs(optimization): document the CpuChip trace-gen host levers (+11.7% TM kHz))
