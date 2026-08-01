@@ -618,10 +618,13 @@ where
 /// values), the program becomes chip-set-determined ⇒ one program per
 /// cluster ⇒ the enumerated `vk_map` covers every real workload.
 ///
-/// Encoding: `degree` is big-endian (index 0 = MSB) bits of `2^log_h`,
-/// exactly one bit set at index `d-1-log_h` (`d = degree.len()`), so
-/// `log_h = Σ_i degree[i] * (d-1-i)`.  We recompose that in the
-/// extension field, project to the base field via `ext2felt` (which also
+/// Encoding: `degree` is the big-endian (index 0 = MSB) boolean
+/// decomposition of the chip's REAL HEIGHT (`d = degree.len()`), which is
+/// a power of two only under the legacy `next_power_of_two` padding.  We
+/// derive `log_h = ceil(log2(height))` from those bits (see the inline
+/// derivation below — it agrees with the old one-hot `Σ degree[i]*(d-1-i)`
+/// recompose for every power-of-two height), project to the base field
+/// via `ext2felt` (which also
 /// asserts the higher components are zero ⇒ binds `degree[i]` to the
 /// base field), then `num2bits` + reverse to reproduce the exact
 /// big-endian `log_h` decomposition the consumer expects.
@@ -665,14 +668,44 @@ where
                 .unwrap_or(&[]);
             let dlen = degree.len();
 
-            // log_h = Σ_i degree[i] * (dlen-1-i), recomposed in the
-            // extension field then projected to the base field.
-            let mut acc_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-            for (i, d) in degree.iter().enumerate() {
-                let coeff: Ext<C::F, C::EF> =
-                    builder.constant(C::EF::from_usize(dlen - 1 - i));
-                acc_ext = builder.eval(acc_ext + *d * coeff);
+            // CEIL log of the witnessed HEIGHT, recomposed in the extension
+            // field then projected to the base field.
+            //
+            // `degree` are the big-endian boolean coordinates of the chip's
+            // REAL height.  Under the legacy `next_power_of_two` padding that
+            // height was always `2^log_h` (exactly one bit set), so the old
+            // `log_h = Σ_i degree[i] * (dlen-1-i)` recompose worked.  The
+            // SP1-parity `next_multiple_of_32` core padding sets SEVERAL bits,
+            // and that sum then returns garbage (e.g. h=3488 -> 11+10+8+7+5
+            // instead of 12) — a SILENT Fiat-Shamir divergence from the host
+            // prologue, which observes the CEIL log
+            // (`shard_level::prover::build_chip_log_heights`).
+            //
+            // Derive the ceil log from the bits directly, with `b[i]` boolean:
+            //   seen[i]  = OR_{j<=i} b[j]                (running "MSB reached")
+            //   Σ seen   = msb_pos + 1  (0 when h == 0)
+            //   extra    = OR_i ( b[i] AND seen[i-1] )   (1 iff h is NOT 2^k)
+            //   log_h    = Σ seen - seen[last] + extra
+            // Checks: h=0 -> 0; h=1 -> 0; h=2^k -> k; 2^k<h<2^(k+1) -> k+1.
+            // Byte-identical to the old recompose for every power-of-two
+            // height, and the emitted op sequence is still value-independent
+            // (fixed length `dlen`), so the program stays chip-set-determined.
+            let _ = dlen;
+            let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
+            let mut seen: Ext<C::F, C::EF> = zero;
+            let mut seen_sum: Ext<C::F, C::EF> = zero;
+            let mut extra: Ext<C::F, C::EF> = zero;
+            for d in degree.iter() {
+                let seen_prev = seen;
+                // t = b AND seen_prev  (a lower bit set below the MSB)
+                let t: Ext<C::F, C::EF> = builder.eval(*d * seen_prev);
+                // extra = extra OR t
+                extra = builder.eval(extra + t - extra * t);
+                // seen = seen_prev OR b
+                seen = builder.eval(seen_prev + *d - seen_prev * *d);
+                seen_sum = builder.eval(seen_sum + seen);
             }
+            let acc_ext: Ext<C::F, C::EF> = builder.eval(seen_sum - seen + extra);
             let log_h_felt: Felt<C::F> = if dlen == 0 {
                 builder.constant(C::F::ZERO)
             } else {
