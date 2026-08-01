@@ -141,6 +141,12 @@ mod sys {
             .include_item("MemInstrEvent")
             .include_item("MemoryInitializeFinalizeEvent")
             .include_item("MemoryInitCols")
+            .include_item("MemoryInstrCommonCols")
+            .include_item("LoadNarrowColumns")
+            .include_item("LoadWordColumns")
+            .include_item("StoreNarrowColumns")
+            .include_item("StoreWordColumns")
+            .include_item("MemoryUnalignedColumns")
             .include_item("MemoryLocalCols")
             .include_item("MemoryLocalEvent")
             .include_item("MemoryRecord") // Just for convenience. Not exposed, so we need to manually do this.
