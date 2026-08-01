@@ -1394,3 +1394,103 @@ Recorded because a previous attribution pointed at the wrong mechanism and cost 
   chips; at 64 rows/shard that is not measurable.  A device kernel is available
   as a follow-up if it ever shows up in a profile.
 - **Switches.** None — unconditional.
+
+## GPU-idle on the serial core critical path: two host stalls REMOVED (Aug 2)
+
+Instrument: `ZIREN_GPU_NVTX_PROF=1` (ziren-gpu) turns every `tracing` span into
+an NVTX range under an NVTX-only subscriber (no fmt layer, 1.7% overhead), then
+`nsys` joins those ranges against the CUDA activity timeline and every GPU-idle
+gap is attributed to the DEEPEST enclosing named host code site.  On tendermint
+core (33 shards, 1 GPU, RAYON=16) that accounts for 100% of the idle with no
+unattributed remainder.
+
+Occupancy, stating the definition (the historical numbers disagree because this
+was left implicit) — over the `CORE_PROVE` window, 900 ms/shard:
+**kernel-only 35.9% busy (577 ms/shard idle); kernel U memcpy U memset 46.7%
+busy (480 ms/shard idle).**  Excluding one-time prover setup the union figure is
+51.3%, which reconciles with the independently measured 52.6%.
+
+### 1. Device grind for the per-shard placeholder FRI open
+`ZIREN_GPU_PH_GRIND_DEVICE` (ziren-gpu), default OFF.
+
+The per-shard placeholder `pcs.open` on the 1x1 dummy — commented in-tree as
+"(CPU, cheap)" — reaches `p3_fri::prove`, whose first post-commit step is
+`challenger.grind(query_proof_of_work_bits = 16)`: p3's HOST SIMD-packed rayon
+`find_map_first` over ~2.7e8 batches of the KoalaBear order.  Measured at
+**40.57 ms/shard, ~100% GPU-idle, 33/33 shards** — 4.7% of the core wall spent
+finding a 16-bit nonce for a placeholder proof over a 1x1 matrix.
+
+Routed to the device kernel already used by `grind_batch`/`grind_pow`
+(`grind_koala_bear`) via a challenger newtype forwarding every other op.
+Byte-identical twice over: structurally (`find_map_first` is order-preserving so
+it yields the smallest-index witness, which is exactly what the kernel's global
+`atomicMin` selects) and empirically (`RAYON_NUM_THREADS=1`, where the parallel
+search degenerates to a sequential scan from 0, reproduces the goat golden).
+
+Effect (NVTX span, same binary, gate off vs on): `FRI prover`
+**40.72 -> 0.89 ms/shard**; the host-grind span disappears.
+
+### 2. Truncate the eq-table build to the rows actually read
+`ZIREN_GPU_EQ_TRUNC` (host `crates/pcs`), default OFF.
+
+`evaluate_trace_columns_at_point` sums only rows `[0, height)` but builds the
+eq-table over the whole `2^|eval_point|` cube.  For the full-point openings in
+`logup_gkr_output_extract` the point is the full `max_log_row_count` trace point
+while the trace — notably every PREPROCESSED trace — is far shorter, so a
+2^22-row table is built to read its first few thousand entries, per chip, per
+shard, on the host with the GPU idle.
+
+Mechanism confirmed by sub-instrumentation BEFORE the fix.  The decisive
+signature is that the full-point preprocessed evaluation does NOT scale with
+chip count while the main-trace ones do:
+
+| chips | main | prep | mainfull | **prepfull** |
+|---|---|---|---|---|
+| 25 | 114.7 | 42.4 | 131.2 | **96.2** |
+| 9  |   9.1 | 15.7 |   6.7 | **82.3** |
+| 4  |   0.0 | 18.6 |   4.2 | **88.3** |
+
+i.e. a fixed `O(2^|eval_point|)` table build, not trace work; on a 4-chip shard
+it is essentially the whole span wall.
+
+Since `eq_mle_table` maps index bit `i` to `eval_point[i]`, every `row < 2^k` has
+all bits `>= k` zero, so `eq[row] == (prod_{i>=k}(1-r_i)) * eq_k[row]`.  Building
+the size-`2^k` table and folding the constant tail into the per-column
+accumulator is EXACT (field multiplication distributes over the sum) and turns
+the build into `O(height)`.
+
+Effect (NVTX span): `logup_gkr_output_extract` **59.00 -> 23.31 ms/shard (-60%)**.
+
+### Combined result
+Tendermint core, 4 runs per arm, same binary, gates off vs on, **verify ON**:
+
+| arm | core_khz | core secs |
+|---|---|---|
+| off | 2714 / 2620 / 2685 / 2654 | 27.797 / 28.788 / 28.096 / 28.419 |
+| on  | 2891 / 2829 / 2901 / 2899 | 26.093 / 26.667 / 26.001 / 26.018 |
+
+**2668 -> 2880 kHz = +7.9%** (core 28.275 -> 26.195 s, -7.4%).  Clean separation:
+the slowest ON run beats the fastest OFF run.
+
+**Byte-neutral.**  Byte gate GREEN with gates OFF and with gates ON, verify ON:
+fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`, tendermint `7190969b1feae13a`.
+
+### Negative / non-finding recorded
+- The "~24% GPU busy during core proving" figure quoted in earlier notes is
+  **stale**; measured here at 46.7% (union) / 35.9% (kernel-only).  Always state
+  which definition is meant, and never divide nsys busy by an nsys wall.
+
+### Follow-up found but NOT fixed: `ZIREN_GPU_ZC_VIEW_BY_NAME` is 77% dead
+The zerocheck view-by-name lever (ziren-gpu `55ff0fa`, default ON, still
+present) silently stopped covering the core path when core padding became the
+SP1-parity `next_multiple_of_32`.  `commit_dense_view_for_name` hard-declines
+unless `poly_size.is_power_of_two()`, which a multiple-of-32 height essentially
+never is, so the zerocheck `prepare` falls back to the legacy HOST upload.
+
+Measured (goat core, hit/miss counters): **24 hits, 82 declined by the pow2
+guard, 0 absent** — i.e. the names ARE in the commit pack and the guard is the
+only reason the lever fails.  Declined heights are all multiples of 32
+(192, 608, 416, 96256, 173184, 7712, 71104, ...).  This is a strong candidate
+root cause for the ~29 GB zerocheck H2D.  Restoring it needs the non-pow2 case
+served as a device D2D + device bitrev (the guard exists because only pow2
+heights are bit-reversed in the commit pack), not simply relaxing the guard.
