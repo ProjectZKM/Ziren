@@ -67,9 +67,16 @@ pub fn estimate_mips_lde_size(
     cells += (num_events_per_air[MipsAirId::SyscallInstrs]).next_power_of_two()
         * costs_per_air[&MipsAirId::SyscallInstrs];
 
-    // Compute the MemoryInstruction chip contribution.
-    cells += (num_events_per_air[MipsAirId::MemoryInstrs]).next_power_of_two()
-        * costs_per_air[&MipsAirId::MemoryInstrs];
+    // Compute the memory-instruction chip contributions.
+    for air in [
+        MipsAirId::MemoryLoadNarrow,
+        MipsAirId::MemoryLoadWord,
+        MipsAirId::MemoryStoreNarrow,
+        MipsAirId::MemoryStoreWord,
+        MipsAirId::MemoryUnaligned,
+    ] {
+        cells += (num_events_per_air[air]).next_power_of_two() * costs_per_air[&air];
+    }
 
     // Compute the MiscInstruction chip contribution.
     cells += (num_events_per_air[MipsAirId::MiscInstrs]).next_power_of_two()
@@ -146,21 +153,21 @@ pub fn estimate_mips_event_counts(
         + opcode_counts[Opcode::Jumpi]
         + opcode_counts[Opcode::JumpDirect];
 
-    // Compute the number of events in the MemoryInstrs chip.
-    events_counts[MipsAirId::MemoryInstrs] = opcode_counts[Opcode::LB]
-        + opcode_counts[Opcode::LH]
-        + opcode_counts[Opcode::LW]
+    // Compute the number of events in the memory-instruction chips.
+    events_counts[MipsAirId::MemoryLoadNarrow] = opcode_counts[Opcode::LB]
         + opcode_counts[Opcode::LBU]
-        + opcode_counts[Opcode::LHU]
-        + opcode_counts[Opcode::SB]
-        + opcode_counts[Opcode::SH]
-        + opcode_counts[Opcode::SW]
-        + opcode_counts[Opcode::LWL]
+        + opcode_counts[Opcode::LH]
+        + opcode_counts[Opcode::LHU];
+    events_counts[MipsAirId::MemoryLoadWord] =
+        opcode_counts[Opcode::LW] + opcode_counts[Opcode::LL];
+    events_counts[MipsAirId::MemoryStoreNarrow] =
+        opcode_counts[Opcode::SB] + opcode_counts[Opcode::SH];
+    events_counts[MipsAirId::MemoryStoreWord] =
+        opcode_counts[Opcode::SW] + opcode_counts[Opcode::SC];
+    events_counts[MipsAirId::MemoryUnaligned] = opcode_counts[Opcode::LWL]
         + opcode_counts[Opcode::LWR]
-        + opcode_counts[Opcode::LL]
         + opcode_counts[Opcode::SWL]
-        + opcode_counts[Opcode::SWR]
-        + opcode_counts[Opcode::SC];
+        + opcode_counts[Opcode::SWR];
 
     // Compute the number of events in the MiscInstrs chip.
     events_counts[MipsAirId::MiscInstrs] = opcode_counts[Opcode::INS]
@@ -214,7 +221,11 @@ pub fn pad_mips_event_counts(
         MipsAirId::Branch => *v += 8 * num_cycles,
         MipsAirId::Jump => *v += 2 * num_cycles,
         MipsAirId::SyscallInstrs => *v += num_cycles,
-        MipsAirId::MemoryInstrs => *v += 8 * num_cycles,
+        MipsAirId::MemoryLoadNarrow => *v += 8 * num_cycles,
+        MipsAirId::MemoryLoadWord => *v += 8 * num_cycles,
+        MipsAirId::MemoryStoreNarrow => *v += 8 * num_cycles,
+        MipsAirId::MemoryStoreWord => *v += 8 * num_cycles,
+        MipsAirId::MemoryUnaligned => *v += 8 * num_cycles,
         MipsAirId::MiscInstrs => *v += 8 * num_cycles, // TODO: Check this value.
         MipsAirId::CloClz => *v += 3 * num_cycles,     // TODO: Check this value.
         MipsAirId::SyscallCore => *v += 2 * num_cycles,

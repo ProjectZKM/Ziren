@@ -4718,7 +4718,7 @@ pub mod tests {
         let realcanon: &[(&str, usize)] = &[
             ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
             ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
-            ("Jump", 10), ("Lt", 12), ("MemoryInstrs", 10), ("MemoryLocal", 10),
+            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10), ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10), ("MemoryLocal", 10),
             ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10), ("Program", 19),
             ("ShiftLeft", 9), ("ShiftRight", 9), ("SyscallCore", 10),
             ("SyscallInstrs", 10),
@@ -5042,7 +5042,7 @@ pub mod tests {
             ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
             ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
             ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
-            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MemoryGlobalInit", 17), ("LoadNarrow", 15), ("LoadWord", 15), ("StoreNarrow", 15), ("StoreWord", 15), ("MemoryUnaligned", 15), ("MemoryLocal", 11),
             ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
             ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
             ("SyscallInstrs", 11),
@@ -5712,7 +5712,7 @@ pub mod tests {
             ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
             ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
             ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
-            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MemoryGlobalInit", 17), ("LoadNarrow", 15), ("LoadWord", 15), ("StoreNarrow", 15), ("StoreWord", 15), ("MemoryUnaligned", 15), ("MemoryLocal", 11),
             ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
             ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
             ("SyscallInstrs", 11),
@@ -5777,7 +5777,7 @@ pub mod tests {
         // memory cluster = fib's 22 chips
         let cluster: Vec<&str> = vec![
             "AddSub", "Bitwise", "Branch", "Byte", "CloClz", "Cpu", "DivRem", "Global",
-            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "MemoryInstrs",
+            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "LoadNarrow",, "LoadWord",, "StoreNarrow",, "StoreWord",, "MemoryUnaligned",
             "MemoryLocal", "MiscInstrs", "MovCond", "Mul", "Program", "ShiftLeft",
             "ShiftRight", "SyscallCore", "SyscallInstrs",
         ];
@@ -5846,7 +5846,7 @@ pub mod tests {
             ("AddSub", 16), ("Bitwise", 13), ("Branch", 13), ("Byte", 16),
             ("CloClz", 5), ("Cpu", 17), ("DivRem", 11), ("Global", 18),
             ("Jump", 11), ("Lt", 15), ("MemoryGlobalFinalize", 17),
-            ("MemoryGlobalInit", 17), ("MemoryInstrs", 15), ("MemoryLocal", 11),
+            ("MemoryGlobalInit", 17), ("LoadNarrow", 15), ("LoadWord", 15), ("StoreNarrow", 15), ("StoreWord", 15), ("MemoryUnaligned", 15), ("MemoryLocal", 11),
             ("MiscInstrs", 11), ("MovCond", 12), ("Mul", 13), ("Program", 19),
             ("ShiftLeft", 13), ("ShiftRight", 11), ("SyscallCore", 11),
             ("SyscallInstrs", 11),

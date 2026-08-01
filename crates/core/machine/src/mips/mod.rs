@@ -35,7 +35,10 @@ pub(crate) mod mips_chips {
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
         cpu::CpuChip,
-        memory::{MemoryGlobalChip, MemoryInstructionsChip},
+        memory::{
+            LoadNarrowChip, LoadWordChip, MemoryGlobalChip, MemoryUnalignedChip, StoreNarrowChip,
+            StoreWordChip,
+        },
         misc::{MiscInstrsChip, MovCondChip},
         program::ProgramChip,
         syscall::{
@@ -106,8 +109,16 @@ pub enum MipsAir<F: PrimeField32> {
     Branch(BranchChip),
     /// An AIR for MIPS Jump instructions.
     Jump(JumpChip),
-    /// An AIR for MIPS memory instructions.
-    MemoryInstrs(MemoryInstructionsChip),
+    /// An AIR for the MIPS narrow (sub-word) load instructions.
+    MemoryLoadNarrow(LoadNarrowChip),
+    /// An AIR for the MIPS word-aligned load instructions.
+    MemoryLoadWord(LoadWordChip),
+    /// An AIR for the MIPS narrow (sub-word) store instructions.
+    MemoryStoreNarrow(StoreNarrowChip),
+    /// An AIR for the MIPS word-aligned store instructions.
+    MemoryStoreWord(StoreWordChip),
+    /// An AIR for the MIPS unaligned load/store instructions.
+    MemoryUnaligned(MemoryUnalignedChip),
     /// An AIR for MIPS mov condition instructions.
     MovCond(MovCondChip),
     /// An AIR for MIPS misc instructions.
@@ -429,10 +440,25 @@ impl<F: PrimeField32> MipsAir<F> {
         costs.insert(syscall_instrs.name(), syscall_instrs.cost());
         chips.push(syscall_instrs);
 
-        let memory_instructions =
-            Chip::new(MipsAir::MemoryInstrs(MemoryInstructionsChip::default()));
-        costs.insert(memory_instructions.name(), memory_instructions.cost());
-        chips.push(memory_instructions);
+        let memory_load_narrow = Chip::new(MipsAir::MemoryLoadNarrow(LoadNarrowChip));
+        costs.insert(memory_load_narrow.name(), memory_load_narrow.cost());
+        chips.push(memory_load_narrow);
+
+        let memory_load_word = Chip::new(MipsAir::MemoryLoadWord(LoadWordChip));
+        costs.insert(memory_load_word.name(), memory_load_word.cost());
+        chips.push(memory_load_word);
+
+        let memory_store_narrow = Chip::new(MipsAir::MemoryStoreNarrow(StoreNarrowChip));
+        costs.insert(memory_store_narrow.name(), memory_store_narrow.cost());
+        chips.push(memory_store_narrow);
+
+        let memory_store_word = Chip::new(MipsAir::MemoryStoreWord(StoreWordChip));
+        costs.insert(memory_store_word.name(), memory_store_word.cost());
+        chips.push(memory_store_word);
+
+        let memory_unaligned = Chip::new(MipsAir::MemoryUnaligned(MemoryUnalignedChip));
+        costs.insert(memory_unaligned.name(), memory_unaligned.cost());
+        chips.push(memory_unaligned);
 
         let misc_instrs = Chip::new(MipsAir::MiscInstrs(MiscInstrsChip::default()));
         costs.insert(misc_instrs.name(), misc_instrs.cost());
@@ -495,7 +521,11 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::Jump, record.jump_events.len()),
             (MipsAirId::MovCond, record.movcond_events.len()),
             (MipsAirId::MiscInstrs, record.misc_events.len()),
-            (MipsAirId::MemoryInstrs, record.memory_instr_events.len()),
+            (MipsAirId::MemoryLoadNarrow, record.memory_load_narrow_events.len()),
+            (MipsAirId::MemoryLoadWord, record.memory_load_word_events.len()),
+            (MipsAirId::MemoryStoreNarrow, record.memory_store_narrow_events.len()),
+            (MipsAirId::MemoryStoreWord, record.memory_store_word_events.len()),
+            (MipsAirId::MemoryUnaligned, record.memory_unaligned_events.len()),
             (MipsAirId::SyscallInstrs, record.syscall_events.len()),
             (MipsAirId::DivRem, record.divrem_events.len()),
             (MipsAirId::AddSub, record.add_sub_events.len()),
@@ -574,7 +604,11 @@ impl<F: PrimeField32> MipsAir<F> {
             MipsAir::Branch(BranchChip::default()),
             MipsAir::Jump(JumpChip::default()),
             MipsAir::SyscallInstrs(SyscallInstrsChip::default()),
-            MipsAir::MemoryInstrs(MemoryInstructionsChip::default()),
+            MipsAir::MemoryLoadNarrow(LoadNarrowChip),
+            MipsAir::MemoryLoadWord(LoadWordChip),
+            MipsAir::MemoryStoreNarrow(StoreNarrowChip),
+            MipsAir::MemoryStoreWord(StoreWordChip),
+            MipsAir::MemoryUnaligned(MemoryUnalignedChip),
             MipsAir::MovCond(MovCondChip::default()),
             MipsAir::MiscInstrs(MiscInstrsChip::default()),
             MipsAir::MemoryLocal(MemoryLocalChip::new()),
@@ -785,7 +819,11 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Branch(_) => unreachable!("Invalid for core chip"),
             Self::Jump(_) => unreachable!("Invalid for core chip"),
             Self::SyscallInstrs(_) => unreachable!("Invalid for core chip"),
-            Self::MemoryInstrs(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryLoadNarrow(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryLoadWord(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryStoreNarrow(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryStoreWord(_) => unreachable!("Invalid for core chip"),
+            Self::MemoryUnaligned(_) => unreachable!("Invalid for core chip"),
             Self::MiscInstrs(_) => unreachable!("Invalid for core chip"),
             Self::MovCond(_) => unreachable!("Invalid for core chip"),
         }

@@ -81,14 +81,6 @@ extern void jump_event_to_row_koalabear(
     jump::event_to_row<kb31_t>(*event, *cols_kb31);
 }
 
-extern void mem_instrs_event_to_row_koalabear(
-    const MemInstrEvent* event,
-    MemoryInstructionsColumns<KoalaBearP3>* cols
-) {
-    MemoryInstructionsColumns<kb31_t>* cols_kb31 = reinterpret_cast<MemoryInstructionsColumns<kb31_t>*>(cols);
-    memory_instrs::event_to_row<kb31_t>(*event, *cols_kb31);
-}
-
 extern void misc_instrs_event_to_row_koalabear(
     const MiscEvent* event,
     MiscInstrColumns<KoalaBearP3>* cols
