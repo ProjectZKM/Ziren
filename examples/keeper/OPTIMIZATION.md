@@ -180,6 +180,121 @@ delta, how it was validated, and the enable/kill-switch.
   host gap on the `D2H -> H2D` transition, 12,445 times per run — host-issue
   bound, not kernel bound.
 
+## Global cumulative sum — stop re-deriving it; publish the scan (host + ziren-gpu)
+
+- **What.** The parallel fold above made `public_values()` cheaper. This makes
+  it **free**: the fold is deleted from the prove path entirely.
+  `GlobalChip`'s trace generator ALREADY computes the identical value — it
+  scans every interaction point to fill the `GlobalAccumulation` column — and
+  Ziren threw that result away, so `public_values()` re-derived it from
+  scratch, once per shard, with a `lift_x` (a square root in the degree-7
+  extension) plus a curve addition per `GlobalLookupEvent`.
+  `GlobalChip::generate_trace` now publishes the digest into a
+  `GlobalCumulativeSumCell` on the record and `public_values()` reads it.
+
+- **SP1 parity.** This is exactly SP1's shape, not an invention: the field
+  `global_cumulative_sum: Arc<Mutex<SepticDigest<u32>>>`
+  (`sp1` `crates/core/executor/src/record.rs:124`) is written by
+  `GlobalChip::generate_trace` (`sp1` `crates/core/machine/src/global/mod.rs:208`)
+  and `public_values()` is a pure read
+  (`sp1` `crates/core/executor/src/record.rs:875`). SP1 never re-derives it.
+
+- **The GPU half.** The device generator is the one that runs under the GPU
+  prover (`MipsAir::Global` dispatches to `generate_trace_device`, ziren-gpu
+  `core/src/tracegen/mod.rs:176`). Its round 2 (`ScanTemplateLarge`,
+  `cuda/tracegen/core.cuh`) produces the INCLUSIVE scan of the interaction
+  points seeded with `start_point()`, so `cumulative_sums[nb_events - 1]` IS
+  the shard digest. It is read back with ONE 56-byte D2H, issued async before
+  round 3 so round 3's existing `cudaStreamSynchronize` covers it — no added
+  synchronisation. The padding rows contribute the group identity
+  (`kb31_septic_curve_t()` is `(0,0)`, which `is_infinity()` treats as the
+  identity and `operator+=` short-circuits), which is why the scan is exactly
+  the host fold.
+
+- **Safety, by construction rather than by argument.** `GlobalCumulativeSumCell`
+  DEEP-copies on `Clone` (never shares the cell), the published value is tagged
+  with the event count it came from and is distrusted the moment
+  `global_lookup_events.len()` disagrees, and `append()` clears it. Any miss
+  falls back to the fold, so callers with no `GlobalChip` trace (unit tests,
+  `debug_constraints`) stay correct. **A miss is a pure slowdown, never a wrong
+  answer.**
+
+- **Measured host time removed (reth, 281 shards, `ZIREN_GPU_HOST_PROF=1`,
+  3 paired ABBA rounds with the arms swapped between GPU slots).** Wall AND
+  thread-CPU, per shard:
+
+  | round | `.public_values` wall A→B | `.public_values` cpu A→B | `commit_total` wall A→B |
+  |---|---|---|---|
+  | 1 | 75.84 → 0.006 | 53.65 → 0.006 | 106.95 → 87.33 |
+  | 2 | 84.14 → 0.006 | 57.52 → 0.006 | 109.87 → 92.03 |
+  | 3 | 69.36 → 0.005 | 50.92 → 0.005 | 101.01 → 86.46 |
+  | mean | **76.45 → 0.006** | **54.03 → 0.006** | **105.94 → 88.61 (−17.3)** |
+
+  `.public_values` collapsing to 6 µs is also the hit proof: the fold does not
+  run. `commit_total` is serial (1 call/shard, on the dispatch thread via
+  `prove_one_core_shard`), so −17.3 ms/shard comes off the critical path. The
+  saving exceeds the fold's own thread-CPU because the fold also contended with
+  the trace-gen fan-out: `.accel_wall` drops with it (95→80 ms/shard in round 3).
+
+- **Measured kHz: no resolvable change on reth.** 1080/1087, 1112/1078,
+  1100/1087, 1121/1116 (A/B, arms swapped each round) — mean A 1103, B 1092.
+  Round-to-round spread is ~3%, and the predicted gain from −17.3 ms/shard
+  against a 1323 ms/shard loop is ~1.3%, i.e. **below this harness's noise
+  floor**; four paired rounds cannot resolve it. Reported as measured, not as a
+  win. The host milliseconds are removed and reproducible; their conversion is
+  not demonstrated.
+
+- **Premise correction.** This site was handed over as "150.8 ms/shard
+  (177.8 in the ranked idle list) at ~100% GPU-idle, reth's #1 host lever". It
+  measures **76.45 ms/shard wall / 54.03 ms/shard thread-CPU** on canonical —
+  ~2.3x smaller — because `ZIREN_GPU_COMMIT_PV_OVERLAP` already runs it
+  concurrently with the fan-out, where it partially hides.
+
+- **Validated.** Byte-identical: fib `7c780d9f59d728b5…` (both arms), reth
+  `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2` — 281
+  shards, `VERIFY OK`, reproduced by BOTH arms and on both binaries built
+  during the work. `ZIREN_PV_DIGEST_ASSERT=1` cross-checks every published
+  digest against the from-scratch fold and panics on any difference: it ran
+  clean across all 281 reth shards, i.e. **bit identity, not just a matching
+  proof hash**. (A runtime check, not `debug_assert!`, because the perf harness
+  builds release.)
+
+- **Switch.** `ZIREN_GPU_PV_DEVICE_DIGEST` during the A/B; removed afterwards,
+  path unconditional.
+
+## Core dispatch loop is NOT producer-bound on reth (measurement, negative)
+
+- **What was inferred.** That the 285.8 ms/shard of un-attributed `CORE_PROVE`
+  idle (39.1% of all reth idle) was the dispatch thread BLOCKED waiting for
+  phase-2 trace generation — reth's 8 producer threads carry 2.6x tendermint's
+  aggregate trace-gen wall — and that the lever was therefore
+  `TRACE_GEN_WORKERS` / `RECORDS_AND_TRACES_CHANNEL_CAPACITY`.
+
+- **What is measured.** `ZIREN_RECV_PROF=1` times the blocking `recv()`
+  explicitly (it hid inside `for .. in records_rx.into_iter()`'s `next()`,
+  outside every span), in the loop that actually runs —
+  `prover/src/core_multi_gpu.rs`, reached from `prove_core_multi_gpu`:
+
+  ```
+  A: dispatch_loop_ms=371870.1  blocked_on_records_ms=2.1  (0.0%)  281 shards → 0.0 ms/shard
+  B: dispatch_loop_ms=372552.9  blocked_on_records_ms=2.3  (0.0%)  281 shards → 0.0 ms/shard
+  ```
+
+  **Zero.** The producer is never the limiter on reth; trace generation always
+  has the next batch ready. All 1323 ms/shard of the dispatch loop is inside
+  the per-shard prove body, not waiting for it.
+
+- **Consequences.** Sweeping `TRACE_GEN_WORKERS` /
+  `RECORDS_AND_TRACES_CHANNEL_CAPACITY` cannot help (the harness already sets
+  8/8 and there is nothing to overlap). The unspanned `CORE_PROVE` block must
+  be attributed INSIDE `prove_one_core_shard`, not at the channel.
+
+- **Also a siting lesson.** The same instrumentation placed in the host repo's
+  `crates/core/machine/src/utils/prove.rs` loop produced a binary with the
+  probe **stripped by the linker** — that loop is the CPU prover's and is dead
+  under the GPU prover. Zero calls, silently. Check the probe's string survives
+  into the binary before trusting a "no output means no time" reading.
+
 ## Jagged-eval structural sumcheck — host-core parallelization
 
 - **What.** `structural_jagged_eval_sumcheck` (`crates/pcs/src/jagged_eval_sumcheck.rs`)

@@ -37,7 +37,7 @@ use crate::{
 /// `GlobalChip::generate_trace` (`sp1` `crates/core/machine/src/global/mod.rs:208`)
 /// — which has already scanned every interaction point to fill the
 /// `GlobalAccumulation` column — and `public_values()`
-/// (`sp1` `crates/core/machine/src/../executor/src/record.rs:875`) is a pure
+/// (`sp1` `crates/core/executor/src/record.rs:875`) is a pure
 /// read of it.
 ///
 /// Ziren computed the same scan in `GlobalChip`'s trace generation and then
@@ -90,16 +90,6 @@ impl Clone for GlobalCumulativeSumCell {
     fn clone(&self) -> Self {
         Self(Mutex::new(*self.0.lock().unwrap()))
     }
-}
-
-/// `ZIREN_PV_DIGEST_ASSERT=1` — cross-check every published global
-/// cumulative-sum digest against the from-scratch fold, and panic on any
-/// difference.  Validation only; read once.
-fn pv_digest_assert_enabled() -> bool {
-    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("ZIREN_PV_DIGEST_ASSERT").is_ok_and(|v| v == "1" || v == "true")
-    })
 }
 
 /// A record of the execution of a program.
@@ -603,22 +593,7 @@ impl MachineRecord for ExecutionRecord {
             .global_cumulative_sum
             .get(self.global_lookup_events.len())
         {
-            Some(digest) => {
-                // Validation gate: recompute the fold and demand BIT identity.
-                // Release builds run the perf harness, so `debug_assert!` would
-                // never fire there — this has to be a runtime check to be worth
-                // anything.  Removed once the equivalence is established.
-                if pv_digest_assert_enabled() {
-                    let folded = compute_global_cumulative_sum(&self.global_lookup_events);
-                    assert_eq!(
-                        digest, folded,
-                        "ZIREN_PV_DIGEST_ASSERT: published global cumulative-sum digest \
-                         disagrees with the fold over {} events",
-                        self.global_lookup_events.len(),
-                    );
-                }
-                digest
-            }
+            Some(digest) => digest,
             None => compute_global_cumulative_sum(&self.global_lookup_events),
         };
         pv.to_vec()
