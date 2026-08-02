@@ -2318,6 +2318,15 @@ job/result fields would make the encode a single memcpy).
   critical-path wall removed per goat run; no
   measurable change on tendermint (3914/3745/3574 vs 3895/3230/3774 kHz — the gate is not
   exercised there in either arm).
+- **Validated on reth** (281 shards, 419,960,677 cycles, verify ON, single GPU, one pair):
+
+  | arm | fallbacks | core kHz | core s  | core proof sha256 |
+  |-----|-----------|----------|---------|-------------------|
+  | 23  | 5         | 1325     | 316.84  | `2c4d3597a79a6f36…` |
+  | 0   | 0         | 1338     | 313.79  | `2c4d3597a79a6f36…` |
+
+  Byte-identical to the reth core golden in both arms; the gain is only ~1% because just
+  5 of 281 shards decline.
 - **Validated byte-identical.** goat core sha `8aa10f1942b71b62` (the goat core golden) in
   all 6 A/B runs; tendermint core `7190969b1feae13a` in all 6. Full chain
   core -> compress -> shrink -> wrap with verify at every stage, gate at 0:
