@@ -2604,3 +2604,108 @@ ms/shard the coordinator spends blocked waiting for the commit worker** (0.02 ms
   resident drive accounts for only 71.9 (SYNC 45.5, host 10.1); **~213 ms/shard is the
   per-layer `gpu_layer_build_jhr_slab` device slab build**, which carries no internal
   instrumentation (`l_pre` reads 0.311 and does not cover it). Handed to the slab owner.
+## The `Global` chip on reth: characterised, and why there is no SP1 lever in it (host)
+
+Investigation target was reth's `Global` chip explosion (14.9% of reth trace area
+vs 0.9% on tendermint). Two of the three premises handed over were refuted by
+measurement; the third produced a landed byte-neutral host change.
+
+### 1. Composition — MEASURED, not inferred
+
+`Global` is exactly one row per `GlobalLookupEvent`
+(`crates/core/machine/src/global/mod.rs` `num_rows`), and those events have
+exactly four producers. Instrumenting each producer (reth, 281 records, verify
+ON, `ZIREN_DEP_PROF=1`) gives the per-shard average:
+
+| producer | events/shard | share | rule |
+|---|---|---|---|
+| `MemoryLocal` | 247,706 | **67.0%** | 2 per local memory event |
+| `MemoryGlobalFinalize` | 60,519 | 16.4% | 1 per finalize event |
+| `MemoryGlobalInit` | 56,702 | 15.3% | 1 per init event |
+| `SyscallPrecompile` | 2,427 | 0.7% | **2** per syscall event |
+| `SyscallCore` | 2,427 | 0.7% | **2** per syscall event |
+| **total** | **369,781** | | |
+
+So `Global` height is `2 x (distinct addresses touched in the shard)` plus the
+memory-boundary rows. reth is large here for one reason and it is a property of
+the guest: it touches ~124k distinct addresses per shard (247,706 / 2) walking
+state tries and decoding RLP, where tendermint touches a small fraction of that.
+There is no redundancy to remove — the executor already folds every access to an
+address into ONE `MemoryLocalEvent` via an address-keyed `IntMap`
+(`crates/core/executor/src/executor.rs:177`), exactly as SP1 does
+(`sp1 crates/core/executor/src/tracing.rs:1483-1512`).
+
+### 2. SP1 comparison — REFUTES "SP1's global accounting is structurally cheaper"
+
+SP1 has the same chip, the same name, the same 2-per-touched-address rule
+(`sp1 crates/core/machine/src/memory/local.rs:105-157`), and the same
+`GlobalAccumulation` bus (`sp1 .../operations/global_accumulation.rs:67-80,131-147`
+vs Ziren `global/mod.rs:297-321`). On both cost axes Ziren is already **leaner**:
+
+| | Ziren | SP1 |
+|---|---|---|
+| `Global` row width | **100** cols | **241** cols (`sp1 .../artifacts/rv64im_costs.json`) |
+| LogUp interactions / row | **4** | **7** |
+| `MemoryLocal` entries / row | **4** | **1** (`sp1 .../memory/local.rs:24`) |
+
+SP1's row is 2.4x wider because it embeds a full Poseidon2 permutation (179 cols)
+for the curve lift; Ziren's `lift_x` needs only an offset search. So porting SP1
+here would make the chip **bigger**, not smaller. There is no parity lever.
+
+### 3. Ceiling — quantified BEFORE building
+
+At 369,781 rows x 100 cols = 37.0 M cells/shard out of ~339 M, `Global` is
+~10.9% of reth's trace area. The only internal width reduction available is
+swapping Ziren's `offset_bits[8]` + `y6_bit_decomp[30]` (38 cols) for SP1's
+byte-decomposition shape `offset` + `y6_byte_decomp[4]` (5 cols), worth 33 cols
+= 33% of the chip = **3.6% of reth trace area**. That is DEVICE work, and this
+project has now measured five times that removing device work does not move kHz
+(a -5% kernel wall gave -0.26%; a 4.56x GKR transition speedup gave +0.1%). It
+also changes the VK. **Predicted kHz gain 0-1%; not worth a VK move.** The
+`Global` chip was therefore dropped as a lever on evidence.
+
+### 4. What the instrumentation DID find: dead + serial host work in `generate_dependencies`
+
+`StarkMachine::generate_dependencies` runs inside the trace-gen workers'
+turn-taking critical section (`record_gen_sync.wait_for_turn` .. `advance_turn`,
+`crates/core/machine/src/utils/prove.rs:437,511-620`), so it is serial host time.
+Per-chip attribution on reth (281 records):
+
+| chip | wall ms/shard | thread-CPU ms/shard | status |
+|---|---|---|---|
+| `KeccakSponge` | **87.03** | **54.89** | **100% dead** |
+| `Cpu` | 36.92 | 17.86 | required (emits byte lookups) |
+| `StoreWord` / `LoadWord` | 14.69 / 11.81 | 4.46 / 4.46 | required |
+| `Global` | 9.80 | 8.65 | ~6 ms of this was the probe's own distinct-key `HashSet` |
+| `MemoryLocal` | 3.57 | 2.51 | required |
+
+`KeccakSponge` was the whole story. The `MachineAir::generate_dependencies`
+default (`crates/pcs/src/air/machine.rs:44-51`) is `self.generate_trace(input,
+output)` — it exists so a chip that records byte lookups into `output` gets them
+registered. `KeccakSpongeChip::generate_trace` takes `_: &mut Self::Record` and
+never writes to it, and its AIR issues no byte lookups, so the default was
+building a full KeccakSponge trace — a `p3_keccak` permutation per sponge block,
+24 rounds each — and dropping it. Keccak-heavy guests (reth) paid it; keccak-free
+ones (tendermint) never did, which is one concrete reason tendermint-tuned levers
+did not transfer to reth.
+
+Two smaller items in the same pass: `Global` was the ONLY chip still folding a
+flat `Vec<ByteLookupEvent>` in one event at a time through a serial
+`byte_lookups.entry(..)` — 369,781 hashes per shard collapsing to **29 distinct
+keys**, since the sole key is `U16Range(message[0])` and `message[0]` is a shard
+index; and `MemoryLocal` staged its events in a local `Vec` that was then copied
+into `output` and copied again by `append`.
+
+**Changed** (`crates/core/machine/src/syscall/precompiles/keccak_sponge/trace.rs`,
+`global/mod.rs`, `memory/local.rs`): override `KeccakSponge`'s
+`generate_dependencies` to a no-op, aggregate `Global`'s byte lookups per chunk
+into a counting `HashMap` + `add_byte_lookup_events_from_maps` (the shape all ~20
+other chips already use), and build `MemoryLocal`'s events straight into `output`
+with an up-front `reserve`. **-91.0 ms wall / -58.7 ms thread-CPU per shard of
+serial host time. Zero H2D bytes — this is pure host compute.**
+
+Byte-neutral by construction: the removed call's only effect was allocating and
+dropping a matrix; `byte_lookups` is a multiplicity counter and `bytes/trace.rs`
+scatter-ADDs it into a fixed 2^16-row table, so only the (event -> count) multiset
+matters, never order or batching; and `MemoryLocal` pushes identical events in
+identical order.
