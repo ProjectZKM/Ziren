@@ -1764,7 +1764,7 @@ impl<'a> Executor<'a> {
         // the predecessor's `next_next_pc`, captured BEFORE any syscall (the
         // halt) overrides `next_pc` to 0.  Equals `next_pc` for every
         // instruction except the halt.
-        let recv_next_pc = self.state.next_pc;
+        let mut recv_next_pc = self.state.next_pc;
 
         let mut a = 0;
         let mut b = 0;
@@ -1947,6 +1947,30 @@ impl<'a> Executor<'a> {
             self.rw_cpu(Register::V0, a, MemoryAccessPosition::A);
             next_pc = precompile_next_pc;
             next_next_pc = precompile_next_pc + 4;
+            // A syscall that REWRITES `next_pc` must rewrite the value the row
+            // RECEIVES on the `State` bus too: the Cpu AIR pins
+            // `state_recv_next_pc == next_pc` on every non-halt row
+            // (`cpu/air/mod.rs:209`); HALT is the only exemption, and its real
+            // received continuation is the pre-syscall `next_pc`.
+            //
+            // `EXIT_UNCONSTRAINED` is the case that matters.  It rolls
+            // `state.pc` and `state.clk` back to the ENTER instruction
+            // (`syscalls/unconstrained.rs:47-49`) and sets `ctx.next_pc =
+            // state.pc + 4`, so the emitted row impersonates the ENTER row
+            // (which was never emitted -- no events are recorded while
+            // `unconstrained`).  But `state.next_pc` is NOT rolled back, so the
+            // `recv_next_pc` captured before the syscall is still the EXIT
+            // instruction's own continuation.  The predecessor of the ENTER
+            // instruction SENT the ENTER's continuation, so the `State`
+            // multiset is left with exactly one unmatched (send, receive) pair
+            // per unconstrained block and the shard fails
+            // `LogUp-GKR: public-values balance`.
+            //
+            // For every other syscall `precompile_next_pc == pc + 4 ==` the
+            // entry `next_pc`, so this assignment is a no-op.
+            if syscall != SyscallCode::HALT {
+                recv_next_pc = next_pc;
+            }
             self.state.clk += precompile_cycles;
             exit_code = returned_exit_code;
             hi_or_prev_a = Some(prev_a);
