@@ -12,7 +12,11 @@ use zkm_pcs::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::{mem::take, str::FromStr, sync::Arc};
+use std::{
+    mem::take,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     events::{
@@ -24,6 +28,79 @@ use crate::{
     syscalls::{precompiles::keccak::sponge::GENERAL_BLOCK_SIZE_U32S, SyscallCode},
     MipsAirId, Program,
 };
+
+/// Carrier for the shard's global cumulative-sum digest.
+///
+/// SP1 parity.  In SP1 the digest is NEVER re-derived at commit time: the field
+/// `global_cumulative_sum: Arc<Mutex<SepticDigest<u32>>>`
+/// (`sp1` `crates/core/executor/src/record.rs:124`) is written by
+/// `GlobalChip::generate_trace` (`sp1` `crates/core/machine/src/global/mod.rs:208`)
+/// — which has already scanned every interaction point to fill the
+/// `GlobalAccumulation` column — and `public_values()`
+/// (`sp1` `crates/core/machine/src/../executor/src/record.rs:875`) is a pure
+/// read of it.
+///
+/// Ziren computed the same scan in `GlobalChip`'s trace generation and then
+/// THREW THE RESULT AWAY, so `public_values()` re-folded every
+/// `GlobalLookupEvent` from scratch — a `lift_x` (a square root in the degree-7
+/// extension) plus a curve addition per event, once per shard, on the shard
+/// prover's serial critical path with the GPU idle.  This cell restores the SP1
+/// shape: the trace generator publishes, `public_values()` reads.
+///
+/// Interior mutability is required because both trace generators take the
+/// record by shared reference (`generate_trace(&self, input: &Self::Record, ..)`).
+///
+/// Two safety properties:
+/// * `Clone` DEEP-copies (never shares the cell), so a cloned record can never
+///   observe a digest published against a different event vector.
+/// * The published value is tagged with the event count it was derived from;
+///   [`ExecutionRecord::public_values`] only trusts it when the count still
+///   matches `global_lookup_events.len()`, and otherwise recomputes.  Events are
+///   only ever appended in this codebase, so a length match is a sound guard.
+///
+/// A miss is a pure slowdown, never a wrong answer.
+#[derive(Debug, Default)]
+pub struct GlobalCumulativeSumCell(Mutex<Option<(usize, SepticDigest<u32>)>>);
+
+impl GlobalCumulativeSumCell {
+    /// Publish `digest`, derived from exactly `nb_events` global lookup events.
+    #[inline]
+    pub fn publish(&self, nb_events: usize, digest: SepticDigest<u32>) {
+        *self.0.lock().unwrap() = Some((nb_events, digest));
+    }
+
+    /// Read the digest iff it was derived from exactly `nb_events` events.
+    #[inline]
+    #[must_use]
+    pub fn get(&self, nb_events: usize) -> Option<SepticDigest<u32>> {
+        match *self.0.lock().unwrap() {
+            Some((n, digest)) if n == nb_events => Some(digest),
+            _ => None,
+        }
+    }
+
+    /// Drop any published digest.
+    #[inline]
+    pub fn clear(&self) {
+        *self.0.lock().unwrap() = None;
+    }
+}
+
+impl Clone for GlobalCumulativeSumCell {
+    fn clone(&self) -> Self {
+        Self(Mutex::new(*self.0.lock().unwrap()))
+    }
+}
+
+/// `ZIREN_PV_DIGEST_ASSERT=1` — cross-check every published global
+/// cumulative-sum digest against the from-scratch fold, and panic on any
+/// difference.  Validation only; read once.
+fn pv_digest_assert_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("ZIREN_PV_DIGEST_ASSERT").is_ok_and(|v| v == "1" || v == "true")
+    })
+}
 
 /// A record of the execution of a program.
 ///
@@ -88,6 +165,11 @@ pub struct ExecutionRecord {
     pub syscall_events: Vec<SyscallEvent>,
     /// A trace of all the global lookup events.
     pub global_lookup_events: Vec<GlobalLookupEvent>,
+    /// Carrier for the global cumulative-sum digest, published by whichever
+    /// `GlobalChip` trace generator ran for this shard.  See
+    /// [`GlobalCumulativeSumCell`].
+    #[serde(skip)]
+    pub global_cumulative_sum: GlobalCumulativeSumCell,
     /// The public values.
     pub public_values: PublicValues<u32, u32>,
     /// The shape of the proof.
@@ -492,6 +574,12 @@ impl MachineRecord for ExecutionRecord {
         self.cpu_local_memory_access.append(&mut other.cpu_local_memory_access);
         self.bump_memory_events.append(&mut other.bump_memory_events);
         self.global_lookup_events.append(&mut other.global_lookup_events);
+        // The event vector just changed: any previously published digest is
+        // stale.  (The length tag in `GlobalCumulativeSumCell` would already
+        // reject it; this makes the invalidation explicit at the mutation
+        // site.)
+        self.global_cumulative_sum.clear();
+        other.global_cumulative_sum.clear();
     }
 
     /// Retrieves the public values.  This method is needed for the `MachineRecord` trait, since
@@ -507,7 +595,32 @@ impl MachineRecord for ExecutionRecord {
         pv.global_count = self.global_lookup_events.len() as u32;
         pv.global_init_count = self.global_memory_initialize_events.len() as u32;
         pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
-        pv.global_cumulative_sum = compute_global_cumulative_sum(&self.global_lookup_events);
+        // SP1 parity (`sp1` `record.rs:875`): read the digest the `GlobalChip`
+        // trace generator already produced instead of re-folding every event.
+        // The fallback keeps every caller that has no `GlobalChip` trace (unit
+        // tests, `debug_constraints`, any future prover stage) correct.
+        pv.global_cumulative_sum = match self
+            .global_cumulative_sum
+            .get(self.global_lookup_events.len())
+        {
+            Some(digest) => {
+                // Validation gate: recompute the fold and demand BIT identity.
+                // Release builds run the perf harness, so `debug_assert!` would
+                // never fire there — this has to be a runtime check to be worth
+                // anything.  Removed once the equivalence is established.
+                if pv_digest_assert_enabled() {
+                    let folded = compute_global_cumulative_sum(&self.global_lookup_events);
+                    assert_eq!(
+                        digest, folded,
+                        "ZIREN_PV_DIGEST_ASSERT: published global cumulative-sum digest \
+                         disagrees with the fold over {} events",
+                        self.global_lookup_events.len(),
+                    );
+                }
+                digest
+            }
+            None => compute_global_cumulative_sum(&self.global_lookup_events),
+        };
         pv.to_vec()
     }
 }
