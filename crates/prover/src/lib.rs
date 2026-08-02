@@ -2406,76 +2406,69 @@ pub mod tests {
         }
     }
 
-    /// STEP-2 (SP1 MachineShape port): prove the COMPOSE recursion program
-    /// is **band-INDEPENDENT** — its bytes (and thus its VK) depend only on
-    /// (chip-set, arity), NOT on the per-child input heights / size-class
-    /// band.  If true, the `multi_cartesian_product` over `allowed_shapes`
-    /// bands in `RecursionShapeConfig::get_all_shape_combinations` is pure
-    /// over-enumeration for compose: the band a compose node lands in is a
-    /// deterministic function of (chip-set, arity), so bands can be collapsed
-    /// to one canonical key per (chip-set, arity).
+    /// STEP-2 (SP1 MachineShape port): the COMPOSE program-cache key
+    /// (`ZKMCompressBasefoldWitnessValues::shape_key`) must satisfy exactly one
+    /// invariant — **equal `shape_key` implies a byte-identical compose
+    /// program** — because `compose_program_basefold` hands back the cached
+    /// program on a key hit.  This test pins both directions of that
+    /// invariant.
     ///
-    /// MECHANISM (traced, this is what the test mechanizes):
-    ///   * The compose verifier (`verify_compress_basefold`) does FIXED work
-    ///     per chip — it iterates the child shard's `chip_openings` KEYS
-    ///     (the chip-SET) and WITNESSES each height from the opened `degree`
-    ///     (`chip_height_*_from_opened_degrees`).  Heights are scalar VALUES,
-    ///     never structural.
-    ///   * The dummy child shard proof sizes its logup-GKR / zerocheck round
-    ///     counts from `max_log_row_count` (a global constant), NOT the
-    ///     per-chip heights (`dummy/basefold_shard_proof.rs:120,217-223`); the
-    ///     height enters only as a fixed-`bit_len` `quotient[0]` degree
-    ///     bit-vector and `log_degree` scalar.
-    ///   * Therefore two same-(chip-set, arity) dummy witnesses at DIFFERENT
-    ///     bands have equal `shape_key()` AND build byte-identical compose
-    ///     programs.  `fix_shape` then snaps both to a band.
+    /// ## History: what the previous version of this test asserted, and why it
+    /// was wrong
     ///
-    /// MEASURED VERDICT (this test PINS it — the hypothesis was REFUTED):
-    /// **BANDS ARE LOAD-BEARING for compose; they CANNOT be collapsed.**
-    /// At the SAME chip-set + SAME arity, a low band (children at log_h=3)
-    /// and a high band (log_h=8) build compose programs of DIFFERENT byte
-    /// length (~74 MB vs ~112 MB) ⇒ DIFFERENT VK.
+    /// This test used to be named `compose_program_basefold_band_is_load_bearing`
+    /// and asserted that two same-(chip-set, arity) compose witnesses at
+    /// DIFFERENT per-child height bands build compose programs of DIFFERENT
+    /// byte length, while noting as a "latent cache hazard" that `shape_key`
+    /// COLLIDES across those bands.  Both halves have since been overtaken:
     ///
-    /// ROOT CAUSE (traced): the per-child band sets each child's trace AREA,
-    /// hence the child shard-proof's jagged-basefold bundle
-    /// `log_dense_size = L` (dummy/basefold_shard_proof.rs:431-449:
-    /// `pack_traces_jagged` on `2^log_h`-tall matrices → L grows with the
-    /// heights; `batch_evaluations` width = `2^(L - log_stacking)`, BaseFold
-    /// rounds / query-path lengths / reduction rounds all key off L).  The
-    /// compose program `read()`s that bundle, so a taller band ⇒ a longer
-    /// witness stream ⇒ more program instructions ⇒ a different VK.  The band
-    /// therefore encodes the children's `log_dense_size` (total trace area) —
-    /// a genuine structural dimension, not incidental padding.
+    ///   * The band half is now FALSE.  Two things made the compose program
+    ///     height-agnostic: (1) the recursion-layer AREA PIN
+    ///     (`RECURSION_LOG_TRACE_AREA` = 27) fixes every child bundle's
+    ///     `log_dense_size` for any child whose natural area is under the
+    ///     floor, so both bands commit at L=27 with identical stripe/round
+    ///     counts; and (2) `chip_height_bits_from_opened_degrees`
+    ///     (`compress_basefold.rs:383`) replaced the older
+    ///     `chip_height_bits_from_log_heights`, so per-chip heights are DERIVED
+    ///     from witnessed values instead of BAKED as `builder.constant()`s.
+    ///     MEASURED at bands 3/8/12/16: one shape_key, one 173,774,597-byte
+    ///     program, byte-identical.  The old test's own escape-hatch message
+    ///     ("if the recursion became height-agnostic ... this test's premise is
+    ///     stale") is precisely what happened.
     ///
-    /// SECONDARY FINDING (latent cache hazard, also PINNED here): assertion
-    /// (a) below shows `shape_key()` is EQUAL across the two bands even though
-    /// the programs differ.  `shape_key` (compress_basefold.rs:1227) does NOT
-    /// hash the shard proof's `evaluation_proof` bundle lengths
-    /// (`log_dense_size` / `batch_evaluations.len()`), so two different-band
-    /// inputs COLLIDE in the program cache key.  The default
-    /// `compose_program_basefold` cache would return the wrong cached program
-    /// for a colliding band; only `ZIREN_VERIFY_PROGRAM_CACHE=1` catches it
-    /// (byte-equality audit).  Step-4 (height-agnostic recursion) is what
-    /// would actually let bands collapse — until then, shape_key SHOULD be
-    /// extended to cover the bundle's `log_dense_size` (see the TODO emitted
-    /// by this test).
+    ///   * The "latent hazard" half named the wrong axis.  The collision it
+    ///     observed across bands is BENIGN — same key, same program, which is
+    ///     the invariant holding, not breaking.  The REAL hazard is on the
+    ///     `log_dense_size` axis itself, and it is reachable because the area
+    ///     pin is a FLOOR (`max(natural, 27)`), not a clamp: a recursion child
+    ///     whose NATURAL jagged area exceeds 2^27 carries L > 27.  Using the
+    ///     compress machine's real chip widths and the per-chip natural maxima
+    ///     recorded in `RecursionShapeConfig::allowed_shapes`, the
+    ///     normalize-sized band lands at natural L=27 (pin binds) but the
+    ///     soundness compose band used by tendermint and goat lands at natural
+    ///     **L=29**, and the FIX-off maxima at **L=31**.  So real compose
+    ///     children genuinely span several L, and before the fix L=27/28/29 all
+    ///     produced the SAME `shape_key` while building 173.8 MB / 178.0 MB /
+    ///     185.3 MB programs.
     ///
-    /// The two inputs use the SAME recursion chip-set + SAME arity (4) but a
-    /// "low band" (log_h=3) vs "high band" (log_h=8).
+    /// The old test could never have caught this: it never ran.  It has been
+    /// uncompilable since the area pin added the `recursion_area_pin` parameter
+    /// to `dummy_basefold_vk_and_shard_proof` without updating the call site at
+    /// `tests::dummy_core_vk_chip_information_is_faithful`, and separately since
+    /// `deabd433` left a double-comma syntax error in the `MemoryInstrs` split.
     #[test]
     #[serial]
-    fn compose_program_basefold_band_is_load_bearing() {
-        use zkm_recursion_circuit::machine::{
-            ZKMCompressBasefoldWitnessValues, ZKMCompressShape, ZKMCompressWithVkeyShape,
-        };
+    fn compose_program_cache_key_implies_identical_program() {
         use zkm_pcs::air::MachineAir;
         use zkm_pcs::shape::OrderedShape;
+        use zkm_recursion_circuit::machine::{
+            ZKMCompressBasefoldWitnessValues, ZKMCompressShape, ZKMCompressWithVkeyShape,
+            ZKMMerkleProofWitnessValues,
+        };
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
         let compress_machine = prover.compress_prover.machine();
 
-        // Same recursion chip-set for both bands (the production compose
-        // children are recursion proofs over this fixed 7-chip machine).
         let chip_names: Vec<String> = compress_machine
             .chips()
             .iter()
@@ -2483,11 +2476,14 @@ pub mod tests {
             .collect();
 
         let arity = 4usize;
-        let merkle_tree_height = VK_MERKLE_TREE_HEIGHT;
+        let prog_bytes = |w: &ZKMCompressBasefoldWitnessValues<InnerSC>| -> Vec<u8> {
+            bincode::serialize(&*prover.compose_program_basefold(w))
+                .expect("serialize compose program")
+        };
 
-        // Build a Compress shape with `arity` children, every child chip at
-        // a uniform `log_h`.  Distinct `log_h` => distinct size-class band
-        // (a different `allowed_shapes` cartesian-product cell).
+        // ── (a) SAFE COLLISION: different per-child height bands ───────────
+        // Both bands sit under the area-pin floor, so both children commit at
+        // L=27.  Equal key AND equal program bytes — the invariant holding.
         let shape_at_band = |log_h: usize| -> ZKMCompressWithVkeyShape {
             let proof_shape = || {
                 OrderedShape::from_log2_heights(
@@ -2499,69 +2495,101 @@ pub mod tests {
             };
             let compress_shape =
                 ZKMCompressShape::from((0..arity).map(|_| proof_shape()).collect::<Vec<_>>());
-            ZKMCompressWithVkeyShape { compress_shape, merkle_tree_height }
+            ZKMCompressWithVkeyShape {
+                compress_shape,
+                merkle_tree_height: VK_MERKLE_TREE_HEIGHT,
+            }
         };
-
-        let shape_low = shape_at_band(3);
-        let shape_high = shape_at_band(8);
 
         let witness_low = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy::<
             CompressAir<KoalaBear>,
-        >(compress_machine, &shape_low);
+        >(compress_machine, &shape_at_band(3));
         let witness_high = ZKMCompressBasefoldWitnessValues::<InnerSC>::dummy::<
             CompressAir<KoalaBear>,
-        >(compress_machine, &shape_high);
+        >(compress_machine, &shape_at_band(8));
 
-        assert_eq!(witness_low.vks_and_proofs.len(), arity, "low-band witness arity");
-        assert_eq!(witness_high.vks_and_proofs.len(), arity, "high-band witness arity");
-
-        // (a) LATENT CACHE HAZARD: shape_key COLLIDES across bands even though
-        //     the programs differ — shape_key omits the bundle's log_dense_size.
         let sk_low = witness_low.shape_key();
         let sk_high = witness_high.shape_key();
         assert_eq!(
             sk_low, sk_high,
-            "[STEP-2] expected shape_key to COLLIDE across bands (it omits the \
-             bundle log_dense_size); if this now DIFFERS, shape_key was \
-             extended to cover the band — update this test",
+            "[STEP-2] expected shape_key to be band-INDEPENDENT (both bands sit \
+             under the RECURSION_LOG_TRACE_AREA floor, so both commit at L=27)",
         );
-        eprintln!(
-            "[STEP-2] shape_key collides across bands ({sk_low:#018x}) — \
-             program-cache hazard: extend shape_key to hash the shard \
-             proof's evaluation_proof bundle log_dense_size / \
-             batch_evaluations.len() (or rely on ZIREN_VERIFY_PROGRAM_CACHE=1)."
-        );
-
-        // (b) The PRODUCTION compose program (via `compose_program_basefold`,
-        //     the same path the vk_map uses, incl. fix_shape) has a DIFFERENT
-        //     byte length across bands ⇒ DIFFERENT VK ⇒ bands are load-bearing.
-        let prog_low = prover.compose_program_basefold(&witness_low);
-        let prog_high = prover.compose_program_basefold(&witness_high);
-
-        let len_low =
-            bincode::serialize(&*prog_low).expect("serialize low-band compose program").len();
-        let len_high =
-            bincode::serialize(&*prog_high).expect("serialize high-band compose program").len();
-
-        assert_ne!(
-            len_low, len_high,
-            "[STEP-2] compose program byte-length is EQUAL across bands \
-             ({len_low}) — if the recursion became height-agnostic, bands can \
-             now be collapsed; revisit step-4 (this test's premise is stale)",
+        let bytes_low = prog_bytes(&witness_low);
+        let bytes_high = prog_bytes(&witness_high);
+        assert_eq!(
+            bytes_low.len(),
+            bytes_high.len(),
+            "[STEP-2] CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) but \
+             different compose program LENGTH across bands — the compose \
+             program stopped being height-agnostic; extend shape_key to cover \
+             whichever field diverged",
         );
         assert!(
-            len_high > len_low,
-            "[STEP-2] expected the TALLER band to build a LARGER program \
-             (more jagged bundle witness reads); got low={len_low} high={len_high}",
+            bytes_low == bytes_high,
+            "[STEP-2] CACHE-KEY UNSOUND: equal shape_key ({sk_low:#018x}) and \
+             equal length but different compose program BYTES across bands",
         );
 
-        eprintln!(
-            "[STEP-2] PASS — bands ARE LOAD-BEARING for compose: low(h=3) \
-             builds a {len_low}-byte program, high(h=8) builds {len_high} bytes \
-             (Δ={} bytes) at the SAME chip-set/arity={arity}. The band encodes \
-             the children's log_dense_size (jagged bundle size). Bands CANNOT \
-             be collapsed without making the recursion height-agnostic (step-4).",
-            len_high - len_low,
+        // ── (b) THE REGRESSION: children whose bundle L differs ────────────
+        // `ZKMCompressBasefoldWitnessValues::dummy` hardcodes the production
+        // pin, so build the witness directly with an explicit area pin — which
+        // is exactly what a real child with natural area > 2^27 produces.
+        let proof_shape = OrderedShape::from_log2_heights(
+            &chip_names
+                .iter()
+                .map(|n: &String| (n.clone(), 8usize))
+                .collect::<Vec<(String, usize)>>(),
+        );
+        let at_pin = |pin: usize| -> ZKMCompressBasefoldWitnessValues<InnerSC> {
+            let vks_and_proofs: Vec<_> = (0..arity)
+                .map(|_| {
+                    zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
+                        CompressAir<KoalaBear>,
+                    >(compress_machine, &proof_shape, Some(pin))
+                })
+                .collect();
+            let vk_merkle_data =
+                ZKMMerkleProofWitnessValues::dummy(vks_and_proofs.len(), VK_MERKLE_TREE_HEIGHT);
+            ZKMCompressBasefoldWitnessValues {
+                vks_and_proofs,
+                vk_merkle_data,
+                is_complete: false,
+            }
+        };
+
+        let mut seen: std::collections::BTreeMap<u64, (usize, Vec<u8>)> =
+            std::collections::BTreeMap::new();
+        for pin in [
+            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA,
+            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA + 1,
+            zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA + 2,
+        ] {
+            let w = at_pin(pin);
+            let sk = w.shape_key();
+            let bytes = prog_bytes(&w);
+            if let Some((prev_pin, prev_bytes)) = seen.get(&sk) {
+                assert!(
+                    *prev_bytes == bytes,
+                    "[STEP-2] CACHE-KEY UNSOUND: bundle L={prev_pin} and L={pin} \
+                     share shape_key {sk:#018x} but build DIFFERENT compose \
+                     programs ({} vs {} bytes).  `compose_program_basefold` \
+                     would return the wrong cached program for one of them. \
+                     shape_key must hash the evaluation_proof bundle's \
+                     log_dense_size and the lengths it drives.",
+                    prev_bytes.len(),
+                    bytes.len(),
+                );
+            }
+            seen.insert(sk, (pin, bytes));
+        }
+        assert_eq!(
+            seen.len(),
+            3,
+            "[STEP-2] expected three DISTINCT shape_keys for bundle L=27/28/29 \
+             (each builds a differently sized compose program); got {} — the \
+             key no longer separates log_dense_size",
+            seen.len(),
         );
     }
 
@@ -2628,7 +2656,7 @@ pub mod tests {
         let (dummy_vk, _proof) =
             zkm_recursion_circuit::stark::dummy_basefold_vk_and_shard_proof::<
                 MipsAir<KoalaBear>,
-            >(core_machine, &shape);
+            >(core_machine, &shape, None);
         let dummy_prep: BTreeSet<String> =
             dummy_vk.chip_information.iter().map(|(n, _, _)| n.clone()).collect();
         assert_eq!(
@@ -5777,7 +5805,7 @@ pub mod tests {
         // memory cluster = fib's 22 chips
         let cluster: Vec<&str> = vec![
             "AddSub", "Bitwise", "Branch", "Byte", "CloClz", "Cpu", "DivRem", "Global",
-            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "LoadNarrow",, "LoadWord",, "StoreNarrow",, "StoreWord",, "MemoryUnaligned",
+            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "LoadNarrow", "LoadWord", "StoreNarrow", "StoreWord", "MemoryUnaligned",
             "MemoryLocal", "MiscInstrs", "MovCond", "Mul", "Program", "ShiftLeft",
             "ShiftRight", "SyscallCore", "SyscallInstrs",
         ];
