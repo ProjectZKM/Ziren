@@ -2290,6 +2290,12 @@ job/result fields would make the encode a single memcpy).
   mirrors (host `pcs/src/shard_level/prover.rs`, ziren-gpu `shard-prover/src/shard_helpers.rs`),
   so all four move together. The default is changed 23 -> 0; the env var stays as an
   operator override.
+- **Where the behaviour actually lives (measured, not assumed).** The host
+  `zkm_pcs::shard_level::prover::compute_skip_device_d2h` has NO caller in either repo;
+  the live D2H-skip decision is ziren-gpu's `shard_helpers::compute_skip_device_d2h`
+  (`shard-prover/src/lib.rs:3232`). The host edit is therefore mirror-consistency only —
+  the functional change is entirely in ziren-gpu (`min_log_dense_size_for_gpu`, which also
+  gates the commit-side dense_q carrier in `commit_dense.rs`, plus the shard-prover mirror).
 - **Why the old default was stale.** It came from an early tendermint observation
   (`log_dense_size=21`, +21% wall with GPU dispatch). Re-measured at canonical, tendermint
   at `SHARD_SIZE=2^22+1` no longer produces ANY sub-23 shard, so the workload the default was

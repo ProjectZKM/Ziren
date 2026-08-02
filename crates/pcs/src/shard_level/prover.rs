@@ -1146,6 +1146,14 @@ pub fn observe_zerocheck_to_jagged_bridge<SC>(
 /// `log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, default 0), in which
 /// case device-resident chips skip the eager D2H (the device commit hook
 /// packs them D2D).  Pure computation — no transcript.
+///
+/// NOTE (measured): this copy currently has NO caller in either repo — the
+/// live decision is ziren-gpu's `zkm_gpu_shard_prover::shard_helpers::
+/// compute_skip_device_d2h` (called from `shard-prover/src/lib.rs`), which
+/// carries the same env read and default.  Keep the two in sync: the host
+/// `CpuProver` driver would take this one if it ever grew a device provider,
+/// and a silent divergence in the threshold would put the commit-side dense_q
+/// carrier and the reduce-side gate on opposite sides of the decision.
 pub fn compute_skip_device_d2h<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
