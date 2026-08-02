@@ -8,7 +8,7 @@ use itertools::Itertools;
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use serde::{Deserialize, Serialize};
 
-use super::{Challenge, Com, OpeningProof, StarkGenericConfig, Val};
+use super::{Challenge, Com, StarkGenericConfig, Val};
 use crate::septic_digest::SepticDigest;
 use crate::shape::OrderedShape;
 
@@ -31,11 +31,10 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     /// (Option B single-main-commit flow), this is a *placeholder*
     /// FRI prover-data produced by committing to a single 1×1 dummy
     /// trace (microseconds-cost vs the multi-second real main-trace
-    /// commit).  The basefold `open()` path drives a placeholder 1×1
-    /// `pcs.open` against it to populate `ShardProof.opening_proof`
-    /// with matching dummy bytes; the verifier short-circuits before
-    /// `pcs.verify`.  In the non-BaseFold FRI path this is the real
-    /// main-trace FRI prover data.
+    /// commit) whose only surviving product is `main_commit`.  Nothing
+    /// opens against it: the shard proof carries no FRI opening, and the
+    /// verifier reads its opening evidence exclusively from
+    /// `ShardProof::basefold_shard_proof`.
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
@@ -135,16 +134,6 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    /// FRI opening proof.  In BaseFold mode (Option B
-    /// single-main-commit flow — default for KoalaBear), the prover
-    /// emits a *placeholder* FRI proof produced by opening a 1×1
-    /// dummy trace (microseconds-cost vs the multi-second real
-    /// main-trace open).  The verifier short-circuits before
-    /// `pcs.verify` (see verifier.rs `basefold_shard_proof.is_some()`
-    /// branch) so the placeholder bytes are never consumed.  In the
-    /// non-BaseFold FRI/STARK path (BN254 wrap / OuterSC) this is a
-    /// real proof.
-    pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
     /// Shard-level BaseFold proof (always-on for KoalaBear MIPS shards).

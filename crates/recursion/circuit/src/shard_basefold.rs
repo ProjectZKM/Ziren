@@ -120,9 +120,9 @@ pub struct BasefoldShardProof<F, EF> {
 
 /// In-circuit shard proof variable — the BaseFold-pipeline 5-field
 /// shape (replaces the legacy
-/// [`crate::stark::ShardProofVariable`]'s 5-field "commitment +
-/// opened_values + opening_proof + chip_ordering + public_values"
-/// shape, which is hard-wired to the 4-batch FRI opening).
+/// [`crate::stark::ShardProofVariable`]'s "commitment + opened_values +
+/// chip_ordering + public_values" shape, which was hard-wired to the
+/// 4-batch FRI opening).
 ///
 /// Each field has a documented role in the four-phase verification
 /// flow:
