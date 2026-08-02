@@ -1959,3 +1959,202 @@ default ON and takes every layer, and those sites are only reached when
 `wire_effective_gpu_count() > 1`.  They remain real levers for the
 multi-GPU configuration and are recorded here so the next sweep does not
 re-derive them.
+
+## Trace-gen + commit marshalling: the window is 88% BLOCKED, not computing (ziren-gpu)
+
+The `MachineProver::commit` window — per-chip trace generation, the H2D
+marshalling around it, and `public_values` — was the largest remaining
+host block on the serial core critical path.  This is its sub-instrumented
+anatomy, the three levers it produced, and the four premises it refuted.
+
+Tooling: `ZIREN_GPU_HOST_PROF` extended with per-chip attribution and,
+decisively, a **`CLOCK_THREAD_CPUTIME_ID` reading paired with every wall
+clock**, so every span splits into genuine host COMPUTE (cpu ns) and
+WAITING (wall − cpu).  Wall time alone cannot tell a lever from a thread
+parked in the CUDA driver.
+
+### The (a)/(b)/(c)/(d) split — measured, tendermint core, 33 shards, 1 GPU
+
+`commit` wall **122–157 ms/shard** across three sweeps (box-load spread),
+of which the serial thread's own CPU is **17.8 ms**:
+
+| span | wall ms/sh | cpu ms/sh | busy |
+|---|---|---|---|
+| `commit` total | 156.8 | 17.8 | 11% |
+| … `generate trace accel` fan-out (wall) | 133.0 | 0.02 | ~0 |
+| … `public_values` (serial, after the fan-out) | 22.3 | 16.5 | 74% |
+| … dummy FRI commit | 1.0 | 1.0 | 100% |
+| … job partition + `num_rows_device` + sort + domains | 0.3 | 0.1 | — |
+| SUM over all 24 chips inside the fan-out (parallel) | **1142.9** | **89.0** | **7.8%** |
+
+- **(a) genuine host compute — 89.0 ms/shard aggregate inside the fan-out,
+  plus 17.8 ms on the serial thread.**  Inside a 133 ms window that is
+  ~0.7 core-equivalents.
+- **(b) allocation / page-fault — ~0 as it stood.**  `.alloc+memset` is
+  0.10 ms and the `CpuEventFfi` staging vector was already pooled.  A
+  residual ~10 ms/shard of first-touch cost surfaced only later, when the
+  pinned buffer removed it.
+- **(c) waiting on the CUDA driver / copy engine — 1053.9 ms/shard
+  aggregate, ≈7.9 threads permanently blocked.**  This is the whole story
+  of the window.
+- **(d) waiting on the GPU — near zero**, apart from `ByteChip`'s explicit
+  `stream.sync_event()` (already recorded above as not recoverable).
+
+The per-chip table shows the shared-resource signature directly: every
+chip lands on the same 55–124 ms plateau regardless of its own size, at
+busy fractions from **0.4% (`Jump`) to 46% (`Cpu`)**.
+
+### REFUTED: CPU oversubscription by the phase-2 producers
+
+The natural reading of "88% blocked" is that the 8 phase-2 trace-gen
+workers starve the prove thread.  A `/proc/stat` sampler alongside the run
+says otherwise: the box sits at **6.6% mean, 38.5% peak of 124 cores**.
+Nothing is CPU-starved; the threads are blocked inside the driver.
+
+### REFUTED: `CpuChip` sets the floor of the fan-out
+
+`CpuChip` is by far the biggest chip — 348.8 MB/shard of H2D, 45% of all
+process H2D, 107–129 ms/shard, the top of the plateau — and it is still
+**not** the floor.  With `Cpu` fixed the fan-out wall fell only
+133.0 → 86.8 ms, because `Byte` (78.1), `StoreWord` (68.5),
+`LoadWord` (67.7) and ten more sit on the same plateau.  Rank chips by
+their *blocking*, not by their bytes.
+
+### Lever 1 — `public_values` computed concurrently with the fan-out
+
+`ZIREN_GPU_COMMIT_PV_OVERLAP`, `shard-prover/src/lib.rs`.
+
+`shard.public_values()` is a pure function of the record — it reads
+nothing `commit` produces — yet ran at the very END of `commit`, adding
+**22.3 ms/shard of wall, 16.5 ms of it genuine CPU** (the septic-curve
+global-cumulative-sum fold) to the serial path with the GPU already
+dispatched.  It is now spawned into a `rayon::in_place_scope` wrapping the
+fan-out, which is 88% blocked and leaves the box at ~7%, so the fold runs
+there for free; `in_place_scope` joins before the value is read.
+Byte-neutral by construction — same input, same already order-independent
+parallel reduce, only the wall-clock position moves.  `commit`'s own CPU
+falls **17.8 → 0.4 ms/shard**.
+
+### Lever 2 — produce `CpuEventFfi` directly into a persistent PINNED buffer
+
+`ZIREN_GPU_CPU_TG_PINNED`, `core/src/tracegen/core.rs`.
+
+The SP1 shape (`sp1-gpu/crates/jagged_tracegen/src/lib.rs:767-774` writes
+each chip's trace straight into a pinned buffer at a precomputed offset).
+Pinned staging as a *separate hop* stays refuted — it merely adds the
+memcpy back; **producing in place is the shape that wins**.
+
+| | before | after |
+|---|---|---|
+| `.ev_h2d` wall / cpu | 44.1 / 13.1 | **0.11 / 0.10** |
+| `.ev_convert` wall / cpu | 62.4 / 26.3 | **29.7 / 16.8** |
+| `CpuChip` total wall | 125.6 | 96.8 |
+
+**Two traps, each worth ~50 ms/shard, both found only by sub-instrumenting
+the new code:**
+
+1. **Page-lock ONCE.**  Sizing the buffer to the current shard (`n + n/8`)
+   let a later, larger shard force a fresh `cudaHostRegister`.
+   Page-locking ~350 MB device-synchronises and cost more than the copy it
+   replaced: the first cut made the fan-out wall *worse*, 97.7 → 123.2 ms.
+   Fixed by allocating once at the `SHARD_SIZE` upper bound.
+2. **Never create a CUDA event per shard.**  An async copy means the
+   buffer cannot be rewritten until the copy lands, so the first cut
+   recorded a fresh event each shard.  That `cudaEventCreate` /
+   `cudaEventDestroy` pair measured **47.4 ms/shard of pure blocking with
+   ZERO CPU** — both take the CUDA context lock, held almost continuously
+   during the fan-out by ~24 concurrent chip uploads.  One persistent
+   per-slot event, simply re-recorded, drops `acquire` from **49.7 → 3.2
+   ms/shard**; the pool mutex itself measures 0.001 ms.
+
+### Lever 3 — device program table replaces the per-cycle `instrs` array
+
+`ZIREN_GPU_CPU_TG_PROG_TABLE`, `core/src/tracegen/core.rs` plus
+`core_cpu_generate_trace_prog` in `cuda/tracegen/core.cuh`.
+
+`CpuChip` uploaded a PER-CYCLE instruction array built as
+`cpu_events.par_iter().map(|e| program.fetch(e.pc).into()).collect()`.
+`Program::fetch` is literally `instructions[(pc − pc_base) / 4]`
+(`crates/core/executor/src/program.rs:183`), so that array is a pure
+gather out of a per-PROCESS constant: 2.29 M entries and **54.9 MB of
+pageable H2D rebuilt every shard**, against a 231 K-entry program table.
+The kernel now does the same index arithmetic, `(pc − pc_base) >> 2` —
+bit-identical by construction.  `.instrs_build` + `.instrs_h2d`:
+**12.4 + 2.6 → 8.4 + 0 ms/shard**, and 54.9 MB/shard off the shared
+pageable path.
+
+**Trap:** the obvious cache key does not work.  `trace_checkpoint` takes
+`Program` **by value**, so every record carries a distinct `Arc<Program>`
+with a distinct instruction `Vec`; an `Arc::as_ptr` key misses 100% of the
+time and the first cut rebuilt the table every shard (15.8 ms/shard —
+worse than the code it replaced).  The cache is now validated by a full
+**parallel element-wise comparison** of the instruction table, a proof of
+identity rather than a pointer coincidence, at ~4 ms/shard.
+
+### Effect
+
+Same run conditions throughout (tendermint core, 33 shards, GPU 3,
+sequential, `ZIREN_GPU_HOST_PROF=1`):
+
+| arm | `commit` wall ms/sh | `commit` cpu ms/sh | fan-out wall ms/sh |
+|---|---|---|---|
+| all three OFF | 156.8 | 17.8 | 133.0 |
+| pinned only | 127.4 | 17.6 | 102.1 |
+| program table only | 141.9 | 17.0 | 119.0 |
+| **all three ON** | **88.1** | **0.4** | **86.8** |
+
+On the final build, alternating OFF/ON pairs (2 each) so the two arms see
+the same box load:
+
+| arm | `commit` wall ms/sh | `commit` cpu ms/sh |
+|---|---|---|
+| OFF | 144.1, 149.3 (mean **146.7**) | 18.1, 17.2 (mean **17.7**) |
+| ON | 68.6, 81.3 (mean **74.9**) | 0.67, 1.06 (mean **0.87**) |
+
+**−71.8 ms/shard of host wall and −16.8 ms/shard of genuine serial-thread
+CPU**, i.e. 2.4 s off a ~24 s tendermint core prove.
+
+`CpuChip`'s own total falls **125.6 → 46.3 ms/shard** and it leaves the
+top thirteen chips entirely; the fan-out's pole becomes `Byte`.
+
+Pinned and program-table are **synergistic, not additive**: with pinning
+alone the surviving pageable `instrs` copy blocks far harder than before
+(`.instrs_h2d` 2.6 → 33.8 ms wall) because it now queues against a 310 MB
+pinned DMA.  Land them together.
+
+### kHz
+
+Every measurement includes verify; no `--skip-verify`.  Box noise here is
+±6–13% run to run — the same order as the effect — so single runs are not
+usable and none are quoted.
+
+- **Paired, 2 GPUs, slots swapped every rep, 4 reps** (all three ON vs all
+  OFF): +2.9%, +1.7%, +5.3%, +5.1% — **4/4 positive, mean +3.7%**.
+- **ABBA blocks (ctl,trt,trt,ctl) ×3, 12 runs each, solo GPU**, isolating
+  the gates: `public_values` overlap **+1.2%**, pinned + program-table
+  **+2.8%**.  Their sum, +4.0%, agrees with the paired combined result.
+- **Alternating pairs on the final build, 2 reps** (all three ON vs OFF,
+  `ZIREN_GPU_HOST_PROF=1` on both arms): 3141 → 3223 and 3116 → 3179,
+  **2/2 positive, +2.3%**.
+- **Design negative recorded.**  A plain alternating A/B
+  (base,all,base,all) on one GPU over 12 runs was *indistinguishable*
+  (−1.0%, spread 2921–3310 kHz = 13%).  Alternating A/B is too weak at
+  this effect size; use ABBA blocks or swapped pairs.
+
+### Byte gates and determinism
+
+All four goldens reproduce exactly with all three gates ON *and* OFF, on
+the instrumented build and again on the final build: fib
+`7c780d9f59d728b5`, goat `8aa10f1942b71b62`, tendermint
+`7190969b1feae13a`, fib compress `c80d70d835a42aee`, every one
+`VERIFY OK`.  `RAYON_NUM_THREADS=8` determinism gate, 3 runs per program
+with all gates ON: one distinct sha per program, each equal to its golden.
+
+### Follow-up this exposes
+
+The fan-out is still a 55–78 ms plateau of ~13 chips blocked in the driver
+at 0.5–25% busy.  `Cpu` is fixed; `Byte`, `StoreWord`, `LoadWord`,
+`AddSub` and the rest still upload their event arrays pageable.  The same
+produce-into-pinned treatment per event type is the obvious next step, and
+the two traps above — register once, never create an event per shard — are
+the whole of the difficulty.
