@@ -749,7 +749,25 @@ where
             let _span = p2_prover_span.enter();
             let mut shard_proofs = Vec::new();
             tracing::debug_span!("phase 2 prover").in_scope(|| {
-                for (records, traces) in p2_records_and_traces_rx.into_iter() {
+                // ── CORE_PROVE UNSPANNED ATTRIBUTION ──────────────────────
+                // The largest un-attributed block of prover idle is time inside
+                // `CORE_PROVE` with no deeper span open.  It is either (a) this
+                // thread BLOCKED waiting for phase-2 trace generation to hand
+                // over the next batch, or (b) unspanned host work on the prove
+                // thread.  The `for .. in rx.into_iter()` above hid the
+                // difference: the blocking `recv()` happens inside the
+                // iterator's `next()`, outside every span.  Time it explicitly
+                // so the two are separable.  Reported by `ZIREN_RECV_PROF=1`.
+                let mut recv_blocked_ns: u64 = 0u64;
+                let mut recv_batches: u64 = 0u64;
+                let mut rx_iter = p2_records_and_traces_rx.into_iter();
+                while let Some((records, traces)) = {
+                    let t_recv = std::time::Instant::now();
+                    let next = rx_iter.next();
+                    recv_blocked_ns += t_recv.elapsed().as_nanos() as u64;
+                    recv_batches += u64::from(next.is_some());
+                    next
+                } {
                     tracing::debug_span!("batch").in_scope(|| {
                         let span = tracing::Span::current().clone();
                         shard_proofs.par_extend(
@@ -848,6 +866,14 @@ where
                             ),
                         );
                     });
+                }
+                if std::env::var("ZIREN_RECV_PROF").as_deref() == Ok("1") {
+                    eprintln!(
+                        "[RECV_PROF] phase2_prover blocked_on_records_total_ms={:.1} \
+                         batches={recv_batches} per_batch_ms={:.2}",
+                        recv_blocked_ns as f64 / 1e6,
+                        recv_blocked_ns as f64 / 1e6 / (recv_batches.max(1) as f64),
+                    );
                 }
             });
             shard_proofs
