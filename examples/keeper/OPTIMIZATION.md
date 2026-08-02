@@ -236,13 +236,37 @@ delta, how it was validated, and the enable/kill-switch.
   saving exceeds the fold's own thread-CPU because the fold also contended with
   the trace-gen fan-out: `.accel_wall` drops with it (95→80 ms/shard in round 3).
 
-- **Measured kHz: no resolvable change on reth.** 1080/1087, 1112/1078,
-  1100/1087, 1121/1116 (A/B, arms swapped each round) — mean A 1103, B 1092.
-  Round-to-round spread is ~3%, and the predicted gain from −17.3 ms/shard
-  against a 1323 ms/shard loop is ~1.3%, i.e. **below this harness's noise
-  floor**; four paired rounds cannot resolve it. Reported as measured, not as a
-  win. The host milliseconds are removed and reproducible; their conversion is
-  not demonstrated.
+- **Measured kHz — and a harness artifact worth more than the result.** Seven
+  paired reth rounds, arms swapped between GPU slots every round (A = baseline,
+  B = device digest, kHz):
+
+  | round | launched first | A | B | B/A |
+  |---|---|---|---|---|
+  | 1 | A | 1080 | 1087 | +0.65% |
+  | 2 | A | 1112 | 1078 | −3.06% |
+  | 3 | A | 1100 | 1087 | −1.18% |
+  | 4 | A | 1121 | 1116 | −0.45% |
+  | 5 | A | 1158 | 1141 | −1.47% |
+  | 6 | **B** | 1095 | 1103 | **+0.73%** |
+  | 7 | **B** | 1105 | 1165 | **+5.44%** |
+
+  Rounds 1-5 launch A five seconds before B. That is not cosmetic: two
+  concurrent reth runs contend (reth moves 530 GiB of H2D, so a pair contends
+  for host memory bandwidth, not just cores), and whichever starts first also
+  finishes first and gets an **uncontended tail**. Reversing the order flips the
+  sign. Order-balanced point estimate: mean(A-first) −1.10%, mean(B-first)
+  +3.08% → **≈ +1.0%**, which is what −17.3 ms/shard against a 1323 ms/shard
+  dispatch loop predicts (+1.3%). Not statistically tight at n=7, but the sign
+  and magnitude agree with the mechanism.
+
+  **Rule for this harness: alternate which arm launches first, or launch
+  simultaneously.** A fixed launch order injects a several-percent bias that
+  silently swamps a 1% lever — it is what made the first five rounds read as a
+  small regression.
+
+- **Tendermint control (launched simultaneously, so unbiased).** Golden
+  `7190969b1feae13a…` on every run. Round 1 A 3102 / B 3206, round 2 A 3068 /
+  B 3135 — **B +3.4% and +2.2%, mean +2.8%**, consistent sign across the swap.
 
 - **Premise correction.** This site was handed over as "150.8 ms/shard
   (177.8 in the ranked idle list) at ~100% GPU-idle, reth's #1 host lever". It
@@ -250,14 +274,17 @@ delta, how it was validated, and the enable/kill-switch.
   ~2.3x smaller — because `ZIREN_GPU_COMMIT_PV_OVERLAP` already runs it
   concurrently with the fan-out, where it partially hides.
 
-- **Validated.** Byte-identical: fib `7c780d9f59d728b5…` (both arms), reth
-  `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2` — 281
-  shards, `VERIFY OK`, reproduced by BOTH arms and on both binaries built
-  during the work. `ZIREN_PV_DIGEST_ASSERT=1` cross-checks every published
-  digest against the from-scratch fold and panics on any difference: it ran
-  clean across all 281 reth shards, i.e. **bit identity, not just a matching
-  proof hash**. (A runtime check, not `debug_assert!`, because the perf harness
-  builds release.)
+- **Validated.** Byte-identical on both arms and on the final gate-removed
+  build: fib core `7c780d9f59d728b5…`, fib compress `7e3c5d753cf25e55…`,
+  tendermint `7190969b1feae13a…` (33 shards), reth
+  `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2` (281
+  shards) — every run `VERIFY OK`, including `COMPRESS VERIFY OK` on fib.
+  `ZIREN_PV_DIGEST_ASSERT=1` cross-checked every published digest against the
+  from-scratch fold and panicked on any difference: it ran clean across all 281
+  reth shards, i.e. **bit identity, not merely a matching proof hash**. (A
+  runtime check, not `debug_assert!`, because the perf harness builds release.)
+  RAYON>1 determinism (`RAYON_NUM_THREADS=8`): tendermint x2 and fib all
+  reproduced their goldens exactly.
 
 - **Switch.** `ZIREN_GPU_PV_DEVICE_DIGEST` during the A/B; removed afterwards,
   path unconditional.
@@ -282,7 +309,9 @@ delta, how it was validated, and the enable/kill-switch.
 
   **Zero.** The producer is never the limiter on reth; trace generation always
   has the next batch ready. All 1323 ms/shard of the dispatch loop is inside
-  the per-shard prove body, not waiting for it.
+  the per-shard prove body, not waiting for it.  With `commit_total` at 98 ms of
+  that 1323 ms, **~92.6% of reth's per-shard prove path is inside `open()`** —
+  that is where any further reth work has to go.
 
 - **Consequences.** Sweeping `TRACE_GEN_WORKERS` /
   `RECORDS_AND_TRACES_CHANNEL_CAPACITY` cannot help (the harness already sets
