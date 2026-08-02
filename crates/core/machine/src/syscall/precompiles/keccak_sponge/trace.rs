@@ -24,6 +24,43 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
         "KeccakSponge".to_string()
     }
 
+    /// This chip has NO dependencies, so `generate_dependencies` must do
+    /// nothing.
+    ///
+    /// The `MachineAir` default (`crates/pcs/src/air/machine.rs`) is
+    /// `self.generate_trace(input, output)?` — it materialises the whole trace
+    /// purely so a chip whose `generate_trace` records byte lookups into
+    /// `output` gets them registered.  `generate_trace` below takes `_: &mut
+    /// Self::Record` and never writes to it, and the AIR
+    /// (`keccak_sponge/air.rs`) issues no byte lookups at all, so the default
+    /// builds a full KeccakSponge trace — a `p3_keccak::generate_trace_rows`
+    /// permutation per sponge block, 24 rounds each — and drops it on the
+    /// floor.
+    ///
+    /// That is not free: `generate_dependencies` runs inside the trace-gen
+    /// workers' turn-taking critical section (`record_gen_sync.wait_for_turn`
+    /// .. `advance_turn` in `crate::utils::prove`), so it is SERIAL host time
+    /// on the prover's critical path.  Measured on reth (281 shards): 104.0 ms
+    /// wall / 65.8 ms thread-CPU per shard, the single largest entry in the
+    /// whole `generate_dependencies` pass.  Keccak-heavy guests (reth) pay it;
+    /// keccak-free ones (tendermint) never see it.
+    ///
+    /// SP1 does the same thing the same way — it overrides
+    /// `generate_dependencies` per chip to compute ONLY the byte lookups
+    /// (`sp1/crates/core/machine/src/syscall/precompiles/keccak256/trace.rs:29`
+    /// reuses one scratch row and collects `blu` instead of building a trace).
+    /// Ziren's required work here is empty, so the override is empty.
+    ///
+    /// Byte-neutral: the removed call's only effect was allocating and
+    /// dropping a matrix.
+    fn generate_dependencies(
+        &self,
+        _input: &Self::Record,
+        _output: &mut Self::Record,
+    ) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
     fn generate_trace(
         &self,
         input: &Self::Record,

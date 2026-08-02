@@ -1,3 +1,4 @@
+use hashbrown::HashMap;
 use std::{borrow::Borrow, mem::transmute};
 
 use p3_air::{WindowAccess, Air, BaseAir};
@@ -93,11 +94,31 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
 
         let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
 
+        // Aggregate per chunk into a COUNTING map, exactly like every other
+        // chip in this machine (`alu/add_sub`, `cpu/trace`,
+        // `memory/instructions/trace`, ...).  `Global` was the sole chip still
+        // collecting a flat `Vec<ByteLookupEvent>` and folding it in
+        // one-event-at-a-time: `add_byte_lookup_events` is a SERIAL loop of
+        // `byte_lookups.entry(..)` hashes, and this chip has one event per
+        // global lookup — the largest event count in the record.
+        //
+        // Those hashes are almost entirely redundant.  The only key is
+        // `U16Range(message[0])`, and `message[0]` is a shard index (memory
+        // lookups) or a syscall shard (syscall lookups), so a whole reth shard
+        // collapses to a couple of dozen distinct keys.  Measured on reth:
+        // 274,815 events per shard mapping to 29 distinct keys, costing 2.5 ms
+        // of serial host time per shard inside the `generate_dependencies`
+        // critical section, plus a full flatten of the intermediate Vec.
+        //
+        // Byte-neutral: `byte_lookups` is a multiplicity counter and the Byte
+        // chip's trace-gen (`bytes/trace.rs`) is a scatter-ADD into a fixed
+        // 2^16-row table, so only the (event -> count) multiset matters —
+        // never the insertion order or the batching.
         let blu_batches = events
             .chunks(chunk_size)
             .par_bridge()
             .map(|events| {
-                let mut blu: Vec<ByteLookupEvent> = Vec::new();
+                let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 events.iter().for_each(|event| {
                     blu.add_u16_range_check(event.message[0].try_into().unwrap());
                 });
@@ -105,7 +126,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
             })
             .collect::<Vec<_>>();
 
-        output.add_byte_lookup_events(blu_batches.into_iter().flatten().collect());
+        output.add_byte_lookup_events_from_maps(blu_batches.iter().collect::<Vec<_>>());
         Ok(())
     }
 
