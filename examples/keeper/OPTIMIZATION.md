@@ -1411,7 +1411,8 @@ busy (480 ms/shard idle).**  Excluding one-time prover setup the union figure is
 51.3%, which reconciles with the independently measured 52.6%.
 
 ### 1. Device grind for the per-shard placeholder FRI open
-`ZIREN_GPU_PH_GRIND_DEVICE` (ziren-gpu), default OFF.
+ziren-gpu `prover/src/core_multi_gpu.rs`; unconditional (the
+`ZIREN_GPU_PH_GRIND_DEVICE` kill switch was removed after validation).
 
 The per-shard placeholder `pcs.open` on the 1x1 dummy — commented in-tree as
 "(CPU, cheap)" — reaches `p3_fri::prove`, whose first post-commit step is
@@ -1431,7 +1432,8 @@ Effect (NVTX span, same binary, gate off vs on): `FRI prover`
 **40.72 -> 0.89 ms/shard**; the host-grind span disappears.
 
 ### 2. Truncate the eq-table build to the rows actually read
-`ZIREN_GPU_EQ_TRUNC` (host `crates/pcs`), default OFF.
+Host `crates/pcs/src/shard_level/logup_gkr_prover.rs`; unconditional (the
+`ZIREN_GPU_EQ_TRUNC` kill switch was removed after validation).
 
 `evaluate_trace_columns_at_point` sums only rows `[0, height)` but builds the
 eq-table over the whole `2^|eval_point|` cube.  For the full-point openings in
@@ -1481,8 +1483,8 @@ fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`, tendermint `7190969b1feae13a`.
   which definition is meant, and never divide nsys busy by an nsys wall.
 
 ### Follow-up found but NOT fixed: `ZIREN_GPU_ZC_VIEW_BY_NAME` is 77% dead
-The zerocheck view-by-name lever (ziren-gpu `55ff0fa`, default ON, still
-present) silently stopped covering the core path when core padding became the
+The zerocheck view-by-name lever (ziren-gpu `55ff0fa`, then default ON and
+since made unconditional) silently stopped covering the core path when core padding became the
 SP1-parity `next_multiple_of_32`.  `commit_dense_view_for_name` hard-declines
 unless `poly_size.is_power_of_two()`, which a multiple-of-32 height essentially
 never is, so the zerocheck `prepare` falls back to the legacy HOST upload.
@@ -1605,6 +1607,12 @@ fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`, tendermint `7190969b1feae13a`
 also gated for determinism at `RAYON_NUM_THREADS=8`, gate ON, 3 runs each:
 fib 3/3 and goat 3/3 produced a SINGLE distinct sha.
 
+**Switch.** None — unconditional.  The `ZIREN_GPU_ZC_VIEW_NONPOW2` kill
+switch, the older `ZIREN_GPU_ZC_VIEW_BY_NAME` kill switch and the superseded
+pow2-only `commit_dense_view_for_name` lookup were removed after validation;
+the orientation guard itself (`use_rev == commit_rev && (use_rev || pow2)`)
+is unchanged.  `ZIREN_ZC_VIEW_VERIFY=1` is retained.
+
 The recursion stack was gated too (the historical blind spot of validating core
 only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
 `c80d70d835a42aee` — unchanged, both verifying.
@@ -1720,9 +1728,9 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   exact goldens fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`,
   tendermint `7190969b1feae13a`; plus a `RAYON_NUM_THREADS=8`
   determinism gate, 3 runs per program, single distinct sha each.
-- **Switch.** `ZIREN_GPU_GKR_COALESCED_TRANSITION`, **default ON**;
-  `=0` is the kill switch back to the 2-D kernels + separate split
-  launch.
+- **Switch.** None — unconditional.  The
+  `ZIREN_GPU_GKR_COALESCED_TRANSITION` kill switch and the then-dead 2-D
+  `splitFirstLayerByRowMsb` kernel were removed after validation.
 - **Next in this stage (measured, not done).**  `buildJhrSlabKernel` +
   `buildJhrSlabKernelBaseNum` are **22.3 ms/shard** (17.8% of the
   post-change GKR busy) and are pure duplication: the layer is
@@ -1809,8 +1817,9 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   Fix ahead in **4/4** pairs, in both GPU layouts. Peak VRAM unchanged
   (23.6–24.3 GiB either way). Excluding pair 1's low control rep (2 970, the
   first run of the block) the mean delta is +8.8%.
-- **Switch.** `ZIREN_GPU_JHR_EQROW_DEVICE`, **default ON**; `=0` is the kill
-  switch back to the host build + upload.
+- **Switch.** None — unconditional (the `ZIREN_GPU_JHR_EQROW_DEVICE` kill
+  switch was removed after validation).  Still declines when
+  `ZIREN_GPU_JHR_COLIDX_EQROW=0` or under `ZIREN_GPU_LASTCOORDS_DEVICE_VERIFY`.
 - **Two measured negatives from the same investigation.**
   - *Batching the per-chip transition launches* (418 → 20 via a
     `blockIdx.z = chip` pointer-array kernel, the shape
@@ -1908,10 +1917,12 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   distinct sha each.  The control arm of all four paired runs also
   produced `7190969b1feae13a`, so the gate is byte-neutral in both
   directions.
-- **Switch.** `ZIREN_GPU_JAGGED_ROW_EQ_HOST_SKIP`, **default ON**; `=0`
-  is the kill switch.  The skip declines automatically whenever
-  `ZIREN_GPU_JAGGED_ROW_EQ_DEVICE_VERIFY` is on, since that gate needs the
-  host table to compare the device build against.
+- **Switch.** None — both the device `row_eq` build
+  (`ZIREN_GPU_JAGGED_ROW_EQ_DEVICE`) and the host-build skip
+  (`ZIREN_GPU_JAGGED_ROW_EQ_HOST_SKIP`) are unconditional; their kill
+  switches were removed after validation.  The skip still declines
+  automatically whenever `ZIREN_GPU_JAGGED_ROW_EQ_DEVICE_VERIFY` is on,
+  since that check needs the host table to compare the device build against.
 
 ### REFUTED by sub-instrumentation: the GKR round loop's Fiat-Shamir tail
 
@@ -2022,7 +2033,8 @@ their *blocking*, not by their bytes.
 
 ### Lever 1 — `public_values` computed concurrently with the fan-out
 
-`ZIREN_GPU_COMMIT_PV_OVERLAP`, `shard-prover/src/lib.rs`.
+`shard-prover/src/lib.rs`; unconditional (the
+`ZIREN_GPU_COMMIT_PV_OVERLAP` kill switch was removed after validation).
 
 `shard.public_values()` is a pure function of the record — it reads
 nothing `commit` produces — yet ran at the very END of `commit`, adding
@@ -2037,7 +2049,9 @@ falls **17.8 → 0.4 ms/shard**.
 
 ### Lever 2 — produce `CpuEventFfi` directly into a persistent PINNED buffer
 
-`ZIREN_GPU_CPU_TG_PINNED`, `core/src/tracegen/core.rs`.
+`core/src/tracegen/core.rs`; unconditional (the `ZIREN_GPU_CPU_TG_PINNED`
+kill switch was removed after validation; `ZIREN_GPU_CPU_TG_PINNED_CAP`
+remains as a sizing bound).
 
 The SP1 shape (`sp1-gpu/crates/jagged_tracegen/src/lib.rs:767-774` writes
 each chip's trace straight into a pinned buffer at a precomputed offset).
@@ -2069,8 +2083,10 @@ the new code:**
 
 ### Lever 3 — device program table replaces the per-cycle `instrs` array
 
-`ZIREN_GPU_CPU_TG_PROG_TABLE`, `core/src/tracegen/core.rs` plus
-`core_cpu_generate_trace_prog` in `cuda/tracegen/core.cuh`.
+`core/src/tracegen/core.rs` plus `core_cpu_generate_trace_prog` in
+`cuda/tracegen/core.cuh`; unconditional (the `ZIREN_GPU_CPU_TG_PROG_TABLE`
+kill switch and the superseded `core_cpu_generate_trace` kernel were
+removed after validation).
 
 `CpuChip` uploaded a PER-CYCLE instruction array built as
 `cpu_events.par_iter().map(|e| program.fetch(e.pc).into()).collect()`.

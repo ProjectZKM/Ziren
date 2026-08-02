@@ -120,7 +120,7 @@ where
         height <= domain,
         "trace height ({height}) must be <= 2^|eval_point| ({domain})"
     );
-    // ── GPU-IDLE lever (gate `ZIREN_GPU_EQ_TRUNC`) ──────────────────────
+    // ── GPU-IDLE lever: TRUNCATED eq-table build ───────────────────────
     // Only rows `[0, height)` are ever summed below, so only the FIRST
     // `height` eq-table entries are ever read — yet the table is built over
     // the whole `2^|eval_point|` cube.  That is ruinous for the full-point
@@ -148,7 +148,7 @@ where
     // rounding — and turns the build from `O(2^|eval_point|)` into
     // `O(height)`.
     let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
-    let (eq, tail) = if eq_trunc_enabled() && k < eval_point.len() {
+    let (eq, tail) = if k < eval_point.len() {
         let tail = eval_point[k..]
             .iter()
             .fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
@@ -176,15 +176,6 @@ where
         })
         .collect()
 }
-
-/// Kill-switch gate for the truncated eq-table build above.  Default ON:
-/// the ON arm was byte-gated green on all four goldens (fib, goat,
-/// tendermint, fib compress) with verify ON.  Set to `0` to disable.
-fn eq_trunc_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("ZIREN_GPU_EQ_TRUNC").as_deref().unwrap_or("1") == "1")
-}
-
 
 #[cfg(test)]
 mod tests {
