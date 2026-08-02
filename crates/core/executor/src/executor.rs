@@ -819,6 +819,9 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryReadRecord {
+        // A `Some` map means the access came through a `SyscallContext`, so it will be proven by a
+        // precompile chip in its own shard — see `bump_register_timestamp`.
+        let is_syscall_access = local_memory_access.is_some();
         // Get the memory record entry.
         let addr = register as u32;
         let entry = self.state.memory.registers.entry(addr);
@@ -872,7 +875,8 @@ impl<'a> Executor<'a> {
         }
         // Construct the memory read record.  The witnessed previous timestamp is the *bumped* one
         // (see `bump_register_timestamp`), so it is always in the current shard.
-        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryReadRecord::new(
             cur_record.value,
             cur_record.shard,
@@ -897,14 +901,25 @@ impl<'a> Executor<'a> {
     /// `RegisterAccessCols` drop `prev_shard`, `compare_clk` and `diff_8bit_limb` (9 columns to
     /// 6).  The dropped shard comparison is paid for exactly once per (register, shard) by the
     /// `MemoryBump` chip instead of once per first-touch.
+    ///
+    /// `is_syscall_access` says the access came through a [`crate::syscalls::SyscallContext`]
+    /// (i.e. `local_memory_access` was `Some`), which means it will be proven by a *precompile*
+    /// chip.  Those accesses must NOT be bumped: `ExecutionRecord::split` moves precompile events
+    /// into their own shard while `bump_memory_events` stays in the main record, so the shadow
+    /// read and the access it bumps would land in two different shards and leave the local memory
+    /// bus unbalanced in both.  Only the `Cpu` chip uses the 6-column `RegisterAccessCols` that
+    /// need `prev_shard == shard`; every precompile chip witnesses the full `MemoryAccessCols`
+    /// (`crate::air::MemoryAirBuilder::eval_memory_access`) and handles `prev_shard != shard`
+    /// itself.
     #[inline]
     fn bump_register_timestamp(
         &mut self,
         addr: u32,
         shard: u32,
         prev_record: MemoryRecord,
+        is_syscall_access: bool,
     ) -> (u32, u32) {
-        if self.unconstrained || prev_record.shard == shard {
+        if self.unconstrained || is_syscall_access || prev_record.shard == shard {
             return (prev_record.shard, prev_record.timestamp);
         }
         if self.executor_mode == ExecutorMode::Trace {
@@ -1032,6 +1047,9 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        // A `Some` map means the access came through a `SyscallContext`, so it will be proven by a
+        // precompile chip in its own shard — see `bump_register_timestamp`.
+        let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
         // Get the memory record entry.
         let entry = self.state.memory.registers.entry(addr);
@@ -1120,7 +1138,8 @@ impl<'a> Executor<'a> {
 
         // Construct the memory write record.  The witnessed previous timestamp is the *bumped*
         // one (see `bump_register_timestamp`), so it is always in the current shard.
-        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
             cur_record.value,
             cur_record.shard,
@@ -1142,6 +1161,9 @@ impl<'a> Executor<'a> {
         timestamp: u32,
         local_memory_access: Option<&mut nohash_hasher::IntMap<u32, MemoryLocalEvent>>,
     ) -> MemoryWriteRecord {
+        // A `Some` map means the access came through a `SyscallContext`, so it will be proven by a
+        // precompile chip in its own shard — see `bump_register_timestamp`.
+        let is_syscall_access = local_memory_access.is_some();
         let addr = register as u32;
 
         // Get the memory record entry.
@@ -1208,7 +1230,8 @@ impl<'a> Executor<'a> {
 
         // Construct the memory write record.  The witnessed previous timestamp is the *bumped*
         // one (see `bump_register_timestamp`), so it is always in the current shard.
-        let (prev_shard, prev_timestamp) = self.bump_register_timestamp(addr, shard, prev_record);
+        let (prev_shard, prev_timestamp) =
+            self.bump_register_timestamp(addr, shard, prev_record, is_syscall_access);
         MemoryWriteRecord::new(
             cur_record.value,
             cur_record.shard,
