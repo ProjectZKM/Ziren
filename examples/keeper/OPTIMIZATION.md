@@ -2709,3 +2709,106 @@ dropping a matrix; `byte_lookups` is a multiplicity counter and `bytes/trace.rs`
 scatter-ADDs it into a fixed 2^16-row table, so only the (event -> count) multiset
 matters, never order or batching; and `MemoryLocal` pushes identical events in
 identical order.
+
+## The FirstLayer jagged slab: a 4x host expansion in front of a pageable H2D (ziren-gpu)
+
+reth's H2D was measured at **524.57 GiB** for a 281-shard run
+(`ZIREN_GPU_H2D_PROF=1`, CORE_END total — this instrumentation is complete by
+construction, every H2D funnels through the two wrappers it hooks). The GKR
+slab was named as the dominant contributor; that premise held, but the reason
+was not the one assumed.
+
+### Where the bytes come from — MEASURED, and two stale docstrings
+
+`build_jhr_slab_from_host_layer` -> `upload_quadrant`
+(`basefold/src/jhr_slab_device.rs`) is reached from
+`try_wire_host_source_slab_native`, whose gate `ZIREN_GPU_JHR_SLAB_GIANT` is
+documented "Default OFF" but is coded `!= Ok("0")`, i.e. **default ON**. The
+sibling `ZIREN_GPU_FIRST_EF_LAYER_DEVICE` has the same stale-comment/live-code
+mismatch (also default ON) — and that one is doing its job: instrumenting the
+call sites shows `slabsrc/Layer_host_upload_*` **never fires**, so the nv=29
+first EF `Layer` really is device-resident and is NOT the source.
+
+The source is the nv=30 `FirstLayer` falling back when its device-resident
+stash declines. Counted per shard on reth:
+
+| call site | calls/shard |
+|---|---|
+| `FirstLayer_STASH_ok` | **0.1** |
+| `FirstLayer_STASH_DECLINED_host_upload` | **~1.0** |
+
+The stash declines on ~90% of reth shards, and instrumenting each early return
+shows **every** decline is the same one — `stash.len() != n_chips`
+(`device_logup_gkr.rs`), reported as `stash{37..45}_vs_chips{4..11}`. reth's
+shards are chip-set SUBSETS of the stash, and the guard is an exact-length
+equality, so a subset shard can never match. tendermint's homogeneous shards do
+match, which is why this cost is invisible there.
+
+### What the fallback costs — MEASURED at the site
+
+| probe | wall ms/shard | thread-CPU ms/shard | bytes/shard |
+|---|---|---|---|
+| `slab/host_embed_base_to_ef4` | **120.33** | **119.99** | — |
+| `slab/h2d_base_embedded` | 18.83 | 18.83 | 717.1 MB |
+| `slab/h2d_ef4_direct` | 19.26 | 19.26 | 717.1 MB |
+
+The 120 ms span is `cells[..n].iter().map(cast).collect()` — the base-field ->
+Ef4 widening, done on the HOST. It contains **no CUDA call at all**, so its
+thread-CPU reading is a genuine host-compute measurement and is not subject to
+the CUDA-spin-wait caveat that invalidates %cpu on CUDA-calling spans. The two
+H2D probes DO call CUDA; their thread-time is the issuing thread sitting inside
+the copy API, because the copy source is a pageable `Vec` — the pageable-async
+mechanism, measured at the site.
+
+### The fix — reuse the kernel that already exists
+
+`build_jhr_slab_on_device_basenum` already widens base-field numerators inline
+and is already used by the device-resident stash path. The host-source path
+simply did not use it. Route the FirstLayer fallback through it: upload the
+numerator cells as `KoalaBear` and let the kernel widen them
+(`build_jhr_slab_from_host_layer_basenum`).
+
+Byte-identical by construction — both packs share `compute_jhr_slab_layout` and
+differ ONLY in the numerator element type the kernel reads (see the
+`JhrSlabLayout` doc comment). On any decline (type mismatch, metadata-only
+quadrant) the Ef4 entry point is used unchanged.
+
+**MEASURED effect, whole reth run, same instrumentation both arms:**
+
+| | H2D total | calls |
+|---|---|---|
+| canonical | **524.57 GiB** | 811,427 |
+| basenum | **378.23 GiB** | 811,207 |
+
+**-146.34 GiB = -27.9% of ALL reth H2D**, at essentially unchanged call count —
+the same copies, with the numerator half 4x smaller. Plus the 120.33 ms/shard
+host expansion removed outright.
+
+Note this does NOT need the stash decline to be fixed; it makes the fallback
+cheap. Fixing the decline itself (keying the stash by chip instead of requiring
+`stash.len() == n_chips`) would remove the remaining ~179 MB/shard numerator
+upload and the 19.3 ms/shard denominator copy as well, and is the obvious
+follow-up.
+
+**kHz, reth, sequential paired A/B** (one run on the box at a time, GPU 3, order
+B,D,D,B so the ABBA cancels linear drift and the launch order alternates within
+each pair; verify ON every run; no reps discarded):
+
+| run | arm | core s | core kHz | core proof sha256 |
+|---|---|---|---|---|
+| 1 | canonical | 413.115 | 1017 | `2c4d3597a79a6f36…` |
+| 2 | **basenum** | 351.079 | **1196** | `2c4d3597a79a6f36…` |
+| 3 | **basenum** | 346.994 | **1210** | `2c4d3597a79a6f36…` |
+| 4 | canonical | 389.624 | 1078 | `2c4d3597a79a6f36…` |
+
+**canonical 1047.5 -> basenum 1203.0 kHz = +14.85%**, core 401.37 -> 349.04 s
+= **-186.2 ms/shard**. Adjacent pairs +17.6% and +12.2% — same sign, no
+discarded reps. All four proofs byte-identical to the reth core golden and
+`CORE VERIFY OK`.
+
+Note the realized -186.2 ms/shard EXCEEDS the -134 ms/shard the site probes
+predicted (120.3 ms host expansion + ~14 ms of copy-API time). The probes wrap
+only `copy_from_host`; the driver's own pageable staging is not inside that
+span, which is why the NVTX census attributes 152.8 ms/shard of MEMCPY to
+`logup_gkr_first_layer` where the probe sees 18.8. Removing 538 MB/shard of
+pageable traffic removes more wall than the copy-API time alone suggests.
