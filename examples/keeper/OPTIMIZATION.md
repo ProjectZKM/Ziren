@@ -2483,3 +2483,124 @@ job/result fields would make the encode a single memcpy).
     restore the host reduce for small shards. Retained (not const-ified) because the
     multi-GPU spawner relies on it as an escape hatch for the order-dependent device
     dense_q handle.
+
+## Complete host-side census of the GPU shard driver's `open()` (reth, Aug 02)
+
+**The blind spot.** The GPU prover does *not* run the shared host shard driver
+(`prove_shard_to_basefold_with_loader_dispatch`, which carries `phase_*` spans).
+`StarkGpuProver::prove_shard_to_basefold_with_provider` assembles the stages itself and
+carried **zero** `tracing` spans. Measured consequence on reth (281 shards, single GPU,
+verify ON): **733.5 of 1335.9 ms/shard sat inside `CORE_PROVE` with no span open at all**,
+and **493.8 ms/shard of device idle (67.6% of all idle) could not be attributed to any host
+site**. Every prior "idle by span" ranking charged that time to whatever *producer* span
+happened to be open on another thread.
+
+**Instrumentation added** (profiling-only, default OFF):
+- `core/src/utils/span_prof.rs` — `ZIREN_GPU_SPAN_CPU_PROF=1` pairs
+  `CLOCK_THREAD_CPUTIME_ID` with the wall for **every** `tracing` span, subtracts child
+  spans, and buckets per `(span, tid)`. No per-site instrumentation.
+- Stage spans over the whole device-native shard driver, the zerocheck
+  build/prep/flush/reduce, the single-GPU inline dispatch loop, the basefold entry, and
+  the GKR grind/challenge prologue.
+
+**Residual inside `open()` after this: 0.05 ms/shard.**
+
+### ⚠ CUDA sync SPINS on this box — thread-CPU alone is NOT a compute/wait discriminator
+
+`open_precompute_commit` measures **99.3% thread-CPU** yet nsys shows **51.55 of its 62.95
+ms/shard is inside `cudaStreamSynchronize`** and only 0.66 ms is outside any CUDA call. A
+blocking sync burns 100% CPU while the thread does nothing. Any conclusion that used
+`%cpu` to prove "host compute" on a span that calls CUDA is unsafe.
+
+The correct discriminator is the **pair** (thread-CPU, CUDA-API time on that thread):
+
+| thread-CPU | CUDA API | classification |
+|---|---|---|
+| high | low | **(a) genuine host compute** — a lever |
+| high | high SYNC | (d) waiting on the GPU (spinning) |
+| high | high MEMCPY | (c) host blocked *inside* a pageable copy (also spins) |
+| ~0 | none | (e) parked on a channel / rayon join |
+
+### The census (reth, 281 shards, verify ON, single GPU, 1210 kHz)
+
+Shard = 1234.9 ms/shard. `CORE_PROVE` self (dispatch loop) = 341.1; **`open()` = 890.9
+ms/shard (72.1%)**, of which 0.05 unattributed.
+
+| site (serial prover thread) | self ms/sh | SYNC | MEMCPY | ALLOC | HOSTCODE | class |
+|---|---|---|---|---|---|---|
+| `dispatch_recv_commit_wait` | 296.9 | – | – | – | – | **(e)** 0.02 ms CPU, no CUDA |
+| `logup_gkr_layer_transitions` | 285.5 | 71.6 | 47.0 | 8.1 | **156.0** | (a)+(c)+(d) |
+| `logup_gkr_first_layer` | 159.2 | 3.7 | **152.8** | 0.6 | 1.9 | **(c)** GKR slab |
+| `zc_reduce` | 142.5 | **108.5** | 7.3 | 1.8 | 21.7 | (d) |
+| `open_precompute_commit` | 63.0 | **51.6** | 6.3 | 1.9 | 0.7 | (d) |
+| `jagged_basefold_open` | 54.1 | 32.5 | 12.7 | 1.9 | 1.9 | (d)+(c) |
+| `logup_gkr_output_extract` | 42.9 | 0.7 | – | – | 42.1 | **(e)** rayon join, 1.9% CPU |
+| `zc_prep_cells` | 36.9 | – | 2.3 | 0.2 | **34.4** | **(a)** |
+| `open_s4_jagged_pcs` self | 34.0 | 7.8 | 1.0 | 0.1 | 24.7 | (a) |
+| `jagged_sumcheck_reduce` | 28.2 | – | **23.7** | 4.0 | 0.1 | (c) |
+| `open_s2_logup_gkr` self | 27.0 | – | – | – | 27.0 | (a) |
+| `dispatch_inline_basefold` self | 25.8 | – | – | – | – | (b)/(e) provider teardown |
+| **`gpu_shard_open` self (unattributed)** | **0.05** | | | | | |
+
+Category rollup over the shard: **(a) host compute ≈ 264 ms/shard (21.4%)**, (b) alloc ≈ 23,
+(c) blocked in pageable memcpy ≈ 253, (d) GPU wait ≈ 284, (e) blocked on another thread ≈ 343.
+
+Every MEMCPY millisecond above is time the **issuing thread** spent inside the copy API, so
+it is by definition *not* overlapped — it is a host block, dominated by
+`logup_gkr_first_layer` (152.8 ms/shard, the GKR slab; handed to the slab owner).
+
+### Landed: parallel preprocessed column-major staging
+
+`zc_prep_cells` was the one large span meeting both (a) criteria (99.9% CPU **and** ~no CUDA
+API). Sub-instrumenting it isolated **`zc_prep_colmajor_stage` = 28.4 ms/shard at 99.9%
+thread-CPU over only 2.0 calls/shard**: a row-major → column-major transpose written with
+the *column* index innermost, so every store crossed a cache line, run single-threaded on
+the serial prover thread. Rewritten column-contiguous (`par_chunks_mut(height)`, one chunk
+= one destination column) and spread over rayon; output identical by construction.
+
+| metric | control | fix | Δ |
+|---|---|---|---|
+| `zc_prep_colmajor_stage` self-wall | 28.40 ms/sh | 6.46 ms/sh | **−21.9** |
+| `zc_prep_cells` self-wall | 34.86 ms/sh | 14.48 ms/sh | **−20.4** |
+| serial prover thread total CPU | 885.7 ms/sh | 848.4 ms/sh | **−37.3** |
+| serial prover thread self-wall | 1278.0 ms/sh | 1268.8 ms/sh | −9.2 |
+
+**kHz — 4 order-alternated paired reth runs, verify ON:**
+
+| pair | launch order | ctl | fix | Δ |
+|---|---|---|---|---|
+| mech | ctl-first | 1202 | 1220 | +1.50% |
+| 2 | fix-first | 1205 | 1242 | +3.07% |
+| 3 | ctl-first | 1247 | 1213 | −2.73% |
+| 4 | fix-first | 1185 | 1224 | +3.29% |
+
+Mean **+1.28%**, but the launch-order artifact still dominates (fix-first pairs mean +3.18%,
+ctl-first pairs mean −0.62%). **The kHz gain is NOT established at this sample size** — the
+honest result is the directly-measured −20.4 ms/shard of host compute, which is only 1.7% of
+the shard wall and therefore sits inside the ±3% order artifact.
+
+**Why the host-ms does not convert 1:1 here:** the paired span census shows serial self-wall
+fell only 9.2 ms/shard against 20.4 ms/shard of removed host work — the remainder reappears
+as `dispatch_recv_commit_wait`. The basefold half is **co-gated by the commit worker**, so
+host-ms removed inside `open()` is partly absorbed. That is the key structural finding:
+the single largest block in the shard is not inside `open()` at all, it is the **296.9
+ms/shard the coordinator spends blocked waiting for the commit worker** (0.02 ms of CPU).
+
+**Byte gates.** reth core `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2`
+(281 shards) in **both arms of every pair**, verify OK throughout.
+
+**Negatives / refuted premises recorded:**
+- `bf_reupload_traces_host_transpose` (the `universal_trace_reserve` host transpose +
+  pageable H2D in `run_basefold_for_snapshot`) is **0 calls/shard on the single-GPU inline
+  path** — the provider CAS always wins. Dead code, not a lever.
+- `dispatch_recv_records` = **0.008 ms/shard** — re-confirms reth is not producer-bound.
+- `gkr_grind_pow` = 3.7 ms/shard at 0.5% CPU — the PoW grind is *not* host-bound.
+- The existing `gkr_prof` breakdown events (`layer_transitions_breakdown`,
+  `round_internal_split`, `pool_method_split`, `flatten_vs_prove`) use `target = "gkr_prof"`
+  (an `=`, i.e. a *field*) instead of `target: "gkr_prof"` (the event target), so they are
+  invisible under any `gkr_prof` filter directive. Use
+  `RUST_LOG=warn,zkm_gpu_basefold::device_logup_gkr=info` to see them.
+- Of `logup_gkr_layer_transitions`' 285.5 ms/shard, the `ZIREN_GPU_JHR_RND_PROF`-instrumented
+  resident drive accounts for only 71.9 (SYNC 45.5, host 10.1); **~213 ms/shard is the
+  per-layer `gpu_layer_build_jhr_slab` device slab build**, which carries no internal
+  instrumentation (`l_pre` reads 0.311 and does not cover it). Handed to the slab owner.
