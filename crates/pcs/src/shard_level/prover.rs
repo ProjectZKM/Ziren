@@ -753,7 +753,7 @@ where
     // (captured here, pre-drain) for a correct dense_q.
     // GPU reduction min log-dense (mirror ziren-gpu
     // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
-    // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 23).  The device dense
+    // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 0).  The device dense
     // handle is registered only at/above this size.
     // The CpuProver driver's per-shard provider is always `None` (the GPU
     // pipeline assembles this stage device-native and never calls this host
@@ -1143,7 +1143,7 @@ pub fn observe_zerocheck_to_jagged_bridge<SC>(
 
 /// C0 block 2 (part 1) — the prospective-dense D2H-skip decision.  Returns
 /// `true` when the device dense-handle happy path is GUARANTEED (prospective
-/// `log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, default 23), in which
+/// `log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, default 0), in which
 /// case device-resident chips skip the eager D2H (the device commit hook
 /// packs them D2D).  Pure computation — no transcript.
 pub fn compute_skip_device_d2h<SC, A>(
@@ -1160,7 +1160,7 @@ where
     let gpu_min_log_dense = std::env::var("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(23);
+        .unwrap_or(0);
     // Prospective dense size from the FULL (provider-resolved) per-chip
     // dims — identical to what the dense commit hook will compute.
     let prospective_total: usize = chips

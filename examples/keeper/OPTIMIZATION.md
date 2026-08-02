@@ -2278,3 +2278,46 @@ job/result fields would make the encode a single memcpy).
   once is the fast path.
 - **`wire_effective_gpu_count() > 1` levers** — see the CORRECTION above;
   0-call in production at every GPU count.
+
+## Jagged-reduction min-log-dense gate default 23 -> 0 — the last prove-path host fallback removed (host + ziren-gpu)
+
+- **What.** The GPU jagged-reduction hook (`gpu_jagged_reduction_hook_v2`) DECLINED
+  (`return None`) whenever `packing.log_dense_size < ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`,
+  and the dispatch then ran the host `zkm_pcs::jagged_sumcheck::prove_jagged_reduction_owned`
+  — a host fallback on the prove path, logged once per declining shard as
+  `jagged_pcs device reduction returned None (shape rejected)`. The same threshold gates the
+  commit-side device dense_q carrier (`commit_dense.rs`) and the two `compute_skip_device_d2h`
+  mirrors (host `pcs/src/shard_level/prover.rs`, ziren-gpu `shard-prover/src/shard_helpers.rs`),
+  so all four move together. The default is changed 23 -> 0; the env var stays as an
+  operator override.
+- **Why the old default was stale.** It came from an early tendermint observation
+  (`log_dense_size=21`, +21% wall with GPU dispatch). Re-measured at canonical, tendermint
+  at `SHARD_SIZE=2^22+1` no longer produces ANY sub-23 shard, so the workload the default was
+  tuned for does not exercise the gate at all.
+- **What actually declined** (measured, single-GPU, verify ON):
+  - goat, 9 shards, per-shard `log_dense_size` = 28,28,28,27,28,**21,21**,29,26 — the two
+    declines are exactly the two sub-23 shards; host reduce walls 97 ms + 93 ms.
+  - reth, 281 shards — 5 declines (`log_dense_size` 21-22), all in the tail.
+  - tendermint, 33 shards — 0 declines.
+- **Measured** (goat core, GPU 6, verify ON, interleaved A/B pairs):
+
+  | arm                 | fallbacks | core kHz            |
+  |---------------------|-----------|---------------------|
+  | 23 (host fallback)  | 2         | 858 / 905 / 868 / 888 |
+  | 0  (device for all) | 0         | 928 / 930 / 894     |
+
+  ~+3-5% goat core kHz and 190 ms of host critical-path wall removed per goat run; no
+  measurable change on tendermint (3914/3745/3574 vs 3895/3230/3774 kHz — the gate is not
+  exercised there in either arm).
+- **Validated byte-identical.** goat core sha `8aa10f1942b71b62` (the goat core golden) in
+  all 6 A/B runs; tendermint core `7190969b1feae13a` in all 6. Full chain
+  core -> compress -> shrink -> wrap with verify at every stage, gate at 0:
+  goat shrink `79d9809d90f21a6f831f7950458226289d638291b4eb1282a3d6fe7f1e287e13` and fib
+  shrink `01fea74b918de1f64ad27fb1f852553c82f752b99058fb42d396b8e193ca3f2e` — both
+  byte-identical to the default-gate arm, rc=0. The device reducer is therefore
+  transcript- and byte-faithful to `prove_jagged_reduction_owned` at these sizes.
+- **Switches.**
+  - `ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE` — default **0** (was 23). Set to a high value to
+    restore the host reduce for small shards. Retained (not const-ified) because the
+    multi-GPU spawner relies on it as an escape hatch for the order-dependent device
+    dense_q handle.
