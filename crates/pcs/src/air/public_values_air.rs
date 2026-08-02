@@ -134,14 +134,65 @@ fn eval_global_memory_finalize<AB: ZKMAirBuilder>(
 /// next_next_pc (public)` come straight from the public values.  Review:
 /// the executor must populate `start_next_pc`/`next_next_pc` to exactly
 /// the first row's `next_pc` and the last row's `next_next_pc`.
+///
+/// The bus tuple's shard field is `execution_shard`, NOT `shard`: the Cpu
+/// chip's own `shard` COLUMN is filled from
+/// `input.public_values.execution_shard` (`cpu/trace.rs:49,84,329`), and the
+/// chain endpoints the Cpu AIR emits use that column
+/// (`cpu/air/mod.rs:101,108`), so these two boundary endpoints must be
+/// denominated in the same quantity or the `State` multiset cannot close.
+///
+/// `shard` and `execution_shard` agree only until the first shard that
+/// carries no Cpu chip: `shard` increments on every shard while
+/// `execution_shard` increments only on Cpu shards, so from the first
+/// precompile/memory-only shard onwards they differ permanently.  A workload
+/// whose non-Cpu shards all fall at the tail (tendermint, goat) therefore
+/// never exercises the mismatch; one that interleaves them (reth: 61 of 281
+/// shards, the first at index 36) fails the LogUp-GKR public-values balance.
+///
+/// Measured by replaying the SAME saved reth core proof (block 23,467,100,
+/// 281 shards) through both verifiers — `eval_public_values` is read only by
+/// the verifier and the recursion circuit, never by the prover, so the proof
+/// bytes are identical in both columns:
+///
+/// | verifier shard field | reth bad shards | goat | tendermint |
+/// |---|---|---|---|
+/// | `pv.shard`           | 184/281 | 0/9 | 0/33 |
+/// | `pv.execution_shard` |  28/281 | 0/9 | 0/33 |
+///
+/// Before the change the failing set was EXACTLY `{Cpu shard with
+/// pv.shard != pv.execution_shard}` (184 of 184, no false positives), which
+/// is what identified the mismatch.  The change recovers 156 of those 184 and
+/// regresses neither control program.
+///
+/// NOTE: this alone is not sufficient.  28 of the 184 have a SECOND,
+/// independent cause on the same bus — `EXIT_UNCONSTRAINED` leaves a stale
+/// `state_recv_next_pc` on the row it emits, see the companion executor fix —
+/// so reth needs both changes to verify end to end.
+///
+/// On a non-Cpu shard the two endpoints below are the identical tuple (the
+/// executor leaves `start_pc == next_pc` and the timestamps equal), so send
+/// and receive cancel exactly and the choice of shard field is inert there.
 fn eval_state<AB: ZKMAirBuilder>(
     builder: &mut AB,
     pv: &PublicValues<Word<AB::PublicVar>, AB::PublicVar>,
 ) {
     // Initial endpoint — sent here, received by the first real Cpu row.
-    builder.send_state(pv.shard, pv.initial_timestamp, pv.start_pc, pv.start_next_pc, AB::Expr::ONE);
+    builder.send_state(
+        pv.execution_shard,
+        pv.initial_timestamp,
+        pv.start_pc,
+        pv.start_next_pc,
+        AB::Expr::ONE,
+    );
     // Final endpoint — received here, sent by the last (halting) Cpu row.
-    builder.receive_state(pv.shard, pv.last_timestamp, pv.next_pc, pv.next_next_pc, AB::Expr::ONE);
+    builder.receive_state(
+        pv.execution_shard,
+        pv.last_timestamp,
+        pv.next_pc,
+        pv.next_next_pc,
+        AB::Expr::ONE,
+    );
 }
 
 /// `GlobalAccumulation` boundary: anchor the running-digest chain.
