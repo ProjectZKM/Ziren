@@ -1967,9 +1967,24 @@ And a whole family of candidates in `drive_packed_pool` /
 bit-reversed `eq_row_packed` interleave, the per-round eq D2H→host-fold→H2D
 round trip) is **dormant on single-GPU**: the JHR device-slab wire is
 default ON and takes every layer, and those sites are only reached when
-`wire_effective_gpu_count() > 1`.  They remain real levers for the
-multi-GPU configuration and are recorded here so the next sweep does not
-re-derive them.
+`wire_effective_gpu_count() > 1`.
+
+> **CORRECTION (measured on 2 GPUs).** The sentence that used to close this
+> paragraph — "they remain real levers for the multi-GPU configuration" — is
+> **wrong**, and nobody should spend time on them.  `wire_effective_gpu_count()`
+> is `logup_task_pool_device_ids().len()`, and that list is **confined to the
+> devices the process can actually see**
+> (`basefold/src/logup_round_device.rs:496`).  Process-per-GPU is the *sole*
+> multi-GPU proving path (`process_per_gpu_core_enabled`, "there is NO env
+> escape to force multi-GPU back in-process"), and it pins every worker child
+> with `CUDA_VISIBLE_DEVICES=<one physical id>`.  So the count is **1 inside
+> every production worker, at every GPU count**.  MEASURED: on a 2-GPU
+> tendermint run both children log `#369 LogUp TaskPool initialized with 1
+> device-pinned slots (device_ids=[0])`, and that `n` is exactly the value
+> `wire_effective_gpu_count()` returns.  The `> 1` branches are therefore
+> **0-call in production**, and multi-GPU takes the identical device-wire path
+> as single-GPU.  The real multi-GPU lever is the spawner *parent* — see
+> "Multi-GPU is a net regression" below.
 
 ## Trace-gen + commit marshalling: the window is 88% BLOCKED, not computing (ziren-gpu)
 
@@ -2174,3 +2189,92 @@ at 0.5–25% busy.  `Cpu` is fixed; `Byte`, `StoreWord`, `LoadWord`,
 produce-into-pinned treatment per event type is the obvious next step, and
 the two traps above — register once, never create an event per shard — are
 the whole of the difficulty.
+
+## Multi-GPU is a net REGRESSION — the spawner parent is the whole story
+
+First measurement of the multi-GPU core path (every prior number on this
+project was single-GPU). Tendermint / goat / fib, `verify` ON, RTX 5090,
+`gate_sha`, GPU 3+4.
+
+| program | GPUs | core s (mean) | shards | **kHz** | scaling eff. | golden |
+|---|---|---|---|---|---|---|
+| tendermint | 1 | 24.24 | 33 | **3114** | 100% | `7190969b1feae13a` |
+| tendermint | 2 | 66.49 | 33 | **1135** | **18.2%** (0.36x) | `7190969b1feae13a` |
+| goat | 1 | 9.27 | 9 | **740** | 100% | `8aa10f1942b71b62` |
+| goat | 2 | 35.94 | 9 | **191** | **12.9%** (0.26x) | `8aa10f1942b71b62` |
+| fib | 1 | 2.46 | 1 | — | — | `7c780d9f59d728b5` |
+| fib | 2 | 25.94 | 1 | — | — | `7c780d9f59d728b5` |
+
+n=3 for tendermint (1127/1156/1121 and 3092/3216/3035 kHz), n=2 for goat.
+**Adding a second GPU makes tendermint 2.7x SLOWER and goat 3.9x slower.**
+
+**The proof does not depend on GPU count.** All three goldens are
+byte-identical at 1 and 2 GPUs, verify ON, across 7 independent 2-GPU
+tendermint runs.
+
+### Where the time goes (`ZIREN_GPU_HOST_PROF=1`, tendermint 2 GPU, ms/shard)
+
+| site | ms/sh |
+|---|---|
+| `spawn_ser_traces` | 516 |
+| `spawn_ship_write` (346 MiB/shard) | 451 |
+| `spawn_trace_checkpoint` | 207 |
+| `spawn_ser_record` | 185 |
+| `spawn_gen_deps` | 122 |
+| `spawn_collect_wait` (**the only GPU wait**) | **60** |
+| `spawn_execute_state` | 50 |
+| `spawn_gen_traces` | 44 |
+
+Caveat: the sites sum to ~125% of the 1909 ms/shard wall (several of them
+block on pipe backpressure), so treat the shares as indicative; the
+load-bearing numbers are the A/B wall delta and the `ser_traces` 548 -> 0.
+
+**Profile diff vs single-GPU.** The single-GPU in-process run's whole
+instrumented host total is **0.83 ms/shard**, and every `spawn_*` site is
+0 calls. The multi-GPU *worker child* profile is **0.73-0.81 ms/shard** —
+i.e. identical to single-GPU. So nothing about proving changed: the entire
+multi-GPU delta is the spawner parent, which adds ~1.6-2.4 s/shard of host
+work and waits on a GPU only ~3% of the time. The GPUs are idle for
+essentially the whole multi-GPU wall.
+
+Root cause is structural. The in-process single-GPU path runs a 3-stage
+concurrent pipeline (a checkpoint-generator thread, `trace_gen_workers`=8
+trace threads with `TurnBasedSync`, and the GPU pool). The spawner parent
+(`core_multi_gpu.rs`, `prove_core_per_gpu_spawner`) runs **all of it
+serially on one thread** and then adds a bincode + pipe round trip per
+shard that the in-process path does not pay at all.
+
+### Landed: `ZIREN_GPU_SPAWN_FAST` (default OFF)
+
+Two scheduling-only fixes, proof byte-identical:
+
+1. **Pre-serialize each checkpoint's shards on rayon** instead of bincoding
+   `record` + `traces` serially in the dispatch loop.
+   MEASURED `spawn_ser_traces` 548 -> **0** ms/shard, the parallel block
+   flat at ~185 ms/shard: **-543 ms/shard of serial host work**.
+2. **Spawn every worker child before writing any init frame.** The init
+   frame exceeds the 64 KiB pipe buffer, so `write_framed` blocks until that
+   child drains it — and the child only reads after its own ~12 s
+   `ZKMProver::new()`. Inline spawn+init serialized startup at ~12 s x N
+   (fib 2-GPU: 27.1 s for ONE shard vs 2.45 s single-GPU).
+   MEASURED `spawn_worker_init` 710 -> 484 ms/shard.
+
+MEASURED paired alternating A/B, verify ON, tendermint 2 GPU:
+**1163 -> 1311 kHz (+12.7%)**, golden `7190969b1feae13a` in both arms.
+
+This is a down payment, not the fix: at 1311 kHz multi-GPU is still 2.4x
+slower than one GPU. The remaining work is to give the spawner parent the
+same concurrent trace-gen pipeline the in-process path already has, and to
+stop paying 346 MiB/shard of bincode (`serde_bytes` on the three `Vec<u8>`
+job/result fields would make the encode a single memcpy).
+
+### Refuted, do not re-chase
+
+- **Streaming `write_framed`** (`serialized_size` + `serialize_into` to skip
+  the second full-size buffer) is **catastrophically slower**: serde encodes
+  `Vec<u8>` as a *seq of u8*, so it issues one write syscall per byte
+  (~346 M/shard) into an unbuffered pipe. A tendermint 2-GPU run made no
+  measurable progress in 7 minutes. Building the buffer once and writing it
+  once is the fast path.
+- **`wire_effective_gpu_count() > 1` levers** — see the CORRECTION above;
+  0-call in production at every GPU count.
