@@ -2262,8 +2262,37 @@ Two scheduling-only fixes, proof byte-identical:
 MEASURED paired alternating A/B, verify ON, tendermint 2 GPU:
 **1163 -> 1311 kHz (+12.7%)**, golden `7190969b1feae13a` in both arms.
 
-This is a down payment, not the fix: at 1311 kHz multi-GPU is still 2.4x
-slower than one GPU. The remaining work is to give the spawner parent the
+**Re-measured and made unconditional (Aug 2).** ABBA on GPU 3+4, one
+binary, the gate flipped by env only so the arms differ in nothing else;
+tendermint core, 33 shards, verify ON:
+
+| order | arm | core s | kHz |
+|---|---|---|---|
+| 1 | OFF | 62.23 | 1212 |
+| 2 | ON  | 57.32 | 1316 |
+| 3 | ON  | 55.55 | 1358 |
+| 4 | OFF | 68.52 | 1101 |
+
+mean 1156.5 -> 1337.0 kHz = **+15.6%**, ON wins both A/B pairs. Core proof
+sha256 `7190969b1feae13a...` in all four runs — identical to the
+single-GPU golden. The gate has therefore been **removed**: both fixes are
+now the only path (`ZIREN_GPU_SPAWN_FAST` no longer exists, and
+`pipeline::spawn_fast_enabled` is gone). Re-validated after removal:
+tendermint 2-GPU `504dd06a3d0b532f...` and goat 2-GPU
+`0ee8783a35be53cd...`, both byte-identical to the same binary's 1-GPU
+runs (the post-Aug-2 goldens — see the placeholder-FRI-open entry below).
+
+Also removed at the same site: a stale `SPAWNER-DIVERGENCE FIX` comment
+describing a `cmd.env("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE", ...)` setter
+for each child that no longer exists — it was dropped when the
+owned-carrier refactor retired the order-dependence it guarded, and the
+env default is now 0. The env itself is deliberately kept as an operator
+escape hatch.
+
+This is a down payment, not the fix: at ~1337 kHz multi-GPU is still 2.4x
+slower than one GPU (single-GPU tendermint measured 3229 kHz on the same
+box the same day). **Multi-GPU remains a net regression; nothing should
+run production on it yet.** The remaining work is to give the spawner parent the
 same concurrent trace-gen pipeline the in-process path already has, and to
 stop paying 346 MiB/shard of bincode (`serde_bytes` on the three `Vec<u8>`
 job/result fields would make the encode a single memcpy).
@@ -2339,3 +2368,104 @@ job/result fields would make the encode a single memcpy).
     restore the host reduce for small shards. Retained (not const-ified) because the
     multi-GPU spawner relies on it as an escape hatch for the order-dependent device
     dense_q handle.
+
+## `ShardProof::opening_proof` — a dead FRI field, its placeholder open, and a PoW grind, all deleted (host + ziren-gpu)
+
+- **What.** `ShardProof` carried an `opening_proof: OpeningProof<SC>` that nothing
+  read. Producing it cost, per shard: a 1x1-dummy `pcs.commit`, a replay of the
+  legacy STARK transcript (observe `main_commit`, sample 2 local-permutation
+  challenges, re-derive and observe every chip's cumulative sums, sample alpha
+  and zeta) and a 1x1 `pcs.open`, whose `p3_fri::prove` opens with
+  `challenger.grind(proof_of_work_bits)` — a 16-bit PoW search. The field and
+  everything that fed it are gone from both provers.
+- **Proof that it was dead** (traced, then confirmed by a green full chain):
+  - `Verifier::verify_shard` (`crates/pcs/src/verifier.rs`) has **zero**
+    references to `opening_proof`. It hard-errors when `basefold_shard_proof` is
+    `None` ("FRI verify path retired") and dispatches everything, inner
+    KoalaBear and the OUTER BN254 wrap alike, to `BasefoldShardVerifier`.
+  - The live recursion path never sees a `ShardProof`.
+    `ZKMCircuitWitness::{CoreBasefold, ComposeBasefold, DeferredBasefold}` carry
+    `BasefoldShardProof`, not `ShardProof`
+    (`machine/{core,compress,wrap,deferred}_basefold.rs`). The legacy
+    `ZKMCircuitWitness::Core`/`Compress` variants — the only things that
+    witnessed a `ShardProof`, via `Witnessable for ShardProof` — are reachable
+    only from the `basefold_shard_proof.is_none()` fallback in
+    `get_first_layer_inputs`, i.e. only for proofs the verifier rejects outright.
+  - `crates/prover/src/shapes.rs` enumerates **only** basefold witness dummies,
+    so no VK in the vk_map / `vk_root` is a function of the field either.
+  - Therefore **no VK moves.** Confirmed on two programs: fib and goat
+    `core -> compress -> shrink -> wrap(BN254)` are green end to end with
+    verify at every stage after the change.
+- **Measured effect on the proof.** Core proof bytes drop by exactly
+  **6,436 B/shard**: fib 1,448,568 -> 1,442,132 (1 shard), goat
+  13,306,279 -> 13,248,355 (9), tendermint 49,637,292 -> 49,424,904 (33).
+  reth (281 shards) lands at 449,562,771 B, i.e. **-1.81 MB**. A fib compress
+  proof drops 1,372,556 -> 1,372,520.
+- **Measured effect on wall: NONE that is resolvable, and that is the honest
+  answer.** The grind had already been routed to the device `grind_koala_bear`
+  kernel (40.57 -> 0.89 ms/shard), so what was left to remove on the GPU path
+  is ~1 ms/shard against ~710 ms/shard = **0.13% — an order of magnitude below
+  the run-to-run spread.** Two independent 6-run ABBA blocks (tendermint core,
+  1 GPU, verify ON, `A B B A A B` over two binaries) confirm it is
+  unresolvable:
+
+  | block | arm | kHz (in run order) | mean |
+  |---|---|---|---|
+  | 1 | before | 3271 / 3159 / 3167 | 3199 |
+  | 1 | after  | 3121 / 3162 / 2844 | 3042 |
+  | 2 | before | 2918 / 3136 / 3123 | 3059 |
+  | 2 | after  | 3060 / 3366 / 3174 | 3200 |
+
+  Block 1 favours *before* by 4.9%, block 2 favours *after* by 4.6% — **the
+  sign flips between blocks**, which is what noise looks like. Pooled over all
+  12 runs: before 3129 kHz, after 3121 kHz = **-0.25%, a dead heat**. All 12
+  runs reproduced their arm's golden exactly (6x `7190969b1feae13a`,
+  6x `504dd06a3d0b532f`). This is a **null result on wall**; the change is
+  justified by the dead code and the latent nondeterminism, not by kHz. The host CPU prover, which never had
+  the device-grind lever, does lose the whole ~40 ms/shard search plus the
+  transcript replay (host-only fib core wall was not separately A/B'd).
+- **REFUTED premise — the CPU prover was already deterministic.** The starting
+  hypothesis was that `pow_witness` made the CPU prover nondeterministic
+  (p3's `DuplexChallenger::grind` really does use rayon `find_any`, which is
+  order-unspecified). Measured on the pre-change binary, host-only fib core,
+  **29 runs** — 13 at `RAYON_NUM_THREADS` default (124), 8 at 8, 8 at 32 —
+  every single one produced sha256 `815d1ca431a4a31e...`: **1 distinct proof,
+  0 variation.** In practice the calling rayon thread starts at witness 0 and
+  short-circuits before a stealing thread can find its own (much larger)
+  witness. The change removes the structural risk rather than a measured bug.
+  The post-change binary is likewise 1-distinct over 13 runs
+  (`9a0f8201fc75e19a...`).
+- **Byte-CHANGING — goldens move** (verify ON at every step, all reproduced by
+  two independent binaries and by 1-GPU and 2-GPU runs):
+
+  | gate | old | new |
+  |---|---|---|
+  | fib core | `7c780d9f59d728b5` | **`65bda0fb84a09c27`** |
+  | fib compress | `7e3c5d753cf25e55` | **`2ab0f17192ffb453`** |
+  | goat core (9) | `8aa10f1942b71b62` | **`0ee8783a35be53cd`** |
+  | tendermint core (33) | `7190969b1feae13a` | **`504dd06a3d0b532f`** |
+  | simple-go core (3) | `443b92db18eceab5` | **`c7c1a9b0579afa6e`** |
+  | reth core (281) | `2c4d3597a79a6f36` | **`132a973840dc8802`** |
+
+- **Recursion re-validated on two programs.** `core -> compress -> shrink ->
+  wrap(BN254)`, verify at every stage, rc=0, for **fib** and **goat**. No
+  recursion program and no VK changed — as the consumer trace predicts, since
+  the basefold witnesses never carried the field.
+- **Also deleted.** `DeviceGrindChallenger` in `core_multi_gpu.rs` (~110 LOC of
+  newtype + 6 forwarded challenger impls) existed only to accelerate this
+  placeholder grind and has no other caller.
+- **Found on the way, NOT fixed: `ShardProof.commitment.main_commit` is the
+  next dead field, and the two provers already disagree on it.** After this
+  change the host CPU prover and the GPU prover produce fib core proofs of the
+  same length (1,442,132 B) that differ in **exactly 32 bytes at offsets
+  17-48** — the 8-felt `main_commit` MerkleCap and nothing else. The host
+  writes the 1x1 dummy commit; `core_multi_gpu::run_basefold_for_snapshot`
+  overwrites it with the raw BaseFold Merkle root. Both proofs verify, which
+  is itself proof that the BaseFold verifier reads `main_commitment` off the
+  `basefold_shard_proof` and never off the envelope. So the ziren-gpu comment
+  claiming the rebuilt envelope is "BYTE-IDENTICAL to the host CPU
+  `MachineProver::open`" is wrong in the one field it rebuilds — harmless
+  today, but the two provers are not byte-comparable at the shard-proof
+  envelope, and the 1x1 dummy `pcs.commit` on both sides can go the same way
+  as the open once that field does.
+- **Switches.** None — the path is unconditional.
