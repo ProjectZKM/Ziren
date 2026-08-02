@@ -1732,3 +1732,134 @@ only): fib core+COMPRESS, both arms, core `7c780d9f59d728b5` and compress
   transition output and the sumcheck input.  Having the transition write
   the slab layout directly would delete the kernel and ~1 680
   per-chip allocations per shard.
+
+## Species sweep — a host-built table whose consumer moved to the device, but the producer did not (ziren-gpu)
+
+- **The species.** Two independent sweeps on the same day found the same
+  shape at two different sites: a partial-Lagrange / eq table built ON
+  THE HOST, cloned, uploaded — while a device kernel that reproduces it
+  bit-for-bit already existed (`jagged_sumcheck` round-0 `row_eq`, and
+  the LogUp-GKR round-wire `eq_row`).  This entry is the **residue** of
+  the first of those: after the table stopped travelling over PCIe, the
+  host was still BUILDING it.
+- **What.** `9db0580` moved the fused jagged round-0 `row_eq` table onto
+  the device — `2^max_log_row` EF4, 4 194 304 elements = 64 MiB on a
+  tendermint core shard, built by `partial_lagrange_ef_koala_bear` from
+  the 352-byte row point.  That removed **2.06 GiB/run of H2D, 8.05% of
+  ALL host→device bytes** — and moved kHz *below noise*.  What it did not
+  remove is the host build: `build_fused_weight_inputs` still called
+  `zkm_pcs::jagged_sumcheck::build_fused_weight_inputs`, whose second
+  half is `eq_mle_table(rev(z_row))`, a full 4.19 M-element doubling
+  construction once per shard on the serial Fiat-Shamir critical path,
+  purely so `row_eq_device` could ignore the result.  Nothing on the
+  happy path reads `weights.row_eq` any more.
+- **Measured host cost removed** (`ZIREN_GPU_HOST_PROF=1`, tendermint
+  core, 33 shards, RTX 5090):
+
+  | probe | before | after |
+  |---|---|---|
+  | `build_fused_weight_inputs` | **20.037 ms/shard** | **0.033 ms/shard** |
+  | … of which the `zkm_pcs` build | 20.034 | 0.031 |
+  | … of which the `JaggedChallenge→Ef4` copy | 0.000 | 0.000 |
+
+  The 4.19 M-element `map(lb_to_ef4).collect()` is already free: Rust's
+  in-place collect specialisation reuses the allocation and `lb_to_ef4`
+  compiles to identity.  Net **−20.0 ms/shard of HOST time** plus 64 MiB
+  of host allocation.  nsys/NVTX corroborates the size independently: the
+  `CORE_PROVE` span's OWN idle (not inside any child span) was 674.8 ms
+  over 33 shards = **20.4 ms/shard**, matching the host timer to 2%.
+- **Measured kHz** (tendermint core, `RAYON_NUM_THREADS=16`, verify ON,
+  4 paired *concurrent* runs; reps 1 and 3 with the fix on GPU 3 and the
+  control on GPU 4, reps 2 and 4 with the arms swapped):
+
+  | rep | control kHz | fix kHz | delta |
+  |---|---|---|---|
+  | 1 | 3313 | 3422 | +3.29% |
+  | 2 | 3190 | 3292 | +3.20% |
+  | 3 | 3085 | 3171 | +2.79% |
+  | 4 | 3249 | 3357 | +3.32% |
+  | mean | **3209** | **3311** | **+3.16%** |
+
+  Fix ahead 4/4.  No rep discarded.
+- **The lesson, stated as a rule.**  **Rank candidates by HOST
+  MILLISECONDS REMOVED, never by GB REMOVED.**  The PCIe half of *this
+  very table* was 8.05% of all H2D bytes and measured below noise; the
+  20 ms of host compute behind it is worth +3.2%.  When a table moves to
+  the device, the host build is a separate, usually larger lever, and it
+  does not remove itself.
+- **Byte-identity.**  `row_eq` has exactly two remaining readers, both
+  cold, and both reconstruct on demand via
+  `FusedWeightInputs::ensure_row_eq` / `row_eq_host_upload`:
+  (1) `row_eq_device`'s fallback (kill switch, absent/mismatched point,
+  or a device alloc/launch error); (2) the HOST fused round-0 fallback,
+  which reads `row_eq` through `w_at`.  Both call
+  `eq_mle_table_ef4(row_eq_point)`, and `row_eq_point` **is** `rev(z_row)`
+  — the exact argument the host builder hands `eq_mle_table` — so the
+  reconstruction is the same products at the same indices in the same
+  order.  The host builder parallelises the doubling with rayon, but every
+  element is an independent product (no reduction, no reassociation), so
+  the parallelism cannot change a single field element.  `z_col_lagrange`
+  is bit-identical by construction: the host single source of truth is
+  literally `(partial_lagrange(z_col), eq_mle_table(rev(z_row)))`, and the
+  skip path calls that same `partial_lagrange`.
+- **Byte gate + determinism.**  fib `7c780d9f59d728b5`, goat
+  `8aa10f1942b71b62`, tendermint `7190969b1feae13a`, fib compress
+  `c80d70d835a42aee` — exact goldens, all `VERIFY OK`, with the gate ON.
+  `ZIREN_GPU_JAGGED_ROW_EQ_HOST_SKIP_VERIFY=1` builds the eager host pair
+  AND the lazy reconstruction every shard and asserts bit-identity of
+  both halves; it passed on every shard of all three programs.
+  `RAYON_NUM_THREADS=8` determinism gate, 3 runs per program, one
+  distinct sha each.  The control arm of all four paired runs also
+  produced `7190969b1feae13a`, so the gate is byte-neutral in both
+  directions.
+- **Switch.** `ZIREN_GPU_JAGGED_ROW_EQ_HOST_SKIP`, **default ON**; `=0`
+  is the kill switch.  The skip declines automatically whenever
+  `ZIREN_GPU_JAGGED_ROW_EQ_DEVICE_VERIFY` is on, since that gate needs the
+  host table to compare the device build against.
+
+### REFUTED by sub-instrumentation: the GKR round loop's Fiat-Shamir tail
+
+The standing premise was that the remaining LogUp-GKR round-loop idle is
+"per-round host finalize/observe/sample between `foldAndSumC`'s D2H and the
+next fold: 12.3 ms/shard over 27.6 gaps, up to 6 ms on the biggest layers."
+`ZIREN_GPU_JHR_RND_PROF=1` splits that loop statement by statement.
+Measured, tendermint core, 33 shards, 210 fused rounds/shard:
+
+| step | ms/shard |
+|---|---|
+| `stream.synchronize()` — **GPU wait, not host** | 41.5 |
+| `out_dev` `cudaMallocAsync` | 2.7 |
+| 5 cols-sized metadata H2D | 1.7 |
+| `partials` D2H | 1.6 |
+| `finalize_univariate_host` | 0.77 |
+| `observe_coeffs` | 0.44 |
+| host metadata prefix build | 0.23 |
+| everything else (scratch, col_index, launch, reduce, state, sample, horner) | 1.7 |
+| **HOST TOTAL** | **9.2** |
+
+`finalize + observe + sample + horner` together are **1.23 ms/shard**, and
+the worst single round's whole post-D2H host tail is **0.019 ms** — ~300×
+smaller than the 6 ms claimed.  The round loop's remaining idle is not the
+Fiat-Shamir tail, and even removing *all* 9.2 ms of its host time would be
+worth ~1.4% by the calibration above.  Do not re-chase it.
+
+### Also refuted in the same sweep (measured 0, do not re-chase)
+
+Four further "host table" candidates from the static sweep measured at or
+near zero on the single-GPU core prove path:
+
+| candidate | measured |
+|---|---|
+| zerocheck y-tuple per-chip `partial_lagrange` (`sum_as_poly`) | **0 calls** — the batched device-eq path takes every round |
+| `HostInteractions::new` per chip (`stark/permutation.rs`) | **0 calls** on the core prove path |
+| per-chip alpha-power geometric series | **0 calls** |
+| zerocheck bytecode clone + concat per round | 0.15 + 0.50 ms/shard |
+
+And a whole family of candidates in `drive_packed_pool` /
+`chip_structured_round_sp1` (host `col_index` segmented iota, the
+bit-reversed `eq_row_packed` interleave, the per-round eq D2H→host-fold→H2D
+round trip) is **dormant on single-GPU**: the JHR device-slab wire is
+default ON and takes every layer, and those sites are only reached when
+`wire_effective_gpu_count() > 1`.  They remain real levers for the
+multi-GPU configuration and are recorded here so the next sweep does not
+re-derive them.
