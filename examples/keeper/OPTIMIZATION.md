@@ -2307,12 +2307,15 @@ job/result fields would make the encode a single memcpy).
   - tendermint, 33 shards — 0 declines.
 - **Measured** (goat core, GPU 6, verify ON, interleaved A/B pairs):
 
-  | arm                 | fallbacks | core kHz            |
-  |---------------------|-----------|---------------------|
-  | 23 (host fallback)  | 2         | 858 / 905 / 868 / 888 |
-  | 0  (device for all) | 0         | 928 / 930 / 894     |
+  | arm                 | fallbacks | core kHz (6 interleaved pairs)   |
+  |---------------------|-----------|----------------------------------|
+  | 23 (host fallback)  | 2         | 858 / 905 / 600* / 868 / 888 / 848 |
+  | 0  (device for all) | 0         | 928 / 930 / 839* / 894 / 918 / 883 |
 
-  ~+3-5% goat core kHz and 190 ms of host critical-path wall removed per goat run; no
+  (*) the third pair of the first batch ran against a concurrent cargo build; it is
+  discarded as a perf signal but is retained here because arm B still won it. Arm B wins
+  6/6 pairs; on the 5 clean pairs the gain is +3.5% to +5.4%. ~190 ms of host
+  critical-path wall removed per goat run; no
   measurable change on tendermint (3914/3745/3574 vs 3895/3230/3774 kHz — the gate is not
   exercised there in either arm).
 - **Validated byte-identical.** goat core sha `8aa10f1942b71b62` (the goat core golden) in
