@@ -852,9 +852,21 @@ where
         // (confirmed: no consumer in `open()`), so a 0-height chip maps to the
         // degree-1 domain — a discarded placeholder purely to avoid the panic.
         // Same all-stage no-op guarantee as `log_degrees` above.
+        // A non-power-of-two height (SP1-parity `next_multiple_of_32` core
+        // padding) ALSO panics inside `natural_domain_for_degree`
+        // (`log2_strict_usize`), so round up to the next power of two — this
+        // value is a discarded placeholder either way.  Byte-identical for
+        // every power-of-two height (the only case that reached this line
+        // before).
         let _trace_domains = degrees
             .iter()
-            .map(|degree| pcs.natural_domain_for_degree(if *degree == 0 { 1 } else { *degree }))
+            .map(|degree| {
+                pcs.natural_domain_for_degree(if *degree == 0 {
+                    1
+                } else {
+                    degree.next_power_of_two()
+                })
+            })
             .collect::<Vec<_>>();
 
         // Observe the public values and the main commitment.
