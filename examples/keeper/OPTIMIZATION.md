@@ -399,6 +399,87 @@ delta, how it was validated, and the enable/kill-switch.
   under the GPU prover. Zero calls, silently. Check the probe's string survives
   into the binary before trusting a "no output means no time" reading.
 
+## LogUp-GKR round wire — decomposition + three per-round serial-path removals (ziren-gpu)
+
+- **What it is.** `gkr_wire_total` (`basefold/src/device_logup_gkr.rs`
+  `try_wire_{device,host_source}_slab_native`) is the largest single host span
+  left on the serial critical path: **106.8 ms/shard wall at 100.4 ms
+  thread-CPU on reth** (281 shards), 103.1/97.2 on tendermint. It was believed
+  to be ~95% genuine host compute because thread-CPU tracked wall.
+- **What it actually is (MEASURED, `ZIREN_GPU_HOST_PROF=1`).** Twenty-six new
+  probe sites (`core/src/host_prof.rs` sites 49-74) split it to a **0.06%
+  remainder**:
+
+  | part | reth ms/sh | what it is |
+  |---|---|---|
+  | `.lbs_pack` | 19.07 (0.00 cpu) | `build_jhr_slab_on_device` + blocking sync — GPU |
+  | `.fl_slab_stash` | 9.86 | FirstLayer device split + pack — GPU |
+  | `.drv_round0` | 10.67 | round-0 poly kernel + sync + D2H — GPU |
+  | `.rd_SYNC` | 42.97 | `stream.synchronize()` per fold round — GPU |
+  | `.rd_outalloc` | 8.38 | 210 `cudaMallocAsync` for the fold output slab |
+  | `.rd_metah2d` | 2.37 | 5 pageable `cols`-u32 H2D per round (1050/shard) |
+  | `.rd_d2h` | 1.94 | `partials.to_host()` (full `3*MAX_GRID_SIZE`) |
+  | `.drv_terminal` + `.drv_interact` | 5.15 | host terminal fold + interactions rounds |
+  | `.rd_observe` + `.rd_sample` | 0.59 | Fiat-Shamir — irreducible |
+  | everything else | ~5.8 | host metadata, finalize, launches, eq folds |
+
+  **`.rd_SYNC` reads 42.97 ms wall at 42.43 ms thread-CPU — 98.7% "cpu-busy"
+  while doing zero host work.** CUDA spin-waits, so thread-CPU is not a
+  compute/wait discriminator here. Cross-check against the per-stage device
+  table: `.lbs_pack` + `.fl_slab_stash` = 28.9 ms/shard vs `gkr.firstlayer`
+  19.02 ms/Mcycle x 1.494 Mcycle/shard = 28.4; `.rd_SYNC` + `.drv_round0` =
+  53.6 vs `gkr.sumcheck` 32.94 x 1.494 = 49.2. **~82 of the 106.8 ms is the GPU
+  executing GKR kernels; genuine host COMPUTE is 8.4 ms (7.8%), CUDA API with
+  the GPU idle is 14.6 ms.**
+- **Removals.** Three changes to `basefold/src/logup_round_device.rs`, all
+  inside the fused fold+sum round loop:
+  1. **Recycle the fold output slab.** The kernel writes the whole `4*h_out`
+     prefix unconditionally (`h_out == sum(new_real_h)`), and per-column heights
+     are non-increasing, so round r-2's retired slab always fits round r's
+     output. Recycling it removes one `cudaMallocAsync` + one `cudaFreeAsync`
+     per round. **Capped at 64 MiB (`JHR_SPARE_MAX_ELEMS`):** a retained buffer
+     is one the stream-ordered allocator can no longer hand to a CONCURRENT
+     consumer on the same device (trace-gen and the next shard's commit share
+     the mempool), so an uncapped spare moved the process high-water mark by the
+     giant early-round slabs — MEASURED on tendermint, peak VRAM **24.5 -> 28.3
+     GiB uncapped**, which reth (peaking near the 31.8 GiB card) cannot afford.
+     The alloc costs the same ~40 us regardless of size and the slab halves
+     every round, so the cap gives up only the first rounds of each layer.
+  2. **One packed metadata H2D per round.** The five `cols`-sized u32 arrays
+     (`data_start_in/out`, `iter_start_poly`, `real_h_in`, `new_real_h`) now
+     live block-contiguous in one `5*cols` staging Vec and one `5*cols_cap`
+     device buffer; kernel arguments are pointers into it. 1050 pageable copies
+     per shard become 210. Identical device bytes.
+  3. **D2H only `3*grid_size` partials**, not the full `3*MAX_GRID_SIZE` (48
+     KiB) pool capacity. `reduce_partials_host` never indexes past
+     `3*grid_size`, so the copied prefix is exactly what is read.
+- **Measured** (reth 281 shards, `ZIREN_GPU_HOST_PROF=1`), per-lever on the
+  serial path, each against the same instrumented control:
+
+  | site | control | after | delta |
+  |---|---|---|---|
+  | `.rd_outalloc` (recycle, uncapped) | 8.381 | 2.688 | **-5.69** |
+  | `.rd_outalloc` (recycle, 64 MiB cap — shipped) | 8.381 | 5.021 | **-3.36** |
+  | `.rd_metah2d` (packed H2D) | 2.367 | 0.596 | **-1.77** |
+  | `.rd_d2h` (partials trim) | 1.942 | 1.331 | **-0.61** |
+
+  Shipped total **-5.74 ms/shard** of GPU-idle serial wall; `.rd_state` 0.160 ->
+  0.074 and `.rd_scratch` 0.323 -> 0.165 come along. The cap costs 2.3 ms of the
+  uncapped 5.69 and buys back the whole VRAM regression. Both sides of each
+  delta carry the same per-lap probe cost, so the deltas are clean while the
+  residuals are inflated by it.
+- **Peak VRAM** (same GPU, same workload): tendermint baseline 24 517 MiB,
+  uncapped recycle 28 293, **capped 24 517** (six runs, 24 517-24 549); reth
+  baseline 26 551-27 159, capped **27 095**. Neutral.
+- **Validated byte-identical.** fib core `7c780d9f59d728b5`, fib compress
+  `7e3c5d753cf25e55`, goat `8aa10f1942b71b62` (9 shards), simple-go
+  `443b92db18eceab5` (3), tendermint `7190969b1feae13a` (33) at RAYON=16,
+  reth `2c4d3597a79a6f36...` (281) — all with CORE VERIFY OK.
+- **Switches.** None — the paths are unconditional (no new env gate). The
+  26 `host_prof` sites are byte-neutral and cost nothing with
+  `ZIREN_GPU_HOST_PROF` unset.
+
+
 ## Jagged-eval structural sumcheck — host-core parallelization
 
 - **What.** `structural_jagged_eval_sumcheck` (`crates/pcs/src/jagged_eval_sumcheck.rs`)
