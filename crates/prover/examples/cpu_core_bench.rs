@@ -95,18 +95,42 @@ fn main() {
          core_khz={khz:.1}"
     );
 
-    // VERIFY IS MANDATORY — never skipped.
-    let t_verify = std::time::Instant::now();
-    prover.verify(&core_proof.proof, &vk).expect("core verify FAILED");
-    let verify_secs = t_verify.elapsed().as_secs_f64();
-    eprintln!("[CPUBENCH] CORE VERIFY OK verify_secs={verify_secs:.3}");
-
+    // Persist the proof + vk BEFORE verifying. `verify()` on a many-shard core
+    // proof spikes RSS hard (measured: ~12 GB -> 73.8 GB in <10 s on a
+    // 33-shard tendermint proof), and an OOM kill there would otherwise
+    // destroy a multi-hour prove with no artifact to show for it. Writing
+    // first means a killed verify still leaves a shaable, independently
+    // verifiable proof (see the `verify_core_vkonly` example).
     let bytes = bincode::serialize(&core_proof.proof).expect("serialize core proof");
     eprintln!("[CPUBENCH] serialized core proof bytes = {}", bytes.len());
     if let Ok(out) = std::env::var("ZIREN_CORE_PROOF_OUT") {
         std::fs::write(&out, &bytes).expect("write core proof bytes");
         eprintln!("[CPUBENCH] wrote core proof bytes to {out}");
     }
+    if let Ok(vk_out) = std::env::var("ZIREN_CORE_VK_OUT") {
+        let vk_bytes = bincode::serialize(&vk).expect("serialize vk");
+        std::fs::write(&vk_out, &vk_bytes).expect("write vk bytes");
+        eprintln!("[CPUBENCH] wrote vk bytes = {} to {vk_out}", vk_bytes.len());
+    }
+    // Drop the serialized copy before verify so its bytes are not part of the
+    // verify-time peak.
+    drop(bytes);
+
+    // VERIFY IS MANDATORY. In-process by default; set CPUBENCH_DEFER_VERIFY=1
+    // to skip it here ONLY when verification is instead performed
+    // out-of-process on the dumped proof+vk via `verify_core_vkonly`, which
+    // starts from a clean address space and so has a far lower peak.
+    let defer_verify = std::env::var("CPUBENCH_DEFER_VERIFY").is_ok();
+    let verify_secs = if defer_verify {
+        eprintln!("[CPUBENCH] CORE VERIFY DEFERRED to out-of-process verify_core_vkonly");
+        -1.0
+    } else {
+        let t_verify = std::time::Instant::now();
+        prover.verify(&core_proof.proof, &vk).expect("core verify FAILED");
+        let s = t_verify.elapsed().as_secs_f64();
+        eprintln!("[CPUBENCH] CORE VERIFY OK verify_secs={s:.3}");
+        s
+    };
 
     let peak = peak_rss_bytes();
     eprintln!(
