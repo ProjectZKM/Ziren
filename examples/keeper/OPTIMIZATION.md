@@ -2812,3 +2812,122 @@ only `copy_from_host`; the driver's own pageable staging is not inside that
 span, which is why the NVTX census attributes 152.8 ms/shard of MEMCPY to
 `logup_gkr_first_layer` where the probe sees 18.8. Removing 538 MB/shard of
 pageable traffic removes more wall than the copy-API time alone suggests.
+
+## CLOSED BY MEASUREMENT: the zerocheck / commit / basefold-open `cudaStreamSynchronize` blocks are genuine data dependencies (reth)
+
+- **What was suspected.** An NVTX census of the GPU shard driver put ~193 ms/shard of
+  reth's 1234.9 ms shard inside `cudaStreamSynchronize` at three sites — `zc_reduce`
+  108.5, `open_precompute_commit` 51.6, `jagged_basefold_open` 32.5 (+ `open_s4_jagged_pcs`
+  7.8) — and the open question was whether those were premature/over-broad syncs (a host
+  lever) or the GPU genuinely being the critical path (not one).
+- **How it was settled.** For every `cudaStreamSynchronize` call on the serial prover
+  thread, the device-op union (kernel ∪ memcpy ∪ memset) was integrated over exactly that
+  call's interval, together with the un-merged sum of overlapping device-op durations
+  (= concurrency) and the set of streams active inside the window.
+- **Measured.** GPU busy DURING the sync: `zc_reduce` **98.2%**, `open_precompute_commit`
+  **96.6%**, `jagged_basefold_open` **93.8%**, `open_s4_jagged_pcs` **87.5%** — and
+  **concurrency exactly 1.00 on a single stream in every one of them**, i.e. one serial
+  dependency chain with no independent work that a narrower wait could have skipped.
+  Total GPU-idle inside all four sites' syncs is **5.7 ms/shard (0.46% of the shard)**.
+  The chains are: `zerocheckJaggedCxFusedChipsPtrs` 94.3 ms/sh; Merkle
+  `streamingAbsorbStripe` 23.6 + `bit_rev_permutation_z` 10.7 + `_CT_NTT` 10.1;
+  NTT/bitrev/`dotProductBaseEfChip` 18.5; `branchingProgram` 6.7.
+- **Why the usual discriminator fails here.** All three spans read **99.2–99.5% thread-CPU**
+  (`ZIREN_GPU_SPAN_CPU_PROF`), which looks like host compute — it is CUDA spin-wait. The
+  valid discriminator is the TRIPLE (thread-CPU, CUDA-API time, GPU-busy-during-the-API-call).
+- **Consequence.** ~193 ms/shard (16% of the shard) is unattackable from the host. It is
+  attackable only by making those device chains cheaper — and, unlike device work that
+  overlaps host work, device work inside these windows IS on the serial critical path, so
+  it converts 1:1 to shard wall.
+
+## Where reth's shard actually goes — the GPU-idle host-compute census (measurement, ziren-gpu)
+
+Same reth capture (281 shards, single GPU, 1234.9 ms/shard), prover thread only.
+Each span's self-wall is split into CUDA-API time and host code, and the device-op
+union is integrated over each part, so "HOST, GPU idle" is the serial critical path
+(the only thing that has ever converted to kHz).
+
+| span (prover thread) | self ms/sh | sync ms/sh (GPU busy) | HOST ms/sh | of which GPU-IDLE | thread-CPU |
+|---|---|---|---|---|---|
+| `dispatch_recv_commit_wait` | 296.9 | – | 296.9 | ~296.9 | **0.0%** (blocked) |
+| `logup_gkr_layer_transitions` | 285.5 | 71.6 (96%) | 156.0 | 154.8 | 99.2% |
+| `logup_gkr_first_layer` | 159.2 | 3.7 (95%) | 1.9 | 1.2 | 99.5% |
+| `zc_reduce` | 142.5 | 108.5 (98%) | 21.9 | 21.4 | 99.5% |
+| `open_precompute_commit` | 62.9 | 51.6 (97%) | 0.7 | 0.3 | 99.3% |
+| `jagged_basefold_open` | 54.1 | 32.5 (94%) | 1.9 | 1.4 | 99.2% |
+| `logup_gkr_output_extract` | 42.9 | 0.7 | 42.1 | 25.1 | 1.9% (rayon join) |
+| `zc_prep_cells` | 36.9 | – | 34.4 | 33.5 | 99.9% |
+| `open_s4_jagged_pcs` | 34.0 | 7.8 (88%) | 24.7 | 24.5 | 100.0% |
+| `jagged_sumcheck_reduce` | 28.2 | – (23.7 memcpy, 99% busy) | 0.1 | 0.1 | 93.8% |
+| `open_s2_logup_gkr` | 27.0 | – | 27.0 | 27.0 | 99.1% |
+
+- **The single largest item is not compute at all.** `dispatch_recv_commit_wait`
+  (`core_multi_gpu.rs`, the coordinator's `receiver.recv()` for the pool worker's core
+  commit) is **296.9 ms/shard = 24% of the shard at 0.0% thread-CPU with the GPU 15% busy**.
+  The producer side is idle too — the 8 trace-gen workers sit at **3.4–5.6% CPU** and the
+  checkpoint generator's `batch` span is 306.0 ms/shard at **0.0% CPU**. Every thread is
+  blocked while the GPU idles: this is the price of the one-shard-in-flight invariant, and
+  it is the largest single lever on reth.
+- **Genuine host compute with the GPU idle**, in rank order: `zc_prep_cells` 33.5,
+  `open_s2_logup_gkr` 27.0, `logup_gkr_output_extract` 25.1, `open_s4_jagged_pcs` 24.5,
+  `zc_reduce` 21.4 ms/shard — ~131 ms/shard (10.6%) in total, all on the serial thread.
+
+## Zerocheck odd-height fold on device — the last host fallback inside the zerocheck reduce (ziren-gpu)
+
+- **What.** `fold_device_hook` folded a chip's cells on device only when `num_real` was
+  EVEN. An ODD `num_real` fell back to `fold_odd_on_host`: a full D2H of the chip's cells,
+  a single-threaded host lerp loop, and a full H2D of the result — from inside the SERIAL
+  zerocheck reduce, with the GPU idle for all of it (and in violation of the standing
+  "never fall back to host during proving" rule). `num_real` halves with `div_ceil` every
+  round, so odd heights recur constantly.
+- **Measured cost of the old path (reth, nsys, 281 shards).** `zc_reduce`'s host code is
+  21.9 ms/shard with the GPU idle for 21.4 of it, and **17.3 ms/shard of that is host work
+  immediately preceding a `zerocheckJaggedFold` launch**. Device fold-kernel launches are
+  225.7/shard while `zc_reduce` issues **252.6 D2H (61.4 MB) and 628.7 H2D (31.7 MB) per
+  shard** — a device-only fold needs none of those. Roughly half of the ~430 folds per
+  shard took the host round trip.
+- **Fix.** `zerocheckJaggedFoldOdd` takes the `num_real` bound directly (row `2i+1 >=
+  num_real` reads ZERO — the same clamp `zerocheckJaggedCx` already uses), so the odd fold
+  stays on device.
+- **Why byte-neutral.** Same expression in the same field: the kernel computes
+  `x + alpha*(y - x)`, the host computed `alpha*(y - x) + x`, with `y = 0` for the missing
+  partner; `h_in` remains the buffer's row stride so the reads are the identical elements.
+  Falls back to the host path on downcast failure or `num_real > height`.
+- **Measured (reth, 281 shards, single GPU, verify ON, paired runs with BOTH the GPU and
+  the launch order swapped between reps).** core proving **317.2 s -> 290.8 s** (1324 ->
+  **1444 kHz**, +9.1%) and, with the arms swapped, **316.4 s -> 291.1 s** (1327 ->
+  **1443 kHz**, +8.7%). Zero overlap: every ON run beats every OFF run by >25 s.
+  **-91 ms/shard**, ~4x more than the 24.6 ms/shard the trace attributes to the host loop
+  plus the copies' API time — the blocking `to_host()` / `to_device()` round trips cost far
+  more in induced stream serialisation than their own API time shows. Peak VRAM +416 MiB
+  (the fold output now lives on device).
+- **Odd-fold rate (ZIREN_PROF_CORE `odd_fold` counters, ON).** `host_n=0` everywhere (the
+  device path takes all of them) with `dev_n`/`even_n` = 275/209 and 41/69 on tendermint,
+  88/66 and 24/64 on goat, 333/173 on fib — i.e. **26-66% of every shard's zerocheck folds
+  are odd-height**, all of which used to be a host round trip.
+- **Tendermint control (33 shards, sequential alternating on one GPU, verify ON).**
+  OFF 3618 / 3639 kHz, ON 3730 / 3803 kHz (+3.8%) — TM gains less than reth, as expected.
+- **Validated byte-identical.** reth core `2c4d3597a79a6f36...` (281 shards) with
+  `CORE VERIFY OK` on BOTH arms of two paired reps; fib `7c780d9f59d728b5`,
+  goat `8aa10f1942b71b62`, simple-go `443b92db18eceab5`, tendermint `7190969b1feae13a`
+  all GREEN with verify ON; reth at RAYON_NUM_THREADS=8 reproduces the same core sha.
+- **Switches.** `ZIREN_GPU_ODD_FOLD_DEVICE` — default **on**; `=0` restores the host round
+  trip. `ZIREN_PROF_CORE` additionally dumps the odd/even fold split.
+
+## LogUp-GKR output-extract — batched full-point + main chip openings (ziren-gpu)
+
+- **What.** `logup_gkr_output_extract` batched only the DEVICE-ONLY chips' main openings.
+  Every chip's FULL-POINT opening — and, on reth (where every chip has a host MLE), every
+  host chip's main opening as well — went through a separate per-chip
+  `eval_chip_at_point_via_provider` from inside the rayon join, each rebuilding its own
+  `2^max_log_row_count` eq-table on device and serialising on the shard stream.
+  `full_eval_point` is IDENTICAL for every chip, so that is N eq-table builds for one
+  distinct point.
+- **Measured (ZIREN_PROF_OE, reth, 281 shards).** The per-chip full-point route costs
+  **86.9 thread-ms/shard**; batching it collapses that to **0.01 thread-ms** plus one
+  batched call. **But the span does not get cheaper**: `parmap` 45.4 -> 34.9 ms/shard while
+  the batched call adds 11.2 ms on the serial prover thread — the per-chip work had been
+  overlapping inside the rayon pool, so moving it onto the serial thread trades parallel
+  wall for serial wall. Peak VRAM drops ~320 MiB.
+- **Verdict.** Byte-neutral and a large reduction in redundant device work, but span-neutral
+  — kept behind `ZIREN_GPU_OE_FULL_BATCH` (default **off**) rather than made unconditional.
