@@ -2,14 +2,13 @@ use crate::septic_curve::SepticCurve;
 use crate::septic_digest::SepticDigest;
 use crate::septic_extension::SepticExtension;
 use core::fmt::Display;
-use itertools::Itertools;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Reverse, error::Error, time::Instant};
 
 use crate::{air::LookupScope, AirOpenedValues, ChipOpenedValues, ShardOpenedValues};
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
-use p3_commit::{Pcs, PolynomialSpace};
+use p3_challenger::CanObserve;
+use p3_commit::Pcs;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::{RowMajorMatrix, RowMajorMatrixView}, Matrix};
 use p3_maybe_rayon::prelude::*;

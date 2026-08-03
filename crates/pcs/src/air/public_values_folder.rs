@@ -25,7 +25,7 @@
 use std::marker::PhantomData;
 
 use p3_air::{AirBuilder, ExtensionBuilder};
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
+use p3_field::{ExtensionField, Field};
 
 use crate::air::{AirLookup, LookupScope, MessageBuilder};
 use crate::folder::PairWindow;

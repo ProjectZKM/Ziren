@@ -1017,7 +1017,7 @@ pub mod jagged {
 
     use super::{
         FriConfig,
-        commit_jagged_pcs, open_jagged_pcs_host,
+        open_jagged_pcs_host,
         verify_jagged_pcs,
     };
 

@@ -7,7 +7,7 @@ use std::{
 use itertools::Itertools;
 use p3_air::{Air, BaseAir};
 use p3_commit::{LagrangeSelectors, PolynomialSpace};
-use p3_field::{BasedVectorSpace, Field, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 
 use super::{
     folder::{PairWindow, VerifierConstraintFolder},

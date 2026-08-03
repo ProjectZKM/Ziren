@@ -121,7 +121,6 @@ where
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
-    use p3_field::PrimeCharacteristicRing;
 
     // Per-shard zerocheck sub-phase timing.  Three sub-phases:
     //   (a) per-chip constraint-table build (par_iter — typically the
