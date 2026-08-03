@@ -113,8 +113,9 @@ impl ZKMProverOpts {
     /// SP1's `ceil() + 4`) the branch is a no-op — full default
     /// shard_size is used.
     ///
-    /// Pair with `ZIREN_GPU_RECOMPUTE_FIRST_LAYER=1` (default OFF, scaffold
-    /// only) on ziren-gpu's `layer_transition_dispatch.rs` for the matching
+    /// Pair with `ZIREN_GPU_RECOMPUTE_FIRST_LAYER` (AUTO: on for small
+    /// cards, off otherwise; `=0`/`=1` force it) on ziren-gpu's
+    /// `layer_transition_dispatch.rs` for the matching
     /// half of SP1's pattern that drops the first-layer device buffers
     /// after the second is materialized.  Full first-layer-virtual host
     /// regen wiring is deferred — see the related design memo.

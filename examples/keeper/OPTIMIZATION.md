@@ -2880,10 +2880,13 @@ was not the one assumed.
 
 `build_jhr_slab_from_host_layer` -> `upload_quadrant`
 (`basefold/src/jhr_slab_device.rs`) is reached from
-`try_wire_host_source_slab_native`, whose gate `ZIREN_GPU_JHR_SLAB_GIANT` is
+`try_wire_host_source_slab_native`, whose gate `ZIREN_GPU_JHR_SLAB_GIANT` was
 documented "Default OFF" but is coded `!= Ok("0")`, i.e. **default ON**. The
-sibling `ZIREN_GPU_FIRST_EF_LAYER_DEVICE` has the same stale-comment/live-code
-mismatch (also default ON) — and that one is doing its job: instrumenting the
+sibling `ZIREN_GPU_FIRST_EF_LAYER_DEVICE` had the same stale-comment/live-code
+mismatch (also default ON).  Both docstrings have since been corrected, along
+with 20 more found by the Aug-3 sweep of every `env::var("ZIREN*")` read
+against its doc comment — see the hygiene commit.  The measurement below is
+unaffected: `ZIREN_GPU_FIRST_EF_LAYER_DEVICE` is doing its job — instrumenting the
 call sites shows `slabsrc/Layer_host_upload_*` **never fires**, so the nv=29
 first EF `Layer` really is device-resident and is NOT the source.
 
