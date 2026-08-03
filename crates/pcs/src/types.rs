@@ -8,7 +8,7 @@ use itertools::Itertools;
 use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use serde::{Deserialize, Serialize};
 
-use super::{Challenge, Com, OpeningProof, StarkGenericConfig, Val};
+use super::{Challenge, Com, StarkGenericConfig, Val};
 use crate::septic_digest::SepticDigest;
 use crate::shape::OrderedShape;
 
@@ -26,16 +26,21 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 /// hold refcounted handles to the same allocation.
 pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
+    /// Placeholder main-trace commitment (a 1×1 dummy commit on the CPU
+    /// prover, the real device commit on the GPU prover).  It does NOT
+    /// reach the shard proof — `ShardCommitment` carries no `main_commit`
+    /// any more.  It survives because the GPU prover's shrink
+    /// basefold-attach path reads it back out as an 8-felt digest
+    /// (`shard-prover/src/lib.rs`, `data.main_commit` downcast).
     pub main_commit: Com<SC>,
     /// FRI prover data for the main-trace commit.  In BaseFold mode
     /// (Option B single-main-commit flow), this is a *placeholder*
     /// FRI prover-data produced by committing to a single 1×1 dummy
     /// trace (microseconds-cost vs the multi-second real main-trace
-    /// commit).  The basefold `open()` path drives a placeholder 1×1
-    /// `pcs.open` against it to populate `ShardProof.opening_proof`
-    /// with matching dummy bytes; the verifier short-circuits before
-    /// `pcs.verify`.  In the non-BaseFold FRI path this is the real
-    /// main-trace FRI prover data.
+    /// commit).  Nothing opens against it and nothing reads it: the
+    /// shard proof carries no FRI opening, and the verifier reads its
+    /// opening evidence exclusively from
+    /// `ShardProof::basefold_shard_proof`.
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
@@ -69,33 +74,26 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
     }
 }
 
+/// Trace commitments carried in the shard-proof envelope.
+///
+/// The BaseFold pipeline emits none of them.  The single real
+/// main-trace commitment is the jagged-PCS BaseFold commit, whose
+/// 8-felt digest travels as `BasefoldShardProof::main_commitment` and
+/// is what both the host verifier and the recursion circuit bind to.
+/// The legacy `main_commit` MerkleCap that used to sit here was a
+/// write-only field: no verifier and no in-circuit constraint ever
+/// read it, and the host and GPU provers did not even agree on its
+/// value (host: a 1×1 dummy commit; GPU: the raw BaseFold root), yet
+/// both produced proofs that verify.  It is gone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShardCommitment<C> {
-    pub main_commit: C,
     /// Auxiliary commitments emitted alongside the main trace
     /// commit.  Empty in the BaseFold pipeline (no permutation
     /// trace, no quotient commitment — the soundness work moved
     /// into a sumcheck-based binding + folded FRI commit).  In the
-    /// legacy 4-batch FRI pipeline this holds two entries in
+    /// legacy 4-batch FRI pipeline this held two entries in
     /// strict `[permutation, quotient]` order.
     pub auxiliary_commits: Vec<C>,
-}
-
-impl<C: Clone> ShardCommitment<C> {
-    /// The permutation-trace commitment, if present.  Accessor
-    /// that preserves the legacy semantic slot after the field
-    /// rename (`auxiliary_commits[0]` in the new layout).
-    pub fn permutation_commit(&self) -> Option<&C> {
-        self.auxiliary_commits.first()
-    }
-
-    /// The quotient-polynomial commitment, if present.  Accessor
-    /// that preserves the legacy semantic slot after the field
-    /// rename (`auxiliary_commits[1]` in the new layout).
-    pub fn quotient_commit(&self) -> Option<&C> {
-        self.auxiliary_commits.get(1)
-    }
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,16 +133,6 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 pub struct ShardProof<SC: StarkGenericConfig> {
     pub commitment: ShardCommitment<Com<SC>>,
     pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    /// FRI opening proof.  In BaseFold mode (Option B
-    /// single-main-commit flow — default for KoalaBear), the prover
-    /// emits a *placeholder* FRI proof produced by opening a 1×1
-    /// dummy trace (microseconds-cost vs the multi-second real
-    /// main-trace open).  The verifier short-circuits before
-    /// `pcs.verify` (see verifier.rs `basefold_shard_proof.is_some()`
-    /// branch) so the placeholder bytes are never consumed.  In the
-    /// non-BaseFold FRI/STARK path (BN254 wrap / OuterSC) this is a
-    /// real proof.
-    pub opening_proof: OpeningProof<SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
     /// Shard-level BaseFold proof (always-on for KoalaBear MIPS shards).

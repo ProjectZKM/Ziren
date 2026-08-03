@@ -21,7 +21,7 @@ use super::{
 };
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
+    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PcsProverData,
     ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
@@ -761,8 +761,12 @@ where
         // (which observes its 8-felt digest as `main_commitment`).  Here we only
         // need a placeholder `main_commit` / `main_data`, produced by committing a
         // single 1x1 dummy trace (microseconds) — EXACTLY the GPU `drop_fri_commit`
-        // single-commit path.  `open()`'s placeholder `pcs.open` runs against this
-        // `main_data`; the BaseFold verifier short-circuits before `pcs.verify`.
+        // single-commit path.  NEITHER reaches the shard proof any more: the
+        // envelope carries no FRI opening and no `main_commit` MerkleCap, and
+        // the BaseFold verifier reads all of its opening evidence from
+        // `ShardProof::basefold_shard_proof`.  They are kept because
+        // `ShardMainData` is shared with the GPU prover, whose shrink
+        // basefold-attach path reads `main_commit` back out as an 8-felt digest.
         let dummy_trace: RowMajorMatrix<Val<SC>> =
             RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
         let dummy_domain = pcs.natural_domain_for_degree(1);
@@ -880,32 +884,17 @@ where
         // shard-level prover's prologue sees an aligned transcript
         // (otherwise round 0's claimed_sum check desyncs).
         //
-        // The snapshot is consumed only by the basefold branch but must
-        // be captured here, before the main_commit observe + perm
-        // challenge sampling that follow — those operations diverge the
-        // challenger state from what the basefold verifier expects.
+        // The snapshot is the ONLY thing the shard proof takes off this
+        // challenger.  Everything the legacy FRI envelope used to do after
+        // this point (observe `main_commit`, sample the two local-permutation
+        // challenges, observe the per-chip cumulative sums, sample alpha/zeta,
+        // and finally run a placeholder `pcs.open`) fed exactly one field —
+        // `ShardProof::opening_proof` — which no verifier and no live
+        // recursion program ever read.  The field is gone, so the whole tail
+        // is gone with it.  Note the caller passes `&mut challenger.clone()`
+        // per shard, so no downstream transcript depends on the post-`open`
+        // challenger state either.
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
-
-        challenger.observe(data.main_commit.clone());
-
-        // Obtain the challenges used for the local permutation argument.
-        let mut local_permutation_challenges: Vec<SC::Challenge> = Vec::new();
-        for _ in 0..2 {
-            // UFCS-disambiguate `F = Val<SC>` — the impl also
-            // carries `SC::Challenger: FieldChallenger<JaggedVal>` (threaded to
-            // the static outer BaseFold open), so bare `sample_algebra_element`
-            // is ambiguous. `Val<SC>` preserves the original resolution exactly.
-            local_permutation_challenges.push(
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                ),
-            );
-        }
-
-        let _packed_perm_challenges = local_permutation_challenges
-            .iter()
-            .map(|c| PackedChallenge::<SC>::from(*c))
-            .collect::<Vec<_>>();
 
         // === BaseFold fast path (KoalaBear/JaggedChallenger default) ===
         // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the default proof
@@ -933,78 +922,12 @@ where
             let t_basefold_path = std::time::Instant::now();
 
             // Skip permutation traces and quotient evaluation entirely.
-            // NOTE: public_values + main_commit already observed at lines 322-323,
-            // and perm challenges already sampled at lines 327-328.
-            // Do NOT re-observe or re-sample — that corrupts the Fiat-Shamir transcript.
-
-            // No permutation commit to observe (skipped).
-            // But cumulative sums are always observed (verifier does this unconditionally).
-            for i in 0..chips.len() {
-                let local_sum = SC::Challenge::ZERO;
-                // #P2S0: a 0-row missing chip has
-                // no last row to read the septic digest from — it contributes the
-                // ZERO digest (no events, no cumulative-sum contribution).  Guard
-                // on `values.len() < 14` (NOT just `height() == 0`) so the guard is
-                // the EXACT mirror of `chip_global_cumulative_sum` (which returns
-                // zero for `sz < 14`): identical for every present global-scope
-                // chip (their traces are always >= 14 values wide), strictly safer
-                // than the raw `values[len-14..]` slice for any under-14 trace, and
-                // drift-free against the shard-level cumulative-sum path.
-                let global_sum = if chips[i].commit_scope() == LookupScope::Local
-                    || traces[i].values.len() < 14
-                {
-                    SepticDigest::<Val<SC>>::zero()
-                } else {
-                    let main_trace = &traces[i];
-                    let main_trace_size = main_trace.height() * main_trace.width();
-                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                    SepticDigest(SepticCurve {
-                        x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j]),
-                        y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j + 7]),
-                    })
-                };
-                challenger.observe_slice(local_sum.as_basis_coefficients_slice());
-                challenger.observe_slice(&global_sum.0.x.0);
-                challenger.observe_slice(&global_sum.0.y.0);
-            }
-
-            // Sample alpha (constraint mixing challenge).
-            // UFCS-disambiguate `F = Val<SC>` (see the perm-challenge
-            // sample above) — preserves the original resolution byte-for-byte.
-            let _alpha: SC::Challenge =
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                );
-
-            // No quotient commit to observe (skipped).
-            // Sample zeta (evaluation point) for the legacy prep/main
-            // opening fields that are still carried in the shard-proof
-            // envelope.  Permutation and quotient are intentionally
-            // absent in the BaseFold path.
-            let _zeta: SC::Challenge =
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                );
-
-            // === Single-main-commit: placeholder pcs.open ===
-            //
-            // The basefold verifier dispatches via
-            // `basefold_shard_proof.is_some()` at the top of
-            // `Verifier::verify_shard` and never calls `pcs.verify` on
-            // the legacy FRI fields.  We run a *minimal* placeholder
-            // `pcs.open` on a single 1×1 dummy point against the
-            // placeholder `main_data` produced by
-            // `commit_basefold_path` so the existing
-            // `ShardProof.opening_proof: OpeningProof<SC>` shape stays
-            // valid (a real `FriProof` value with empty FRI work).
-            // Cost is microseconds vs the seconds of the real
-            // multi-trace FRI open this replaces.
-            let main_trace_opening_points_placeholder: Vec<Vec<SC::Challenge>> =
-                vec![vec![_zeta]];
-            let (_openings_unused, opening_proof) = pcs.open(
-                vec![(&data.main_data, main_trace_opening_points_placeholder)],
-                challenger,
-            );
+            // The legacy FRI envelope (cumulative-sum observes, alpha, zeta and
+            // the placeholder 1×1 `pcs.open`) is gone: it existed solely to fill
+            // `ShardProof::opening_proof`, which is no longer a field.  The
+            // shard-level BaseFold prover below runs off
+            // `basefold_challenger_snapshot`, so dropping the tail cannot move
+            // any transcript the verifier replays.
 
             let basefold_path_ms = t_basefold_path.elapsed().as_millis();
 
@@ -1016,7 +939,7 @@ where
                 {
                     let _ = writeln!(
                         f,
-                        "BASEFOLD_PATH total={}ms (Option B single-main-commit, placeholder pcs.open)",
+                        "BASEFOLD_PATH total={}ms (Option B single-main-commit, no FRI open)",
                         basefold_path_ms,
                     );
                 }
@@ -1089,12 +1012,8 @@ where
             );
 
             return Ok(ShardProof::<SC> {
-                commitment: ShardCommitment {
-                    main_commit: data.main_commit.clone(),
-                    auxiliary_commits: Vec::new(),
-                },
+                commitment: ShardCommitment { auxiliary_commits: Vec::new() },
                 opened_values: ShardOpenedValues { chips: opened_values },
-                opening_proof,
                 chip_ordering: data.chip_ordering,
                 public_values: data.public_values,
                 basefold_shard_proof,

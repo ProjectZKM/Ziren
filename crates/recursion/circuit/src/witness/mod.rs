@@ -141,7 +141,6 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let commitment = self.commitment.read(builder);
         let opened_values = self.opened_values.read(builder);
-        let opening_proof = self.opening_proof.read(builder);
         let public_values = self.public_values.read(builder);
         let chip_ordering = self.chip_ordering.clone();
 
@@ -157,7 +156,6 @@ where
         ShardProofVariable {
             commitment,
             opened_values,
-            opening_proof,
             public_values,
             chip_ordering,
             basefold_jagged_fingerprint,
@@ -167,7 +165,6 @@ where
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         self.commitment.write(witness);
         self.opened_values.write(witness);
-        self.opening_proof.write(witness);
         self.public_values.write(witness);
         // BaseFold-pipeline writes disabled to match the disabled
         // reads above.  Re-enable when the SP1-style parallel
@@ -182,14 +179,12 @@ where
     type WitnessVariable = ShardCommitment<T::WitnessVariable>;
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let main_commit = self.main_commit.read(builder);
         let auxiliary_commits =
             self.auxiliary_commits.iter().map(|c| c.read(builder)).collect();
-        Self::WitnessVariable { main_commit, auxiliary_commits }
+        Self::WitnessVariable { auxiliary_commits }
     }
 
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.main_commit.write(witness);
         for c in self.auxiliary_commits.iter() {
             c.write(witness);
         }
