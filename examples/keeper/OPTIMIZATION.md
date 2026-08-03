@@ -4167,8 +4167,13 @@ same binary in both arms, verify ON:
 | 5 | 7 | B,A | 2464 | 2425 | +1.61 % |
 | **mean** | | | **2580** | **2487** | **+3.7 %** |
 
-Mean of the paired ratios +3.69 %, SD 3.35 %, so the 95 % CI is roughly
-+0.7 % to +6.7 % — positive but wide. Two honest caveats: pair 3 is a
+Mean of the paired ratios +3.69 %, SD 3.35 %, SE 1.50 %. With n = 5 the correct
+interval is Student-t, not normal: **95 % CI -0.5 % to +7.9 %**, which
+*includes zero*. So the kHz pairing on its own does NOT establish the win at
+95 % — it is consistent with the effect and centred in the right place, but it
+is underpowered. The evidence that the work moved is the direct span
+measurement above (23.96 -> 0.19 ms/shard, shard period -5.6 %), which does not
+depend on this statistic. Two further caveats: pair 3 is a
 **negative** (its A arm also had the longest wall of any run in the set, 928.7 s
 vs 805.0 s, the box's contention signature), and pairs 4-5 ran with both GPUs
 plus another tenant busy, where a fixed ~24 ms/shard saving is a smaller
