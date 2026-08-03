@@ -104,8 +104,10 @@ delta, how it was validated, and the enable/kill-switch.
 
   | program | `ELEMENT_THRESHOLD` | shards | core kHz | peak VRAM (MiB) | padded dense |
   | --- | ---: | ---: | ---: | ---: | ---: |
-  | tendermint | 251,658,240 | 33 | 4473, 4368 | 24,581 / 24,613 | 8.49 G |
+  | tendermint | 251,658,240 | 33 | 4473, 4368, 4600 | 24,581 / 24,613 / 24,549 | 8.49 G |
   | tendermint | 301,989,888 | 27 | 4184 | 28,453 | 13.82 G |
+  | tendermint | 402,653,184 | 24 | 4357 | 28,613 | 12.21 G |
+  | tendermint | 503,316,480 | 24 | 4243, 4421 | 29,477 / 29,093 | 12.21 G |
   | goat | 251,658,240 | 9 | 977 | 23,653 | 1.82 G |
   | goat | 301,989,888 | 8 | 956 | 28,453 | 2.22 G |
   | goat | 503,316,480 | 8 | 939 | 28,453 | 1.98 G |
@@ -134,27 +136,41 @@ delta, how it was validated, and the enable/kill-switch.
   CPU shards still fit a 2^28 hypercube** — a sharp local optimum, and the same
   optimum on all three workloads.
 
-- **INFERRED — the cost model (3-point fit on reth, validated out-of-sample).**
-  `core wall ≈ 0.457 ns × (padded dense cells) + 254 ms × (shards) + 71.8 s`.
-  For reth that is 20% dense / 40% per-shard / 40% cycle-proportional
-  (trace-gen + execution, which no split change can touch). Fitted on reth only;
-  it predicts **tendermint's** 1.0x -> 1.2x delta as +0.911 s against +0.959 s
-  observed — **5% out-of-sample error on a workload not in the fit**. It also
-  corrects a standing figure: the per-shard fixed cost is ~254 ms of core wall,
-  not 88 ms.
+- **MEASURED — past `402,653,184` the area cap is inert too, and the
+  clk24-saturated shard is STILL not a win.** On tendermint,
+  `ELEMENT_THRESHOLD = 402,653,184` and `503,316,480` produce the **identical
+  proof** (sha `ba88a0d44ac26414`, 3 reps) — beyond that point every split is
+  clk24-determined and further area budget changes nothing, exactly like
+  `SHARD_SIZE`. That configuration is the theoretical best case for the
+  amortisation argument: **27% fewer shards** (33 -> 24) at the largest shard the
+  AIR permits. It measures **4357 / 4243 / 4421 kHz against a 4473 / 4368 / 4600
+  baseline — 3.1% SLOWER**, at 29.5 GiB instead of 24.6. The dense cliff wins
+  there too: 8.49 -> 12.21 G padded (+44%) for a 27% shard saving.
 
-- **INFERRED — the +12% that VRAM is holding.** At
-  `ELEMENT_THRESHOLD = 503,316,480` reth would run 128 CPU shards (clk24-capped)
-  + 61 deferred = 189 shards, all CPU shards at 2^29 at ~0.79 fill, padded dense
-  90.35 G. The model puts that at 161 s vs 180 s, i.e. **~2607 kHz, +11.7%** —
-  the one configuration where the shard-count saving outruns the dense cliff,
-  because a 2^29 shard at 0.79 fill is far cheaper per unit of real work than one
-  at 0.546. It is blocked **purely by device memory**: the run aborts with
-  `CUDA Error out of memory` in the **resident jagged fused fold+sum kernel**
-  (`ziren-gpu basefold/src/logup_round_device.rs:9155`) on the first 2^29 CPU
-  shard, 19 s in, at 29,253 MiB. So "bigger shards" is not a splitter-tuning
-  problem — it is a VRAM problem localised to one kernel, and it is worth ~12% on
-  reth if that kernel is tiled or streamed.
+- **INFERRED, then PARTIALLY REFUTED — the cost model.** A 3-point fit on reth
+  gives `core wall ≈ 0.457 ns × (padded dense) + 254 ms × (shards) + 71.8 s`
+  (20% dense / 40% per-shard / 40% cycle-proportional trace-gen + execution,
+  which no split change can touch). It predicts **tendermint's** 1.0x -> 1.2x
+  delta as +0.911 s against +0.959 s observed — 5% out-of-sample. **But it fails
+  on tendermint's clk24-saturated point** (predicts −0.59 s, observes +0.54 s),
+  and an independent 3-point fit on tendermint alone gives a per-shard
+  coefficient of **59 ms, not 254 ms**. The two disagree 4.3x on precisely the
+  parameter the "bigger shards amortise fixed cost" argument rests on, so
+  **neither fit is safe to extrapolate** — treat them as descriptive of the
+  points measured, not predictive. In particular an earlier reading of the
+  reth-only fit projected `ELEMENT_THRESHOLD = 503,316,480` on reth at
+  ~2607 kHz (+11.7%); **that projection is retracted** — the analogous
+  tendermint configuration is a 3.1% loss.
+
+- **MEASURED — the reth OOM, for the record.** `ELEMENT_THRESHOLD = 503,316,480`
+  on reth (128 clk24-capped CPU shards + 61 deferred, every CPU shard on a 2^29
+  hypercube) aborts 19 s in with rc=134, peak 29,253 MiB:
+  `CUDA Error out of memory` raised from the **resident jagged fused fold+sum
+  kernel**, `ziren-gpu basefold/src/logup_round_device.rs:9155` — the same site
+  the `ELEMENT_THRESHOLD` docstring already names. Making that kernel tile or
+  stream would unblock the configuration, but on the tendermint evidence above
+  the configuration is **not expected to be faster**, so this is a robustness
+  note rather than a perf lever.
 
 - **RECOMMENDATION: change nothing.** `SHARD_SIZE` is inert at any value
   `>= 2^22` and the shipped `1 << 24` default is already correct;
@@ -162,19 +178,32 @@ delta, how it was validated, and the enable/kill-switch.
   tendermint and goat simultaneously, and it is the only tested value that leaves
   adequate device-memory margin: **17.1% headroom on reth** (27,031 of
   32,607 MiB), 24.6% on tendermint, 27.5% on goat. The nearest alternative
-  (1.20x) is 3.8% slower on reth, 6.5% slower on tendermint, 2.1% slower on goat,
+  (1.20x) is 3.8% slower on reth, 6.6% slower on tendermint, 2.1% slower on goat,
   and leaves **4.3% headroom** — below the 10% bar, i.e. unshippable even if it
-  had been faster.
+  had been faster. Every other point tested is worse on kHz, on VRAM, or both.
 
 - **Negatives, recorded.** (1) The `SHARD_SIZE` lever is inert — refuted at the
   byte level. (2) `ELEMENT_THRESHOLD` up is slower on all three workloads.
   (3) `ELEMENT_THRESHOLD` down is slower on reth. (4) "Fill the existing
   hypercube for free" — refuted: reth's CPU shards are already at 0.909 median
-  fill with 2.7% headroom on the fullest. (5) The `!shape_match_found` and
-  `height_split` limits are dead code on the prove path for every program in the
-  gate set. (6) `MAX_SHARD_SIZE = 1 << 21` (`crates/pcs/src/opts.rs`) governs only
+  fill with 2.7% headroom on the fullest. (5) "The clk24-saturated shard is the
+  regime where amortisation wins" — refuted on tendermint, 3.1% slower.
+  (6) The reth-fitted cost model as a predictor — refuted by its own
+  out-of-sample failure and by the 4.3x disagreement with the tendermint fit.
+  (7) The `!shape_match_found` and `height_split` limits are dead code on the
+  prove path for every program in the gate set. (8)
+  `MAX_SHARD_SIZE = 1 << 21` (`crates/pcs/src/opts.rs`) governs only
   `ZKMCoreOpts::max()` / `::recursion()`; the core prove path takes
   `ZKMCoreOpts::default()` and is unaffected by it.
+
+- **Validation.** Every arm ran `verify` (never `--skip-verify`) and reported
+  `CORE VERIFY OK`. Each configuration is its own byte-golden and each was
+  reproduced: reth baseline `2c4d3597a79a6f36` x3 (matching the canonical
+  golden, and including the `SHARD_SIZE=2^24` arm), reth 1.20x
+  `3d000a733d5bd1b5` x2, tendermint baseline `7190969b1feae13a` x3 (canonical
+  golden), tendermint clk24-saturated `ba88a0d44ac26414` x3, goat baseline
+  `8aa10f1942b71b62` (canonical golden). The instrumented build reproduces every
+  canonical golden exactly, so the probes are byte-neutral.
 
 - **Enable/kill-switch.** `ZIREN_SPLIT_PROF=1` on the host executor prints the
   per-split limit census (default OFF, `OnceLock`-gated, no bytes change). The
