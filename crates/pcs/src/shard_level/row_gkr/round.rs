@@ -16,9 +16,25 @@
 //! interaction variables, so `eq_row` shrinks before `eq_int`.
 
 use alloc::vec::Vec;
+use core::mem::{ManuallyDrop, MaybeUninit};
 
 use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
+
+/// Reinterpret a fully-written `Vec<MaybeUninit<T>>` as a `Vec<T>` without
+/// reallocating or copying.
+///
+/// # Safety
+///
+/// Every element of `v` must have been initialized.  `MaybeUninit<T>` is
+/// guaranteed to have the same size, alignment and ABI as `T`, so the
+/// allocation is reusable verbatim.
+unsafe fn assume_init_vec<T>(v: Vec<MaybeUninit<T>>) -> Vec<T> {
+    let mut v = ManuallyDrop::new(v);
+    let (ptr, len, cap) = (v.as_mut_ptr(), v.len(), v.capacity());
+    // SAFETY: caller guarantees full initialization; layout is identical.
+    unsafe { Vec::from_raw_parts(ptr.cast::<T>(), len, cap) }
+}
 
 use super::layer::{GkrCircuitLayer, LayerState, LogUpGkrCpuLayer};
 use crate::shard_level::sumcheck_poly::{
@@ -56,20 +72,25 @@ where
     // (~4 × total × 16 B of redundant memory traffic per call).
     let total_chip_cols: usize =
         layer.numerator_0.iter().map(|c| c.num_interactions).sum();
-    let alloc_uninit = || -> Vec<EF> {
-        let mut v: Vec<EF> = Vec::with_capacity(total);
-        // SAFETY: every slot is written by the scatter below before any
-        // read. `EF` is `Copy` with trivial drop, so dropping the Vec on
-        // an early panic does not read uninit memory.
+    // The buffers are `MaybeUninit<EF>` rather than `EF` so that holding the
+    // un-scattered allocation is sound: `MaybeUninit<EF>` has no validity
+    // requirement, whereas a `Vec<EF>` whose elements are uninitialized is
+    // instant UB (and `clippy::uninit_vec`, a deny-level correctness lint).
+    // `assume_init_vec` below converts in place once every slot is written.
+    let alloc_uninit = || -> Vec<MaybeUninit<EF>> {
+        let mut v: Vec<MaybeUninit<EF>> = Vec::with_capacity(total);
+        // SAFETY: `MaybeUninit<EF>` is valid for any bit pattern, including
+        // uninitialized memory, so extending the length over the reserved
+        // capacity is sound on its own.
         unsafe {
             v.set_len(total);
         }
         v
     };
-    let mut n0_flat: Vec<EF> = alloc_uninit();
-    let mut d0_flat: Vec<EF> = alloc_uninit();
-    let mut n1_flat: Vec<EF> = alloc_uninit();
-    let mut d1_flat: Vec<EF> = alloc_uninit();
+    let mut n0_flat: Vec<MaybeUninit<EF>> = alloc_uninit();
+    let mut d0_flat: Vec<MaybeUninit<EF>> = alloc_uninit();
+    let mut n1_flat: Vec<MaybeUninit<EF>> = alloc_uninit();
+    let mut d1_flat: Vec<MaybeUninit<EF>> = alloc_uninit();
 
     // Per-chip column offsets so the row scatter can fan out
     // across rayon workers.
@@ -108,22 +129,38 @@ where
                 let d1_real = row < d1_chip.num_real_rows;
                 for col in 0..chip_cols {
                     let flat_col = chip_off + col;
-                    n0_row[flat_col] = if n0_real { (*n0_chip.get(row, col)).into() } else { EF::ZERO };
-                    d0_row[flat_col] = if d0_real { *d0_chip.get(row, col) } else { EF::ONE };
-                    n1_row[flat_col] = if n1_real { (*n1_chip.get(row, col)).into() } else { EF::ZERO };
-                    d1_row[flat_col] = if d1_real { *d1_chip.get(row, col) } else { EF::ONE };
+                    n0_row[flat_col]
+                        .write(if n0_real { (*n0_chip.get(row, col)).into() } else { EF::ZERO });
+                    d0_row[flat_col]
+                        .write(if d0_real { *d0_chip.get(row, col) } else { EF::ONE });
+                    n1_row[flat_col]
+                        .write(if n1_real { (*n1_chip.get(row, col)).into() } else { EF::ZERO });
+                    d1_row[flat_col]
+                        .write(if d1_real { *d1_chip.get(row, col) } else { EF::ONE });
                 }
             }
             // Pad trailing columns with identity-fraction (n=0, d=1).
             for flat_col in total_chip_cols..cols {
-                n0_row[flat_col] = EF::ZERO;
-                d0_row[flat_col] = EF::ONE;
-                n1_row[flat_col] = EF::ZERO;
-                d1_row[flat_col] = EF::ONE;
+                n0_row[flat_col].write(EF::ZERO);
+                d0_row[flat_col].write(EF::ONE);
+                n1_row[flat_col].write(EF::ZERO);
+                d1_row[flat_col].write(EF::ONE);
             }
         });
 
-    (n0_flat, d0_flat, n1_flat, d1_flat)
+    // SAFETY: `total == rows * cols`, so `par_chunks_exact_mut(cols)` above
+    // visits every one of the `rows` chunks with no remainder, and each
+    // iteration writes columns `[0, total_chip_cols)` (per-chip loop) and
+    // `[total_chip_cols, cols)` (padding loop) — i.e. every slot of all four
+    // buffers is initialized.
+    unsafe {
+        (
+            assume_init_vec(n0_flat),
+            assume_init_vec(d0_flat),
+            assume_init_vec(n1_flat),
+            assume_init_vec(d1_flat),
+        )
+    }
 }
 
 /// Compute the four round-polynomial evaluations `p(0), p(1), p(2), p(3)`

@@ -14,7 +14,6 @@ use zkm_curves::params::Limbs;
 
 use crate::{memory::MemoryCols, CoreChipError};
 use generic_array::ArrayLength;
-use p3_maybe_rayon::prelude::ParallelIterator;
 
 pub use zkm_primitives::consts::{
     bytes_to_words_le, bytes_to_words_le_vec, num_to_comma_separated, words_to_bytes_le,

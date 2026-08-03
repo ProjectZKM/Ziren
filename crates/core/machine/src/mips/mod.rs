@@ -1379,8 +1379,8 @@ pub mod tests {
     // reconstruction, demonstrating the reconstruction reads + binds the degree
     // bits the round walk alone ignores.
     //
-    // The reconstruction is gated `ZIREN_LOGUP_RECONSTRUCTION=1`
-    // (default OFF) because the exact interaction-axis MLE convention that makes
+    // The reconstruction is gated `ZIREN_LOGUP_RECONSTRUCTION` (ACTIVE BY
+    // DEFAULT; `=0` is the escape hatch).  The exact interaction-axis MLE convention that makes
     // it numerically match the GKR leaf on HONEST proofs is still being pinned
     // (the per-chip embed lift + degree mask are verified; the residual is the
     // leaf assembly orientation — see the crate REPORT).  So this test asserts

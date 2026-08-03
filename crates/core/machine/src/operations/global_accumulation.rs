@@ -4,7 +4,6 @@ use p3_field::Field;
 use p3_field::PrimeCharacteristicRing;
 use p3_field::PrimeField32;
 use zkm_derive::AlignedBorrow;
-use zkm_pcs::air::BaseAirBuilder;
 use zkm_pcs::air::SepticExtensionAirBuilder;
 use zkm_pcs::septic_curve::SepticCurveComplete;
 use zkm_pcs::ZKMAirBuilder;

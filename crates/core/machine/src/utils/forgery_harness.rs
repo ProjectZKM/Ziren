@@ -247,7 +247,7 @@ fn stage0_control_fixon_honest_verifies() {
 /// MUST be rejected (heights redundantly bound on this path); `false`
 /// documents a path where the forgery SURVIVES (records, not a soundness
 /// claim — used to prove the gating is exactly what disables the host
-/// degree anchor by default).
+/// degree anchor when `ZIREN_LOGUP_RECONSTRUCTION=0`).
 fn run_forgery(
     label: &str,
     program: Program,
