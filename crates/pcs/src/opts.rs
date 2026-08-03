@@ -39,6 +39,8 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// `2.00x`.  Peak VRAM: 24.3 / **27.0** / 31.2 GiB of 32.6.  Raising it 20%
 /// moves 202 of 245 shards onto a `2^29` hypercube at 0.546 fill (+44% padded
 /// dense) for a 13% shard-count saving — slower AND 4.3% from the card wall.
+/// Past `402,653,184` the cap is inert (every split is clk24-determined), and
+/// even that best case is 3.1% SLOWER on tendermint at 27% fewer shards.
 pub const ELEMENT_THRESHOLD: usize = (1 << 27) + (1 << 26) + (1 << 25) + (1 << 24);
 
 /// Options to configure the Ziren prover for core and recursive proofs.
