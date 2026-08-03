@@ -2931,3 +2931,283 @@ union is integrated over each part, so "HOST, GPU idle" is the serial critical p
   wall for serial wall. Peak VRAM drops ~320 MiB.
 - **Verdict.** Byte-neutral and a large reduction in redundant device work, but span-neutral
   — kept behind `ZIREN_GPU_OE_FULL_BATCH` (default **off**) rather than made unconditional.
+
+## Re-census of the reth core shard (Aug 03) — near-zero unattributed remainder
+
+Two instruments over the same canonical, reth 281 shards, verify ON, single
+GPU, `RAYON_NUM_THREADS=16`:
+
+* `ZIREN_GPU_SPAN_CPU_PROF=1 ZIREN_GPU_NVTX_PROF=1` — per-span SELF wall +
+  thread-CPU on the serial prover thread. **Both flags are required**; under
+  `RUST_LOG=warn` with only the first, the table prints empty.
+* `nsys profile --trace=cuda,nvtx` joined against the NVTX ranges — splits each
+  span's SELF wall into CUDA-API kinds vs HOST CODE and measures the device
+  union-busy fraction over exactly those intervals.
+
+Core 288.894 s / 281 = **1028.1 ms/shard** (1454 kHz) for the span run;
+1054.8 ms/shard under nsys.
+
+### Ranked census, serial prover thread (nsys split)
+
+| span | self | SYNC | MEMCPY | LAUNCH | ALLOC | HOSTCODE | of which GPU-IDLE |
+|---|---|---|---|---|---|---|---|
+| `dispatch_recv_commit_wait` | 308.2 | – | – | – | – | 308.2 | 251.1 |
+| `logup_gkr_first_layer` | 166.1 | 3.7 | **159.7** | 0.2 | 0.7 | 1.7 | 1.0 |
+| `zc_reduce` | 141.0 | **108.0** | 6.3 | 1.8 | 1.9 | 22.9 | 22.5 |
+| `logup_gkr_layer_transitions` | 121.1 | 70.9 | **30.7** | 2.0 | 7.4 | 10.0 | 9.5 |
+| `open_precompute_commit` | 62.6 | 52.2 | 6.3 | 1.8 | 1.6 | 0.5 | 0.2 |
+| `jagged_basefold_open` | 53.4 | 32.8 | 12.7 | 4.1 | 1.8 | 2.0 | 1.5 |
+| `logup_gkr_output_extract` | 42.3 | 0.7 | 0.0 | 0.1 | – | **41.5** | 25.0 |
+| `open_s4_jagged_pcs` | 35.1 | 7.7 | 0.8 | 0.3 | 0.1 | 26.2 | 26.1 |
+| `jagged_sumcheck_reduce` | 27.5 | – | 23.7 | 0.3 | 3.2 | 0.2 | 0.1 |
+| `open_s2_logup_gkr` | 23.5 | – | – | – | – | 23.5 | 23.5 |
+| `dispatch_inline_basefold` | 23.5 | – | – | – | – | 23.5 | 23.5 |
+| `gkr_device_layer_walk` | 13.0 | 5.8 | 0.5 | 1.0 | 5.0 | 0.7 | 0.5 |
+| `CORE_PROVE` (unspanned) | 10.3 | – | 0.3 | – | – | 10.0 | 9.9 |
+| `zc_prep_cells` | 9.2 | – | 2.2 | – | 0.1 | 6.8 | 6.8 |
+| `zc_prep_colmajor_stage` | 5.5 | – | – | – | – | 5.5 | 4.8 |
+| `gkr_grind_pow` | 4.4 | – | – | – | – | 4.4 | 4.4 |
+| `gkr_first_ef_transition` | 2.8 | 2.4 | – | 0.1 | 0.2 | 0.1 | 0.1 |
+| 4 further spans | 2.5 | – | – | – | – | 2.3 | 1.7 |
+| **attributed** | **1052.0** | **284.3** | **244.2** | **11.6** | **22.0** | **489.5** | **411.9** |
+| **UNATTRIBUTED** | **2.8** | | | | | | |
+
+`self` excludes child spans. One-time work on the same thread
+(`initialize prover` 24.6, `compile_one loop` 10.0, `build
+compose-basefold-recursion program` 6.5, `setup` 2.6, symbolic constraint
+inference 2.8 = 46.5 ms/shard-equivalent) runs before `CORE_PROVE` and is
+excluded from both sides, as are the post-proving verify spans.
+
+**Unattributed remainder = 2.8 ms/shard = 0.27%.** The independent
+SPAN_CPU_PROF run agrees: 1021.3 attributed of 1028.1, remainder 6.8 ms =
+0.67%.
+
+### Class rollup
+
+| class | ms/shard | share | note |
+|---|---|---|---|
+| HOSTCODE | 489.5 | 46.4% | of which 308.2 is `dispatch_recv_commit_wait` (blocked on the commit worker thread — a pthread wait, invisible to CUDA tracing) |
+| CUDA SYNC | 284.3 | 27.0% | 97% of it with the device union BUSY — genuine dependency |
+| CUDA MEMCPY | 244.2 | 23.2% | 94% device-busy, but **78% of it (190.4 ms) is one bug**, see below |
+| ALLOC | 22.0 | 2.1% | |
+| LAUNCH | 11.6 | 1.1% | |
+| unattributed | 2.8 | 0.27% | |
+
+Device union busy over the core window: **56.4%** (594.6 ms/shard of 1054.8).
+
+### REFUTED: `gpu_layer_build_jhr_slab` is 17.5 ms/shard, not ~213
+
+The standing premise was that ~213 ms of `logup_gkr_layer_transitions`' (then)
+285.5 ms sat inside an uninstrumented `gpu_layer_build_jhr_slab`. Probed
+directly (`ZIREN_GPU_HOST_PROF=1`, new sites), reth:
+
+| host_prof site | wall ms/shard | thread-CPU | calls/shard |
+|---|---|---|---|
+| `gkr_wire_total` | 123.8 | 122.0 | 21.0 |
+| ` .lbs_total` = `gpu_layer_build_jhr_slab` | **17.5** | 17.1 | 20.0 |
+| ` .lbs_regsync` | 0.016 | 0.000 | 20.0 |
+| ` .lbs_alloc` | 0.000 | 0.000 | **0.0** |
+| ` .lbs_unpack` | 0.000 | 0.000 | **0.0** |
+| ` .lbs_pack` (`build_jhr_slab_on_device` + sync) | **17.5** | **0.000** | 20.0 |
+| ` .fl_slab_stash` | 1.0 | 1.0 | 1.0 |
+| ` .fl_slab_hostup` | 34.1 | 33.8 | 0.9 |
+
+`gpu_layer_build_jhr_slab` is 17.5 ms/shard over 20 calls with **zero
+thread-CPU** — a pure GPU wait inside `build_jhr_slab_on_device`. Removing it
+buys nothing (THE RULE). Its `Wholesale` arm (`lbs_alloc` / `lbs_unpack`) never
+executes on reth at all: every registry layer is `LayerStorage::PerChip`.
+
+The 213 ms never existed at this canonical. The span went 285.5 -> 117.9 when
+the basenum change landed; what remains inside it is `lbs_total` 17.5 (GPU
+wait) + `fl_slab_hostup` 34.1 (host H2D) + ~71 the jagged sumcheck drive
+(independently 71.9 from `ZIREN_GPU_JHR_RND_PROF`) + ~2 outside the wire —
+which is the nsys split above, SYNC 70.9 / MEMCPY 30.7 / ALLOC 7.4, with
+nothing left over.
+
+### What moved since the previous census
+
+| site | previous | now | |
+|---|---|---|---|
+| shard wall | 1234.9 | **1028.1** | -16.7% |
+| `logup_gkr_layer_transitions` | 285.5 | **117.9** | **-58.7%** |
+| `logup_gkr_first_layer` | 159.2 | 142.1 | -10.7% |
+| `zc_reduce` | 142.5 | 137.8 | -3.3% |
+| `dispatch_recv_commit_wait` | 296.9 | 317.1 | +6.8% |
+| `logup_gkr_output_extract` | 42.9 | 46.5 | +8.4% |
+
+`dispatch_recv_commit_wait` grew only because everything around it shrank; it
+is the coordinator blocked on the commit worker, 19% of it with the device
+busy.
+
+## The FirstLayer stash decline itself: one length test, ~1.6 GB/shard of PCIe round trip (ziren-gpu)
+
+The previous section made the FirstLayer host-upload fallback 4x cheaper and
+named the follow-up: fix the decline. This is that follow-up, and it is larger
+than the fallback was — because the decline costs a **D2H as well as the H2D**.
+The same four quadrants come DOWN off the device and go straight back UP.
+
+### The guard
+
+`generate_first_layer_native` (`basefold/src/device_gkr_circuit.rs`) builds the
+first layer METADATA-ONLY for every chip whose interaction table is already
+device-resident in `FIRST_LAYER_STASH`: empty `cells`, real `num_real_rows`.
+That is byte-safe only while every downstream consumer sources those chips from
+the stash and never uploads the empty host cells, so the function tested:
+
+```rust
+let fully = peek_first_layer_stash().len() == chips.len();
+```
+
+`FIRST_LAYER_STASH` is a **process-global union**: `stash_first_layer` dedups by
+`(name, device_id)` and nothing drains it on the prove path, so after a few
+shards it holds every chip name this device has ever seen. A shard's chip set
+is a **subset** of that union. An exact-length test therefore passes only for a
+workload whose shards all carry the same chip set — tendermint — and fails for
+every heterogeneous one.
+
+MEASURED on reth (281 shards, `ZIREN_GPU_HOST_PROF=1`, new probes):
+
+| counter | value |
+|---|---|
+| `fl_stash_decl_len` — declines on the length test | **0.9 calls/shard** |
+| `fl_stash_decl_other` — declines for any other reason | **0.0 calls/shard** |
+| mean observed `stash.len()` at the decline | **33** |
+| mean shard chip count | **21** |
+
+Every decline is the length test. Not one is a real shape or type problem. The
+shards were fully covered the whole time.
+
+### What the decline costs — MEASURED at two sites
+
+`fully == false` triggers BOTH halves:
+
+1. the safety net re-materializes the real quadrants per chip
+   (`device_first_layer_split_from_stash` -> device split -> `to_host()` x4), so
+   the quadrants come **D2H**;
+2. the giant FirstLayer slab build then declines the stash and uploads those
+   same host cells (`build_jhr_slab_from_host_layer_basenum`), so they go
+   **H2D** again.
+
+| host_prof site | wall ms/shard | thread-CPU | calls/shard | cells/shard |
+|---|---|---|---|---|
+| `fl_remat` (device split + 4x `to_host` + host `RowMajorTable` build) | **152.8** | 152.0 | 0.9 | — |
+| `.fl_slab_hostup` (H2D of the same quadrants) | **34.1** | 33.8 | 0.9 | 89,642,493 |
+| `.fl_slab_stash` (the declining attempt itself) | 1.0 | 1.0 | 1.0 | — |
+
+Both run on the SERIAL prover thread.
+
+`fl_remat`'s 152.8 ms/shard is the same **159.7 ms/shard of MEMCPY the nsys
+census attributes to `logup_gkr_first_layer`** (previous section) — the site is
+now named, and it is ~97% of that span's SELF time. `.fl_slab_hostup` is the
+**30.7 ms/shard of MEMCPY under `logup_gkr_layer_transitions`**. Together they
+are **78% of the shard's entire CUDA MEMCPY-API time (190.4 of 244.2 ms)**.
+
+Bytes: numerator and denominator quadrants carry the same cell count, so
+89.64 M cells = 44.82 M `KoalaBear` (179.3 MB) + 44.82 M `Ef4` (716.8 MB) =
+**896 MB per direction**, x0.9 shards ≈ **1.6 GB/shard of pageable PCIe round
+trip** — for data that never had to leave the device. The 716.8 MB denominator
+figure is exactly what the previous section's independent `slab/h2d_ef4_direct`
+probe measured.
+
+### The fix — test COVERAGE by chip, not length
+
+Both consumers — the F->EF first transition and the FirstLayer slab build —
+resolve a chip through the per-shard pin `FIRST_LAYER_META_PIN`, which is
+already built **by name** in chip-index order. So the precondition is exactly
+"every metadata-only chip resolves to a pinned stash entry whose shape still
+matches the metadata we read off it", and that is what the code now tests:
+
+```rust
+let fully = meta_chips.iter().all(|(c, _, ni, h)| {
+    pins.get(*c).and_then(|o| o.as_ref()).is_some_and(|(n, d)| {
+        let len = n.len();
+        *ni > 0 && len == *h * *ni && d.len() == len
+    })
+});
+```
+
+`meta_chips` now carries the `chip_height` that
+`device_first_layer_dims_from_stash` derived, so a **REPLACED** entry — the
+time-of-check/time-of-use hazard the pin exists for — fails the shape re-check
+exactly as a missing one does. The pin is a superset-tolerant lookup; the
+length test was not. The pin is published whenever the coverage holds and
+CLEARED otherwise, so the not-covered path keeps its original behaviour
+verbatim.
+
+Byte-identity rests on the same property the previous change relied on:
+`build_jhr_slab_on_device_basenum` packs from the device split of the SAME
+stash buffers the host path D2H'd, and `ZIREN_GPU_JHR_SLAB_DEVICE_VERIFY=1`
+asserts the two slabs cell-by-cell.
+
+### MEASURED
+
+**kHz, reth core, paired concurrent A/B with the GPU slots SWAPPED between
+rounds** — control = canonical + the (inert) probes, fix = the same binary plus
+this change. Verify ON on every run; no reps discarded.
+
+| round | fix GPU | fix kHz | ctl GPU | ctl kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 6 | 1767 | 7 | 1434 | +23.2% |
+| 2 | 7 | 1736 | 6 | 1486 | +16.8% |
+| 3 | 6 | 1515 | 7 | 1467 | +3.3% |
+| 4 | 7 | 1779 | 6 | 1345 | +32.3% |
+| 5 | 6 | 1798 | 7 | 1516 | +18.6% |
+| **mean** | | **1719.0** | | **1449.6** | **+18.6%** |
+
+Core wall 290.237 -> 245.272 s = **-160.0 ms/shard**, against -186.9 ms/shard
+predicted by the two site probes. Every round is positive and the arms swap
+GPUs each round, so the sign is not a slot artifact. Round 3 (+3.3%) was taken
+with four concurrent large runs on the box (load average 32) and is kept rather
+than discarded; the control arm's own spread over the five rounds is 1345-1516
+(12.7%), the fix arm's 1515-1798 (18.7%).
+
+**H2D bytes, whole reth run, same `ZIREN_GPU_H2D_PROF=1` instrumentation both
+arms** (complete by construction — every H2D funnels through the two wrappers
+it hooks):
+
+| | H2D total | calls |
+|---|---|---|
+| canonical | **383.81 GiB** | 811,427 |
+| chip-keyed | **149.21 GiB** | 802,589 |
+
+**-234.60 GiB = -61.1% of ALL reth H2D**, at essentially unchanged call count.
+Over the two changes together the reth H2D total is 524.57 -> 383.81 ->
+**149.21 GiB, -71.6%**. That run scored 1804 kHz.
+
+**Byte gates, all against the published goldens, verify ON:**
+
+| program | shards | sha | |
+|---|---|---|---|
+| fib | 1 | `7c780d9f59d728b5` | golden |
+| goat | 9 | `8aa10f1942b71b62` | golden |
+| simple-go | 3 | `443b92db18eceab5` | golden |
+| tendermint | 33 | `7190969b1feae13a` | golden |
+| fib compress | — | `7e3c5d753cf25e55` | golden |
+| **reth** | **281** | `2c4d3597a79a6f36…` | golden on all 5 fix runs and all 5 control runs |
+
+`RAYON_NUM_THREADS=8`, two independent reth runs: identical sha to each other
+and to the RAYON=16 golden, verify OK.
+
+tendermint is structurally UNAFFECTED — its shards are exactly the case where
+the length test already passed, so the pin was published either way. 3902 kHz
+fix vs 3717 kHz control is inside the same-day tendermint spread; the golden
+held on both.
+
+NEGATIVE worth recording: one fix run (`fix_r2`) was SIGKILLed by the host OOM
+killer DURING verification (`rc=137`), on a box with 297 GB of other agents'
+tmpfs resident and two concurrent reth verifications. Its core proof sha was
+already written and matches the golden; only that run's verification is
+missing. Pairing reth runs risks this — the host RAM, not the GPU, is the
+binding resource during verify.
+
+### The general lesson — the third guard of this shape in two days
+
+* an `is_power_of_two()` test that left a landed lever 77% dead for weeks once
+  padding relaxed to `next_multiple_of_32`;
+* a `MachineAir` default that called `generate_trace` and discarded the result;
+* this one, `stash.len() == chips.len()`.
+
+All three are an **exact-shape equality on a fast path with a silent fallback**,
+and **no byte gate can see any of them** — every arm produces the identical
+proof. The only defence is a counter on the decline, which is why
+`fl_stash_decl_len` / `fl_stash_decl_other` are landed rather than deleted.
