@@ -3,6 +3,184 @@
 Log of measured prover optimizations. Each entry: what changed, the measured
 delta, how it was validated, and the enable/kill-switch.
 
+## Shard size: `SHARD_SIZE` is INERT, `ELEMENT_THRESHOLD` binds, and the current value is the measured optimum (host)
+
+- **The question.** "Raise the shard size to at least 2^24" — on the premise that
+  a bigger shard amortises the per-shard fixed cost, which matters most on reth
+  (281 shards). Both halves of the premise turn out to be wrong in an
+  instructive way, and the second one is wrong for a reason that names a
+  concrete +12% lever.
+
+- **A core shard is closed by a disjunction of five limits**
+  (`Executor::inc_shard_if_need`, `crates/core/executor/src/executor.rs`), and
+  which one fires was not observable. `ZIREN_SPLIT_PROF=1` (added here, default
+  OFF, `OnceLock`-gated so it is free when off) prints one line per split naming
+  the firing limit plus the live trace-area / tallest-chip estimates:
+
+  | limit | trips when |
+  | --- | --- |
+  | `cpu_exit` | `clk >= 4 * SHARD_SIZE` (`shard_size` is stored as `cycles * 4`) |
+  | `clk_exit` | `clk >= 2^24` — the CPU AIR's 24-bit `clk` range check. A HARD bound, not a tunable |
+  | `!shape_match_found` | no maximal shape fits (needs `maximal_shapes`, i.e. a core shape config) |
+  | `height_split` | tallest chip reaches `2^22 - 2^16` rows |
+  | `area_split` | `Σ_chip event_counts × costs >= ELEMENT_THRESHOLD` |
+
+- **MEASURED — the split-reason census.** CPU-only checkpoint pass
+  (`ExecutorMode::Checkpoint`, the same `execute_state` the GPU prover drives),
+  `SHAPE_CHECK_FREQUENCY=1024`:
+
+  | program | `SHARD_SIZE` | `ELEMENT_THRESHOLD` | CPU shards | split reasons |
+  | --- | ---: | ---: | ---: | --- |
+  | reth | 4,194,305 | 251,658,240 | 220 | **elem 219/219 (100%)** |
+  | reth | 16,777,216 (2^24) | 251,658,240 | 220 | **elem 219/219 (100%)** |
+  | reth | 2,097,152 (2^21) | 251,658,240 | 255 | cpu 223, elem 31 |
+  | tendermint | 4,194,305 | 251,658,240 | 32 | elem 31/31 |
+  | tendermint | 16,777,216 | 251,658,240 | 32 | elem 31/31 |
+  | tendermint | 2,097,152 | 251,658,240 | 45 | cpu 44/44 |
+  | goat | 4,194,305 | 251,658,240 | 4 | elem 3/3 |
+  | goat | 16,777,216 | 251,658,240 | 4 | elem 3/3 |
+
+  `noshape` and `height` fire **zero** times on every program at every setting
+  tested — `maximal_shapes` is `None` on the prove path, and no chip gets within
+  2x of the `2^22 - 2^16` height cap.
+
+- **MEASURED — `SHARD_SIZE >= 2^22` is structurally inert.** `cpu_exit` compares
+  against `4 * SHARD_SIZE` while `clk_exit` compares against a fixed `2^24`, so
+  at `SHARD_SIZE = 4,194,305` the cycle budget is `16,777,220` — **4 clk above
+  the 24-bit wall** — and at the shipped `2^24` default it is `2^26`, 4x above
+  it. Either way the cycle exit is unreachable. Confirmed at the byte level: a
+  full reth core prove at `SHARD_SIZE=4194305` and one at the un-overridden
+  `2^24` default produce the **identical proof**,
+  sha256 `2c4d3597a79a6f3651f7388b...`, 281 shards both, both `CORE VERIFY OK`.
+  The `SHARD_SIZE=2^21` row above is the positive control that the knob is live
+  at all — it does change the split, because `4 * 2^21 = 2^23` lands *below* the
+  area-driven splits.
+
+  Corollary: **the shipped `1 << 24` default has always been valid on this box** —
+  `ZKMProverOpts::gpu` takes the large-card branch at `gpu_memory_gb = 36`, so no
+  halving applies, and it is byte-equivalent to everything the byte-gate harness
+  has been measuring at `SHARD_SIZE=4194305`. Nothing was ever mis-measured;
+  the two settings are the same configuration.
+
+- **MEASURED — how far `ELEMENT_THRESHOLD` can even go.** The 24-bit `clk`
+  ceiling caps the shard at `2^24 / 5 = 3.355 Mcycles` (the interpreter charges
+  `clk += 5` per instruction), so raising the area cap saturates:
+
+  | `ELEMENT_THRESHOLD` | reth CPU shards | tendermint | goat | max split `clk` (of 2^24) |
+  | ---: | ---: | ---: | ---: | ---: |
+  | 201,326,592 | 275 | 39 | 5 | 60.5% |
+  | **251,658,240 (default)** | **220** | **32** | **4** | **73.8%** |
+  | 301,989,888 | 184 | 26 | 3 | 90.0% |
+  | 339,738,624 | 163 | 24 | 3 | 99.3% |
+  | 402,653,184 (SP1's value) | 140 | 23 | 3 | 100% — `clk24` fires 51x |
+  | 503,316,480 | 128 | 23 | 3 | 100% — `clk24` fires 112x |
+  | 671,088,640 | 128 | 23 | 3 | 100% — `clk24` only |
+
+  So the entire usable range of "bigger core shards" is **1.72x on reth**
+  (220 -> 128) and **1.39x on tendermint** (32 -> 23), and it is fenced by an AIR
+  range check, not by a tunable.
+
+- **MEASURED — reth's 281 shards are 220 + 61, and only the 220 respond.** The
+  `[SPLIT]` census counts 220 area-capped CPU shards; the proof carries 281. The
+  other **61 are deferred / precompile shards** cut by `SplitOpts`, and their
+  count is **invariant at 61** across every `ELEMENT_THRESHOLD` tested. (goat:
+  4 CPU + 5 deferred = 9, deferred invariant; tendermint: 32 + 1 = 33.) The
+  often-quoted "reth = 1.494 Mcycles/shard" divides by 281 and understates the
+  real CPU-shard granularity, which is **1.910 Mcycles**.
+
+- **MEASURED — the sweep.** reth (419,960,677 cycles), single GPU, `verify` ON,
+  same GPU back-to-back, launch order alternated. `padded dense` is
+  `Σ_shard 2^log_dense` from a per-shard dense probe on ziren-gpu's
+  `commit_dense`. Card is 32,607 MiB.
+
+  | `ELEMENT_THRESHOLD` | shards | core kHz | peak VRAM (MiB) | % card | padded dense | dense fill |
+  | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+  | 201,326,592 (0.80x) | 336 | 2095 | 24,311 | 74.6% | 95.04 G | 0.742 |
+  | **251,658,240 (1.00x)** | **281** | **2328, 2339** | **26,903 / 27,031** | **82.9%** | **80.68 G** | **0.873** |
+  | 301,989,888 (1.20x) | 245 | 2269, 2223 | 31,207 / 30,857 | **95.7%** | 116.18 G | 0.605 |
+  | 503,316,480 (2.00x) | — | **CUDA OOM, rc=134** | 29,253 at abort | — | — | — |
+
+  Controls, same day, same GPU:
+
+  | program | `ELEMENT_THRESHOLD` | shards | core kHz | peak VRAM (MiB) | padded dense |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | tendermint | 251,658,240 | 33 | 4473, 4368 | 24,581 / 24,613 | 8.49 G |
+  | tendermint | 301,989,888 | 27 | 4184 | 28,453 | 13.82 G |
+  | goat | 251,658,240 | 9 | 977 | 23,653 | 1.82 G |
+  | goat | 301,989,888 | 8 | 956 | 28,453 | 2.22 G |
+  | goat | 503,316,480 | 8 | 939 | 28,453 | 1.98 G |
+
+  Every arm verified (`CORE VERIFY OK`). Each `ELEMENT_THRESHOLD` is legitimately
+  its own byte-golden — the proof differs because the split differs. One reth
+  baseline rep (2260 kHz) was **discarded**: it overlapped a CPU-heavy census on
+  the same box.
+
+- **Why every direction loses — the dense cliff, MEASURED per shard.** The
+  jagged commit pads the dense to `2^ceil(log2(total))`, and reth's CPU shards
+  land at **median fill 0.909, max 0.974 of 2^28**:
+
+  | bucket | n | median total | median fill | padded work |
+  | --- | ---: | ---: | ---: | ---: |
+  | 2^27 | 11 | 98,615,296 | 0.735 | 1.48 G |
+  | 2^28 | 228 | 244,051,232 | 0.909 (max **0.974**) | 61.20 G |
+  | 2^29 | 33 | 414,388,288 | 0.772 | 17.72 G |
+
+  There is **2.7% of headroom** before the fullest CPU shard crosses into 2^29.
+  Raising the area cap 20% therefore moves 202 of 245 shards to a 2^29 hypercube
+  at 0.546 fill: padded dense **+44%** (80.68 -> 116.18 G) while the shard count
+  falls only 13%. Lowering it keeps every shard at 2^28 but pays 2^28 for less
+  data: padded dense **+18%** for 55 more shards. The current
+  `ELEMENT_THRESHOLD = 251,658,240` is, by measurement, **the largest value whose
+  CPU shards still fit a 2^28 hypercube** — a sharp local optimum, and the same
+  optimum on all three workloads.
+
+- **INFERRED — the cost model (3-point fit on reth, validated out-of-sample).**
+  `core wall ≈ 0.457 ns × (padded dense cells) + 254 ms × (shards) + 71.8 s`.
+  For reth that is 20% dense / 40% per-shard / 40% cycle-proportional
+  (trace-gen + execution, which no split change can touch). Fitted on reth only;
+  it predicts **tendermint's** 1.0x -> 1.2x delta as +0.911 s against +0.959 s
+  observed — **5% out-of-sample error on a workload not in the fit**. It also
+  corrects a standing figure: the per-shard fixed cost is ~254 ms of core wall,
+  not 88 ms.
+
+- **INFERRED — the +12% that VRAM is holding.** At
+  `ELEMENT_THRESHOLD = 503,316,480` reth would run 128 CPU shards (clk24-capped)
+  + 61 deferred = 189 shards, all CPU shards at 2^29 at ~0.79 fill, padded dense
+  90.35 G. The model puts that at 161 s vs 180 s, i.e. **~2607 kHz, +11.7%** —
+  the one configuration where the shard-count saving outruns the dense cliff,
+  because a 2^29 shard at 0.79 fill is far cheaper per unit of real work than one
+  at 0.546. It is blocked **purely by device memory**: the run aborts with
+  `CUDA Error out of memory` in the **resident jagged fused fold+sum kernel**
+  (`ziren-gpu basefold/src/logup_round_device.rs:9155`) on the first 2^29 CPU
+  shard, 19 s in, at 29,253 MiB. So "bigger shards" is not a splitter-tuning
+  problem — it is a VRAM problem localised to one kernel, and it is worth ~12% on
+  reth if that kernel is tiled or streamed.
+
+- **RECOMMENDATION: change nothing.** `SHARD_SIZE` is inert at any value
+  `>= 2^22` and the shipped `1 << 24` default is already correct;
+  `ELEMENT_THRESHOLD = 251,658,240` is the measured kHz optimum on reth,
+  tendermint and goat simultaneously, and it is the only tested value that leaves
+  adequate device-memory margin: **17.1% headroom on reth** (27,031 of
+  32,607 MiB), 24.6% on tendermint, 27.5% on goat. The nearest alternative
+  (1.20x) is 3.8% slower on reth, 6.5% slower on tendermint, 2.1% slower on goat,
+  and leaves **4.3% headroom** — below the 10% bar, i.e. unshippable even if it
+  had been faster.
+
+- **Negatives, recorded.** (1) The `SHARD_SIZE` lever is inert — refuted at the
+  byte level. (2) `ELEMENT_THRESHOLD` up is slower on all three workloads.
+  (3) `ELEMENT_THRESHOLD` down is slower on reth. (4) "Fill the existing
+  hypercube for free" — refuted: reth's CPU shards are already at 0.909 median
+  fill with 2.7% headroom on the fullest. (5) The `!shape_match_found` and
+  `height_split` limits are dead code on the prove path for every program in the
+  gate set. (6) `MAX_SHARD_SIZE = 1 << 21` (`crates/pcs/src/opts.rs`) governs only
+  `ZKMCoreOpts::max()` / `::recursion()`; the core prove path takes
+  `ZKMCoreOpts::default()` and is unaffected by it.
+
+- **Enable/kill-switch.** `ZIREN_SPLIT_PROF=1` on the host executor prints the
+  per-split limit census (default OFF, `OnceLock`-gated, no bytes change). The
+  matching per-shard dense-geometry probe lives in ziren-gpu `commit_dense.rs`
+  under the same variable and is not part of this repo.
+
 ## Global-chip septic scan — delete the serial block chain (ziren-gpu)
 
 - **What.** `ScanTemplateLarge` (`cuda/scan/scan.cuh`), the inclusive scan that
