@@ -3,6 +3,81 @@
 Log of measured prover optimizations. Each entry: what changed, the measured
 delta, how it was validated, and the enable/kill-switch.
 
+## Global-chip septic scan — delete the serial block chain (ziren-gpu)
+
+- **What.** `ScanTemplateLarge` (`cuda/scan/scan.cuh`), the inclusive scan that
+  `core_global_generate_trace_round_2` runs over the `Global` chip's interaction
+  points, was a **CHAINED** scan: `scan_kernel_large::Scan` has every block
+  busy-poll `while (atomicAdd(&flags[bid], 0) == 0) {}` until its predecessor
+  publishes a running total. The launch therefore costs a **serial chain of
+  `num_blocks` global round-trips**, and the chain was **twice as long as the
+  data requires** — the grid was `ceil(n / block_dim)` while each block covers
+  `2 * block_dim = SECTION_SIZE` elements, so half the blocks contributed
+  nothing to the output yet still took their turn in the chain.
+  Replaced with the standard chain-free 3-phase scan: per-block Brent-Kung scan
+  plus block total, a recursive scan of the block totals, then a redistribute
+  add. Same `BrentKungScan` for the block-local work; no spin-wait anywhere.
+
+- **How it was found.** A per-stage device-work census of a reth core prove
+  (`nsys` CUDA trace, kernels bucketed by name into prover stages, normalised to
+  ms per Mcycle proven). `Scan<kb31_septic_curve_t>` showed up as
+  **43.86 ms/shard from exactly 1.0 launch per shard — 29.35 ms/Mcycle, 10.0% of
+  ALL device work in the prove**. The launch geometry made the mechanism
+  unambiguous: the largest instances were `grid=16896, block=64` at 108.8 ms and
+  `grid=23140` at 155.2 ms, i.e. **~6.5 µs per block of pure chain latency**,
+  scaling linearly with the block count and not with the arithmetic.
+
+- **Why it is byte-neutral.** `operator+=` on `kb31_septic_curve_t`
+  (`crates/core/machine/include/kb31_septic_extension_t.hpp`) is the COMPLETE
+  curve group law — it handles infinity, `x1 != x2`, doubling and `P + (-P)` —
+  so the accumulation is over an **abelian group** and any re-association gives
+  the identical element; field arithmetic is exact, so this is byte-identical,
+  not merely numerically equivalent. The block-local Brent-Kung tree already
+  re-associated within a block; the 3-phase form only hoists the same
+  re-association one level up. The new `BlockScan` additionally identity-fills
+  its shared tile (`kb31_septic_curve_t()` is `(0,0)`, which `is_infinity()`
+  treats as the identity), so a PARTIAL final block yields an exact block total
+  — the chained kernel left that slot uninitialised and got away with it only
+  because every block after a partial one is entirely out of range.
+
+- **Measured — the kernel** (reth, 281 shards, `nsys`, same tree, one variable):
+
+  | | ms/shard | ms/Mcycle | launches/shard |
+  |---|---|---|---|
+  | chained `Scan` | 43.86 | 29.35 | 1.0 |
+  | 3-phase (`BlockScan` + `AddBlockOffset` + `SingleBlockScan`) | **0.66** | **0.42** | 3.9 |
+
+  **66x** on the kernel; the `tracegen` stage as a whole falls from 36.61 to
+  7.05 ms/Mcycle and total device work from 294.6 to 271.3 ms/Mcycle.
+
+- **Measured — kHz** (single RTX 5090, verify ON, `RAYON_NUM_THREADS=16`,
+  isolating control = the SAME binary with the legacy path selected, arms
+  alternated across two GPU slots):
+
+  | arm | rep1 | rep2 | rep3 | mean | delta |
+  |---|---|---|---|---|---|
+  | reth CTRL (chained) | 2403 | 2406 | 2393 | 2400.7 | |
+  | reth FIX (3-phase)  | 2575 | 2505 | 2490 | **2523.3** | **+5.1%** |
+  | tendermint CTRL | 4670 | 4784 | 4606 | 4686.7 | |
+  | tendermint FIX  | 4819 | 4810 | 4656 | 4770.3 (6 reps) | **+1.8%** |
+
+  Zero overlap on reth (worst FIX 2490 > best CTRL 2406). Tendermint gains far
+  less because its `Global` chip is an order of magnitude smaller — the win
+  scales with the Global chip's height, which is exactly why it is a reth lever.
+
+- **Validated byte-identical.** fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`
+  (9 shards), simple-go `443b92db18eceab5` (3), fib compress
+  `7e3c5d753cf25e55`, tendermint `7190969b1feae13a` **6/6 runs at
+  `RAYON_NUM_THREADS=16`**, reth
+  `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2` (281) on
+  BOTH arms, every run `VERIFY OK`.
+
+- **Switches.** None — unconditional. The chained `scan_kernel_large::Scan` is
+  deleted; `ScanTemplateSmall` is untouched (its chained kernel is still used by
+  `scan_koala_bear{,_challenge}`, neither of which is launched on the core prove
+  path — the reth census shows `scan_kernel_large::Scan<kb31_septic_curve_t>` as
+  the only live scan).
+
 ## Core trace padding — SP1-parity `next_multiple_of_32` (host)
 
 - **What.** Every core chip padded its trace to `next_power_of_two(events)`
