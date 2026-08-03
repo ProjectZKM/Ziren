@@ -102,6 +102,13 @@ pub trait JaggedEvalRoundEngine {
     fn compute_round_evals(&mut self) -> (InnerChallenge, InnerChallenge);
     /// Fold the running EQ product against `alpha`; advance to the next round.
     fn fold(&mut self, alpha: InnerChallenge);
+    /// The closed-form `claimed_sum` this sumcheck reduces to, computed by the
+    /// engine from the inputs it already holds.  `None` (the default) means the
+    /// caller runs the host [`full_jagged_evaluation`] instead.  Called at most
+    /// once, BEFORE the first [`Self::compute_round_evals`].
+    fn claimed_sum(&mut self) -> Option<InnerChallenge> {
+        None
+    }
 }
 
 type JaggedEvalEngineFactory =
@@ -588,6 +595,16 @@ fn jagged_eval_par_enabled() -> bool {
         .unwrap_or(true)
 }
 
+/// Cross-check gate for the device-computed jagged `claimed_sum`.
+///
+/// `ZIREN_GPU_JAGGED_CLAIMED_SUM_VERIFY=1` runs the host closed form ALONGSIDE
+/// the device one and asserts equality.  A perf-only substitution that is
+/// CORRECT is indistinguishable from one that silently never runs, so this is
+/// the positive control: it computes both and fails loudly on any mismatch.
+fn claimed_sum_verify_enabled() -> bool {
+    std::env::var("ZIREN_GPU_JAGGED_CLAIMED_SUM_VERIFY").is_ok()
+}
+
 // Dedicated rayon pool for the jagged-eval structural sumcheck.  The jagged-eval
 // runs INSIDE the single-thread basefold worker pool, so a bare `par_iter` there
 // stays sequential; installing on this pool routes the per-column inner loops to
@@ -818,29 +835,14 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     };
     let n = 2 * half;
 
-    let claimed_sum = full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
-    challenger.observe_algebra_element(claimed_sum);
-
-    // Build merged_prefix_sums (per-chip 2*(log_m+1)-bit Points,
-    // each = bits(prefix_sums[k]) || bits(prefix_sums[k+1])) and
-    // z_col_lagrange (per-chip EQ factors).  Both feed the
-    // structural prover.
+    // `z_col_lagrange` (per-column EQ factors).  Hoisted ABOVE the claimed-sum
+    // observe: the device jagged-eval engine needs `z_col_eq_vals` at
+    // construction, and the engine now supplies the claimed sum itself.  Every
+    // statement between here and the `observe` below is challenger-silent, so
+    // the hoist is transcript-neutral.
     let z_col_lagrange =
         crate::jagged_branching_program::partial_lagrange(z_col);
     let num_chips = prefix_sums.len() - 1;
-    let merged_prefix_sums: Vec<Vec<InnerChallenge>> = (0..num_chips)
-        .map(|k| {
-            let mut merged: Vec<InnerChallenge> =
-                crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
-            merged.extend_from_slice(
-                &crate::jagged_branching_program::bits_big_endian::<InnerChallenge>(
-                    prefix_sums[k + 1],
-                    half,
-                ),
-            );
-            merged
-        })
-        .collect();
     let z_col_eq_vals: Vec<InnerChallenge> =
         z_col_lagrange[..num_chips].to_vec();
 
@@ -852,7 +854,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     // COMPUTE to the device (the challenger stays host-side).  With NO factory
     // installed (default / pure-host), fall through to the exact legacy host
     // path — byte-identical to today.
-    let engine_and_verify = JAGGED_EVAL_ENGINE_FACTORY.with(|c| {
+    let mut engine_and_verify = JAGGED_EVAL_ENGINE_FACTORY.with(|c| {
         c.borrow().as_ref().map(|(factory, verify)| {
             let setup = JaggedEvalSetup {
                 offsets: prefix_sums,
@@ -865,6 +867,55 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
             (factory(&setup), *verify)
         })
     });
+
+    // `claimed_sum` — the closed-form jagged evaluation the sumcheck reduces to.
+    //
+    // The host form (`full_jagged_evaluation`) is a SINGLE-THREADED loop over
+    // every COLUMN of every chip, each running a ~`log_m`-layer branching-program
+    // DP: measured at 27.3 ms/shard of the reth serial path with the GPU 0% busy
+    // for all of it.  The device engine already holds the prefix-sum bit tensors,
+    // `z_row`, `z_index` and `z_col_eq_vals` on-device, and the branching-program
+    // kernel already has the matching `round_num == -1` mode, so ask the engine
+    // first.  `None` (no engine installed, or the engine declines) falls back to
+    // the host closed form.  Field arithmetic is exact, so both are BYTE-IDENTICAL.
+    let claimed_sum = {
+        let _s = tracing::info_span!("jeval_claimed_sum").entered();
+        match engine_and_verify.as_mut().and_then(|(engine, _)| engine.claimed_sum()) {
+            Some(device_sum) => {
+                if claimed_sum_verify_enabled() {
+                    let host_sum =
+                        full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
+                    assert_eq!(
+                        device_sum, host_sum,
+                        "device jagged claimed_sum != host full_jagged_evaluation"
+                    );
+                }
+                device_sum
+            }
+            None => full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace),
+        }
+    };
+    challenger.observe_algebra_element(claimed_sum);
+
+    // Build merged_prefix_sums (per-column 2*(log_m+1)-bit Points,
+    // each = bits(prefix_sums[k]) || bits(prefix_sums[k+1])).  Feeds the
+    // structural prover.
+    let merged_prefix_sums: Vec<Vec<InnerChallenge>> = {
+        let _s = tracing::info_span!("jeval_merged_prefix_sums").entered();
+        (0..num_chips)
+            .map(|k| {
+                let mut merged: Vec<InnerChallenge> =
+                    crate::jagged_branching_program::bits_big_endian(prefix_sums[k], half);
+                merged.extend_from_slice(
+                    &crate::jagged_branching_program::bits_big_endian::<InnerChallenge>(
+                        prefix_sums[k + 1],
+                        half,
+                    ),
+                );
+                merged
+            })
+            .collect()
+    };
     let partial_sumcheck_proof = match engine_and_verify {
         Some((mut engine, verify)) => structural_jagged_eval_sumcheck_with_engine(
             &mut *engine,

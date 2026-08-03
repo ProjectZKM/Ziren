@@ -3946,3 +3946,254 @@ And the probes settle WHY it is safe rather than asserting it: on the GPU path
 (negative control also 0), i.e. every host site changed here is unreachable
 from the GPU prover. `eq_mle_table` and `evaluate_trace_columns_at_point` are
 reached but are not modified by this change.
+
+## The jagged closed-form `claimed_sum` moved to the device (Aug 04)
+
+### Re-classifying the serial path first: thread-CPU cannot tell compute from a spin-wait
+
+The starting premise for this pass was that a span running at ~100 % thread-CPU
+is ~100 % host compute. It is not. `cudaStreamSynchronize` **spin-waits**: a
+measured 42.971 ms wait billed 42.425 ms of `CLOCK_THREAD_CPUTIME_ID` while
+doing zero host work, and a 19.065 ms wait billed **0.000** ms because CUDA
+yields above ~950 µs. So the wall/CPU ratio is a function of wait DURATION, not
+of work, and every host-compute figure derived from thread-CPU is inflated.
+
+The only sound discriminator is per-span **(wall, CUDA-API time on that thread,
+GPU-busy during the interval, other-thread activity)**. Excluding measured
+`CUPTI_ACTIVITY_KIND_RUNTIME` intervals is exact here because the codebase uses
+the CUDA **runtime** API throughout — the trace contains no `CUPTI_ACTIVITY_KIND_DRIVER`
+table at all, so there is no uncaptured driver-API time to be misread as host compute.
+
+reth core, 185 shards in the capture window, 592.2 ms/shard, coordinator
+(serial) thread, **unattributed remainder 0.000 %**:
+
+| class | ms/shard | share |
+|---|---|---|
+| CUDA API with the GPU **BUSY** (waiting on a busy GPU — not a lever) | 336.66 | 56.8 % |
+| genuine host compute, GPU **IDLE** | 127.75 | 21.6 % |
+| CUDA API with the GPU **IDLE** (launch/alloc/copy gaps) | 74.91 | 12.6 % |
+| non-CUDA blocking wait on another thread (pipeline stall) | 29.29 | 4.9 % |
+| genuine host compute, GPU busy | 23.27 | 3.9 % |
+| coordinator time outside any span | 0.32 | 0.1 % |
+
+"Genuine host compute" still over-counts, because a rayon fan-out looks
+identical to compute on the coordinator: no CUDA API on that thread, yet the
+work is parallel and the lever is a different one. Splitting the 127.75 ms by
+whether **other** threads were inside CUDA API during the same interval:
+
+| | ms/shard |
+|---|---|
+| coordinator **actually executing** host code, GPU idle — the true lever | **106.50** |
+| coordinator blocked in a parallel fan-out (rayon join) | 24.27 |
+| coordinator executing host code while the GPU is busy | 20.26 |
+
+Ranked, that true-lever 106.50 ms/shard is:
+
+| span | a-solo, GPU idle (ms/sh) | what it is |
+|---|---|---|
+| `open_s4_jagged_pcs` | 27.21 | `full_jagged_evaluation` (this section) |
+| `dispatch_inline_basefold` | 25.74 | destructor tail — `free`/`munmap`, not compute |
+| `logup_gkr_output_extract` | 13.56 | (a further 22.34 ms of it is fan-out, not compute) |
+| `logup_gkr_layer_transitions` | 11.59 | |
+| `zc_reduce` | 5.82 | |
+| `zc_prep_colmajor_stage` | 5.20 | |
+| `gkr_grind_pow` | 4.66 | |
+| `zc_prep_cells` | 3.97 | |
+
+This reconciles with an independent `perf` profile of the same workload, which
+found ≤10-14 % of the critical path is *prover host code*: 106.50 ms/shard is
+18.0 % of the shard, but 25.74 of it is `free`/`munmap` inside libc rather than
+prover code — 106.50 − 25.74 = 80.76 ms = **13.6 %**, inside that band.
+
+### The lever
+
+`zkm_pcs::jagged_branching_program::full_jagged_evaluation` is the closed-form
+value the jagged-eval sumcheck reduces to. It is a **plain single-threaded
+`for` loop over every COLUMN of every chip** (`num_cols` = Σ chip widths, order
+10³), and each iteration runs a ~`log_m`-layer branching-program DP (~130
+extension-field ops per layer) plus two throwaway `Vec<EF>` bit
+decompositions. It is the largest single item of genuine, single-threaded,
+GPU-idle host compute on the reth serial path.
+
+It did **not** have a device seam. The `ZIREN_GPU_JAGGED_EVAL_DEVICE` gate does
+not exist in the tree (only `..._VERIFY` does); the device jagged-eval round
+engine is installed unconditionally and covers the sumcheck **rounds** only.
+`full_jagged_evaluation` was called on the host at `jagged_eval_sumcheck.rs:821`
+*before* the engine was even constructed.
+
+The device work, however, was already written and dead: `cuda/basefold/jagged_eval_bp.cu`'s
+`branchingProgram` kernel has a `round_num == -1` mode that spans both prefix-sum
+layer ranges over all layers, takes no lambda and no rho, and writes the
+**unweighted** `BP.eval(t_col, t_{col+1})` per column — exactly the per-column
+term of the host loop. Ziren-gpu never called it with `-1`.
+
+The change:
+
+* `JaggedEvalRoundEngine` gains `fn claimed_sum(&mut self) -> Option<InnerChallenge>`,
+  defaulting to `None` (so no other implementor is affected).
+* `prove_jagged_evaluation` hoists the `z_col_lagrange` / `z_col_eq_vals` build and
+  the engine construction ABOVE the claimed-sum `observe`. Every hoisted statement
+  is challenger-silent, so the transcript is unchanged.
+* `DeviceJaggedEvalEngine::claimed_sum` launches the kernel with `round_num = -1`
+  and applies the `z_col_lagrange` weights in the same host reduction shape the
+  per-round path already uses (a few thousand terms — microseconds).
+
+No new device buffers: the engine already uploaded `current_prefix_sums`,
+`next_prefix_sums`, `z_row`, `z_index` and `z_col_eq_vals`.
+
+**Byte-neutrality is structural, not hopeful.** `claimed_sum` is observed into
+the challenger, so any difference would change every downstream byte. Field
+arithmetic over `BinomialExtensionField<KoalaBear,4>` is exact and associative,
+so the device sum equals the host sum for any reduction order.
+
+### Why coordinator host compute converts here: the worker is not the bottleneck
+
+Removing GPU-idle host time from the coordinator only converts if the
+coordinator is the critical path. On reth it is, decisively — same trace,
+185 shards, 592.2 ms/shard:
+
+* BaseFold on the coordinator covers **562.3 ms/shard = 94.9 % of the window**;
+* the pool worker's commit+open is **37.6 ms/shard = 6.4 %**, and 52.4 ms/shard
+  of it is already overlapped with BaseFold;
+* `dispatch_recv_commit_wait` (coordinator starved by the worker) is 29.3 ms/shard.
+
+562.3 + 29.3 ≈ 591.6 of the 592.2 ms period. The worker has 562 ms of
+coordinator time in which to do 37.6 ms of work, so shortening the coordinator
+does not simply convert into a longer wait.
+
+### Negatives and refuted premises from this pass
+
+* **`ZIREN_GPU_JAGGED_EVAL_DEVICE` does not exist.** It was reported as an
+  existing default-OFF device seam for this work. `grep` over the tree finds only
+  `ZIREN_GPU_JAGGED_EVAL_DEVICE_VERIFY`; `install_device_jagged_eval_engine` is
+  called unconditionally, and the engine it installs covers the sumcheck ROUNDS.
+  There was no seam for the closed form. "Just enable it" was not available.
+* **The CUDA memory-pool release threshold was already SP1-aligned.** The
+  49 ms/shard of GPU-idle `cudaMallocAsync` is not an eager-release problem:
+  `cuda_setup_mem_pool` already sets `cudaMemPoolAttrReleaseThreshold =
+  UINT64_MAX` on every device (>30 GB card), and the post-shard
+  `cudaMemPoolTrimTo` is default-OFF. Premise refuted before any code was written.
+* **`logup_gkr_output_extract` is mostly NOT coordinator host compute.** Its
+  52.4 ms/shard of coordinator wall carries zero CUDA API *on that thread*, which
+  a "self minus CUDA-API" rule scores as pure host compute. Measuring the other
+  threads during the same intervals shows **205.3 ms/shard of CUDA API spread
+  over ~16 rayon workers** and only 18.2 ms of GPU-busy: it is a launch-bound
+  parallel fan-out, not a serial compute lever. Only 13.6 ms/shard of it is
+  solo coordinator compute.
+* **`dispatch_inline_basefold`'s 25.7 ms/shard is not compute at all.** Splitting
+  the span's gaps shows 25.99 of 26.0 ms lands in the implicit destructor tail
+  after the last child span closes, with **0 CUDA API process-wide, 0 ns of GPU
+  kernel time and 0 other NVTX spans** in the window. It is `free`/`munmap` page
+  teardown on the coordinator, contending with the reaper thread's ~1.3 GiB/shard
+  munmap storm (min 2.98 / median 25.9 / max 75.7 ms, r = 0.61 vs shard wall).
+  It cannot be moved to the device; it has to be deferred (the
+  `zkm_gpu_core::reaper::defer_drop` pattern already used one frame down) or the
+  per-shard host trace store has to stop being returned to the OS. Not attempted
+  here — recorded as the next measured lever.
+* **The single biggest remaining GPU-idle CUDA-API item is 7 allocations.**
+  Of the 74.9 ms/shard of class-(b) time, ~49 ms is the allocator, and
+  **43.5 ms/shard comes from just 7.2 `cudaMallocAsync` calls per shard that each
+  exceed 100 µs (mean 6.05 ms)** — 0.07 % of the ~9,700 alloc calls. They sit in
+  `logup_gkr_layer_transitions` (3.26/shard, 22.6 ms) and `jagged_sumcheck_reduce`
+  (1.11/shard, 13.2 ms at 11.9 ms each). They are not a warm-up: per-shard cost
+  *rises* through the run (37 ms/shard in the first decile to 50-61 ms/shard in
+  the last), i.e. steady-state pool growth against sustained VRAM pressure
+  (reth peaks ~27.1 GiB of 31.8).
+
+### Measured: the span collapses and the shard period follows
+
+Isolating control — **the same binary**, one env gate flipped, back-to-back
+bounded nsys captures on the same GPU. `jeval_claimed_sum` is the new span
+around exactly this work:
+
+| span (coordinator wall, ms/shard) | host closed form | device | delta |
+|---|---|---|---|
+| `jeval_claimed_sum` | 23.96 | **0.19** | **-23.77** |
+| … of which with the GPU IDLE | 23.94 | **0.04** | **-23.90** |
+| `jeval_merged_prefix_sums` | 0.29 | 0.30 | 0.00 |
+| `open_s4_jagged_pcs` | 124.47 | 97.61 | -26.86 |
+| … of which GPU-idle | 46.98 | 19.48 | -27.50 |
+| `gpu_shard_open` | 524.12 | 489.37 | -34.75 |
+| `dispatch_recv_commit_wait` | 25.32 | 26.95 | +1.63 |
+| **shard period** | **578.9** | **546.3** | **-32.6 (-5.6 %)** |
+
+Three things to read off this:
+
+1. The work really moved: 23.96 ms/shard of GPU-idle single-threaded host
+   compute became 0.19 ms. This is also the **positive control** — a perf-only
+   substitution that silently never ran would leave the span unchanged, and a
+   byte gate could not tell the difference.
+2. It was **not reabsorbed as a pipeline stall**: `dispatch_recv_commit_wait`
+   moved +1.6 ms, so the coordinator did not simply spend the saving waiting on
+   the pool worker. The shard period fell by roughly the amount removed.
+3. `jeval_merged_prefix_sums` was a suspected secondary cost and is **0.29
+   ms/shard** — measured, not assumed, and left alone.
+
+### What is left of the serial host path afterwards
+
+Same measurement re-run on the device arm (200 shards, 546.3 ms/shard,
+unattributed remainder 0.000 %):
+
+| | before | after |
+|---|---|---|
+| coordinator executing host code, GPU idle (true lever) | 106.50 | **74.64** |
+| coordinator executing host code, GPU busy | 20.26 | 20.12 |
+| blocked in a parallel fan-out | 24.27 | 23.85 |
+| blocking wait on another thread | 29.29 | 26.95 |
+| class (b): CUDA API with the GPU idle | 74.91 | 58.94 |
+| device union-busy | 61.2 % | **67.0 %** |
+
+`open_s4_jagged_pcs` drops from 27.21 to **1.07** ms/shard of solo GPU-idle host
+compute — the lever landed exactly where it was measured. The new head of the
+list is the `dispatch_inline_basefold` destructor tail at 25.53 ms/shard, which
+is memory teardown, not compute, and is documented above as the next lever.
+
+Remaining ranked (a-solo, GPU idle, ms/shard): `dispatch_inline_basefold` 25.53,
+`logup_gkr_layer_transitions` 10.98, `logup_gkr_output_extract` 10.41,
+`zc_reduce` 5.69, `gkr_grind_pow` 4.72, `zc_prep_colmajor_stage` 3.89,
+`zc_prep_cells` 3.01.
+
+### kHz, byte gates, VRAM
+
+reth core, **5 same-GPU paired runs**, arms alternated within each pair, the
+same binary in both arms, verify ON:
+
+| pair | GPU | order | device (A) | host (B) | A/B |
+|---|---|---|---|---|---|
+| 1 | 6 | A,B | 2697 | 2506 | +7.62 % |
+| 2 | 6 | B,A | 2723 | 2559 | +6.41 % |
+| 3 | 7 | A,B | 2539 | 2552 | **-0.51 %** |
+| 4 | 6 | A,B | 2475 | 2395 | +3.34 % |
+| 5 | 7 | B,A | 2464 | 2425 | +1.61 % |
+| **mean** | | | **2580** | **2487** | **+3.7 %** |
+
+Mean of the paired ratios +3.69 %, SD 3.35 %, so the 95 % CI is roughly
++0.7 % to +6.7 % — positive but wide. Two honest caveats: pair 3 is a
+**negative** (its A arm also had the longest wall of any run in the set, 928.7 s
+vs 805.0 s, the box's contention signature), and pairs 4-5 ran with both GPUs
+plus another tenant busy, where a fixed ~24 ms/shard saving is a smaller
+fraction of a longer shard. The nsys shard-period measurement (-5.6 %) is the
+tighter estimate of the same effect; the kHz pairing is consistent with it but
+noisier. Canonical-binary reference runs on the same box in the same window:
+2476 / 2509 / 2663 kHz.
+
+Tendermint core, 3 paired runs at `RAYON_NUM_THREADS=16`: A 5145 / 4407 / 4974,
+B 5070 / 4622 / 4867 — mean of paired ratios **-0.3 %, SD 3.8 %**. That is a
+**null, and an underpowered one**: the CI is about +/-4.8 %, so it cannot
+resolve a ~4 % effect. It is reported as "not resolvable", not "zero".
+
+**Byte gates — every proof produced in this pass matches the canonical golden:**
+
+* reth `2c4d3597a79a6f36...` — 9 proofs (3 canonical-binary, 4 device-arm, 2 host-arm)
+* tendermint `7190969b1feae13a` — 7 proofs, all at `RAYON_NUM_THREADS=16`
+  (3 device-arm, 3 host-arm, 1 under the `..._VERIFY` lockstep assert)
+* fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62`,
+  simple-go `443b92db18eceab5`, fib-compress `7e3c5d753cf25e55`
+
+**Peak VRAM is unchanged**: reth 27287 MiB max on both arms; tendermint 24581
+MiB max on both arms.
+
+The on/off gate is deliberately not kept. It existed only to be the
+isolating-control arm, and this mirrors the jagged-eval round-engine seam in the
+same file, which is installed unconditionally and retains only its `..._VERIFY`
+cross-check.
