@@ -28,6 +28,17 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// tendermint and goat. The value below is the largest budget measured to fit
 /// BOTH (goat OOMs at `1 << 28`, so the headroom above it is thin — re-measure
 /// peak VRAM before raising it).
+///
+/// SWEPT AND CONFIRMED OPTIMAL (see examples/keeper/OPTIMIZATION.md,
+/// "Shard size").  This is the ONLY limit that closes a core shard in practice
+/// — 100% of splits on reth / tendermint / goat are area splits — and its
+/// current value is a sharp local optimum on all three at once, because it is
+/// the largest budget whose CPU shards still fit a `2^28` jagged hypercube
+/// (reth median fill 0.909, max 0.974 — 2.7% of headroom).  reth core kHz:
+/// 2095 at `0.80x`, **2328/2339 here**, 2269/2223 at `1.20x`, CUDA-OOM at
+/// `2.00x`.  Peak VRAM: 24.3 / **27.0** / 31.2 GiB of 32.6.  Raising it 20%
+/// moves 202 of 245 shards onto a `2^29` hypercube at 0.546 fill (+44% padded
+/// dense) for a 13% shard-count saving — slower AND 4.3% from the card wall.
 pub const ELEMENT_THRESHOLD: usize = (1 << 27) + (1 << 26) + (1 << 25) + (1 << 24);
 
 /// Options to configure the Ziren prover for core and recursive proofs.
@@ -266,6 +277,19 @@ impl Default for ZKMCoreOpts {
             // OVERRIDES it (parse arm below); only the no-env / unparseable
             // default is pinned to 2^24. The memory heuristic still governs
             // shard_batch_size + the split divisor below.
+            //
+            // MEASURED (see examples/keeper/OPTIMIZATION.md, "Shard size"):
+            // this value is INERT for any `SHARD_SIZE >= 2^22`. The executor
+            // stores it as `cycles * 4` and exits on `clk >= 4 * SHARD_SIZE`,
+            // but a second, FIXED exit fires at `clk >= 2^24`
+            // (`CORE_SHARD_CLK_24BIT_LIMIT`, the CPU AIR's 24-bit `clk` range
+            // check).  At 2^22 the cycle budget already equals that wall, and
+            // at the 2^24 default it is 4x above it, so the cycle exit is
+            // unreachable and 100% of core splits are `ELEMENT_THRESHOLD`
+            // (trace-area) splits.  A full reth core prove at
+            // `SHARD_SIZE=4194305` and at the 2^24 default produce the
+            // BYTE-IDENTICAL proof.  Raising this further changes nothing;
+            // the shard-size lever is `ELEMENT_THRESHOLD` below.
             shard_size: env::var("SHARD_SIZE").map_or_else(
                 |_| 1 << 24,
                 |s| s.parse::<usize>().unwrap_or(1 << 24),
