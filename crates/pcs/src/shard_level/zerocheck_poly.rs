@@ -232,8 +232,13 @@ where
 
 // ───────────────────────────── ported primitives ─────────────────────────
 
-/// `eq(point, -)` lagrange weights over the `2^|point|` hypercube,
+/// `eq(point, -)` lagrange weights over the WHOLE `2^|point|` hypercube,
 /// big-endian (`point[0]` = MSB).  Port of `slop` `partial_lagrange`.
+///
+/// The prover now always builds only the prefix it reads
+/// ([`partial_lagrange_prefix`]); this full build is retained as that
+/// function's test ORACLE and as the readable statement of the convention.
+#[cfg(test)]
 pub(crate) fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
     let mut evals = vec![EF::ONE];
     for &c in point {
@@ -244,6 +249,49 @@ pub(crate) fn partial_lagrange<EF: Field>(point: &[EF]) -> Vec<EF> {
                 [v - prod, prod]
             })
             .collect();
+    }
+    evals
+}
+
+/// The first `n` entries of [`partial_lagrange`], computed in `O(n)`
+/// instead of `O(2^|point|)`.
+///
+/// The zerocheck round poly indexes this table ONLY at
+/// `[0, num_real_entries.div_ceil(2))` — one entry per real row-pair — while
+/// `|point| = max_log_row_count - 1 - round`, the SHARD-GLOBAL variable
+/// count.  Every chip shorter than the tallest one therefore paid a full
+/// `2^{max_log_row_count-1}`-entry serial build to read a handful of
+/// entries, once per chip per round.
+///
+/// Exactness: `partial_lagrange` is big-endian, so a final index `i` has
+/// top-`j` bits `i >> (k - j)`.  All `i < n` therefore live in the first
+/// `ceil(n / 2^{k-j})` slots of intermediate level `j`, and every slot this
+/// function computes is produced by the SAME `[v - v*c, v*c]` expansion in
+/// the SAME order as the full build — the omitted slots are exactly the ones
+/// the caller never reads.  Byte-identical for every index in `[0, n)`.
+pub(crate) fn partial_lagrange_prefix<EF: Field>(point: &[EF], n: usize) -> Vec<EF> {
+    let k = point.len();
+    let n = n.min(1usize << k);
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut evals = vec![EF::ONE];
+    for (j, &c) in point.iter().enumerate() {
+        // Slots of level `j + 1` that any index `< n` can reach.
+        let shift = k - (j + 1);
+        let need = (((n - 1) >> shift) + 1).min(1usize << (j + 1));
+        let mut next: Vec<EF> = Vec::with_capacity(need);
+        for &v in evals.iter() {
+            if next.len() >= need {
+                break;
+            }
+            let prod = v * c;
+            next.push(v - prod);
+            if next.len() < need {
+                next.push(prod);
+            }
+        }
+        evals = next;
     }
     evals
 }
@@ -558,7 +606,10 @@ where
         let dim = self.zeta.len();
         let last = self.zeta[dim - 1];
         let rest_point = &self.zeta[..dim - 1];
-        let partial = partial_lagrange(rest_point);
+        // Only `[0, num_pairs)` is ever read (the per-pair eq weight in
+        // `accumulate_y_tuple_host`, and `partial[threshold_half]` with
+        // `threshold_half = num_pairs - 1`), so build exactly that.
+        let partial = partial_lagrange_prefix(rest_point, num_real.div_ceil(2));
 
         // The per-pair degree-4 eq-weighted accumulation (the device zerocheck
         // kernel's job) and the analytic finalize (host-only, transcript-
@@ -980,17 +1031,23 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
     if ncols == 0 || num_real == 0 {
         return Vec::new();
     }
-    let out_rows = num_real.div_ceil(2);
-    let mut out = vec![EF::ZERO; out_rows * ncols];
-    for i in 0..out_rows {
+    let mut out = vec![EF::ZERO; num_real.div_ceil(2) * ncols];
+    // Each output row reads one row-pair and writes its own `ncols` slot —
+    // no reduction, no shared state — so the row loop is embarrassingly
+    // parallel and byte-identical to the serial walk.  It was serial, and
+    // measured (`ZeroCheckPoly::fix_last`, goat core, 9 shards) 16.9 s of
+    // 100%-serial calling-thread time (`thread_cpu == wall`) on the
+    // zerocheck driver's critical path while the rest of the box idled.
+    use p3_maybe_rayon::prelude::*;
+    out.par_chunks_mut(ncols).enumerate().for_each(|(i, out_row)| {
         let r0 = 2 * i;
         let r1 = 2 * i + 1;
-        for c in 0..ncols {
+        for (c, o) in out_row.iter_mut().enumerate() {
             let x = cells[r0 * ncols + c];
             let y = if r1 < num_real { cells[r1 * ncols + c] } else { K::ZERO };
-            out[i * ncols + c] = alpha * (y - x) + x;
+            *o = alpha * (y - x) + x;
         }
-    }
+    });
     out
 }
 
@@ -1146,6 +1203,29 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
 
     type EF = InnerChallenge;
+
+    /// `partial_lagrange_prefix(point, n)` must equal `partial_lagrange(point)[..n]`
+    /// for EVERY `n`, over every point dimension the zerocheck can hand it.
+    /// The prefix build's index argument (big-endian: index `i < n` lives in the
+    /// first `ceil(n / 2^{k-j})` slots of level `j`) is the whole reason the
+    /// truncation is exact, so it gets an exhaustive check rather than a spot one.
+    #[test]
+    fn partial_lagrange_prefix_matches_full_prefix() {
+        for k in 0..=8usize {
+            let point: Vec<EF> =
+                (0..k).map(|i| EF::from_u32((7 * i as u32 + 3) * 1_234_567 + 11)).collect();
+            let full = partial_lagrange(&point);
+            assert_eq!(full.len(), 1 << k);
+            for n in 0..=(1usize << k) {
+                let pre = partial_lagrange_prefix(&point, n);
+                assert_eq!(pre.len(), n, "k={k} n={n}: wrong length");
+                assert_eq!(&pre[..], &full[..n], "k={k} n={n}: prefix diverges");
+            }
+            // `n` past the end saturates rather than panicking.
+            let over = partial_lagrange_prefix(&point, (1usize << k) + 5);
+            assert_eq!(&over[..], &full[..]);
+        }
+    }
 
     /// Standard multilinear evaluation of a dense table at `point`, with
     /// `point[k]` bound to bit `k` (LSB-first) of the table index — the

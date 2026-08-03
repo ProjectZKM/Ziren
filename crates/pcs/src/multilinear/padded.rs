@@ -343,11 +343,35 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         }
         let num_real = self.num_real_entries();
 
-        // Equality table over the full point (length 2^num_variables),
-        // indexed the SAME way the trace rows are indexed — this makes the
-        // real-cells sum below byte-identical to
+        // Equality table over the point, indexed the SAME way the trace rows
+        // are indexed — this makes the real-cells sum below byte-identical to
         // `evaluate_trace_columns_at_point`.
-        let eq = crate::zerocheck_prover::eq_mle_table::<EF>(point);
+        //
+        // TRUNCATED eq-table build (the same lever already landed in
+        // `evaluate_trace_columns_at_point`, whose SIBLING call two lines
+        // below this one in `row_gkr::top_level` has had it since the
+        // GPU-idle work; this main-trace path was left behind).  Only rows
+        // `[0, num_real)` are ever read out of `eq` — the padding branch is
+        // analytic via `full_geq` and touches no table entry — yet the table
+        // was built over the whole `2^num_variables` cube, which on the
+        // LogUp-GKR output-extract full-point opening is the FULL
+        // `max_log_row_count` trace cube per chip per shard.
+        //
+        // `eq_mle_table` maps index bit `i` to `point[i]`, so every
+        // `row < 2^k` has all bits `>= k` zero and therefore
+        //     eq[row] == (prod_{i>=k} (1 - r_i)) * eq_k[row],
+        // with `eq_k = eq_mle_table(&point[..k])`.  Field multiplication is
+        // associative and distributes over the sum, so folding the constant
+        // tail into the per-column accumulator is EXACT:
+        //     tail * sum(eq_k[row] * x_row) == sum(eq[row] * x_row).
+        let k = if num_real <= 1 { 0 } else { (num_real - 1).ilog2() as usize + 1 };
+        let (eq, tail) = if k < point.len() {
+            let tail = point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
+            (crate::zerocheck_prover::eq_mle_table::<EF>(&point[..k]), tail)
+        } else {
+            (crate::zerocheck_prover::eq_mle_table::<EF>(point), EF::ONE)
+        };
+        debug_assert!(eq.len() >= num_real);
 
         // ── real-cells contribution ────────────────────────────────────────
         // Per column: sequential dot product over the real rows (matching
@@ -366,7 +390,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
                     for row in 0..num_real {
                         acc += eq[row] * EF::from(cells[row * width + col]);
                     }
-                    acc
+                    acc * tail
                 })
                 .collect()
         } else {

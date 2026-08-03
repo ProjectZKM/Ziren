@@ -169,7 +169,7 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// Entries for dealing with the Poseidon2 hash state.
     perm: Option<
         Poseidon2<
-            F::Packing,
+            F,
             Poseidon2ExternalLayerKoalaBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,
@@ -231,7 +231,7 @@ pub enum RuntimeError<F: Debug, EF: Debug> {
 impl<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> Runtime<'a, F, EF, Diffusion>
 where
     Poseidon2<
-        F::Packing,
+        F,
         Poseidon2ExternalLayerKoalaBear<16>,
         Diffusion,
         PERMUTATION_WIDTH,
@@ -241,7 +241,7 @@ where
     pub fn new(
         program: Arc<RecursionProgram<F>>,
         perm: Poseidon2<
-            F::Packing,
+            F,
             Poseidon2ExternalLayerKoalaBear<16>,
             Diffusion,
             PERMUTATION_WIDTH,

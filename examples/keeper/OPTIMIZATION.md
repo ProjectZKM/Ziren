@@ -3681,3 +3681,184 @@ here (it is a property of `init_tracer` + the spawner), but it means:
 The child's stderr is inherited, so `eprintln!` reaches the operator on every
 configuration.  Worth fixing centrally by pointing `init_tracer`'s fmt writer
 at stderr.
+
+## The CPU (host) prover — first optimization pass (Aug 03)
+
+The CPU prover had never been profiled. This is the first census of where its
+host milliseconds actually go, plus the four levers that census justified. All
+numbers are MEASURED on `ant-5090-2` (124 cores / 925 GB, CPU only, run
+`taskset -c 64-111` = 48 cores, `RAYON_NUM_THREADS=48`), `SHARD_BATCH_SIZE=4`,
+`SHARD_SIZE=4194305`, `ELEMENT_THRESHOLD=251658240`, **verify always on**.
+
+### The instrumentation, and its controls
+
+A temporary `zkm_pcs::hostprof` probe module (removed before landing) recorded
+per-site `calls / items-built / items-read / wall / CLOCK_THREAD_CPUTIME_ID`.
+Two controls, because six probes went dead in the preceding two days:
+
+* **positive control** — `prove_shard_zerocheck`, which runs exactly once per
+  shard, so its `calls` must equal the shard count (33 on tendermint: it did);
+* **negative control** — a probe never incremented, plus a marker string that
+  IS present in the linked binary. Both marker strings byte-scan present while
+  the counter reads 0 ⇒ **string presence in the binary proves nothing; only
+  the counter does.**
+
+### REFUTED: `basefold/prover.rs:211 partial_lagrange` is live but free
+
+The named suspect. It IS reached (33 calls on tendermint = one per shard), but
+its point is `batching_point`, whose length is `log2(total_polys)` — **not** the
+22-variable `eval_point`. Measured table sizes: **4 entries on fib, 4048 across
+all 33 tendermint shards**, for a total of **0.3 ms of a 711-second prove**
+(4e-5 %). The "22 allocations ending at 64 MiB" reading was off by ~10^6; the
+three defects in it are real and the site is simply not worth touching.
+
+### Where the CPU prover's time actually goes
+
+`perf record` (goat, 9 shards, `-F 299`), self-time:
+
+| bucket | share |
+|---|---|
+| Poseidon2 permutation (`p3_monty_31::**no_packing**::poseidon2`) | **34.6 %** |
+| glibc allocator (`malloc`/`_int_free`/`malloc_consolidate`) — `libc.so.6` | **12.8 %** |
+| unnamed inlined closures (AIR eval, zerocheck, GKR kernels) | ~28 % |
+| kernel (page faults, spin) | 5.1 % |
+
+and the probe census on **tendermint CONTROL** (33 shards, 711.6 s core wall,
+21,978 s of process CPU), aggregated calling-thread wall:
+
+| site | calls | built | read | wall s | thread-cpu s |
+|---|---|---|---|---|---|
+| `accumulate_y_tuple_host` (per-pair AIR eval) | 15,158 | 165 M pairs | 7.67 G cells | 504.5 | 405.6 |
+| `eq_mle_table` (all sites) | 1,804 | **3.79 G** | — | 410.4 | 273.9 |
+| `PaddedMle::eval_at` | 803 | **3.37 G** | **165 M** | 252.1 | 162.9 |
+| `evaluate_trace_columns_at_point` (already truncated) | 935 | 553 M | 187 M | 223.0 | 155.1 |
+| `ZeroCheckPoly::fix_last` | 17,666 | 331 M rows | — | 104.7 | **98.4 (100 % serial)** |
+| `partial_lagrange` (zerocheck) | 15,158 | **2.89 G** | **165 M** | 31.5 | **31.0 (100 % serial)** |
+| `partial_lagrange` (basefold) | 33 | 4,048 | 4,048 | **0.0003** | 0.0003 |
+
+### Lever 1 — `PaddedMle::eval_at` built the full `2^max_log_row_count` cube
+
+The GPU-side sibling `evaluate_trace_columns_at_point` got the truncated
+eq-table months ago. `PaddedMle::eval_at` — the OTHER half of the same
+LogUp-GKR output-extract, two lines apart in `row_gkr/top_level.rs` — was left
+behind. Only rows `[0, num_real)` are read (the padding branch is analytic via
+`full_geq` and touches no entry), so it built **3.37 G entries to read 165 M:
+20.4x waste, ~51 GB of pointless EF writes per tendermint prove.** Fix is the
+same identity already used by the sibling: `eq[row] == (prod_{i>=k}(1-r_i)) *
+eq_k[row]` for `row < 2^k`, tail folded into the per-column accumulator —
+exact, so byte-identical.
+
+### Lever 2 — the zerocheck round poly's `partial_lagrange`
+
+`sum_as_poly` built `partial_lagrange(zeta[..dim-1])` — `2^{max_log_row_count-1-round}`
+entries — **once per chip per round**, but reads only `[0, num_real.div_ceil(2))`.
+`num_variables` is the SHARD-GLOBAL `max_log_row_count`, so every chip shorter
+than the tallest one paid the tallest chip's table. Measured **2.89 G built /
+165 M read = 17.5x**, and **100 % serial** (`thread_cpu == wall`). Added
+`partial_lagrange_prefix(point, n)`: because the table is big-endian, all
+indices `< n` live in the first `ceil(n / 2^{k-j})` slots of level `j`, so the
+first `n` entries cost `O(n)` instead of `O(2^k)` and every computed slot comes
+out of the identical `[v - v*c, v*c]` expansion. Goat: **5432 ms -> 361 ms.**
+
+### Levers 3 and 4 — the zerocheck sumcheck was serial over chips
+
+`reduce_sumcheck_to_evaluation` mapped the chip axis SERIALLY
+(`polys_cursor.iter().map(sum_as_poly)`), with rayon only INSIDE each chip over
+its row-pairs. A shard's many short chips therefore each spread a handful of
+pairs across the whole pool while everything else idled — visible in the probes
+as `accumulate_y_tuple_host` burning 84 % of its wall as calling-thread CPU and
+`fix_last` burning 100 %. And `fold_cells`, under `fix_last`, was a plain
+double `for` loop: **98.4 s of pure serial time per tendermint prove.**
+
+Both are pure order-preserving maps over independent elements with no shared
+state and no challenger, so `par_iter` is byte-identical (field addition is
+exactly associative, so rayon's tree reduction inside `sum_as_poly` was already
+order-independent).
+
+### Measured
+
+| workload | CONTROL | levers 1+2 | all four (landed) |
+|---|---|---|---|
+| fib (1 shard) | 4.492 s | **3.170 s (-29.4 %)** | **3.117 s (-30.6 %)** |
+| goat (9 shards) | 50.9 kHz / 22.1 cores | 50.7 kHz (**+0 %**) | **57.5 kHz (+13.0 %)** / 23.9 cores |
+| tendermint (33 shards) | 113.4 kHz / 29.0 cores | 112.5, 115.6 kHz | **117.0 kHz (+3.2 %)** / 29.8 cores |
+
+Tendermint is 33 shards x 75,438,907 cycles, arms INTERLEAVED in one script
+because the shared box's run-to-run spread is larger than the effect:
+
+| pair | CONTROL | all four | delta | CONTROL cores | fixed cores |
+|---|---|---|---|---|---|
+| 1 | 113.3 kHz | 117.8 kHz | +4.0 % | 29.4 | 30.1 |
+| 2 | 115.7 kHz | 116.8 kHz | +1.0 % | 29.0 | 30.0 |
+| 3 | 111.2 kHz | 116.3 kHz | +4.6 % | 28.5 | 29.3 |
+| mean | 113.4 (sd 2.3) | **117.0 (sd 0.8)** | **+3.2 %** | | |
+
+Fixed wins every pair, and its spread is 3x tighter. Peak RSS is unchanged
+(CONTROL 106.9-113.6 GB, fixed 107.1-115.1 GB); cores busy rises ~0.8 of the 48
+requested (the box has 124, shared with other tenants). Two earlier
+NON-interleaved CONTROL runs read 106.0 and 113.0 kHz — a 6.6 % spread on their
+own, which is why the pairing matters.
+
+**The honest split:** levers 1+2 are worth **-29 % on a sparse shard and ~0 on
+a dense one.** fib is 3457 cycles inside a `2^22` shard — an 822x padding ratio
+— so its whole prove is the eq-table over-build. goat's shards are near-full,
+so the same 18-20x table waste is only ~1 % of process CPU and hides behind
+rayon. **Levers 3+4 are the ones that pay on real workloads.** Reporting 1+2 as
+a general win from the fib number alone would have been wrong.
+
+### The largest lever found is NOT landed: the CPU prover cannot be built with SIMD
+
+`p3-monty-31` selects its AVX2/AVX-512 Poseidon2 and packed-field paths purely
+on `target_feature`. The repo has **no `.cargo/config.toml` and no RUSTFLAGS**,
+so `target_feature=avx2` is off and plonky3 compiles the **scalar
+`no_packing`** path — which is 34.6 % of the CPU prover's cycles, on boxes that
+both have AVX-512.
+
+Turning it on did not compile:
+`crates/recursion/core/src/runtime/mod.rs` bounds the recursion `Runtime` on
+`Poseidon2<F::Packing, ...>: CryptographicPermutation<[F; 16]>` — satisfiable
+ONLY when `F::Packing == F`, i.e. only when packing is disabled. The caller
+passes a scalar `Poseidon2KoalaBear<16>` anyway, so `F::Packing -> F` (3 tokens)
+is the correct type and is a literal no-op under today's default build. **That
+fix is landed here**; it is byte-neutral and unblocks the experiment.
+
+With it, `RUSTFLAGS="-C target-cpu=native"` builds and links 284 AVX-512
+packing symbols, and fib core goes **8.63 s -> 4.15 s (2.08x)**.
+
+**But it is NOT byte-neutral**: the SIMD proof is stable across runs and
+**cross-verifies GREEN under the scalar verifier**, yet differs from the scalar
+proof in 383 bytes inside one contiguous 558-byte window (identical total
+length, so no shape/height change). So SIMD is a valid-but-different proof and
+would need its own regenerated CPU golden set plus a recursion/compress
+re-validation. Left as a decision, not landed.
+
+### Negatives
+
+* `partial_lagrange` at `basefold/prover.rs:348` — live, 0.0003 s. Not touched.
+* Levers 1+2 on goat: **+0.4 % (i.e. nothing)**, three runs.
+* The two boxes disagree on feasibility, not on results: the 16-core/123 GB dev
+  box cannot run goat or tendermint at `SHARD_BATCH_SIZE=4` at all — `earlyoom`
+  SIGTERMs the prover at ~67 GB RSS (10 % free). Four runs were lost to this
+  before the journal was read; `EXIT=143` on a long CPU prove is earlyoom, not
+  the harness.
+* Tendermint run-to-run spread on the shared box is **6.6 %** (CONTROL 106.0 vs
+  113.0 kHz) — larger than levers 1+2. Arms must be INTERLEAVED, and a single
+  A-vs-B tendermint pair is not evidence.
+* All nine tendermint proves (5 CONTROL, 1 levers-1+2, 3 all-four) and every
+  goat/fib prove reproduce the CPU goldens exactly, verify on:
+  fib `815d1ca4...`, goat `0d6400b2...`, tendermint `18bd3732...`.
+
+### GPU re-gate (shared `crates/pcs` touched)
+
+Isolating control, same `gate_sha` binary, levers OFF vs ON, one GPU:
+
+* fib `7c780d9f59d728b5` == `7c780d9f59d728b5` — and equal to the published GPU
+  fib golden;
+* goat `b590d8687c613a6f` == `b590d8687c613a6f`.
+
+And the probes settle WHY it is safe rather than asserting it: on the GPU path
+`prove_shard_zerocheck`, `PaddedMle::eval_at`, `partial_lagrange` (zerocheck),
+`accumulate_y_tuple_host` and `ZeroCheckPoly::fix_last` all read **0 calls**
+(negative control also 0), i.e. every host site changed here is unreachable
+from the GPU prover. `eq_mle_table` and `evaluate_trace_columns_at_point` are
+reached but are not modified by this change.

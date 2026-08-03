@@ -163,10 +163,22 @@ where
     let mut univariate_poly_msgs: Vec<UnivariatePolynomial<EF>> =
         Vec::with_capacity(num_variables as usize);
 
+    // Per-chip parallelism.  Every `sum_as_poly*` / `fix_*_variable` below is
+    // a PURE function of one `(poly, claim)` pair — no shared state, no
+    // challenger, and the collects preserve input order — so mapping the chip
+    // axis with rayon is byte-identical to the serial map.  It matters because
+    // the inner per-pair `par_iter` inside `sum_as_poly` only has work
+    // proportional to THAT chip's real rows: with the chip axis serial, a
+    // shard's many short chips each spread a handful of pairs over the whole
+    // pool and the calling thread ends up doing nearly all of it (MEASURED,
+    // goat core: `accumulate_y_tuple_host` thread-CPU / wall = 84%, and
+    // `ZeroCheckPoly::fix_last` = 100%).
+    use p3_maybe_rayon::prelude::*;
+
     // Round 0: compute, observe, sample.
     let mut uni_polys: Vec<UnivariatePolynomial<EF>> = polys
-        .iter()
-        .zip(claims.iter())
+        .par_iter()
+        .zip(claims.par_iter())
         .map(|(poly, claim)| poly.sum_as_poly_in_last_t_variables(Some(*claim), t))
         .collect();
 
@@ -180,7 +192,7 @@ where
     point.insert(0, alpha);
 
     let mut polys_cursor: Vec<P::NextRoundPoly> =
-        polys.into_iter().map(|poly| poly.fix_t_variables(alpha, t)).collect();
+        polys.into_par_iter().map(|poly| poly.fix_t_variables(alpha, t)).collect();
 
     // Rounds [t .. num_variables).
     for _ in t..num_variables as usize {
@@ -192,8 +204,8 @@ where
             uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_prev)).collect();
 
         uni_polys = polys_cursor
-            .iter()
-            .zip(round_claims.iter())
+            .par_iter()
+            .zip(round_claims.par_iter())
             .map(|(poly, &round_claim)| poly.sum_as_poly_in_last_variable(Some(round_claim)))
             .collect();
         rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
@@ -206,7 +218,7 @@ where
         point.insert(0, alpha);
 
         polys_cursor =
-            polys_cursor.into_iter().map(|poly| poly.fix_last_variable(alpha)).collect();
+            polys_cursor.into_par_iter().map(|poly| poly.fix_last_variable(alpha)).collect();
     }
 
     // Final eval at the terminal alpha.
