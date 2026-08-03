@@ -3211,3 +3211,165 @@ All three are an **exact-shape equality on a fast path with a silent fallback**,
 and **no byte gate can see any of them** — every arm produces the identical
 proof. The only defence is a counter on the decline, which is why
 `fl_stash_decl_len` / `fl_stash_decl_other` are landed rather than deleted.
+
+## PCIe re-census after the FirstLayer fixes (Aug 03) — the H2D premise no longer holds
+
+The standing premise was "Ziren is 100% pageable at 33 GB/s against SP1's 98%
+pinned at 55, H2D 22.04 ms/Mcycle vs 4.77, and `cudaMemcpyAsync` is the single
+largest host cost on the coordinator at 64.6 ms/shard". Two of those three
+numbers survive re-measurement; the conclusion drawn from them does not.
+
+Instrument: `ZIREN_GPU_H2D_PROF` extended to record **D2H as well as H2D**, to
+**time every copy around the CUDA FFI call**, to attribute per **thread class**
+(`main` = the serial prover thread; `stagepool` = the 16-wide commit+open
+stage pool) and per **power-of-two size class**, and to backtrace a copy iff
+its *already-measured* host time crossed a threshold
+(`ZIREN_GPU_H2D_PROF_BT_SLOW_US`). The label is resolved AFTER the clock is
+read, so symbolisation is never inside a measured interval. Uniform 1-in-N
+sampling was tried first and is useless here: the expensive calls are a tiny
+minority of a 743k-call population, so a uniform sample returns only the 2 us
+ones.
+
+### The volume, reth core, 281 shards, canonical, verify ON
+
+| | total | per shard | calls/shard |
+|---|---|---|---|
+| H2D | **142.37 GiB** | 518.8 MiB | 2645 |
+| D2H | **12.08 GiB** | 44.0 MiB | 614 |
+
+142.37 GiB / 419.96 Mcycles = **347 MiB/Mcycle**. SP1's 4.77 ms/Mcycle at its
+measured 55 GB/s pinned rate is ~250 MiB/Mcycle, so Ziren's H2D **byte volume is
+within 1.4x of SP1's** — it is the RATE that differs, and the rate gap is worth
+about 25 ms/shard, ~4% of a 602 ms reth shard. The 22.04 ms/Mcycle figure
+predates the chip-keyed FirstLayer stash fix that took reth H2D from 383.81 to
+149.21 GiB.
+
+### Where the host milliseconds are — MEASURED, ranked
+
+Summed over all threads, H2D 223 ms/shard and D2H 48 ms/shard. Split by thread:
+
+| thread | host ms/shard in copy APIs | MiB/shard | calls/shard |
+|---|---|---|---|
+| `main` (serial prover, critical path) | **64.5** | 178 | 3140 |
+| `stagepool` (16 threads, commit+open) | **192** summed | 282 | 24 |
+
+The four biggest sites on `main`, from the cost-triggered backtrace:
+
+| site | ms/shard | MiB/shard | calls/shard |
+|---|---|---|---|
+| `to_host <- jagged_sumcheck::device_rounds_loop` | 19.94 | **0.00** | 1.0 |
+| `to_device_async <- interaction_eval <- build_gkr_circuit_native` | 8.34 | 58.04 | 1.7 |
+| `to_host <- Vec::from_iter <- commit_dense::gpu_jagged_precompute_commit_hook` | 5.10 | 10.96 | 1.1 |
+| `copy_to_host <- DeviceMleEf::fixed_at_zero <- FriCudaProver` | 5.06 | **0.00** | 2.0 |
+
+**Roughly 35 of the coordinator's 64.5 ms/shard move ZERO OR NEAR-ZERO BYTES.**
+They are device-dependency waits wearing a `cudaMemcpy` costume, and they belong
+to the already-closed blocking-sync cluster. Only ~25 ms/shard is transfer, and
+the largest single eliminable piece of it is the 58 MiB/shard host-built GKR
+circuit input.
+
+On the stage pool every pageable per-chip upload costs 11-20 ms while carrying
+0.4-15 MiB (34 MB/s to 1.6 GB/s), and **the one upload on that path that is
+already page-locked — the 194 MiB/shard `CpuEventFfi` array, the single largest
+H2D site in the process — does not appear in the cost table at all.** That is
+the positive control for the mechanism: page-locking works, and byte rank and
+cost rank are unrelated.
+
+### REFUTED: the blocking is not the documented pageable stream-drain
+
+CUDA documents that a `cudaMemcpyAsync` from pageable memory synchronises the
+stream before initiating the copy, which would make the 11-20 ms "the chip's own
+queued work". `ZIREN_GPU_H2D_PROF_PRESYNC=1` puts an explicit
+`cudaStreamSynchronize` in front of every H2D and charges it separately:
+
+| | explicit drain, ms/shard | drains/shard |
+|---|---|---|
+| `stagepool` | **2.14** | 98 |
+| `main` | 83.68 | 2581 |
+
+The stage pool's streams are **empty** when the upload is issued. The cost is a
+~12 ms FIXED per-call term independent of size — mutual queueing among the ~24
+concurrent copies, not bandwidth and not the copy's own stream.
+
+### NEGATIVE: per-thread pinned bounce for the 64 KiB - 16 MiB class
+
+Parked on ziren-gpu `perf/pinned-h2d-bounce-NEGATIVE`. A persistent per-thread
+page-locked buffer (registered ONCE per thread, one event created once and
+re-recorded), used for a bounded size class so the device copy becomes a true
+async DMA for the price of one host memcpy.
+
+reth core, 3 paired rounds, GPU slots swapped every round, same binary both arms
+(`ZIREN_GPU_H2D_PINNED_BOUNCE` 0 vs 16), verify ON, no reps discarded:
+
+| round | off | on | delta |
+|---|---|---|---|
+| 1 | 2595 | 2466 | -5.0% |
+| 2 | 2543 | 2488 | -2.2% |
+| 3 | 2320 | 2393 | +3.1% |
+| **mean** | **2486** | **2449** | **-1.5%** |
+
+reth core sha `2c4d3597a79a6f36` on all six runs; tendermint `7190969b1feae13a`.
+Byte-neutral, and not a win. An earlier revision bounced EVERY size and was
+worse: the event record plus the next use's event wait costs ~50 us, taking the
+65 B - 1 KiB class from 8 us/call to 62 us/call.
+
+### Why pinning cannot pay here — the fan-out wall is only 83 ms
+
+`ZIREN_GPU_HOST_PROF=1`, reth, 281 shards:
+
+| site | wall ms/shard | thread-CPU ms/shard |
+|---|---|---|
+| `commit_total` | 90.9 | 22.2 |
+| ` .accel_wall` (the trace-gen fan-out WALL) | **83.3** | 15.9 |
+| `tg_dev_sum` (SUM over 17.8 device chips, parallel) | 443.5 | 121.7 |
+| `tg_hostcopy_sum` (SUM over 3.3 host chips, parallel) | 21.2 | 4.2 |
+| `gkr_wire_total` | 105.7 | **100.2** |
+
+The whole commit fan-out is **83.3 ms of wall**, so 192 ms/shard of summed copy
+blocking across 16 threads cannot be costing 192 ms of anything. And within the
+fan-out the chips are waiting on the GPU, not on PCIe: `D:DivRem` is 24.3 ms
+wall at **1.0%** thread-CPU, `D:Byte` 45.0 ms at 19.5%, `D:ShiftRight` 12.7 ms
+at 1.0%. Compressing PCIe there frees threads that are already idle.
+
+### The device allocator, measured the same way
+
+| bucket | calls/shard | host ms/shard |
+|---|---|---|
+| `malloc` >= 1 MiB | 812.9 | **34.4** |
+| `malloc` < 16 KiB | ~3240 | 9.5 |
+| `malloc` 16 KiB - 1 MiB | 1048 | 7.6 |
+| `free` | ~5000 | 6.5 |
+| **total** | **10,111** | **60.6** |
+
+`main` carries 32.0 ms of the malloc time over 4937 calls/shard, i.e. the
+allocator is a LARGER coordinator cost than every real PCIe transfer put
+together. 3.1 calls/shard are ~2.3 GiB each and cost 5.5 ms apiece (17 ms/shard
+between them). NOTE: these ms carry the probe's own per-call mutex, so treat
+them as ~20% high; the independent nsys figure for the same build is 28.7
+ms/shard on the coordinator over 10,570 calls/shard, which corroborates the
+ranking.
+
+### NEGATIVE: raising the mempool release threshold for reth
+
+The hypothesis was reasonable and is wrong. The auto-set `cudaMallocAsync`
+release threshold is `total - 6 GiB` = **25.4 GiB** on this card, and its in-tree
+justification (`cuda/utils/runtime.cuh`) was calibrated on tendermint's ~22.5 GiB
+steady state. **reth peaks ~27 GiB**, i.e. *above* the threshold — exactly the
+regime that same comment warns produces "298 `cudaMallocAsync` calls > 1 ms" per
+run. So: raise it and the 813 large allocations/shard should stop round-tripping
+to the driver.
+
+reth core, `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES` default vs `UINT64_MAX`,
+sequential alternating pairs on one GPU, verify ON:
+
+| pair | default (kHz) | never-release (kHz) | delta |
+|---|---|---|---|
+| 1 | 2312 | 2257 | -2.4% |
+| 2 | 2489 | 2383 | -4.3% |
+
+Golden `2c4d3597a79a6f36` on all four. **Cache-everything is a LOSS on reth**, so
+the existing small-card policy is correct even where the working set exceeds the
+threshold: at 27 of 31.8 GiB the pool's retained slack competes with the live
+working set, and that costs more than the driver round-trips it avoids. Do not
+re-open by raising the threshold; the allocator lever is the **call count**
+(10,111/shard, 4937 of them on the coordinator), not the pool policy.
