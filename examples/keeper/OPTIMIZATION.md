@@ -5361,3 +5361,217 @@ the same 8-9 s.
 * tendermint `7190969b1feae13a` (33) — 6 proofs at `RAYON_NUM_THREADS=16`
 * fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62` (9),
   simple-go `443b92db18eceab5` (3), fib compress `7e3c5d753cf25e55`
+
+## Device-work re-census at canonical, and the zerocheck sample the host throws away (Aug 06, ziren-gpu)
+
+### The stage table was stale; here it is again, attributed by NVTX span
+
+Five landings had moved the shape since the last full map, so the table was
+re-taken from scratch on **reth** (the target program; tendermint is a control
+only) at canonical ziren-gpu `2511c03` / host `c65de346`. Bounded `nsys`
+capture (`-y 70 -d 180`, `--trace=cuda,nvtx`), 170 shards inside the window,
+254.1 Mcycles. Every kernel is attributed to the **innermost NVTX span live on
+its launching thread at launch time** (CUPTI `correlationId` -> RUNTIME row ->
+thread + timestamp), not by kernel name — name bucketing had put the LogUp-GKR
+sumcheck's `foldAndSumCircuitLayerJaggedMsb` in the "jagged" bucket and the
+jagged-eval `branchingProgram` in "zerocheck".
+
+| stage (NVTX span) | ms/Mcyc | % of kernel | launches/shard | us/launch |
+|---|---|---|---|---|
+| zerocheck `open_s3_zerocheck / zc_reduce` | **49.65** | 26.1 % | 1195.9 | 62.1 |
+| LogUp-GKR sumcheck `open_s2_logup_gkr / logup_gkr_layer_transitions` | **46.60** | 24.5 % | 774.3 | 89.9 |
+| PCS commit `open_precompute_commit` (NTT + Merkle) | 33.73 | 17.7 % | 721.4 | 69.9 |
+| jagged BaseFold open `open_s4_jagged_pcs / jagged_basefold_open` | 24.74 | 13.0 % | 1181.7 | 31.3 |
+| jagged sumcheck `open_s4_jagged_pcs / jagged_sumcheck_reduce` | 14.52 | 7.6 % | 92.1 | 235.6 |
+| jagged-eval branching program (`open_s4_jagged_pcs` self) | 5.02 | 2.6 % | 116.1 | 64.6 |
+| GKR first layer `logup_gkr_first_layer` | 4.67 | 2.5 % | 21.9 | 318.6 |
+| GKR device layer walk `gkr_device_layer_walk` | 4.51 | 2.4 % | 397.9 | 16.9 |
+| tracegen (device + global rounds 1-3) | 3.31 | 1.7 % | 24.4 | ~136 |
+| GKR output extract | 1.29 | 0.7 % | 68.0 | 28.5 |
+| GKR first ef-transition | 1.28 | 0.7 % | 19.9 | 96.2 |
+| FRI prover (`bf_epilogue`) | 0.48 | 0.3 % | 1.0 | 718.1 |
+| **unattributed remainder** (`<unspanned>` + four sub-0.1 spans) | **0.37** | **0.19 %** | | |
+| **KERNEL TOTAL** | **190.17** | 100 % | 4515 | 42.1 |
+
+Non-kernel device activity, which overlaps the kernels only marginally (mean
+device concurrency while busy = 1.005, i.e. the work is effectively serialized
+on one stream):
+
+| | ms/Mcyc | ops/shard | volume | rate |
+|---|---|---|---|---|
+| H2D | 16.55 | 1820.8 | 328.5 MiB/Mcyc | 20.8 GB/s |
+| D2D | 4.62 | 341.5 | 3745.3 MiB/Mcyc | 849 GB/s |
+| memset | 4.85 | 115.1 | | |
+| D2H | 1.07 | 621.1 | 27.6 MiB/Mcyc | 27.1 GB/s |
+
+Kernel union **190.33**, all-activity union **205.44 ms/Mcyc**.
+
+The old table is retired: its buckets summed to 249 ms/Mcyc against a 190
+ms/Mcyc total, i.e. they double-counted. Against the fresh figures the
+directional moves are zerocheck 71.07 -> 49.65 and tracegen 7.05 -> 3.31; the
+"GKR sumcheck 32.94" bucket was undercounting by the two `jhr` slab-build
+kernels, which belong to the same span and cost 12.34 ms/Mcyc on their own.
+
+### Gap and occupancy over a clean wall
+
+Against SP1's ~88.9 ms/Mcyc: **2.14x on kernels, 2.31x on all device
+activity**. Clean reth (no profiler, verify on, GPU 4) gives 3071 / 3016 kHz on
+the two uncontended runs = **328.6 ms/Mcyc of wall**, so
+
+* occupancy, kernel-only = 190.33 / 328.6 = **57.9 %**
+* occupancy, all device activity = 205.44 / 328.6 = **62.5 %**
+
+against SP1's 64.0 %. The previous reading was 62.7 % kernel-only; it has
+fallen because the kernels got ~5 % cheaper while the host half did not. The
+"device work converts to kHz about 1:1" model therefore still holds, but it is
+an empirical rule at ~58 % occupancy, not an identity.
+
+### Three refutations from the same capture
+
+Named here so they are not re-attacked:
+
+* **`bit_rev_permutation_z<64>` is not slow.** At 14.56 ms/Mcyc it is the
+  fourth-largest kernel and costs *more* than the radix-256 NTT butterflies it
+  feeds (13.87), which reads like an obvious defect. It is not: `gridX = 2048`,
+  `blockX = 64`, `Z_COUNT = 64` fixes the domain at 2^23 elements, so each 39.6
+  us launch moves 2 x 33.5 MB = **1.695 TB/s, 94.6 % of the RTX 5090's 1.792
+  TB/s peak**. Only its volume (549 launches/shard) is attackable, and that is
+  an LDE-shape question, not a kernel question.
+* **`foldAndSumCircuitLayerJaggedMsb` is not occupancy-starved.** `ptxas -v`
+  gives 124 registers / 0 spills under its `__launch_bounds__(256)`, which caps
+  the SM at 528 threads (25.8 % theoretical occupancy) and looks like the
+  obvious lever on a 26.14 ms/Mcyc kernel. Plotting per-launch duration against
+  `gridX` shows the ratio of measured time to a 1.7 TB/s bandwidth model sitting
+  at **0.7-1.1x for every grid from 70 to 800 blocks** — it is already running
+  at DRAM bandwidth. What *is* wasted is its small-grid tail: 65.3 launches per
+  shard at `gridX = 1` cost 14.2 us each against a 0.5 us bandwidth floor
+  (30.6x), and there is a flat ~33 us floor for every launch from `gridX = 4` to
+  `gridX = 127`. That tail is 2.59 ms/Mcyc, ~10 % of the kernel.
+* **The zerocheck kernel does not spill.** `-maxrregcount=64` plus no
+  `__launch_bounds__` is exactly the configuration that made
+  `foldAndSumCircuitLayerJaggedMsb` spill 272 bytes, so
+  `zerocheckJaggedCxFusedChipsPtrs` looked like the same bug at 43.64 ms/Mcyc.
+  `ptxas -v` says otherwise: **64 registers, 0 spill stores, 0 spill loads,
+  2224 bytes stack frame** at `MEMORY_SIZE = 128`. The stack frame is
+  `Val expr_f[128]` (2048 B) + `Challenge expr_ef[10]` (160 B) — a
+  dynamically-indexed interpreter register file, which is local memory by
+  construction and not a spill. Adding launch bounds would buy nothing.
+
+### The change: the zerocheck's fourth interpolation sample was never read
+
+`finalize_round_poly` pins the degree-4 zerocheck round polynomial from the
+three samples `p(0)`, `p(2)`, `p(4)` plus two FREE constraints — the sumcheck
+identity `p(0) + p(1) = claim`, and the eq-factor root
+`zerocheck_eq_root(last)` at which `p` vanishes — and only falls back to a
+direct `{0,1,2,3,4}` sweep on five exact degenerate `last` coordinates
+(`0, 1, 1/2, 1/3, 3/7`) where that reconstruction is ill posed. Its own
+docstring says so: *"the host never evaluates the X = 3 constraint"*.
+
+The per-chip host accumulator was already gated on exactly that predicate:
+
+```rust
+let compute_y3 = zerocheck_eq_root(last).is_none();
+let (y_0, y_2, y_3, y_4) = self.accumulate_y_tuple(&partial, is_first_round, compute_y3);
+```
+
+The FUSED device kernel — the one that actually runs on reth — was not. It
+launched `dim3 grid(maxBlocks, 4, numSlots)` with `SAMPLES = {0, 2, 3, 4}` on
+every round of every shard, so **a quarter of the largest kernel in the prover
+computed a partial the host then discarded**. `numSamples` is now a launch
+parameter (4 => `{0,2,3,4}`, 3 => `{0,2,4}`); `batched_device_round` passes 3
+unless some chip in the batch has a degenerate `last`:
+
+```rust
+let compute_y3 = lasts.iter().any(|l| zerocheck_eq_root(*l).is_none());
+```
+
+Byte-neutral by construction: the three surviving samples run the identical
+bytecode over an identical `grid.x`/`grid.z`, only `grid.y` shrinks and the
+partials stride goes `slot*4 + y` -> `slot*numSamples + y`. `y[2]` comes back
+ZERO, which is exactly what `accumulate_y_tuple_host` already returns for
+`compute_y3 == false`, and `finalize_round_poly` reads it only in the branch
+that forces `numSamples = 4`.
+
+**Predicted before measuring** (from the launch-size histogram: launches at or
+above ~1024 blocks are GPU-saturated and scale with work, the small-grid tail is
+latency-bound and will not move): the `zerocheckJaggedCxFusedChipsPtrs` family
+43.64 -> 34.4 ms/Mcyc, the `zc_reduce` span 49.65 -> 40.4, the device kernel
+total 190.17 -> **180.9 ms/Mcyc (-4.9 %)**, reth ~3195 kHz.
+
+**Measured** (identical bounded nsys capture, 171 vs 170 shards in window):
+
+| | before | after | delta |
+|---|---|---|---|
+| `zerocheckJaggedCxFusedChipsPtrs<ext,ext,*>` | 35.63 | 29.16 | **-18.1 %** |
+| `zerocheckJaggedCxFusedChipsPtrs<kb31,ext,*>` (round 0) | 8.01 | 6.05 | **-24.5 %** |
+| span `zc_reduce` | 49.65 | 41.22 | **-17.0 %** |
+| **device kernel TOTAL** | **190.17** | **180.97** | **-4.84 %** |
+
+The predicted total was 180.9 against 180.97 measured. Every other span moves
+by less than 1 % (`logup_gkr_layer_transitions` -0.9 %, `open_precompute_commit`
+-0.1 %, `jagged_basefold_open` -0.3 %) — noise, no collateral. D2H VOLUME drops
+27.5 -> 25.7 MiB/Mcyc, the smaller partials buffer; the D2H *time* in the second
+capture (1.06 -> 2.78 ms/Mcyc) is contention, not regression — its rate fell
+27.1 -> 9.7 GB/s because that capture ran with two other reth proofs on the box,
+and H2D volume is unchanged at 326 MiB/Mcyc either way.
+
+**kHz, five same-GPU pairs, back-to-back, order alternated, verify on:**
+
+| pair | GPU | order | base kHz | 3-sample kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 6 | A,B | 2952 | 2880 | -2.44 % |
+| 2 | 6 | A,B | 3044 | 3103 | +1.94 % |
+| 3 | 6 | A,B | 2939 | 3073 | +4.56 % |
+| 4 | 4 | B,A | 3006 | 3152 | +4.86 % |
+| 5 | 4 | B,A | 2923 | 3030 | +3.66 % |
+
+Mean of the paired ratios **+2.52 %**, SD 2.99, SE 1.34. The Student-t 95 %
+interval at n = 5 is **-1.20 % to +6.23 %, which INCLUDES ZERO** — the kHz
+pairing on its own does not establish the win, exactly as with the previous
+pass. Four of five pairs are positive. Pair 1's changed arm ran concurrently
+with the instrumented nsys capture on a third GPU and is the only negative;
+dropping it gives +3.75 % (95 % CI +1.67 % to +5.84 %), but that is a post-hoc
+exclusion and the full-n interval is the honest one.
+
+The tight evidence is the kernel measurement, which does not depend on
+run-to-run wall: -9.20 ms/Mcyc of device work, all of it inside `zc_reduce`,
+predicted to within 0.04 %.
+
+**Byte gates — every proof matches the canonical golden, verify on:**
+
+* reth `2c4d3597a79a6f36...` (281 shards) — **14 proofs**: 5 three-sample,
+  9 canonical baseline
+* tendermint `7190969b1feae13a` (33) — **6 three-sample proofs at
+  `RAYON_NUM_THREADS=16`** + 1 baseline
+* fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62` (9),
+  simple-go `443b92db18eceab5` (3), fib compress `7e3c5d753cf25e55` —
+  three-sample == baseline on all four
+
+**Switches.** None; the sample count follows the same predicate the host
+finalize already used. Warning counts unchanged (zkm-gpu-core 194,
+zkm-gpu-basefold 14, prover 0).
+
+### What is left in the zerocheck, and why it is harder
+
+The remaining 41.22 ms/Mcyc does not scale down with the sumcheck. Per-launch
+time against total block count:
+
+| blocks | launches/shard | ms/Mcyc | us/launch |
+|---|---|---|---|
+| 131072 | 0.7 | 7.13 | 14608 |
+| 32768 | 1.0 | 6.40 | 9741 |
+| 4096 | 1.0 | 1.36 | 2014 |
+| 1024 | 1.0 | 0.77 | 1148 |
+| 256 | 1.3 | 0.69 | 768 |
+| **64-127** | **8.5** | **4.33** | **763** |
+
+`gridX = max over chips of ceil(num_pairs/256)` bottoms out at 1, so the last
+~8.5 rounds all launch the same ~100 blocks (`4 x numSlots`, now `3 x`) on a
+170-SM GPU and each costs a flat ~760 us — the time for ONE serial pass through
+the longest slot's AIR bytecode, with under one block per SM to hide the
+dependent local-memory chain through `expr_f`. Roughly 14.7 ms/shard of the
+zerocheck is this floor. Shortening it needs shorter chunks, i.e. the
+dataflow-aware chunker already identified as the next step; SP1 has no tail
+optimization here either, but it does size its grid per (chunk, row-tile) so
+small chips emit blocks proportional to their own height instead of the
+batch-wide maximum — that part is portable and independent.
