@@ -4409,3 +4409,242 @@ The on/off gate is deliberately not kept. It existed only to be the
 isolating-control arm, and this mirrors the jagged-eval round-engine seam in the
 same file, which is installed unconditionally and retains only its `..._VERIFY`
 cross-check.
+
+## The fused zerocheck launch was latency-bound, not work-bound — split it by independent bytecode chunk (Aug 05, ziren-gpu)
+
+### What the reth profile actually says
+
+`zerocheckJaggedCxFusedChipsPtrs` is the single largest device stage on reth.
+The starting lead was a grid-dimension histogram: launches with `gridZ = 6`
+cost ~9.1 ms and `gridZ = 5` cost 0.49 ms, so "one chip adds 8.6 ms".
+
+`gridZ` is not a round index and not a chip index in the way that reading
+suggests. The zerocheck driver
+(`crates/pcs/src/shard_level/zerocheck_poly.rs::reduce_sumcheck_serial`) asserts
+every poly has the same `num_variables` and runs ONE fused launch per round over
+ALL of a shard's chips, so **`gridZ` is the shard's chip count and is constant
+for the whole shard**. `gridZ = 6` therefore names a *shard class*, not a chip
+position.
+
+An untracked per-launch probe on the (already-synchronising) host wrapper,
+printing the roster with each chip's bytecode length and pair count, named them
+directly — reth, 281 shards, 6182 fused launches:
+
+| `gridZ` | shard class | dominant chip | bytecode instrs | launches | total |
+|---|---|---|---|---|---|
+| 7 | Keccak precompile | `KeccakSponge` | **67 260** | 440 | **8.53 s** |
+| 6 | secp256k1 precompile | `Secp256k1AddAssign` | **39 126** | 528 | **6.35 s** |
+| 25 | core (MIPS) | `Global` | 2 049 | 2464 | 6.18 s |
+| 5 | memory init/finalize | `Global` | 2 049 | 352 | 2.42 s |
+
+The precompile AIRs carry **20-33x the bytecode of any core chip** (the whole
+MIPS chip set tops out at `Global`, 2 049 instructions). 1 342 of 6 182
+launches — the four precompile classes — were **58 % of all fused-launch time**.
+
+### The mechanism: the cost does not depend on the work
+
+The decisive number is the per-launch cost against the dominant chip's pair
+count, from the same probe:
+
+| `KeccakSponge` pairs | 1 | 32 | 1 024 | 32 768 | 65 536 |
+|---|---|---|---|---|---|
+| launch | 13.6 ms | 15.4 ms | 20.2 ms | 45.5 ms* | 45.5 ms |
+
+A round where the chip has **one pair** costs 13.6 ms; a round with 65 536 pairs
+costs 45.5 ms. Over a 65 536x range of work the cost moves 3.3x. The launch is
+**latency-bound**: the 67 260-instruction serial bytecode walk *is* the round.
+In the tail rounds one thread of one warp runs it while the other 8 159 warp
+slots on the GPU are idle.
+
+### Four refutations before the fix (each one measured)
+
+A standalone replay of the REAL dumped chip programs through the REAL
+`constraint_eval_dispatch.inc` at the REAL launch geometry
+(`grid(1,4,1)`, 256 threads, 1 pair) reproduced the in-situ cost to within
+10 % (Secp 10.8 ms bench vs 9.9 ms in-proof), then ablated it:
+
+* **Instruction fetch + the 60-way switch is 4 % of it.** Emptying every case
+  body: 276 -> 11 ns/instr (Secp), 192 -> 8 ns/instr (Keccak). Staging the
+  bytecode through shared memory, cooperatively and double-buffered, bought
+  **2.4 %**. The instruction stream was never the problem.
+* **The `MEMORY_SIZE` register-file tier is not it.** `KeccakSponge` uses 7
+  interpreter registers and is flat across `MEMORY_SIZE` 8/16/32/64/128
+  (12.93-12.95 ms). What matters is the count of registers a chip actually
+  touches, which is a property of the AIR.
+* **`-maxrregcount` is not binding.** The kernel uses 48 registers under the
+  sm_120 cap of 64; raising the cap to 255 changed nothing.
+* **The extension multiply is not it.** Rewriting every base-field multiply
+  opcode as an add — same operands, same local traffic, cheap ALU — bought 9 %
+  (Keccak) / 13 % (Secp). Short-circuiting every trace load bought 22 % / 13 %.
+  The remaining ~60-70 % is the serial dependency chain itself.
+
+### The latency-bound claim, tested directly rather than assumed
+
+"Latency-bound" was a hypothesis, so it was measured against the one thing that
+distinguishes it: whether adding concurrent warps is free. Same replay harness,
+program and geometry held fixed, only the pair count (= active threads) varied.
+
+**One block, one SM, 1 -> 8 active warps (256x the work):**
+
+| active warps | 1 | 2 | 4 | 8 |
+|---|---|---|---|---|
+| `KeccakSponge` | 12.67 ms | 13.18 | 13.78 | **14.48 ms (+14 %)** |
+| `Secp256k1AddAssign` | 10.44 ms | 10.51 | 10.60 | **10.76 ms (+3 %)** |
+
+**Then out to 32 blocks (`KeccakSponge`, 32x more work again):**
+
+| blocks | 1 | 2 | 4 | 8 | 32 |
+|---|---|---|---|---|---|
+| wall | 14.47 ms | 14.67 | 14.68 | 18.09 | **18.19 ms** |
+
+A single SM absorbs eight concurrent copies of this interpreter for 3-14 %, and
+the card absorbs thirty-two blocks' worth for +26 % on 32x the work. One warp
+therefore occupies well under a seventh of one SM's issue capacity: the walk is
+stalled on its own dependency chain, not on any shared resource. The prediction
+is confirmed and quantified — **the pre-fix kernel was running at roughly 1/32 of
+the parallelism it could absorb for free.**
+
+This is also why neither previously-refuted direction could have worked. The
+local-memory pool and the per-thread array size are properties of a single
+thread's walk; neither changes the length of the dependency chain nor the number
+of warps. Chunking is a third mechanism: it does not touch the walk at all, it
+multiplies the number of walks in flight (16 chunks x 4 eval points = 64 blocks
+where there were 4), which is exactly the axis with 32x of headroom. It is also
+not per-tier sizing — the launch count per round is unchanged at one, and the
+`MEMORY_SIZE` tier is untouched.
+
+Conclusion: nothing about the kernel body was wrong. The only axis of
+parallelism left, once a chip runs out of pairs, is the constraint program.
+
+### The fix: cut the program where nothing is live
+
+A position in the bytecode whose **live-in register set is empty** — no
+interpreter register (base `expr_f` or extension `expr_ef`) written before it is
+read at or after it — splits the program into two halves that share nothing.
+Each half is then correct against the freshly zeroed register file the kernel
+already hands it, and needs no dataflow rewrite, no backward slicing and no
+duplicated instructions.
+
+Ziren's AIR bytecode is full of them (backward liveness over the dumped
+programs): `KeccakSponge` 1 487, `Secp256k1AddAssign` 2 378,
+`Bls12381DoubleAssign` 3 642. Balanced 16-way splits snapped to legal positions
+give ideal speedups of 14.1x / 7.5x / 3.6x.
+
+`ytuple_chunks` (ziren-gpu `core/src/basefold/zerocheck_ytuple.rs`) computes the
+cuts once per chip at cache-build time. `blockIdx.z` in
+`zerocheckJaggedCxFusedChipsPtrs` now indexes a **slot** — a (chip, chunk) pair —
+carrying its own bytecode range, its resumed `powersOfAlpha` index, and a
+disjoint slice of the chip's GKR column sweep. The host sums the per-slot
+partials. KoalaBear-extension addition is exact and associative, so the
+regrouping is **byte-identical**, not approximately so.
+
+Chips shorter than `2 * 2048` instructions are left whole. That is every core
+MIPS chip, so core shards keep the exact pre-chunking launch shape and only the
+precompile AIRs are split — confirmed in the trace: `gridZ = chips` for all
+core/memory shards, `chips=7 -> gridZ=24` and `chips=6 -> gridZ=21` for the
+Keccak and secp classes.
+
+This is Ziren's form of the sp1-gpu chunk + `BlockDispatch` shape
+(`sp1-gpu/crates/air/src/ir/chunker.rs`,
+`sp1-gpu/crates/sys/lib/zerocheck/sequential.cu`), reached without SP1's DAG
+rewrite because Ziren's linear register machine already offers the cut points.
+
+### Measured
+
+reth, 281 shards, same GPU, per-launch host timing around the wrapper:
+
+| | baseline | chunked | |
+|---|---|---|---|
+| `KeccakSponge` round at 1 pair | 13 635 us | **1 073 us** | **12.7x** |
+| `Secp256k1AddAssign` at 1 pair | 9 877 us | **1 206 us** | **8.2x** |
+| 7-chip shard class, total | 8.53 s | **3.05 s** | -5.48 s |
+| 6-chip shard class, total | 6.35 s | **2.88 s** | -3.47 s |
+| every other shard class | | | within +/-0.05 s |
+| fused-launch total | 29.81 s | **20.85 s** | **-8.95 s** |
+
+The per-launch floor that remains (~1.1 ms at one pair) is the wrapper's
+uploads plus the residual walk, not the chunked kernel; raising the 16-chunk cap
+further has little left to take.
+
+### Correctness argument, and where the cut analysis runs out
+
+The liveness table the cut analysis depends on is not hand-trusted. Every one of
+the interpreter's **61 opcodes** was re-derived mechanically from
+`constraint_eval_dispatch.inc` — which of `expr_f[a|b|c]` / `expr_ef[a|b|c]` each
+case reads and which it writes, including the read-modify-write forms — and
+compared against the Rust match arms: **0 mismatches**. That matters because the
+gate set only exercises three of the chunked chips; the rest would otherwise ship
+unvalidated.
+
+Every chip was then cross-checked by a *different* criterion than the one used to
+pick the cuts: a forward last-write scan asserting that no read inside a chunk
+resolves to a write before the chunk's start, plus exact coverage and exact
+`constraint_offset` prefix counts. **59 chips checked, 0 violations.** 24 chips
+chunk; the 35 core MIPS chips stay whole.
+
+The analysis is honest about where it fails. The balanced split is only as good
+as the longest indivisible run, and a family of chips has one:
+
+| chip | instrs | chunks | longest chunk | effective speedup |
+|---|---|---|---|---|
+| `KeccakSponge` | 67 260 | 16 | 4 775 | **14.1x** |
+| `Secp256k1/r1/Bn254AddAssign` | 39 126 | 16 | 5 228 | **7.5x** |
+| `EdAddAssign` | 51 130 | 16 | 7 468 | 6.8x |
+| `Bls12381DoubleAssign` | 103 211 | 16 | 28 925 | 3.6x |
+| `KeccakSpongeControl` | 6 657 | 3 | 2 222 | 3.0x |
+| `Bls12381FpOpAssign` | 18 419 | 8 | 16 350 | **1.1x** |
+| `Bls12831Fp2MulAssign` | 61 596 | 16 | 57 894 | **1.1x** |
+| `Bn254Fp2MulAssign` | 30 780 | 15 | 28 310 | 1.1x |
+
+The `Fp2` / `FpOp` family keeps a register live across almost its whole program,
+so a cut-point split cannot touch it — visible in the reth trace as the
+`chips=6 -> gridZ=13` class (`Bls12381FpOpAssign`), which gains little. Breaking
+those needs a dataflow-aware chunker that re-materialises a constraint's backward
+slice, i.e. the sp1-gpu `chunk_dag` model
+(`sp1-gpu/crates/air/src/ir/chunker.rs`), and is the next step if that family
+starts to matter. Those chips also spend 16 output slots to buy ~1.1x, so a
+policy that drops cuts which fail to reduce the longest run would trim the
+partial buffer at no cost — byte-neutral by the same associativity argument, but
+not attempted here (it would invalidate this pass's gate set).
+
+### End-to-end kHz, and what the statistic can and cannot carry
+
+Clean arms (the diagnostic probe removed from both), isolating control: the
+baseline tree is `git archive` of canonical ziren-gpu `0b7d556`, the test tree is
+that plus these three files. Same GPU within each pair, back-to-back, launch
+order alternated. reth core, `RAYON_NUM_THREADS=16`, verify on.
+
+| pair | GPU | order | base kHz | chunked kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 6 | B,C | 2700 | 2854 | **+5.70 %** |
+| 2 | 6 | C,B | 2756 | 2980 | **+8.13 %** |
+| 3 | 6 | B,C | 2725 | 2731 | +0.22 % |
+| 4 | 6 | C,B | 2597 | 2621 | +0.92 % |
+| 5 | 7 | B,C | 2557 | 2697 | **+5.48 %** |
+
+Mean of the paired ratios **+4.09 %**, SD 3.38, SE 1.51. At n = 5 the Student-t
+95 % interval is **-0.11 % to +8.29 %**, which *just includes zero*. The mean is
+the right estimate, but the interval does not clear zero, so the kHz pairing on
+its own does **not** establish the win at 95 %. What it does establish is
+direction: all five pairs are positive (sign test, one-sided p = 0.03).
+
+Two conditions to read with it. Pairs 4-5 ran with a second reth proof
+concurrently on the other GPU — deliberately, to buy two more pairs in the same
+wall — and both arms of both pairs are slower (2557-2621 kHz vs 2700-2756 solo);
+a fixed per-shard saving is a smaller fraction of a longer shard, so those pairs
+compress the effect. Pair 3 is the box's ordinary +/-7 % swing.
+
+The tight evidence is not this statistic, it is the direct span measurement,
+which does not depend on run-to-run wall at all: the fused launch's own total on
+an identical 281-shard proof went **29.81 s -> 20.85 s**, with the whole -8.95 s
+landing in the two precompile shard classes and every other class within
++/-0.05 s. Core wall on the first clean pair moved 155.55 s -> 147.14 s, which is
+the same 8-9 s.
+
+**Byte gates — every proof in this pass matches the canonical golden, verify on:**
+
+* reth `2c4d3597a79a6f36...` (281 shards) — **13 proofs**: 6 chunked, 6 canonical
+  baseline, 1 instrumented
+* tendermint `7190969b1feae13a` (33) — 6 proofs at `RAYON_NUM_THREADS=16`
+* fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62` (9),
+  simple-go `443b92db18eceab5` (3), fib compress `7e3c5d753cf25e55`
