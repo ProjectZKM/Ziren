@@ -5590,13 +5590,21 @@ batch-wide maximum — that part is portable and independent.
   `struct BlockDispatch` in `crates/sys/include/zerocheck/sequential.cuh:80-88`)
   plus a block-ordering change SP1 does not need (it has no sample dimension in
   `grid.y`).
-- **Why it is faster.** All four samples of a row tile read the SAME two trace
-  rows — `ZerocheckJaggedFolder::interp` loads `data[base + idx*height + 2i]`
-  and `[2i+1]` regardless of `eval_point`. Making them four CONSECUTIVE blocks
-  puts them on the machine together, so three of the four reads hit cache. The
-  gain tracks trace volume exactly, which is the signature of that mechanism:
-  MEASURED per launch-size bucket on reth, `-14.8 % / -21.8 % / -14.6 %` in the
-  three largest buckets against only `-1.6 % to -5.0 %` in the small ones.
+- **What the gain depends on (MEASURED).** It scales with GRID SIZE, not with
+  cell width. Per launch-size bucket on reth: `-14.8 % / -21.8 % / -14.6 %` in
+  the three largest buckets against `-1.6 % to -5.0 %` in the small ones; split
+  another way, rounds >= 1 with < 256 row tiles gain 2.3 % and with >= 256 they
+  gain 15.1 %.
+- **Mechanism (INFERRED, not isolated).** All four samples read the SAME two
+  trace rows — `ZerocheckJaggedFolder::interp` loads
+  `data[base + idx*height + 2i]` and `[2i+1]` regardless of `eval_point` — so
+  co-residency should let three of the four hit cache. The grid-size dependence
+  fits that. The discriminating test I ran for it does NOT discriminate: if the
+  gain were trace reads turning into cache hits, widening the cell from 4 bytes
+  (round 0) to 16 (rounds >= 1) should move it, and MEASURED it does not
+  (-13.4 % vs -11.8 %) — plausibly because trace reads are a similar *fraction*
+  of the kernel in both, round 0 already running 4.3x faster per instruction.
+  Treat the explanation as unproven; the effect is not.
 - **Why byte-neutral.** Each block computes the identical partial: the pair set
   a block owns is unchanged (`blkCount * 256 >= num_pairs` and
   `maxBlocks * 256 >= num_pairs` both give one grid-stride iteration over the
