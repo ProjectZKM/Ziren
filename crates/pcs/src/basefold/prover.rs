@@ -29,7 +29,7 @@ use super::code::RsCodeWord;
 use super::config::{BATCH_GRINDING_BITS, FriConfig};
 use super::encoder::DftEncoder;
 use super::fri::{commit_phase_round, final_poly};
-use super::mle::{Mle, message_from_iter};
+use super::mle::Mle;
 use super::proof::{BasefoldProof, LeafOpening, MerkleOpening};
 
 /// Deterministic counterpart to `<C as GrindingChallenger>::grind(bits)`.
@@ -469,8 +469,6 @@ where
             }
             query_phase_openings_and_proofs.push(MerkleOpening { leaves });
         }
-
-        let _ = message_from_iter::<usize, _>(core::iter::empty::<usize>());
 
         BasefoldProof {
             univariate_messages,
