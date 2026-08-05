@@ -3,6 +3,385 @@
 Log of measured prover optimizations. Each entry: what changed, the measured
 delta, how it was validated, and the enable/kill-switch.
 
+## The jagged-PCS stage, kernel by kernel — and the per-column launch that owns a third of it (ziren-gpu)
+
+The jagged stage had never been profiled. This is the map, plus the two
+changes it justified: **jagged bucket 38.80 → 22.97 ms/Mcycle (−40.8%), all
+device kernel work 214.90 → 199.46 (−7.18%), profiled reth proving wall
+150.75 → 144.07 s (−4.43%), byte-identical.**
+
+### The 48.27 ms/Mcycle is REAL — but only a third of it is the jagged sumcheck
+
+Re-measured at ziren-gpu `0b7d556` / host `afe719f0` (nsys CUDA trace, reth,
+281 shards, 419.96 Mcycles, `RAYON_NUM_THREADS=16`, single RTX 5090; the
+canonical tip when the profile was taken — `3e686f7` landed during this work
+and touches only the fused zerocheck launch; the arms were re-based and
+re-profiled on it, and the CTL profile there reproduces these jagged numbers
+to within 0.5% — `dotProductBaseEfChip` 16.49 vs 16.41, `partialLagrangeNaiveEf`
+10.40 vs 10.41 — so the map holds on both tips).
+Total device work 263.4 ms/Mcycle (kernels 235.9 + memops 27.5), and
+the surrounding buckets reproduce the known table within a few percent
+(zerocheck 68.19 vs 71.07, GKR sumcheck 33.27 vs 32.94, GKR transition 5.88
+vs 5.82, merkle 22.02 vs 20.53, ntt+bitrev 28.3 vs 29.56), so this is the
+same measurement basis.
+
+Bucketing by name is a trap worth stating: `foldAndSumCircuitLayerJaggedMsb`,
+`logupSumAsPolyCircuitLayerJaggedMsb`, `zerocheckJaggedCxFusedChipsPtrs` and
+`zerocheckJaggedFold` all contain "Jagged" and all belong to GKR and
+zerocheck. Bucketing by CALLER, the jagged stage is:
+
+| kernel | ms/Mcyc | ms/shard | launches/shard | us/launch | what |
+|---|---|---|---|---|---|
+| `dotProductBaseEfChip` | 16.41 | 24.53 | **2836.6** | 8.6 | `y_per_chip` column evals |
+| `partialLagrangeNaiveEf` | 10.41 | 15.55 | 523.3 | 29.7 | eq tables — 5.10 jagged / 5.31 zerocheck+GKR |
+| `lagrangeFoldEfEfInPlaceDevR` | 5.67 | 8.48 | 53.9 | 157.4 | reduce round fold |
+| `branchingProgram` | 5.01 | 7.49 | 58.9 | 127.2 | jagged-EVAL structural sumcheck |
+| `jaggedRoundEvalsEfEf` | 3.75 | 5.60 | 26.9 | 208.1 | reduce round message |
+| `lagrangeFoldBaseFused` | 3.19 | 4.76 | 1.0 | 4764 | reduce round-0 fold |
+| `jaggedRoundEvalsBaseFused` | 2.44 | 3.65 | 1.0 | 3646 | reduce round-0 message |
+| `jagged_col_index_from_starts` | 0.99 | 1.48 | 231.0 | 6.4 | |
+| `sumPartials3Ef` | 0.55 | 0.82 | 26.9 | 30.5 | `<<<1,1>>>` grid reduce |
+| `jhr_fold_metadata_kernel` | 0.38 | 0.57 | 21.0 | 27.0 | |
+| `jaggedFsInterpolateAndObserve` | 0.27 | 0.40 | 26.9 | 14.7 | in-kernel FS |
+| `fixLastVariable` (jagged-eval) | 0.06 | 0.09 | 57.9 | 1.5 | |
+| **total** | **49.1** | **73.4** | **3865** | | |
+
+That reproduces the 48.27 figure. What it does NOT contain is what everyone
+assumed: **the jagged sumcheck reduce proper** (`lagrangeFold*` +
+`jaggedRoundEvals*` + `sumPartials3Ef` + FS) is **15.9 ms/Mcycle — 32% of the
+bucket**. The two largest items are a **per-column launch** (33%) and a
+**shared eq-table builder** (21%), neither of which is the sumcheck.
+
+`partialLagrangeNaiveEf` is additionally **shared with zerocheck and GKR** —
+its launch histogram is a geometric ladder, ~24 launches at each of grid
+16384, 8192, ... 8, the signature of a sumcheck round loop shrinking its eq
+table, not of the jagged path. Splitting it by whether a
+`dotProductBaseEfChip` burst follows (see the eq-table lever below) puts
+**5.10 ms/Mcycle on jagged and 5.31 on zerocheck/GKR**, so the
+strictly-jagged total is **43.8 ms/Mcycle**.
+
+**Not confirmable here:** the 8.74x-vs-SP1 ratio itself. Ziren's side is
+measured above; SP1's 5.52 ms/Mcycle was not re-measured and its bucket
+composition is unknown, so this entry claims nothing about the ratio — only
+about where Ziren's 48.27 actually goes, which is the actionable part.
+
+### The jagged kernels run alone on the GPU (but see the caveat)
+
+Sweep-line over the nsys kernel intervals (union-busy 96.6 s of a 165.1 s
+span, 58.5% busy): the fraction of each kernel's GPU time that has ANY other
+kernel concurrent is `dotProductBaseEfChip` **6.0%**,
+`partialLagrangeNaiveEf` 4.2%, `lagrangeFoldEfEfInPlaceDevR` **0.0%**,
+`jaggedRoundEvalsEfEf` 0.1%. So while these kernels are EXECUTING, nothing
+else is.
+
+**Caveat that had to be tested, not assumed:** "exclusive while executing" is
+not the same as "on the wall-clock critical path". The same sweep line over
+the GAPS between the per-column launches finds 52.3% of that gap time DOES
+have another kernel running, so the burst is partly interleaved with other
+work even though nothing overlaps the launches themselves — which left the
+conversion genuinely open. It was settled by measurement, not inference:
+removing 15.44 ms/Mcycle of kernel time moved the profiled proving wall by
+6.68 s against a 6.48 s prediction (below). **This stage is on the critical
+path and converts ~1:1.**
+
+### The ceiling, before building anything
+
+| | ms/Mcyc | s over the run | % of the 153 s proving wall |
+|---|---|---|---|
+| whole jagged bucket | 49.1 | 20.6 | 13.4% |
+| `dotProductBaseEfChip` (this change) | 16.41 | 6.9 | 4.5% |
+| reduce fold+evals (fuse, below) | 9.42 | 4.0 | 2.6% |
+| jagged eq-table rebuild (hoist, below) | 5.10 | 2.1 | 1.4% |
+| **addressable by those three** | **30.93** | **13.0** | **8.5%** |
+
+So **deleting the entire jagged stage outright would be +15.5% kHz**, and the
+three identified levers cap at **+9.3% if their replacements cost zero** —
+realistically ~+6%. Nothing in this stage is a 2x lever; it is worth doing
+because it is cheap and byte-identical, not because it is large.
+
+### The finding: `y_per_chip` launches one kernel PER COLUMN, capped at 64 blocks
+
+`eval_columns_with_eq_raw` (ziren-gpu
+`core/src/basefold/batched_trace_eval.rs:125`) loops
+`for col in 0..width { dot_product_base_ef_koala_bear(...) }`, and the
+launcher (`cuda/basefold/per_chip_eval_at.cu:80`) sets
+`gridSize = min(64, ceil(n/256))`. Its comment says "Per-column launches are
+BATCHED" — only the partial buffer and the D2H were batched; **the launches
+were not**.
+
+The launch-geometry histogram makes the mechanism unambiguous: of the 2836.6
+launches/shard, **2028.6 run at exactly `grid=(64,1,1) block=(256,1,1)` and
+account for 22.68 of the 24.53 ms/shard**. 64 x 256 = 16384 threads on a
+170-SM card is ~6% of the machine's thread capacity, so this kernel was
+almost entirely idle SMs and launch latency rather than work.
+
+For scale: at 2836.6 launches/shard this is **~40% of every kernel launch the
+prover makes** (total ~7130/shard), 3.4x the next-most-launched kernel
+(`bit_rev_permutation_z`, 547.7/shard).
+
+**This cost scales with SHAPE, not with data.** The 2836.6 launches are
+`sum over chips of that chip's column count` (~41 chips x ~69 columns), and
+each costs ~8.6 us largely independent of how few elements it moves — the
+grid=(1,1,1) launches (238/shard, tiny columns) still cost 2.2 us each. So
+the jagged stage joins the pattern the zerocheck work found in the fused
+`c_X` launch: **cost tracking per-chip structure rather than trace area**.
+Any workload with more chips or wider chips pays more here for the same
+number of proven cycles.
+
+That single kernel is **7.0% of ALL device kernel time on reth** and 94% of
+its duration is exclusive.
+
+It also drags a launch-gap tail. Across the run's 797,080 launches there are
+489,398 intra-burst inter-launch gaps (< 1 ms) totalling **3,471.9 ms at a
+mean 7.09 us** — the host-side cost of issuing that many kernels — and
+**47.7% of that gap time has no kernel running at all**. Per shard that is
+**24.53 ms of kernel + 12.35 ms of gap = 36.9 ms**, i.e. the pattern really
+costs ~24.7 ms/Mcycle, not the 16.41 the kernel column shows.
+
+### The fix: fold the column axis into `gridDim.y`
+
+One launch per chip instead of one per column
+(`dotProductBaseEfChipBatched`). The x-grid, the per-block element slice, the
+grid-stride (`blockDim.x * gridDim.x`, deliberately NOT including
+`gridDim.y`), the accumulation order and the destination partial slot are all
+unchanged, so this is **byte-identical by construction** — it does not even
+rely on re-association of the field adds. Only the number of concurrently
+resident blocks changes.
+
+The launcher declines when `width > 65535` (the `gridDim.y` cap — an
+over-large y-grid fails the launch SILENTLY, which would corrupt the partials
+rather than error) and the per-column loop stays as the fallback.
+
+Per-thread state (`ptxas -v`, sm_120, the authoritative source —
+`cuobjdump -res-usage` STACK is misleading for dynamically-indexed local
+arrays): old kernel 36 registers / 4096 B smem / **0 spill**; batched 38
+registers / 4096 B smem / **0 spill**. At 38 registers a 256-thread block
+allows 6 blocks/SM = 1536 threads = the full sm_120 thread limit, so the
+batched form can occupy the machine where the 64-block form structurally
+could not.
+
+- **Enable/kill-switch.** `ZIREN_GPU_BATCHED_COL_DOT=0` selects the legacy
+  per-column loop in the SAME binary; that is the isolating control both
+  measurement arms used.
+- **Positive control** (the probe-is-dead trap): `cuobjdump` shows
+  `dotProductBaseEfChipBatched` present in the fix binary and ABSENT from
+  canonical, and an nsys goat run of the fix binary shows 287 launches of it
+  (31.9/shard) with **zero** launches of the unbatched kernel.
+
+### Measured — the kernel time goes, and it does convert
+
+PREDICTION, stated before any arm was run: the burst is 6.89 s of kernel
++ 3.47 s of launch gap in a 153 s wall, so if the batched form costs ~1 s the
+saving should be ~5.9 s = **+3.7% kHz**. (Outcome: the batched form costs
+2.17 ms/Mcycle ≈ 0.9 s, both levers together removed 6.48 s of kernel time,
+and the profiled walls moved 6.68 s = −4.43%. The prediction was low by
+about one percentage point because it only counted one of the two levers.)
+
+The kHz A/B on reth is the WEAKER instrument here and is reported first so
+the reader does not over-read it.
+
+**reth, 4 paired reps, verify ON, the BATCHED COLUMN DOT ALONE at `0b7d556`
+(the fused round was not yet in this arm), isolating control (same binary,
+`ZIREN_GPU_BATCHED_COL_DOT=0` vs default), launch order alternated AND GPU
+slot swapped every rep:**
+
+| rep | ctl gpu | ctl kHz | fix gpu | fix kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 3 | 2570 | 4 | 2612 | +1.63% |
+| 2 | 4 | 2599 | 3 | 2597 | −0.08% |
+| 3 | 3 | 2563 | 4 | 2503 | −2.34% |
+| 4 | 4 | 2562 | 3 | 2680 | +4.61% |
+| **mean** | | **2573.5** | | **2598.0** | **+0.96%** |
+
+sd 2.93%, se 1.46%, t(df=3) = 3.182 ⇒ **95% CI = [−3.70%, +5.61%]. The
+interval INCLUDES ZERO.** The per-rep spread (−2.3% to +4.6%) is the
+documented ±7% box swing, not signal. Resolving a ~3% effect against this
+variance would need on the order of 40 paired reps; at ~13.5 min per reth
+run (proving + verify) that is not a usable instrument, which is why the
+kernel-level measurement below is the one that decides.
+
+All four fix-arm proofs were byte-identical to the canonical reth golden
+`2c4d3597a79a6f36…` with `CORE VERIFY OK`.
+
+**The kernel-level measurement, which is not noisy, settles it.** Two nsys
+reth profiles, same binary at `3e686f7`, back-to-back on the same GPU, CTL =
+both levers off / FIX = both on:
+
+| kernel | CTL ms/Mcyc | FIX ms/Mcyc | CTL launch/sh | FIX launch/sh |
+|---|---|---|---|---|
+| `dotProductBaseEfChip` → `…Batched` | 16.49 | **2.17** | 2836.6 | **44.0** |
+| `lagrangeFoldEfEfInPlaceDevR` | 5.67 | 0.00 | 53.9 | 2.0 |
+| `jaggedRoundEvalsEfEf` | 3.75 | 1.88 | 26.9 | 1.0 |
+| `lagrangeFoldAndSumEfEfDevR` (new, fused) | – | 5.92 | – | 25.9 |
+| `sumPartials3Ef` | 0.55 | 0.63 | 26.9 | 26.9 |
+| `lagrangeFoldBaseFused` | 3.20 | 3.20 | 1.0 | 1.0 |
+| `jaggedRoundEvalsBaseFused` | 2.44 | 2.45 | 1.0 | 1.0 |
+| `branchingProgram` | 5.01 | 5.02 | 58.9 | 58.9 |
+| `partialLagrangeNaiveEf` (untouched) | 10.40 | 10.51 | 523.3 | 523.3 |
+| **jagged bucket** | **38.80** | **22.97** | | |
+| **ALL device kernels** | **214.90** | **199.46** | | |
+
+- **Batching the column dot: 16.49 → 2.17 ms/Mcycle, a 7.6x kernel speedup,
+  with launches 2836.6 → 44.0 per shard (64x fewer).** The 44 is the number
+  of per-chip calls per shard, which lines up with the 41.4 jagged eq-table
+  builds counted independently below (the small gap is the correlation
+  heuristic used there, not a discrepancy).
+- **Fusing the reduce round: 5.67 + 3.75 = 9.42 → 1.88 + 5.92 = 7.80
+  ms/Mcycle (−17%).** Less than the 40% the traffic model predicts, because
+  the round-`start` message still needs its own standalone pass and the fused
+  kernel's 66 registers cap it at 3 blocks/SM against the 4 and 6 of the two
+  kernels it replaces. Real, but the smaller of the two.
+- **Jagged bucket −40.8%; all device kernel work −7.18%.**
+
+**And it converts to wall almost exactly 1:1.** 15.44 ms/Mcycle x 419.96
+Mcycle = **6.48 s of kernel time removed**, and the two profiled runs' proving
+walls were **150.748 s → 144.072 s = 6.68 s (−4.43%, 2786 → 2915 kHz)**. The
+prediction from kernel time alone lands within 3% of the observed wall
+delta. So the earlier worry that this stage might be off the critical path is
+**refuted**: it is on it.
+
+**reth, 4 paired reps of BOTH levers at `3e686f7`**, same protocol (isolating
+control in one binary, order alternated, slots swapped):
+
+| rep | ctl gpu | ctl kHz | fix gpu | fix kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 3 | 2744 | 4 | 2885 | +5.14% |
+| 2 | 4 | 2724 | 3 | 2780 | +2.06% |
+| 3 | 3 | 2678 | 4 | 2802 | +4.63% |
+| 4 | 4 | 2751 | 3 | 2771 | +0.73% |
+| **mean** | | **2724.2** | | **2809.5** | **+3.14%** |
+
+sd 2.10%, se 1.05%, t(df=3) = 3.182 ⇒ **95% CI = [−0.20%, +6.48%]**. All four
+reps are positive and the point estimate matches the −4.43% profiled-wall
+figure, but the interval still **grazes zero** — at n = 4 against a ±7%
+per-rep swing this instrument cannot certify a ~4% effect, and saying
+otherwise would be overclaiming. A sign test on 4/4 positive is p = 0.0625
+one-sided, also short of conventional significance.
+
+**So the claim this entry makes is the kernel one, which is not noisy:
+−40.8% of the jagged bucket, −7.18% of all device kernel work, byte-identical,
+with the wall moving 6.68 s against a 6.48 s prediction.** The kHz A/B is
+consistent with that and is reported for completeness, not as the evidence.
+The batched-dot-alone arm above shows the same instrument failing to resolve
+half the change, which is the expected behaviour, not a contradiction.
+
+### Validated byte-identical
+
+Isolating control at `3e686f7`: the SAME binary run twice per program, CTL
+with both levers off (= canonical behaviour) and FIX with both on, shas
+compared. Every pair matched, and every sha matched the canonical golden —
+`3e686f7` did not move them either.
+
+| program | stage | ctl sha | fix sha | canonical golden |
+|---|---|---|---|---|
+| fib | core | `7c780d9f59d728b5` | `7c780d9f59d728b5` | ✓ |
+| goat | core | `8aa10f1942b71b62` | `8aa10f1942b71b62` | ✓ |
+| simple-go | core | `443b92db18eceab5` | `443b92db18eceab5` | ✓ |
+| tendermint | core | `7190969b1feae13a` | `7190969b1feae13a` | ✓ |
+| fib | compress | `7e3c5d753cf25e55` | `7e3c5d753cf25e55` | ✓ |
+| reth | core | `2c4d3597a79a6f36…` | `2c4d3597a79a6f36…` (x4) | ✓ |
+
+`CORE VERIFY OK` on every run (`COMPRESS VERIFY OK` too on the compress
+pair). **Concurrency bar: 6 further tendermint core runs at
+`RAYON_NUM_THREADS=16` on the fix arm, all `7190969b1feae13a`** (7 including
+the gate run), plus the 4 reth fix runs above.
+
+### SP1 comparison (read, with file:line)
+
+SP1 never launches per column anywhere on the jagged path. Its main sumcheck
+is ONE grid-stride loop over one flat dense buffer, resolving the ragged
+column boundaries through a precomputed `u32[N/2]` `col_index` descriptor
+built once at tracegen
+(`sp1-gpu/crates/sys/lib/jagged_sumcheck/jagged_sumcheck.cu:16-28`,
+`sp1-gpu/crates/utils/src/jagged.rs:9-19`), and it synthesizes the jagged
+polynomial on the fly as `eqZCol[colIdx] * eqZRow[rowIdx]`
+(`jagged_sumcheck.cu:25-31`) instead of materializing it for round 0.
+
+Two other structural differences, both real but SMALLER than the launch bug:
+
+1. **SP1 fuses the fold with the next round's univariate**
+   (`jaggedFixAndSum`, `jagged_sumcheck.cu:59-119`;
+   `paddedHadamardFixAndSum`, `jagged_sumcheck.cu:121-182`) — one memory pass
+   per round. Ziren spends three: `jaggedRoundEvalsEfEf` reads both tables,
+   then each `lagrangeFoldEfEfInPlaceDevR` reads one and writes half of it.
+   With `n = 2*half` that is 80n bytes/round vs SP1's 48n — **1.67x**. Over
+   the whole reduce, 27.9 GB/shard vs 19.3 GB (log_dense = 28), i.e. **1.45x**
+   traffic.
+   Independently corroborated: the zerocheck lead measured
+   `device_rounds_loop_inkernel_fs` at **20.0 ms mean, 5.62 s per reth core
+   proof, ~1.15 TB/s = 64% of peak bandwidth**. A loop already at 64% of DRAM
+   bandwidth cannot be helped by a better kernel — only by moving fewer
+   bytes, which is exactly what the fusion does. Expected 5.62 -> ~3.4 s,
+   ~1.5% of wall.
+2. **SP1 gets the jagged-eval claimed sum for free** from the main sumcheck's
+   `component_poly_evals[1]` (`sp1-gpu/crates/shard_prover/src/prover.rs:520-530`);
+   Ziren recomputes it (device `round_num == -1` closed form). One extra
+   `branchingProgram` launch of ~59 — ~1.7% of that kernel.
+
+Ziren's own `basefold/src/jagged_sumcheck.rs:22-27` already documents choosing
+the "structurally simpler" materialized weight table over SP1's
+BranchingProgram/prefix-sum path. That choice is real but it costs only the
+1.45x traffic above. **The algorithmic choice is not where the time goes** —
+the launch pattern is.
+
+### Negative results (do not re-open)
+
+- **The jagged sumcheck hypercube rounding is NOT the problem.** Both provers
+  round to `2^ceil(log2(total))`; reth's dense fill is already median 0.909.
+- **`sumPartials3Ef` is `<<<1,1,1>>>` — one thread — and it does not matter.**
+  It looks alarming (a fully serial per-round grid reduce) but it is 26.9
+  launches/shard at 30.5 us = **0.55 ms/Mcycle**, 1.1% of the bucket.
+  Measured, not assumed.
+- **The round-0 binary search is not the problem either.**
+  `fused_col_of` (`cuda/basefold/jagged_sumcheck_kernels.cu:397`) does ~10
+  dependent lookups per element where SP1 does an O(1) `col_index` read, but
+  the two round-0 kernels together are 5.63 ms/Mcycle at 2 launches/shard, and
+  they are bandwidth-shaped (`lagrangeFoldBaseFused` moves ~5 GB in 4.76 ms).
+- **`branchingProgram` runs at `grid=(5,2,1)` for 46.2 of its 58.9
+  launches/shard** — 10 blocks = 2560 threads, ~1% of the card — but it is only 5.01
+  ms/Mcycle total and the work is genuinely `O(num_columns * layers)`. SP1's
+  is the same shape (`branching_program.rs:119-122`, `ceil(C/256) x 2`
+  blocks). Not a lever.
+
+### Sized but NOT taken (next levers, in order)
+
+- **The jagged path rebuilds the SAME eq table once per chip.**
+  `eval_chip_columns_at_point_device` calls `build_eq_table(eval_point)`
+  internally (`core/src/basefold/batched_trace_eval.rs:80`), and both callers
+  invoke it from a per-chip loop with a LOOP-INVARIANT point —
+  `open_dispatch.rs:611-620` passes `stack_point` unchanged every iteration,
+  and `logup_gkr.rs:163` is the per-chip `eval_at` hook whose point is the
+  shared `max_log_row_count` point the module header describes ("we build ONE
+  `partial_lagrange(shared_point)`"). The code does not do what the header
+  says.
+  Attributed from the canonical profile by correlating each
+  `partialLagrangeNaiveEf` launch with a following `dotProductBaseEfChip`
+  burst: **41.4 launches/shard are jagged's — only 7.9% of that kernel's
+  launches but 49% of its TIME (5.10 of 10.41 ms/Mcycle)**, because these are
+  the full-size `2^max_log_row` tables. The remaining 5.31 ms/Mcycle is
+  zerocheck/GKR. Hoisting removes ~97.6% of the 5.10 — worth ~2.1 s of a
+  153 s wall.
+  **The hoist is already written**: `eval_chips_at_points_batched_via_provider_gpu`
+  (`batched_trace_eval.rs:290`) groups requests by eval-point limbs and builds
+  the eq-table ONCE per group, precisely for this. The GKR opening hook uses
+  it; **`open_dispatch.rs:611-620` does not** — it calls the single-chip entry
+  point in a loop. NOT taken here only because the eq-table would have to
+  cross stream boundaries if the stripe matrices are not all on one stream,
+  and that wants its own validation rather than riding along with this change.
+  (That 41.4 is also the chip count per shard — i.e. the batched dot above
+  takes the per-column launches from **2836.6/shard to 41.4/shard, 68x**.)
+- **`partialLagrangeNaiveEf` is `O(n * 2^n)` where `O(2^n)` suffices.**
+  `cuda/basefold/partial_lagrange.cu:27-42` recomputes, for every one of the
+  `2^n` outputs, the full product over all `n` coordinates — 22x the
+  multiplies of the standard doubling construction at n = 22. Measured 4.37 s
+  of a 153 s wall (2.6%), 95.8% exclusive, and it writes 67 MB in 327.6 us =
+  205 GB/s, i.e. arithmetic-bound, consistent with the redundancy. Byte-
+  identical to fix (exact associative field multiply). **NOT taken here
+  because the kernel is shared with zerocheck and GKR** and zerocheck is
+  another owner's lead. Worth ~+2.4%.
+- **Fuse the reduce's fold with the next round's message** (SP1
+  `paddedHadamardFixAndSum`). ~1.6 s of 153 s, ~+1.0%.
+
 ## Shard size: `SHARD_SIZE` is INERT, `ELEMENT_THRESHOLD` binds, and the current value is the measured optimum (host)
 
 - **The question.** "Raise the shard size to at least 2^24" — on the premise that
