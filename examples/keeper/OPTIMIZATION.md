@@ -3,6 +3,327 @@
 Log of measured prover optimizations. Each entry: what changed, the measured
 delta, how it was validated, and the enable/kill-switch.
 
+## The eq-table builder: `O(n·2^n)` where `O(2^n)` suffices, and 41.4 redundant builds that were NOT where the last entry said (ziren-gpu)
+
+The previous entry sized two levers and took neither. Both are taken here.
+One of its premises is **refuted by measurement**, and the stream question it
+stopped on is **answered by measurement** — with a different answer for each
+of the two call sites.
+
+**eq-table build 10.115 → 2.098 ms/Mcycle (−79.3%), ALL device kernel work
+198.724 → 190.659 (−4.06%), byte-identical on every gate including the reth
+golden `2c4d3597a79a6f36…` and the fib compress golden `7e3c5d753cf25e55`.**
+The reth kHz A/B gives +1.42% at n = 4 with a CI of [−2.20%, +5.05%] — it
+cannot resolve an effect this size and is not the evidence here.
+Plus the two isolating-control gates the previous entry left behind, removed.
+
+### Where `partialLagrangeNaiveEf` is actually called (MEASURED)
+
+The kernel was instrumented at all six of its call sites with a per-site
+count, `Σ 2^n` and `Σ n·2^n`. One reth core proof, 281 shards, 419.96
+Mcycles, canonical `4776d10` + counters only (that build reproduces the reth
+golden `2c4d3597a79a6f36…`, so the census is byte-neutral):
+
+| call site | calls | /shard | Σ n·2^n (G) | share of multiplies |
+|---|---|---|---|---|
+| `batched_trace_eval::eval_chip_columns_at_point_device` | 12273 | 43.7 | 602.9 | **52.7%** |
+| `zerocheck_ytuple` device-eq | 122650 | 436.5 | 467.7 | **40.9%** |
+| `jagged_sumcheck::row_eq_device` | 281 | 1.0 | 25.9 | 2.3% |
+| `logup_round_device` eq build | 5901 | 21.0 | 23.6 | 2.1% |
+| `partial_lagrange_then_dot_ef` | 5901 | 21.0 | 23.6 | 2.1% |
+| `batched_trace_eval` provider batch | 52 | 0.2 | 1.1 | 0.1% |
+| **total** | **147058** | **523.3** | **1144.7** | |
+
+523.3 calls/shard against the 523.3 launches/shard the canonical profile
+reports — the same number, though not exactly the same quantity: 19.8/shard
+of these calls have an empty eval point and return the constant `[1]` without
+launching, and nsys counts 520.0 launches/shard in the control arm, so ~16/shard
+are unattributed either way. That 3% does not move any conclusion below.
+93.6% of the multiplies are in just two sites, and the per-`n` histogram is
+flat at ~6100–7500 calls for every `n` in 1..22 — the signature of sumcheck
+round loops, plus a tail of full-size `n ≈ 21` tables that carry the time.
+
+**REFUTED: the open-dispatch stripe loop is not the 41.4.** The previous
+entry attributed the 41.4 jagged eq builds/shard to `open_dispatch.rs:611-620`
+and `logup_gkr.rs:163`. Instrumenting the loop itself gives **281 opens and
+1207 stripes over the whole proof — 4.30 stripes/shard, not 41.4.** The other
+39.4/shard are `logup_gkr_output_extract`'s per-chip openings: ~19.8 device
+chips/shard × two openings each (the trailing-`log_h` main point and the
+shared full point), each rebuilding its own full-height eq table
+(`n ≈ 21`). Hoisting the
+stripe loop is right, but on its own it is worth 926 builds out of 12325.
+
+### Lever 1 — the doubling ladder (`partialLagrangeNaiveEf` → `+ partialLagrangeLevelEf`)
+
+`cuda/basefold/partial_lagrange.cu` recomputed the whole `n`-fold product for
+every one of the `2^n` outputs. Before changing anything, a standalone
+microbenchmark on an idle 5090 (same nvcc flags, same field headers) settled
+whether the redundancy is actually *time* — the alternative being that the
+kernel is bandwidth-bound and the extra multiplies are free:
+
+| n | naive | store-only floor | ladder (prefix 16) | naive/floor | naive/ladder |
+|---|---|---|---|---|---|
+| 16 | 8.18 us | 2.14 | 8.20 | 3.8x | 1.00x |
+| 18 | 20.54 | 4.10 | 16.39 | 5.0x | 1.25x |
+| 20 | 75.82 | 8.20 | 30.75 | 9.3x | 2.47x |
+| 21 | 153.60 | 12.35 | 45.07 | 12.4x | 3.41x |
+| 22 | 315.32 | 22.60 | 69.68 | **13.9x** | **4.53x** |
+| 24 | 1404.13 | 159.54 | 439.02 | 8.8x | 3.20x |
+
+The store-only kernel writes the same `2^n` EF4 with the same grid and no
+arithmetic: at n=22 it moves 67 MB in 22.6 us = **2.96 TB/s**, so the naive
+kernel is **93% arithmetic, not bandwidth** — the redundancy is real time.
+(The earlier "205 GB/s ⇒ arithmetic-bound" reading was right; this pins the
+floor.)
+
+The fix is the standard in-place doubling ladder: `partialLagrangeLevelEf`
+expands `output[0..2^k)` to `output[0..2^(k+1))` in one pass —
+`v = out[i]; out[i+2^k] = v*z_k; out[i] = v*(1-z_k)`. Total multiplies
+`2·2^n` instead of `n·2^n`.
+
+- **Byte-identity BY CONSTRUCTION, not by re-association.** The naive kernel
+  forms `((one·f_0)·f_1)·…·f_{n-1}` left-associated in ascending `k`; level
+  `k` multiplies exactly `f_k` onto the right of the level-`(k-1)` value,
+  which IS that partial product. Same operands, same order, same
+  association, and `(1−z)` formed the same way. The microbench also compares
+  the two kernels elementwise for **every n in 1..=24** — identical.
+- **Race-freedom.** Thread `i` reads only `out[i]` and writes only `out[i]`
+  and `out[i+2^k]`; each slot has exactly one owning thread and no thread
+  reads a slot another writes. `compute-sanitizer --tool initcheck` over the
+  whole `n = 1..24` sweep: **0 errors** — no level ever reads a slot the
+  previous level did not write, which is the failure mode the argument is
+  guarding against.
+- **Crossover, measured.** The ladder needs `n − prefix + 1` launches instead
+  of 1, so below n≈18 the launches cost more than the multiplies they save.
+  `LADDER_PREFIX_VARS = 16` builds the low 16 coordinates with the *unchanged*
+  naive kernel in one launch and ladders the rest: at every n from 10 to 24 it
+  is flat-to-better (1.00x at n ≤ 17). A prefix of 14 is ~5% WORSE at
+  n = 15..17, 18 is 18-26% worse at n = 18..22, and 12 is 1.35-2x worse at
+  n = 13..17. **This is why the constant is 16 and not "just ladder
+  everything" — laddering from 0 costs 96.5 us at n = 22 against 69.6.**
+- **Per-thread state** (`ptxas -v`, sm_120, `-maxrregcount=64`, the
+  authoritative source): naive 44 registers / 0 spill, level kernel **56
+  registers / 0 spill**, store-only 18. No `__launch_bounds__` needed.
+- **Positive control** (the dead-probe trap): `cuobjdump -symbols` on the
+  LINKED binaries shows `partialLagrangeLevelEf` **present in the landed
+  binary and absent from canonical**, and the deleted `dotProductBaseEfChip`
+  the other way round — and nsys counts 483.2 launches/shard of the level
+  kernel in the ladder arm. Symbol present *and* observed running.
+
+### Lever 2 — build the shared eq table once, at both call sites
+
+Two independent hoists, and the stream answer is different for each.
+
+**(a) The interleaved-open stripe loop** now calls a new
+`eval_chips_columns_at_shared_point_device` that builds the table once for all
+`n_stripes`. **Stream safety, measured: 0 of 1363 stripes** (reth 1207 over
+281 opens, tendermint 127/33, goat 29/9) carries a stream handle different
+from stripe 0's, from `CudaStream::default()`'s, or a different device id.
+Every stripe rides the per-thread default-stream sentinel — the CUDA units are
+compiled `-default-stream=per-thread`, so handle 0 resolves to the *calling*
+thread's stream and that loop is one thread. The hoist is trivially safe. It
+is still *checked* at runtime (a mismatch forces one `synchronize()` of the
+build stream, counted by `SHAREDEQ_XSTREAM`) because that is a property of the
+producer, not of this function.
+
+**(b) `ZIREN_GPU_OE_FULL_BATCH` is now default ON.** The batched entry point
+the previous entry pointed at (`eval_chips_at_points_batched_via_provider_gpu`)
+could never have been called from `open_dispatch` — it takes chip *names* and
+a `DeviceShardTraces` provider, not owned stripe matrices. The place that does
+call it is `logup_gkr_output_extract`, behind a gate that defaulted **OFF**,
+which is why the census found only 52 calls to it in a whole reth proof while
+the per-chip path made 12273. Flipping it collapses **12325 → 3389 eq builds
+per proof** (`SHAREDEQ_BUILDS`; `SHAREDEQ_MATRICES` = 12357 = exactly the
+`dotProductBaseEfChipBatched` instance count, the positive control).
+
+**And here the stream question has the opposite answer.** That batched path
+built the eq table *and* ran every per-chip dot on `bf_consumer_stream(...)` =
+the per-thread default stream, while the chip's trace matrix may live on an
+explicit `cudaStreamNonBlocking` chip stream. **Measured: 3108 of 3389 groups
+contain such a chip.** So the dot now launches on `dev.stream()` — the stream
+the trace was produced on, which orders it against the producer for free — and
+the build stream is synchronized once per group when they differ. Latent
+rather than active (the producing stage syncs long before), but at 52
+calls/proof it was untested and at 3389 it is the main path.
+
+The two counters decompose cleanly and that is the check: on reth,
+`SHAREDEQ_BUILDS = 3389 = 281 + 3108`, i.e. exactly one build per open (the
+stripe hoist, **zero** cross-stream) plus 3108 provider groups (**all**
+cross-stream). Same counter, opposite answer, one line apart.
+
+### Measured — the kernel matrix
+
+All four configurations are the **same binary** (isolating control), nsys CUDA
+trace, reth, 281 shards, 419.96 Mcycles, `RAYON_NUM_THREADS=16`, single RTX
+5090, back-to-back on one GPU. The `naive + per-chip` row IS canonical
+behaviour and reproduces the canonical profile
+(`partialLagrangeNaiveEf` 10.115 vs 10.41 ms/Mcycle, 520.0 vs 523.3
+launches/shard, ALL kernels 198.724 vs 199.46) — that is the control's
+positive control.
+
+| config | `…NaiveEf` | `…LevelEf` | eq total | eq launch/sh | ALL device kernels |
+|---|---|---|---|---|---|
+| naive + per-chip (**= canonical**) | 10.115 | – | **10.115** | 520.0 | **198.724** |
+| **ladder** + per-chip | 1.377 | 2.847 | 4.224 | 1003.2 | 193.101 (−2.83%) |
+| naive + **batched** | 5.731 | – | 5.731 | 491.5 | 194.242 (−2.26%) |
+| **ladder + batched** (landed) | 1.085 | 1.013 | **2.098** | 847.9 | **190.659 (−4.06%)** |
+
+`dotProductBaseEfChipBatched` also falls 2.160 → 1.911 ms/Mcycle at the same
+12357 instances whenever the batch is on. Mechanism NOT established — the
+launches are identical in shape and count; the batched openings issue from the
+serial prover thread rather than from inside the rayon join, so they queue
+differently, but that is inference, not measurement. Reported because it is in
+the numbers, not claimed as a result.
+
+One caveat on this matrix: it is taken on the measurement binary, which
+carries the eq-table changes but not the provider-batch stream reordering
+(that is host-side ordering — it moves the dot to `dev.stream()` and adds one
+`synchronize()` per group — and does not change any launch's shape or count).
+Profiling the LANDED binary directly confirms that: `partialLagrangeNaiveEf`
+1.072 + `partialLagrangeLevelEf` 1.002 = **2.074 ms/Mcycle at the identical
+491.5 + 356.4 launches/shard**, `dotProductBaseEfChipBatched` 1.900, **ALL
+device kernels 189.574** — the same numbers within cross-binary run-to-run
+noise (2.098 / 190.659 on the measurement binary), so the 3108 host syncs cost
+nothing on the device. Its counters also reproduce exactly:
+`shared_eq builds=3389 matrices=12357 xstream_syncs=3108`.
+
+The two levers are **sub-additive**: 5.623 + 4.482 = 10.105 ms/Mcycle saved
+separately against 8.065 together, because they attack overlapping work (the
+batch removes the big `n≈21` builds; the ladder discounts whatever is left).
+Both are still worth taking — the ladder because it also covers zerocheck's
+436.5 builds/shard, which no batching reaches.
+
+**Prediction discipline.** From the standalone microbench a model
+`Σ_n calls(n)·t(n)` predicted 4.477 s of `partialLagrangeNaiveEf` on canonical
+against 4.371 s profiled independently (2.4% error), then predicted the
+ladder arm at 4.20 ms/Mcycle and 1003.1 launches/shard — observed **4.224 and
+1003.2**. For the combined arm the prediction stated before the profile ran
+was 3.1 ms/Mcycle / 192.0 ALL / −3.4%; observed **2.098 / 190.659 / −4.06%**,
+i.e. the estimate of the overlap was too pessimistic. Recorded as stated.
+
+### kHz — the weaker instrument, reported as such
+
+**PREDICTION, stated before any paired arm was run:** 8.065 ms/Mcycle ×
+419.96 Mcycles = **3.387 s of kernel time removed**; this stage was shown to
+convert ~1:1 in the previous entry (6.48 s predicted → 6.68 s observed); the
+paired arms run 2-up so their wall is ~160–175 s rather than the 145 s solo
+profile ⇒ **+2.0 to +2.4% kHz**. And, stated in the same breath: against the
+documented ±7% per-rep box swing, a 95% t-interval at n=4 on a ~2.2% effect
+will almost certainly **include zero**.
+
+**reth, 4 paired reps, verify ON, isolating control in ONE binary** (CTL =
+`ZIREN_GPU_PL_LADDER_PREFIX=40` (pure naive) + `ZIREN_GPU_OE_FULL_BATCH=0`,
+which is canonical behaviour; FIX = ladder + batch), **launch order alternated
+AND GPU slot swapped every rep**:
+
+| rep | ctl gpu | ctl kHz | fix gpu | fix kHz | delta |
+|---|---|---|---|---|---|
+| 1 | 4 | 2476 | 6 | 2500 | +0.97% |
+| 2 | 6 | 2536 | 4 | 2521 | −0.59% |
+| 3 | 6 | 2517 | 4 | 2635 | +4.69% |
+| 4 | 4 | 2559 | 6 | 2575 | +0.63% |
+| **mean** | | **2522.0** | | **2557.8** | **+1.42%** |
+
+sd 2.28%, se 1.14%, t(df=3) = 3.182 ⇒ **95% CI = [−2.20%, +5.05%]. The
+interval INCLUDES ZERO**, exactly as predicted before the runs. 3/4 reps
+positive (sign test p = 0.0625 one-sided, also short of significance). The
+point estimate +1.42% is below the +2.0–2.4% predicted from kernel time, but
+the prediction sits comfortably inside the interval, so this instrument
+neither confirms nor contradicts it — it simply cannot resolve a ~2% effect
+against a ±7% per-rep swing at n = 4. All eight proofs were
+`2c4d3597a79a6f36…` with `CORE VERIFY OK`.
+
+One caveat that cuts the same way: the CTL arm of this A/B is canonical
+behaviour *plus* the open-stripe hoist, which is unconditional in the
+measurement binary. That hoist is worth ~0.1 ms/Mcycle, so it moves the point
+estimate by well under a tenth of the interval width.
+
+**The claim this entry makes is therefore the kernel one, which is not noisy:
+the eq builder falls 79.3% and all device kernel work falls 4.06%, measured as
+an isolating control in one binary and reproduced on the landed binary at
+189.574 ms/Mcycle.** The kHz A/B is reported for completeness, not as the
+evidence. This is the same instrument that failed to resolve the previous
+entry's larger 3.14% effect (CI [−0.20%, +6.48%]); its behaviour here is
+expected, not a contradiction.
+
+### Gates removed
+
+`ZIREN_GPU_BATCHED_COL_DOT` and `ZIREN_GPU_JAGGED_FUSED_ROUND` landed
+default-ON at `4776d10` as isolating controls for the entry above. Both are
+gone and their paths are unconditional. The dead code that went with them:
+
+- the per-column dot loop in `eval_columns_with_eq_raw`, the
+  `dot_product_base_ef_koala_bear` Rust wrapper, its `extern` declaration, and
+  the `dotProductBaseEfChip` CUDA kernel + launcher (~90 lines). The
+  `width > 65535` `gridDim.y` decline the loop used to catch is now an
+  `assert!` — a silent launch failure must not become a silent wrong answer.
+- the unfused evals-then-two-folds body of `device_rounds_loop_inkernel_fs`,
+  `fused_round_enabled()`, and the `!fused_round ||` disjunct in the
+  mid-loop-decline assert.
+- a docstring the gate falsified: the `ZIREN_GPU_INKERNEL_JAGGED_FS` doc
+  comment had been left attached to `fused_round_enabled`, so removing that
+  function put it back on the function it describes. The
+  `per_chip_eval_at.cu` header still pointed at
+  `core/src/basefold/per_chip_eval_at.rs`, a file deleted long ago.
+
+Build warnings unchanged: **zkm-gpu-core 194, zkm-gpu-basefold 14,
+zkm-gpu-prover 0** — identical to the canonical `4776d10` build with the same
+toolchain and features.
+
+### Validated byte-identical
+
+Isolating control built first: the **unmodified canonical tree**, built and
+gated by this work, reproduces every golden (`fib 7c780d9f59d728b5`, `goat
+8aa10f1942b71b62`, `tendermint 7190969b1feae13a`, `simple-go 443b92db18eceab5`,
+`reth 2c4d3597a79a6f36…`). The census build (counters only, canonical code)
+reproduces the reth golden too, so the census itself is byte-neutral.
+
+| program | stage | landed-arm sha | canonical golden |
+|---|---|---|---|
+| fib | core | `7c780d9f59d728b5` | ✓ |
+| goat | core | `8aa10f1942b71b62` | ✓ |
+| tendermint | core | `7190969b1feae13a` | ✓ |
+| simple-go | core | `443b92db18eceab5` | ✓ |
+| reth | core | `2c4d3597a79a6f36…` | ✓ |
+| fib | compress | `7e3c5d753cf25e55` | ✓ |
+
+`CORE VERIFY OK` on every run, `COMPRESS VERIFY OK` on the compress pair.
+**Concurrency bar: 6 further tendermint core runs at `RAYON_NUM_THREADS=16`,
+all `7190969b1feae13a`** (7 including the gate run), plus **three** reth
+core runs on the landed arm (`156.505 / 149.826 / 165.101 s`), all
+`2c4d3597a79a6f36…`, and the eight reth proofs of the paired kHz campaign
+below — 11 reth proofs in total, every one the golden.
+
+The `ZIREN_GPU_OE_FULL_BATCH` flip was ALSO validated separately as an
+isolating control on the **canonical** binary — `=1` vs unset, same build,
+reth — and both produced `2c4d3597a79a6f36…` with `CORE VERIFY OK`, so the
+gate's default change is byte-neutral independently of everything else in
+this entry.
+
+### Negative / refuted results
+
+- **The open-dispatch stripe loop is NOT worth ~1.4%.** It is 4.30
+  stripes/shard, so hoisting it removes 926 of 12325 eq builds — with the
+  ladder in place that is ~0.1 ms/Mcycle, comfortably below the noise floor.
+  It is landed because it is free and correct, not because it is a lever.
+- **The eq table crossing streams was the right thing to worry about, but at
+  the wrong site.** The stripe loop never crosses; the provider batch almost
+  always does.
+- **The ladder nearly doubles this kernel's launch count** (520.0 → 1003.2
+  per shard) and is still 2.4x cheaper. Launch count is not the metric here;
+  redundant multiplies were. (The previous entry's lever was the opposite —
+  there the launch count WAS the problem. Neither generalises.)
+- **The kHz A/B could not resolve this either**, at n = 4 with a point
+  estimate of +1.42% and a CI of [−2.20%, +5.05%]. Two consecutive entries
+  have now had to say this about the same instrument on reth; the kernel
+  profile is the one that decides at these effect sizes.
+- **Re-association was never needed.** KoalaBear and its degree-4 extension
+  are exact, so a two-halves product decomposition (`lo[i & m] * hi[i >> h]`,
+  one multiply per element, 3 launches) would also be byte-identical and
+  slightly cheaper. It was not used: the ladder preserves the operand order
+  literally, which is a stronger and cheaper-to-audit argument on a
+  transcript-bearing kernel.
+
 ## The jagged-PCS stage, kernel by kernel — and the per-column launch that owns a third of it (ziren-gpu)
 
 The jagged stage had never been profiled. This is the map, plus the two
@@ -150,7 +471,8 @@ resident blocks changes.
 
 The launcher declines when `width > 65535` (the `gridDim.y` cap — an
 over-large y-grid fails the launch SILENTLY, which would corrupt the partials
-rather than error) and the per-column loop stays as the fallback.
+rather than error). At the time the per-column loop stayed as the fallback;
+it has since been deleted and the Rust caller asserts instead.
 
 Per-thread state (`ptxas -v`, sm_120, the authoritative source —
 `cuobjdump -res-usage` STACK is misleading for dynamically-indexed local
@@ -160,9 +482,11 @@ allows 6 blocks/SM = 1536 threads = the full sm_120 thread limit, so the
 batched form can occupy the machine where the 64-block form structurally
 could not.
 
-- **Enable/kill-switch.** `ZIREN_GPU_BATCHED_COL_DOT=0` selects the legacy
+- **Enable/kill-switch.** `ZIREN_GPU_BATCHED_COL_DOT=0` selected the legacy
   per-column loop in the SAME binary; that is the isolating control both
-  measurement arms used.
+  measurement arms used. **The gate and that loop have since been REMOVED**
+  (see the eq-table entry above) — the batched launch is unconditional and
+  the `width > 65535` decline is now an assert.
 - **Positive control** (the probe-is-dead trap): `cuobjdump` shows
   `dotProductBaseEfChipBatched` present in the fix binary and ABSENT from
   canonical, and an nsys goat run of the fix binary shows 287 launches of it
@@ -343,7 +667,8 @@ the launch pattern is.
   is the same shape (`branching_program.rs:119-122`, `ceil(C/256) x 2`
   blocks). Not a lever.
 
-### Sized but NOT taken (next levers, in order)
+### Sized but NOT taken here (BOTH taken in the entry above; read that first —
+### its census REFUTES the attribution below)
 
 - **The jagged path rebuilds the SAME eq table once per chip.**
   `eval_chip_columns_at_point_device` calls `build_eq_table(eval_point)`
@@ -368,6 +693,12 @@ the launch pattern is.
   point in a loop. NOT taken here only because the eq-table would have to
   cross stream boundaries if the stripe matrices are not all on one stream,
   and that wants its own validation rather than riding along with this change.
+  **[SUPERSEDED — a per-call-site launch census puts the stripe loop at 4.30
+  builds/shard, not 41.4; the 41.4 is `logup_gkr_output_extract`'s per-chip
+  openings behind the default-OFF `ZIREN_GPU_OE_FULL_BATCH`. And
+  `eval_chips_at_points_batched_via_provider_gpu` could never have been called
+  from `open_dispatch` — it takes chip names and a provider, not owned stripe
+  matrices. See the eq-table entry above.]**
   (That 41.4 is also the chip count per shard — i.e. the batched dot above
   takes the per-column launches from **2836.6/shard to 41.4/shard, 68x**.)
 - **`partialLagrangeNaiveEf` is `O(n * 2^n)` where `O(2^n)` suffices.**
@@ -379,6 +710,9 @@ the launch pattern is.
   identical to fix (exact associative field multiply). **NOT taken here
   because the kernel is shared with zerocheck and GKR** and zerocheck is
   another owner's lead. Worth ~+2.4%.
+  **[TAKEN — see the eq-table entry above: 10.115 → 1.377 ms/Mcycle for this
+  kernel with the ladder alone, and byte-identity comes from the operand
+  ORDER, not from re-association.]**
 - **Fuse the reduce's fold with the next round's message** (SP1
   `paddedHadamardFixAndSum`). ~1.6 s of 153 s, ~+1.0%.
 
