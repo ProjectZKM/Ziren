@@ -5628,13 +5628,31 @@ batch-wide maximum — that part is portable and independent.
   but the block-uniform search state it adds does not fit under the in-tree
   `-maxrregcount 64` and grows the per-thread stack frame from 2224 B to
   2256 B, costing +3.9 % on the kernel — slightly more than the 0.39 s it saves
-  the host. The sample-adjacent order is what pays. Confirmed on an isolating
-  A/B/C control (tendermint, one GPU, back to back, 2 rounds): stage totals
-  1.4795 s / 1.4870 s / 1.1205 s.
+  the host. The sample-adjacent order is what pays.
+
+  Isolating A/B/C control (tendermint, ONE GPU, back to back, 3 rounds), fused
+  launch -> sync: A 1.3730 / 1.3849 / 1.3802, B 1.4683 / 1.4543 / 1.4489,
+  C 1.0959 / 1.1032 / 1.1037. Paired A -> C deltas -20.18 % / -20.34 % /
+  -20.03 %, mean **-20.19 %, 95 % CI [-20.57 %, -19.80 %]** — does not include
+  zero. Stage totals: A 1.4823 s, B 1.4824 s (**+0.01 %, a wash**), C 1.1282 s
+  (one C round's D2H is a 0.15 s outlier against 0.013-0.015 s elsewhere and is
+  excluded from that mean).
   Two independent canonical runs of the probe agree to **0.2 %** on the stage
   total and to <1.3 % in every bucket, so these differences are signal.
+- **Byte gates, verify on — every proof matches the canonical golden.**
+  reth `2c4d3597a79a6f36...` (281 shards), tendermint `7190969b1feae13a` (33)
+  x6 at `RAYON_NUM_THREADS=16` plus 3 more in the isolating control,
+  fib `7c780d9f59d728b5`, goat `8aa10f1942b71b62` (9),
+  simple-go `443b92db18eceab5` (3), fib compress `7e3c5d753cf25e55`.
 - **Switches.** None; the grid shape is unconditional. Warning counts
   unchanged (zkm-gpu-core 194, zkm-gpu-basefold 14, prover 0).
+- **Merging with the three-sample change** (`perf/zc-3-samples`, which keeps a
+  runtime `numSamples` in `grid.y`): use
+  `dim3 grid(numSamples * totalBlocks, 1, 1)` with
+  `bx = blockIdx.x / numSamples` and `sampleIdx = blockIdx.x - bx * numSamples`
+  (one runtime division per block), `outCx[blockIdx.x]`, and a host regroup
+  that reads `out[b * numSamples + sample]`. The two changes are otherwise
+  independent.
 
 ## Zerocheck small-grid floor — what the cut points actually allow
 
