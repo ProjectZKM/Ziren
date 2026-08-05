@@ -5575,3 +5575,116 @@ dataflow-aware chunker already identified as the next step; SP1 has no tail
 optimization here either, but it does size its grid per (chunk, row-tile) so
 small chips emit blocks proportional to their own height instead of the
 batch-wide maximum — that part is portable and independent.
+
+## Zerocheck grid: per-slot block dispatch + sample-adjacent block order (ziren-gpu)
+
+- **What.** `zerocheckJaggedCxFusedChipsPtrs` launched
+  `grid = (maxBlocks, 4, numSlots)` with `maxBlocks = max over chips of
+  ceil(num_pairs/256)`, so every slot inherited the batch-wide maximum and the
+  four interpolation samples of one row tile sat `maxBlocks` blocks apart in
+  dispatch order. It now launches `grid = (4 * totalBlocks, 1, 1)`, where
+  `totalBlocks` is the prefix sum of each slot's OWN `ceil(num_pairs/256)`
+  (`ZerocheckSlots::blk_off`, one binary search per block) and the sample is
+  the low two bits of `blockIdx.x`. This is sp1-gpu's `BlockDispatch` shape
+  (`sp1-gpu/crates/zerocheck/src/prover.rs:1500-1524`, consumed via
+  `struct BlockDispatch` in `crates/sys/include/zerocheck/sequential.cuh:80-88`)
+  plus a block-ordering change SP1 does not need (it has no sample dimension in
+  `grid.y`).
+- **Why it is faster.** All four samples of a row tile read the SAME two trace
+  rows — `ZerocheckJaggedFolder::interp` loads `data[base + idx*height + 2i]`
+  and `[2i+1]` regardless of `eval_point`. Making them four CONSECUTIVE blocks
+  puts them on the machine together, so three of the four reads hit cache. The
+  gain tracks trace volume exactly, which is the signature of that mechanism:
+  MEASURED per launch-size bucket on reth, `-14.8 % / -21.8 % / -14.6 %` in the
+  three largest buckets against only `-1.6 % to -5.0 %` in the small ones.
+- **Why byte-neutral.** Each block computes the identical partial: the pair set
+  a block owns is unchanged (`blkCount * 256 >= num_pairs` and
+  `maxBlocks * 256 >= num_pairs` both give one grid-stride iteration over the
+  same rows), only the block's coordinates and its `outCx` slot move. The host
+  regroup sums each slot's blocks in the same order; the blocks that no longer
+  launch contributed an exact zero, and KoalaBear-extension addition is exact.
+- **Measured** — byte-neutral host probe around the launch, reth 281 shards,
+  419 960 677 cycles:
+
+  | | canonical `2511c03` | per-slot dispatch only | **+ sample-adjacent** |
+  |---|---|---|---|
+  | fused launch -> sync | 18.362 s | 19.078 s | **16.143 s** |
+  | `outCx` D2H | 0.277 s | 0.199 s | 0.202 s |
+  | host regroup | 0.408 s | 0.096 s | 0.100 s |
+  | **stage total** | **19.047 s** | 19.373 s | **16.444 s (-13.7 %)** |
+  | blocks launched | 43 416 413 | 5 730 377 | 5 730 377 |
+  | `outCx` over the proof | 2.779 GB | 0.367 GB | 0.367 GB |
+
+  The middle column is the honest negative: **per-slot grid sizing on its own
+  is a wash.** It removes 86.8 % of the blocks and 87 % of the `outCx` PCIe,
+  but the block-uniform search state it adds does not fit under the in-tree
+  `-maxrregcount 64` and grows the per-thread stack frame from 2224 B to
+  2256 B, costing +3.9 % on the kernel — slightly more than the 0.39 s it saves
+  the host. The sample-adjacent order is what pays. Confirmed on an isolating
+  A/B/C control (tendermint, one GPU, back to back, 2 rounds): stage totals
+  1.4795 s / 1.4870 s / 1.1205 s.
+  Two independent canonical runs of the probe agree to **0.2 %** on the stage
+  total and to <1.3 % in every bucket, so these differences are signal.
+- **Switches.** None; the grid shape is unconditional. Warning counts
+  unchanged (zkm-gpu-core 194, zkm-gpu-basefold 14, prover 0).
+
+## Zerocheck small-grid floor — what the cut points actually allow
+
+The previous entry named the zerocheck tail as the next target and offered two
+candidate fixes: SP1's per-(chunk, row-tile) grid sizing, and a dataflow-aware
+chunker. Measured, **they are separable, the first cannot help the tail at
+all, and the second is already at the limit of the cut points that exist.**
+
+**Per-chip grid sizing contributes exactly zero to the floor.** In the tail
+rounds `maxBlocks == 1`, so Ziren's grid and SP1's dispatch table emit the same
+blocks: MEASURED, the `grid.x == 1` bucket launches 61 004 blocks of which
+61 004 are useful, 0 % waste. Its value is elsewhere (the PCIe and regroup
+above), and it had to be paired with the block-ordering change to pay at all.
+
+**Sizing the floor.** Throughput in the work-bound rounds is a flat
+**134.8 G bytecode-instruction-evaluations/s** across shard classes. Charging
+every launch at that rate and calling the excess the latency-bound overhang
+gives **4.287 s, 23.3 % of the 18.362 s stage** — 2.7 % of the 157 s reth core
+wall. That is the whole prize behind the small-grid floor, and it is the
+ceiling for a perfect dataflow chunker.
+
+**The empty-live-in chunker is exhausted.** `ytuple_chunks` cuts where the
+LIVE-IN register set is empty. Dumping every such position and running an
+optimal minimax partition (binary-search the length bound, greedy
+furthest-advance) gives the shortest achievable longest chunk at any split
+factor:
+
+| chip | instrs | legal cuts | shipped longest chunk (g=16) | minimax floor, any g |
+|---|---|---|---|---|
+| `Bls12831Fp2MulAssign` | 61596 | 420 | 57894 | **57894 / 2** |
+| `Bls12831Fp2AddSubAssign` | 36745 | 421 | 33034 | **33034 / 3** |
+| `Bn254Fp2MulAssign` | 30780 | 292 | 28310 | **28310 / 2** |
+| `Bls12381FpOpAssign` | 18419 | 423 | 16350 | **16350 / 3** |
+| `Bls12381DoubleAssign` | 103211 | 3642 | 28925 | **28925 / 5** |
+| `Secp256k1DoubleAssign` | 51315 | 2426 | 14141 | **14141 / 5** |
+| `Bls12381Decompress` | 71940 | 3157 | 15820 | **15820 / 6** |
+| `Bls12381AddAssign` | 77222 | 3562 | 10924 | **10924 / 10** |
+| `Secp256k1AddAssign` | 39126 | 2378 | 5228 | **5228 / 11** |
+| `KeccakSponge` | 67260 | 1487 | 4390 | 1669 / 44 |
+| `Global` (longest CORE chip) | 2049 | 47 | 2049 (unsplit) | **1025 / 3** |
+| `SysLinux` | 1693 | 33 | 1693 (unsplit) | **1403 / 3** |
+
+For every chip that carries reth time except `KeccakSponge`, the shipped greedy
+already reaches the optimum — raising `ZIREN_GPU_ZC_MAX_CHUNKS` or replacing
+the greedy with a minimax partition changes nothing. The `Fp2`/`FpOp` family
+has **no legal cut in the first 85-94 % of its program**: the nearest clean
+position to instruction 3850 of `Bls12831Fp2MulAssign` is 57894, which is only
+possible if nothing below 57894 is clean at all.
+
+Attributing the 4.287 s overhang by chip class and scaling by the reachable
+critical path: core MIPS shards 2.152 s -> ~0.68 s reachable (2049 -> 1403,
+and the binding chip is `SysLinux`, not `Global`); `KeccakSponge` 0.259 s ->
+~0.17 s; `Secp/Bn254 DoubleAssign` 0.598 s, `Fp2AddSub` 0.323 s, `FpOp`
+0.310 s, `Fp2Mul` 0.282 s, `Bls12381Double` 0.143 s, `Secp AddAssign` 0.117 s
+— **0 s reachable, every one already at its minimax floor.**
+
+**So: ~0.87 s (0.55 % of core wall) is reachable with empty-live-in cuts, and
+4.287 s (2.7 % of core wall) is the ceiling for a true dataflow (DAG) chunker.**
+The chunker is genuinely the prerequisite, but its whole ceiling is under 3 %
+of the wall, and more than half of it sits in the ordinary MIPS core shards
+(`SysLinux`: 33 cut points in 1693 instructions), not in the precompiles.
