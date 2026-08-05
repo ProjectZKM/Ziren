@@ -5714,3 +5714,195 @@ and the binding chip is `SysLinux`, not `Global`); `KeccakSponge` 0.259 s ->
 The chunker is genuinely the prerequisite, but its whole ceiling is under 3 %
 of the wall, and more than half of it sits in the ordinary MIPS core shards
 (`SysLinux`: 33 cut points in 1693 instructions), not in the precompiles.
+
+## Zerocheck grid, MERGED: sample-adjacent per-slot dispatch over the THREE surviving samples
+
+The two zerocheck changes above rewrite the same launch, so they had to be
+merged rather than stacked: dropping the X = 3 interpolation sample the host
+discards took `numSamples` from 4 to 3, and the sample-adjacent per-slot block
+dispatch puts the sample in the low digit of `blockIdx.x`. The merged form
+collapses the grid to ONE dimension:
+
+```
+dim3 grid(numSamples * totalBlocks, 1, 1)
+bx        = blockIdx.x / numSamples          // row tile within the slot's range
+sampleIdx = blockIdx.x - bx * numSamples     // interpolation sample, LOW digit
+outCx[blockIdx.x]                            // one Challenge per launched block
+```
+
+with the host regroup reading `out[b * numSamples + sample]`. `totalBlocks` is
+the prefix sum over slots of each slot's OWN `ceil(num_pairs / 256)`
+(`ZerocheckSlots::blk_off`); a block resolves its slot with one binary search at
+block init. Collapsing to 1-D also retires the `gridDim.y/z <= 65535` hazard
+that `dim3(maxBlocks, numSamples, numSlots)` carried.
+
+**The non-power-of-two divisor costs nothing.** With X = 3 gone the divisor is
+3, not 4, so the decode is no longer a shift. Both live values are
+strength-reduced on a grid-uniform branch — `>> 2` for 4, the exact
+`__umulhi(n, 0xAAAAAAAB) >> 1` magic for 3. MEASURED two ways:
+
+- `ptxas -v` (authoritative for per-thread state) is IDENTICAL between the
+  strength-reduced decode, a plain runtime `blockIdx.x / numSamples`, and the
+  per-slot dispatch with no sample decode at all: **64 registers, 2256 B stack
+  frame, 28 B spill stores / 28 B spill loads**, at every `MEMORY_SIZE` tier and
+  in both the base and extension instantiations. The canonical control (sample
+  in `blockIdx.y`) is **2224 B with ZERO spills**. So the whole +32 B frame and
+  every spilled byte is the per-slot block->slot search state — confirming the
+  earlier diagnosis of why per-slot dispatch alone costs kernel time — and the
+  sample decode, magic multiply included, adds nothing on top of it.
+- Runtime, tendermint, paired, **8 interleaved rounds** on one GPU against an
+  otherwise identical arm that uses a plain `blockIdx.x / numSamples`: the
+  plain division costs **+0.50 %** on the fused kernel, 95 % CI
+  [-0.28 %, +1.29 %] — **INCLUDES ZERO**, with a half-width under 1 %. The
+  cleanest 5-round session alone gives +0.08 %, CI [-0.81 %, +0.98 %].
+
+So the strength reduction is NOT load-bearing; it is kept because it is three
+instructions and self-documenting. The honest summary of "does a
+non-power-of-two `numSamples` cost anything": **nothing in per-thread state,
+and at most ~1 % of the fused kernel in time, not separable from noise.**
+
+### Kernel-level isolating control (tendermint, ONE GPU, arms interleaved, 4 rounds)
+
+- **B** = canonical `cf3046b`, `dim3(maxBlocks, 3, numSlots)`
+- **D** = + per-slot block dispatch ONLY (sample stays in `grid.y`, NOT adjacent)
+- **M** = + per-slot dispatch AND sample-adjacent 1-D order (the MERGE)
+
+| | B control | D dispatch only | **M merged** |
+|---|---|---|---|
+| fused launch -> sync | 1.1222 s | 1.1811 s (**+5.26 %**) | **0.9288 s (-17.23 %)** |
+| `outCx` D2H | 0.0268 s | 0.0126 s | 0.0126 s |
+| host regroup | 0.0441 s | 0.0081 s | 0.0080 s |
+| **stage total** | **1.1930 s** | 1.2018 s (**+0.74 %**) | **0.9494 s (-20.42 %)** |
+| blocks launched | 18 936 582 | 1 975 263 | 1 975 263 |
+| `outCx` over the proof | 303.0 MB | 31.6 MB | 31.6 MB |
+
+Paired per-round deltas against the control, 95 % t interval on 4 rounds:
+
+| | paired mean | 95 % CI | |
+|---|---|---|---|
+| fused, D vs B | +5.26 % | [+3.63 %, +6.89 %] | excludes zero |
+| fused, M vs B | **-17.23 %** | [-19.05 %, -15.42 %] | excludes zero |
+| fused, M vs D (pure adjacency) | **-21.37 %** | [-22.03 %, -20.70 %] | excludes zero |
+| stage, D vs B | +0.74 % | [-0.12 %, +1.59 %] | **INCLUDES ZERO — a wash** |
+| stage, M vs B | **-20.42 %** | [-21.60 %, -19.25 %] | excludes zero |
+
+**Per-slot dispatch on its own is still a wash at three samples**, exactly as it
+was at four: it removes 89.6 % of the launched blocks and 89.6 % of the `outCx`
+PCIe (saving 0.050 s of host D2H + regroup), and gives all of it back as +5.26 %
+on the kernel. The sample-adjacent order is what pays.
+
+**The prediction was stated before measuring and held to 0.05 %.** Modelling the
+kernel as 20 % sample-count-invariant plus 80 % per-(block, sample), and the
+adjacency saving as `(1 - 1/k)` of a row-read cost `R` fitted from the 4-sample
+measurement, predicted the merged fused wall at **0.9283 s**; measured
+**0.9288 s**. The predicted *delta* (-15.9 %) was 1.3 points short only because
+the predicted control (1.1035 s) was 1.7 % low.
+
+That the `(1 - 1/k)` scaling reproduces the merged number is CONSISTENT with
+trace-row reuse but still does not prove it: the mechanism remains INFERRED.
+
+### Byte gates, verify ON
+
+Isolating control first: an independent build of unmodified canonical `cf3046b`
+reproduces every published golden. The merged arm then matches all of them.
+
+### reth (the representative program)
+
+Kernel census, one control/merged pair on GPU 7, probe on, 281 shards,
+419 960 677 cycles:
+
+| | control `cf3046b` | **merged** | |
+|---|---|---|---|
+| fused launch -> sync | 15.0519 s (35.84 ms/Mcyc) | **13.4282 s (31.97)** | **-10.79 %** |
+| `outCx` D2H | 0.1985 s (0.47) | 0.1101 s (0.26) | -44.5 % |
+| host regroup | 0.3072 s (0.73) | 0.0704 s (0.17) | -77.1 % |
+| **stage total** | **15.5576 s (37.05 ms/Mcyc)** | **13.6087 s (32.40)** | **-12.53 %, -4.64 ms/Mcyc** |
+| blocks launched | 130 249 239 | 17 191 131 | **-86.8 %** |
+| `outCx` over the proof | 2.084 GB | 0.275 GB | -86.8 % |
+
+**Tendermint over-states this change by 1.6x** — stage -20.42 % there against
+-12.53 % on reth. That is the fourth time tendermint has failed to represent
+reth; keep measuring both.
+
+The merged arm of this pair ran with a second reth proof co-resident on the
+other GPU and the control ran with only a tendermint stream, so the merged
+kernel time here is if anything pessimistic. Its WALL is not usable and is not
+quoted (the probe appends a line per launch).
+
+Max `grid.x` observed, tendermint: 32 991 for the merged 1-D grid, against the
+2^31-1 limit — three orders of magnitude of headroom, and `grid.y = grid.z = 1`
+so the 65 535 cap is out of the picture entirely.
+
+### Does the gain really come from trace-row reuse? A controlled k-sweep
+
+The previous entry left the mechanism INFERRED and its discriminating test
+(cell width) FLAT. Merging with the X = 3 change created a better test for
+free: the reuse-group size `k` is now a build parameter. Four arms from ONE
+tree, interleaved on one GPU, three rounds — `k = 3` and `k = 4`, each with and
+without sample adjacency (the `k = 4` arms force `compute_y3 = true`; the extra
+X = 3 partial is discarded by `finalize_round_poly`, so the proof bytes must
+not move, and they do not). Block counts confirm the arms differ ONLY in `k`:
+1 975 263 vs 2 633 684, exactly 4/3.
+
+| | dispatch only | + sample-adjacent | adjacency gain | absolute saving |
+|---|---|---|---|---|
+| **k = 4** | 1.4698 s | 1.1150 s | **-24.14 %**, CI [-24.63, -23.65] | 0.3548 s |
+| **k = 3** | 1.1840 s | 0.9159 s | **-22.64 %**, CI [-24.85, -20.43] | 0.2681 s |
+
+**This refutes the simple form of the row-reuse story.** If the gain were "the
+tile's two trace rows are read once instead of `k` times", the saving would be
+`(1 - 1/k)` of a cost proportional to `k` — i.e. proportional to `k - 1`, a
+CONSTANT saving per extra co-resident sample, predicting `S(3)/S(4) = 2/3`.
+MEASURED, `S(3)/S(4) = 0.756`: the `k = 3` saving is **13.3 % larger** than the
+law allows. The marginal saving per added co-resident sample FALLS, 0.134 s for
+the first two and 0.087 s for the third.
+
+So the effect SATURATES in `k`. That is what a capacity-limited cache does and
+what a strict "k-1 of k DRAM reads become hits" count does not. The mechanism is
+therefore **still not proven** — but it is now narrowed: whatever it is, it is
+sublinear in the reuse-group size, so any model that counts eliminated reads
+one-for-one is wrong. Practically it also means the gain would NOT keep growing
+if a future change raised the sample count.
+### kHz — the honest negative
+
+**The wall-clock effect is real but below this box's noise floor, and I could
+not certify it.** Verify was ON for every run; no `--skip-verify` anywhere.
+
+- **reth, 7 clean paired runs** (probe-free binaries, control and merged back to
+  back on one GPU, `BM`/`MB` order alternated), walls
+  `-1.82 / -1.01 / -5.88 / +1.55 / +5.25 / -0.54 / +0.32 %`: mean **-0.30 %**,
+  sd 3.38, **95 % CI [-3.43 %, +2.82 %] — INCLUDES ZERO**. Unpaired means
+  2815 -> 2825 kHz (+0.34 %).
+- **Why**: the kernel probe says the whole zerocheck stage falls 15.558 ->
+  13.609 s, i.e. **1.95 s of a 149 s wall = 1.31 %**. The observed pair-to-pair
+  sd is 3.38 %, so **~27 pairs (54 reth proofs, ~13 h) would be needed** to
+  exclude zero. The dominant noise is co-tenancy: these pairs ran two reth
+  proofs on two GPUs, and the arms of a pair are ~14 min apart, so the pairing
+  does NOT cancel the neighbouring GPU's changing load. A previous solo
+  base-reth triple on this box had sd 0.75 %; **solo pairs are the right
+  protocol for a wall-level zerocheck measurement, and 2-concurrent is not.**
+- **tendermint, 6 clean paired runs at `RAYON_NUM_THREADS=16`**: mean +0.09 %,
+  95 % CI [-9.84 %, +10.09 %] — INCLUDES ZERO, and the stage saving there is
+  only 0.24 s of a 14.2 s wall (1.7 %). One run was a +17 % outlier.
+
+So: **the kernel-level ms/Mcyc numbers above are the evidence for this change;
+kHz neither confirms nor contradicts them at any sample size I could afford.**
+
+### Byte gates, verify ON — nothing moved
+
+Isolating control first: an independent build of unmodified canonical `cf3046b`
+reproduces **every** published golden, and the merged arm then matches all of
+them, byte for byte:
+fib `7c780d9f59d728b5` · goat `8aa10f1942b71b62` (9) ·
+simple-go `443b92db18eceab5` (3) · tendermint `7190969b1feae13a` (33) x6 at
+`RAYON_NUM_THREADS=16` · fib compress `7e3c5d753cf25e55` ·
+reth `2c4d3597a79a6f3651f7388bba09f8edd169714ecc236d79c07b8a569c01aff2` (281).
+
+Totals across every arm built for this work: **44 tendermint proofs, 16 reth
+proofs, and the fib/goat/simple-go/compress set — all byte-identical.** The
+`k = 4` k-sweep arms additionally exercise the `numSamples == 4` path of the
+merged kernel, which a production Fiat-Shamir challenge never reaches, and it
+is byte-correct too.
+
+Warning counts unchanged: zkm-gpu-core 194, zkm-gpu-basefold 14.
+Switches: none; the grid shape is unconditional.
