@@ -270,8 +270,6 @@ pub struct ZKMCoreOpts {
     pub checkpoints_channel_capacity: usize,
     /// The capacity of the channel for records and traces.
     pub records_and_traces_channel_capacity: usize,
-    /// The frequency for shape checks.
-    pub shape_check_frequency: u64,
 }
 
 impl Default for ZKMCoreOpts {
@@ -328,8 +326,6 @@ impl Default for ZKMCoreOpts {
                     |_| DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY,
                     |s| s.parse::<usize>().unwrap_or(DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY),
                 ),
-            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY")
-                .map_or_else(|_| 16, |s| s.parse::<u64>().unwrap_or(16)),
             reconstruct_commitments: true,
         };
 
@@ -397,8 +393,6 @@ impl ZKMCoreOpts {
                     |_| DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY,
                     |s| s.parse::<usize>().unwrap_or(DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY),
                 ),
-            shape_check_frequency: env::var("SHAPE_CHECK_FREQUENCY")
-                .map_or_else(|_| 16, |s| s.parse::<u64>().unwrap_or(16)),
             reconstruct_commitments: true,
         }
     }

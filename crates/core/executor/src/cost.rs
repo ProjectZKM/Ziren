@@ -209,6 +209,209 @@ pub fn estimate_mips_event_counts(
     events_counts
 }
 
+/// Maps an opcode to the core AIR that charges it a main-trace row, mirroring the grouping
+/// performed by [`estimate_mips_event_counts`].
+///
+/// This is the Ziren analogue of SP1's `riscv_air_id_from_opcode`
+/// (sp1 `crates/core/executor/src/vm/shapes.rs`) and is the lookup that turns the periodic
+/// O(chips) re-estimate into SP1's O(1) per-instruction accumulate.
+///
+/// Returns `None` for the opcodes that [`estimate_mips_event_counts`] does not attribute to
+/// any chip: `SYSCALL` (the `SyscallInstrs` chip is never populated by the estimator),
+/// `MOD` / `MODU` (the estimator's `DivRem` count is `DIV + DIVU` only) and `UNIMPL`.
+#[must_use]
+pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
+    Some(match opcode {
+        Opcode::ADD | Opcode::SUB => MipsAirId::AddSub,
+        Opcode::MUL | Opcode::MULT | Opcode::MULTU => MipsAirId::Mul,
+        Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR => MipsAirId::Bitwise,
+        Opcode::SLL => MipsAirId::ShiftLeft,
+        Opcode::SRL | Opcode::SRA | Opcode::ROR => MipsAirId::ShiftRight,
+        Opcode::DIV | Opcode::DIVU => MipsAirId::DivRem,
+        Opcode::SLT | Opcode::SLTU => MipsAirId::Lt,
+        Opcode::BEQ | Opcode::BNE | Opcode::BGTZ | Opcode::BGEZ | Opcode::BLTZ | Opcode::BLEZ => {
+            MipsAirId::Branch
+        }
+        Opcode::Jump | Opcode::Jumpi | Opcode::JumpDirect => MipsAirId::Jump,
+        Opcode::LB | Opcode::LBU | Opcode::LH | Opcode::LHU => MipsAirId::LoadNarrow,
+        Opcode::LW | Opcode::LL => MipsAirId::LoadWord,
+        Opcode::SB | Opcode::SH => MipsAirId::StoreNarrow,
+        Opcode::SW | Opcode::SC => MipsAirId::StoreWord,
+        Opcode::LWL | Opcode::LWR | Opcode::SWL | Opcode::SWR => MipsAirId::MemoryUnaligned,
+        Opcode::INS
+        | Opcode::EXT
+        | Opcode::SEXT
+        | Opcode::MADDU
+        | Opcode::MSUBU
+        | Opcode::MADD
+        | Opcode::MSUB
+        | Opcode::TEQ => MipsAirId::MiscInstrs,
+        Opcode::WSBH | Opcode::MNE | Opcode::MEQ => MipsAirId::MovCond,
+        Opcode::CLO | Opcode::CLZ => MipsAirId::CloClz,
+        Opcode::SYSCALL | Opcode::MOD | Opcode::MODU | Opcode::UNIMPL => return None,
+    })
+}
+
+/// Exact, incrementally-maintained per-shard trace area and tallest-chip height.
+///
+/// This is the port of SP1's `ShapeChecker` (sp1 `crates/core/executor/src/vm/shapes.rs`):
+/// each event bumps the owning chip's height and adds that chip's width to a running area, so
+/// the shard-split test at [`Self::check_shard_limit`] is a pair of comparisons against live
+/// state rather than a periodic O(chips) re-estimate.
+///
+/// It replaces the `SHAPE_CHECK_FREQUENCY`-gated block that called
+/// [`estimate_mips_event_counts`] + [`pad_mips_event_counts`], and is *exactly* equal to that
+/// estimator's output on every cycle — not an approximation of it. `estimate_mips_event_counts`
+/// was already a pure function of `(clk / 5, local_mem, syscalls_sent, opcode counts)`, all of
+/// which the executor already maintains incrementally, so the periodic recompute was
+/// rebuilding a value it could have carried. Because the state is exact at *every* cycle
+/// rather than only at multiples of a check frequency, the worst-case `pad_mips_event_counts`
+/// inflation that covered the blind window between two checks is no longer needed.
+///
+/// The `Cpu` chip is deliberately *not* accumulated here: its row count is `clk / 5` by
+/// definition and `clk` is already exact executor state, so it is folded in as a single
+/// multiply-add inside [`Self::check_shard_limit`]. That keeps the accumulator's write set to
+/// the few sites that already maintain `LocalCounts`, instead of also having to hook every
+/// `clk` bump (including the variable-width precompile bumps, which are the easiest to miss).
+#[derive(Debug, Clone)]
+pub struct ShardSplitAccumulator {
+    /// Running `Σ_chip height[chip] × width[chip]` over every chip except `Cpu`.
+    trace_area: u64,
+    /// Running `max_chip height[chip]` over every chip except `Cpu`.
+    max_height: u64,
+    /// Per-chip row counts.
+    heights: EnumMap<MipsAirId, u64>,
+    /// Main-trace width per chip, as an array rather than the `HashMap` the periodic path
+    /// hashed into once per chip per check.
+    costs: EnumMap<MipsAirId, u64>,
+    /// Distinct addresses touched in this shard, i.e. `LocalCounts::local_mem`. Kept here so
+    /// the `MemoryLocal` `div_ceil` and the `Global` row count stay O(1).
+    touched_addresses: u64,
+    /// The trace-area budget for one shard (`ELEMENT_THRESHOLD`).
+    element_threshold: u64,
+    /// The per-chip row cap for one shard.
+    height_threshold: u64,
+}
+
+impl ShardSplitAccumulator {
+    /// Create an accumulator over the given per-chip main-trace widths and split thresholds.
+    #[must_use]
+    pub fn new(
+        costs: &HashMap<MipsAirId, u64>,
+        element_threshold: u64,
+        height_threshold: u64,
+    ) -> Self {
+        let mut cost_map: EnumMap<MipsAirId, u64> = EnumMap::default();
+        for (air, &cost) in costs {
+            cost_map[*air] = cost;
+        }
+        let mut this = Self {
+            trace_area: 0,
+            max_height: 0,
+            heights: EnumMap::default(),
+            costs: cost_map,
+            touched_addresses: 0,
+            element_threshold,
+            height_threshold,
+        };
+        this.reset();
+        this
+    }
+
+    /// Clear all per-shard state. Called at every shard boundary.
+    pub fn reset(&mut self) {
+        self.heights = EnumMap::default();
+        self.trace_area = 0;
+        self.max_height = 0;
+        self.touched_addresses = 0;
+        // The memory-bump chip charges one shadow read per register per shard unconditionally,
+        // so it is seeded rather than accumulated (cf. `estimate_mips_event_counts`, which sets
+        // `MemoryBump` to `NUM_REGISTERS` regardless of the event counts).
+        self.bump(MipsAirId::MemoryBump, NUM_REGISTERS as u64);
+    }
+
+    /// Add `count` rows to `air`, keeping `trace_area` and `max_height` in step.
+    #[inline]
+    fn bump(&mut self, air: MipsAirId, count: u64) {
+        let height = &mut self.heights[air];
+        *height += count;
+        let height = *height;
+        if height > self.max_height {
+            self.max_height = height;
+        }
+        self.trace_area += count * self.costs[air];
+    }
+
+    /// Charge `count` rows for `opcode`, including the chips it induces rows on indirectly.
+    ///
+    /// Mirrors the `DivRem` fan-out that [`estimate_mips_event_counts`] applies after the fact
+    /// (`Mul += DivRem`, `Lt += DivRem`). The other cross-chip dependencies — the extra
+    /// `AddSub` / `Lt` / shift rows an instruction induces — are already expressed as explicit
+    /// `Opcode` increments by the executor's bookkeeping block, so they arrive here as ordinary
+    /// calls and need no special handling.
+    #[inline]
+    pub fn add_opcode(&mut self, opcode: Opcode, count: u64) {
+        let Some(air) = mips_air_id_from_opcode(opcode) else {
+            return;
+        };
+        self.bump(air, count);
+        if air == MipsAirId::DivRem {
+            self.bump(MipsAirId::Mul, count);
+            self.bump(MipsAirId::Lt, count);
+        }
+    }
+
+    /// Record one newly-touched address, charging the `MemoryLocal` and `Global` chips.
+    #[inline]
+    pub fn add_touched_address(&mut self) {
+        // `MemoryLocal` packs `NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC` addresses per row, so a
+        // new address opens a row only when the previous ones exactly filled the last one —
+        // the incremental form of the estimator's `div_ceil`.
+        if self.touched_addresses.is_multiple_of(NUM_LOCAL_MEMORY_ENTRIES_PER_ROW_EXEC as u64) {
+            self.bump(MipsAirId::MemoryLocal, 1);
+        }
+        self.touched_addresses += 1;
+        self.bump(MipsAirId::Global, 2);
+    }
+
+    /// Whether this shard has reached its trace-area budget / its per-chip height cap.
+    ///
+    /// `cpu_cycles` is the `Cpu` chip's row count (`clk / 5`); see the type-level note on why
+    /// it is passed in rather than accumulated. This is SP1's `check_shard_limit`.
+    #[inline]
+    #[must_use]
+    pub fn check_shard_limit(&self, cpu_cycles: u64) -> (bool, bool) {
+        let area = self.trace_area + cpu_cycles * self.costs[MipsAirId::Cpu];
+        let max_height = if cpu_cycles > self.max_height { cpu_cycles } else { self.max_height };
+        (area >= self.element_threshold, max_height >= self.height_threshold)
+    }
+
+    /// The live trace area, including the `Cpu` contribution. For diagnostics only.
+    #[must_use]
+    pub fn trace_area(&self, cpu_cycles: u64) -> u64 {
+        self.trace_area + cpu_cycles * self.costs[MipsAirId::Cpu]
+    }
+
+    /// The live tallest-chip height, including `Cpu`. For diagnostics only.
+    #[must_use]
+    pub fn max_height(&self, cpu_cycles: u64) -> u64 {
+        if cpu_cycles > self.max_height {
+            cpu_cycles
+        } else {
+            self.max_height
+        }
+    }
+
+    /// The live per-chip row counts, including `Cpu`. For diagnostics and for cross-checking
+    /// against [`estimate_mips_event_counts`].
+    #[must_use]
+    pub fn event_counts(&self, cpu_cycles: u64) -> EnumMap<MipsAirId, u64> {
+        let mut counts = self.heights;
+        counts[MipsAirId::Cpu] = cpu_cycles;
+        counts
+    }
+}
+
 /// Pads the event counts to account for the worst case jump in events across N cycles.
 #[must_use]
 #[allow(clippy::match_same_arms)]
@@ -243,4 +446,113 @@ pub fn pad_mips_event_counts(
         _ => (),
     });
     event_counts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mips_costs;
+    use enum_map::Enum;
+
+    /// Every opcode the MIPS executor can retire, so the equivalence test below covers the
+    /// whole `Opcode` -> `MipsAirId` map rather than a hand-picked subset.
+    fn all_opcodes() -> Vec<Opcode> {
+        (0..Opcode::LENGTH).map(Opcode::from_usize).collect()
+    }
+
+    fn costs() -> HashMap<MipsAirId, u64> {
+        mips_costs().into_iter().map(|(k, v)| (k, v as u64)).collect()
+    }
+
+    /// The incremental accumulator must agree with [`estimate_mips_event_counts`] EXACTLY, for
+    /// every chip, at every point in the stream — not just at the end and not approximately.
+    ///
+    /// This is the property the whole `SHAPE_CHECK_FREQUENCY` removal rests on: the periodic
+    /// re-estimate could be dropped precisely because the accumulator reproduces it, so if this
+    /// ever fails, shard boundaries have silently moved.
+    #[test]
+    fn accumulator_matches_estimator_over_a_mixed_opcode_stream() {
+        let costs = costs();
+        let opcodes = all_opcodes();
+        let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX);
+        let mut reference: EnumMap<Opcode, u64> = EnumMap::default();
+        let mut touched: u64 = 0;
+
+        // A deterministic, badly-behaved stream: opcode choice and address-touch decisions are
+        // driven by a cheap LCG so the counts land on every `div_ceil` boundary of the
+        // `MemoryLocal` packing rather than only on multiples of it.
+        let mut rng: u64 = 0x243f_6a88_85a3_08d3;
+        for step in 0..20_000u64 {
+            rng = rng.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let opcode = opcodes[(rng >> 33) as usize % opcodes.len()];
+            let count = 1 + (rng >> 17) % 3;
+
+            acc.add_opcode(opcode, count);
+            reference[opcode] += count;
+
+            if rng % 3 == 0 {
+                acc.add_touched_address();
+                touched += 1;
+            }
+
+            // `Cpu` is derived rather than accumulated, so sweep it too.
+            let cpu_cycles = step * 5 / 5;
+            let expected = estimate_mips_event_counts(cpu_cycles, touched, 0, reference);
+            assert_eq!(
+                acc.event_counts(cpu_cycles),
+                expected,
+                "per-chip counts diverged at step {step} (opcode {opcode:?})"
+            );
+
+            let expected_area: u64 = expected
+                .iter()
+                .map(|(air, &n)| n * costs.get(&air).copied().unwrap_or(0))
+                .sum();
+            assert_eq!(acc.trace_area(cpu_cycles), expected_area, "area diverged at step {step}");
+
+            let expected_max = expected.iter().map(|(_, &h)| h).max().unwrap_or(0);
+            assert_eq!(acc.max_height(cpu_cycles), expected_max, "height diverged at step {step}");
+        }
+    }
+
+    /// A reset must restore exactly the state a fresh accumulator starts in, including the
+    /// unconditional per-shard `MemoryBump` seed. A reset that dropped the seed would understate
+    /// every shard's area by `NUM_REGISTERS * width(MemoryBump)`.
+    #[test]
+    fn reset_restores_a_fresh_shard() {
+        let costs = costs();
+        let mut acc = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX);
+        let fresh = acc.event_counts(0);
+
+        for opcode in all_opcodes() {
+            acc.add_opcode(opcode, 7);
+        }
+        for _ in 0..37 {
+            acc.add_touched_address();
+        }
+        assert_ne!(acc.event_counts(0), fresh);
+
+        acc.reset();
+        assert_eq!(acc.event_counts(0), fresh);
+        assert_eq!(acc.event_counts(0), estimate_mips_event_counts(0, 0, 0, EnumMap::default()));
+    }
+
+    /// The split test must fire exactly at the threshold, on whichever limit is reached first.
+    #[test]
+    fn check_shard_limit_fires_on_either_budget() {
+        let costs = costs();
+        let cpu_width = costs[&MipsAirId::Cpu];
+        // A fresh shard is not empty: it already carries the unconditional `MemoryBump` seed.
+        let seed_area = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX).trace_area(0);
+
+        // Area budget sized so the second Cpu row is exactly what crosses it.
+        let acc = ShardSplitAccumulator::new(&costs, seed_area + cpu_width * 2, u64::MAX);
+        assert_eq!(acc.check_shard_limit(1), (false, false));
+        assert_eq!(acc.check_shard_limit(2), (true, false));
+
+        // Height budget, independent of area. `NUM_REGISTERS` seeded rows sit below it.
+        let acc = ShardSplitAccumulator::new(&costs, u64::MAX, 100);
+        assert_eq!(acc.check_shard_limit(99), (false, false));
+        assert_eq!(acc.check_shard_limit(100), (false, true));
+    }
 }

@@ -5,7 +5,6 @@ use std::{
 };
 
 use super::program::MAX_MEMORY;
-use enum_map::EnumMap;
 use hashbrown::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,7 +17,7 @@ use crate::{
         emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
         emit_jump_dependencies, emit_misc_dependencies,
     },
-    estimate_mips_event_counts, estimate_mips_lde_size,
+    estimate_mips_lde_size,
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
         MemoryAccessPosition, MemoryBumpEvent, MemoryInitializeFinalizeEvent, MemoryLocalEvent,
@@ -34,7 +33,7 @@ use crate::{
     subproof::SubproofVerifier,
     syscalls::{default_syscall_map, Syscall, SyscallCode, SyscallContext},
     ExecutionReport, Instruction, MaximalShapes, MipsAirId, Opcode, Program, Register,
-    NUM_REGISTERS,
+    ShardSplitAccumulator, NUM_REGISTERS,
 };
 
 /// The maximum number of instructions in a program.
@@ -91,6 +90,16 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// (`clk < 2^24`, i.e. `2^24 / 5 ≈ 3.355 M` cycles at `clk += 5` per instruction) is what
 /// bounds a shard from above. `ELEMENT_THRESHOLD` closes shards well before either.
 const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
+
+/// How often the offline shape-search tooling (`lde_size_check` / `maximal_shapes`) samples the
+/// live chip heights.
+///
+/// This is NOT a production knob. The two limits that actually close shards — trace area and
+/// per-chip height — are exact on every cycle and have no frequency at all; this constant only
+/// bounds the cost of the O(shapes x chips) scan that `FIX_CORE_SHAPES=true` and the
+/// `find_maximal_shapes` script enable, neither of which runs on the prove path. It is the
+/// former `SHAPE_CHECK_FREQUENCY` default, kept so that tooling behaves exactly as before.
+const SHAPE_SEARCH_CHECK_FREQUENCY: u64 = 16;
 
 /// Per-shard split-reason profiler (`ZIREN_SPLIT_PROF=1`, default OFF).
 ///
@@ -152,14 +161,6 @@ pub struct Executor<'a> {
 
     /// The maximum size of each shard.
     pub shard_size: u32,
-
-    /// The per-shard trace-AREA cap in raw main-trace cells (SP1 `ELEMENT_THRESHOLD`).
-    ///
-    /// A shard is closed once its accumulated un-padded main-trace cell count
-    /// `Σ_chip event_counts[chip] × costs[chip]` reaches this value. Unlike [`Self::shard_size`]
-    /// (a cycle budget scaled by 4), this is a raw cell count taken directly from
-    /// `opts.element_threshold` (no ×4).
-    pub element_threshold: u64,
 
     /// The maximum number of shards to execute at once.
     pub shard_batch_size: u32,
@@ -235,8 +236,9 @@ pub struct Executor<'a> {
     /// Report of the program execution.
     pub report: ExecutionReport,
 
-    /// Statistics for event counts.
-    pub local_counts: LocalCounts,
+    /// Exact, incrementally-maintained trace area / tallest-chip height for the shard being
+    /// executed. Read by [`Self::inc_shard_if_need`] as an O(1) pair of comparisons.
+    pub split_acct: ShardSplitAccumulator,
 
     /// Verifier used to sanity check `verify_zkm_proof` during runtime.
     pub subproof_verifier: Option<&'a dyn SubproofVerifier>,
@@ -254,9 +256,6 @@ pub struct Executor<'a> {
     /// The costs of the program.
     pub costs: HashMap<MipsAirId, u64>,
 
-    /// The frequency to check the stopping condition.
-    pub shape_check_frequency: u64,
-
     /// Early exit if the estimate LDE size is too big.
     ///
     /// `false` everywhere except the offline `find_maximal_shapes` script.
@@ -266,7 +265,7 @@ pub struct Executor<'a> {
     ///
     /// Defaults to `0`, so [`Self::lde_size_check`] must never be enabled without
     /// also setting this — otherwise `padded_lde_size > 0` holds on every check and
-    /// the executor closes a shard at every `shape_check_frequency` boundary.
+    /// the executor closes a shard at every `SHAPE_SEARCH_CHECK_FREQUENCY` boundary.
     pub lde_size_threshold: u64,
 
     /// optional MinimalTrace collector. When `Some`,
@@ -280,8 +279,7 @@ pub struct Executor<'a> {
     /// Skip replay-irrelevant
     /// bookkeeping in `execute_operation`. When set, the executor:
     ///   - skips `report.opcode_counts` increments (per cycle)
-    ///   - skips `local_counts.event_counts` increments (per cycle)
-    ///   - skips `local_counts.syscalls_sent` accounting (per syscall)
+    ///   - skips the `split_acct` trace-area / height accumulation (per cycle)
     ///   - skips the per-class branch/jump opcode-count adjustments
     ///     (~30 LOC of bookkeeping per cycle)
     /// These are all duplicate work in TracingVM replay — they were
@@ -372,17 +370,6 @@ pub enum ExecutorMode {
     Checkpoint,
     /// Run the execution with full tracing of events.
     Trace,
-}
-
-/// Information about event counts which are relevant for shape fixing.
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct LocalCounts {
-    /// The event counts.
-    pub event_counts: Box<EnumMap<Opcode, u64>>,
-    /// The number of syscalls sent globally in the current shard.
-    pub syscalls_sent: usize,
-    /// The number of addresses touched in this shard.
-    pub local_mem: usize,
 }
 
 /// Errors that the [``Executor``] can throw.
@@ -503,13 +490,12 @@ impl<'a> Executor<'a> {
         if split_prof_on() {
             eprintln!(
                 "[SPLIT] CONFIG shard_size={} clk_budget={} clk24_limit={} element_threshold={} \
-                 height_threshold={} shape_check_frequency={}",
+                 height_threshold={}",
                 opts.shard_size,
                 (opts.shard_size as u64) * 4,
                 CORE_SHARD_CLK_24BIT_LIMIT,
                 opts.element_threshold,
                 CORE_SHARD_HEIGHT_THRESHOLD,
-                opts.shape_check_frequency,
             );
         }
 
@@ -528,7 +514,15 @@ impl<'a> Executor<'a> {
 
         let hook_registry = context.hook_registry.unwrap_or_default();
 
-        let costs = crate::mips_costs();
+        let costs: HashMap<MipsAirId, u64> =
+            crate::mips_costs().into_iter().map(|(k, v)| (k, v as u64)).collect();
+        let split_acct = ShardSplitAccumulator::new(
+            &costs,
+            // SP1 ELEMENT_THRESHOLD: raw main-trace cell budget — NOT scaled by 4 (it is
+            // already a cell count, whereas `shard_size` is a cycle budget × 4 → clk).
+            opts.element_threshold as u64,
+            CORE_SHARD_HEIGHT_THRESHOLD,
+        );
 
         Self {
             record,
@@ -537,9 +531,6 @@ impl<'a> Executor<'a> {
             program,
             memory_accesses: MemoryAccessRecord::default(),
             shard_size: (opts.shard_size as u32) * 4,
-            // SP1 ELEMENT_THRESHOLD: raw main-trace cell budget — NOT scaled by 4 (it is
-            // already a cell count, whereas `shard_size` is a cycle budget × 4 → clk).
-            element_threshold: opts.element_threshold as u64,
             shard_batch_size: opts.shard_batch_size as u32,
             cycle_tracker: HashMap::new(),
             io_buf: HashMap::new(),
@@ -551,7 +542,7 @@ impl<'a> Executor<'a> {
             emit_global_memory_events: true,
             max_syscall_cycles,
             report: ExecutionReport::default(),
-            local_counts: LocalCounts::default(),
+            split_acct,
             print_report: false,
             subproof_verifier: context.subproof_verifier,
             hook_registry,
@@ -567,8 +558,7 @@ impl<'a> Executor<'a> {
             local_memory_access: nohash_hasher::IntMap::default(),
             local_reg_access: std::array::from_fn(|_| None),
             maximal_shapes: None,
-            costs: costs.into_iter().map(|(k, v)| (k, v as u64)).collect(),
-            shape_check_frequency: opts.shape_check_frequency,
+            costs,
             lde_size_check: false,
             lde_size_threshold: 0,
             minimal_trace_collector: None,
@@ -763,7 +753,7 @@ impl<'a> Executor<'a> {
         //     on the .is_some() condition to be true only in the SyscallContext.
         if !self.unconstrained && !self.skip_replay_bookkeeping
             && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+            self.split_acct.add_touched_address();
         }
 
         let prev_record = *record;
@@ -1045,7 +1035,7 @@ impl<'a> Executor<'a> {
         //     on the .is_some() condition to be true only in the SyscallContext.
         if !self.unconstrained && !self.skip_replay_bookkeeping
             && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+            self.split_acct.add_touched_address();
         }
 
         let prev_record = *record;
@@ -1153,7 +1143,7 @@ impl<'a> Executor<'a> {
         //     on the .is_some() condition to be true only in the SyscallContext.
         if !self.unconstrained && !self.skip_replay_bookkeeping
             && (record.shard != shard || local_memory_access.is_some()) {
-            self.local_counts.local_mem += 1;
+            self.split_acct.add_touched_address();
         }
 
         let prev_record = *record;
@@ -1835,43 +1825,48 @@ impl<'a> Executor<'a> {
 
         // gate replay-irrelevant
         // bookkeeping. In TracingVM workers, `skip_replay_bookkeeping`
-        // is set so opcode_counts and local_counts are not
+        // is set so opcode_counts and the split accumulator are not
         // re-incremented — they were already computed during the
         // checkpoint-gen pass.
+        //
+        // This is SP1's `ShapeChecker::handle_instruction`: the instruction charges a row to
+        // its own chip, plus rows to the chips it induces dependencies on, and the running
+        // trace area / tallest-chip height move with it. It is the only place opcode-driven
+        // rows are counted, so the accumulator cannot drift from the executor.
         if !self.unconstrained && !self.skip_replay_bookkeeping {
             self.report.opcode_counts[instruction.opcode] += 1;
-            self.local_counts.event_counts[instruction.opcode] += 1;
+            self.split_acct.add_opcode(instruction.opcode, 1);
             if instruction.is_memory_load_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 2;
+                self.split_acct.add_opcode(Opcode::ADD, 2);
             } else if instruction.is_branch_cmp_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
-                self.local_counts.event_counts[Opcode::SLT] += 2;
+                self.split_acct.add_opcode(Opcode::ADD, 1);
+                self.split_acct.add_opcode(Opcode::SLT, 2);
             } else if instruction.is_mov_cond_instruction() {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
+                self.split_acct.add_opcode(Opcode::ADD, 1);
             } else if instruction.opcode == Opcode::EXT {
-                self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 1;
+                self.split_acct.add_opcode(Opcode::SLL, 1);
+                self.split_acct.add_opcode(Opcode::SRL, 1);
             } else if instruction.is_cloclz_instruction() {
-                self.local_counts.event_counts[Opcode::SRL] += 1;
+                self.split_acct.add_opcode(Opcode::SRL, 1);
             } else if instruction.is_maddsubu_instruction() {
-                self.local_counts.event_counts[Opcode::MULTU] += 1;
+                self.split_acct.add_opcode(Opcode::MULTU, 1);
             } else if instruction.opcode == Opcode::INS {
-                self.local_counts.event_counts[Opcode::ROR] += 2;
-                self.local_counts.event_counts[Opcode::SLL] += 1;
-                self.local_counts.event_counts[Opcode::SRL] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 1;
+                self.split_acct.add_opcode(Opcode::ROR, 2);
+                self.split_acct.add_opcode(Opcode::SLL, 1);
+                self.split_acct.add_opcode(Opcode::SRL, 2);
+                self.split_acct.add_opcode(Opcode::ADD, 1);
             } else if instruction.opcode == Opcode::DIV {
-                self.local_counts.event_counts[Opcode::MULT] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 2;
-                self.local_counts.event_counts[Opcode::SLTU] += 1;
+                self.split_acct.add_opcode(Opcode::MULT, 2);
+                self.split_acct.add_opcode(Opcode::ADD, 2);
+                self.split_acct.add_opcode(Opcode::SLTU, 1);
             } else if instruction.opcode == Opcode::DIVU {
-                self.local_counts.event_counts[Opcode::MULTU] += 2;
-                self.local_counts.event_counts[Opcode::ADD] += 2;
-                self.local_counts.event_counts[Opcode::SLTU] += 1;
+                self.split_acct.add_opcode(Opcode::MULTU, 2);
+                self.split_acct.add_opcode(Opcode::ADD, 2);
+                self.split_acct.add_opcode(Opcode::SLTU, 1);
             } else if instruction.is_maddsub_instruction() {
-                self.local_counts.event_counts[Opcode::MULT] += 1;
+                self.split_acct.add_opcode(Opcode::MULT, 1);
             } else if instruction.opcode == Opcode::JumpDirect {
-                self.local_counts.event_counts[Opcode::ADD] += 1;
+                self.split_acct.add_opcode(Opcode::ADD, 1);
             }
         }
 
@@ -2635,7 +2630,7 @@ impl<'a> Executor<'a> {
             });
             trace.total_cycles = next_chunk_clk;
         }
-        self.local_counts = LocalCounts::default();
+        self.split_acct.reset();
         // Copy all of the existing local memory accesses to the record's local_memory_access vec.
         if self.executor_mode == ExecutorMode::Trace {
             // also drain the register-slot fast-
@@ -3316,85 +3311,66 @@ impl<'a> Executor<'a> {
         // verification.
         let clk_exit = self.max_syscall_cycles + self.state.clk >= CORE_SHARD_CLK_24BIT_LIMIT;
 
-        // Every N cycles, check if there exists at least one shape that fits.
+        // The `Cpu` chip charges one row per cycle and `clk` advances by 5 per cycle, so this
+        // is the chip's exact live height. It is the one input the accumulator does not carry
+        // itself — see `ShardSplitAccumulator`.
+        let cpu_cycles = (self.state.clk / 5) as u64;
+
+        // SP1-parity shard-limit test (sp1 `ShapeChecker::check_shard_limit`,
+        // crates/core/executor/src/vm/shapes.rs:240): two comparisons against state that every
+        // instruction already maintained, evaluated on EVERY cycle.
         //
-        // If we're close to not fitting, early stop the shard to ensure we don't OOM.
+        //  * `area_split` closes the shard once the accumulated UN-PADDED main-trace cell count
+        //    reaches `ELEMENT_THRESHOLD`, keeping dense shards at log_dense <= 29 — the
+        //    per-shard dense-area budget the jagged commit is sized for. This is the limit that
+        //    closes 100% of real core splits on reth / tendermint / goat.
+        //  * `height_split` closes it once the tallest chip reaches the per-chip cube cap, so
+        //    no chip exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows however large `SHARD_SIZE` is,
+        //    keeping every shard inside the base-cube recursion's fixed per-chip height.
+        //    LIVE but not tripping on today's workloads: measured peaks are goat 2,216,960 and
+        //    tendermint 2,491,392 against a `CORE_SHARD_HEIGHT_THRESHOLD` of 4,128,768, i.e.
+        //    only ~1.7x of headroom. Raising `ELEMENT_THRESHOLD` walks straight at this fence,
+        //    so do not treat it as slack.
         //
-        // INERT ON THE PRODUCTION PROVE PATH.  `shape_match_found` can only go false inside
-        // the `lde_size_check` / `maximal_shapes` block below, and BOTH inputs are off by
-        // default: `lde_size_check` is `false` (set true only by the offline
+        // There is no check frequency and no worst-case padding. Both existed only because the
+        // area / height figures used to be rebuilt from scratch every `SHAPE_CHECK_FREQUENCY`
+        // cycles by `estimate_mips_event_counts`, which left a blind window that
+        // `pad_mips_event_counts` had to cover by inflating every chip by its worst-case growth
+        // over that window. With the figures exact on every cycle, both are dead weight.
+        let (area_split, height_split) = self.split_acct.check_shard_limit(cpu_cycles);
+
+        if split_prof_on() {
+            SPLIT_PROF_STATE.with(|s| {
+                let (last_g, _, _) = s.get();
+                s.set((
+                    last_g,
+                    self.split_acct.trace_area(cpu_cycles),
+                    self.split_acct.max_height(cpu_cycles),
+                ));
+            });
+        }
+
+        // Offline shape-search tooling only; INERT ON THE PRODUCTION PROVE PATH.
+        // `shape_match_found` can only go false inside this block, and BOTH of its inputs are
+        // off by default: `lde_size_check` is `false` (set true only by the offline
         // `find_maximal_shapes` script) and `maximal_shapes` is `None` (it is
-        // `prover.core_shape_config`, which needs `FIX_CORE_SHAPES=true`).  Kept because
-        // FIX-on and the shape-search tooling are both still selectable.
-        let mut shape_match_found = true;
-        // Height-based shard split (mirrors SP1's `ShapeChecker::check_shard_limit` height
-        // branch, sp1 crates/core/executor/src/vm/shapes.rs:240): start a new shard as soon
-        // as the tallest chip's estimated height reaches the per-chip cube cap, so no chip
-        // ever exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows no matter how large `SHARD_SIZE`
-        // (a cycle budget) is. This keeps every split shard inside the base-cube recursion's
-        // fixed per-chip height, so recursion / vk_map / the gnark ceremony are untouched.
+        // `prover.core_shape_config`, which needs `FIX_CORE_SHAPES=true`). Kept because FIX-on
+        // and the shape-search tooling are both still selectable.
         //
-        // UNLIKE `shape_match_found` above, this is LIVE, ungated code — it just never trips
-        // on today's workloads, which is not the same thing as being dead. MEASURED via
-        // `ZIREN_SPLIT_PROF=1`'s `maxh` field at `SHARD_SIZE=4194305`,
-        // `SHAPE_CHECK_FREQUENCY=1024`: goat peaks at 2,216,960 and tendermint at 2,491,392
-        // against a `CORE_SHARD_HEIGHT_THRESHOLD` of 4,128,768 — 0.54x and 0.60x of the cap,
-        // i.e. only ~1.7x of headroom. Raising `ELEMENT_THRESHOLD` (which is what lets a
-        // shard accumulate more rows; it is the limit that closes 100% of real splits) walks
-        // straight at this fence, so do not treat it as slack.
-        let mut height_split = false;
-        // Per-shard trace-AREA split (mirrors SP1's `ShapeChecker::check_shard_limit` element
-        // branch, sp1 crates/core/executor/src/vm/shapes.rs:242 `trace_area >= element_threshold`).
-        // Close the shard once the accumulated UN-PADDED main-trace cell count reaches the SP1
-        // `ELEMENT_THRESHOLD`, so dense shards (which today run the cycle/clk budget out to
-        // log_dense = 30) split strictly earlier and stay at log_dense ≤ 29 — the per-shard
-        // dense-area budget the jagged commit is sized for. Additional to (never replaces) the
-        // cycle / 24-bit-clk / per-chip-height splits.
-        let mut area_split = false;
-        if self.state.global_clk.is_multiple_of(self.shape_check_frequency) {
-            // Estimate the number of events in the trace.
-            let event_counts = estimate_mips_event_counts(
-                (self.state.clk / 5) as u64,
-                self.local_counts.local_mem as u64,
-                self.local_counts.syscalls_sent as u64,
-                *self.local_counts.event_counts,
-            );
-
-            // SP1-parity trace AREA = Σ_chip event_counts[chip] × costs[chip] (raw main-trace
-            // cells). This is SP1's live `trace_area` accumulator (each event adds `costs[air]`),
-            // NOT the LDE size: no `next_power_of_two`, no `× size_of × 2` byte scaling — so we do
-            // NOT reuse `estimate_mips_lde_size`. Widths come from the loaded cost table
-            // (`self.costs`); chips with no events contribute 0.
-            let area: u64 = event_counts
-                .iter()
-                .map(|(air, &count)| count.saturating_mul(self.costs.get(&air).copied().unwrap_or(0)))
-                .sum();
-            if area >= self.element_threshold {
-                area_split = true;
-            }
-
-            // Ziren refreshes this estimate only every `shape_check_frequency` cycles, so pad
-            // each chip by its worst-case growth over that window (SP1's
-            // `pad_mips_event_counts`) before comparing against the cap. This guarantees no
-            // chip crosses `2^CORE_MAX_LOG_ROW_COUNT` between two consecutive checks. `EnumMap`
-            // is `Copy`, so `event_counts` stays usable by the checks below.
-            let padded_heights = pad_mips_event_counts(event_counts, self.shape_check_frequency);
-            let max_chip_height = padded_heights.iter().map(|(_, h)| *h).max().unwrap_or(0);
-            if max_chip_height >= CORE_SHARD_HEIGHT_THRESHOLD {
-                height_split = true;
-            }
-
-            if split_prof_on() {
-                SPLIT_PROF_STATE.with(|s| {
-                    let (last_g, _, _) = s.get();
-                    s.set((last_g, area, max_chip_height));
-                });
-            }
+        // Unlike the two production limits above this one is genuinely O(shapes x chips), so it
+        // keeps a sampling frequency of its own rather than paying that cost every cycle. The
+        // frequency is a private constant of the tooling, NOT the retired `SHAPE_CHECK_FREQUENCY`
+        // knob: it no longer has any influence on where production shards split.
+        let mut shape_match_found = true;
+        if (self.lde_size_check || self.maximal_shapes.is_some())
+            && self.state.global_clk.is_multiple_of(SHAPE_SEARCH_CHECK_FREQUENCY)
+        {
+            let event_counts = self.split_acct.event_counts(cpu_cycles);
 
             // Check if the LDE size is too large.
             if self.lde_size_check {
                 let padded_event_counts =
-                    pad_mips_event_counts(event_counts, self.shape_check_frequency);
+                    pad_mips_event_counts(event_counts, SHAPE_SEARCH_CHECK_FREQUENCY);
                 let padded_lde_size = estimate_mips_lde_size(padded_event_counts, &self.costs);
                 if padded_lde_size > self.lde_size_threshold {
                     tracing::warn!(
@@ -3445,7 +3421,7 @@ impl<'a> Executor<'a> {
                         continue;
                     }
 
-                    if l_infinity >= 32 * (self.shape_check_frequency as usize) {
+                    if l_infinity >= 32 * (SHAPE_SEARCH_CHECK_FREQUENCY as usize) {
                         shape_match_found = true;
                         break;
                     }
