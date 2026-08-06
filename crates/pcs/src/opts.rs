@@ -3,6 +3,13 @@ use std::env;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
+/// Cycle budget used by [`ZKMCoreOpts::max`] ONLY — NOT the core prove path.
+///
+/// Despite the name this does not cap anything the core prover sees: the core path takes
+/// [`ZKMCoreOpts::default`], whose `shard_size` defaults to `1 << 24` (and is inert anyway —
+/// see the note there). `max()` is reached only via [`ZKMCoreOpts::recursion`] (which then
+/// overwrites `shard_size` with `RECURSION_MAX_SHARD_SIZE`) and via direct `max()` callers.
+/// Two constants that look like they cap the same thing and do not.
 const MAX_SHARD_SIZE: usize = 1 << 21;
 const RECURSION_MAX_SHARD_SIZE: usize = 1 << 21;
 const MAX_SHARD_BATCH_SIZE: usize = 8;
