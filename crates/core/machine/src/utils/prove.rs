@@ -496,6 +496,9 @@ where
                                         }
                                     }
                                 }
+                                // Diagnostic shape dump — see the `[B]` site below for the
+                                // FIX_CORE_SHAPES caveat: without it `record.shape` is `None`
+                                // and every line reads `shape: []`.
                                 if std::env::var("DUMP_SHARD_SHAPES").is_ok() && fixed_shape {
                                     use std::io::Write;
                                     let mut f = std::fs::OpenOptions::new()
@@ -584,6 +587,15 @@ where
                                 }
                                 // Diagnostic: dump per-shard shape to /tmp for diff'ing
                                 // across runs to find non-determinism in shape selection.
+                                //
+                                // ONLY MEANINGFUL WITH `FIX_CORE_SHAPES=true`.  `record.shape`
+                                // is populated exclusively by `shape_config.fix_shape` above,
+                                // and `shape_config` is `prover.core_shape_config`, which is
+                                // `None` unless `FIX_CORE_SHAPES=true` (see
+                                // `zkm_prover::ZKMProver::uninitialized`).  Under the
+                                // production default (FIX-off) every line therefore reads
+                                // `shape: []` and only the LINE COUNT (= shard count) carries
+                                // information.
                                 if std::env::var("DUMP_SHARD_SHAPES").is_ok() {
                                     use std::io::Write;
                                     let path = "/tmp/shard_shapes.log";

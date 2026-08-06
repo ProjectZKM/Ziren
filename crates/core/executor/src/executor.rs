@@ -47,8 +47,8 @@ pub const DEFAULT_PC_INC: u32 = 4;
 /// A valid pc should be divisible by 4, so we use 1 to indicate that the pc is not used.
 pub const UNUSED_PC: u32 = 1;
 
-/// A valid core shard must satisfy TWO hard bounds, both of which the default `SHARD_SIZE`
-/// (a cycle budget) happens to respect but a larger one does not:
+/// A valid core shard must satisfy TWO hard bounds that the `SHARD_SIZE` cycle budget does
+/// NOT imply at its current default:
 ///
 ///  1. Every chip's trace height must fit the recursion's per-chip cube cap
 ///     `2^CORE_MAX_LOG_ROW_COUNT` — see [`CORE_SHARD_HEIGHT_THRESHOLD`].
@@ -57,10 +57,14 @@ pub const UNUSED_PC: u32 = 1;
 ///     `crates/core/machine/src/cpu/air/mod.rs::eval_shard_clk` and `verify_mem_access_ts`.
 ///     See [`CORE_SHARD_CLK_24BIT_LIMIT`].
 ///
-/// The default `SHARD_SIZE = 2^22` cycles closes a shard at `clk >= shard_size * 4 = 2^24`,
-/// i.e. it is calibrated so bound (2) holds; at that size bound (1) also holds naturally
-/// (`clk < 2^24` ⇒ `< ~2^24/5` CPU rows `< 2^22`). A larger `SHARD_SIZE` lifts the cycle exit
-/// past both bounds, so we enforce them directly here.
+/// `SHARD_SIZE` is stored as `cycles * 4` and the cycle exit fires at `clk >= 4 * SHARD_SIZE`,
+/// so a `SHARD_SIZE` of exactly `2^22` would coincide with bound (2). The default is `1 << 24`
+/// (`zkm_pcs::opts::ZKMCoreOpts::default`), i.e. 4x ABOVE that wall, so the cycle exit is
+/// unreachable and bounds (1)/(2) must be — and are — enforced directly here. Because
+/// `clk += 5` per instruction, bound (2) caps any shard at `2^24 / 5 ≈ 3.355 M` cycles no
+/// matter what `SHARD_SIZE` says. In practice neither fires first: 100% of measured core
+/// splits on reth / tendermint / goat are `ELEMENT_THRESHOLD` (trace-area) splits — see
+/// `zkm_pcs::opts::ELEMENT_THRESHOLD`.
 const CORE_MAX_LOG_ROW_COUNT: usize = zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
 /// The per-chip height at which the executor forces a new core shard, mirroring SP1's
@@ -80,8 +84,12 @@ const CORE_SHARD_HEIGHT_THRESHOLD: u64 = (1 << CORE_MAX_LOG_ROW_COUNT) - CORE_SH
 /// The `clk` (timestamp) ceiling for a single core shard: the CPU AIR range-checks `clk` to 24
 /// bits, so it must stay below `2^24`. Enforced alongside the cycle budget so a large
 /// `SHARD_SIZE` cannot push a shard's `clk` past the range check (which would break the
-/// memory-access timestamp argument and fail the shard verifier). Equal to the default
-/// `SHARD_SIZE=2^22`'s cycle exit (`shard_size * 4`), so it is a no-op at the default size.
+/// memory-access timestamp argument and fail the shard verifier).
+///
+/// This is the REAL structural ceiling on a core shard, not `SHARD_SIZE`: at the `1 << 24`
+/// default the cycle exit sits 4x above this limit, so `SHARD_SIZE` is inert and this fence
+/// (`clk < 2^24`, i.e. `2^24 / 5 ≈ 3.355 M` cycles at `clk += 5` per instruction) is what
+/// bounds a shard from above. `ELEMENT_THRESHOLD` closes shards well before either.
 const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
 
 /// Per-shard split-reason profiler (`ZIREN_SPLIT_PROF=1`, default OFF).
@@ -237,6 +245,10 @@ pub struct Executor<'a> {
     pub hook_registry: HookRegistry<'a>,
 
     /// The maximal shapes for the program.
+    ///
+    /// `None` on the production prove path — it is set from
+    /// `prover.core_shape_config`, which requires `FIX_CORE_SHAPES=true`. See the
+    /// `shape_match_found` note in `inc_shard_if_need`.
     pub maximal_shapes: Option<MaximalShapes>,
 
     /// The costs of the program.
@@ -246,9 +258,15 @@ pub struct Executor<'a> {
     pub shape_check_frequency: u64,
 
     /// Early exit if the estimate LDE size is too big.
+    ///
+    /// `false` everywhere except the offline `find_maximal_shapes` script.
     pub lde_size_check: bool,
 
     /// The maximum LDE size to allow.
+    ///
+    /// Defaults to `0`, so [`Self::lde_size_check`] must never be enabled without
+    /// also setting this — otherwise `padded_lde_size > 0` holds on every check and
+    /// the executor closes a shard at every `shape_check_frequency` boundary.
     pub lde_size_threshold: u64,
 
     /// optional MinimalTrace collector. When `Some`,
@@ -3292,14 +3310,22 @@ impl<'a> Executor<'a> {
         let cpu_exit = self.max_syscall_cycles + self.state.clk >= self.shard_size;
 
         // Hard timestamp bound: keep every shard's `clk` within the CPU AIR's 24-bit range
-        // check (`clk < 2^24`) regardless of `SHARD_SIZE`. The cycle exit above only enforces
-        // this at the default `SHARD_SIZE=2^22` (where `shard_size == 2^24`); a larger cycle
-        // budget would otherwise let `clk` run past the range check and fail verification.
+        // check (`clk < 2^24`) regardless of `SHARD_SIZE`. The cycle exit above would only
+        // enforce this at `SHARD_SIZE == 2^22` (where `shard_size == 2^24`); the default is
+        // `1 << 24`, so without this check `clk` would run past the range check and fail
+        // verification.
         let clk_exit = self.max_syscall_cycles + self.state.clk >= CORE_SHARD_CLK_24BIT_LIMIT;
 
         // Every N cycles, check if there exists at least one shape that fits.
         //
         // If we're close to not fitting, early stop the shard to ensure we don't OOM.
+        //
+        // INERT ON THE PRODUCTION PROVE PATH.  `shape_match_found` can only go false inside
+        // the `lde_size_check` / `maximal_shapes` block below, and BOTH inputs are off by
+        // default: `lde_size_check` is `false` (set true only by the offline
+        // `find_maximal_shapes` script) and `maximal_shapes` is `None` (it is
+        // `prover.core_shape_config`, which needs `FIX_CORE_SHAPES=true`).  Kept because
+        // FIX-on and the shape-search tooling are both still selectable.
         let mut shape_match_found = true;
         // Height-based shard split (mirrors SP1's `ShapeChecker::check_shard_limit` height
         // branch, sp1 crates/core/executor/src/vm/shapes.rs:240): start a new shard as soon
@@ -3307,6 +3333,15 @@ impl<'a> Executor<'a> {
         // ever exceeds `2^CORE_MAX_LOG_ROW_COUNT` rows no matter how large `SHARD_SIZE`
         // (a cycle budget) is. This keeps every split shard inside the base-cube recursion's
         // fixed per-chip height, so recursion / vk_map / the gnark ceremony are untouched.
+        //
+        // UNLIKE `shape_match_found` above, this is LIVE, ungated code — it just never trips
+        // on today's workloads, which is not the same thing as being dead. MEASURED via
+        // `ZIREN_SPLIT_PROF=1`'s `maxh` field at `SHARD_SIZE=4194305`,
+        // `SHAPE_CHECK_FREQUENCY=1024`: goat peaks at 2,216,960 and tendermint at 2,491,392
+        // against a `CORE_SHARD_HEIGHT_THRESHOLD` of 4,128,768 — 0.54x and 0.60x of the cap,
+        // i.e. only ~1.7x of headroom. Raising `ELEMENT_THRESHOLD` (which is what lets a
+        // shard accumulate more rows; it is the limit that closes 100% of real splits) walks
+        // straight at this fence, so do not treat it as slack.
         let mut height_split = false;
         // Per-shard trace-AREA split (mirrors SP1's `ShapeChecker::check_shard_limit` element
         // branch, sp1 crates/core/executor/src/vm/shapes.rs:242 `trace_area >= element_threshold`).
