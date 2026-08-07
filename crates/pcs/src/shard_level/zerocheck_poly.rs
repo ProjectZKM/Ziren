@@ -70,15 +70,36 @@ use crate::Chip;
 
 // ───────────────────────── serial sumcheck driver ────────────────────────
 //
-// A `Send + Sync`-free reduction over `ZeroCheckPoly`s (which borrow the
-// chip and so are not `Sync` without an `A: Sync` bound that would
-// cascade through the whole prover trait stack).  This is a faithful
-// copy of `sumcheck_poly::reduce_sumcheck_to_evaluation`'s body — same
-// `point.insert(0, alpha)` front-build, same per-coefficient base-field
-// observation, same `claimed_sum = λ-RLC(claims)` — so the proof it
-// emits is replayed identically by `verify_sumcheck_host`.  The polys
-// are reduced sequentially (the original is also sequential over polys;
-// the rayon parallelism lives inside each poly's `sum_as_poly`).
+// A reduction over `ZeroCheckPoly`s that maps the CHIP axis serially.  This
+// is a faithful copy of `sumcheck_poly::reduce_sumcheck_to_evaluation`'s body
+// — same `point.insert(0, alpha)` front-build, same per-coefficient
+// base-field observation, same `claimed_sum = λ-RLC(claims)` — so the proof
+// it emits is replayed identically by `verify_sumcheck_host`.  The rayon
+// parallelism lives INSIDE each poly: `sum_as_poly`'s per-pair
+// `(0..num_pairs).into_par_iter()` and `fold_cells`'s `par_chunks_mut`.
+// That is SP1's shape too — `slop` `reduce_sumcheck_to_evaluation`
+// (`slop/crates/sumcheck/src/prover.rs`) maps its chip axis serially and puts
+// all of its parallelism inside the poly (`mle.rs` `par_iter().step_by(2)`,
+// `hypercube::prover::zerocheck::sum_as_poly` `par_bridge` over pair chunks).
+//
+// This comment used to say the serial map was FORCED, because the poly
+// "borrows the chip and so is not `Sync` without an `A: Sync` bound that
+// would cascade through the whole prover trait stack".  That is FALSE and
+// should not be repeated: `MachineAir<F>: BaseAir<F> + 'static + Send + Sync`
+// (`air/machine.rs`), so `Chip<F, A>` — `{air: A, sends/receives:
+// Vec<Lookup<F>>, usize}` — is already `Sync` under the `A: MachineAir<F>`
+// bound this poly has always carried, and every other `ZeroCheckPoly` field
+// is a `Vec`, a `&[F]` or a scalar.  Adding
+// `P: SumcheckPolyFirstRound<EF> + Send + Sync` plus
+// `P::NextRoundPoly: Send + Sync` below compiles with ZERO new bounds
+// anywhere else (verified); SP1 declares exactly that bound on its own
+// driver.  The map is serial because parallelising it does not pay, not
+// because it cannot be parallelised — MEASURED on the GPU twin of this
+// function (ziren-gpu `reduce_gpu_zerocheck_serial`), where the chip-axis
+// `into_par_iter()` engaged 100% and cost 12% of reth core throughput: the
+// per-chip fold is ~20 µs, far below rayon's profitable task granularity, so
+// dispatch latency swamped it and the injected tasks displaced the trace
+// generation sharing the pool.
 
 #[inline]
 fn observe_ext<F, EF, Challenger>(challenger: &mut Challenger, v: EF)
