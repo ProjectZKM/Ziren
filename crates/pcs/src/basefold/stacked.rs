@@ -58,6 +58,92 @@ pub enum StackedVerifierError {
     IncorrectShape,
 }
 
+/// Exact inverse of [`interleave_multilinears_with_fixed_rate`] for the
+/// single width-1 input the jagged PCS commits: rebuild the flat dense
+/// vector from the STRIPED multilinears the commit already retained on
+/// [`StackedBasefoldProverData::interleaved_mles`].
+///
+/// SP1 parity: `JaggedProver::prove_trusted_evaluations`
+/// (`slop/crates/jagged/src/prover.rs`) feeds its jagged sumcheck the same
+/// `pcs_prover_data.interleaved_mles()` the commit produced and then moves the
+/// same `pcs_prover_data` into the open — the dense representation is built
+/// ONCE per round.  This helper is the Ziren analogue: it lets the step-4
+/// reduction read the committed data instead of re-deriving it from the chip
+/// traces.
+///
+/// Layout inverted (see `interleave_multilinears_with_fixed_rate`): stripe `s`
+/// is stored `[height = stack_height, width = batch]` row-major, and was built
+/// from `elements[c * height + r] = stripe[r * width + c]` where `elements`
+/// occupied `dense[base .. base + width * height]`.  So the walk below writes
+/// each destination column contiguously.
+///
+/// # Panics
+/// If the stripes do not cover `dense_len` cells.  That is the load-bearing
+/// guard: the ziren-gpu device commit deliberately stores **width-only
+/// placeholder** stripes (`vec![ZERO; bwidth]`, i.e. height 1) when it keeps
+/// the real stripes device-resident, and reconstructing from those would
+/// silently yield a zero dense polynomial.  A short cover is therefore a hard
+/// error, never a fallback.
+pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
+    interleaved: &[Arc<Mle<F>>],
+    dense_len: usize,
+) -> Vec<F> {
+    use p3_maybe_rayon::prelude::*;
+
+    let covered: usize = interleaved.iter().map(|m| m.guts().as_slice().len()).sum();
+    assert!(
+        covered >= dense_len,
+        "dense_from_interleaved_mles: committed stripes cover {covered} cells but the dense \
+         polynomial needs {dense_len} — the stripes are placeholders (device-resident commit), \
+         not the committed data",
+    );
+
+    // FLAKE FIX: see round.rs note about KoalaBear u32 serde — safe zero init.
+    let mut out: Vec<F> = vec![F::ZERO; dense_len];
+    let mut base = 0usize;
+    for mle in interleaved {
+        if base >= dense_len {
+            break;
+        }
+        let width = mle.num_polynomials();
+        let vals = mle.guts().as_slice();
+        if width == 0 || vals.is_empty() {
+            continue;
+        }
+        let height = vals.len() / width;
+        // The final stripe is zero-padded past `dense_len`; clip it.
+        let span = (width * height).min(dense_len - base);
+
+        // ROW-BLOCKED transpose.  The naive "one parallel task per output
+        // column" walk re-streams the whole `width`-column stripe once per
+        // column, and a 64-byte line holds 16 consecutive `vals` belonging to
+        // 16 DIFFERENT columns — so with a stripe far larger than LLC the
+        // source is pulled from DRAM ~`width/threads` times.  Blocking the row
+        // axis so every task works inside the same `ROW_BLOCK × width` window
+        // (a few MiB, LLC-resident) pulls each source line once and serves the
+        // remaining columns from cache.  Blocks are sequential and each task
+        // owns one column slice, so no aliasing and no `unsafe`.
+        const ROW_BLOCK: usize = 1 << 15;
+        let mut cols: Vec<&mut [F]> = out[base..base + span].chunks_mut(height).collect();
+        let mut r0 = 0usize;
+        while r0 < height {
+            let r1 = (r0 + ROW_BLOCK).min(height);
+            let block = &vals[r0 * width..r1 * width];
+            cols.par_iter_mut().enumerate().for_each(|(c, col)| {
+                // The clipped final stripe can leave a short trailing column.
+                let hi = r1.min(col.len());
+                for r in r0..hi {
+                    col[r] = block[(r - r0) * width + c];
+                }
+            });
+            r0 = r1;
+        }
+        base += span;
+    }
+    debug_assert_eq!(base, dense_len);
+    out
+}
+
 /// Layout helper: walk a stream of MLEs and pack their values into
 /// fixed-size `[batch_size, 1 << log_stacking_height]` stripes.
 ///

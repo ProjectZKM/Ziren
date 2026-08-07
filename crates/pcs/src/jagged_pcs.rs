@@ -1787,40 +1787,13 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // (4) Re-materialize dense_q for the sumcheck reduction, then
-        // drop it immediately after.  This is the counterpart of the
-        // move-into-commit optimization in step (2): the two 4N
-        // buffers never coexist.
-        //
-        // Use the `_owned` variant so the inner loop can drop dense_q
-        // after round 0 (releasing the 4N base-field buffer before the
-        // EF tables for rounds 1..n are built).  Saves one full N-element
-        // clone vs the &[InnerVal] entry point.
-        // dispatch: when a GPU jagged-reduction hook has been registered
-        // (by ziren-gpu's `compress_multi_gpu` startup block; the hook is
-        // `Some` only on the GPU prover), route the reduction through the
-        // device hook.  The hook is byte-equivalent to
-        // `prove_jagged_reduction_owned` (verified by the existing
-        // host fallback path + the GPU-side scaffold tests in
-        // `ziren-gpu/basefold/src/jagged_sumcheck.rs::tests`).  When
-        // the hook returns `None` (unsupported shape) or is not
-        // registered, the host fallback path runs unchanged.
-        //
-        // Hook hardening / diagnostics:
-        //   * V2 hook (with optional device handle) preferred over V1
-        //   * shape-rejection counter — log on each Nth (geometric) None
-        //   * V2 hook with `Some(device_handle)` is logged separately to
-        //     confirm the device-resident path is exercised
-        //
-        // Device-resident dense_q signature:
-        // when a V2 hook is registered, the dispatch passes
-        // `device_handle = None` (Ziren has no on-device dense_q yet —
-        // the host materialization at line ~1413 is the source).  V2
-        // semantics with `None` collapse to V1 behaviour; the signature
-        // is in place for future Ziren-side wiring (e.g. GPU-resident
-        // chip-trace materialization) to skip the H→D upload.
-        // ── The jagged reduction (drop-LDEs pre-free + hook dispatch +
-        // post-free) packaged as the `reduce` closure threaded through
+        // (4) Rebuild dense_q for the sumcheck reduction from the STRIPES the
+        // commit retained, then drop it immediately after.  Uses the `_owned`
+        // reduction entry point so the inner loop can drop dense_q after round
+        // 0 (releasing the 4N base-field buffer before the EF tables for rounds
+        // 1..n are built) — saves one full N-element clone vs the `&[InnerVal]`
+        // entry point.
+        // ── The jagged reduction packaged as the `reduce` closure threaded through
         // the shared `prove_jagged_basefold_linear_core`.  The core samples
         // `z_col` at the SP1 transcript position (after the commit observe,
         // immediately before the reduction) and passes it in.  This closure
@@ -1829,6 +1802,11 @@ pub mod jagged {
         // the whole point of the de-dup.  Non-`move`: every capture (packing /
         // y_per_chip / chip_traces / provider / r_row_per_chip / z_row /
         // n_chips) is read by reference.
+        // SP1 parity (`slop/crates/jagged/src/prover.rs`): take a CHEAP
+        // `Arc`-clone handle on the stripes the commit already produced, use it
+        // for the sumcheck, then move the same `prover_data` into the open.
+        // `Vec<Arc<Mle>>` clone == SP1's `Message<Mle>` clone: pointer-only.
+        let interleaved = prover_data.stacked_data.interleaved_mles.clone();
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
@@ -1847,10 +1825,21 @@ pub mod jagged {
             // reduce/open kernels directly.  Byte-identical to the former
             // `is_device()==false` host arm (device carrier / decline
             // fallback scaffolding was dead on the CPU prover).
-            let dense_q = materialize_dense_jagged::<InnerVal>(
-                chip_traces,
-                packing.log_dense_size,
-                dense_rev,
+            // SP1 shape: the dense representation is built ONCE per round, at
+            // commit time, and the SAME data feeds both the jagged sumcheck and
+            // the open — `prove_trusted_evaluations` takes
+            // `pcs_prover_data.interleaved_mles()` for the sumcheck poly and
+            // then moves the same `pcs_prover_data` into
+            // `prove_untrusted_evaluation`.  Ziren used to re-derive `dense_q`
+            // from `chip_traces` here, a SECOND full pass over the same cells
+            // (measured 0.70 s/shard at `log_dense_size = 28`, i.e. 2^28 cells
+            // = 1 GiB, on 16 threads).  Rebuild it from the stripes the commit
+            // already retained instead; `dense_from_interleaved_mles` is the
+            // exact inverse of the width-1 interleave, so this is byte-identical
+            // — and it drops the reduction's last dependency on `chip_traces`.
+            let dense_q = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
+                &interleaved,
+                1usize << packing.log_dense_size,
             );
             crate::jagged_sumcheck::prove_jagged_reduction_owned(
                 dense_q,
@@ -1866,6 +1855,12 @@ pub mod jagged {
         tracing::info!(
             elapsed_ms = _t_red.elapsed().as_millis() as u64,
             chips = n_chips,
+            // ENGAGEMENT COUNTER for the committed-stripe rebuild above.  A
+            // non-zero `dense_stripes` on every shard is the proof that the
+            // reduction really read the commit's `interleaved_mles` and did not
+            // silently fall back — the failure mode a byte gate cannot see,
+            // because any correct dense_q source produces identical bytes.
+            dense_stripes = interleaved.len() as u64,
             sub_phase = "sumcheck_reduce",
             "jagged sub-phase done"
         );
