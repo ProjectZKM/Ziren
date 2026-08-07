@@ -177,11 +177,27 @@ pub fn build_mips_machine_shape() -> MachineShape {
     //     sponge Control twins) — not core + family.
     let main_exec = extend_cluster(&core_base, &["Global"]);
     let memory_min = extend_cluster(&preprocessed, memory_cluster_extras());
+    // A memory shard carries ONLY the global-memory chips that actually have
+    // events, and init/finalize are emitted in DIFFERENT shards once the run
+    // needs more than one memory shard.  Under FIX-off there is no cluster
+    // padding, so such a shard commits a chip set that is a strict SUBSET of
+    // `memory_min` — measured on a 9-shard goat chain, which produces a
+    // `{Byte, Global, MemoryGlobalFinalize, Program}` shard with no
+    // `MemoryGlobalInit` and whose normalize vk was therefore absent from the
+    // enumerated map ("vk not allowed" at compress).  Enumerate both halves.
+    let memory_finalize_only = extend_cluster(&preprocessed, &["MemoryGlobalFinalize", "Global"]);
+    let memory_init_only = extend_cluster(&preprocessed, &["MemoryGlobalInit", "Global"]);
     let precompile_base =
         extend_cluster(&preprocessed, &["Global", "MemoryLocal", "SyscallPrecompile"]);
 
-    let mut clusters: Vec<BTreeSet<String>> =
-        vec![core_base.clone(), main_exec, memory.clone(), memory_min];
+    let mut clusters: Vec<BTreeSet<String>> = vec![
+        core_base.clone(),
+        main_exec,
+        memory.clone(),
+        memory_min,
+        memory_finalize_only,
+        memory_init_only,
+    ];
     for (_, extras) in precompile_families() {
         // Single-shard union (legacy) + the minimal precompile shard.
         clusters.push(extend_cluster(&memory, extras));
@@ -302,25 +318,50 @@ mod tests {
     fn machine_shape_has_expected_cluster_count() {
         let ms = build_mips_machine_shape();
         // Cluster structure (see `build_mips_machine_shape`):
-        //   4 BASE clusters:
+        //   6 BASE clusters:
         //     core_base, main_exec (=core+Global), memory (=core+memory
-        //     extras), memory_min (=preprocessed+memory extras, NO core)
+        //     extras), memory_min (=preprocessed+memory extras, NO core),
+        //     and the two SPLIT memory shards (finalize-only / init-only)
         //   2 per precompile family:
         //     core-union (=memory ∪ family) + minimal precompile shard
         //     (=precompile_base ∪ family).
         // Derive the expectation from the live family list so adding a
         // precompile family updates the bound automatically.
-        let expected = 4 + 2 * precompile_families().len();
+        let expected = 6 + 2 * precompile_families().len();
         assert_eq!(
             ms.chip_clusters.len(),
             expected,
-            "cluster count drifted from 4 base + 2×{} families",
+            "cluster count drifted from 6 base + 2×{} families",
             precompile_families().len(),
         );
         // Sanity-pin the current value so an accidental base-cluster
         // change is caught even if a family is added/removed at the
         // same time.
-        assert_eq!(ms.chip_clusters.len(), 26);
+        assert_eq!(ms.chip_clusters.len(), 28);
+    }
+
+    /// A multi-shard run emits global-memory INIT and FINALIZE events in
+    /// DIFFERENT shards, and under FIX-off a shard commits ONLY the chips that
+    /// actually have rows.  So a memory shard can carry `MemoryGlobalFinalize`
+    /// without `MemoryGlobalInit` (measured on a 9-shard goat chain) — a chip
+    /// set that is a strict SUBSET of `memory_min`.  Both halves must be
+    /// enumerated or the shard's normalize vk can never be in `vk_map.bin`
+    /// ("vk not allowed" at compress under `VERIFY_VK=true`).
+    #[test]
+    fn machine_shape_covers_split_memory_shards() {
+        let ms = build_mips_machine_shape();
+        let prep = set_from(preprocessed_chips());
+        for (label, only) in
+            [("finalize-only", "MemoryGlobalFinalize"), ("init-only", "MemoryGlobalInit")]
+        {
+            let mut want = prep.clone();
+            want.insert("Global".to_string());
+            want.insert(only.to_string());
+            assert!(
+                ms.chip_clusters.iter().any(|c| *c == want),
+                "no cluster for the {label} memory shard {want:?}"
+            );
+        }
     }
 
     #[test]
@@ -352,9 +393,9 @@ mod tests {
         let cpu_free =
             ms.chip_clusters.iter().filter(|c| !c.contains("Cpu")).count();
 
-        // Cpu-free = memory_min (1) + one minimal precompile shard per
-        // family (precompile_base ∪ family).
-        let expected_cpu_free = 1 + precompile_families().len();
+        // Cpu-free = memory_min + the two SPLIT memory shards (3) + one
+        // minimal precompile shard per family (precompile_base ∪ family).
+        let expected_cpu_free = 3 + precompile_families().len();
         assert_eq!(
             cpu_free, expected_cpu_free,
             "Cpu-free clusters (minimal memory/precompile shard types) drifted"
@@ -380,7 +421,7 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // SP1-style consecutive-integer enumeration over the 26-cluster
+        // SP1-style consecutive-integer enumeration over the 28-cluster
         // model: per cluster the inner loops are
         //   prep_mult(1..=MAX_AREA_MULTIPLE) ×
         //   main_mult(1..=MAX_AREA_MULTIPLE) ×
@@ -399,7 +440,7 @@ mod tests {
         );
         // Pin the concrete current value so a silent cluster/area regression
         // (e.g. a cluster dropped, or a max-main cap re-introduced) is caught.
-        assert_eq!(shapes.len(), 93_600, "expected 26 clusters × 12 × 12 × 5 × 5");
+        assert_eq!(shapes.len(), 100_800, "expected 28 clusters × 12 × 12 × 5 × 5");
         assert!(shapes.len() >= 100, "shape count {} too small — missing clusters?", shapes.len());
     }
 
