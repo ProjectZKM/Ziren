@@ -81,13 +81,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                         ],
                     },
                     opened_values: ShardOpenedValues { chips: vec![] },
-                    opening_proof: FriProof {
-                        commit_phase_commits: vec![],
-                        commit_pow_witnesses: vec![],
-                        query_proofs: vec![],
-                        final_poly: vec![Default::default()],
-                        query_pow_witness: KoalaBear::ZERO,
-                    },
                     chip_ordering: HashMap::new(),
                     public_values: vec![],
                     basefold_shard_proof: None,

@@ -23,9 +23,9 @@ use zkm_pcs::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingK
 
 use crate::{
     challenger::CanObserveVariable,
-    fri::{dummy_commit, dummy_pcs_proof, PolynomialBatchShape, PolynomialShape},
+    fri::dummy_commit,
     hash::FieldHasherVariable,
-    CircuitConfig, FriProofVariable, KoalaBearFriParameters,
+    CircuitConfig, KoalaBearFriParameters,
 };
 
 use crate::{
@@ -39,7 +39,6 @@ pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriPar
     pub commitment: ShardCommitment<SC::DigestVariable>,
     #[allow(clippy::type_complexity)]
     pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-    pub opening_proof: FriProofVariable<C, SC>,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Felt<C::F>>,
     /// Fixed-size fingerprint of the jagged-PCS opening proof
@@ -71,7 +70,6 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 /// `ShardProof` carries:
 ///   - `commitment.auxiliary_commits = vec![]` (no perm + quotient commits)
 ///   - `opened_values` with empty `permutation`/`quotient` fields
-///   - `opening_proof` from the basefold-mode FRI sub-proof (prep + main only)
 ///   - `basefold_shard_proof: Some(_)` populated with the dummy
 ///     basefold shard proof from `dummy_basefold_vk_and_shard_proof`.
 ///
@@ -86,9 +84,9 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 ///
 /// # Status (scaffold)
 ///
-/// The opening_proof + opened_values FRI placeholders are minimal
-/// (empty perm/quotient, opening_proof from a small pcs.open call
-/// mirroring the prover branch).  Cryptographic soundness of the
+/// The `opened_values` FRI placeholders are minimal (empty
+/// perm/quotient), mirroring the prover branch.  Cryptographic
+/// soundness of the
 /// dummy isn't required — consumers (`program_from_shape`) only
 /// care about the witness-stream shape, which is driven by
 /// chip_ordering + chip_cumulative_sums in the basefold sub-proof.
@@ -163,35 +161,6 @@ where
             .collect(),
     };
 
-    // FRI opening_proof — minimal placeholder.  The basefold path
-    // still calls `pcs.open` for prep + main (no perm/quotient),
-    // producing a 2-batch FRI proof.  For the dummy we emit a
-    // 2-batch shape via `dummy_pcs_proof` (preprocessed + main only).
-    let mut preprocessed_batch_shape = vec![];
-    let mut main_batch_shape = vec![];
-    for chip_opening in opened_values.chips.iter() {
-        if !chip_opening.preprocessed.local.is_empty() {
-            preprocessed_batch_shape.push(PolynomialShape {
-                width: chip_opening.preprocessed.local.len(),
-                log_degree: chip_opening.log_degree,
-            });
-        }
-        main_batch_shape.push(PolynomialShape {
-            width: chip_opening.main.local.len(),
-            log_degree: chip_opening.log_degree,
-        });
-    }
-    let mut batch_shapes = Vec::with_capacity(2);
-    if !preprocessed_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: preprocessed_batch_shape });
-    }
-    if !main_batch_shape.is_empty() {
-        batch_shapes.push(PolynomialBatchShape { shapes: main_batch_shape });
-    }
-    let fri_queries = machine.config().fri_config().num_queries;
-    let log_blowup = machine.config().fri_config().log_blowup;
-    let opening_proof = dummy_pcs_proof(fri_queries, &batch_shapes, log_blowup);
-
     let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| KoalaBear::ZERO).collect::<Vec<_>>();
 
     let shard_proof = ShardProof {
@@ -200,7 +169,6 @@ where
             auxiliary_commits: Vec::new(),
         },
         opened_values,
-        opening_proof,
         chip_ordering,
         public_values,
         basefold_shard_proof: Some(Box::new(basefold_proof)),

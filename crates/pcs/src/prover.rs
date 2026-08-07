@@ -671,7 +671,11 @@ where
     >: Send + Sync + 'static,
 {
     type DeviceMatrix = RowMajorMatrix<Val<SC>>;
-    type DeviceProverData = PcsProverData<SC>;
+    // The BaseFold path has no host-side univariate commit, so there is no
+    // prover data to carry between `commit()` and `open()`.  The single real
+    // main-trace commitment is the jagged-PCS commit built inside
+    // `prove_shard_to_basefold`, which owns its own prover state.
+    type DeviceProverData = ();
     type DeviceProvingKey = StarkProvingKey<SC>;
     type Error = CpuProverError;
 
@@ -757,16 +761,14 @@ where
 
         // INLINE single commit (SP1 / GPU parity): the ONE real main-trace
         // commitment is the BaseFold jagged-PCS commit produced LAZILY in
-        // `open()` -> `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`
-        // (which observes its 8-felt digest as `main_commitment`).  Here we only
-        // need a placeholder `main_commit` / `main_data`, produced by committing a
-        // single 1x1 dummy trace (microseconds) — EXACTLY the GPU `drop_fri_commit`
-        // single-commit path.  `open()`'s placeholder `pcs.open` runs against this
-        // `main_data`; the BaseFold verifier short-circuits before `pcs.verify`.
-        let dummy_trace: RowMajorMatrix<Val<SC>> =
-            RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
-        let dummy_domain = pcs.natural_domain_for_degree(1);
-        let (main_commit, main_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+        // `open()` -> `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`,
+        // which observes its own 8-felt digest as `main_commitment` inside
+        // `BasefoldShardProof`.  Nothing here commits anything: `main_commit` is
+        // the config's constant zero commitment, carried only so the legacy
+        // `ShardProof.commitment` envelope stays populated (no verifier, recursion
+        // circuit or Groth16 consumer reads it — the BaseFold verifier reads
+        // `basefold_shard_proof.main_commitment`).
+        let main_commit = crate::config::ZeroCommitment::<SC>::zero_commitment(pcs);
 
         // Get the chip ordering (name-order, matching the commit + the recursion
         // `opened_values.chips` BTreeMap order).
@@ -784,7 +786,7 @@ where
         ShardMainData {
             traces,
             main_commit,
-            main_data,
+            main_data: (),
             chip_ordering,
             public_values: record.public_values(),
             // Record the per-shard rev(zeta)
@@ -976,54 +978,17 @@ where
                     challenger,
                 );
 
-            // No quotient commit to observe (skipped).
-            // Sample zeta (evaluation point) for the legacy prep/main
-            // opening fields that are still carried in the shard-proof
-            // envelope.  Permutation and quotient are intentionally
-            // absent in the BaseFold path.
-            let _zeta: SC::Challenge =
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                );
-
-            // === Single-main-commit: placeholder pcs.open ===
-            //
-            // The basefold verifier dispatches via
-            // `basefold_shard_proof.is_some()` at the top of
-            // `Verifier::verify_shard` and never calls `pcs.verify` on
-            // the legacy FRI fields.  We run a *minimal* placeholder
-            // `pcs.open` on a single 1×1 dummy point against the
-            // placeholder `main_data` produced by
-            // `commit_basefold_path` so the existing
-            // `ShardProof.opening_proof: OpeningProof<SC>` shape stays
-            // valid (a real `FriProof` value with empty FRI work).
-            //
-            // COST — the "empty FRI work" framing is misleading, and the
-            // former "cost is microseconds" claim here was WRONG.  The
-            // commit phase does collapse to zero rounds (at height 2 with
-            // log_blowup=1 the `while folded.len() > blowup*final_poly_len`
-            // loop never runs), and the 84 query openings are read-only.  But
-            // `p3_fri::prove` still runs the config's 16-bit
-            // `query_proof_of_work_bits` grind unconditionally, and that grind
-            // dominates: MEASURED at 40.57 ms/shard (nsys+NVTX, tendermint
-            // core, ziren-gpu `core_multi_gpu.rs`), ~4.7% of core wall, with
-            // the accelerator idle throughout.  ziren-gpu routes it to a
-            // device kernel via `DeviceGrindChallenger`; THIS CpuProver path
-            // has no such mitigation and pays the full host grind per shard.
-            // The emitted proof also carries ~6.4 KB/shard of query openings
-            // that nothing ever reads.
-            //
-            // Removing it does NOT require making `opening_proof` an
-            // `Option` — an all-empty `FriProof` is already constructed for
-            // this same field in `sdk/src/provers/mock.rs` and in ziren-gpu's
-            // `shard-prover`.  The real cost of removal is re-baselining the
-            // CPU/GPU byte-identity goldens, not a type or VK change.
-            let main_trace_opening_points_placeholder: Vec<Vec<SC::Challenge>> =
-                vec![vec![_zeta]];
-            let (_openings_unused, opening_proof) = pcs.open(
-                vec![(&data.main_data, main_trace_opening_points_placeholder)],
-                challenger,
-            );
+            // No quotient commit to observe (skipped), and no `zeta` to sample:
+            // the BaseFold path opens nothing here.  SP1's `ShardProof`
+            // (hypercube/src/verifier/proof.rs) carries exactly one PCS proof
+            // field — the real jagged evaluation proof — and no legacy
+            // univariate opening slot, so there is nothing left for a
+            // placeholder `pcs.open` to populate.  It used to run against a
+            // committed 1x1 dummy trace purely to keep an
+            // `opening_proof: OpeningProof<SC>` field type-valid; that cost an
+            // unconditional 16-bit `query_proof_of_work_bits` grind inside
+            // `p3_fri::prove` (measured 40.57 ms/shard, accelerator idle) and
+            // emitted ~6.4 KB/shard of query openings no verifier ever read.
 
             let basefold_path_ms = t_basefold_path.elapsed().as_millis();
 
@@ -1035,7 +1000,7 @@ where
                 {
                     let _ = writeln!(
                         f,
-                        "BASEFOLD_PATH total={}ms (Option B single-main-commit, placeholder pcs.open)",
+                        "BASEFOLD_PATH total={}ms (single-main-commit)",
                         basefold_path_ms,
                     );
                 }
@@ -1113,7 +1078,6 @@ where
                     auxiliary_commits: Vec::new(),
                 },
                 opened_values: ShardOpenedValues { chips: opened_values },
-                opening_proof,
                 chip_ordering: data.chip_ordering,
                 public_values: data.public_values,
                 basefold_shard_proof,
