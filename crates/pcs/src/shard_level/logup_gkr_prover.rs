@@ -158,23 +158,77 @@ where
     };
     debug_assert!(eq.len() >= height);
 
-    // Performance optimization: parallelize the per-column
-    // MLE evaluation. Each column is an independent dot product
-    // over the eq-table; collect-into-Vec is rayon-friendly.
-    // Rows `[height, domain)` contribute zero (implicit zero padding),
-    // so we sum only over the real `height` rows — the eq-table is
-    // indexed at `row < height <= domain` so the indices are in bounds.
+    // Rows `[height, domain)` contribute zero (implicit zero padding), so we
+    // sum only over the real `height` rows — the eq-table is indexed at
+    // `row < height <= domain` so the indices are in bounds.
+    //
+    // ── HOST LEVER: base-field multiply + row-major pass ────────────────────
+    // This function IS the LogUp-GKR output-extract's preprocessed opening,
+    // and it is the largest single block of host compute on the shard
+    // critical path: sub-instrumented on reth core (281 shards, 25 chips),
+    // `prep` costs 131 ms/shard and the full-point `prepfull` a further
+    // 108 ms/shard, together driving a 161 ms/shard `par_iter` inside a span
+    // whose thread-CPU reads ~2% (the work is on rayon workers, so the
+    // span-CPU census classifies it "blocked" and it hid there).
+    //
+    // The old form was `acc += eq[row] * EF::from(trace[row * width + col])`,
+    // column-parallel.  Two costs, both removable with no change to the
+    // emitted values:
+    //
+    //  1. `EF::from(b)` embeds the base felt as `[b, 0, 0, 0]` and then runs
+    //     the FULL quartic extension product — the generic `Mul<Self>` arm of
+    //     `BinomialExtensionField<_, 4>` is a `D x D` double loop, ~16 base
+    //     multiplies plus the `W` foldings, and the compiler cannot elide the
+    //     three zero limbs because they are runtime values.  `Mul<Base>` is
+    //     `value.map(|x| x * b)` = 4 base multiplies.  The two agree
+    //     EXACTLY: with `b = [b0,0,0,0]` every `j > 0` term of the double
+    //     loop is a field zero and `i + 0 < D` always, so the generic arm
+    //     already computes `[a0*b0, a1*b0, a2*b0, a3*b0]`.  Dropping the
+    //     embedding is bit-identical, not merely equivalent.
+    //
+    //  2. Column-parallel over a ROW-major trace strides by `width` felts, so
+    //     every column pass pulls one cache line per row and the matrix is
+    //     re-streamed `width` times.  Blocking over rows reads it once, keeps
+    //     `width` accumulators hot, and parallelises over `height / CHUNK`
+    //     instead of `width` (better on the narrow preprocessed traces).
+    //     Field addition is exact and associative, so summing per-chunk
+    //     partials and adding them in chunk order is bit-identical to the
+    //     single sequential per-column sum.
     use p3_maybe_rayon::prelude::*;
-    (0..width)
-        .into_par_iter()
-        .map(|col| {
-            let mut acc = EF::ZERO;
-            for row in 0..height {
-                acc += eq[row] * EF::from(trace[row * width + col]);
+    if height == 0 {
+        return vec![EF::ZERO; width];
+    }
+    // Rows per parallel block.  Large enough that the per-block accumulator
+    // allocation and the reduce are noise, small enough to keep every worker
+    // fed on the short preprocessed traces.
+    const ROW_BLOCK: usize = 512;
+    let mut evals = trace[..height * width]
+        .par_chunks(ROW_BLOCK * width)
+        .enumerate()
+        .map(|(blk, cells)| {
+            let base_row = blk * ROW_BLOCK;
+            let mut acc = vec![EF::ZERO; width];
+            for (r, row) in cells.chunks_exact(width).enumerate() {
+                let e = eq[base_row + r];
+                for (a, &c) in acc.iter_mut().zip(row.iter()) {
+                    *a += e * c;
+                }
             }
-            acc * tail
+            acc
         })
-        .collect()
+        .reduce(
+            || vec![EF::ZERO; width],
+            |mut l, r| {
+                for (a, b) in l.iter_mut().zip(r.into_iter()) {
+                    *a += b;
+                }
+                l
+            },
+        );
+    for a in evals.iter_mut() {
+        *a *= tail;
+    }
+    evals
 }
 
 #[cfg(test)]
@@ -299,5 +353,79 @@ mod tests {
         let r = vec![EF::from(F::from_u64(7))];
         let evals = evaluate_trace_columns_at_point::<F, EF>(&trace, 0, &r);
         assert!(evals.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod eval_trace_columns_reference_tests {
+    use super::*;
+    use p3_field::PrimeCharacteristicRing;
+
+    type F = p3_koala_bear::KoalaBear;
+    type EF = p3_field::extension::BinomialExtensionField<F, 4>;
+
+    /// The pre-lever form, kept verbatim as the bit-identity oracle: embed
+    /// each base felt into the extension, multiply with the FULL quartic
+    /// product, and accumulate one column at a time in row order.
+    fn reference(trace: &[F], width: usize, eval_point: &[EF]) -> Vec<EF> {
+        if width == 0 {
+            return Vec::new();
+        }
+        let height = trace.len() / width;
+        let k = if height <= 1 { 0 } else { (height - 1).ilog2() as usize + 1 };
+        let (eq, tail) = if k < eval_point.len() {
+            let tail = eval_point[k..].iter().fold(EF::ONE, |acc, &r| acc * (EF::ONE - r));
+            (eq_mle_table::<EF>(&eval_point[..k]), tail)
+        } else {
+            (eq_mle_table::<EF>(eval_point), EF::ONE)
+        };
+        (0..width)
+            .map(|col| {
+                let mut acc = EF::ZERO;
+                for row in 0..height {
+                    acc += eq[row] * EF::from(trace[row * width + col]);
+                }
+                acc * tail
+            })
+            .collect()
+    }
+
+    /// Bit-identity over shapes that exercise both levers: widths on either
+    /// side of a cache line, heights that straddle the `ROW_BLOCK` boundary
+    /// (so the parallel reduce actually has >1 partial to re-associate), and
+    /// eval points LONGER than `log2(height)` (so the truncated-eq `tail`
+    /// participates).
+    #[test]
+    fn base_mul_and_row_blocking_are_bit_identical() {
+        for &(width, height) in &[
+            (1usize, 1usize),
+            (3, 4),
+            (7, 8),
+            (2, 512),
+            (5, 513),
+            (13, 1024),
+            (31, 1025),
+            (68, 2048),
+        ] {
+            let trace: Vec<F> =
+                (0..width * height).map(|i| F::from_u64((i as u64 * 2_654_435_761) % 1_000_003)).collect();
+            let log_h = height.max(1).next_power_of_two().trailing_zeros() as usize;
+            // Exercise both `k == eval_point.len()` and `k < eval_point.len()`.
+            for extra in [0usize, 3] {
+                let pt: Vec<EF> = (0..log_h + extra)
+                    .map(|i| {
+                        EF::from(F::from_u64((i as u64 + 1) * 7919 % 1_000_003))
+                            + EF::from(F::from_u64((i as u64 + 2) * 104_729 % 1_000_003))
+                                * EF::from(F::from_u64(3))
+                    })
+                    .collect();
+                assert_eq!(
+                    evaluate_trace_columns_at_point::<F, EF>(&trace, width, &pt),
+                    reference(&trace, width, &pt),
+                    "divergence at width={width} height={height} |point|={}",
+                    pt.len()
+                );
+            }
+        }
     }
 }
