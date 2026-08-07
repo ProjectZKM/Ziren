@@ -1610,11 +1610,51 @@ where
     }
 }
 
+/// The INNER-ring body of [`crate::BasefoldRing::prove_jagged_open`], shared
+/// verbatim by the three KoalaBear/Poseidon2 rings — the ones whose
+/// `BfMmcs` IS `JaggedMmcs` and whose `Challenger` IS `JaggedChallenger`, so
+/// the concrete types need no runtime recovery.
+///
+/// `precomputed` is `Some` on the single-main-commit flow (the commit ran
+/// up-front and its digest was observed in the Phase 1 prologue, so the in-band
+/// observe is suppressed) and `None` on the legacy self-contained flow, which
+/// commits and observes in-band.
+pub fn prove_jagged_open_inner(
+    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+    r_row_per_chip: &[Vec<crate::InnerChallenge>],
+    z_row: &[crate::InnerChallenge],
+    pre_y_per_chip: Option<Vec<Vec<crate::InnerChallenge>>>,
+    precomputed: Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
+    challenger: &mut crate::jagged_pcs::JaggedChallenger,
+) -> crate::shard_level::shard_proof::EvaluationProof {
+    let bundle = match precomputed {
+        Some(precomputed) => {
+            crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
+                chip_traces,
+                r_row_per_chip,
+                z_row,
+                precomputed,
+                pre_y_per_chip,
+                challenger,
+            )
+        }
+        None => crate::jagged_pcs::jagged::prove_jagged_basefold_with_y_per_chip(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            pre_y_per_chip,
+            challenger,
+        ),
+    };
+    crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
+}
+
 /// Returns an [`EvaluationProof`] tagged with the path that produced
-/// it. Runs only when SC monomorphizes to the KoalaBear /
-/// `JaggedChallenger` config; otherwise returns `EvaluationProof::Empty`.
-/// The outer challenger is downcast to `&mut JaggedChallenger` so the
-/// jagged-PCS transcript stays bound to the shard's outer state.
+/// it. Runs only when SC monomorphizes to a config that proves via BaseFold;
+/// otherwise returns `EvaluationProof::Empty`.  The per-ring jagged open is
+/// dispatched through [`crate::BasefoldRing::prove_jagged_open`], so the
+/// concrete `BfMmcs` / `Challenger` are supplied by the impl rather than
+/// recovered at runtime.
 ///
 /// When `precomputed_commit` is `Some`, the BaseFold commit was
 /// produced up-front by the orchestrator (single-main-commit
@@ -1687,17 +1727,13 @@ where
             >>::Commitment,
         >,
 {
-    use core::any::{Any, TypeId};
-    use crate::jagged_pcs::jagged::{
-        prove_jagged_basefold_with_precomputed_provider,
-        prove_jagged_basefold_with_y_per_chip,
-    };
+    use core::any::TypeId;
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
     // Dispatch via `BasefoldRing`. Configs
     // that don't prove via BaseFold (OuterSC wrap on FRI) emit `Empty`. The
-    // KoalaBear identities that make the transmute + challenger downcast below
+    // KoalaBear identities that make the transmutes below
     // sound are asserted in debug builds (they hold for every config that
     // returns `use_basefold() == true` today).
     if !<SC as BasefoldRing>::use_basefold() {
@@ -1796,55 +1832,11 @@ where
         )
     };
 
-    // OUTER (wrap) ring dispatch. When the
-    // config's challenger is NOT the inner JaggedChallenger (i.e.
-    // OuterChallenger), the jagged BaseFold open runs over the outer MMCS
-    // (OuterValMmcs) via a hook registered by recursion-core (zkm-pcs
-    // cannot name those types). The hook rmp-serializes a
-    // JaggedBasefoldBundleGeneric<OuterValMmcs> -> EvaluationProof::Bytes.
-    if TypeId::of::<SC::Challenger>()
-        != TypeId::of::<crate::jagged_pcs::JaggedChallenger>()
-    {
-        // STATIC monomorphization of the former
-        // `OUTER_JAGGED_OPEN_HOOK`.  The recursion-core hook body
-        // (`outer_open`) WAS exactly this generic call over
-        // `OuterChallenger`/`OuterValMmcs`; this removes the dyn-Any
-        // indirection.  On this branch `SC::Challenger == OuterChallenger`
-        // and `SC::BfMmcs == OuterValMmcs` (the wrap ring is the only
-        // non-`JaggedChallenger` ring), so naming them via the `BasefoldRing`
-        // associated type + trait-level challenger bounds is byte-identical
-        // BY CONSTRUCTION.  `pre_y_per_chip = None` mirrors the hook (its
-        // own legacy step-3 y_per_chip recompute — identical values), so the
-        // serialized bundle bytes match the hook output exactly.
-        let precomputed = precomputed_commit.expect(
-            "prove_trusted_evaluations: outer BaseFold path requires a precomputed \
-             commit (commit_basefold_path sets it under the same use_basefold gate)",
-        );
-        let bundle = crate::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
-            SC::Challenger,
-            <SC as BasefoldRing>::BfMmcs,
-        >(
-            &chip_traces,
-            &r_row_per_chip,
-            z_row,
-            None,
-            precomputed,
-            challenger,
-            <SC as BasefoldRing>::bf_mmcs(),
-            <SC as BasefoldRing>::fri_config(),
-        );
-        return EvaluationProof::Bytes(bundle.to_bytes());
-    }
-
-    let challenger_any: &mut dyn Any = challenger;
-    let lb_challenger = challenger_any
-        .downcast_mut::<crate::jagged_pcs::JaggedChallenger>()
-        .expect("TypeId gate guarantees SC::Challenger == JaggedChallenger");
-
     // Openings-for-free: reinterpret the residual openings to InnerChallenge
-    // (Challenge<SC> == InnerChallenge under the TypeId gate above; the
-    // outer-ring hook path above keeps its own legacy step-3 recompute —
-    // identical values either way).
+    // (Challenge<SC> == InnerChallenge under the debug-asserted identity above —
+    // the same relabel `r_row_per_chip` and `chip_traces` already went through
+    // on every ring).  The wrap ring's impl ignores these and keeps its own
+    // legacy step-3 recompute — identical values either way.
     let pre_y_inner: Option<Vec<Vec<InnerChallenge>>> = pre_y_per_chip.map(|per| {
         per.into_iter()
             // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
@@ -1852,54 +1844,30 @@ where
             .collect()
     });
 
-    // Single-main-commit fast path: when the orchestrator
-    // pre-computed the BaseFold commit, drive the host
-    // `prove_jagged_basefold_with_precomputed` body directly.  GPU
-    // hooks own their own commit, so they're bypassed in this mode to
-    // avoid double-committing — the GPU-driven single-main-commit path is a
-    // separate (future) concern.
-    if let Some(precomputed) = precomputed_commit {
-        let precomputed_inner: crate::jagged_pcs::jagged::PrecomputedJaggedCommit = {
-            let any: Box<dyn core::any::Any> = Box::new(precomputed);
-            *any.downcast().expect(
-                "prove_trusted_evaluations inner path: PrecomputedJaggedCommitGeneric\
-                 <SC::BfMmcs> is PrecomputedJaggedCommit when SC::Challenger == \
-                 JaggedChallenger",
-            )
-        };
-        let bundle = prove_jagged_basefold_with_precomputed_provider(
-            &chip_traces,
-            &r_row_per_chip,
-            z_row,
-            precomputed_inner,
-            // Zerocheck-residual openings (skips host step 3).
-            pre_y_inner,
-            lb_challenger,
-        );
-        return EvaluationProof::Bundle(bundle);
-    }
-
-    // #118: the two whole-pipeline jagged-PCS GPU orchestration dispatch
-    // sites (`get_gpu_jagged_pcs_device_hook` device-trace variant, guarded
-    // by `_device_traces.is_some()`, and `get_gpu_jagged_orchestration_hook`
-    // host-trace variant) were REMOVED with their OnceLock registries: both
-    // were dead (ziren-gpu never registered either — the device-trace hook
-    // is "retired by the openings-for-free", the host-trace orchestration's
-    // emit dispatch is "statically dead under the precomputed-commit path"),
-    // so this always fell through to the host jagged-basefold path below.
-    // `_device_traces` is still consumed by the precomputed-commit provider
-    // path above; the legacy (no-precompute) flow is host-only.
-
-    // Openings-for-free: thread the zerocheck-residual openings into the
-    // legacy (no-precompute) flow too — `None` keeps the host step-3 recompute.
-    let bundle = prove_jagged_basefold_with_y_per_chip(
+    // Per-ring jagged open.  Each `BasefoldRing` impl supplies its own concrete
+    // `BfMmcs` + `Challenger`, so `precomputed_commit` — typed
+    // `PrecomputedJaggedCommitGeneric<SC::BfMmcs>` all the way down — is handed
+    // over WITHOUT a `Box<dyn Any>` downcast, and the challenger without a
+    // `downcast_mut`.  This is what retired the `TypeId::of::<SC::Challenger>()`
+    // test that used to stand in for `SC::BfMmcs == JaggedMmcs`, an implication
+    // the type system never carried.
+    //
+    // The inner rings return `EvaluationProof::Bundle`; the wrap ring returns
+    // `Bytes` (rmp-serialized `JaggedBasefoldBundleGeneric<OuterValMmcs>`) and
+    // passes `pre_y_per_chip = None`, exactly as this site used to.
+    //
+    // #118: the two whole-pipeline jagged-PCS GPU orchestration dispatch sites
+    // that used to live here were REMOVED with their OnceLock registries — both
+    // were dead (ziren-gpu never registered either), so control always reached
+    // the host jagged-basefold path the ring impls now call.
+    <SC as BasefoldRing>::prove_jagged_open(
         &chip_traces,
         &r_row_per_chip,
         z_row,
         pre_y_inner,
-        lb_challenger,
-    );
-    EvaluationProof::Bundle(bundle)
+        precomputed_commit,
+        challenger,
+    )
 }
 
 

@@ -214,6 +214,46 @@ pub trait BasefoldRing: StarkGenericConfig {
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
+
+    /// Ring-native jagged BaseFold OPEN — the prove-side counterpart of
+    /// [`Self::precompute_jagged_inline`], and the reason
+    /// [`crate::shard_level::prover::prove_trusted_evaluations`] needs no
+    /// runtime type test to pick a jagged open.
+    ///
+    /// The open must run over the ring's OWN `Self::BfMmcs` and
+    /// `Self::Challenger`, and it must produce the matching
+    /// [`crate::shard_level::shard_proof::EvaluationProof`] shape: the inner
+    /// (KoalaBear/Poseidon2) rings emit a concrete `Bundle`, the wrap ring
+    /// emits `Bytes` (an rmp-serialized `JaggedBasefoldBundleGeneric<
+    /// OuterValMmcs>`, which has no concrete slot in the enum).  Dispatching
+    /// that on `Self` puts the choice where the concrete types are known.
+    ///
+    /// This replaces a `TypeId::of::<SC::Challenger>()` test that stood in for
+    /// two facts the type system was not carrying: that the CHALLENGER is
+    /// `JaggedChallenger`, and — separately, and not implied by it — that
+    /// `Self::BfMmcs` is `JaggedMmcs`, so that
+    /// `PrecomputedJaggedCommitGeneric<Self::BfMmcs>` could be `.expect()`-ed
+    /// out of a `Box<dyn Any>`.  Both downcasts are gone: inside each impl the
+    /// two types ARE the concrete ones, by construction.
+    ///
+    /// Like `precompute_jagged_inline` this is a required method, NOT a
+    /// default, so the `Self::Challenger` capability bounds the generic
+    /// BaseFold prover needs (`FieldChallenger` / `GrindingChallenger` /
+    /// `CanObserve<BfCommitment<Self>>`) are discharged INSIDE each concrete
+    /// impl instead of propagating up the whole shard-prover call chain.
+    ///
+    /// `precomputed` is `None` only on the legacy in-band-commit flow (host
+    /// synthetic / tests); the single-main-commit flow always supplies it.
+    fn prove_jagged_open(
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
+        z_row: &[crate::InnerChallenge],
+        pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
+        precomputed: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        >,
+        challenger: &mut Self::Challenger,
+    ) -> crate::shard_level::shard_proof::EvaluationProof;
 }
 
 /// The BaseFold jagged-PCS commitment type for a `BasefoldRing`

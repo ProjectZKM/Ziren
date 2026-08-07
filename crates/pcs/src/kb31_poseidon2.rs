@@ -244,6 +244,29 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2Inner {
             recursion_area_pin,
         )
     }
+
+    /// Ring-native jagged BaseFold open.  `Self::BfMmcs == JaggedMmcs` and
+    /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
+    /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
+    fn prove_jagged_open(
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
+        z_row: &[crate::InnerChallenge],
+        pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
+        precomputed: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        >,
+        challenger: &mut Self::Challenger,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        crate::shard_level::prover::prove_jagged_open_inner(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            pre_y_per_chip,
+            precomputed,
+            challenger,
+        )
+    }
 }
 
 // ── 128-bit StarkGenericConfig ────────────────────────────────────────────
@@ -374,6 +397,29 @@ impl crate::config::BasefoldRing for KoalaBearPoseidon2D5 {
             Self::fri_config(),
             use_rev,
             recursion_area_pin,
+        )
+    }
+
+    /// Ring-native jagged BaseFold open.  `Self::BfMmcs == JaggedMmcs` and
+    /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
+    /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
+    fn prove_jagged_open(
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
+        z_row: &[crate::InnerChallenge],
+        pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
+        precomputed: Option<
+            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        >,
+        challenger: &mut Self::Challenger,
+    ) -> crate::shard_level::shard_proof::EvaluationProof {
+        crate::shard_level::prover::prove_jagged_open_inner(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            pre_y_per_chip,
+            precomputed,
+            challenger,
         )
     }
 }
@@ -667,6 +713,29 @@ pub mod koala_bear_poseidon2 {
                 Self::fri_config(),
                 use_rev,
                 recursion_area_pin,
+            )
+        }
+
+        /// Ring-native jagged BaseFold open.  `Self::BfMmcs == JaggedMmcs` and
+        /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
+        /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
+        fn prove_jagged_open(
+            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+            r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
+            z_row: &[crate::InnerChallenge],
+            pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
+            precomputed: Option<
+                crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+            >,
+            challenger: &mut Self::Challenger,
+        ) -> crate::shard_level::shard_proof::EvaluationProof {
+            crate::shard_level::prover::prove_jagged_open_inner(
+                chip_traces,
+                r_row_per_chip,
+                z_row,
+                pre_y_per_chip,
+                precomputed,
+                challenger,
             )
         }
     }

@@ -298,6 +298,47 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
             recursion_area_pin,
         )
     }
+
+    fn prove_jagged_open(
+        chip_traces: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>],
+        r_row_per_chip: &[Vec<zkm_pcs::InnerChallenge>],
+        z_row: &[zkm_pcs::InnerChallenge],
+        _pre_y_per_chip: Option<Vec<Vec<zkm_pcs::InnerChallenge>>>,
+        precomputed: Option<
+            zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        >,
+        challenger: &mut Self::Challenger,
+    ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
+        // The wrap ring's jagged open, over `OuterValMmcs` + `OuterChallenger`.
+        // This is the body `prove_trusted_evaluations` used to reach through a
+        // `TypeId::of::<SC::Challenger>() != JaggedChallenger` test; the wrap
+        // ring is the only non-`JaggedChallenger` ring, so naming the types
+        // here is that test made static — and it is what lets the INNER arm
+        // stop inferring `BfMmcs == JaggedMmcs` from a challenger identity.
+        //
+        // `_pre_y_per_chip` is deliberately DROPPED: this path keeps the
+        // generic prover's own legacy step-3 `y_per_chip` recompute (identical
+        // values), so the serialized bundle bytes are unchanged from the
+        // former call site, which also passed `None`.
+        let precomputed = precomputed.expect(
+            "prove_jagged_open: outer BaseFold path requires a precomputed \
+             commit (commit_basefold_path sets it under the same use_basefold gate)",
+        );
+        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
+            Self::Challenger,
+            Self::BfMmcs,
+        >(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            None,
+            precomputed,
+            challenger,
+            Self::bf_mmcs(),
+            Self::fri_config(),
+        );
+        zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
+    }
 }
 
 /// The FRI config for testing recursion.
