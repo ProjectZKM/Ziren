@@ -766,34 +766,40 @@ where
         // (8) Verify the zerocheck sumcheck proof itself.
         verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
 
-        // (9) Observe the per-chip openings into the transcript
-        // so subsequent phases (jagged PCS opening) replay a
-        // consistent challenger state.
+        // (9) SP1 observe slot 2 — the ZEROCHECK openings (trace@z*), observed
+        // after the zerocheck sumcheck and before the jagged-PCS phase.
+        //
+        // In-circuit mirror of SP1 `crates/hypercube/src/prover/shard.rs
+        // :617,625,626` and of the host verifier's step (5).  SP1 observes the
+        // sumcheck's `component_poly_evals` here — the reduction's residual at
+        // z*, which in Ziren is exactly `opened_values.chips[].{preprocessed,
+        // main}.local` (the prover's `trace_at_z`, split at each chip's
+        // preprocessed width by `build_opened_values`).
+        //
+        // This slot USED to carry `gkr_evaluations.chip_openings` — SP1's slot-1
+        // payload in slot 2's position, i.e. observed after the α/γ/λ samples in
+        // section (1) above.  The GKR openings now land in
+        // `logup_gkr::verify_logup_gkr`, before those samples; this slot carries
+        // its own payload.  Both sides moved together — host prover, host
+        // verifier, ziren-gpu driver and this circuit — so the challenger stays
+        // in lock-step; a one-sided move surfaces as a jagged-PCS z_col
+        // round-0 identity failure, not as a zerocheck assert.
+        //
+        // `opened_values.chips` is in NAME order (the prover's
+        // `build_opened_values` name-sorts), matching the host.
         let len_felt: Felt<C::F> =
             builder.constant(C::F::from_canonical_usize(shard_chips.len()));
         challenger.observe(builder, len_felt);
-        // Observe the GKR CHIP-OPENINGS (NOT opened_values) — the host
-        // verify_zerocheck_host (verifier.rs:862-885) iterates
-        // `gkr_evaluations.chip_openings` (BTreeMap name order) and observes,
-        // per chip, preprocessed_trace_evaluations (if present) THEN
-        // main_trace_evaluations. Observing
-        // `opened_values.chips[].{preprocessed,main}.local` (the trace@z
-        // openings) instead would desync the in-circuit challenger from the
-        // prover: the GKR openings are evaluated @z_gkr (≠ z*), so the VALUES
-        // differ — invisible to the zerocheck's own asserts, surfacing only as
-        // the jagged-PCS z_col mismatch (gnark wrap step4 = round-0 identity
-        // failure). The host comment at verifier.rs:866-871 documents exactly
-        // this failure mode. Mirror the host source + order to stay in lockstep.
-        for chip_evaluation in gkr_evaluations.chip_openings.values() {
-            if let Some(prep) =
-                chip_evaluation.preprocessed_trace_evaluations.as_ref()
-            {
-                observe_ext_slice::<C, FC>(builder, challenger, prep);
-            }
-            observe_ext_slice::<C, FC>(
+        for opening in opened_values.chips.iter() {
+            crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(
                 builder,
                 challenger,
-                &chip_evaluation.main_trace_evaluations,
+                &opening.preprocessed.local,
+            );
+            crate::logup_gkr::observe_length_prefixed_ext_slice::<C, FC>(
+                builder,
+                challenger,
+                &opening.main.local,
             );
         }
     }

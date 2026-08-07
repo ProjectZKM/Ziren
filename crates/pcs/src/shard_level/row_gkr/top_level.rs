@@ -429,6 +429,18 @@ where
         witness,
     };
 
+    // SP1 observe slot 1 — the GKR trace openings (trace@ζ), observed HERE,
+    // inside the GKR phase, before the shard driver samples the zerocheck's
+    // α / γ / λ.  Mirrors `sp1-latest/crates/hypercube/src/logup_gkr/prover.rs
+    // :187,204,206`.  Keeping it inside this function (rather than in the shard
+    // driver) makes it structurally impossible for a driver to sample a
+    // zerocheck challenge against an unbound opening vector.  See
+    // `shard_level::prover::observe_logup_gkr_openings`.
+    crate::shard_level::prover::observe_logup_gkr_openings::<F, EF, Challenger>(
+        challenger,
+        chips.len(),
+        &proof.logup_evaluations,
+    );
 
     proof
 }

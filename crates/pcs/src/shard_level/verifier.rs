@@ -1138,31 +1138,33 @@ where
         other => other,
     })?;
 
-    // (5) Observe per-chip opening count + openings, in chip-NAME order.
+    // (5) SP1 observe slot 2 — the zerocheck openings (trace@z*), observed
+    // after the zerocheck sumcheck and before the jagged phase.  Mirror of
+    // SP1 `crates/hypercube/src/prover/shard.rs:617,625,626` and of the
+    // prover's `observe_zerocheck_openings_from_residual`.
     //
-    // The prover's phase_bridge_3_4 (prover.rs) iterates
-    // `logup_evaluations.chip_openings` — a `BTreeMap<String, _>`, i.e.
-    // NAME order — to feed these observations.  The `chips` slice here is
-    // height/definition-ordered, NOT name-ordered, so iterating it would
-    // observe the same opening values in a different sequence and desync
-    // the challenger vs the prover (surfacing only later as a jagged
-    // sumcheck round-0 identity failure once z_col is sampled).  Iterate
-    // the same BTreeMap the prover does so the transcript stays in lock-step.
-    challenger.observe(Val::<SC>::from_u64(chips.len() as u64));
-    for (_name, opening) in gkr_evaluations.chip_openings.iter() {
-        if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
-            for c in prep.iter() {
-                for basis in c.as_basis_coefficients_slice() {
-                    challenger.observe(*basis);
-                }
-            }
-        }
-        for c in opening.main_trace_evaluations.iter() {
-            for basis in c.as_basis_coefficients_slice() {
-                challenger.observe(*basis);
-            }
-        }
-    }
+    // This slot previously carried the GKR openings (`gkr_evaluations.
+    // chip_openings`) — SP1's slot-1 payload in slot 2's position.  Those now
+    // land at the end of `verify_logup_gkr_host`, before the α/γ/λ samples
+    // above.
+    //
+    // `opened_values.chips` is a Vec emitted in NAME order by the prover's
+    // `build_opened_values`, already split into preprocessed/main at each
+    // chip's `preprocessed_width` — the same pairs, in the same order, the
+    // prover feeds from its `trace_at_z` residual.
+    crate::shard_level::prover::observe_zerocheck_openings::<
+        Val<SC>,
+        Challenge<SC>,
+        SC::Challenger,
+        _,
+    >(
+        challenger,
+        chips.len(),
+        opened_values
+            .chips
+            .iter()
+            .map(|c| (c.preprocessed.local.as_slice(), c.main.local.as_slice())),
+    );
 
     Ok(())
 }
@@ -2068,6 +2070,19 @@ where
     }
 
     let _ = max_log_row_count;
+
+    // SP1 observe slot 1 — the GKR trace openings (trace@ζ).  Mirror of the
+    // prover's observe at the end of
+    // `row_gkr::top_level::prove_shard_logup_gkr_rows`, and of SP1
+    // `crates/hypercube/src/logup_gkr/prover.rs:187,204,206`.  It MUST land
+    // here, at the end of the LogUp-GKR stage, because `verify_zerocheck_host`
+    // opens by sampling α / γ / λ — the challenges the opening vector has to be
+    // bound before.
+    crate::shard_level::prover::observe_logup_gkr_openings::<
+        Val<SC>,
+        Challenge<SC>,
+        SC::Challenger,
+    >(challenger, chips.len(), &proof.logup_evaluations);
 
     Ok(())
 }

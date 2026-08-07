@@ -81,6 +81,28 @@ pub fn observe_ext_slice<C, FC>(
     }
 }
 
+/// Observe a LENGTH-PREFIXED extension-field slice: the element COUNT as one
+/// felt, then the elements.
+///
+/// In-circuit mirror of the host `zkm_pcs::shard_level::prover::
+/// observe_length_prefixed_ext` and of SP1's
+/// `observe_variable_length_extension_slice`
+/// (`sp1-latest/crates/recursion/circuit/src/challenger.rs:99-110`).  The
+/// length is a circuit CONSTANT (opening widths are fixed by the shape/VK), so
+/// this costs one extra observed felt per slice and no witness.
+pub fn observe_length_prefixed_ext_slice<C, FC>(
+    builder: &mut Builder<C>,
+    challenger: &mut FC,
+    slice: &[Ext<C::F, C::EF>],
+) where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+{
+    let len_felt: Felt<C::F> = builder.constant(C::F::from_canonical_usize(slice.len()));
+    challenger.observe(builder, len_felt);
+    observe_ext_slice::<C, FC>(builder, challenger, slice);
+}
+
 /// Evaluate a multilinear extension `mle_evals` (the dense
 /// hypercube-evaluation vector of length `2^point.len()`) at the
 /// verifier-sampled extension point.
@@ -708,6 +730,53 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         // evals MUST equal the reconstruction from the chips' trace openings.
         builder.assert_ext_eq(numerator_eval, expected_numerator);
         builder.assert_ext_eq(denominator_eval, expected_denominator);
+    }
+
+    // ── SP1 observe slot 1 — the GKR trace openings (trace@ζ) ──────────
+    //
+    // In-circuit mirror of SP1 `crates/hypercube/src/logup_gkr/prover.rs
+    // :187,204,206`, of the host prover
+    // (`row_gkr::top_level::prove_shard_logup_gkr_rows`) and of the host
+    // verifier (end of `verify_logup_gkr_host`).
+    //
+    // Position is load-bearing: `BasefoldZerocheckVerifier::verify_zerocheck`
+    // opens by sampling α / γ / λ, and the zerocheck identity it then enforces
+    // (`assert_ext_eq(claimed_sum, zerocheck_sum_modification)` plus the
+    // rlc_eval assert) is only a Schwartz–Zippel test of those challenges if
+    // this opening vector is already committed.  Observed here — before that
+    // sample — the openings are fixed; observed after (where this used to sit,
+    // as step (9) of verify_zerocheck) the identity degenerates to one linear
+    // equation a prover can solve for the openings.
+    //
+    // `shard_chips.len()` felt, then per chip in NAME order
+    // (`chip_openings` is a `BTreeMap`) the four length-prefixed slices:
+    // preprocessed, main, preprocessed_full, main_full.  Both opening sets are
+    // observed because Ziren's core stage drives the claim from `*_full` while
+    // the recursion / shrink / wrap stages drive it from the legacy set.
+    let num_chips_felt: Felt<C::F> =
+        builder.constant(C::F::from_canonical_usize(shard_chips.len()));
+    challenger.observe(builder, num_chips_felt);
+    for chip_evaluation in logup_evaluations.chip_openings.values() {
+        observe_length_prefixed_ext_slice::<C, FC>(
+            builder,
+            challenger,
+            chip_evaluation.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]),
+        );
+        observe_length_prefixed_ext_slice::<C, FC>(
+            builder,
+            challenger,
+            &chip_evaluation.main_trace_evaluations,
+        );
+        observe_length_prefixed_ext_slice::<C, FC>(
+            builder,
+            challenger,
+            chip_evaluation.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]),
+        );
+        observe_length_prefixed_ext_slice::<C, FC>(
+            builder,
+            challenger,
+            chip_evaluation.main_trace_evaluations_full.as_deref().unwrap_or(&[]),
+        );
     }
 }
 

@@ -865,25 +865,24 @@ where
         "shard phase done"
     );
 
-    // zerocheck → jagged-PCS bridge: observe per-chip openings to keep challenger
-    // state in sync with the verifier. Order matters: num_chips felt,
-    // then per-chip preprocessed then main basis coefficients in
-    // chip-NAME order — matching the recursion verifier's step (9)
-    // (recursion/circuit/src/zerocheck.rs:628 iterates the name-ordered
-    // opened_values.chips) and SP1 (shard.rs:617-626 over the
-    // BTreeSet/BTreeMap chip set). `chip_openings` is a BTreeMap<String,_>,
-    // so iterating it directly yields name order.
+    // SP1 observe slot 2 — the zerocheck openings (trace@z*), observed after
+    // the zerocheck sumcheck and BEFORE the jagged phase, mirroring
+    // `sp1-latest/crates/hypercube/src/prover/shard.rs:617,625,626`.
+    //
+    // This slot used to carry the GKR openings (trace@ζ) instead — SP1's slot
+    // 1 payload, delivered in slot 2's position, i.e. after α/γ/λ had already
+    // been sampled.  Slot 1 now lives where SP1 puts it, at the end of the GKR
+    // phase (`row_gkr::top_level::prove_shard_logup_gkr_rows`), and this slot
+    // carries its own payload.  See `observe_logup_gkr_openings` for why the
+    // ordering is load-bearing.
+    //
+    // `num_chips` felt, then per chip the length-prefixed preprocessed-then-main
+    // openings in chip-NAME order — the order the recursion verifier's step (9)
+    // and the host verifier replay.
     let _t_phase35 = std::time::Instant::now();
     {
         let _span = tracing::info_span!("phase_bridge_3_4").entered();
-        // C0 extraction: the zerocheck→jagged bridge observes are lifted
-        // VERBATIM into a `zkm-pcs` pub helper (num_chips felt, then per-chip
-        // prep-then-main basis coefficients in NAME order — order unchanged).
-        observe_zerocheck_to_jagged_bridge::<SC>(
-            challenger,
-            chips.len(),
-            &logup_gkr_proof.logup_evaluations,
-        );
+        observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
     }
     tracing::info!(
         elapsed_ms = _t_phase35.elapsed().as_millis() as u64,
@@ -1082,35 +1081,166 @@ pub fn observe_transcript_prologue<SC, A>(
     }
 }
 
-/// C0 block 3 — zerocheck → jagged-PCS bridge observe.  Observes the
-/// `num_chips` felt, then per-chip preprocessed-then-main basis coefficients
-/// in chip-NAME order (`chip_openings` is a `BTreeMap`, so iteration is name
-/// order) — keeping the challenger in sync with the verifier's step (9).
-pub fn observe_zerocheck_to_jagged_bridge<SC>(
-    challenger: &mut SC::Challenger,
-    num_chips: usize,
-    logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
-) where
-    SC: StarkGenericConfig,
-    Challenge<SC>: BasedVectorSpace<Val<SC>>,
+/// Observe a LENGTH-PREFIXED extension-field slice.
+///
+/// SP1's `observe_variable_length_extension_slice`
+/// (`sp1-latest/slop/crates/challenger/src/lib.rs:61-66`, in-circuit mirror
+/// `crates/recursion/circuit/src/challenger.rs:99-110`): observe the element
+/// COUNT as one felt, then each element's basis coefficients.  The prefix is
+/// what removes the parsing ambiguity between two adjacent opening slices —
+/// without it, a prover free to move a column between two chips (or between
+/// the preprocessed and main halves of one chip) reaches the same transcript
+/// state from different opening vectors.
+pub fn observe_length_prefixed_ext<F, EF, Challenger>(challenger: &mut Challenger, data: &[EF])
+where
+    F: p3_field::PrimeField,
+    EF: BasedVectorSpace<F>,
+    Challenger: p3_challenger::FieldChallenger<F>,
 {
-    use p3_field::BasedVectorSpace;
-    let num_chips_felt = Val::<SC>::from_u64(num_chips as u64);
-    challenger.observe(num_chips_felt);
-    for (_name, opening) in logup_evaluations.chip_openings.iter() {
-        if let Some(prep) = opening.preprocessed_trace_evaluations.as_ref() {
-            for c in prep.iter() {
-                for basis in c.as_basis_coefficients_slice() {
-                    challenger.observe(*basis);
-                }
-            }
-        }
-        for c in opening.main_trace_evaluations.iter() {
-            for basis in c.as_basis_coefficients_slice() {
-                challenger.observe(*basis);
-            }
+    challenger.observe(F::from_u64(data.len() as u64));
+    for v in data.iter() {
+        for basis in v.as_basis_coefficients_slice() {
+            challenger.observe(*basis);
         }
     }
+}
+
+/// SP1 observe slot **1** — the LogUp-GKR trace openings (trace@ζ).
+///
+/// SP1 observes these INSIDE the GKR phase, immediately after the round walk
+/// produces the terminal evaluation point and before the shard driver samples
+/// any zerocheck challenge
+/// (`sp1-latest/crates/hypercube/src/logup_gkr/prover.rs:187` the `chips.len()`
+/// felt, then `:204` preprocessed and `:206` main, each length-prefixed; the
+/// zerocheck's α/γ are sampled afterwards at `prover/shard.rs:707,709` and λ at
+/// `:599`).
+///
+/// # Why the position is load-bearing
+///
+/// The zerocheck identity the verifier enforces is
+///
+/// ```text
+///   Σ_i λ^i Σ_k γ^k O_{i,k}  =  Σ_i λ^i [ C̃_{α,i}(anchor) + Σ_k γ^k T̃_{i,k}(anchor) ]
+/// ```
+///
+/// (left side: `claimed_sum` re-derived from these openings, host
+/// `verifier.rs` step G2-b; right side: what the zerocheck sumcheck forces).
+/// With `O` fixed BEFORE α/γ/λ this is a Schwartz–Zippel test of a nonzero
+/// polynomial in those challenges, so it forces both `O = T̃(anchor)` and a
+/// vanishing constraint sum.  With α/γ/λ sampled first it collapses to ONE
+/// linear equation in `|O|` unknowns, which a prover can solve for `O` —
+/// absorbing a constraint violation `Σ_i λ^i C̃_{α,i}` into the opening vector.
+/// The only other binding on `O` is the LogUp last-layer reconstruction, which
+/// is two scalar equations (`verifier.rs`, the numerator/denominator
+/// mismatch returns) and touches only the columns that appear in an
+/// interaction expression.
+///
+/// # What is observed
+///
+/// Ziren carries TWO opening sets per chip where SP1 carries one: the legacy
+/// trailing-`log_h` `main_trace_evaluations` (which drives the claim on the
+/// recursion / shrink / wrap stages) and the full-point
+/// `main_trace_evaluations_full` (which drives it on the core stage, and which
+/// SP1's single set corresponds to — SP1 asserts every trace is a `PaddedMle`
+/// over the full cube at `prover/shard.rs:514`, so its one opening IS the
+/// full-point one).  Both are observed unconditionally so the binding does not
+/// depend on which stage's convention is in force; each is length-prefixed, so
+/// the four slices stay unambiguous.  Chip order is NAME order
+/// (`chip_openings` is a `BTreeMap`, matching SP1's `BTreeSet<Chip>`).
+pub fn observe_logup_gkr_openings<F, EF, Challenger>(
+    challenger: &mut Challenger,
+    num_chips: usize,
+    logup_evaluations: &crate::shard_level::types::LogUpEvaluations<EF>,
+) where
+    F: p3_field::PrimeField,
+    EF: BasedVectorSpace<F>,
+    Challenger: p3_challenger::FieldChallenger<F>,
+{
+    challenger.observe(F::from_u64(num_chips as u64));
+    for (_name, opening) in logup_evaluations.chip_openings.iter() {
+        observe_length_prefixed_ext::<F, EF, Challenger>(
+            challenger,
+            opening.preprocessed_trace_evaluations.as_deref().unwrap_or(&[]),
+        );
+        observe_length_prefixed_ext::<F, EF, Challenger>(
+            challenger,
+            &opening.main_trace_evaluations,
+        );
+        observe_length_prefixed_ext::<F, EF, Challenger>(
+            challenger,
+            opening.preprocessed_trace_evaluations_full.as_deref().unwrap_or(&[]),
+        );
+        observe_length_prefixed_ext::<F, EF, Challenger>(
+            challenger,
+            opening.main_trace_evaluations_full.as_deref().unwrap_or(&[]),
+        );
+    }
+}
+
+/// SP1 observe slot **2** — the zerocheck openings (trace@z\*).
+///
+/// SP1 observes the sumcheck's `component_poly_evals` right after
+/// `reduce_sumcheck_to_evaluation` returns and before the jagged phase
+/// (`sp1-latest/crates/hypercube/src/prover/shard.rs:617` the `airs.len()`
+/// felt, then `:625` preprocessed and `:626` main, each length-prefixed).
+/// Ziren had NO counterpart: the reduced point `z*` and its openings went
+/// straight into the jagged open, so the jagged phase's own challenges were
+/// sampled without the openings they are meant to be opening.
+///
+/// `per_chip` yields `(preprocessed@z*, main@z*)` per chip in NAME order —
+/// on the prover from the zerocheck residual `trace_at_z` split at each chip's
+/// `preprocessed_width`, on the verifier from `opened_values.chips` (which
+/// `build_opened_values` emits name-sorted with exactly that split).
+pub fn observe_zerocheck_openings<'a, F, EF, Challenger, I>(
+    challenger: &mut Challenger,
+    num_chips: usize,
+    per_chip: I,
+) where
+    F: p3_field::PrimeField,
+    EF: BasedVectorSpace<F> + 'a,
+    Challenger: p3_challenger::FieldChallenger<F>,
+    I: IntoIterator<Item = (&'a [EF], &'a [EF])>,
+{
+    challenger.observe(F::from_u64(num_chips as u64));
+    for (prep, main) in per_chip {
+        observe_length_prefixed_ext::<F, EF, Challenger>(challenger, prep);
+        observe_length_prefixed_ext::<F, EF, Challenger>(challenger, main);
+    }
+}
+
+/// Prover-side adapter for [`observe_zerocheck_openings`]: split the zerocheck
+/// residual `trace_at_z` (prep-then-main concatenated per chip) at each chip's
+/// `preprocessed_width` and feed the pairs in NAME order — the same split and
+/// the same order [`build_opened_values`] uses to build the `opened_values` the
+/// verifier observes.
+pub fn observe_zerocheck_openings_from_residual<SC, A>(
+    challenger: &mut SC::Challenger,
+    chips: &[&Chip<Val<SC>, A>],
+    trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+) where
+    SC: StarkGenericConfig,
+    A: MachineAir<Val<SC>>,
+    Val<SC>: p3_field::PrimeField,
+    Challenge<SC>: BasedVectorSpace<Val<SC>>,
+{
+    let mut name_sorted: Vec<&&Chip<Val<SC>, A>> = chips.iter().collect();
+    name_sorted.sort_by(|a, b| {
+        MachineAir::<Val<SC>>::name(**a).cmp(&MachineAir::<Val<SC>>::name(**b))
+    });
+    observe_zerocheck_openings::<Val<SC>, Challenge<SC>, SC::Challenger, _>(
+        challenger,
+        chips.len(),
+        name_sorted.iter().map(|chip| {
+            let name = MachineAir::<Val<SC>>::name(**chip);
+            let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
+            // The borrow is of `trace_at_z` (a parameter), not of the local
+            // `name`, so it outlives the closure body.
+            let evals: &[Challenge<SC>] =
+                trace_at_z.get(&name).map(|v| v.as_slice()).unwrap_or(&[]);
+            let split = prep_width.min(evals.len());
+            evals.split_at(split)
+        }),
+    );
 }
 
 /// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
