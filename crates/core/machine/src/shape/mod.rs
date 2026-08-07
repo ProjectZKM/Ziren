@@ -122,9 +122,65 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// FIX-off normalize VK equals the FIX-on canonical cluster VK in the
     /// production vk_map.
     ///
-    /// Returns `None` when no cluster fits (the over-large case `fix_shape`
-    /// also rejects) — the caller then keeps legacy own-height packing.
+    /// Never returns `None` for a record that carries any chip: when no allowed
+    /// BAND fits, [`Self::raw_chip_set_cluster_shape`] still supplies the
+    /// canonical chip-SET.  That fallback is load-bearing — the sole caller
+    /// (`utils/prove.rs`, the FIX-off jagged commit) uses only the chip NAMES,
+    /// and a `None` there leaves the shard committed at its RAW present-chip
+    /// set, whose normalize VK the enumeration never emits.  Measured on the
+    /// in-repo fib ELF that `build_groth16_bn254`'s `dummy_proof()` proves:
+    /// its single packed shard fits no `partial_small_shapes` band, so it
+    /// committed 23 chips instead of the 27-chip `memory` cluster and
+    /// `VERIFY_VK=true` died "vk not allowed" at shrink.
     pub fn find_canonical_cluster_shape(
+        &self,
+        record: &ExecutionRecord,
+    ) -> Option<Shape<MipsAirId>> {
+        self.find_canonical_cluster_shape_banded(record)
+            .or_else(|| self.raw_chip_set_cluster_shape(record))
+    }
+
+    /// The canonical chip-SET for a record whose heights fit no allowed band:
+    /// every chip the record carries, at a placeholder log-height, lifted to
+    /// the smallest superset stacked-shapes cluster by [`canonicalize_shape`].
+    ///
+    /// Heights here are deliberately meaningless — the FIX-off commit reads
+    /// only the chip NAMES off this shape (it injects a 0-row trace per
+    /// missing chip and packs the present ones at their own natural heights),
+    /// so the SET is the entire contract.  Over-inclusion is safe: a chip that
+    /// the commit would have dropped only widens the set within the same
+    /// cluster, and `canonicalize_shape` would have injected it anyway.
+    fn raw_chip_set_cluster_shape(&self, record: &ExecutionRecord) -> Option<Shape<MipsAirId>> {
+        let mut shape: Shape<MipsAirId> = Shape::from_log2_heights(&[]);
+        // Preprocessed chips are present on every shard.
+        shape.insert(MipsAirId::Program, 1);
+        shape.insert(MipsAirId::Byte, 1);
+        let mut heights = MipsAir::<F>::core_heights(record);
+        heights.extend(MipsAir::<F>::memory_heights(record));
+        for (air, height) in heights {
+            if height > 0 {
+                shape.insert(air, 1);
+            }
+        }
+        for (air, (_, _)) in self.partial_precompile_shapes.iter() {
+            if let Some((height, _, _)) = air.precompile_heights(record) {
+                if height > 0 {
+                    if let Ok(id) = MipsAirId::from_str(&MachineAir::<F>::name(air)) {
+                        shape.insert(id, 1);
+                    }
+                }
+            }
+        }
+        if shape.len() <= 2 {
+            // Nothing but the preprocessed chips — no cluster to speak of.
+            return None;
+        }
+        canonicalize_shape(&mut shape);
+        Some(shape)
+    }
+
+    /// The band-fitting half of [`Self::find_canonical_cluster_shape`].
+    fn find_canonical_cluster_shape_banded(
         &self,
         record: &ExecutionRecord,
     ) -> Option<Shape<MipsAirId>> {
