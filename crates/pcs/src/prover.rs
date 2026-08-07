@@ -997,8 +997,27 @@ where
             // `commit_basefold_path` so the existing
             // `ShardProof.opening_proof: OpeningProof<SC>` shape stays
             // valid (a real `FriProof` value with empty FRI work).
-            // Cost is microseconds vs the seconds of the real
-            // multi-trace FRI open this replaces.
+            //
+            // COST — the "empty FRI work" framing is misleading, and the
+            // former "cost is microseconds" claim here was WRONG.  The
+            // commit phase does collapse to zero rounds (at height 2 with
+            // log_blowup=1 the `while folded.len() > blowup*final_poly_len`
+            // loop never runs), and the 84 query openings are read-only.  But
+            // `p3_fri::prove` still runs the config's 16-bit
+            // `query_proof_of_work_bits` grind unconditionally, and that grind
+            // dominates: MEASURED at 40.57 ms/shard (nsys+NVTX, tendermint
+            // core, ziren-gpu `core_multi_gpu.rs`), ~4.7% of core wall, with
+            // the accelerator idle throughout.  ziren-gpu routes it to a
+            // device kernel via `DeviceGrindChallenger`; THIS CpuProver path
+            // has no such mitigation and pays the full host grind per shard.
+            // The emitted proof also carries ~6.4 KB/shard of query openings
+            // that nothing ever reads.
+            //
+            // Removing it does NOT require making `opening_proof` an
+            // `Option` — an all-empty `FriProof` is already constructed for
+            // this same field in `sdk/src/provers/mock.rs` and in ziren-gpu's
+            // `shard-prover`.  The real cost of removal is re-baselining the
+            // CPU/GPU byte-identity goldens, not a type or VK change.
             let main_trace_opening_points_placeholder: Vec<Vec<SC::Challenge>> =
                 vec![vec![_zeta]];
             let (_openings_unused, opening_proof) = pcs.open(
