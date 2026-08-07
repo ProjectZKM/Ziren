@@ -1230,7 +1230,7 @@ pub mod jagged {
     /// single-main-commit flow.  Produced by
     /// [`precompute_jagged_basefold_commit`] before the shard-level
     /// Phase 1 prologue, then consumed by
-    /// [`prove_jagged_basefold_with_precomputed`] in Phase 4.
+    /// [`prove_jagged_basefold_with_precomputed_provider`] in Phase 4.
     ///
     /// The 8-felt digest of `commit.original_commitment` (via
     /// [`crate::jagged_pcs::basefold_commit_digest`]) is the
@@ -1291,7 +1291,7 @@ pub mod jagged {
     /// up-front, WITHOUT observing the commitment into a challenger.
     /// Returns the packing metadata plus the BaseFold commit + prover
     /// data — enough state for
-    /// [`prove_jagged_basefold_with_precomputed`] to skip the in-band
+    /// [`prove_jagged_basefold_with_precomputed_provider`] to skip the in-band
     /// commit and run steps (3)+(4)+(5) against an aligned transcript.
     ///
     /// Caller MUST surface `commit.original_commitment` (or its 8-felt digest)
@@ -1437,34 +1437,8 @@ pub mod jagged {
         )
     }
 
-    /// Single-main-commit variant: run steps (3)+(4)+(5)
-    /// using a `precompute_jagged_basefold_commit` result.  Does NOT
-    /// observe `precomputed.commit.original_commitment` into the challenger —
-    /// the orchestrator/Phase 1 prologue already observed the 8-felt
-    /// digest as `main_commitment`, and the verifier counterpart
-    /// [`verify_jagged_basefold_no_observe`] also skips the in-band
-    /// observe.  Wire bytes match the
-    /// `prove_jagged_basefold_with_y_per_chip` shape exactly.
-    pub fn prove_jagged_basefold_with_precomputed(
-        chip_traces: &[ChipTraceView<'_>],
-        r_row_per_chip: &[Vec<InnerChallenge>],
-        z_row: &[InnerChallenge],
-        precomputed: PrecomputedJaggedCommit,
-        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-    ) -> JaggedBasefoldBundle {
-        prove_jagged_basefold_with_precomputed_provider(
-            chip_traces,
-            r_row_per_chip,
-            z_row,
-            precomputed,
-            pre_y_per_chip,
-            challenger,
-        )
-    }
-
     /// Provider-aware reduction prove: same as
-    /// [`prove_jagged_basefold_with_precomputed`] but additionally accepts
+    /// [`prove_jagged_basefold_with_precomputed_provider`] but additionally accepts
     /// the per-shard `DeviceTraceProvider`.  The provider is used ONLY on
     /// the slow GPU-reduction fallback edge: when the device handle / V2
     /// hook declines and the host body must run, any chip whose
@@ -1645,7 +1619,7 @@ pub mod jagged {
 
     /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
     /// self-contained flow, which now precomputes + observes the commit in its
-    /// wrapper) and [`prove_jagged_basefold_with_precomputed`] (the
+    /// wrapper) and [`prove_jagged_basefold_with_precomputed_provider`] (the
     /// single-commit flow).  `precomputed` is always supplied: steps (1) + (2)
     /// were run up-front and the in-band commit observe is suppressed (the
     /// caller already observed the digest — the orchestrator at the Phase 1
@@ -2140,7 +2114,7 @@ pub mod jagged {
     }
 
     /// Option B variant: verifier counterpart of
-    /// [`prove_jagged_basefold_with_precomputed`].  Skips the in-band
+    /// [`prove_jagged_basefold_with_precomputed_provider`].  Skips the in-band
     /// `challenger.observe(commitment)` because the orchestrator's
     /// Phase 1 prologue already observed the BaseFold commit's 8-felt
     /// digest as `main_commitment`.

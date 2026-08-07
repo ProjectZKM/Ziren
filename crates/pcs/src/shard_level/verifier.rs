@@ -1011,9 +1011,11 @@ where
     //
     // The cross-chip constraint-RLC half (recursion part (a),
     // == point_and_eval.1) additionally needs the trace opened at the
-    // zerocheck REDUCED point z_zc; the host opens the jagged PCS at the GKR
-    // point z_gkr today, so that half lands with the open-point re-point
-    // (the full `verify_zerocheck_cryptographic_identity_host` is kept for it).
+    // zerocheck REDUCED point z*.  That is exactly what the prover opens the
+    // jagged PCS at (`prover.rs`, Stage 4 passes
+    // `zerocheck_proof.point_and_eval.0`), so the half is already discharged by
+    // the `recompute_zerocheck_rlc_eval_host` hard check above; the earlier
+    // "opens at the GKR point z_gkr today" note was stale.
     let _ = public_values;
     {
         use p3_air::BaseAir;

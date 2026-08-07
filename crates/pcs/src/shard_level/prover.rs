@@ -40,8 +40,9 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
 /// registered), returns the 8-felt BaseFold digest as the new
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
-/// threads it into the jagged-PCS opening.  The matrices are moved into a named-tuple
-/// Vec for the commit and moved back out — no trace data is copied.
+/// threads it into the jagged-PCS opening.  The incoming `main_traces` views
+/// are only relabeled to `InnerVal` for the commit build (a zero-copy slice
+/// reinterpret) and returned unchanged — no trace data is copied or moved.
 pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
     // The jagged trusted-evaluations open + commit producer — the COMMIT
     // static-dispatch seam (Phase-1 collapse of the former
@@ -712,76 +713,47 @@ where
             }
         };
 
-    // Auto-precompute (GPU pipeline path). The host CPU prover
-    // supplies `Some(precomputed)` from `commit_basefold_path` / `open()`;
-    // the GPU pipeline cannot (it has no host-side commit step) and passes
-    // `None`.  Because the verifier ALWAYS uses
-    // `verify_jagged_basefold_no_observe`, a `None` here would
-    // make the prover observe the BaseFold commit in-band while the
-    // verifier skips it → transcript desync.  So when no precomputed
-    // commit was supplied and this is the KoalaBear jagged-PCS config, run
-    // the BaseFold pre-commit now (GPU-accelerated via the
-    // ZIREN_GPU_BASEFOLD hook) on the already-materialized traces, override
-    // `main_commitment` with its 8-felt digest, and thread the result into
-    // the jagged-PCS opening so the in-band observe is skipped.  Matrices
-    // move in/out of the named-tuple Vec with zero data copy.
-    // Device residency, PCS-binding correctness: the jagged BaseFold
-    // commit must cover EVERY chip's real cells. Device-resident chips carry
-    // an EMPTY host main trace (the GKR / zerocheck phases read them through
-    // the per-shard provider), so the commit would silently DROP their cells
-    // (and, when every chip is device-resident, build an empty packing —
-    // log_dense_size == 0 → prove_jagged_reduction panic). Materialize those
-    // chips' traces from the provider into a commit-only trace set; the
-    // empty `main_traces` continue to drive the device GKR/zerocheck paths.
-    // Host-path behaviour is unchanged (no empty+provider chips there).
-    // Commit-traces D2H skip: on the GPU happy path the dense
-    // commit is built by the device hook (resident chips D2D, dims
-    // resolved from the provider) and the jagged reduction consumes the
-    // registered device dense handle — so the per-chip FULL-trace D2H here
-    // is pure waste for device-resident chips (their host values are never
-    // read).
+    // Auto-precompute.  This driver is the CpuProver path ONLY: the GPU
+    // pipeline assembles the shard stages device-natively in ziren-gpu's
+    // `shard-prover/src/lib.rs` and never enters this function.
     //
-    // SOUNDNESS GATE: the skip is taken ONLY when that device-handle happy
-    // path is GUARANTEED, i.e. the dense commit fires, the V2 reduction
-    // consumes the handle (JAGGED_PCS), and the dense size clears the GPU
-    // reduction threshold (handle is only registered for log_dense >= the GPU
-    // min; mirror its env+default here).  If any condition fails the device
-    // handle is NOT registered and the jagged reduction falls back to a HOST
-    // materialize — but the per-shard provider uses drain-on-lookup, so by
-    // reduction time the device traces are GONE and a late re-materialize
-    // cannot recover them.  In that case we MUST keep the eager early D2H
-    // (captured here, pre-drain) for a correct dense_q.
-    // GPU reduction min log-dense (mirror ziren-gpu
-    // jagged_reduction_dispatch::min_log_dense_size_for_gpu: env
-    // ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE, default 0).  The device dense
-    // handle is registered only at/above this size.
-    // The CpuProver driver's per-shard provider is always `None` (the GPU
-    // pipeline assembles this stage device-native and never calls this host
-    // driver), so every chip is host-resident. There is no device-chip remat
-    // side-store and no early device cumulative-sum tail capture: an
-    // all-`None` remat drives `build_commit_trace_views` down the pure
-    // host-trace branch, where each present chip BORROWS the shared `Arc<Mle>`
-    // store's real (unpadded) cells (the SITE-1 zero-copy). The returned
-    // views' lifetime is tied to `no_device_remat`, so the driver owns it for
-    // the duration.
-    let no_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> =
-        chips.iter().map(|_| None).collect();
-    let commit_traces =
-        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &no_device_remat);
-    // All-`None` cumulative-sum tails: `build_chip_cumulative_sums` reads each
-    // present chip's raw host cells directly.
-    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
-        chips.iter().map(|_| None).collect();
+    // `maybe_auto_precompute_basefold` runs the BaseFold pre-commit when the
+    // caller supplied no `precomputed_commit`, overrides `main_commitment`
+    // with its 8-felt digest, and threads the result into the jagged-PCS
+    // opening so the in-band commit observe is skipped.  That skip is
+    // load-bearing: the verifier ALWAYS uses
+    // `verify_jagged_basefold_no_observe`, so a `None` here would make the
+    // prover observe the BaseFold commit in-band while the verifier skips it
+    // → transcript desync.
+    //
+    // Every chip is host-resident on this driver, so the device-residency
+    // parameters the shared helpers accept are inert here:
+    //   * `no_device_remat` — all-`None`, which drives
+    //     `build_commit_trace_views` down the pure host-trace branch, where
+    //     each present chip BORROWS the shared `Arc<Mle>` store's real
+    //     (unpadded) cells (the SITE-1 zero-copy).  The views' lifetime is tied
+    //     to `no_device_remat`, so the driver owns it for the duration.
+    //   * `chip_cum_tails` — all-`None`; `build_chip_cumulative_sums` then
+    //     reads each present chip's raw host cells directly.
+    // The live device-remat / commit-traces-D2H-skip logic (and the soundness
+    // gate around the device dense handle) lives in ziren-gpu's
+    // `shard_helpers::{build_eager_device_remat, compute_skip_device_d2h,
+    // capture_chip_cum_tails}`, which feed these SAME shared helpers with real
+    // values.  Do not re-derive it here.
+    //
     // HEIGHT-AGNOSTIC RECURSION: the PRESENT chips' commit traces stay at their
     // NATURAL raw height (no band-pad), so the host packing offsets == the raw
     // degree heights == the in-circuit RAW col_prefix_sums reconstruction.  The
     // core STARK proves at those same actual heights (the `FIX_CORE_SHAPES=false`
     // perf win).  Missing (injected) chips are packed at band height (in
     // commit_basefold_path) to preserve the chip-SET / VK, so the recursion
-    // normalize VK = f(chip-SET).  A band-cap being installed IS the FIX-off
-    // predicate; FIX-on installs none and is byte-identical.  Device-resident
-    // chips (width==0) are not host-packed here — the GPU commit-dense path owns
-    // their packing.
+    // normalize VK = f(chip-SET).
+    let no_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> =
+        chips.iter().map(|_| None).collect();
+    let commit_traces =
+        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &no_device_remat);
+    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
+        chips.iter().map(|_| None).collect();
     let (commit_traces, main_commitment, precomputed_commit) =
         maybe_auto_precompute_basefold::<SC, A, D>(
             jagged_eval_producer,
@@ -1139,72 +1111,6 @@ pub fn observe_zerocheck_to_jagged_bridge<SC>(
             }
         }
     }
-}
-
-/// C0 block 2 (part 1) — the prospective-dense D2H-skip decision.  Returns
-/// `true` when the device dense-handle happy path is GUARANTEED (prospective
-/// `log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, default 0), in which
-/// case device-resident chips skip the eager D2H (the device commit hook
-/// packs them D2D).  Pure computation — no transcript.
-///
-/// NOTE (measured): this copy currently has NO caller in either repo — the
-/// live decision is ziren-gpu's `zkm_gpu_shard_prover::shard_helpers::
-/// compute_skip_device_d2h` (called from `shard-prover/src/lib.rs`), which
-/// carries the same env read and default.  Keep the two in sync: the host
-/// `CpuProver` driver would take this one if it ever grew a device provider,
-/// and a silent divergence in the threshold would put the commit-side dense_q
-/// carrier and the reduce-side gate on opposite sides of the decision.
-pub fn compute_skip_device_d2h<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-) -> bool
-where
-    SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
-{
-    // GPU reduction min log-dense (mirror ziren-gpu
-    // jagged_reduction_dispatch::min_log_dense_size_for_gpu).  The device dense
-    // handle is registered only at/above this size.
-    let gpu_min_log_dense = std::env::var("ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(0);
-    // Prospective dense size from the FULL (provider-resolved) per-chip
-    // dims — identical to what the dense commit hook will compute.
-    let prospective_total: usize = chips
-        .iter()
-        .zip(shared_trace_mles.iter())
-        .map(|(chip, pm)| {
-            // An empty host trace (inner `None`) ⟺ the raw trace was width-0;
-            // its real HEIGHT lives in the provider.  Host chips read the
-            // shared MLE's real width / row count.
-            //
-            // A device chip's committed WIDTH is its declared AIR width — the
-            // same "AIR width + provider height" pairing the device-fold path
-            // already sources its dims from, and the width the verifier
-            // hard-checks (`opening.main.local.len() == chip.width()`).  So it
-            // needs no provider round-trip.  An unexercised chip has no
-            // provider entry → (0, 0), exactly as before.
-            let (w, h) = if pm.inner().is_some() {
-                (pm.num_polynomials(), pm.num_real_entries())
-            } else {
-                match pm.metadata_height() {
-                    Some(h) => (<_ as p3_air::BaseAir<Val<SC>>>::width(&chip.air), h),
-                    None => (0, 0),
-                }
-            };
-            w * h
-        })
-        .sum();
-    let prospective_log_dense = if prospective_total == 0 {
-        0
-    } else {
-        (prospective_total.next_power_of_two()).trailing_zeros() as usize
-    };
-    // Device-vs-host is chosen statically by prover TYPE; the device dense
-    // handle is registered only at/above the GPU reduction min log-dense, so
-    // mirror that size guard here.
-    prospective_log_dense >= gpu_min_log_dense
 }
 
 /// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
