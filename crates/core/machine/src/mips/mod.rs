@@ -1371,23 +1371,23 @@ pub mod tests {
     // default state, an HONEST FIX-on proof still verifies (the new code path is
     // additive and transcript-neutral).
     //
-    // (c) SOUNDNESS: with `ZIREN_LOGUP_RECONSTRUCTION=1` the reconstruction
-    // becomes the ACTIVE last-layer assert; an area-preserving per-chip height
+    // (c) SOUNDNESS: the reconstruction is the ACTIVE last-layer assert (it runs
+    // unconditionally since `22616c7a`); an area-preserving per-chip height
     // forgery — tamper a chip's `degree` (quotient[0], the `full_geq` threshold
     // the LogUp last-layer padding mask reads) without touching `circuit_output`
     // / `main_trace_evaluations` — is REJECTED at the LogUp last-layer
     // reconstruction, demonstrating the reconstruction reads + binds the degree
     // bits the round walk alone ignores.
     //
-    // The reconstruction is gated `ZIREN_LOGUP_RECONSTRUCTION` (ACTIVE BY
-    // DEFAULT; `=0` is the escape hatch).  The exact interaction-axis MLE convention that makes
-    // it numerically match the GKR leaf on HONEST proofs is still being pinned
-    // (the per-chip embed lift + degree mask are verified; the residual is the
-    // leaf assembly orientation — see the crate REPORT).  So this test asserts
-    // the contract: (b) default honest verify is OK; the
-    // reconstruction-on soundness gate is exercised under the flag.
+    // The reconstruction runs UNCONDITIONALLY (`22616c7a` removed the
+    // `ZIREN_LOGUP_RECONSTRUCTION` escape hatch).  The exact interaction-axis MLE
+    // convention that makes it numerically match the GKR leaf on HONEST proofs is
+    // still being pinned (the per-chip embed lift + degree mask are verified; the
+    // residual is the leaf assembly orientation — see the crate REPORT).  So this
+    // test asserts the contract: (b) honest verify is OK; (c) the forgery is
+    // rejected at the reconstruction.
     //
-    // Run serially (`--test-threads=1`): the flag is a process-wide env var,
+    // Run serially (`--test-threads=1`):
     // set/cleared around each verify.
     #[test]
     // FAST diagnostic harness: prove one honest FIX-on fibonacci shard and run
@@ -1425,10 +1425,8 @@ pub mod tests {
         .unwrap();
         let (_pk, vk) = machine.setup(runtime.program.as_ref());
 
-        std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
         let mut challenger = machine.config().challenger();
         let r = machine.verify(&vk, &proof, &mut challenger);
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         eprintln!("[PROBE] recon-ON honest verify => {:?}", r.map(|_| "OK"));
     }
 
@@ -1484,7 +1482,6 @@ pub mod tests {
         // 2) GATE-(b): the honest proof verifies on the DEFAULT path (the
         // reconstruction code is additive / transcript-neutral and does not
         // regress honest verification).
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let honest = verify(&proof);
         eprintln!("[GATE-B] honest verify (default) => {honest}");
         assert_eq!(honest, "OK", "honest FIX-on proof must verify (gate-b)");
@@ -1494,9 +1491,7 @@ pub mod tests {
         // reconstruction's numerator AND denominator asserts hold for an honest
         // proof.  Only then is the gate-C GREEN reject attributable to the
         // forgery (and not to the reconstruction rejecting honest proofs too).
-        std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
         let honest_on = verify(&proof);
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         eprintln!("[GATE-B-ON] honest verify (reconstruction ON) => {honest_on}");
         assert_eq!(
             honest_on, "OK",
@@ -1571,21 +1566,18 @@ pub mod tests {
         // rejection in BOTH configurations instead -- weaker on attribution
         // (rejection is no longer attributable to the flag) but stronger on
         // soundness, which is what the gate is for.
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let red = verify(&forged);
         eprintln!("[GATE-C] flag-off forged verify => {red}");
         assert!(
             red.contains("last-layer reconstruction"),
             "the area-preserving height forgery must be rejected at the last-layer \
-             reconstruction even with ZIREN_LOGUP_RECONSTRUCTION unset; got: {red}"
+             reconstruction (it runs unconditionally); got: {red}"
         );
 
         // 5) GREEN: with the reconstruction ON, the forgery is REJECTED at the
         // LogUp last-layer reconstruction — the assert reads + binds the degree
         // bits the round walk alone ignores.
-        std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
         let green = verify(&forged);
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         eprintln!("[GATE-C] GREEN (reconstruction on) verify => {green}");
         assert!(
             green.contains("last-layer reconstruction"),
@@ -1728,7 +1720,6 @@ pub mod tests {
     #[test]
     fn stage0_tiny_honest_fixoff() {
         setup_logger();
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144);
         let r = stage0_verify(&machine, &vk, &proof);
         eprintln!("[STAGE0-TINY-HONEST] FIX-off raw-height verify => {r}");
@@ -1742,7 +1733,6 @@ pub mod tests {
     #[test]
     fn stage0_fib_honest_fixoff() {
         setup_logger();
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144);
         let r = stage0_verify(&machine, &vk, &proof);
         eprintln!("[STAGE0-FIB-HONEST] FIX-off raw-height verify => {r}");
@@ -1762,7 +1752,6 @@ pub mod tests {
     #[test]
     fn stage0_tiny_forgery_baseline_fixoff() {
         setup_logger();
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let (proof, machine, vk) = stage0_prove_fixoff(simple_program(), 262_144);
 
         // sanity: the honest tiny proof verifies first.
@@ -1789,7 +1778,6 @@ pub mod tests {
                 // baseline has flipped exactly as that comment anticipated.
                 // Kept, inverted, as the regression guard that the hole stays
                 // closed.
-                std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
                 let baseline = stage0_verify(&machine, &vk, &forged);
                 eprintln!(
                     "[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}"
@@ -1822,35 +1810,25 @@ pub mod tests {
     ) {
         // Reconstruction is verifier-only + transcript-neutral, so its state
         // during proving is irrelevant; clear it so proving is unaffected.
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         stage0_prove_fixoff(program, shard_size)
     }
 
-    // Shared helper: run the FULL machine.verify with the reconstruction in the
-    // requested state, returning the error string (or "OK").  The
-    // CORE (MIPS) machine host-verifies rev by construction (`core_rev` flag), so
-    // no env toggle is needed.  Self-contained recon-env management (the stage0_*
-    // baselines remove ZIREN_LOGUP_RECONSTRUCTION, so Stage 3 needs its own driver).
+    // Shared helper: run the FULL machine.verify, returning the error string (or
+    // "OK").  The CORE (MIPS) machine host-verifies rev by construction
+    // (`core_rev` flag), and the degree-masked last-layer reconstruction runs
+    // unconditionally, so there is nothing to toggle.
     #[cfg(test)]
     fn stage3_verify_rev(
         machine: &StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>>,
         vk: &StarkVerifyingKey<KoalaBearPoseidon2>,
         p: &zkm_pcs::MachineProof<KoalaBearPoseidon2>,
-        recon_on: bool,
     ) -> String {
         use zkm_pcs::StarkGenericConfig;
-        if recon_on {
-            std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
-        } else {
-            std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
-        }
         let mut challenger = machine.config().challenger();
-        let r = match machine.verify(vk, p, &mut challenger) {
+        match machine.verify(vk, p, &mut challenger) {
             Ok(()) => "OK".to_string(),
             Err(e) => format!("{e}"),
-        };
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
-        r
+        }
     }
 
     // Helper: ADAPTIVE forgery.  Forge a degree bit (area-preserving, as
@@ -1948,30 +1926,8 @@ pub mod tests {
     }
 
     // A/B transcript-neutrality probe.  Prove ONE honest fib proof,
-    // then verify the SAME proof recon-OFF and recon-ON under rev, printing
-    // item-12 EQUAL for each (via S8J_RLC).  If recon-ON flips item-12 EQUAL on
-    // the SAME proof, the reconstruction is NOT transcript-neutral.
-    #[test]
-    #[ignore]
-    fn stage3_rev_ab_neutrality_probe() {
-        setup_logger();
-        let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
-        std::env::set_var("S8J_RLC", "1");
-
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
-        eprintln!("[AB] ===== recon-OFF verify =====");
-        let off = stage3_verify_rev(&machine, &vk, &proof, false);
-        eprintln!("[AB] recon-OFF => {off}");
-
-        eprintln!("[AB] ===== recon-ON verify =====");
-        let on = stage3_verify_rev(&machine, &vk, &proof, true);
-        eprintln!("[AB] recon-ON => {on}");
-        std::env::remove_var("S8J_RLC");
-    }
-
-    // The forgery flip under rev.
-    // Under the rev/natural core path AND
-    // ZIREN_LOGUP_RECONSTRUCTION=1 (reconstruction ON):
+    // The forgery flip under rev.  Under the rev/natural core path, with the
+    // degree-masked last-layer reconstruction active (unconditional):
     //   (a) the HONEST proof still ACCEPTS (anti-confound: the flip is only real
     //       if honest is green with the reconstruction on);
     //   (b) the DEGREE-ONLY area-preserving height forgery now REJECTS at the
@@ -1987,7 +1943,7 @@ pub mod tests {
         let (proof, machine, vk) = stage3_prove_fixoff_rev(simple_program(), 262_144);
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
-        let honest_on = stage3_verify_rev(&machine, &vk, &proof, true);
+        let honest_on = stage3_verify_rev(&machine, &vk, &proof);
         eprintln!("[STAGE3-TINY] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
             honest_on, "OK",
@@ -2008,12 +1964,8 @@ pub mod tests {
             }
             Some(desc) => {
                 eprintln!("[STAGE3-TINY] (b) {desc}");
-                // sanity: with recon OFF the forgery still SURVIVES under rev.
-                let off = stage3_verify_rev(&machine, &vk, &forged, false);
-                eprintln!("[STAGE3-TINY] (b) recon-OFF forged => {off}");
-                assert_eq!(off, "OK", "baseline under rev: forgery survives recon-OFF");
-                // the flip: recon ON rejects at the reconstruction assert.
-                let on = stage3_verify_rev(&machine, &vk, &forged, true);
+                // The forgery must REJECT at the reconstruction assert.
+                let on = stage3_verify_rev(&machine, &vk, &forged);
                 eprintln!("[STAGE3-TINY] (b) recon-ON forged => {on}");
                 assert!(
                     on.contains("last-layer reconstruction"),
@@ -2032,7 +1984,7 @@ pub mod tests {
         let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
 
         // (a) honest ACCEPTS with recon ON under rev (anti-confound).
-        let honest_on = stage3_verify_rev(&machine, &vk, &proof, true);
+        let honest_on = stage3_verify_rev(&machine, &vk, &proof);
         eprintln!("[STAGE3-FIB] (a) honest recon-ON under rev => {honest_on}");
         assert_eq!(
             honest_on, "OK",
@@ -2046,12 +1998,8 @@ pub mod tests {
         let desc = stage0_apply_height_forgery(&mut forged)
             .expect("fibonacci (mixed-height) must host an area-preserving forgery");
         eprintln!("[STAGE3-FIB] (b) {desc}");
-        // sanity: recon OFF => forgery survives under rev.
-        let off = stage3_verify_rev(&machine, &vk, &forged, false);
-        eprintln!("[STAGE3-FIB] (b) recon-OFF forged => {off}");
-        assert_eq!(off, "OK", "baseline under rev: forgery survives recon-OFF");
-        // the flip.
-        let on = stage3_verify_rev(&machine, &vk, &forged, true);
+        // The forgery must REJECT at the reconstruction assert.
+        let on = stage3_verify_rev(&machine, &vk, &forged);
         eprintln!("[STAGE3-FIB] (b) recon-ON forged => {on}");
         assert!(
             on.contains("last-layer reconstruction"),
@@ -2073,7 +2021,7 @@ pub mod tests {
         let (proof, machine, vk) = stage3_prove_fixoff_rev(fibonacci_program(), 262_144);
 
         // sanity: honest accepts both recon states under rev.
-        let h_on = stage3_verify_rev(&machine, &vk, &proof, true);
+        let h_on = stage3_verify_rev(&machine, &vk, &proof);
         assert_eq!(h_on, "OK", "honest must accept recon-ON under rev before adaptive");
 
         let mut forged = proof.clone();
@@ -2082,7 +2030,7 @@ pub mod tests {
         eprintln!("[STAGE3-ADAPTIVE] {desc}");
 
         // The adaptive forgery must reject under FULL verify with recon ON.
-        let on = stage3_verify_rev(&machine, &vk, &forged, true);
+        let on = stage3_verify_rev(&machine, &vk, &forged);
         eprintln!("[STAGE3-ADAPTIVE] recon-ON FULL verify => {on}");
         assert_ne!(
             on, "OK",
@@ -2091,34 +2039,15 @@ pub mod tests {
              and must be collapsed onto the bound opening"
         );
 
-        // Also report the recon-OFF behaviour: with recon OFF, the ONLY thing
-        // that can catch the tampered `*_full` is the binding (claim/commit) —
-        // this isolates the rejection site to the binding (not the
-        // reconstruction).
-        let off = stage3_verify_rev(&machine, &vk, &forged, false);
-        eprintln!("[STAGE3-ADAPTIVE] recon-OFF FULL verify => {off}");
-        assert_ne!(
-            off, "OK",
-            "the tampered *_full must be caught by the binding even with recon OFF \
-             (proves *_full is bound, not a free reconstruction-only input)"
-        );
-
-        // Classify the rejection site for the report.
-        let site = if off.contains("sum-modification") || off.contains("claimed_sum") {
-            "CLAIM-BINDING (zerocheck sum-modification identity)"
-        } else if off.contains("jagged") || off.contains("basefold") {
-            "COMMITMENT (jagged/basefold opening)"
-        } else if off.contains("last-layer reconstruction") {
-            "RECONSTRUCTION (unexpected with recon OFF)"
-        } else {
-            "OTHER"
-        };
-        eprintln!("[STAGE3-ADAPTIVE] rejection site (recon-OFF) = {site}");
-        assert_eq!(
-            site, "CLAIM-BINDING (zerocheck sum-modification identity)",
-            "the tampered *_full must be caught at the CLAIM binding (recon OFF) — \
-             confirms *_full is bound through the rev claim-collapse"
-        );
+        // NOTE: this test used to ALSO isolate the rejection SITE by re-verifying
+        // with the reconstruction disabled, to show the tampered `*_full` is
+        // caught by the CLAIM binding and not only by the reconstruction.  That
+        // isolation is no longer expressible: `22616c7a` made the degree-masked
+        // last-layer reconstruction UNCONDITIONAL and removed the
+        // `ZIREN_LOGUP_RECONSTRUCTION` escape hatch, so every verify now runs it
+        // and it is simply the first check to fire.  The soundness property this
+        // test guards -- the adaptive forgery must not be accepted -- is asserted
+        // above and is strictly stronger than the old two-mode form.
 
         // DECISIVE conjunction: an adaptive adversary wins ONLY if SOME *_full
         // makes BOTH (recon-ON pass) AND (claim binding pass) for the forged
@@ -2130,22 +2059,23 @@ pub mod tests {
         let mut deg_only = proof.clone();
         let _ = stage0_apply_height_forgery(&mut deg_only)
             .expect("fib hosts the degree-only forgery");
-        let i_on = stage3_verify_rev(&machine, &vk, &deg_only, true);
+        let i_on = stage3_verify_rev(&machine, &vk, &deg_only);
         eprintln!("[STAGE3-ADAPTIVE] (i) degree-only + honest *_full, recon-ON => {i_on}");
         assert!(
             i_on.contains("last-layer reconstruction"),
             "(i) forged degree with HONEST *_full must REJECT at the reconstruction \
              (so the adversary is forced to change *_full); got: {i_on}"
         );
-        // Endpoint (ii) is the recon-OFF claim-binding rejection above (any
-        // change to *_full breaks the claim).  Together: no *_full satisfies
-        // both ⇒ the adaptive forgery is impossible.  degree is the SOLE free
-        // variable and *_full need NOT be retired (it is bound by the claim).
+        // Endpoint (ii) -- any change to *_full breaks the claim binding -- is
+        // covered independently by `stage3_rev_full_binding_probe`, which
+        // perturbs ONLY `*_full`.  Together: no `*_full` satisfies both ⇒ the
+        // adaptive forgery is impossible.  degree is the SOLE free variable and
+        // `*_full` need NOT be retired (it is bound by the claim).
         eprintln!(
             "[STAGE3-ADAPTIVE] CONCLUSION: degree-only forgery is caught by the \
-             reconstruction (recon-ON) and any *_full deviation is caught by the \
-             claim binding (recon-OFF) ⇒ adaptive forgery rejects; *_full is bound \
-             (NOT retired)."
+             reconstruction, and any *_full deviation is caught by the claim \
+             binding (see stage3_rev_full_binding_probe) ⇒ adaptive forgery \
+             rejects; *_full is bound (NOT retired)."
         );
     }
 
@@ -2177,12 +2107,12 @@ pub mod tests {
         }
         eprintln!("[STAGE3-BINDPROBE] perturbed *_full[0] on {touched} chip_openings");
 
-        let off = stage3_verify_rev(&machine, &vk, &forged, false);
-        eprintln!("[STAGE3-BINDPROBE] recon-OFF FULL verify => {off}");
+        let off = stage3_verify_rev(&machine, &vk, &forged);
+        eprintln!("[STAGE3-BINDPROBE] FULL verify => {off}");
         assert_ne!(
             off, "OK",
-            "BINDING: perturbing *_full alone must reject (recon OFF) — proves \
-             *_full is bound to the commitment via the rev claim-collapse"
+            "BINDING: perturbing *_full alone must reject — proves *_full is \
+             bound to the commitment via the rev claim-collapse"
         );
     }
 
@@ -2232,7 +2162,7 @@ pub mod tests {
         eprintln!("[STAGE3-ATTR] forged degree raise chip[{rc}] bit {rb}, lower chip[{lc}] bit {lb}");
 
         // forged => recon-ON REJECTS at the reconstruction.
-        let forged_on = stage3_verify_rev(&machine, &vk, &forged, true);
+        let forged_on = stage3_verify_rev(&machine, &vk, &forged);
         eprintln!("[STAGE3-ATTR] forged recon-ON => {forged_on}");
         assert!(
             forged_on.contains("last-layer reconstruction"),
@@ -2243,7 +2173,7 @@ pub mod tests {
         let bf2 = forged.shard_proofs[0].basefold_shard_proof.as_mut().unwrap();
         bf2.opened_values.chips[rc].quotient[0][rb] = zero_ef; // back to 0
         bf2.opened_values.chips[lc].quotient[0][lb] = one_ef; // back to 1
-        let reverted_on = stage3_verify_rev(&machine, &vk, &forged, true);
+        let reverted_on = stage3_verify_rev(&machine, &vk, &forged);
         eprintln!("[STAGE3-ATTR] reverted (degree bits only) recon-ON => {reverted_on}");
         assert_eq!(
             reverted_on, "OK",
@@ -2260,7 +2190,6 @@ pub mod tests {
     #[test]
     fn stage0_fib_forgery_baseline_fixoff() {
         setup_logger();
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let (proof, machine, vk) = stage0_prove_fixoff(fibonacci_program(), 262_144);
 
         // sanity: the honest fib proof verifies first.
@@ -2279,7 +2208,6 @@ pub mod tests {
         // height-soundness assert in the LogUp-GKR last-layer reconstruction now
         // catches the forgery -- so the assertion is inverted and kept as the
         // guard that the hole stays closed.
-        std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let baseline = stage0_verify(&machine, &vk, &forged);
         eprintln!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
         assert_ne!(

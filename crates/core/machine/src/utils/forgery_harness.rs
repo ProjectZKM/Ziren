@@ -238,55 +238,37 @@ fn stage0_control_fixon_honest_verifies() {
 /// matches `expect_reject`.  Returns the reject tag so the caller can
 /// log it.
 ///
-/// `recon`: when `true`, runs the verify under
-/// `ZIREN_LOGUP_RECONSTRUCTION=1` so the degree-masked last-layer
-/// reconstruction (the height anchor) is exercised.  When `false`, the
-/// reconstruction is GATED OFF (explicitly disabled).
+/// The degree-masked last-layer reconstruction (the height anchor) always
+/// runs: `22616c7a` made it unconditional and removed the
+/// `ZIREN_LOGUP_RECONSTRUCTION` escape hatch.
 ///
 /// `expect_reject`: the de-risk assertion — `true` means the forgery
 /// MUST be rejected (heights redundantly bound on this path); `false`
 /// documents a path where the forgery SURVIVES (records, not a soundness
-/// claim — used to prove the gating is exactly what disables the host
-/// degree anchor when `ZIREN_LOGUP_RECONSTRUCTION=0`).
+/// claim).
 fn run_forgery(
     label: &str,
     program: Program,
     stdin: ZKMStdin,
-    recon: bool,
     expect_reject: bool,
     mutate: impl Fn(&mut ShardProof<SC>, usize, &str),
 ) -> String {
-    // Toggle the degree-masked reconstruction (the height anchor) for
-    // the whole prove+verify of this call.  Single-threaded test runner
-    // (--test-threads=1) makes the process-global env var safe here.
-    //
-    // The reconstruction is
-    // ACTIVE BY DEFAULT (verifier.rs un-gated — runs unless the var is
-    // explicitly "0").  So `recon=false` here means EXPLICITLY DISABLE it
-    // (`="0"`, the escape hatch) to reproduce the pre-port baseline; the
-    // production default (var UNSET / "1") runs it.
-    if recon {
-        std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "1");
-    } else {
-        std::env::set_var("ZIREN_LOGUP_RECONSTRUCTION", "0");
-    }
-
     let (proof, machine, vk) = prove_fixoff(program, stdin);
 
     // Honest control first (per-call) — guards against a proof that is
     // already invalid for unrelated reasons, AND confirms the verify
-    // path (under the same `recon` setting) accepts honest proofs.
+    // path accepts honest proofs.
     let honest = verify(&machine, &vk, &proof);
     assert!(
         honest.is_ok(),
-        "[{label}] honest FIX-off proof must verify before forging (recon={recon}, got {})",
+        "[{label}] honest FIX-off proof must verify before forging (got {})",
         reject_tag(&honest)
     );
 
     let (si, ci, name, log_h) = pick_forge_target(&proof);
     eprintln!(
         "[STAGE0][FORGE][{label}] target shard={si} chip_idx={ci} chip='{name}' \
-         log_height={log_h} recon={recon}"
+         log_height={log_h}"
     );
 
     let mut forged = proof.clone();
@@ -294,22 +276,20 @@ fn run_forgery(
 
     let res = verify(&machine, &vk, &forged);
     let tag = reject_tag(&res);
-    eprintln!("[STAGE0][FORGE][{label}] forged verify (recon={recon}) = {tag}");
+    eprintln!("[STAGE0][FORGE][{label}] forged verify = {tag}");
 
     if expect_reject {
         assert!(
             res.is_err(),
-            "[{label}] FORGED HEIGHT SURVIVED (recon={recon}) — \
-             heights are NOT redundantly bound (BLOCKER)"
+            "[{label}] FORGED HEIGHT SURVIVED — heights are NOT \
+             redundantly bound (BLOCKER)"
         );
     } else {
         assert!(
             res.is_ok(),
-            "[{label}] expected forgery to SURVIVE (recon={recon}, gated-off baseline) but it \
-             was rejected: {tag}"
+            "[{label}] expected forgery to SURVIVE but it was rejected: {tag}"
         );
     }
-    std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
     tag
 }
 
@@ -478,11 +458,10 @@ fn stage0_forge_overclaim_fibonacci() {
         "fibonacci/overclaim",
         fibonacci_program(),
         ZKMStdin::new(),
-        false, // recon gate OFF (production default)
         true,  // MUST reject
         overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree, recon-off) => {tag}");
+    eprintln!("[STAGE0][VERDICT] fibonacci OVER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -493,11 +472,10 @@ fn stage0_forge_underclaim_fibonacci() {
         "fibonacci/underclaim",
         fibonacci_program(),
         ZKMStdin::new(),
-        false,
         true,
         underclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree, recon-off) => {tag}");
+    eprintln!("[STAGE0][VERDICT] fibonacci UNDER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -508,11 +486,10 @@ fn stage0_forge_transcript_only_fibonacci() {
         "fibonacci/transcript-only",
         fibonacci_program(),
         ZKMStdin::new(),
-        false,
         true,
         forge_transcript_only,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci TRANSCRIPT-only (recon-off) => {tag}");
+    eprintln!("[STAGE0][VERDICT] fibonacci TRANSCRIPT-only => {tag}");
 }
 
 // (B) DEGREE-ONLY forgeries WITH the reconstruction gate ON — the pure
@@ -527,11 +504,10 @@ fn stage0_forge_degree_only_overclaim_fibonacci_recon_on() {
         "fibonacci/degree-only-overclaim",
         fibonacci_program(),
         ZKMStdin::new(),
-        true, // recon gate ON — exercise the degree anchor
         true, // MUST reject
         forge_degree_only_overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim (recon-ON) => {tag}");
+    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only OVER-claim => {tag}");
 }
 
 #[test]
@@ -543,10 +519,9 @@ fn stage0_forge_degree_only_underclaim_fibonacci_recon_on() {
         fibonacci_program(),
         ZKMStdin::new(),
         true,
-        true,
         forge_degree_only_underclaim,
     );
-    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only UNDER-claim (recon-ON) => {tag}");
+    eprintln!("[STAGE0][VERDICT] fibonacci DEGREE-only UNDER-claim => {tag}");
 }
 
 // (B') DEGREE-ONLY forgery with the reconstruction EXPLICITLY DISABLED
@@ -565,7 +540,6 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
         "fibonacci/degree-only-overclaim-EXPLICITLY-OFF",
         fibonacci_program(),
         ZKMStdin::new(),
-        false, // recon EXPLICITLY OFF (=0 escape hatch)
         false, // SURVIVES (degree anchor disabled on purpose) — documented
         forge_degree_only_overclaim,
     );
@@ -588,7 +562,6 @@ fn stage0_degree_only_overclaim_fibonacci_survives_when_recon_off() {
 fn stage1_degree_only_overclaim_fibonacci_rejected_on_default() {
     setup_logger();
     // TRUE production default: the var is UNSET.
-    std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let honest = verify(&machine, &vk, &proof);
     assert!(
@@ -630,11 +603,10 @@ fn stage0_forge_overclaim_keccak() {
         "keccak/overclaim",
         sha3_chain_program(),
         ZKMStdin::new(),
-        false,
         true,
         overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] keccak OVER-claim (transcript+degree, recon-off) => {tag}");
+    eprintln!("[STAGE0][VERDICT] keccak OVER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -645,11 +617,10 @@ fn stage0_forge_underclaim_keccak() {
         "keccak/underclaim",
         sha3_chain_program(),
         ZKMStdin::new(),
-        false,
         true,
         underclaim,
     );
-    eprintln!("[STAGE0][VERDICT] keccak UNDER-claim (transcript+degree, recon-off) => {tag}");
+    eprintln!("[STAGE0][VERDICT] keccak UNDER-claim (transcript+degree) => {tag}");
 }
 
 #[test]
@@ -661,10 +632,9 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
         sha3_chain_program(),
         ZKMStdin::new(),
         true,
-        true,
         forge_degree_only_overclaim,
     );
-    eprintln!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim (recon-ON) => {tag}");
+    eprintln!("[STAGE0][VERDICT] keccak DEGREE-only OVER-claim => {tag}");
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -742,7 +712,6 @@ fn stage0_forge_count_tamper_column_fibonacci() {
         "fibonacci/count-tamper-column",
         fibonacci_program(),
         ZKMStdin::new(),
-        false, // recon gate (irrelevant to hash-bind) — production default
         true,  // MUST reject (hash-bind)
         forge_count_tamper_column,
     );
@@ -757,7 +726,6 @@ fn stage0_forge_count_tamper_row_fibonacci() {
         "fibonacci/count-tamper-row",
         fibonacci_program(),
         ZKMStdin::new(),
-        false,
         true,
         forge_count_tamper_row,
     );
@@ -866,7 +834,6 @@ fn forge_present_claim_missing(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 fn stage1_forge_height0_missing_claims_active_rejected() {
     setup_logger();
     // TRUE production default: the reconstruction runs unless explicitly "0".
-    std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
     let (proof, machine, vk) = prove_fixoff(fibonacci_program(), ZKMStdin::new());
     let honest = verify(&machine, &vk, &proof);
     assert!(
@@ -904,7 +871,6 @@ fn stage1_forge_present_active_claims_missing_rejected() {
         "present-claims-missing",
         fibonacci_program(),
         ZKMStdin::new(),
-        true, // recon ON — exercise the degree anchor
         true, // MUST reject
         forge_present_claim_missing,
     );
