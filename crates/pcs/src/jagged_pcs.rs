@@ -292,10 +292,12 @@ pub fn commit_jagged_pcs(
     commit_jagged_pcs_host(chip_traces, challenger)
 }
 
-/// Pure host-side implementation of [`commit_jagged_pcs`]
-/// — extracted so the GPU dispatch hook can fall back to it on
-/// shape-unsupported / runtime errors without re-entering the env-flag
-/// dispatch loop.  Always runs the CPU BaseFold + Plonky3 MMCS commit.
+/// Pure host-side implementation of [`commit_jagged_pcs`].  Always runs the
+/// CPU BaseFold + Plonky3 MMCS commit.
+///
+/// NOT a GPU fallback — the GPU prover never reaches it (see
+/// [`commit_jagged_pcs`]; the device commit is unconditional, SP1-parity).
+/// This is the CPU-prover / unit-test path.
 pub fn commit_jagged_pcs_host(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     challenger: &mut JaggedChallenger,
@@ -306,39 +308,13 @@ pub fn commit_jagged_pcs_host(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    commit_jagged_pcs_host_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+    let (commit, prover_data) = commit_jagged_pcs_generic::<JaggedMmcs, JaggedDft>(
         chip_traces,
-        challenger,
         mmcs,
         dft,
         FriConfig::<JaggedVal>::from_env_or_default(),
-    )
-}
-
-/// BaseFold-over-BN254 port: GC-generic host commit core (observes
-/// the commitment into `challenger`).  Parameterized over the challenger
-/// `Challenger` + MMCS `MT` + DFT `D`; the caller supplies the concrete
-/// `mmcs`/`dft`.  The inner path uses `JaggedChallenger` + Poseidon2-KoalaBear
-/// Mmcs; the wrap (OuterSC) will pass the BN254 challenger + Poseidon2-BN254
-/// Mmcs.  `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both.
-#[allow(clippy::type_complexity)]
-pub fn commit_jagged_pcs_host_generic<Challenger, MT, D>(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    challenger: &mut Challenger,
-    mmcs: MT,
-    dft: Arc<D>,
-    fri: FriConfig<JaggedVal>,
-) -> (
-    JaggedCommitGeneric<MT>,
-    JaggedProverDataGeneric<MT>,
-)
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
-    Challenger: CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
-{
-    let (commit, prover_data) =
-        commit_jagged_pcs_no_observe_generic::<MT, D>(chip_traces, mmcs, dft, fri);
+    );
+    // The transcript write lives HERE, at the caller, not inside the PCS helper.
     challenger.observe(commit.original_commitment.clone());
     (commit, prover_data)
 }
@@ -376,7 +352,7 @@ pub fn commit_jagged_pcs_host_no_observe(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    commit_jagged_pcs_no_observe_generic::<JaggedMmcs, JaggedDft>(
+    commit_jagged_pcs_generic::<JaggedMmcs, JaggedDft>(
         chip_traces,
         mmcs,
         dft,
@@ -384,13 +360,15 @@ pub fn commit_jagged_pcs_host_no_observe(
     )
 }
 
-/// BaseFold-over-BN254 port: GC-generic commit core (no challenger
-/// observe).  Parameterized over the MMCS `MT` + DFT `D`; the caller
+/// BaseFold-over-BN254 port: GC-generic commit core.  Does not touch the
+/// transcript: like SP1's `JaggedProver::commit_multilinears`
+/// (slop/crates/jagged/src/prover.rs:106) it takes no challenger, and the
+/// caller owns the `observe` of the returned commitment.  Parameterized over the MMCS `MT` + DFT `D`; the caller
 /// supplies the concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear)
 /// and the wrap (OuterSC, Poseidon2-BN254) paths share one body.
 /// `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both.
 #[allow(clippy::type_complexity)]
-pub fn commit_jagged_pcs_no_observe_generic<MT, D>(
+pub fn commit_jagged_pcs_generic<MT, D>(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
     mmcs: MT,
     dft: Arc<D>,
@@ -1318,7 +1296,7 @@ pub mod jagged {
             )];
 
             let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            crate::jagged_pcs::commit_jagged_pcs_no_observe_generic::<MT, crate::jagged_pcs::JaggedDft>(
+            crate::jagged_pcs::commit_jagged_pcs_generic::<MT, crate::jagged_pcs::JaggedDft>(
                 dense_traces, mmcs, dft, fri,
             )
         };

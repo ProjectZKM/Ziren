@@ -375,10 +375,11 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 #[allow(dead_code, clippy::type_complexity)]
 mod basefold_over_bn254_generic_typecheck {
     use super::{KoalaBearPoseidon2Outer, OuterChallenger, OuterDft, OuterValMmcs};
+    // The commit no longer observes internally, so the caller needs `CanObserve`.
+    use p3_challenger::CanObserve;
     use std::sync::Arc;
     use zkm_pcs::jagged_pcs::{
-        commit_jagged_pcs_host_generic, commit_jagged_pcs_no_observe_generic,
-        open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+        commit_jagged_pcs_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
         JaggedCommitGeneric, JaggedProverDataGeneric,
         JaggedChallenge, JaggedMmcs, JaggedVal,
     };
@@ -401,7 +402,7 @@ mod basefold_over_bn254_generic_typecheck {
         JaggedProverDataGeneric<OuterValMmcs>,
     ) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        commit_jagged_pcs_no_observe_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
+        commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri)
     }
 
     // commit (with observe) — exercises `OuterChallenger:
@@ -417,9 +418,11 @@ mod basefold_over_bn254_generic_typecheck {
         JaggedProverDataGeneric<OuterValMmcs>,
     ) {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            traces, ch, mmcs, dft, fri,
-        )
+        let (commit, prover_data) =
+            commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(traces, mmcs, dft, fri);
+        // The transcript write lives HERE, at the caller, not inside the PCS helper.
+        ch.observe(commit.original_commitment.clone());
+        (commit, prover_data)
     }
 
     // open over the BN254 MMCS.
@@ -567,7 +570,7 @@ mod basefold_over_bn254_roundtrip_test {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::basefold::FriConfig;
         use zkm_pcs::jagged_pcs::{
-            commit_jagged_pcs_host_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+            commit_jagged_pcs_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
             JaggedChallenge,
         };
 
@@ -575,14 +578,14 @@ mod basefold_over_bn254_roundtrip_test {
         // env-default rate keeps prover == verifier (any rate works here).
         let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
         let mut p_chal = make_challenger();
-        let (commit, prover_data) =
-            commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-                traces,
-                &mut p_chal,
-                mmcs.clone(),
-                dft.clone(),
-                rt_fri.clone(),
-            );
+        let (commit, prover_data) = commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(
+            traces,
+            mmcs.clone(),
+            dft.clone(),
+            rt_fri.clone(),
+        );
+        // Caller owns the transcript write, matching the prove path.
+        p_chal.observe(commit.original_commitment.clone());
 
         let stack_dim = commit.log_stacking_height as usize;
         let num_stripes = commit.area >> stack_dim;
