@@ -1562,18 +1562,22 @@ pub mod tests {
         bf.opened_values.chips[rc].quotient[0][rb] = one_ef; // raise: +2^? area
         bf.opened_values.chips[lc].quotient[0][lb] = zero_ef; // lower: -2^? area
 
-        // 4) RED: with the reconstruction OFF (default), the LogUp-GKR stage
-        // ACCEPTS the forgery at the last layer (the hole) — the verify must NOT
-        // fail with the reconstruction error.  (It may fail LATER: the zerocheck
-        // `rlc_eval` also reads `full_geq(degree)` for chips with a nonzero
-        // padding-row adjustment — but that is a different, downstream check.)
+        // 4) With the reconstruction flag OFF (default), the forgery is STILL
+        // rejected at the last-layer reconstruction.  This half used to be the
+        // RED arm of a red/green pair: it asserted the reconstruction error was
+        // NOT raised, pinning the hole that the restructure had to close.  The
+        // degree-masked height-soundness assert is now on the default path, so
+        // the flag no longer gates it and the RED arm no longer exists.  Assert
+        // rejection in BOTH configurations instead -- weaker on attribution
+        // (rejection is no longer attributable to the flag) but stronger on
+        // soundness, which is what the gate is for.
         std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let red = verify(&forged);
-        eprintln!("[GATE-C] RED (reconstruction off) verify => {red}");
+        eprintln!("[GATE-C] flag-off forged verify => {red}");
         assert!(
-            !red.contains("last-layer reconstruction"),
-            "RED: with the reconstruction off the LogUp stage must NOT raise the \
-             reconstruction error (demonstrates the hole); got: {red}"
+            red.contains("last-layer reconstruction"),
+            "the area-preserving height forgery must be rejected at the last-layer \
+             reconstruction even with ZIREN_LOGUP_RECONSTRUCTION unset; got: {red}"
         );
 
         // 5) GREEN: with the reconstruction ON, the forgery is REJECTED at the
@@ -1600,8 +1604,10 @@ pub mod tests {
     // All four prove at RAW heights (FIX-off, `shape_config = None`) — no shape
     // padding => the zerocheck shape-padding tax is removed => fast.  The honest
     // cases must verify GREEN; the forgery
-    // cases must VERIFY (the forgery SURVIVES) with the reconstruction
-    // OFF (default) — that survival is the baseline this restructure closes.
+    // cases must be REJECTED with the reconstruction OFF (default).  These
+    // originally asserted the opposite -- that the forgery SURVIVED -- to pin
+    // the hole the restructure had to close; that flip has happened and the
+    // assertions now guard against it reopening.
     // ───────────────────────────────────────────────────────────────────────
 
     // Shared helper: FIX-off prove a single-shard program at RAW heights, then
@@ -1774,20 +1780,26 @@ pub mod tests {
             }
             Some(desc) => {
                 eprintln!("[STAGE0-TINY-FORGERY] {desc}");
-                // BASELINE: with the reconstruction OFF (default), the forged
-                // proof must still VERIFY (the forgery survives) — this is the
-                // hole.  We assert SURVIVAL: verify returns "OK".
+                // The area-preserving height forgery must be REJECTED even with
+                // the reconstruction off.  This assertion used to demand the
+                // opposite -- it pinned the size of an open hole so a later fix
+                // could be shown to close it (accept -> reject).  The hole IS
+                // closed: the degree-masked height-soundness assert in the
+                // LogUp-GKR last-layer reconstruction now catches it, so the
+                // baseline has flipped exactly as that comment anticipated.
+                // Kept, inverted, as the regression guard that the hole stays
+                // closed.
                 std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
                 let baseline = stage0_verify(&machine, &vk, &forged);
                 eprintln!(
-                    "[STAGE0-TINY-FORGERY] BASELINE (recon off) forged verify => {baseline}"
+                    "[STAGE0-TINY-FORGERY] forged verify (recon off) => {baseline}"
                 );
-                assert_eq!(
+                assert_ne!(
                     baseline, "OK",
-                    "FORGERY-SURVIVES BASELINE (tiny): the area-preserving height \
-                     forgery must currently VERIFY with the reconstruction off — \
-                     this is the hole the restructure must close.  If this is no \
-                     longer OK, the baseline has changed."
+                    "FORGERY MUST BE REJECTED (tiny): an area-preserving height \
+                     forgery verified with the reconstruction off.  This hole was \
+                     closed by the degree-masked height-soundness assert; a pass \
+                     here means it has REOPENED."
                 );
             }
         }
@@ -2260,16 +2272,22 @@ pub mod tests {
             .expect("fibonacci (mixed-height) must host an area-preserving height forgery");
         eprintln!("[STAGE0-FIB-FORGERY] {desc}");
 
-        // BASELINE: with the reconstruction OFF (default), the forged proof must
-        // still VERIFY (the forgery survives) — the hole.
+        // The area-preserving height forgery must be REJECTED even with the
+        // reconstruction off.  This used to assert the opposite: it pinned an
+        // open hole so the restructure could be shown to close it
+        // (accept -> reject).  That transition has happened -- the degree-masked
+        // height-soundness assert in the LogUp-GKR last-layer reconstruction now
+        // catches the forgery -- so the assertion is inverted and kept as the
+        // guard that the hole stays closed.
         std::env::remove_var("ZIREN_LOGUP_RECONSTRUCTION");
         let baseline = stage0_verify(&machine, &vk, &forged);
-        eprintln!("[STAGE0-FIB-FORGERY] BASELINE (recon off) forged verify => {baseline}");
-        assert_eq!(
+        eprintln!("[STAGE0-FIB-FORGERY] forged verify (recon off) => {baseline}");
+        assert_ne!(
             baseline, "OK",
-            "FORGERY-SURVIVES BASELINE (fib): the area-preserving height forgery \
-             must currently VERIFY with the reconstruction off — this is the hole \
-             the restructure (Stage 3) must close (accept->reject)."
+            "FORGERY MUST BE REJECTED (fib): an area-preserving height forgery \
+             verified with the reconstruction off.  This hole was closed by the \
+             degree-masked height-soundness assert; a pass here means it has \
+             REOPENED."
         );
     }
 
