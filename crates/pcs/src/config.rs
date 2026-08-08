@@ -95,7 +95,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// Max preprocessed LOG height committable via the two-adic `pcs.commit`
     /// (= `TWO_ADICITY - log_blowup`).  Above this, the coset LDE
     /// (`height << log_blowup`) would exceed `TWO_ADICITY` and panic in
-    /// `two_adic_generator`, so setup routes prep through `prep_commit_hook`
+    /// `two_adic_generator`, so setup routes prep through `prep_commit`
     /// instead (height-agnostic recursion: FIX-off recursion prep reaches
     /// 2^24 > the inner 2^23 ceiling).  Default `usize::MAX` (never
     /// height-trigger — preserves byte-identical two-adic prep for every

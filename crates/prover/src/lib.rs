@@ -1936,7 +1936,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // proves + host-verifies over OuterValMmcs/OuterChallenger. The outer
         // jagged BaseFold open/verify paths are static generic calls; the
         // PREPROCESSED-commit is resolved statically via
-        // `KoalaBearPoseidon2Outer::prep_commit_hook`.
+        // `KoalaBearPoseidon2Outer::prep_commit`.
         let ZKMReduceProof { vk: compressed_vk, proof: compressed_proof } = compressed_proof;
         let basefold_proof = *compressed_proof
             .basefold_shard_proof
