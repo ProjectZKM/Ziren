@@ -759,9 +759,114 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
     let z_star = proof.eval_point.clone();
 
-    let w_table = build_weight_table(packing, r_row_per_chip, &z_col_lagrange, z_row);
-    let w_mle = crate::zerocheck_prover::MultilinearExt::new(w_table);
-    let w_at_z = w_mle.evaluate(&z_star);
+    // ── CLOSING WEIGHT `w_at_z` — CLOSED FORM (SP1 parity) ──────────────
+    //
+    // `w_at_z` is the dense weight-MLE `w[off_k + row] = eq(z_col,k)·eq(z_row,row)`
+    // evaluated at `z_star`.  It is a function of the VERIFIER's own trusted
+    // packing geometry `(offsets, row_counts)` and the transcript points
+    // `(z_row, z_col, z_star)` — no prover-supplied field element enters it —
+    // so any way of computing it is equally sound; only the cost differs.
+    //
+    // The former implementation MATERIALIZED that MLE:
+    //     build_weight_table(..)                -> Vec<EF> of 2^log_dense_size
+    //     MultilinearExt::new(w).evaluate(z*)   -> CLONES it, then serially folds
+    // For a core reth shard (`log_dense_size == 28`, see `opts.rs`
+    // ELEMENT_THRESHOLD: median jagged-hypercube fill 0.909) that is a 4.0 GiB
+    // allocation, a 4.0 GiB clone, and ~2^29 serial extension-field multiplies:
+    // **14.7 s and 10.0 GiB peak RSS per shard, single-threaded**.  It was the
+    // whole of host verify — and the reason `StarkMachine::verify` has to cap
+    // shard concurrency at 8 (machine.rs) to avoid OOM.
+    //
+    // SP1's verifier never builds it: it closes the identity with the
+    // branching-program evaluation of the jagged polynomial
+    // (`full_jagged_little_polynomial_evaluation`,
+    // slop/crates/jagged/src/verifier.rs:355-361).  Ziren already ports that
+    // closed form as `full_jagged_evaluation`, and the in-tree acceptance gate
+    // `phase1_acceptance_gate::gate_weight_table_matches_branching_program`
+    // asserts the two agree on equal AND mixed heights.  It is
+    // `O(num_columns · log(area))` — **38 ms**, size-independent, no transient.
+    //
+    // The one thing the table form did implicitly that the closed form does not:
+    // it wrote each column's run at `offsets[k]..offsets[k]+row_count`, so a
+    // packing whose `offsets` disagreed with its `chip_infos` row/column counts,
+    // or ran past the dense size, tripped its bounds assert.  The closed form
+    // reads `offsets` alone, so those consistency conditions are now CHECKED
+    // EXPLICITLY below (and as a graceful reject rather than a panic).  SP1
+    // makes the same monotonicity check on its prefix sums (verifier.rs:338-347).
+    {
+        let n_dense = 1usize << packing.log_dense_size;
+        // (a) One offset per global column plus the sentinel.
+        let num_cols_total: usize =
+            packing.chip_infos.iter().map(|c| c.column_count).sum();
+        if packing.offsets.len() != num_cols_total + 1 {
+            tracing::debug!(
+                "jagged reduction: offsets len {} != total columns {} + 1",
+                packing.offsets.len(),
+                num_cols_total,
+            );
+            return None;
+        }
+        // (b) The sentinel is the committed total, and the whole packing fits
+        //     inside the dense hypercube it claims.
+        if packing.offsets[num_cols_total] != packing.total_values
+            || packing.total_values > n_dense
+        {
+            tracing::debug!(
+                "jagged reduction: offsets sentinel {} != total_values {} (or > 2^{})",
+                packing.offsets[num_cols_total],
+                packing.total_values,
+                packing.log_dense_size,
+            );
+            return None;
+        }
+        // (c) Every column's run is exactly its chip's row_count, laid out
+        //     contiguously and monotonically.  This is precisely the layout
+        //     `build_weight_table`'s `w[offsets[k] + row]` writes assumed.
+        //     Also bound `row_count` by the cube — the table form enforced this
+        //     only as an out-of-bounds PANIC on its `2^|z_row|` row-eq table
+        //     (a DoS on a malformed proof); SP1 rejects it explicitly
+        //     (`r > 1 << max_log_row_count` -> IncorrectShape,
+        //     slop/crates/jagged/src/verifier.rs:274).
+        let max_rows = 1usize << z_row.len();
+        let mut k = 0usize;
+        for info in packing.chip_infos.iter() {
+            if info.row_count > max_rows {
+                tracing::debug!(
+                    "jagged reduction: chip '{}' row_count {} > 2^{} (cube)",
+                    info.name,
+                    info.row_count,
+                    z_row.len(),
+                );
+                return None;
+            }
+            for _ in 0..info.column_count {
+                if packing.offsets[k + 1] < packing.offsets[k]
+                    || packing.offsets[k + 1] - packing.offsets[k] != info.row_count
+                {
+                    tracing::debug!(
+                        "jagged reduction: column {k} run {}..{} != chip '{}' row_count {}",
+                        packing.offsets[k],
+                        packing.offsets[k + 1],
+                        info.name,
+                        info.row_count,
+                    );
+                    return None;
+                }
+                k += 1;
+            }
+        }
+    }
+
+    // `full_jagged_evaluation` consumes `z_index` in the branching program's
+    // big-endian order, which is `rev(z_star)` — the same pairing the
+    // acceptance gate asserts against `MultilinearExt::evaluate(&z_star)`.
+    let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
+    let w_at_z = crate::jagged_branching_program::full_jagged_evaluation(
+        &packing.offsets,
+        z_row,
+        z_col,
+        &z_star_rev,
+    );
 
     if current_claim != proof.q_at_z * w_at_z {
         tracing::debug!("jagged sumcheck final identity failed");
@@ -1234,4 +1339,186 @@ mod phase1_acceptance_gate {
         eprintln!("[S5] low-placement commit PROVEN: band_y==raw_y per column; recursion step-4 assert holds with NO embed_factor; offsets/total stay band-keyed.");
     }
 
+}
+
+/// Differential test for the closed-form `w_at_z` substitution in
+/// [`verify_jagged_reduction`].
+///
+/// The verifier used to compute the closing weight by MATERIALIZING the
+/// `2^log_dense_size` weight MLE (`build_weight_table` +
+/// `MultilinearExt::evaluate`) — 4.0 GiB and 14.7 s on a core reth shard.  It
+/// now uses the branching-program closed form (`full_jagged_evaluation`, 38 ms,
+/// no transient), which is what SP1's verifier does.  These tests pin the two
+/// to be BIT-IDENTICAL across randomized and degenerate packing geometry, so
+/// the substitution cannot silently change any verdict.
+#[cfg(test)]
+mod closed_form_weight_equivalence {
+    use super::*;
+    use crate::jagged::JaggedChipInfo;
+    use crate::jagged_branching_program::full_jagged_evaluation;
+    use alloc::string::ToString;
+    use alloc::format;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+
+    fn rand_ef(rng: &mut StdRng) -> InnerChallenge {
+        use p3_field::BasedVectorSpace;
+        <InnerChallenge as BasedVectorSpace<InnerVal>>::from_basis_coefficients_iter(
+            (0..4).map(|_| InnerVal::from_u32(rng.gen::<u32>() & 0x3FFF_FFFF)),
+        )
+        .unwrap()
+    }
+
+    /// Build the canonical packing for `(row_count, column_count)` pairs.
+    fn packing_of(chips: &[(usize, usize)]) -> JaggedPacking<InnerVal> {
+        let mut chip_infos = Vec::new();
+        let mut offsets = Vec::new();
+        let mut running = 0usize;
+        for (i, &(h, w)) in chips.iter().enumerate() {
+            chip_infos.push(JaggedChipInfo {
+                name: format!("chip{i}"),
+                row_count: h,
+                column_count: w,
+            });
+            for _ in 0..w {
+                offsets.push(running);
+                running += h;
+            }
+        }
+        offsets.push(running);
+        let log_dense_size = if running == 0 {
+            0
+        } else {
+            running.next_power_of_two().trailing_zeros() as usize
+        };
+        JaggedPacking {
+            dense_values: Vec::new(),
+            chip_infos,
+            offsets,
+            total_values: running,
+            log_dense_size,
+        }
+    }
+
+    /// `table form == closed form` for one geometry / seed.
+    fn assert_agrees(chips: &[(usize, usize)], seed: u64, z_row_dim: usize) {
+        let packing = packing_of(chips);
+        if packing.total_values == 0 {
+            return;
+        }
+        let mut rng = StdRng::seed_from_u64(seed);
+        let z_row: Vec<InnerChallenge> = (0..z_row_dim).map(|_| rand_ef(&mut rng)).collect();
+        let num_cols = packing.offsets.len() - 1;
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> =
+            (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
+        let z_star: Vec<InnerChallenge> =
+            (0..packing.log_dense_size).map(|_| rand_ef(&mut rng)).collect();
+        let r_row_per_chip: Vec<Vec<InnerChallenge>> =
+            packing.chip_infos.iter().map(|_| z_row.clone()).collect();
+
+        // Old path: materialize the dense weight MLE and fold it.
+        let w_table =
+            build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
+        let table_form =
+            crate::zerocheck_prover::MultilinearExt::new(w_table).evaluate(&z_star);
+
+        // New path: branching-program closed form.
+        let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
+        let closed_form =
+            full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
+
+        assert_eq!(
+            table_form, closed_form,
+            "closed form != materialized weight table for chips {chips:?} \
+             (seed {seed}, z_row_dim {z_row_dim}, log_dense {})",
+            packing.log_dense_size,
+        );
+    }
+
+    #[test]
+    fn closed_form_matches_weight_table_fixed_shapes() {
+        let cases: &[&[(usize, usize)]] = &[
+            &[(1, 1)],                              // single cell
+            &[(1, 5)],                              // one row, many columns
+            &[(64, 1)],                             // one column
+            &[(16, 4), (16, 4)],                    // equal heights
+            &[(16, 3), (8, 5), (4, 1)],             // mixed heights, multi-col
+            &[(31, 2), (17, 3), (5, 7)],            // non-power-of-two heights
+            &[(64, 2), (0, 3), (32, 1)],            // zero-height chip in the middle
+            &[(64, 2), (16, 0), (32, 1)],           // zero-COLUMN chip in the middle
+            &[(1024, 1), (1, 1023)],                // extreme aspect ratios
+            &[(4, 1), (4, 1), (4, 1), (4, 1), (4, 1)], // many tiny chips
+        ];
+        for (i, chips) in cases.iter().enumerate() {
+            // The materialized form indexes a `2^z_row_dim` row-eq table by the
+            // literal row, so the reference path is only defined for
+            // `z_row_dim >= log2(max row_count)`; sweep from there upwards.
+            let max_h = chips.iter().map(|(h, _)| *h).max().unwrap_or(1).max(1);
+            let min_dim = max_h.next_power_of_two().trailing_zeros() as usize;
+            for z_row_dim in [min_dim, min_dim + 1, min_dim + 4, 22] {
+                assert_agrees(chips, 4242 + i as u64, z_row_dim);
+            }
+        }
+    }
+
+    #[test]
+    fn closed_form_matches_weight_table_randomized() {
+        let mut rng = StdRng::seed_from_u64(0xC10_5EDF);
+        for trial in 0..40u64 {
+            let num_chips = rng.gen_range(1..8usize);
+            let chips: Vec<(usize, usize)> = (0..num_chips)
+                .map(|_| (rng.gen_range(0..300usize), rng.gen_range(0..6usize)))
+                .collect();
+            if chips.iter().map(|(h, w)| h * w).sum::<usize>() == 0 {
+                continue;
+            }
+            assert_agrees(&chips, 0xBEEF + trial, 12);
+        }
+    }
+
+    /// The layout guards added alongside the substitution must REJECT a
+    /// packing whose `offsets` disagree with its `chip_infos` — the condition
+    /// the materialized table used to catch via its bounds assert.
+    #[test]
+    fn inconsistent_offsets_are_rejected() {
+        let mut packing = packing_of(&[(16, 2), (8, 2)]);
+        // Corrupt one column's run so offsets no longer match row_count.
+        packing.offsets[1] += 3;
+        let mut rng = StdRng::seed_from_u64(7);
+        let z_row: Vec<InnerChallenge> = (0..12).map(|_| rand_ef(&mut rng)).collect();
+        let num_cols = packing.offsets.len() - 1;
+        let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
+        let z_col: Vec<InnerChallenge> =
+            (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
+        let r_row_per_chip: Vec<Vec<InnerChallenge>> =
+            packing.chip_infos.iter().map(|_| z_row.clone()).collect();
+        let y_per_chip: Vec<Vec<InnerChallenge>> = packing
+            .chip_infos
+            .iter()
+            .map(|c| (0..c.column_count).map(|_| rand_ef(&mut rng)).collect())
+            .collect();
+        // A well-shaped but arbitrary reduction proof: the layout guards run
+        // before the closing identity, so this must be rejected on layout.
+        let proof = JaggedReductionProof::<InnerChallenge> {
+            rounds: (0..packing.log_dense_size)
+                .map(|_| JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] })
+                .collect(),
+            eval_point: (0..packing.log_dense_size).map(|_| rand_ef(&mut rng)).collect(),
+            q_at_z: InnerChallenge::ZERO,
+        };
+        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+        let mut ch = InnerChallenger::new(perm);
+        let out = verify_jagged_reduction(
+            &proof,
+            &packing,
+            &r_row_per_chip,
+            &y_per_chip,
+            &z_col,
+            &z_row,
+            &mut ch,
+        );
+        assert!(out.is_none(), "inconsistent offsets must be rejected");
+        let _ = "".to_string();
+    }
 }

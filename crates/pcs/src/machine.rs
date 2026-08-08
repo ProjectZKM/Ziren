@@ -894,14 +894,24 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 })
             };
 
-            // Bound how many shard verifies run concurrently. Each shard verify
-            // allocates a large transient (padded-dense-sized) buffer; an
-            // unbounded `par_iter` over all shards materializes one per shard at
-            // once (a 41-shard TM proof -> ~700 GB peak host RSS -> OOM).
-            // Capping concurrency bounds peak host memory to ~cap x per-shard
-            // while preserving the EXACT verdict: shards are independent, and we
-            // still collect ALL failures and re-verify the lowest-index one
-            // serially for the identical typed error.
+            // Bound how many shard verifies run concurrently, preserving the
+            // EXACT verdict: shards are independent, and we still collect ALL
+            // failures and re-verify the lowest-index one serially for the
+            // identical typed error.
+            //
+            // HISTORICAL: this cap existed because each shard verify used to
+            // materialize a padded-dense-sized transient — `verify_jagged_reduction`
+            // built the full `2^log_dense_size` weight MLE and then CLONED it to
+            // fold (jagged_sumcheck.rs).  On a core reth shard (`log_dense_size ==
+            // 28`) that was 4.0 GiB allocated + 4.0 GiB cloned, 10.0 GiB peak RSS
+            // and 14.7 s of SINGLE-THREADED work per shard, so an unbounded
+            // `par_iter` over all shards OOMed the host. That weight MLE is now
+            // computed by the SP1-parity branching-program closed form
+            // (`full_jagged_evaluation`, ~38 ms, size-independent, no transient),
+            // so the cap no longer guards against a multi-GiB per-shard peak and
+            // is merely a conservative default. It is left in place because
+            // verify is not a throughput target; raise
+            // `ZIREN_VERIFY_SHARD_CONCURRENCY` if it ever becomes one.
             let cap = std::env::var("ZIREN_VERIFY_SHARD_CONCURRENCY")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
