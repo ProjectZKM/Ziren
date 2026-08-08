@@ -2022,7 +2022,16 @@ impl<'a> Executor<'a> {
             //
             // For every other syscall `precompile_next_pc == pc + 4 ==` the
             // entry `next_pc`, so this assignment is a no-op.
-            if syscall != SyscallCode::HALT {
+            //
+            // The exemption must list EVERY syscall the Cpu AIR marks as
+            // halting, not just `HALT`: `cpu/trace.rs` sets `is_halt` for
+            // `HALT` *and* `SYS_EXT_GROUP` (matching
+            // `syscall/instructions/air.rs`'s `is_halt = is_halt_check +
+            // is_exit_group`), and `is_halt` is exactly the row on which
+            // `cpu/air/mod.rs` leaves `state_recv_next_pc` unpinned.  Writing
+            // the zeroed `next_pc` there strands the predecessor's SENT
+            // `next_next_pc`, so the `State` multiset cannot close.
+            if !matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP) {
                 recv_next_pc = next_pc;
             }
             self.state.clk += precompile_cycles;
