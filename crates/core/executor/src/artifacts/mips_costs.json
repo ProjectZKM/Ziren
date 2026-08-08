@@ -28,7 +28,7 @@
   "Bn254Fp2AddSubAssign": 734,
   "MemoryUnaligned": 64,
   "Secp256k1DoubleAssign": 2280,
-  "U256XU2048Mul": 3129,
+  "U256XU2048Mul": 3157,
   "StoreWord": 59,
   "BooleanCircuitGarbleControl": 80,
   "DivRem": 106,
