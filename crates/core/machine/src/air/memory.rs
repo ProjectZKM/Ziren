@@ -8,7 +8,10 @@ use zkm_pcs::{
     LookupKind,
 };
 
-use crate::memory::{MemoryAccessCols, MemoryCols, RegisterCols};
+use crate::{
+    air::WordAirBuilder,
+    memory::{MemoryAccessCols, MemoryCols, RegisterCols},
+};
 
 pub trait MemoryAirBuilder: BaseAirBuilder {
     /// Constrain a memory read or write.
@@ -32,6 +35,11 @@ pub trait MemoryAirBuilder: BaseAirBuilder {
 
         // Verify that the current memory access time is greater than the previous's.
         self.eval_memory_access_timestamp(mem_access, do_check.clone(), shard.clone(), clk.clone());
+
+        // Defense-in-depth: memory words entering the subsystem must remain byte-shaped even
+        // if an upstream chip forgot to range check them.
+        self.slice_range_check_u8(&memory_access.prev_value().0, do_check.clone());
+        self.slice_range_check_u8(&memory_access.value().0, do_check.clone());
 
         // Add to the memory argument.
         let addr = addr.into();

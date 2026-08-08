@@ -155,6 +155,11 @@ impl<F: PrimeField32> MemoryAccessCols<F> {
     ) {
         self.value = current_record.value.into();
 
+        // Match the byte range checks emitted by `eval_memory_access` for both the previous and
+        // current memory words.
+        output.add_u8_range_checks(&prev_record.value.to_le_bytes());
+        output.add_u8_range_checks(&current_record.value.to_le_bytes());
+
         self.prev_shard = F::from_u32(prev_record.shard);
         self.prev_clk = F::from_u32(prev_record.timestamp);
 
