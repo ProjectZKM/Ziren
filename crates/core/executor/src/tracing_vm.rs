@@ -432,7 +432,7 @@ mod tests {
     /// runs in `ExecutorMode::Checkpoint`, NOT `Trace`. The mem_reads
     /// oracle population in `mr`/`mw` is gated only on
     /// `!self.unconstrained` (no mode check), so it MUST work in
-    /// Checkpoint mode for D.4 producer wiring to be useful. This test
+    /// Checkpoint mode for the producer wiring to be useful. This test
     /// runs a synthetic loadful program through execute_state with
     /// collector ON, then asserts that recorded mem_reads chunks have
     /// non-empty entries on any user-memory load.
@@ -532,7 +532,7 @@ mod tests {
     /// sequential trace path (`Executor::run` with collector ON) and
     /// the parallel replay (`drive_tracing_vm_parallel` on the
     /// captured `MinimalTrace`). Asserts that per-shard CPU event
-    /// counts match. The full record byte-diff is gated on D.4
+    /// counts match. The full record byte-diff is gated on the record byte-equivalence tests
     /// (per-field comparison helper); this test catches the structural
     /// divergence that would break the prover hot path immediately.
     #[test]
@@ -566,7 +566,7 @@ mod tests {
         let total_addsub_b: usize = records_b.iter().map(|r| r.add_sub_events.len()).sum();
 
         // Structural equivalence: both paths must emit the same number
-        // of CPU + ADD events. (Per-field byte-equiv lives in D.4.)
+        // of CPU + ADD events. (Per-field byte-equivalence is covered by the record tests.)
         assert_eq!(total_cpu_a, total_cpu_b,
             "CPU event count diverges: seq={} par={}, trace chunks={}",
             total_cpu_a, total_cpu_b, trace.chunks.len());
@@ -576,7 +576,7 @@ mod tests {
 
     /// deeper byte-equiv: compare CpuEvent + AluEvent
     /// fields between sequential and parallel paths, not just counts.
-    /// This is the regression net for D.5  (when the
+    /// This is the regression net for the mem-read recorder (when the
     /// JIT-emit path lands, this test will catch any per-event drift
     /// even if total counts coincidentally match).
     #[test]

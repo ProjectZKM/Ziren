@@ -49,7 +49,7 @@ use crate::{
 ///
 /// `heights` supplies the per-chip DEVICE trace height (by chip name) for the
 /// width-0 (device-resident / unexercised) chips whose host trace is empty and
-/// so carries no row count.  `chip_height` removal Stage B: when a width-0 chip
+/// so carries no row count.  `chip_height` removal: when a width-0 chip
 /// has a `Some(height)` here, it is BAKED into the dummy via
 /// [`crate::multilinear::PaddedMle::dummy_with_height`], so the 8 downstream
 /// height consumers read it back through `metadata_height()` instead of the
@@ -79,7 +79,7 @@ where
                 // Device-resident / unexercised chip: no host cells.  Bake the
                 // per-chip device height when the caller supplies one (so
                 // `metadata_height()` is the sole source), else a plain dummy
-                // (falls back to the provider — byte-identical to Stage A).
+                // (falls back to the provider — byte-identical to the pre-removal behaviour).
                 match heights(&name) {
                     Some(h) => crate::multilinear::PaddedMle::dummy_with_height(
                         max_log_row_count,

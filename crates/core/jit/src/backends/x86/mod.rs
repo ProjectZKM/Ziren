@@ -219,7 +219,7 @@ pub struct TranspilerBackend {
     /// load instructions (LW today; LB/LBU/LH/LHU/LWL/LWR queued
     /// behind validation) emit a SysV-ABI call to this fn after the
     /// load, passing `(global_clk, guest_addr, value)`. Default
-    /// `None` keeps codegen byte-identical to pre-D.5 — every load
+    /// `None` keeps codegen byte-identical when no recorder is configured — every load
     /// is a single mov, no register save/restore, no extra ops.
     pub(crate) mem_read_recorder: Option<unsafe extern "C" fn(u64, u32, u32)>,
 }
@@ -270,7 +270,7 @@ impl TranspilerBackend {
     /// register a mem-read recorder. After
     /// this is set, every JIT'd load instruction (LW today) emits a
     /// post-load SysV-ABI call to `f(global_clk, guest_addr, value)`.
-    /// Default unset: codegen byte-identical to pre-D.5.
+    /// Default unset: codegen byte-identical to the no-recorder path.
     ///
     /// Caller is responsible for thread-safety of `f` — the standard
     /// pattern is a thread-local `Vec<JitMemReadRecord>` (see

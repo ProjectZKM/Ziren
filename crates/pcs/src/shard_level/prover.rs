@@ -915,7 +915,7 @@ where
     // producer) and so cannot reach `shared_trace_mles` directly.  A
     // device-resident chip (dummy, `inner` None) carries its baked height here;
     // a host chip maps to `None` (its height comes from the non-empty trace, so
-    // this slot is never read).  Stage A bakes nothing → all `None`, so both
+    // this slot is never read).  The pre-removal path bakes nothing → all `None`, so both
     // sites fall back to the per-shard provider — byte-identical to today.
     let open_heights: Vec<Option<usize>> = shared_trace_mles
         .iter()
@@ -1058,7 +1058,7 @@ pub fn observe_transcript_prologue<SC, A>(
     challenger.observe(num_chips);
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Per-chip log-height observe (device-residency aware): a device
-        // chip's REAL height is baked into its dummy MLE (Stage B), read back
+        // chip's REAL height is baked into its dummy MLE, read back
         // via `metadata_height()`; a host chip reports its real row count the
         // same way.  Falls back to h=1/log_h=0 for genuinely unexercised
         // chips.  Source matches the `chip_log_heights` map + the verifier
@@ -1398,7 +1398,7 @@ where
     let mut chip_heights = std::collections::BTreeMap::new();
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Device residency: a device chip's REAL height is baked into its
-        // dummy MLE (Stage B), read back via `metadata_height()`.  A MISSING
+        // dummy MLE, read back via `metadata_height()`.  A MISSING
         // canonical-cluster chip is a genuine 0-row matrix (log_h 0 => all-zero
         // degree bits); the device branch keeps `.max(1)`.
         let h = if pm.inner().is_some() {

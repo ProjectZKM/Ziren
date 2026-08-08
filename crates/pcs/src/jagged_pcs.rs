@@ -2614,7 +2614,7 @@ mod test {
         .expect("basefold jagged-PCS roundtrip");
     }
 
-    /// **Phase C3** — full jagged-sumcheck pipeline backed by BaseFold.
+    /// Full jagged-sumcheck pipeline backed by BaseFold.
     /// E1: ungated from `whir` after `jagged` and `jagged_sumcheck`
     /// were moved out of the whir feature gate.
     #[test]

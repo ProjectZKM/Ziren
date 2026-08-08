@@ -285,7 +285,7 @@ where
                 None => (&[], 0),
             };
             // Device-only chip — its real height is baked into the dummy MLE
-            // (Stage B), read via `metadata_height()`; a host chip reads the
+            // and read via `metadata_height()`; a host chip reads the
             // shared MLE's real row count.  Falls back to 1 (legacy
             // unexercised-chip) when absent.
             let main_height = pm.metadata_height().unwrap_or(1);

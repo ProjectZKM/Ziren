@@ -365,7 +365,7 @@ pub trait GpuZerocheckChallenger {
 // `OnceLock` + `register_/get_` accessors + the `GpuZerocheckBatchedYTupleFn`
 // fn-ptr alias were dropped.  The method's per-chip input struct
 // `ZerocheckChipYTupleInput` was a GPU-only device-ABI type with ZERO host
-// consumers; the AirProver seam (Stage A) relocated it verbatim into ziren-gpu
+// consumers; the AirProver seam relocated it verbatim into ziren-gpu
 // (`zkm-gpu-core::basefold::zerocheck_ytuple_input`), so the host no longer
 // defines it.
 
@@ -401,7 +401,7 @@ pub trait GpuZerocheckChallenger {
 // Device-resident per-layer LogUp-GKR round result: the scalar-only
 // `GpuLogupRoundResult` (univariate_polys/point/final_eval/openings) was a
 // GPU-only device-ABI type with ZERO host consumers; the AirProver seam
-// (Stage C) relocated it into ziren-gpu
+// relocated it into ziren-gpu
 // (`zkm-gpu-basefold::logup_round_device`), so the host no longer defines it.
 // Its dead `next_layer` cross-call channel (always `None`) was dropped in the
 // same stage (see the `GPU_LOGUP_ROUND_HOOK` note below).
@@ -458,7 +458,7 @@ pub trait GpuZerocheckChallenger {
 // (`take/peek/publish/clear_logup_v3_next_handle`) — was DEAD: the GPU device
 // pack never published a next-layer handle, so every `GpuLogupRoundResult` set
 // `next_layer: None` and the TLS always resolved to `None`.  The AirProver seam
-// (Stage C) dropped the whole channel.
+// dropped the whole channel.
 
 // ------------------------------------------------------------------
 // Device-built logup-round eq_row tables.

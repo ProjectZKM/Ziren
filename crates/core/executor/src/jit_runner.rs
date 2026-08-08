@@ -1257,7 +1257,7 @@ mod platform {
         }
         // register the optional mem-read recorder
         // so load instructions emit the post-load extern call. When
-        // `None`, codegen is byte-identical to pre-D.5.
+        // `None`, codegen is byte-identical to the no-recorder path.
         if let Some(recorder) = params.mem_read_recorder {
             transpiler.set_mem_read_recorder(recorder);
         }
@@ -1394,9 +1394,9 @@ mod platform {
         unsafe { jit_fn.call(ctx as *mut JitContext) };
 
         // drain recorder into the chunk's
-        // mem_reads oracle. Pre-D.5 callers (no recorder configured at
+        // mem_reads oracle. Callers with no recorder configured at
         // build time) get the same empty Vec as before — byte-equivalent.
-        // Post-D.5 callers that set `BuildParams.mem_read_recorder` get a
+        // Callers that set `BuildParams.mem_read_recorder` get a
         // populated oracle that TracingVM can consume for replay.
         let mem_reads: Vec<crate::minimal_trace::MemValue> =
             take_recorded_mem_reads()
@@ -1406,7 +1406,7 @@ mod platform {
                     addr: r.addr,
                     value: r.value,
                     // the JIT recorder does not track per-address
-                    // shard/timestamp bookkeeping — the D.4 gap that
+                    // shard/timestamp bookkeeping — the shard-bookkeeping gap that
                     // prevents a JIT-produced oracle from driving a
                     // byte-exact trace. Left 0 here.
                     shard: 0,
