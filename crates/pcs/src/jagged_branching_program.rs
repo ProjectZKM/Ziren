@@ -35,7 +35,7 @@
 use alloc::vec::Vec;
 use core::array;
 
-use p3_field::{ExtensionField, Field};
+use p3_field::Field;
 
 /// Memory state of the branching program: 2 booleans = 4 states.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -196,20 +196,6 @@ impl<EF: Field> BranchingProgram<EF> {
         Self { z_row, z_index, num_vars }
     }
 
-    /// Read the `i`-th LEAST-significant value of `point` (treating
-    /// `point` as big-endian).  Returns ZERO if `i >= point.len()`
-    /// (zero-padding short points).
-    fn get_ith_lsb<F: Field>(point: &[F], i: usize) -> F
-    where
-        EF: ExtensionField<F>,
-    {
-        let dim = point.len();
-        if i >= dim {
-            F::ZERO
-        } else {
-            point[dim - i - 1]
-        }
-    }
 
     fn get_ith_lsb_ef(point: &[EF], i: usize) -> EF {
         let dim = point.len();

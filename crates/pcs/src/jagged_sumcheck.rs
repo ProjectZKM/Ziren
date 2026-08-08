@@ -244,47 +244,7 @@ fn jagged_round_evals(
         )
 }
 
-fn jagged_round_evals_base(
-    q_base: &[InnerVal],
-    w: &[InnerChallenge],
-    half: usize,
-) -> [InnerChallenge; 3] {
-    let zero = InnerChallenge::ZERO;
-    (0..half)
-        .into_par_iter()
-        .map(|i| {
-            let q0: InnerChallenge = q_base[2 * i].into();
-            let q1: InnerChallenge = q_base[2 * i + 1].into();
-            let w0 = w[2 * i];
-            let w1 = w[2 * i + 1];
-            let p0 = w0 * q0;
-            let p1 = w1 * q1;
-            let q2 = q1.double() - q0;
-            let w2 = w1.double() - w0;
-            let p2 = w2 * q2;
-            [p0, p1, p2]
-        })
-        .reduce(
-            || [zero, zero, zero],
-            |a, b| [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
-        )
-}
 
-fn par_fold_table_first_base(
-    q_base: &[InnerVal],
-    r: InnerChallenge,
-) -> Vec<InnerChallenge> {
-    let half = q_base.len() / 2;
-    // Allocator opt + strength reduction.
-    // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
-    let mut out: Vec<InnerChallenge> = vec![InnerChallenge::ZERO; half];
-    out.par_iter_mut().enumerate().for_each(|(i, dst)| {
-        let q0: InnerChallenge = q_base[2 * i].into();
-        let q1: InnerChallenge = q_base[2 * i + 1].into();
-        *dst = q0 + r * (q1 - q0);
-    });
-    out
-}
 
 fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerChallenge {
     let one = InnerChallenge::ONE;

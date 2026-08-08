@@ -25,22 +25,39 @@ pub(crate) const CONTEXT: u8 = dynasmrt::x64::Rq::R12 as u8;
 /// Jump table pointer (callee-saved).
 pub(crate) const JUMP_TABLE: u8 = dynasmrt::x64::Rq::R13 as u8;
 
+// The register and `JitContext`-offset maps below are DELIBERATELY COMPLETE:
+// they mirror the x86 backend's ABI and the `JitContext` layout in full, so the
+// assignment can be read in one place.  Several entries have no current call
+// site (`TRACE_BUF`, `GLOBAL_CLK`, `CLOCK_OR_SAVED_STACK_PTR`, and the
+// `PC`/`NEXT_PC`/`NEXT_NEXT_PC`/`CLK` offsets).  Do NOT delete the unused ones:
+// a PARTIAL offset map is a trap -- the next person adds `PC_OFFSET` back next
+// to a surviving `GLOBAL_CLK_OFFSET` and cannot tell which of the rest exist.
+#[allow(dead_code)]
+mod _abi_map_is_complete_on_purpose {}
+
 /// Trace buffer pointer (callee-saved).
+#[allow(dead_code)]
 pub(crate) const TRACE_BUF: u8 = dynasmrt::x64::Rq::R14 as u8;
 
 /// Global clk (callee-saved).
+#[allow(dead_code)]
 pub(crate) const GLOBAL_CLK: u8 = dynasmrt::x64::Rq::RSI as u8;
 
 /// Per-shard clk OR saved RSP across extern calls.
+#[allow(dead_code)]
 pub(crate) const CLOCK_OR_SAVED_STACK_PTR: u8 = dynasmrt::x64::Rq::R15 as u8;
 
 /// Offset of `pc` in `JitContext`.
+#[allow(dead_code)]
 pub(crate) const PC_OFFSET: i32 = offset_of!(JitContext, pc) as i32;
 /// Offset of `next_pc`.
+#[allow(dead_code)]
 pub(crate) const NEXT_PC_OFFSET: i32 = offset_of!(JitContext, next_pc) as i32;
 /// Offset of `next_next_pc`.
+#[allow(dead_code)]
 pub(crate) const NEXT_NEXT_PC_OFFSET: i32 = offset_of!(JitContext, next_next_pc) as i32;
 /// Offset of `clk`.
+#[allow(dead_code)]
 pub(crate) const CLK_OFFSET: i32 = offset_of!(JitContext, clk) as i32;
 /// Offset of `global_clk`.
 pub(crate) const GLOBAL_CLK_OFFSET: i32 = offset_of!(JitContext, global_clk) as i32;

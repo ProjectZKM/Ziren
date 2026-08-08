@@ -167,9 +167,6 @@ mod platform {
         /// per-syscall sync as the syscall handler observes new
         /// addresses written by the executor.
         seen_addrs: HashSet<u32>,
-        /// True when [`Self::primary_ptr`] came from the thread-local
-        /// pool and should be returned on Drop.
-        from_pool: bool,
         /// Fingerprint of the last program whose `image` was
         /// materialised into this buffer.  Caller compares with the
         /// current program's fingerprint and skips the materialise
@@ -262,7 +259,6 @@ mod platform {
                 cow_ptr: None,
                 mem_fd: fd,
                 seen_addrs: HashSet::new(),
-                from_pool: false,
                 last_program_fingerprint: 0,
             })
         }
@@ -1709,19 +1705,6 @@ mod tests {
     }
 }
 
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-mod platform_diag {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    pub static CACHE_HITS: AtomicU64 = AtomicU64::new(0);
-    pub static CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
-    pub fn hit() { CACHE_HITS.fetch_add(1, Ordering::Relaxed); }
-    pub fn miss() { CACHE_MISSES.fetch_add(1, Ordering::Relaxed); }
-    pub fn snapshot() -> (u64, u64) {
-        (CACHE_HITS.load(Ordering::Relaxed), CACHE_MISSES.load(Ordering::Relaxed))
-    }
-}
-#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
-pub use platform_diag::snapshot as jit_cache_stats;
 
 // ──────────────────────────────────────────────────────────────────
 // JIT-side mem_reads oracle (scaffold)

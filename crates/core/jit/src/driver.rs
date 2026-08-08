@@ -36,10 +36,7 @@
 //! is always a register and the third is an i32 immediate (offset).
 
 use crate::risc::{MipsOperand, MipsRegister};
-use crate::{
-    ComputeInstructions, ControlFlowInstructions, JitError, JitResult, MemoryInstructions,
-    MipsTranspiler, SystemInstructions,
-};
+use crate::{JitError, JitResult, MipsTranspiler};
 
 /// A minimal local mirror of `zkm_core_executor::Opcode`'s discriminants.
 ///
