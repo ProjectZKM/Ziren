@@ -39,32 +39,28 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// This is the ONLY limit that closes a core shard in practice — 100% of splits
 /// on reth / tendermint / goat are area splits.
 ///
-/// ⚠ THE BINDING CONSTRAINT IS `max(total_values) < 2^29`, AND THE MARGIN IS
-/// ~1.2%. This value is NOT "just under 2^28" — that reading is wrong, and was
-/// measured wrong:
-/// - The splitter's predicate is `area >= element_threshold`, so this is a
-///   TRIGGER: a shard's area lands just ABOVE it, never on it.
-/// - `log_dense_size = ceil(log2(total_values))` (`jagged.rs:185`) then sizes
-///   the jagged-EVALUATION sumcheck buffers (EF4, 16 B/elt) for that shard.
-/// - **The two are in DIFFERENT UNITS.** This threshold counts
-///   `Σ events × (preprocessed_width + main_width)` over UNPADDED events;
-///   `total_values` counts committed `width × PADDED height`.
-///   **MEASURED ON RETH: `max(total_values) ≈ 2.107 × ELEMENT_THRESHOLD`.**
-///
-/// So the ceiling is `2^29 / 2.107 ≈ 254,800,000`, and 251,658,240 sits only
-/// **1.2% under it**. At m=1.00 the per-shard `log_dense` histogram is
-/// `28×228, 29×33` (max area 530,186,240 vs `2^29` = 536,870,912) — i.e. the
-/// default ALREADY straddles the 2^28 boundary and rides just below 2^29.
-/// **A denser workload could cross into `log_dense=30` with no config change.**
-/// Raising the threshold is not a free knob: at 1.40x the largest shard reaches
-/// ~742M, past `2^29`, and pads to `2^30` — which is the measured +5,066 MiB
-/// step from m=1.00 to m=1.40, not a gradual slope.
-///
-/// (An earlier revision of this comment called the value `2^28 - 2^24` and
-/// claimed the power-of-two proximity was load-bearing. That arithmetic is true
-/// but irrelevant: it holds in THRESHOLD units, while the cliff is on
-/// `total_values`. Do not re-derive an "aligned" threshold without measuring
-/// the ratio for the workload in question.)
+/// ⚠ WHAT ACTUALLY DRIVES VRAM IS THE **DISTRIBUTION** OF SHARDS ACROSS
+/// jagged-eval SIZE CLASSES — not the largest shard, and not this threshold's
+/// proximity to a power of two.
+/// - `log_dense = ceil(log2(total_values))` (`jagged.rs:185`) sizes the
+///   jagged-EVALUATION sumcheck buffers per shard; **class 29 costs ~2x class
+///   28**.  `total_values` counts committed `width x PADDED height`, which is a
+///   different quantity from this threshold (`Σ events x (preprocessed + main)`
+///   over UNPADDED events).
+/// - **`max(total_values)` measured 530,186,240 on reth at BOTH 251,658,240 and
+///   390,070,272 — identical to the byte.**  The largest shard does NOT scale
+///   with this threshold (it is capped elsewhere, almost certainly the height
+///   cap) and is always class 29.  Do not derive an "aligned" threshold from a
+///   ratio between the two; there isn't a stable one.
+/// - What the threshold moves is the MIX.  Raising it 251,658,240 ->
+///   390,070,272 takes the expensive-class share from **11% (228x c28, 33x c29)
+///   to 79% (14x c28, 170x c29)**, and peak live VRAM from **20.43 GiB to
+///   26.94 GiB** — with the max shard unchanged.
+/// - At 390,070,272 the ~5 GiB LogUp-GKR FirstLayer slab
+///   (`basefold/src/jhr_slab_device.rs`) is the largest single allocation at
+///   peak (5,007.87 MiB, 18.2%); at 251,658,240 it is **not resident at peak at
+///   all**.  Its cost is threshold-dependent, so shrinking it only pays if the
+///   threshold is raised.
 ///
 /// ## Why 1.55x (390,070,272) was tried and REVERTED (Aug 8)
 /// It was landed on one run of evidence and taken back out after ~20 measured
@@ -98,9 +94,10 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// on two independent harnesses, are `e71cd521cca7977f…` (281 shards, this
 /// value) and `97434314cfa58359…` (205 shards, 390,070,272).
 ///
-/// Written as a plain decimal on purpose: any power-of-two spelling of it
-/// encodes a structure that the measurement above shows this value does not
-/// have.
+/// Written as a plain decimal on purpose: earlier revisions spelled it
+/// `2^28 - 2^24` and built a "just under a power of two" rule on that, which
+/// measurement refuted twice.  The value has no demonstrated power-of-two
+/// structure.
 pub const ELEMENT_THRESHOLD: usize = 251_658_240;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
