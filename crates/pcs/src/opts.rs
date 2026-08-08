@@ -39,21 +39,32 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// This is the ONLY limit that closes a core shard in practice — 100% of splits
 /// on reth / tendermint / goat are area splits.
 ///
-/// ⚠ THE VALUE IS `2^28 - 2^24`, i.e. deliberately JUST BELOW a power of two.
-/// That is load-bearing, not incidental, and it is easy to break:
+/// ⚠ THE BINDING CONSTRAINT IS `max(total_values) < 2^29`, AND THE MARGIN IS
+/// ~1.2%. This value is NOT "just under 2^28" — that reading is wrong, and was
+/// measured wrong:
 /// - The splitter's predicate is `area >= element_threshold`, so this is a
-///   TRIGGER — a shard's area lands just ABOVE it, never on it.
+///   TRIGGER: a shard's area lands just ABOVE it, never on it.
 /// - `log_dense_size = ceil(log2(total_values))` (`jagged.rs:185`) then sizes
-///   the jagged-EVALUATION sumcheck buffers for that shard.
-/// ⇒ Setting this TO `2^k` makes every shard close just past `2^k` and pad to
-/// `2^(k+1)` — the worst available value. It must sit just UNDER the boundary.
+///   the jagged-EVALUATION sumcheck buffers (EF4, 16 B/elt) for that shard.
+/// - **The two are in DIFFERENT UNITS.** This threshold counts
+///   `Σ events × (preprocessed_width + main_width)` over UNPADDED events;
+///   `total_values` counts committed `width × PADDED height`.
+///   **MEASURED ON RETH: `max(total_values) ≈ 2.107 × ELEMENT_THRESHOLD`.**
 ///
-/// ⚠ AND THE TWO QUANTITIES ARE IN DIFFERENT UNITS. This threshold counts
-/// `Σ events × (preprocessed_width + main_width)` over UNPADDED events, while
-/// `total_values` counts committed `width × PADDED height`. Do NOT assume a
-/// threshold just under `2^k` puts `total_values` under `2^k`; the ratio is
-/// neither 1 nor constant across shards. Measure it before trusting an
-/// "aligned" value derived in threshold units.
+/// So the ceiling is `2^29 / 2.107 ≈ 254,800,000`, and 251,658,240 sits only
+/// **1.2% under it**. At m=1.00 the per-shard `log_dense` histogram is
+/// `28×228, 29×33` (max area 530,186,240 vs `2^29` = 536,870,912) — i.e. the
+/// default ALREADY straddles the 2^28 boundary and rides just below 2^29.
+/// **A denser workload could cross into `log_dense=30` with no config change.**
+/// Raising the threshold is not a free knob: at 1.40x the largest shard reaches
+/// ~742M, past `2^29`, and pads to `2^30` — which is the measured +5,066 MiB
+/// step from m=1.00 to m=1.40, not a gradual slope.
+///
+/// (An earlier revision of this comment called the value `2^28 - 2^24` and
+/// claimed the power-of-two proximity was load-bearing. That arithmetic is true
+/// but irrelevant: it holds in THRESHOLD units, while the cliff is on
+/// `total_values`. Do not re-derive an "aligned" threshold without measuring
+/// the ratio for the workload in question.)
 ///
 /// ## Why 1.55x (390,070,272) was tried and REVERTED (Aug 8)
 /// It was landed on one run of evidence and taken back out after ~20 measured
@@ -86,7 +97,11 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// The reth core digests either side of the 1.55x experiment, each reproduced
 /// on two independent harnesses, are `e71cd521cca7977f…` (281 shards, this
 /// value) and `97434314cfa58359…` (205 shards, 390,070,272).
-pub const ELEMENT_THRESHOLD: usize = (1 << 28) - (1 << 24);
+///
+/// Written as a plain decimal on purpose: any power-of-two spelling of it
+/// encodes a structure that the measurement above shows this value does not
+/// have.
+pub const ELEMENT_THRESHOLD: usize = 251_658_240;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
