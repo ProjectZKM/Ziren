@@ -878,3 +878,55 @@ fn stage1_forge_present_active_claims_missing_rejected() {
         "[STAGE1][VERDICT] (b) PRESENT active chip claiming missing (degree=0) REJECTED => {tag}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// PREPROCESSED BINDING PROBE.
+//
+// Ziren commits preprocessed traces INTO EACH SHARD alongside the main
+// traces, and the setup-time `vk.commit` is only OBSERVED into the
+// Fiat-Shamir transcript (`machine.rs`'s `vk.observe_into`) -- it is never
+// compared, and `preprocessed_commit()` has no callers.  SP1 instead
+// commits preprocessed ONCE at setup, keeps `preprocessed_data` in the
+// proving key, and its shard verifier checks openings against
+// `vec![vk.preprocessed_commit, *main_commitment]` -- two rounds, so the
+// preprocessed columns are bound to the VK by the opening argument.
+//
+// Question: does Ziren's transcript observation alone bind them?  Prove
+// one program and verify the proof against a DIFFERENT program's vk.  If
+// that is accepted, a prover can prove anything and claim it is some other
+// program.  If it is rejected, something already binds -- and the tag says
+// which check caught it.
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+#[ignore = "proves two real FIX-off core proofs (multi-second); run with --ignored"]
+fn preprocessed_binding_cross_vk_probe() {
+    use crate::programs::tests::{fibonacci_program, simple_program};
+    setup_logger();
+
+    // Honest proof of program B (`simple`).
+    let (proof_b, machine, vk_b) = prove_fixoff(simple_program(), ZKMStdin::new());
+    let honest = verify(&machine, &vk_b, &proof_b);
+    assert!(honest.is_ok(), "anti-confound: program B must verify under its OWN vk");
+
+    // Program A's vk (`fibonacci`) -- a different program, different
+    // preprocessed traces, therefore a different `vk.commit`.
+    let config = KoalaBearPoseidon2::new();
+    let machine_a = MipsAir::machine(config);
+    let (_pk_a, vk_a) = machine_a.setup(&fibonacci_program());
+    assert_ne!(
+        format!("{:?}", vk_a.commit),
+        format!("{:?}", vk_b.commit),
+        "the two programs must have distinct preprocessed commitments for this probe to mean anything"
+    );
+
+    let cross = verify(&machine, &vk_a, &proof_b);
+    let tag = reject_tag(&cross);
+    eprintln!("[PREP-BIND] program B's proof verified against program A's vk => {tag}");
+    assert!(
+        cross.is_err(),
+        "SOUNDNESS: a proof of one program MUST NOT verify against another \
+         program's verifying key; if it does, the preprocessed traces are \
+         unbound and `vk.commit` is decorative"
+    );
+}
