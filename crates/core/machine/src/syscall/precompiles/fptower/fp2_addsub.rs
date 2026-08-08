@@ -208,9 +208,6 @@ impl<F: PrimeField32, P: FpOpField> MachineAir<F> for Fp2AddSubAssignChip<P> {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, P: FpOpField> BaseAir<F> for Fp2AddSubAssignChip<P> {

@@ -172,9 +172,6 @@ impl<F: PrimeField32> MachineAir<F> for LtChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl LtChip {

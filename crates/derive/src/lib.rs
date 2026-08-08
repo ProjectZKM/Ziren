@@ -199,13 +199,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                 }
             });
 
-            let local_only_arms = variants.iter().map(|(variant_name, field)| {
-                let field_ty = &field.ty;
-                quote! {
-                    #name::#variant_name(x) => <#field_ty as zkm_pcs::air::MachineAir<F>>::local_only(x)
-                }
-            });
-
             // Calls the underlying chip's `picus_info()` method
             let picus_info_arms = variants.iter().map(|(variant_name, field)| {
                 let field_ty = &field.ty;
@@ -272,12 +265,6 @@ pub fn machine_air_derive(input: TokenStream) -> TokenStream {
                     fn commit_scope(&self) -> LookupScope {
                         match self {
                             #(#commit_scope_arms,)*
-                        }
-                    }
-
-                    fn local_only(&self) -> bool {
-                        match self {
-                            #(#local_only_arms,)*
                         }
                     }
 

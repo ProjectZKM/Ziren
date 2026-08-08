@@ -84,9 +84,6 @@ impl<F: PrimeField32> MachineAir<F> for BranchChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl BranchChip {

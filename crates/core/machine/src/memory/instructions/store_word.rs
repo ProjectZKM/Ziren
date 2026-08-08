@@ -163,7 +163,4 @@ impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }

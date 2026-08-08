@@ -74,9 +74,6 @@ pub trait MachineAir<F: Field>: BaseAir<F> + 'static + Send + Sync {
     }
 
     /// Specifies whether the air only uses the local row, and not the next row.
-    fn local_only(&self) -> bool {
-        false
-    }
 
     /// Returns information about Picus annotations on AIR columns.
     ///

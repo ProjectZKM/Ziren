@@ -280,7 +280,4 @@ impl<F: PrimeField32> MachineAir<F> for MemoryUnalignedChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }

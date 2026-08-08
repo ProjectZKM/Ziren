@@ -225,9 +225,6 @@ impl<F: PrimeField32> MachineAir<F> for SelectChip {
         true
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<AB> Air<AB> for SelectChip

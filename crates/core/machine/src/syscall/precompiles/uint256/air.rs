@@ -216,9 +216,6 @@ impl<F: PrimeField32> MachineAir<F> for Uint256MulChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F> BaseAir<F> for Uint256MulChip {

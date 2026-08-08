@@ -260,9 +260,6 @@ impl<F: PrimeField32, E: EdwardsParameters> MachineAir<F> for EdDecompressChip<E
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F, E: EdwardsParameters> BaseAir<F> for EdDecompressChip<E> {

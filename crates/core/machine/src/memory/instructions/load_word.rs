@@ -162,7 +162,4 @@ impl<F: PrimeField32> MachineAir<F> for LoadWordChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }

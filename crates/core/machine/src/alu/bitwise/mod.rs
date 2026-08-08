@@ -151,9 +151,6 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl BitwiseChip {

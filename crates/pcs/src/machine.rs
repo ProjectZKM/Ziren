@@ -128,7 +128,6 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
-    pub local_only: Vec<bool>,
     /// The number of total constraints for each chip.
     pub constraints_map: HashMap<String, usize>,
 }
@@ -142,7 +141,6 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             traces: self.traces.clone(),
             data: Arc::clone(&self.data),
             chip_ordering: self.chip_ordering.clone(),
-            local_only: self.local_only.clone(),
             constraints_map: self.constraints_map.clone(),
         }
     }
@@ -498,7 +496,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         );
 
                         (
-                            prep_trace.map(move |t| (chip.name(), chip.local_only(), t)),
+                            prep_trace.map(move |t| (chip.name(), t)),
                             (chip_name, num_main_constraints + num_permutation_constraints),
                         )
                     })
@@ -510,12 +508,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_preprocessed_traces
-            .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
+            .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
         let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
             .iter()
-            .map(|(name, _, trace)| {
+            .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
                 let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
                 ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
@@ -529,7 +527,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
         let max_prep_log = named_preprocessed_traces
             .iter()
-            .map(|(_, _, t)| {
+            .map(|(_, t)| {
                 let h = t.height();
                 if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
             })
@@ -545,7 +543,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             // on the basefold path.
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
-                .map(|(name, _, trace)| (name.to_string(), trace.clone()))
+                .map(|(name, trace)| (name.to_string(), trace.clone()))
                 .collect();
             let commit = SC::prep_commit(&named).expect(
                 "prep commit required but this config does not implement \
@@ -566,19 +564,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let chip_ordering = named_preprocessed_traces
             .iter()
             .enumerate()
-            .map(|(i, (name, _, _))| (name.to_owned(), i))
+            .map(|(i, (name, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
-
-        let local_only = named_preprocessed_traces
-            .iter()
-            .map(|(_, local_only, _)| local_only.to_owned())
-            .collect::<Vec<_>>();
 
         let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
 
         // Get the preprocessed traces
         let traces =
-            named_preprocessed_traces.into_iter().map(|(_, _, trace)| trace).collect::<Vec<_>>();
+            named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
         let pc_start = program.pc_start();
         let initial_global_cumulative_sum = program.initial_global_cumulative_sum();
@@ -591,7 +584,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 traces,
                 data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
-                local_only,
                 constraints_map,
             },
             StarkVerifyingKey {
@@ -655,7 +647,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         );
 
                         (
-                            prep_trace.map(move |t| (chip.name(), chip.local_only(), t)),
+                            prep_trace.map(move |t| (chip.name(), t)),
                             (chip_name, num_main_constraints + num_permutation_constraints),
                         )
                     })
@@ -667,12 +659,12 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
 
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_preprocessed_traces
-            .sort_by_key(|(name, _, trace)| (Reverse(trace.height()), name.clone()));
+            .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
         let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
             .iter()
-            .map(|(name, _, trace)| {
+            .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
                 let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
                 ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
@@ -686,7 +678,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
         let max_prep_log = named_preprocessed_traces
             .iter()
-            .map(|(_, _, t)| {
+            .map(|(_, t)| {
                 let h = t.height();
                 if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
             })
@@ -702,7 +694,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             // on the basefold path.
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
-                .map(|(name, _, trace)| (name.to_string(), trace.clone()))
+                .map(|(name, trace)| (name.to_string(), trace.clone()))
                 .collect();
             let commit = SC::prep_commit(&named).expect(
                 "prep commit required but this config does not implement \
@@ -723,19 +715,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let chip_ordering = named_preprocessed_traces
             .iter()
             .enumerate()
-            .map(|(i, (name, _, _))| (name.to_owned(), i))
+            .map(|(i, (name, _))| (name.to_owned(), i))
             .collect::<HashMap<_, _>>();
-
-        let local_only = named_preprocessed_traces
-            .iter()
-            .map(|(_, local_only, _)| local_only.to_owned())
-            .collect::<Vec<_>>();
 
         let constraints_map: HashMap<_, _> = num_constraints.into_iter().collect();
 
         // Get the preprocessed traces
         let traces =
-            named_preprocessed_traces.into_iter().map(|(_, _, trace)| trace).collect::<Vec<_>>();
+            named_preprocessed_traces.into_iter().map(|(_, trace)| trace).collect::<Vec<_>>();
 
         let pc_start = program.pc_start();
 
@@ -747,7 +734,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 traces,
                 data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
-                local_only,
                 constraints_map,
             },
             StarkVerifyingKey {

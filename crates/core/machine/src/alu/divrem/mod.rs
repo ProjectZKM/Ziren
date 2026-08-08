@@ -380,9 +380,6 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl<F> BaseAir<F> for DivRemChip {

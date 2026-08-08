@@ -225,9 +225,6 @@ impl<F: PrimeField32> MachineAir<F> for MulChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl MulChip {

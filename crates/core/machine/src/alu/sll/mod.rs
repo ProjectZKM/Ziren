@@ -208,9 +208,6 @@ impl<F: PrimeField32> MachineAir<F> for ShiftLeft {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl ShiftLeft {

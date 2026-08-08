@@ -185,8 +185,8 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     pub vk_verification: bool,
 
     /// Per-arity cache for the host-side basefold compose proving-key
-    /// shell (preprocessed traces + chip_ordering + local_only flags)
-    /// paired with the matching verifying key.
+    /// shell (preprocessed traces + chip_ordering) paired with the
+    /// matching verifying key.
     ///
     /// Distinct from `compose_programs_basefold_cache` (which caches the
     /// uncompiled recursion program).  This caches the **post-setup**

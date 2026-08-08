@@ -130,9 +130,6 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl MovCondChip {

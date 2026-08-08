@@ -84,9 +84,6 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
         }
     }
 
-    fn local_only(&self) -> bool {
-        true
-    }
 }
 
 impl JumpChip {

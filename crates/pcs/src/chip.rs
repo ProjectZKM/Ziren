@@ -251,9 +251,6 @@ where
         self.air.commit_scope()
     }
 
-    fn local_only(&self) -> bool {
-        self.air.local_only()
-    }
 
     fn picus_info(&self) -> PicusInfo {
         self.air.picus_info()
