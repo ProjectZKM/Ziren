@@ -55,11 +55,10 @@
 //! elif c > 0:
 //!    assert 0 <= remainder < c
 //!
-//! if is_c_0:
-//!    # if division by 0, then quotient is UNPREDICTABLE per MIPS spec.
-//!    We restrict the quotient = 0xffffffff and remainder = b.
-//!    This needs special care since # b = 0 * quotient + b is satisfied by any quotient.
-//!    assert quotient = 0xffffffff
+//! # Division by zero is undefined per the MIPS spec and is rejected by the executor
+//! # (it traps), so an honest trace never contains a div-by-zero event. The AIR enforces
+//! # the same to stay in agreement with the executor.
+//! assert not is_c_0   # i.e. c != 0 on every real row
 
 use core::{
     borrow::{Borrow, BorrowMut},
@@ -573,12 +572,14 @@ where
                 is_real.clone(),
             );
 
-            // If is_c_0 is true, then quotient must be 0xffffffff = u32::MAX.
-            for i in 0..WORD_SIZE {
-                builder
-                    .when(local.is_c_0.result)
-                    .assert_eq(local.quotient[i], AB::F::from_u8(u8::MAX));
-            }
+            // Division by zero is architecturally undefined: the executor traps on it
+            // (`ExecutionError::ExceptionOrTrap`, `executor.rs` `execute_alu`, which returns
+            // early when `c == 0` for DIV/DIVU/MOD/MODU), so an honest trace never contains a
+            // divrem event with c == 0. Enforce the same here so the AIR REJECTS div-by-zero
+            // rows rather than accepting them with a forced quotient. This keeps the executor
+            // and the AIR in agreement and removes a path for injecting controlled
+            // quotient/remainder values into the trace.
+            builder.when(is_real.clone()).assert_zero(local.is_c_0.result);
         }
 
         // Range check remainder. (i.e., |remainder| < |c| when not is_c_0)
