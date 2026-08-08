@@ -152,8 +152,8 @@ pub fn pick_log_stacking_height(_total_entries: usize) -> u32 {
 // KoalaBear (the outer context keeps the same field for inner and outer);
 // only the Mmcs (hash) + Dft vary by context. Inner uses Poseidon2-KoalaBear
 // Merkle; the wrap (OuterSC) will pass Poseidon2-BN254 Merkle (OuterValMmcs).
-// Non-breaking: `build_pcs` below stays a concrete wrapper so every existing
-// caller compiles unchanged.
+// Callers build the concrete KoalaBear mmcs/dft inline and delegate here
+// directly; there is no concrete wrapper.
 #[allow(clippy::type_complexity)]
 fn build_pcs_generic<MT, D>(
     log_stacking_height: u32,
@@ -186,35 +186,6 @@ where
     (prover, verifier)
 }
 
-// Kept as the concrete inner wrapper (the established pattern); its former
-// callers (commit/open/verify host fns) now build the KoalaBear mmcs/dft
-// inline and delegate to `build_pcs_generic` directly, so this is currently
-// uncalled. Retained for future inner-only callers / symmetry with the
-// generic core.
-#[allow(dead_code)]
-fn build_pcs(
-    log_stacking_height: u32,
-) -> (
-    StackedPcsProver<JaggedVal, JaggedChallenge, JaggedMmcs, JaggedDft>,
-    StackedPcsVerifier<JaggedVal, JaggedChallenge, JaggedMmcs>,
-    JaggedMmcs,
-) {
-    let perm: crate::kb31_poseidon2::InnerPerm =
-        zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
-    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    // Inner stage: env-default rate (ZIREN_BASEFOLD_LOG_BLOWUP override).
-    let (prover, verifier) = build_pcs_generic::<JaggedMmcs, JaggedDft>(
-        log_stacking_height,
-        mmcs.clone(),
-        dft,
-        FriConfig::<JaggedVal>::from_env_or_default(),
-    );
-    (prover, verifier, mmcs)
-}
 
 /// Convert chip traces into per-chip `Mle<JaggedVal>`s, padding each
 /// trace's row count up to the next power of two.  No dense
@@ -432,18 +403,6 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
     roots[0]
 }
 
-/// BaseFold-over-BN254: ring-native commitment digest. Inner (KoalaBear)
-/// callers use `basefold_commit_digest` (8-felt MerkleCap root); the wrap
-/// (OuterSC) carries the BN254 `MT::Commitment` directly via this generic
-/// accessor -- the seam the digest tunnel observes / serializes.
-pub fn basefold_commit_digest_generic<MT: p3_commit::Mmcs<JaggedVal>>(
-    commit: &JaggedCommitGeneric<MT>,
-) -> <MT as p3_commit::Mmcs<JaggedVal>>::Commitment
-where
-    <MT as p3_commit::Mmcs<JaggedVal>>::Commitment: Clone,
-{
-    commit.original_commitment.clone()
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // SP1-faithful jagged "hash-bind" (the count ↔ commitment tie).

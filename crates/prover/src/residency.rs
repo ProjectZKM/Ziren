@@ -152,15 +152,6 @@ pub fn program_cache_audit_enabled() -> bool {
         || resolve_gpu_residency_profile().allows_program_cache_audit()
 }
 
-/// Compose program pre-warm on startup — ON when
-/// `ZIREN_ENABLE_COMPOSE_PREWARM=1` (legacy) or when the profile
-/// allows it (default = `Hybrid` → OFF).
-pub fn compose_prewarm_enabled() -> bool {
-    if let Some(v) = legacy_bool("ZIREN_ENABLE_COMPOSE_PREWARM") {
-        return v;
-    }
-    resolve_gpu_residency_profile().allows_compose_prewarm()
-}
 
 #[cfg(test)]
 mod tests {

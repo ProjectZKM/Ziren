@@ -36,10 +36,6 @@ impl<T> Word<T> {
 }
 
 impl<T: PrimeCharacteristicRing> Word<T> {
-    /// Extends a variable to a word.
-    pub fn extend_expr<AB: ZKMAirBuilder<Expr = T>>(expr: T) -> Word<AB::Expr> {
-        Word([AB::Expr::ZERO + expr, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO])
-    }
 
     /// Returns a word with all zero expressions.
     #[must_use]

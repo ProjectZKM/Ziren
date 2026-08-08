@@ -57,11 +57,6 @@ pub enum ZKMCompressProgramShape {
 }
 
 impl ZKMCompressProgramShape {
-    pub fn hash_u64(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        Hash::hash(&self, &mut hasher);
-        hasher.finish()
-    }
 }
 
 #[derive(Debug, Error)]

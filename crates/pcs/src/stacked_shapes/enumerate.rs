@@ -36,7 +36,7 @@
 
 use std::collections::BTreeSet;
 
-use super::types::{consts, CoreProofShape, MachineShape, ZKMNormalizeInputShape};
+use super::types::{consts, CoreProofShape, MachineShape};
 
 /// The small set of always-present chip names shared by every
 /// cluster (preprocessed-only chips).
@@ -297,18 +297,6 @@ pub fn create_all_input_shapes(machine_shape: &MachineShape) -> Vec<CoreProofSha
     out
 }
 
-/// Wrap a [`CoreProofShape`] into a Normalize-stage input shape.
-/// The stacking/FRI parameters are fixed to the constants defined in
-/// [`super::types::consts`].
-#[must_use]
-pub fn normalize_input_shape_from_core(shape: CoreProofShape) -> ZKMNormalizeInputShape {
-    ZKMNormalizeInputShape {
-        proof_shapes: vec![shape],
-        max_log_row_count: consts::CORE_MAX_LOG_ROW_COUNT,
-        log_blowup: consts::LOG_BLOWUP,
-        log_stacking_height: consts::LOG_STACKING_HEIGHT as usize,
-    }
-}
 
 #[cfg(test)]
 mod tests {

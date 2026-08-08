@@ -111,11 +111,6 @@ impl<F, A: Backend> Mle<F, A> {
         &self.guts
     }
 
-    /// Consume, returning the backing tensor.
-    #[inline]
-    pub fn into_guts(self) -> Tensor<F, A> {
-        self.guts
-    }
 }
 
 impl<F: Field> Mle<F, CpuBackend> {
@@ -240,7 +235,3 @@ pub type Message<T> = Vec<Arc<T>>;
 /// sequence indexed by round number.
 pub type Rounds<T> = Vec<T>;
 
-/// Build a `Message` from any `IntoIterator<Item=T>`.
-pub fn message_from_iter<T, I: IntoIterator<Item = T>>(iter: I) -> Message<T> {
-    iter.into_iter().map(Arc::new).collect()
-}

@@ -79,19 +79,7 @@ pub struct ShardCommitment<C> {
 }
 
 impl<C: Clone> ShardCommitment<C> {
-    /// The permutation-trace commitment, if present.  Accessor
-    /// that preserves the legacy semantic slot after the field
-    /// rename (`auxiliary_commits[0]` in the new layout).
-    pub fn permutation_commit(&self) -> Option<&C> {
-        self.auxiliary_commits.first()
-    }
 
-    /// The quotient-polynomial commitment, if present.  Accessor
-    /// that preserves the legacy semantic slot after the field
-    /// rename (`auxiliary_commits[1]` in the new layout).
-    pub fn quotient_commit(&self) -> Option<&C> {
-        self.auxiliary_commits.get(1)
-    }
 
 }
 

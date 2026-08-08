@@ -236,11 +236,6 @@ impl<T: Field, A: Backend> PaddedMle<T, A> {
         self.inner
     }
 
-    /// Consume, returning the padding descriptor.
-    #[inline]
-    pub fn into_padding(self) -> Padding<T> {
-        self.padding
-    }
 }
 
 /// DATA ops — CPU-only.  These reach into the backing cells (via
