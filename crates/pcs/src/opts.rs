@@ -56,6 +56,18 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 ///   390,070,272 takes the expensive-class share from **11% (228x c28, 33x c29)
 ///   to 79% (14x c28, 170x c29)**, and peak live VRAM from **20.43 GiB to
 ///   26.94 GiB** — with the max shard unchanged.
+/// - ⚠ **THE LARGEST SHARD IS HEIGHT-CAPPED, NOT AREA-CAPPED, AND IT SITS 1.25%
+///   BELOW `2^29`.**  `max(total_values)` measured **530,186,240** at ET =
+///   251,658,240 / 377,487,360 / 390,070,272 / 503,316,480 — identical across a
+///   **2x range of this threshold**, because `530,186,240 / 2^22 = 126.41` and
+///   `SHARD_SIZE = 4,194,305 = 2^22 + 1`: it is `SHARD_SIZE x ~126.4 committed
+///   columns`.  **The committed width can grow only ~1.26% before that shard
+///   crosses into `log_dense = 30` and its jagged-eval buffers double** — an
+///   est. +4 GiB on that one shard, taking the peak here from 20.43 to ~24.4
+///   GiB.  This is live, not hypothetical: `c5daa904` just took the committed
+///   chip set from 23 to 27 when no allowed band fits.  **The lever that
+///   controls it is `SHARD_SIZE`, not this threshold** — halving the height cap
+///   halves `total_values` and drops the max shard to class 28.
 /// - At 390,070,272 the ~5 GiB LogUp-GKR FirstLayer slab
 ///   (`basefold/src/jhr_slab_device.rs`) is the largest single allocation at
 ///   peak (5,007.87 MiB, 18.2%); at 251,658,240 it is **not resident at peak at
