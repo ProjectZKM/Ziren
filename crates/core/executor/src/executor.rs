@@ -1965,8 +1965,14 @@ impl<'a> Executor<'a> {
                         a = syscall_id;
                     }
 
-                    // If the syscall is `HALT` and the exit code is non-zero, return an error.
-                    if syscall == SyscallCode::HALT && precompile_rt.exit_code != 0 {
+                    // If a halting syscall reports a non-zero exit code, return an error.
+                    // Both `HALT` and `SYS_EXT_GROUP` terminate the program (see
+                    // `cpu/trace.rs`'s `is_halt`), so a Go guest that exits non-zero via
+                    // `SYS_exit_group` must fail the same way a Rust guest does via `HALT`
+                    // rather than silently producing a proof of a failed run.
+                    if matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP)
+                        && precompile_rt.exit_code != 0
+                    {
                         return Err(ExecutionError::HaltWithNonZeroExitCode(
                             precompile_rt.exit_code,
                         ));
@@ -1981,7 +1987,12 @@ impl<'a> Executor<'a> {
                     return Err(ExecutionError::UnsupportedSyscall(syscall_id));
                 };
 
-            if syscall == SyscallCode::HALT && returned_exit_code == 0 {
+            // Same halting set as the exit-code guard above.  The run loop also ends on
+            // `state.pc == 0`, which both syscalls produce, so this flag was never load
+            // bearing for termination -- but it should still describe reality.
+            if matches!(syscall, SyscallCode::HALT | SyscallCode::SYS_EXT_GROUP)
+                && returned_exit_code == 0
+            {
                 self.state.exited = true;
             }
 
