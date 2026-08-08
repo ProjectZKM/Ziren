@@ -39,31 +39,54 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// This is the ONLY limit that closes a core shard in practice — 100% of splits
 /// on reth / tendermint / goat are area splits.
 ///
-/// RAISED TO 1.55x (390,070,272) FROM THE LONG-STANDING 251,658,240.  reth goes
-/// 281 -> 205 shards (-27%); shards are the unit that per-shard fixed cost is
-/// paid on, and that cost was measured at ~192 ms/shard with only ~35 ms of it
-/// on the GPU.
+/// ⚠ THE VALUE IS `2^28 - 2^24`, i.e. deliberately JUST BELOW a power of two.
+/// That is load-bearing, not incidental, and it is easy to break:
+/// - The splitter's predicate is `area >= element_threshold`, so this is a
+///   TRIGGER — a shard's area lands just ABOVE it, never on it.
+/// - `log_dense_size = ceil(log2(total_values))` (`jagged.rs:185`) then sizes
+///   the jagged-EVALUATION sumcheck buffers for that shard.
+/// ⇒ Setting this TO `2^k` makes every shard close just past `2^k` and pad to
+/// `2^(k+1)` — the worst available value. It must sit just UNDER the boundary.
 ///
-/// ⚠ THE HEADROOM IS THIN AND THE RELIABILITY EVIDENCE IS ONE RUN.  Measured
-/// peak at this value is 30,567 MiB of 32,607 — 2,040 MiB (6.3%) spare — while
-/// the observed run-to-run VRAM excursion is ~2.4 GiB.  1.60x OOMed 1 run in 4
-/// and 1.85x/2.00x each OOMed 1 in 2, at median box loads of 15 and 13, so load
-/// is NOT the driver.  If reth starts OOMing at
-/// `basefold/src/jhr_slab_device.rs` (a ~5 GiB single allocation for the giant
-/// LogUp-GKR FirstLayer slab), lower this first — 1.40x (352,321,536) is the
-/// value with the strongest reliability record: 0 OOM in 4 runs, 219 shards.
+/// ⚠ AND THE TWO QUANTITIES ARE IN DIFFERENT UNITS. This threshold counts
+/// `Σ events × (preprocessed_width + main_width)` over UNPADDED events, while
+/// `total_values` counts committed `width × PADDED height`. Do NOT assume a
+/// threshold just under `2^k` puts `total_values` under `2^k`; the ratio is
+/// neither 1 nor constant across shards. Measure it before trusting an
+/// "aligned" value derived in threshold units.
 ///
-/// ⚠ DO NOT trust `nvidia-smi` sampling to re-measure the peak: a 2 s sampler
-/// read 28,509 MiB on a run whose in-process ledger showed 30,855 MiB live.
-/// The undersample (~2.3 GiB) is the same order as the excursion being chased.
-/// Use the in-process allocation ledger.
+/// ## Why 1.55x (390,070,272) was tried and REVERTED (Aug 8)
+/// It was landed on one run of evidence and taken back out after ~20 measured
+/// runs across two independent harnesses, two hosts and two GPUs. It bought
+/// reth 281 -> 205 shards and cost on every axis that was checked:
+/// - **Throughput**: paired same-binary A/B (env-only arms, ABBA-ordered) gave
+///   **-3.3%** on the two rounds whose load was not anomalous, and was NOT
+///   statistically resolvable with all three rounds pooled. Every paired sign
+///   was negative. An independent sweep had m=1.00 as its FASTEST arm.
+/// - **Headroom**: **8,003 MiB** free here vs **1,753 MiB** at 1.55x.
+/// - **Reliability**: 0 OOM in 9 runs here; 1.60x OOMed 1 in 4, and 1.85x/2.00x
+///   1 in 2 each, at median box loads of 15 and 13 — so load is NOT the driver.
+/// - **Peak stability**: the fixed-m run-to-run excursion is **+256 MiB** here
+///   versus **~2.4 GiB** at high m. The instability is a property of the high-m
+///   regime, not of the harness.
 ///
-/// The older sweep that called 251,658,240 a sharp optimum sampled only
-/// 0.80/1.00/1.20/2.00 — it never probed (1.33, 1.72], and 1.20x is a local
-/// PESSIMUM: it sits just past the 2^28 -> 2^29 step where the doubled padded
-/// dense is paid before the shard-count saving amortises it.
-pub const ELEMENT_THRESHOLD: usize =
-    (1 << 28) + (1 << 26) + (1 << 25) + (1 << 24) + (1 << 22);
+/// The old "+11.84% kHz at m=1.72" result that motivated raising this is not
+/// wrong, it is SUPERSEDED: it rested on ~192 ms/shard of fixed cost, ~82% of
+/// it HOST-side, and `8cbd8093` ("base-field multiply + row-blocked pass in the
+/// trace MLE eval", +6.1% kHz, byte-identical, zero VRAM) then removed most of
+/// that cost directly. With little left to amortise, fewer-but-larger shards no
+/// longer pay. Re-derive the per-shard cost before reopening this.
+///
+/// ⚠ DO NOT trust `nvidia-smi` sampling to re-measure the peak, and note the
+/// error GROWS with the threshold: measured undersample -1 / +895 / +1,375 MiB
+/// at 1.00x / 1.40x / 1.50x. A 2 s sampler read 28,509 MiB on a run whose
+/// in-process ledger showed 30,855 MiB live. Use the allocation ledger.
+///
+/// Changing this moves shard boundaries ⇒ moves core proof bytes and goldens.
+/// The reth core digests either side of the 1.55x experiment, each reproduced
+/// on two independent harnesses, are `e71cd521cca7977f…` (281 shards, this
+/// value) and `97434314cfa58359…` (205 shards, 390,070,272).
+pub const ELEMENT_THRESHOLD: usize = (1 << 28) - (1 << 24);
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
