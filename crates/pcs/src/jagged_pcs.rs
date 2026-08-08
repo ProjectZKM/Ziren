@@ -725,9 +725,8 @@ where
 // commit (which would skip even the brief dense materialization) is
 // the next-stage refactor.
 //
-// This module does not require the `whir` feature.  It uses the ungated
-// `jagged.rs` (data structures) and `jagged_sumcheck.rs` (PCS-agnostic
-// reduction math), neither of which is behind the whir feature gate.
+// Built on `jagged.rs` (data structures) and `jagged_sumcheck.rs`
+// (PCS-agnostic reduction math).
 
 pub mod jagged {
     use alloc::vec::Vec;
@@ -952,7 +951,7 @@ pub mod jagged {
         <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof:
             serde::Serialize + for<'d> serde::Deserialize<'d>,
     {
-        /// Wire-format bytes (rmp-serde — matches the existing WHIR
+        /// Wire-format bytes (rmp-serde — matches the existing
         /// jagged-PCS bundle's serializer choice).
         pub fn to_bytes(&self) -> Vec<u8> {
             rmp_serde::to_vec(self).expect("JaggedBasefoldBundle serializes")
@@ -2535,8 +2534,6 @@ mod test {
     }
 
     /// Full jagged-sumcheck pipeline backed by BaseFold.
-    /// E1: ungated from `whir` after `jagged` and `jagged_sumcheck`
-    /// were moved out of the whir feature gate.
     #[test]
     fn test_jagged_basefold_roundtrip() {
         use crate::jagged_pcs::jagged::{

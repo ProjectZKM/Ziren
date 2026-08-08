@@ -434,8 +434,8 @@ where
         // Each query index yields one Merkle path; the leaf at that
         // index is the row across every encoded codeword for the round.
         // (Tried par_iter — `MT::Proof: !Send` blocks at the trait
-        // layer; same root cause as the WHIR STIR-loop revert
-        // documented in `whir/src/pcs/prover/mod.rs`.  Would need
+        // layer; same root cause as the STIR-loop revert in the
+        // now-removed WHIR prototype.  Would need
         // upstream Send+Sync on `Mmcs::Proof`; deferred.)
         let mut component_polynomials_query_openings_and_proofs =
             Vec::with_capacity(prover_data.len());

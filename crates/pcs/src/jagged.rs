@@ -1,7 +1,7 @@
-//! Jagged polynomial commitment adapter for WHIR PCS.
+//! Jagged polynomial commitment adapter for the BaseFold PCS.
 //!
 //! Packs variable-height chip traces into a single dense multilinear
-//! polynomial, enabling a single WHIR commit/open/verify cycle for all
+//! polynomial, enabling a single BaseFold commit/open/verify cycle for all
 //! chips in a shard.
 //!
 //! # Protocol (Jagged Polynomial Commitments, ePrint 2025/917)
@@ -116,7 +116,7 @@ pub struct JaggedPacking<F> {
 /// describes the packing layout (chip dimensions, offsets, padded
 /// log size) without allocating the dense polynomial.  Call
 /// [`materialize_dense_jagged`] when the dense `Vec<F>` is actually
-/// needed (e.g. for the WHIR commit).
+/// needed (e.g. for the BaseFold commit).
 ///
 /// This is the SP1-style late-materialization pattern: most
 /// downstream code (sumcheck reduction, verifier weight tables) only
@@ -202,7 +202,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 /// zero-padding to `2^log_dense_size`.
 ///
 /// Caller is expected to drop the result immediately after handing
-/// it to the consumer (e.g. WHIR `commit_column`) to avoid holding
+/// it to the consumer (e.g. the BaseFold commit) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, RowMajorMatrixView<'_, F>)],
@@ -333,7 +333,7 @@ pub fn materialize_dense_jagged<F: Field>(
 ///
 /// **Note (Tier 3):** prefer [`compute_jagged_metadata`] +
 /// [`materialize_dense_jagged`] for new code — that pair lets the
-/// dense vector exist only for the brief window when WHIR commit
+/// dense vector exist only for the brief window when the BaseFold commit
 /// needs it.
 pub fn pack_traces_jagged<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
@@ -514,14 +514,14 @@ pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
 //
 // The naive approach (pack_traces_jagged above) treats all columns from
 // all tables as a single flat vector. This has O(total_columns) fan-in
-// for WHIR projection, causing register pressure and compute-bound
+// for the PCS projection, causing register pressure and compute-bound
 // bottlenecks on GPU.
 //
 // The hierarchical approach:
 //   Phase 1: For each table, fold N columns → 1 polynomial via random
 //            linear combination. This is table-local, aligned, SIMD-friendly.
 //   Phase 2: Pack the per-table polynomials (one per table, different heights)
-//            into a jagged vector for global WHIR commit. Fan-in = num_tables.
+//            into a jagged vector for the global BaseFold commit. Fan-in = num_tables.
 //
 // This reduces fan-in from O(total_columns) to O(num_tables), preserves
 // data locality, and handles jagged heights naturally.
@@ -590,7 +590,7 @@ pub fn fold_tables_local<F: Field>(
 ///
 /// Each table is a single-column polynomial of height `table.height`.
 /// These are concatenated into one dense vector (with padding to power of 2)
-/// for a single WHIR commit.
+/// for a single BaseFold commit.
 ///
 /// Fan-in = number of tables (typically ~20), NOT number of columns (~hundreds).
 pub fn pack_folded_tables_jagged<F: Field>(
@@ -632,11 +632,11 @@ pub fn pack_folded_tables_jagged<F: Field>(
     }
 }
 
-/// Full hierarchical PCS pipeline: fold tables locally, then pack for WHIR.
+/// Full hierarchical PCS pipeline: fold tables locally, then pack for BaseFold.
 ///
 /// ```text
 /// [Table_0: h_0 × w_0] → fold → [f_0: h_0 × 1]  ─┐
-/// [Table_1: h_1 × w_1] → fold → [f_1: h_1 × 1]  ─┤ pack_jagged → dense vector → WHIR commit
+/// [Table_1: h_1 × w_1] → fold → [f_1: h_1 × 1]  ─┤ pack_jagged → dense vector → BaseFold commit
 /// [Table_2: h_2 × w_2] → fold → [f_2: h_2 × 1]  ─┘
 /// ```
 ///

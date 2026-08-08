@@ -921,8 +921,8 @@ mod tests {
     /// with a single lookup, builds leaves via `build_lookup_leaves`,
     /// runs GKR, and checks that reconstructing the leaf-claim from
     /// row-MLE evaluations of the main trace gives exactly
-    /// `proof.leaf_claim`.  This exercise the full chain that the WHIR
-    /// verifier will perform once multi-point BaseFold opening is landed.
+    /// `proof.leaf_claim`.  This exercises the full chain the shard
+    /// verifier performs.
     #[test]
     fn logup_gkr_leaf_claim_reconstructs_from_row_mle() {
         use crate::kb31_poseidon2::{inner_perm, InnerChallenger};

@@ -4,7 +4,7 @@
 //! prover for E1 (drop p3-whir).  The math here is field-typed via
 //! `InnerVal`/`InnerChallenge` from [`crate::kb31_poseidon2`].  This module
 //! exists so the BaseFold path can call the reduction without depending on
-//! the `whir` feature.
+//! no feature gate.
 
 
 use alloc::vec::Vec;

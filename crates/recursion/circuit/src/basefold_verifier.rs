@@ -1,9 +1,8 @@
 //! BaseFold proof verifier for the recursion circuit (host-shape + emit hooks).
 //!
-//! Mirror of [`crate::whir_verifier`]'s scaffold pattern but for
-//! BaseFold-based shard proofs emitted by `prove_jagged_basefold`.
+//! Verifies BaseFold-based shard proofs emitted by `prove_jagged_basefold`.
 //!
-//! Like its WHIR sibling, this module holds:
+//! This module holds:
 //!   - host-shape verification logic (real Rust math) so the
 //!     transcript ordering and per-round consistency checks are
 //!     unit-testable without the full recursion-compiler integration;
@@ -35,19 +34,6 @@
 //!    round, final folded value must equal final_poly
 //! 10. **Final consistency** — `final_poly == last_uni[0] + last_beta · last_uni[1]`
 //!
-//! # Comparison with WHIR verifier
-//!
-//! | Component | WHIR | BaseFold (this file) |
-//! |---|---|---|
-//! | Per-round protocol | k sumcheck + STIR within round | 1 univariate + 1 fold |
-//! | Per-round Merkle commits | 1 (codeword) | 1 (folded codeword) |
-//! | Query phase | Per-round STIR queries | Single batch query phase at end |
-//! | Final consistency | `claim ≟ weight · f(r)` | `final_poly ≟ uni[0] + β·uni[1]` |
-//! | Recursion cost (per round) | ~50 constraints | ~30 constraints (no STIR overhead) |
-//!
-//! All `p3_whir` references in `whir_verifier.rs` are *comment-only* —
-//! the actual code uses only `zkm_recursion_compiler` primitives.
-
 #![allow(unused_variables)]
 
 
@@ -55,7 +41,7 @@
 #[derive(Clone, Debug)]
 pub struct BasefoldVerifierParams {
     /// log2 of the Reed-Solomon rate.  Production default: 4 (rate
-    /// 1/16, matches WHIR's posture for proven 100-bit soundness).
+    /// 1/16, for proven 100-bit soundness).
     pub log_blowup: usize,
     /// FRI query-phase query count.  Production default: 100.
     pub num_queries: usize,
@@ -419,8 +405,7 @@ impl<HV> RecursiveBasefoldVerifier<HV> {
     ///
     /// Returns `true` iff every round-check + final-equality holds.
     /// `initial_eval` is the batched query value derived from the
-    /// component-poly openings (same as the WHIR
-    /// `reduced_openings[log_max_height]`).
+    /// component-poly openings.
     ///
     /// `g_inv_pow_2_per_round[r]` is `g^{-1} ^ {1 << r}` — the
     /// per-round generator-inverse the verifier uses to derive

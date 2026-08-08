@@ -233,7 +233,7 @@ fn fold_round_evals<EF: Field + Send + Sync>(
     // Parallel reduce over `half` pairs.  Each pair contributes
     // (e0*c0, e1*c1, e2*c2) where e2 = 2·e1 - e0, c2 = 2·c1 - c0.
     // The hot loop scales with the dense table size; on large shards
-    // this is the main per-round cost (after the WHIR open).
+    // this is the main per-round cost (after the BaseFold open).
     (0..half)
         .into_par_iter()
         .map(|i| {
@@ -375,7 +375,7 @@ where
         v
     };
 
-    // Empty permutation placeholder (WHIR mode skips permutation;
+    // Empty permutation placeholder (this path skips permutation;
     // lookup integrity is handled by Logup-GKR in phase 2b).
     // Cumulative sums now come from the caller ().
     let empty_perm_ext: Vec<Challenge<SC>> = Vec::new();

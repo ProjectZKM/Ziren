@@ -57,7 +57,7 @@ fn bench_flat_vs_hierarchical() {
     println!("  Pack time:   {}µs", flat_us);
     println!("  Dense vec:   {} values", fs.total_real_values);
     println!("  Padded:      {} values ({:.1}% overhead)", fs.padded_size, (fs.padding_ratio - 1.0) * 100.0);
-    println!("  WHIR fan-in: {}\n", fs.total_columns);
+    println!("  PCS fan-in: {}\n", fs.total_columns);
 
     // Hierarchical
     let alpha = F::from_u32(12345);
@@ -73,7 +73,7 @@ fn bench_flat_vs_hierarchical() {
     println!("  Fold+Pack:   {}µs", hier_us);
     println!("  Dense vec:   {} values", hs.total_real_values);
     println!("  Padded:      {} values ({:.1}% overhead)", hs.padded_size, (hs.padding_ratio - 1.0) * 100.0);
-    println!("  WHIR fan-in: {}\n", hs.total_columns);
+    println!("  PCS fan-in: {}\n", hs.total_columns);
 
     println!("=== Comparison ===");
     println!("  Fan-in:    {} → {} ({:.0}x reduction)", fs.total_columns, hs.total_columns,
