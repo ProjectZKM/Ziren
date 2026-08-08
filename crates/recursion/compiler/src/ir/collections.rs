@@ -373,7 +373,7 @@ mod tests {
     use super::*;
     use crate::config::OuterConfig;
     use crate::ir::Felt;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
 
     type C = OuterConfig;
     type N = <C as Config>::N;
@@ -382,11 +382,11 @@ mod tests {
     #[test]
     fn fixed_array_set_and_set_value_update_elements() {
         let mut builder = Builder::<C>::default();
-        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
-        let two: Felt<Ff> = builder.eval(Ff::from_canonical_u32(2));
-        let three: Felt<Ff> = builder.eval(Ff::from_canonical_u32(3));
-        let seven: Felt<Ff> = builder.eval(Ff::from_canonical_u32(7));
-        let nine: Felt<Ff> = builder.eval(Ff::from_canonical_u32(9));
+        let one: Felt<Ff> = builder.eval(Ff::from_u32(1));
+        let two: Felt<Ff> = builder.eval(Ff::from_u32(2));
+        let three: Felt<Ff> = builder.eval(Ff::from_u32(3));
+        let seven: Felt<Ff> = builder.eval(Ff::from_u32(7));
+        let nine: Felt<Ff> = builder.eval(Ff::from_u32(9));
         let mut array = builder.vec::<Felt<Ff>>(vec![one, two, three]);
 
         builder.set_value(&mut array, 1, seven);
@@ -401,8 +401,8 @@ mod tests {
     #[should_panic(expected = "Array::Fixed does not support shift()")]
     fn fixed_array_shift_panics_with_clear_message() {
         let mut builder = Builder::<C>::default();
-        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
-        let shift = builder.eval(N::from_canonical_u32(1));
+        let one: Felt<Ff> = builder.eval(Ff::from_u32(1));
+        let shift = builder.eval(N::from_u32(1));
         let array = builder.vec::<Felt<Ff>>(vec![one]);
         let _ = array.shift(&mut builder, shift);
     }
@@ -411,7 +411,7 @@ mod tests {
     #[should_panic(expected = "Array::Fixed does not support truncate()")]
     fn fixed_array_truncate_panics_with_clear_message() {
         let mut builder = Builder::<C>::default();
-        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let one: Felt<Ff> = builder.eval(Ff::from_u32(1));
         let array = builder.vec::<Felt<Ff>>(vec![one]);
         array.truncate(&mut builder, Usize::Const(0));
     }
@@ -420,7 +420,7 @@ mod tests {
     #[should_panic(expected = "Array::Fixed does not support get_ptr()")]
     fn fixed_array_get_ptr_panics_with_clear_message() {
         let mut builder = Builder::<C>::default();
-        let one: Felt<Ff> = builder.eval(Ff::from_canonical_u32(1));
+        let one: Felt<Ff> = builder.eval(Ff::from_u32(1));
         let array = builder.vec::<Felt<Ff>>(vec![one]);
         let _ = builder.get_ptr(&array, 0usize);
     }

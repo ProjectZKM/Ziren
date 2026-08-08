@@ -510,7 +510,7 @@ where
         // Hardware MULT/MULTU rows must write HI. Dependency-only multiply
         // rows use UNUSED_PC and keep hi_record_is_real = 0.
         builder.when(local.is_mult + local.is_multu).assert_zero(
-            (local.pc - AB::Expr::from_canonical_u32(UNUSED_PC))
+            (local.pc - AB::Expr::from_u32(UNUSED_PC))
                 * (AB::Expr::one() - local.hi_record_is_real),
         );
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
