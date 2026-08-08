@@ -184,70 +184,21 @@ pub fn chips_to_mles_owned(
 /// Returns a public commitment (observed by the challenger as a
 /// side effect) and prover-side state for later opening.
 ///
-/// The shard commit runs the host BaseFold + Plonky3 MMCS commit.  The
-/// GPU prover does NOT reach this free-fn — its device dense-pack +
-/// BaseFold commit is the `StarkGpuProver` override of
-/// `MachineProver::commit_multilinears` (SP1-parity: unconditional device
-/// commit, no host fallback).  This free-fn is the host / unit-test path.
-pub fn commit_jagged_pcs(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    challenger: &mut JaggedChallenger,
-) -> (JaggedCommit, JaggedProverData) {
-    commit_jagged_pcs_host(chip_traces, challenger)
-}
-
-/// Pure host-side implementation of [`commit_jagged_pcs`].  Always runs the
-/// CPU BaseFold + Plonky3 MMCS commit.
+/// The shard commit runs the host BaseFold + Plonky3 MMCS commit.  The GPU
+/// prover does NOT reach this free-fn — its device dense-pack + BaseFold commit
+/// is the `StarkGpuProver` override of `MachineProver::commit_multilinears`
+/// (SP1-parity: unconditional device commit, no host fallback).  This free-fn is
+/// the CPU-prover / unit-test path.
 ///
-/// NOT a GPU fallback — the GPU prover never reaches it (see
-/// [`commit_jagged_pcs`]; the device commit is unconditional, SP1-parity).
-/// This is the CPU-prover / unit-test path.
-pub fn commit_jagged_pcs_host(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    challenger: &mut JaggedChallenger,
-) -> (JaggedCommit, JaggedProverData) {
-    let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-    let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-    let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-    let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
-    // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    let (commit, prover_data) = commit_jagged_pcs_generic::<JaggedMmcs, JaggedDft>(
-        chip_traces,
-        mmcs,
-        dft,
-        FriConfig::<JaggedVal>::from_env_or_default(),
-    );
-    // The transcript write lives HERE, at the caller, not inside the PCS helper.
-    challenger.observe(commit.original_commitment.clone());
-    (commit, prover_data)
-}
-
-/// No-observe variant used by the single-main-commit precompute — runs
-/// the host BaseFold + MMCS commit without observing the commitment into
-/// a challenger (the orchestrator/Phase 1 prologue's 8-felt
-/// `main_commitment` observe is the real transcript binding).  The GPU
-/// prover commits device-side in its `commit_multilinears` override and
-/// does NOT reach this free-fn.
-pub fn commit_jagged_pcs_no_observe(
-    chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-) -> (JaggedCommit, JaggedProverData) {
-    commit_jagged_pcs_host_no_observe(chip_traces)
-}
-
-/// Same as [`commit_jagged_pcs_host`] but does NOT observe
-/// the commitment into the challenger.  Used by the
-/// single-main-commit flow, where the BaseFold commit happens BEFORE
-/// the shard-level Phase 1 prologue and the prologue's 8-felt
-/// `main_commitment` observe IS the BaseFold-digest observation —
-/// observing again here would desync the prover transcript vs the
-/// verifier.
-///
-/// Callers MUST observe `commit.original_commitment` separately into the
-/// challenger at the same transcript position as the verifier.  The
-/// verifier counterpart is
+/// Does NOT observe the commitment.  Like SP1's
+/// `JaggedProver::commit_multilinears` (slop/crates/jagged/src/prover.rs:106)
+/// this takes no challenger; the CALLER owns the transcript write and must
+/// observe `commit.original_commitment` at the same position as the verifier.
+/// On the single-main-commit flow that write is the shard-level Phase 1
+/// prologue's 8-felt `main_commitment` observe — observing here as well would
+/// desync the prover against the verifier.  The verifier counterpart is
 /// [`jagged::verify_jagged_basefold_no_observe`].
-pub fn commit_jagged_pcs_host_no_observe(
+pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (JaggedCommit, JaggedProverData) {
     let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
@@ -1125,7 +1076,7 @@ pub mod jagged {
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
             )];
-            crate::jagged_pcs::commit_jagged_pcs_no_observe(dense_traces)
+            crate::jagged_pcs::commit_jagged_pcs(dense_traces)
         };
         drop(_commit_span);
         tracing::info!(
@@ -2525,8 +2476,9 @@ mod test {
         ];
 
         let mut p_chal = build_challenger();
-        let (commit, prover_data) =
-            commit_jagged_pcs(traces.clone(), &mut p_chal);
+        let (commit, prover_data) = commit_jagged_pcs(traces.clone());
+        // The caller owns the transcript write.
+        p_chal.observe(commit.original_commitment.clone());
 
         // Compute the eval point + claim for the stacked PCS.  Claim
         // is the multilinear-extension of the *flattened*
