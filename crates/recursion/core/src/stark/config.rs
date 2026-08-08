@@ -529,7 +529,7 @@ mod basefold_over_bn254_roundtrip_test {
     use p3_field::PrimeCharacteristicRing;
     use p3_matrix::dense::RowMajorMatrix;
     use std::sync::Arc;
-    use zkm_pcs::jagged_pcs::{roundtrip_jagged_pcs_generic, JaggedVal};
+    use zkm_pcs::jagged_pcs::JaggedVal;
     use zkm_pcs::BasefoldRing;
 
     fn make_challenger() -> OuterChallenger {
@@ -554,11 +554,94 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
 
-        roundtrip_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            traces,
-            make_challenger,
+        // Body inlined from what used to be `zkm_pcs::jagged_pcs::roundtrip_jagged_pcs_generic`,
+        // matching SP1, whose equivalent (`test_jagged_basefold`, basefold.rs:121) is a generic fn
+        // inside `#[cfg(test)] mod tests` that never leaves the test module.
+        //
+        // It lives HERE rather than next to the PCS purely because of crate layering: the outer-ring
+        // types (`OuterValMmcs` / `OuterChallenger` / `OuterDft`) are defined in this crate while the
+        // PCS is in `zkm-pcs`, so the test cannot sit beside the code it exercises. SP1 avoids this
+        // only because `BnProver`/`BNGC` are co-located with the jagged crate inside `slop`.
+        // Do NOT "tidy" this back into a shared `pub fn` in the prover library — that ships a test
+        // fixture as public API, which is what this change removed.
+        use p3_challenger::{CanObserve, FieldChallenger};
+        use zkm_pcs::basefold::FriConfig;
+        use zkm_pcs::jagged_pcs::{
+            commit_jagged_pcs_host_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+            JaggedChallenge,
+        };
+
+        // Self-consistency roundtrip: commit/open/verify must agree on ONE config;
+        // env-default rate keeps prover == verifier (any rate works here).
+        let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
+        let mut p_chal = make_challenger();
+        let (commit, prover_data) =
+            commit_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+                traces,
+                &mut p_chal,
+                mmcs.clone(),
+                dft.clone(),
+                rt_fri.clone(),
+            );
+
+        let stack_dim = commit.log_stacking_height as usize;
+        let num_stripes = commit.area >> stack_dim;
+        let num_batch_vars = num_stripes.next_power_of_two().trailing_zeros() as usize;
+        let total_vars = num_batch_vars + stack_dim;
+
+        // Deterministic eval point from a fresh (unobserved) challenger, so prover and
+        // verifier agree without an RNG dependency.
+        let mut pt_chal = make_challenger();
+        let eval_point: Vec<JaggedChallenge> =
+            (0..total_vars).map(|_| pt_chal.sample_algebra_element()).collect();
+
+        // The honest evaluation claim, folded from the committed interleaved MLEs.
+        let stack_point: Vec<JaggedChallenge> = eval_point[..stack_dim].to_vec();
+        let batch_evals_flat: Vec<JaggedChallenge> = prover_data
+            .stacked_data
+            .interleaved_mles
+            .iter()
+            .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
+            .collect();
+        let batch_point = &eval_point[stack_dim..];
+        let evaluation_claim = {
+            let target = 1usize << batch_point.len();
+            let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
+            current.resize(target, JaggedChallenge::ZERO);
+            for &r in batch_point.iter().rev() {
+                let half = current.len() / 2;
+                for i in 0..half {
+                    let lo = current[2 * i];
+                    let hi = current[2 * i + 1];
+                    current[i] = lo + r * (hi - lo);
+                }
+                current.truncate(half);
+            }
+            current[0]
+        };
+
+        let proof = open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            prover_data,
+            eval_point.clone(),
+            &mut p_chal,
+            mmcs.clone(),
+            dft.clone(),
+            rt_fri.clone(),
+        );
+
+        let mut v_chal = make_challenger();
+        v_chal.observe(commit.original_commitment.clone());
+        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            &commit.original_commitment,
+            commit.area,
+            commit.log_stacking_height,
+            &eval_point,
+            evaluation_claim,
+            &proof,
+            &mut v_chal,
             mmcs,
             dft,
+            rt_fri,
         )
         .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
     }
