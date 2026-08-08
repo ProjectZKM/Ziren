@@ -123,8 +123,6 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The preprocessed traces.
     pub traces: Vec<RowMajorMatrix<Val<SC>>>,
-    /// The pcs data for the preprocessed traces (Arc-wrapped since MerkleTree is not Clone).
-    pub data: Arc<PcsProverData<SC>>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -139,7 +137,6 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             pc_start: self.pc_start,
             initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             traces: self.traces.clone(),
-            data: Arc::clone(&self.data),
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -520,44 +517,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .unzip();
 
-        // Commit to the batch of traces.
-        // Height-agnostic recursion: route prep through the BaseFold hook when
-        // configured (wrap) OR when a prep trace would overflow the two-adic
-        // `pcs.commit` ceiling (FIX-off recursion prep reaches 2^24 > inner
-        // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
-        let max_prep_log = named_preprocessed_traces
+        // Commit to the batch of traces.  A config that defines `prep_commit`
+        // always uses it -- there is no height threshold and no per-config
+        // opt-in, matching SP1, where setup and the shard commit go through the
+        // one commit path.  Configs without one (the test-only inner/D5
+        // configs) keep the two-adic `pcs.commit`.
+        let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
-            .map(|(_, t)| {
-                let h = t.height();
-                if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
-            })
-            .max()
-            .unwrap_or(0);
-        let use_prep_hook =
-            SC::prep_commit_via_hook() || max_prep_log > SC::prep_two_adic_ceiling_log();
-        let (commit, data) = if use_prep_hook {
-            // SP1-style prep commit (no two-adic coset LDE) — see
-            // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
-            // `pcs.commit` LDE caps prep heights at
-            // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
-            // on the basefold path.
-            let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
-                .iter()
-                .map(|(name, trace)| (name.to_string(), trace.clone()))
-                .collect();
-            let commit = SC::prep_commit(&named).expect(
-                "prep commit required but this config does not implement \
-                 StarkGenericConfig::prep_commit",
-            );
-            // pk.data is unused on the basefold path — 1-row zero dummy.
-            let dummy_domain = pcs.natural_domain_for_degree(1);
-            let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
-            let (_dc, dummy_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+            .map(|(name, trace)| (name.to_string(), trace.clone()))
+            .collect();
+        let commit = if let Some(commit) = SC::prep_commit(&named) {
             let _ = domains_and_traces;
-            (commit, dummy_data)
+            commit
         } else {
             tracing::debug_span!("commit to preprocessed traces")
                 .in_scope(|| pcs.commit(domains_and_traces))
+                .0
         };
 
         // Get the chip ordering.
@@ -582,7 +557,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
-                data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -671,44 +645,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .unzip();
 
-        // Commit to the batch of traces.
-        // Height-agnostic recursion: route prep through the BaseFold hook when
-        // configured (wrap) OR when a prep trace would overflow the two-adic
-        // `pcs.commit` ceiling (FIX-off recursion prep reaches 2^24 > inner
-        // 2^23).  Core + FIX-on recursion stay on `pcs.commit` (byte-identical).
-        let max_prep_log = named_preprocessed_traces
+        // Commit to the batch of traces.  A config that defines `prep_commit`
+        // always uses it -- there is no height threshold and no per-config
+        // opt-in, matching SP1, where setup and the shard commit go through the
+        // one commit path.  Configs without one (the test-only inner/D5
+        // configs) keep the two-adic `pcs.commit`.
+        let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
-            .map(|(_, t)| {
-                let h = t.height();
-                if h <= 1 { 0 } else { (usize::BITS - (h - 1).leading_zeros()) as usize }
-            })
-            .max()
-            .unwrap_or(0);
-        let use_prep_hook =
-            SC::prep_commit_via_hook() || max_prep_log > SC::prep_two_adic_ceiling_log();
-        let (commit, data) = if use_prep_hook {
-            // SP1-style prep commit (no two-adic coset LDE) — see
-            // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
-            // `pcs.commit` LDE caps prep heights at
-            // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
-            // on the basefold path.
-            let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
-                .iter()
-                .map(|(name, trace)| (name.to_string(), trace.clone()))
-                .collect();
-            let commit = SC::prep_commit(&named).expect(
-                "prep commit required but this config does not implement \
-                 StarkGenericConfig::prep_commit",
-            );
-            // pk.data is unused on the basefold path — 1-row zero dummy.
-            let dummy_domain = pcs.natural_domain_for_degree(1);
-            let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
-            let (_dc, dummy_data) = pcs.commit(vec![(dummy_domain, dummy_trace)]);
+            .map(|(name, trace)| (name.to_string(), trace.clone()))
+            .collect();
+        let commit = if let Some(commit) = SC::prep_commit(&named) {
             let _ = domains_and_traces;
-            (commit, dummy_data)
+            commit
         } else {
             tracing::debug_span!("commit to preprocessed traces")
                 .in_scope(|| pcs.commit(domains_and_traces))
+                .0
         };
 
         // Get the chip ordering.
@@ -732,7 +684,6 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
-                data: Arc::new(data),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },

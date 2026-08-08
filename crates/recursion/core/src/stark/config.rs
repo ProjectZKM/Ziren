@@ -167,15 +167,6 @@ impl Default for KoalaBearPoseidon2Outer {
 }
 
 impl StarkGenericConfig for KoalaBearPoseidon2Outer {
-    fn prep_commit_via_hook() -> bool {
-        // SP1-style: the wrap machine's PREPROCESSED commit goes through the
-        // stacked BaseFold (outer_prep_commit hook) — no two-adic coset LDE.
-        // The `pcs.commit` LDE path caps prep heights at
-        // 2^(TWO_ADICITY - log_blowup) = 2^20 (blowup 4) and panics once
-        // the wrap program's tallest prep trace crosses it; its ProverData
-        // has no consumers on the basefold path.
-        true
-    }
 
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],

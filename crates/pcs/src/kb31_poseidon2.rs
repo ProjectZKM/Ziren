@@ -629,13 +629,6 @@ pub mod koala_bear_poseidon2 {
             Some(inner_prep_commit(named_preprocessed_traces))
         }
 
-        fn prep_two_adic_ceiling_log() -> usize {
-            // KoalaBear TWO_ADICITY = 24; the inner prep two-adic `pcs.commit`
-            // uses log_blowup = 1, so the coset LDE caps prep at
-            // 2^(24 - 1) = 2^23.  FIX-off recursion prep reaches 2^24 → route
-            // those (and only those) through `inner_prep_commit` (BaseFold).
-            23
-        }
     }
 
     /// SP1-style PREPROCESSED-trace setup commit for the inner
@@ -745,4 +738,35 @@ pub mod koala_bear_poseidon2 {
         }
     }
 
+}
+
+#[cfg(test)]
+mod prep_commit_wiring {
+    use crate::config::StarkGenericConfig;
+    use p3_matrix::dense::RowMajorMatrix;
+
+    /// The production configs MUST override `prep_commit`.
+    ///
+    /// This is not a formality: `StarkMachine::setup` selects on
+    /// `Option`, so a config that fell back to the trait default would
+    /// silently commit its preprocessed traces with the two-adic
+    /// `pcs.commit` instead of the jagged BaseFold path -- a different
+    /// commitment, and therefore a different VK, with every test still
+    /// passing because both paths are internally consistent.  Assert the
+    /// override is reached rather than inferring it from a green suite.
+    #[test]
+    fn koala_bear_poseidon2_overrides_prep_commit() {
+        type SC = super::koala_bear_poseidon2::KoalaBearPoseidon2;
+        // One 2-row, 1-column preprocessed trace is enough to exercise the path.
+        let named = vec![(
+            "probe".to_string(),
+            RowMajorMatrix::new(vec![<SC as StarkGenericConfig>::Val::default(); 2], 1),
+        )];
+        assert!(
+            <SC as StarkGenericConfig>::prep_commit(&named).is_some(),
+            "KoalaBearPoseidon2 must override prep_commit; falling back to the \
+             trait default would silently switch the preprocessed commitment to \
+             pcs.commit and move the VK"
+        );
+    }
 }

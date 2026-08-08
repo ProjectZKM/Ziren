@@ -2260,7 +2260,7 @@ pub mod tests {
         assert_eq!(pk.commit, deserialized_pk.commit);
         assert_eq!(pk.pc_start, deserialized_pk.pc_start);
         assert_eq!(pk.traces, deserialized_pk.traces);
-        assert_eq!(pk.data.root(), deserialized_pk.data.root());
+
         assert_eq!(pk.chip_ordering, deserialized_pk.chip_ordering);
 
         let serialized_vk = bincode::serialize(&vk).unwrap();

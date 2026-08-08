@@ -70,39 +70,24 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
 
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;
-    /// Whether `StarkMachine::setup` commits PREPROCESSED traces via the
-    /// config's `prep_commit` (the jagged BaseFold path, no
-    /// two-adic coset LDE) instead of `pcs.commit`.  The legacy LDE caps
-    /// prep heights at `2^(TWO_ADICITY - log_blowup)`; the BaseFold path
-    /// never consumes the LDE `ProverData`.  Default false; the OuterSC
-    /// wrap config overrides to true.
-    fn prep_commit_via_hook() -> bool {
-        false
-    }
 
     /// The BaseFold preprocessed-commit for this config, if it has one.  Commits
     /// the preprocessed traces via the jagged BaseFold path (no two-adic coset
-    /// LDE) and returns the commitment directly.  `StarkMachine::setup` invokes
-    /// it when `prep_commit_via_hook()` is set OR a prep trace exceeds
-    /// `prep_two_adic_ceiling_log()`.  Default `None` (only `pcs.commit` is
-    /// used); the inner and wrap configs override it.
+    /// LDE) and returns the commitment directly.  `StarkMachine::setup` uses it
+    /// whenever it is defined -- there is no height threshold and no opt-in
+    /// flag.
+    ///
+    /// The default is `None`, which keeps the two-adic `pcs.commit`.  That is
+    /// what the test-only `KoalaBearPoseidon2Inner` / `KoalaBearPoseidon2D5`
+    /// configs use; the two production configs (`KoalaBearPoseidon2` and the
+    /// wrap `KoalaBearPoseidon2Outer`) both override it, so the production
+    /// setup path never takes the `None` branch.
     fn prep_commit(
         _named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
     ) -> Option<Com<Self>> {
         None
     }
 
-    /// Max preprocessed LOG height committable via the two-adic `pcs.commit`
-    /// (= `TWO_ADICITY - log_blowup`).  Above this, the coset LDE
-    /// (`height << log_blowup`) would exceed `TWO_ADICITY` and panic in
-    /// `two_adic_generator`, so setup routes prep through `prep_commit`
-    /// instead (height-agnostic recursion: FIX-off recursion prep reaches
-    /// 2^24 > the inner 2^23 ceiling).  Default `usize::MAX` (never
-    /// height-trigger — preserves byte-identical two-adic prep for every
-    /// config that fits, incl. core and FIX-on recursion).
-    fn prep_two_adic_ceiling_log() -> usize {
-        usize::MAX
-    }
 }
 
 pub trait ZeroCommitment<SC: StarkGenericConfig> {
