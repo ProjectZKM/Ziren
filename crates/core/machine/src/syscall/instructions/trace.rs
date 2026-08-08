@@ -115,7 +115,6 @@ impl SyscallInstrsChip {
         cols.is_sys_linux = F::from_bool(event.a_record.prev_value & 0x0ff00 != 0);
 
         let prev_a_bytes = event.a_record.prev_value.to_le_bytes();
-        let send_to_table = (prev_a_bytes[1] != 0) || (prev_a_bytes[2] == 1);
         let is_halt_val = cols.is_halt == F::ONE;
 
         // Populate is_prev_a1_zero for bidirectional is_sys_linux constraint.
@@ -163,8 +162,15 @@ impl SyscallInstrsChip {
         // Populate unified KoalaBear range check flags and columns.
         let is_commit_deferred =
             syscall_id == F::from_u32(SyscallCode::COMMIT_DEFERRED_PROOFS.syscall_id());
-        let op_b_needs_check = send_to_table || is_halt_val;
-        let op_c_needs_check = send_to_table || is_commit_deferred;
+        // Activate the KoalaBear range check only when the value travels as a single
+        // reduced field element: the precompile bridge (`prev_a_bytes[2] == 1`),
+        // `is_halt` (exit code), and `is_commit_deferred_proofs` (digest).  Linux
+        // syscall args travel via U16-range-checked half-word columns in `SyscallChip`,
+        // so the check is unnecessary there and would reject legal u32 args such as
+        // AT_FDCWD = 0xFFFFFF9C.  Must match `air.rs`'s activation exactly.
+        let send_to_precompile = prev_a_bytes[2] == 1;
+        let op_b_needs_check = send_to_precompile || is_halt_val;
+        let op_c_needs_check = send_to_precompile || is_commit_deferred;
 
         if op_b_needs_check {
             cols.op_b_check = F::ONE;
