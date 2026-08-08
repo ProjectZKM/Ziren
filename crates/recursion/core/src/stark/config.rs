@@ -462,14 +462,13 @@ mod basefold_over_bn254_generic_typecheck {
 }
 
 
-// OUTER-ring jagged BaseFold setup hook.
-// The open + verify hook bodies are static generic calls
-// in `prove_trusted_evaluations` / `verify_jagged_pcs_host` over the `BasefoldRing`
-// associated type). Only `outer_prep_commit` remains — resolved STATICALLY via
-// `KoalaBearPoseidon2Outer::prep_commit()` so `StarkMachine::setup` (which
-// cannot name `OuterValMmcs`) routes the wrap-ring preprocessed commit here.
-// `Val`/`Challenge` are KoalaBear / KoalaBear^4 for both rings, so only the MMCS
-// differs.
+// OUTER-ring jagged BaseFold setup commit.
+//
+// `outer_prep_commit` is the wrap ring's `StarkGenericConfig::prep_commit` body.
+// It exists because `StarkMachine::setup` is generic over `SC` and so cannot name
+// `OuterValMmcs`, while `precompute_jagged_basefold_commit_generic` must be told
+// which MMCS to use; the config impl supplies it.  `Val`/`Challenge` are
+// KoalaBear / KoalaBear^4 for both rings, so only the MMCS differs.
 pub mod outer_jagged_hooks {
     use super::{KoalaBearPoseidon2Outer, OuterValMmcs};
     use p3_matrix::dense::RowMajorMatrix;
@@ -478,15 +477,14 @@ pub mod outer_jagged_hooks {
     // The shard prover (`prove_trusted_evaluations`) and host verifier
     // (`verify_jagged_pcs_host`) name `OuterChallenger`/`OuterValMmcs` via the
     // `BasefoldRing` associated type and call the generic BaseFold open/verify
-    // statically, so the dyn-Any open/verify hooks are absent. Only
-    // `outer_prep_commit` remains (setup/VK-side; a plain crate-dep fn pointer),
-    // returned by `KoalaBearPoseidon2Outer::prep_commit()`.
+    // statically, so only the setup/VK-side commit lives here.
 
     /// SP1-style PREPROCESSED-trace setup commit for the OuterSC wrap
     /// machine: stacked BaseFold over the Poseidon2-BN254 `OuterValMmcs`
-    /// (no two-adic coset LDE).  Returns bincode of the
-    /// `OuterValMmcs::Commitment` (== `Com<KoalaBearPoseidon2Outer>` since
-    /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>`).
+    /// (no two-adic coset LDE).  Returns the `OuterValMmcs::Commitment`, which
+    /// is `Com<KoalaBearPoseidon2Outer>` since
+    /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>` -- the equality the
+    /// generic `setup` cannot see, which is why this impl exists.
     pub(crate) fn outer_prep_commit(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
     ) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
