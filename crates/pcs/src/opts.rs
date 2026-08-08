@@ -36,19 +36,34 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// BOTH (goat OOMs at `1 << 28`, so the headroom above it is thin — re-measure
 /// peak VRAM before raising it).
 ///
-/// SWEPT AND CONFIRMED OPTIMAL (see examples/keeper/OPTIMIZATION.md,
-/// "Shard size").  This is the ONLY limit that closes a core shard in practice
-/// — 100% of splits on reth / tendermint / goat are area splits — and its
-/// current value is a sharp local optimum on all three at once, because it is
-/// the largest budget whose CPU shards still fit a `2^28` jagged hypercube
-/// (reth median fill 0.909, max 0.974 — 2.7% of headroom).  reth core kHz:
-/// 2095 at `0.80x`, **2328/2339 here**, 2269/2223 at `1.20x`, CUDA-OOM at
-/// `2.00x`.  Peak VRAM: 24.3 / **27.0** / 31.2 GiB of 32.6.  Raising it 20%
-/// moves 202 of 245 shards onto a `2^29` hypercube at 0.546 fill (+44% padded
-/// dense) for a 13% shard-count saving — slower AND 4.3% from the card wall.
-/// Past `402,653,184` the cap is inert (every split is clk24-determined), and
-/// even that best case is 3.1% SLOWER on tendermint at 27% fewer shards.
-pub const ELEMENT_THRESHOLD: usize = (1 << 27) + (1 << 26) + (1 << 25) + (1 << 24);
+/// This is the ONLY limit that closes a core shard in practice — 100% of splits
+/// on reth / tendermint / goat are area splits.
+///
+/// RAISED TO 1.55x (390,070,272) FROM THE LONG-STANDING 251,658,240.  reth goes
+/// 281 -> 205 shards (-27%); shards are the unit that per-shard fixed cost is
+/// paid on, and that cost was measured at ~192 ms/shard with only ~35 ms of it
+/// on the GPU.
+///
+/// ⚠ THE HEADROOM IS THIN AND THE RELIABILITY EVIDENCE IS ONE RUN.  Measured
+/// peak at this value is 30,567 MiB of 32,607 — 2,040 MiB (6.3%) spare — while
+/// the observed run-to-run VRAM excursion is ~2.4 GiB.  1.60x OOMed 1 run in 4
+/// and 1.85x/2.00x each OOMed 1 in 2, at median box loads of 15 and 13, so load
+/// is NOT the driver.  If reth starts OOMing at
+/// `basefold/src/jhr_slab_device.rs` (a ~5 GiB single allocation for the giant
+/// LogUp-GKR FirstLayer slab), lower this first — 1.40x (352,321,536) is the
+/// value with the strongest reliability record: 0 OOM in 4 runs, 219 shards.
+///
+/// ⚠ DO NOT trust `nvidia-smi` sampling to re-measure the peak: a 2 s sampler
+/// read 28,509 MiB on a run whose in-process ledger showed 30,855 MiB live.
+/// The undersample (~2.3 GiB) is the same order as the excursion being chased.
+/// Use the in-process allocation ledger.
+///
+/// The older sweep that called 251,658,240 a sharp optimum sampled only
+/// 0.80/1.00/1.20/2.00 — it never probed (1.33, 1.72], and 1.20x is a local
+/// PESSIMUM: it sits just past the 2^28 -> 2^29 step where the doubled padded
+/// dense is paid before the shard-count saving amortises it.
+pub const ELEMENT_THRESHOLD: usize =
+    (1 << 28) + (1 << 26) + (1 << 25) + (1 << 24) + (1 << 22);
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
