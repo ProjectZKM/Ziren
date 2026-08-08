@@ -295,7 +295,12 @@ mod tests {
             AluEvent::new(0, Opcode::AND, 2, 10, 19),
             AluEvent::new(0, Opcode::NOR, 228, 10, 19),
         ]
-        .repeat(1000);
+        // 4 events x 1024 = 4096 rows.  `p3_uni_stark::prove` requires a
+        // power-of-two height, but `generate_trace` pads to
+        // `next_multiple_of_32`, so a non-power-of-two count (this was 1000 ->
+        // 4000 rows) reaches the prover unpadded and trips
+        // `log2_strict_usize`.  Keep the event count a power of two.
+        .repeat(1024);
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
