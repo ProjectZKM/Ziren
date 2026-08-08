@@ -614,14 +614,10 @@ where
         let (chip_infos, r_row_per_chip, z_row) =
             build_jagged_verify_inputs(&bundle.packing, &chip_widths, eval_point_inner);
         let mmcs = <SC as crate::BasefoldRing>::bf_mmcs();
-        let dft = std::sync::Arc::new(
-            p3_dft::Radix2DitParallel::<crate::jagged_pcs::JaggedVal>::default(),
-        );
         let fri = <SC as crate::BasefoldRing>::fri_config();
         let ok = verify_jagged_basefold_inner_generic::<
             SC::Challenger,
             <SC as crate::BasefoldRing>::BfMmcs,
-            p3_dft::Radix2DitParallel<crate::jagged_pcs::JaggedVal>,
         >(
             &chip_infos,
             &r_row_per_chip,
@@ -629,7 +625,6 @@ where
             &bundle,
             challenger,
             mmcs,
-            dft,
             /* skip_commit_observe = */ true,
             fri,
         );

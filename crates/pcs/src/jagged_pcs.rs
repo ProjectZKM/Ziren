@@ -148,43 +148,6 @@ pub fn pick_log_stacking_height(_total_entries: usize) -> u32 {
     DEFAULT_LOG_STACKING_HEIGHT
 }
 
-// BaseFold-over-BN254: GC-generic PCS core. Val/Challenge stay
-// KoalaBear (the outer context keeps the same field for inner and outer);
-// only the Mmcs (hash) + Dft vary by context. Inner uses Poseidon2-KoalaBear
-// Merkle; the wrap (OuterSC) will pass Poseidon2-BN254 Merkle (OuterValMmcs).
-// Callers build the concrete KoalaBear mmcs/dft inline and delegate here
-// directly; there is no concrete wrapper.
-#[allow(clippy::type_complexity)]
-fn build_pcs_generic<MT, D>(
-    log_stacking_height: u32,
-    mmcs: MT,
-    dft: Arc<D>,
-    fri: FriConfig<JaggedVal>,
-) -> (
-    StackedPcsProver<JaggedVal, JaggedChallenge, MT, D>,
-    StackedPcsVerifier<JaggedVal, JaggedChallenge, MT>,
-)
-where
-    MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal>,
-{
-    // The FRI config (rate/queries/pow) is supplied by the caller so the
-    // per-stage params are a single source of truth carried from commit
-    // through open/verify (inner stages pass `from_env_or_default()`; the
-    // wrap path passes `wrap_fri_config()` = blowup3/pow22 for 100-bit
-    // soundness — see `FriConfig::wrap_fri_config`).
-    let basefold_prover = BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(
-        fri.clone(),
-        dft,
-        mmcs.clone(),
-        1, // num_expected_commitments — one round per shard
-    );
-    let basefold_verifier =
-        BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(fri, mmcs.clone(), 1);
-    let prover = StackedPcsProver::new(basefold_prover, log_stacking_height, DEFAULT_BATCH_SIZE);
-    let verifier = StackedPcsVerifier::new(basefold_verifier, log_stacking_height);
-    (prover, verifier)
-}
 
 
 
@@ -327,7 +290,14 @@ where
     let log_stacking_height = pick_log_stacking_height(total_entries);
     let area = total_entries.next_multiple_of(1usize << log_stacking_height);
 
-    let (prover, _verifier) = build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft, fri);
+    // Build only the prover: SP1 constructs the stacked PCS at the call site and
+    // never pairs it with a verifier it does not use
+    // (slop/crates/stacked, crates/recursion/circuit/src/basefold/stacked.rs:129).
+    let prover = StackedPcsProver::new(
+        BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
+        log_stacking_height,
+        DEFAULT_BATCH_SIZE,
+    );
     let (commitment, stacked_data) = prover.commit_multilinears(mles);
 
     let commit = JaggedCommitGeneric::<MT> {
@@ -677,8 +647,11 @@ where
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
-    let (prover, _verifier) =
-        build_pcs_generic::<MT, D>(prover_data.log_stacking_height, mmcs, dft, fri);
+    let prover = StackedPcsProver::new(
+        BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
+        prover_data.log_stacking_height,
+        DEFAULT_BATCH_SIZE,
+    );
     prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
 }
 
@@ -739,9 +712,8 @@ pub fn verify_jagged_pcs(
     let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
     let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
     let mmcs = JaggedMmcs::new(hash, compress, 0);
-    let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    verify_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+    verify_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs>(
         commitment,
         area,
         log_stacking_height,
@@ -750,7 +722,6 @@ pub fn verify_jagged_pcs(
         proof,
         challenger,
         mmcs,
-        dft,
         FriConfig::<JaggedVal>::from_env_or_default(),
     )
 }
@@ -762,7 +733,7 @@ pub fn verify_jagged_pcs(
 /// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
 /// KoalaBear⁴ for both.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn verify_jagged_pcs_generic<Challenger, MT, D>(
+pub fn verify_jagged_pcs_generic<Challenger, MT>(
     commitment: &<MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
     area: usize,
     log_stacking_height: u32,
@@ -771,18 +742,18 @@ pub fn verify_jagged_pcs_generic<Challenger, MT, D>(
     proof: &StackedBasefoldProof<JaggedVal, JaggedChallenge, MT>,
     challenger: &mut Challenger,
     mmcs: MT,
-    dft: Arc<D>,
     fri: FriConfig<JaggedVal>,
 ) -> Result<(), crate::basefold::StackedVerifierError>
 where
     MT: p3_commit::Mmcs<JaggedVal, Commitment: Clone> + Clone,
-    D: p3_dft::TwoAdicSubgroupDft<JaggedVal> + Send + Sync,
     Challenger: p3_challenger::FieldChallenger<JaggedVal>
         + p3_challenger::GrindingChallenger<Witness = JaggedVal>
         + CanObserve<<MT as p3_commit::Mmcs<JaggedVal>>::Commitment>,
 {
-    let (_prover, verifier) =
-        build_pcs_generic::<MT, D>(log_stacking_height, mmcs, dft, fri);
+    let verifier = StackedPcsVerifier::new(
+        BasefoldVerifier::<JaggedVal, JaggedChallenge, MT>::new(fri, mmcs, 1),
+        log_stacking_height,
+    );
     verifier.verify_trusted_evaluation(
         core::slice::from_ref(commitment),
         &[area],
@@ -2296,20 +2267,18 @@ pub mod jagged {
     /// the registered verify hook; the inner ring keeps the concrete
     /// `verify_jagged_basefold_inner`.
     #[allow(clippy::too_many_arguments)]
-    pub fn verify_jagged_basefold_inner_generic<Challenger, MT, D>(
+    pub fn verify_jagged_basefold_inner_generic<Challenger, MT>(
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         bundle: &JaggedBasefoldBundleGeneric<MT>,
         challenger: &mut Challenger,
         mmcs: MT,
-        dft: std::sync::Arc<D>,
         skip_commit_observe: bool,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
     ) -> bool
     where
         MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal, Commitment: Clone> + Clone,
-        D: p3_dft::TwoAdicSubgroupDft<crate::jagged_pcs::JaggedVal> + Send + Sync,
         Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
             + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
             + CanObserve<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
@@ -2375,7 +2344,7 @@ pub mod jagged {
                 q_at_z_adj *= InnerChallenge::ONE - *r;
             }
         }
-        let res = crate::jagged_pcs::verify_jagged_pcs_generic::<Challenger, MT, D>(
+        let res = crate::jagged_pcs::verify_jagged_pcs_generic::<Challenger, MT>(
             &bundle.commit.original_commitment,
             bundle.commit.area,
             bundle.commit.log_stacking_height,
@@ -2384,7 +2353,6 @@ pub mod jagged {
             &bundle.basefold_proof,
             challenger,
             mmcs,
-            dft,
             fri,
         );
         if let Err(e) = &res {

@@ -455,7 +455,7 @@ mod basefold_over_bn254_generic_typecheck {
         dft: Arc<OuterDft>,
     ) -> Result<(), StackedVerifierError> {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs>(
             commitment,
             area,
             log_stacking_height,
@@ -464,7 +464,6 @@ mod basefold_over_bn254_generic_typecheck {
             proof,
             ch,
             mmcs,
-            dft,
             fri,
         )
     }
@@ -634,7 +633,7 @@ mod basefold_over_bn254_roundtrip_test {
 
         let mut v_chal = make_challenger();
         v_chal.observe(commit.original_commitment.clone());
-        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        verify_jagged_pcs_generic::<OuterChallenger, OuterValMmcs>(
             &commit.original_commitment,
             commit.area,
             commit.log_stacking_height,
@@ -643,7 +642,6 @@ mod basefold_over_bn254_roundtrip_test {
             &proof,
             &mut v_chal,
             mmcs,
-            dft,
             rt_fri,
         )
         .expect("BaseFold jagged-PCS commit/open/verify roundtrip over the BN254 outer ring");
@@ -732,14 +730,13 @@ mod basefold_over_bn254_roundtrip_test {
             zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views).chip_infos;
         let mut v_chal = make_challenger();
         v_chal.observe(commitment);
-        let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
             &chip_infos,
             &r_row_per_chip,
             &z_row,
             &bundle,
             &mut v_chal,
             mmcs,
-            dft,
             /* skip_commit_observe = */ true,
             fri,
         );
