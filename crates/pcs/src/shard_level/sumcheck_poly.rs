@@ -573,23 +573,10 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
 // name `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
 // and call `prove_jagged_basefold_inner_generic` / `build_jagged_verify_inputs`
 // + `verify_jagged_basefold_inner_generic` statically, so the dyn-Any open/verify
-// hooks are dead. Only the PREP-COMMIT `OuterPrepCommitFn` type below remains —
-// it feeds the VK on the setup side and is a plain (no dyn-Any) crate-dep fn
-// pointer. It is now resolved STATICALLY via
-// `KoalaBearPoseidon2Outer::prep_commit_hook` (recursion-core), so the runtime
-// OnceLock registry (`OUTER_PREP_COMMIT_HOOK` slot + register/get accessors) has
-// been retired.
-
-/// Outer PREPROCESSED-trace setup commit (SP1-style: stacked BaseFold over
-/// the Poseidon2-BN254 `OuterValMmcs`, NO two-adic coset LDE).  Input =
-/// the machine's named preprocessed traces; output = bincode of the
-/// `Com<OuterSC>` commitment.  Replaces the legacy `pcs.commit` coset-LDE
-/// path in `StarkMachine::setup` for configs whose
-/// `prep_commit_via_hook()` is true — the LDE capped prep heights at
-/// `2^(TWO_ADICITY - log_blowup)` (the wrap program crossed it) and its
-/// `ProverData` has no consumers on the basefold path.
-pub type OuterPrepCommitFn =
-    fn(Vec<(String, p3_matrix::dense::RowMajorMatrix<p3_koala_bear::KoalaBear>)>) -> Vec<u8>;
+// hooks are dead. The PREP-COMMIT indirection is gone too: the setup commit is
+// now the typed `StarkGenericConfig::prep_commit` method, implemented directly
+// by the inner and wrap configs, so there is no fn-pointer type and no bincode
+// laundering of traces or commitments.
 
 #[cfg(test)]
 mod tests {

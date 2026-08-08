@@ -535,31 +535,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .max()
             .unwrap_or(0);
-        let use_prep_hook = SC::prep_commit_via_hook()
-            || (max_prep_log > SC::prep_two_adic_ceiling_log()
-                && SC::prep_commit_hook().is_some());
+        let use_prep_hook =
+            SC::prep_commit_via_hook() || max_prep_log > SC::prep_two_adic_ceiling_log();
         let (commit, data) = if use_prep_hook {
             // SP1-style prep commit (no two-adic coset LDE) — see
             // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
             // `pcs.commit` LDE caps prep heights at
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
-            let hook = SC::prep_commit_hook()
-                .expect(
-                    "prep commit hook required but none available \
-                     (SC::prep_commit_hook nor registered OuterPrepCommitFn)",
-                );
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
                 .map(|(name, _, trace)| (name.to_string(), trace.clone()))
                 .collect();
-            // Bridge the generic Val<SC> -> KoalaBear type gap via serde
-            // (the hook is only registered for KoalaBear-valued configs).
-            let named_kb: Vec<(String, RowMajorMatrix<p3_koala_bear::KoalaBear>)> =
-                bincode::deserialize(&bincode::serialize(&named).unwrap()).unwrap();
-            let commit_bytes = hook(named_kb);
-            let commit: Com<SC> = bincode::deserialize(&commit_bytes)
-                .expect("prep commit hook: commitment type mismatch");
+            let commit = SC::prep_commit(&named).expect(
+                "prep commit required but this config does not implement \
+                 StarkGenericConfig::prep_commit",
+            );
             // pk.data is unused on the basefold path — 1-row zero dummy.
             let dummy_domain = pcs.natural_domain_for_degree(1);
             let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);
@@ -701,31 +692,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             })
             .max()
             .unwrap_or(0);
-        let use_prep_hook = SC::prep_commit_via_hook()
-            || (max_prep_log > SC::prep_two_adic_ceiling_log()
-                && SC::prep_commit_hook().is_some());
+        let use_prep_hook =
+            SC::prep_commit_via_hook() || max_prep_log > SC::prep_two_adic_ceiling_log();
         let (commit, data) = if use_prep_hook {
             // SP1-style prep commit (no two-adic coset LDE) — see
             // `StarkGenericConfig::prep_commit_via_hook`.  The legacy
             // `pcs.commit` LDE caps prep heights at
             // 2^(TWO_ADICITY - log_blowup); its ProverData has no consumers
             // on the basefold path.
-            let hook = SC::prep_commit_hook()
-                .expect(
-                    "prep commit hook required but none available \
-                     (SC::prep_commit_hook nor registered OuterPrepCommitFn)",
-                );
             let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
                 .iter()
                 .map(|(name, _, trace)| (name.to_string(), trace.clone()))
                 .collect();
-            // Bridge the generic Val<SC> -> KoalaBear type gap via serde
-            // (the hook is only registered for KoalaBear-valued configs).
-            let named_kb: Vec<(String, RowMajorMatrix<p3_koala_bear::KoalaBear>)> =
-                bincode::deserialize(&bincode::serialize(&named).unwrap()).unwrap();
-            let commit_bytes = hook(named_kb);
-            let commit: Com<SC> = bincode::deserialize(&commit_bytes)
-                .expect("prep commit hook: commitment type mismatch");
+            let commit = SC::prep_commit(&named).expect(
+                "prep commit required but this config does not implement \
+                 StarkGenericConfig::prep_commit",
+            );
             // pk.data is unused on the basefold path — 1-row zero dummy.
             let dummy_domain = pcs.natural_domain_for_degree(1);
             let dummy_trace = RowMajorMatrix::new(vec![Val::<SC>::ZERO], 1);

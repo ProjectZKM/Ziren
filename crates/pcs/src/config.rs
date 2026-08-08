@@ -71,7 +71,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// Initialize a new challenger.
     fn challenger(&self) -> Self::Challenger;
     /// Whether `StarkMachine::setup` commits PREPROCESSED traces via the
-    /// registered `OuterPrepCommitFn` hook (SP1-style stacked BaseFold, no
+    /// config's `prep_commit` (the jagged BaseFold path, no
     /// two-adic coset LDE) instead of `pcs.commit`.  The legacy LDE caps
     /// prep heights at `2^(TWO_ADICITY - log_blowup)`; the BaseFold path
     /// never consumes the LDE `ProverData`.  Default false; the OuterSC
@@ -80,15 +80,15 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         false
     }
 
-    /// The BaseFold preprocessed-commit hook for this config, if any.  Commits
-    /// KoalaBear-valued preprocessed traces via stacked BaseFold (no two-adic
-    /// coset LDE) and returns the bincode of `Com<Self>`.  `StarkMachine::setup`
-    /// invokes it when `prep_commit_via_hook()` is set OR a prep trace exceeds
-    /// `prep_two_adic_ceiling_log()`.  Default None (only `pcs.commit` is used).
-    /// The inner (`KoalaBearPoseidon2`) config returns `inner_prep_commit`; the
-    /// wrap (`KoalaBearPoseidon2Outer`) config returns `outer_prep_commit`
-    /// (statically, replacing the retired runtime hook registry).
-    fn prep_commit_hook() -> Option<crate::shard_level::sumcheck_poly::OuterPrepCommitFn> {
+    /// The BaseFold preprocessed-commit for this config, if it has one.  Commits
+    /// the preprocessed traces via the jagged BaseFold path (no two-adic coset
+    /// LDE) and returns the commitment directly.  `StarkMachine::setup` invokes
+    /// it when `prep_commit_via_hook()` is set OR a prep trace exceeds
+    /// `prep_two_adic_ceiling_log()`.  Default `None` (only `pcs.commit` is
+    /// used); the inner and wrap configs override it.
+    fn prep_commit(
+        _named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
+    ) -> Option<Com<Self>> {
         None
     }
 

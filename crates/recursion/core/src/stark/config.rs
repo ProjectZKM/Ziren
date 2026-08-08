@@ -177,12 +177,13 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
         true
     }
 
-    fn prep_commit_hook() -> Option<zkm_pcs::shard_level::sumcheck_poly::OuterPrepCommitFn> {
-        // Statically resolve the OuterSC wrap-machine PREPROCESSED commit to
-        // `outer_prep_commit` (SP1-style stacked BaseFold over the Poseidon2-BN254
-        // `OuterValMmcs`, no two-adic coset LDE) — replaces the retired runtime
-        // OnceLock hook (`register_outer_prep_commit_hook`).
-        Some(outer_jagged_hooks::outer_prep_commit)
+    fn prep_commit(
+        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+    ) -> Option<zkm_pcs::Com<Self>> {
+        // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
+        // BaseFold path over the Poseidon2-BN254 `OuterValMmcs` (no two-adic
+        // coset LDE).
+        Some(outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces))
     }
 
     type Val = OuterVal;
@@ -496,15 +497,15 @@ pub mod outer_jagged_hooks {
     /// `OuterValMmcs::Commitment` (== `Com<KoalaBearPoseidon2Outer>` since
     /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>`).
     pub(crate) fn outer_prep_commit(
-        chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
-    ) -> Vec<u8> {
+        chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+    ) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         // SITE-1 trace-unification: the commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
-        let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(&chip_traces);
+        let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
             &chip_trace_views,
             mmcs,
@@ -516,8 +517,7 @@ pub mod outer_jagged_hooks {
             // a recursion prove commit → no AREA PIN (`None`), byte-identical.
             None,
         );
-        bincode::serialize(&pre.commit.original_commitment)
-            .expect("outer_prep_commit: serialize commitment")
+        pre.commit.original_commitment
     }
 }
 

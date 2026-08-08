@@ -620,9 +620,13 @@ pub mod koala_bear_poseidon2 {
             Challenger::new(self.perm.clone())
         }
 
-        fn prep_commit_hook(
-        ) -> Option<crate::shard_level::sumcheck_poly::OuterPrepCommitFn> {
-            Some(inner_prep_commit)
+        fn prep_commit(
+            named_preprocessed_traces: &[(
+                String,
+                p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+            )],
+        ) -> Option<Com<Self>> {
+            Some(inner_prep_commit(named_preprocessed_traces))
         }
 
         fn prep_two_adic_ceiling_log() -> usize {
@@ -642,18 +646,20 @@ pub mod koala_bear_poseidon2 {
     /// `JaggedMmcs::Commitment` — equal to `Com<KoalaBearPoseidon2>` since the
     /// inner `Pcs` is `TwoAdicFriPcs<_, _, InnerValMmcs, _>` and
     /// `JaggedMmcs == InnerValMmcs` (same Poseidon2-KoalaBear Merkle root).
+    /// Preprocessed-trace commit for the inner config: the jagged BaseFold
+    /// path (no two-adic coset LDE), returning `Com<KoalaBearPoseidon2>`.
     pub fn inner_prep_commit(
-        chip_traces: Vec<(
+        chip_traces: &[(
             String,
             p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
-        )>,
-    ) -> Vec<u8> {
+        )],
+    ) -> Com<KoalaBearPoseidon2> {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
         // SITE-1 trace-unification: the commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
-        let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(&chip_traces);
+        let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
             &chip_trace_views,
             mmcs,
@@ -665,8 +671,7 @@ pub mod koala_bear_poseidon2 {
             // → no AREA PIN (`None`), byte-identical.
             None,
         );
-        bincode::serialize(&pre.commit.original_commitment)
-            .expect("inner_prep_commit: serialize commitment")
+        pre.commit.original_commitment
     }
 
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
