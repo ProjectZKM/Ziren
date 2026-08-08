@@ -187,36 +187,6 @@ where
 }
 
 
-/// Convert chip traces into per-chip `Mle<JaggedVal>`s, padding each
-/// trace's row count up to the next power of two.  No dense
-/// concatenation — each chip stays in its own Mle for the stacked
-/// commit to interleave.
-///
-/// **Move-by-value variant** — `chips_to_mles_owned` takes the
-/// `Vec` by value and skips the `trace.values.clone()` when the
-/// trace is already power-of-two height (the common path for
-/// jagged-dense which is pre-padded).  Saves one full-dense copy
-/// (`4N` bytes for the dense vec) on the hot path.
-#[allow(dead_code)]
-fn chips_to_mles(
-    chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
-) -> (Vec<Arc<Mle<JaggedVal>>>, Vec<(usize, u32)>) {
-    let mut mles = Vec::with_capacity(chip_traces.len());
-    let mut dims = Vec::with_capacity(chip_traces.len());
-    for (_, trace) in chip_traces {
-        let width = trace.width.max(1);
-        let raw_height = trace.values.len() / width;
-        let padded_height = raw_height.next_power_of_two();
-        let log_h = padded_height.trailing_zeros();
-
-        let mut padded = trace.values.clone();
-        padded.resize(padded_height * width, JaggedVal::ZERO);
-
-        mles.push(Arc::new(Mle::from_row_major(RowMajorMatrix::new(padded, width))));
-        dims.push((width, log_h));
-    }
-    (mles, dims)
-}
 
 /// Public for the GPU commit-dispatch hook: the
 /// device-side commit path needs to run the same MLE-construction +

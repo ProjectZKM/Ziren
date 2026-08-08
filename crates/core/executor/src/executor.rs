@@ -3595,13 +3595,6 @@ impl<'a> Executor<'a> {
         }
     }
 
-    #[allow(dead_code)]
-    fn show_regs(&self) {
-        let regs = (0..NUM_REGISTERS)
-            .map(|i| self.state.memory.get(i as u32).unwrap().value)
-            .collect::<Vec<_>>();
-        println!("global_clk: {}, pc: {}, regs {:?}", self.state.global_clk, self.state.pc, regs);
-    }
 }
 
 /// Aligns an address to the nearest word below or equal to it.

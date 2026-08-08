@@ -15,7 +15,7 @@ use super::basefold_constraint_folder::{
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::types::{LogupGkrProof, PartialSumcheckProof};
 use crate::air::MachineAir;
-use crate::types::{AirOpenedValues, ChipOpenedValues, ShardOpenedValues};
+use crate::types::ShardOpenedValues;
 use crate::lookup::LookupKind;
 use crate::{Challenge, Chip, StarkGenericConfig, StarkVerifyingKey, Val};
 
@@ -852,46 +852,6 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
     vec![EF::ZERO; max_log_row_count + 1]
 }
 
-/// Build a [`ChipOpenedValues`] record from a [`super::types::ChipEvaluation`]
-/// emitted by the LogUp-GKR phase.  Used by [`verify_zerocheck_host`] to
-/// drive the [`BasefoldConstraintFolder`] on host.
-///
-/// The LogUp-GKR output carries the main-trace and preprocessed-trace
-/// evaluations at the sumcheck point; the remaining
-/// [`ChipOpenedValues`] fields (permutation, quotient, cumulative sums,
-/// log_degree) aren't consumed by [`BasefoldConstraintFolder`] beyond
-/// what's directly plumbed, so placeholder zeros are adequate.
-#[allow(dead_code)] // host mirrors of the retired crypto-identity check; kept for unit tests
-fn chip_opening_from_gkr_evaluation<F, EF>(
-    evaluation: &super::types::ChipEvaluation<EF>,
-    log_degree: usize,
-) -> ChipOpenedValues<F, EF>
-where
-    F: Field + PrimeCharacteristicRing,
-    EF: ExtensionField<F> + Copy,
-{
-    use crate::septic_curve::SepticCurve;
-    use crate::septic_digest::SepticDigest;
-    use crate::septic_extension::SepticExtension;
-
-    let preprocessed_local = evaluation
-        .preprocessed_trace_evaluations
-        .clone()
-        .unwrap_or_default();
-    let main_local = evaluation.main_trace_evaluations.clone();
-    ChipOpenedValues {
-        preprocessed: AirOpenedValues { local: preprocessed_local, next: vec![] },
-        main: AirOpenedValues { local: main_local, next: vec![] },
-        permutation: AirOpenedValues { local: vec![], next: vec![] },
-        quotient: vec![],
-        global_cumulative_sum: SepticDigest(SepticCurve {
-            x: SepticExtension::<F>([F::ZERO; 7]),
-            y: SepticExtension::<F>([F::ZERO; 7]),
-        }),
-        local_cumulative_sum: EF::ZERO,
-        log_degree,
-    }
-}
 
 /// Host-side zerocheck verification.
 ///
