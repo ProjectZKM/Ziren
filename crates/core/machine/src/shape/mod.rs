@@ -1063,6 +1063,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // exact index panics with "no entry found for key" for any shard size larger
         // than the artifact covers.  Select the largest key <= the request instead;
         // the `max` above already floors it at the smallest key.
+        let requested_log_shard_size = log_shard_size;
         let log_shard_size = self
             .partial_core_shapes
             .range(..=log_shard_size)
@@ -1071,6 +1072,22 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
             .unwrap_or_else(|| {
                 *self.partial_core_shapes.keys().next().expect("no core shape clusters")
             });
+        // Warn rather than clamp silently: an operator who opted into
+        // `FIX_CORE_SHAPES=true` for a 2^24 shard budget would otherwise get
+        // shapes derived for a much smaller shard with no indication, and would
+        // read the resulting split behaviour as their own configuration.
+        if log_shard_size != requested_log_shard_size {
+            tracing::warn!(
+                "maximal core shapes: requested log shard size {} is not in the \
+                 shapes artifact (available: {:?}); using {} instead. Regenerate \
+                 `maximal_shapes.json` with `find_maximal_shapes --shard-sizes {}` \
+                 to cover the requested size.",
+                requested_log_shard_size,
+                self.partial_core_shapes.keys().collect::<Vec<_>>(),
+                log_shard_size,
+                requested_log_shard_size,
+            );
+        }
         let max_preprocessed = self
             .partial_preprocessed_shapes
             .iter()
