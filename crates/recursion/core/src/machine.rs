@@ -11,14 +11,10 @@ use crate::{
     chips::{
         alu_base::{BaseAluChip, NUM_BASE_ALU_ENTRIES_PER_ROW},
         alu_ext::{ExtAluChip, NUM_EXT_ALU_ENTRIES_PER_ROW},
-        batch_fri::BatchFRIChip,
-        exp_reverse_bits::ExpReverseBitsLenChip,
-        fri_fold::FriFoldChip,
         mem::{
             constant::NUM_CONST_MEM_ENTRIES_PER_ROW, variable::NUM_VAR_MEM_ENTRIES_PER_ROW,
             MemoryConstChip, MemoryVarChip,
         },
-        poseidon2_skinny::Poseidon2SkinnyChip,
         poseidon2_wide::Poseidon2WideChip,
         public_values::{PublicValuesChip, PUB_VALUES_LOG_HEIGHT},
         select::SelectChip,
@@ -40,12 +36,8 @@ pub enum RecursionAir<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: u
     MemoryVar(MemoryVarChip<F>),
     BaseAlu(BaseAluChip),
     ExtAlu(ExtAluChip),
-    Poseidon2Skinny(Poseidon2SkinnyChip<DEGREE>),
     Poseidon2Wide(Poseidon2WideChip<DEGREE>),
     Select(SelectChip),
-    FriFold(FriFoldChip<DEGREE>),
-    BatchFRI(BatchFRIChip<DEGREE>),
-    ExpReverseBitsLen(ExpReverseBitsLenChip<DEGREE>),
     PublicValues(PublicValuesChip),
 }
 
@@ -69,48 +61,10 @@ pub struct RecursionAirEventCount {
 
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAir<F, DEGREE> {
     /// Get a machine with all chips, except the dummy chip.
-    pub fn machine_wide_with_all_chips<SC: StarkGenericConfig<Val = F>>(
-        config: SC,
-    ) -> StarkMachine<SC, Self> {
-        let chips = [
-            RecursionAir::MemoryConst(MemoryConstChip::default()),
-            RecursionAir::MemoryVar(MemoryVarChip::default()),
-            RecursionAir::BaseAlu(BaseAluChip),
-            RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
-            RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-            RecursionAir::PublicValues(PublicValuesChip),
-        ]
-        .map(Chip::new)
-        .into_iter()
-        .collect::<Vec<_>>();
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
-    }
+
 
     /// Get a machine with all chips, except the dummy chip.
-    pub fn machine_skinny_with_all_chips<SC: StarkGenericConfig<Val = F>>(
-        config: SC,
-    ) -> StarkMachine<SC, Self> {
-        let chips = [
-            RecursionAir::MemoryConst(MemoryConstChip::default()),
-            RecursionAir::MemoryVar(MemoryVarChip::default()),
-            RecursionAir::BaseAlu(BaseAluChip),
-            RecursionAir::ExtAlu(ExtAluChip),
-            RecursionAir::Poseidon2Skinny(Poseidon2SkinnyChip::<DEGREE>::default()),
-            RecursionAir::FriFold(FriFoldChip::<DEGREE>::default()),
-            RecursionAir::BatchFRI(BatchFRIChip::<DEGREE>),
-            RecursionAir::Select(SelectChip),
-            RecursionAir::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-            RecursionAir::PublicValues(PublicValuesChip),
-        ]
-        .map(Chip::new)
-        .into_iter()
-        .collect::<Vec<_>>();
-        StarkMachine::new(config, chips, PROOF_MAX_NUM_PVS)
-    }
+
 
     /// A machine with dyunamic chip sizes that includes the wide variant of the Poseidon2 chip.
     pub fn compress_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
@@ -191,17 +145,8 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             (Self::MemoryConst(MemoryConstChip::default()), 17),
             // BatchFRI / ExpReverseBitsLen are no longer in the BaseFold
             // compress/shrink *machine* (see `compress_machine`), but their
-            // keys are retained here: `heights()` still enumerates every
-            // RecursionAir variant (these chips live on in `wrap_machine` /
-            // `machine_*_with_all_chips`), and `fix_shape` does
-            // `shape.get(name).unwrap()` over all of `heights()`. The prover
-            // is machine-driven, so the extra keys are ignored for the
-            // reduced compress machine but keep any `fix_shape` consumer
-            // (e.g. the offline `find_recursion_shapes` script) panic-free.
-            (Self::BatchFRI(BatchFRIChip::<DEGREE>), 17),
             (Self::BaseAlu(BaseAluChip), 17),
             (Self::ExtAlu(ExtAluChip), 15),
-            (Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>), 17),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), 16),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
         ]
@@ -234,12 +179,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
                 heights.ext_alu_events.div_ceil(NUM_EXT_ALU_ENTRIES_PER_ROW),
             ),
             (Self::Poseidon2Wide(Poseidon2WideChip::<DEGREE>), heights.poseidon2_wide_events),
-            (Self::BatchFRI(BatchFRIChip::<DEGREE>), heights.batch_fri_events),
             (Self::Select(SelectChip), heights.select_events),
-            (
-                Self::ExpReverseBitsLen(ExpReverseBitsLenChip::<DEGREE>),
-                heights.exp_reverse_bits_len_events,
-            ),
             (Self::PublicValues(PublicValuesChip), PUB_VALUES_LOG_HEIGHT),
         ]
         .map(|(chip, log_height)| (chip.name(), log_height))
@@ -341,11 +281,9 @@ impl From<RecursionShape> for OrderedShape {
 mod basefold_air_assertions {
     use super::*;
     use crate::chips::{
-        alu_base::BaseAluChip, alu_ext::ExtAluChip, batch_fri::BatchFRIChip,
-        exp_reverse_bits::ExpReverseBitsLenChip, fri_fold::FriFoldChip,
+        alu_base::BaseAluChip, alu_ext::ExtAluChip,
         mem::{constant::MemoryChip as MemoryConstChip, variable::MemoryChip as MemoryVarChip},
-        poseidon2_skinny::Poseidon2SkinnyChip, poseidon2_wide::Poseidon2WideChip,
-        public_values::PublicValuesChip, select::SelectChip,
+        poseidon2_wide::Poseidon2WideChip, public_values::PublicValuesChip, select::SelectChip,
     };
     use p3_air::Air;
     use p3_koala_bear::KoalaBear;
@@ -374,17 +312,9 @@ mod basefold_air_assertions {
         assert_basefold_air::<ExtAluChip>();
         // 5. Poseidon2Wide (DEGREE=9, the production const)
         assert_basefold_air::<Poseidon2WideChip<9>>();
-        // 6. Poseidon2Skinny (DEGREE=9)
-        assert_basefold_air::<Poseidon2SkinnyChip<9>>();
-        // 7. Select
+        // 6. Select
         assert_basefold_air::<SelectChip>();
-        // 8. FriFold (DEGREE=9)
-        assert_basefold_air::<FriFoldChip<9>>();
-        // 9. BatchFRI (DEGREE=9)
-        assert_basefold_air::<BatchFRIChip<9>>();
-        // 10. ExpReverseBitsLen (DEGREE=9)
-        assert_basefold_air::<ExpReverseBitsLenChip<9>>();
-        // 11. PublicValues
+        // 7. PublicValues
         assert_basefold_air::<PublicValuesChip>();
 
         // Enum-level: the `#[derive(MachineAir)]` macro emits a generic
@@ -435,19 +365,10 @@ pub mod tests {
         );
         runtime.run().unwrap();
 
-        // Run with the poseidon2 wide chip.
-        let machine = A::machine_wide_with_all_chips(KoalaBearPoseidon2::default());
+        // Prove with the production chip set.
+        let machine = A::compress_machine(KoalaBearPoseidon2::default());
         let (pk, vk) = machine.setup(&program);
-        let result = run_test_machine(vec![runtime.record.clone()], machine, pk, vk);
-        if let Err(e) = result {
-            panic!("Verification failed: {e:?}");
-        }
-
-        // Run with the poseidon2 skinny chip.
-        let skinny_machine =
-            B::machine_skinny_with_all_chips(KoalaBearPoseidon2::ultra_compressed());
-        let (pk, vk) = skinny_machine.setup(&program);
-        let result = run_test_machine(vec![runtime.record], skinny_machine, pk, vk);
+        let result = run_test_machine(vec![runtime.record], machine, pk, vk);
         if let Err(e) = result {
             panic!("Verification failed: {e:?}");
         }

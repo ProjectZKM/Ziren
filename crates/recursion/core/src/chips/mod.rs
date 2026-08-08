@@ -1,10 +1,6 @@
 pub mod alu_base;
 pub mod alu_ext;
-pub mod batch_fri;
-pub mod exp_reverse_bits;
-pub mod fri_fold;
 pub mod mem;
-pub mod poseidon2_skinny;
 pub mod poseidon2_wide;
 pub mod public_values;
 pub mod select;
@@ -28,9 +24,6 @@ pub mod test_fixtures {
         ExecutionRecord {
             base_alu_events: base_alu_events(),
             ext_alu_events: ext_alu_events(),
-            batch_fri_events: batch_fri_events(),
-            exp_reverse_bits_len_events: exp_reverse_bits_events(),
-            fri_fold_events: fri_fold_events(),
             commit_pv_hash_events: public_values_events(),
             select_events: select_events(),
             poseidon2_events: poseidon2_events(),
@@ -77,62 +70,8 @@ pub mod test_fixtures {
         events
     }
 
-    fn batch_fri_events() -> Vec<BatchFRIEvent<KoalaBear>> {
-        let (_, num_test_cases) = initialize();
-        let mut events = Vec::with_capacity(num_test_cases);
-        for _ in 0..num_test_cases {
-            events.push(BatchFRIEvent {
-                ext_single: BatchFRIExtSingleIo { acc: Block::default() },
-                ext_vec: BatchFRIExtVecIo { alpha_pow: Block::default(), p_at_z: Block::default() },
-                base_vec: BatchFRIBaseVecIo { p_at_x: KoalaBear::ONE },
-            });
-        }
-        events
-    }
 
-    fn exp_reverse_bits_events() -> Vec<ExpReverseBitsEvent<KoalaBear>> {
-        let (mut rng, num_test_cases) = initialize();
-        let mut events = Vec::with_capacity(num_test_cases);
-        for _ in 0..num_test_cases {
-            let base = KoalaBear::from_u32(rng.gen());
-            let len = rng.gen_range(1..8); // Random length between 1 and 7 bits
-            let exp: Vec<KoalaBear> =
-                (0..len).map(|_| KoalaBear::from_u32(rng.gen_range(0..2))).collect();
-            let exp_num = exp
-                .iter()
-                .enumerate()
-                .fold(0u32, |acc, (i, &bit)| acc + (bit.as_canonical_u32() << i));
-            let result = base.exp_u64(exp_num as u64);
 
-            events.push(ExpReverseBitsEvent { base, exp, result });
-        }
-        events
-    }
-
-    fn fri_fold_events() -> Vec<FriFoldEvent<KoalaBear>> {
-        let (mut rng, num_test_cases) = initialize();
-        let mut events = Vec::with_capacity(num_test_cases);
-        let random_block =
-            |rng: &mut StdRng| Block::from([KoalaBear::from_u32(rng.gen()); 4]);
-        for _ in 0..num_test_cases {
-            events.push(FriFoldEvent {
-                base_single: FriFoldBaseIo { x: KoalaBear::from_u32(rng.gen()) },
-                ext_single: FriFoldExtSingleIo {
-                    z: random_block(&mut rng),
-                    alpha: random_block(&mut rng),
-                },
-                ext_vec: FriFoldExtVecIo {
-                    mat_opening: random_block(&mut rng),
-                    ps_at_z: random_block(&mut rng),
-                    alpha_pow_input: random_block(&mut rng),
-                    ro_input: random_block(&mut rng),
-                    alpha_pow_output: random_block(&mut rng),
-                    ro_output: random_block(&mut rng),
-                },
-            });
-        }
-        events
-    }
 
     fn public_values_events() -> Vec<CommitPublicValuesEvent<KoalaBear>> {
         let (mut rng, num_test_cases) = initialize();

@@ -6,7 +6,7 @@ use itertools::Itertools;
 use p3_field::{PrimeCharacteristicRing, ExtensionField, BasedVectorSpace};
 use p3_koala_bear::KoalaBear;
 use zkm_recursion_core::air::RecursionPublicValues;
-use zkm_recursion_core::{chips::poseidon2_skinny::WIDTH, D, DIGEST_SIZE, HASH_RATE};
+use zkm_recursion_core::{chips::poseidon2_wide::WIDTH, D, DIGEST_SIZE, HASH_RATE};
 use zkm_pcs::septic_curve::SepticCurve;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::septic_extension::SepticExtension;

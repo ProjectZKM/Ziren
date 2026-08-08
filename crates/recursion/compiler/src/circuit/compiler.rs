@@ -1,4 +1,4 @@
-use chips::poseidon2_skinny::WIDTH;
+use chips::poseidon2_wide::WIDTH;
 use core::fmt::Debug;
 use instruction::{
     FieldEltType, HintAddCurveInstr, HintBitsInstr, HintExt2FeltsInstr, HintInstr, PrintInstr,
@@ -1172,103 +1172,7 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore = "exercises a production-dead chip: `compress_machine` has no ExpReverseBitsLen \
-               chip, so the runtime's events have no receiver and the public-values \
-               balance fails. Unignore when the chip is either restored to the \
-               production machine or retired outright (it is one of four AIRs still \
-               using row selectors)."]
-    fn test_exp_reverse_bits() {
-        setup_logger();
 
-        let mut builder = AsmBuilder::<F, EF>::default();
-        let mut rng = rand_felt_iter(0xEC0BEEF);
-        for _ in 0..100 {
-            let power_f = rng.next().unwrap();
-            let power = power_f.as_canonical_u32();
-            let power_bits = (0..NUM_BITS).map(|i| (power >> i) & 1).collect::<Vec<_>>();
-
-            let input_felt = builder.eval(power_f);
-            let power_bits_felt = builder.num2bits_v2_f(input_felt, NUM_BITS);
-
-            let base = rng.next().unwrap();
-            let base_felt = builder.eval(base);
-            let result_felt = builder.exp_reverse_bits_v2(base_felt, power_bits_felt);
-
-            let expected = power_bits
-                .into_iter()
-                .rev()
-                .zip(std::iter::successors(Some(base), |x| Some(x.square())))
-                .map(|(bit, base_pow)| match bit {
-                    0 => F::ONE,
-                    1 => base_pow,
-                    _ => panic!("not a bit: {bit}"),
-                })
-                .product::<F>();
-            let expected_felt: Felt<_> = builder.eval(expected);
-            builder.assert_felt_eq(result_felt, expected_felt);
-        }
-        test_operations(builder.into_operations());
-    }
-
-    #[test]
-    #[ignore = "exercises a production-dead chip: `compress_machine` has no FriFold \
-               chip, so the runtime's events have no receiver and the public-values \
-               balance fails. Unignore when the chip is either restored to the \
-               production machine or retired outright (it is one of four AIRs still \
-               using row selectors)."]
-    fn test_fri_fold() {
-        setup_logger();
-
-        let mut builder = AsmBuilder::<F, EF>::default();
-
-        let mut felt_iter = rand_felt_iter(0xFEB29);
-        let mut random_felt = move || -> F { felt_iter.next().unwrap() };
-        let mut ext_iter = rand_felt4_iter(0x0451);
-        let mut random_ext = move || EF::from_basis_coefficients_slice(&ext_iter.next().unwrap()).unwrap();
-
-        for i in 2..17 {
-            // Generate random values for the inputs.
-            let x = random_felt();
-            let z = random_ext();
-            let alpha = random_ext();
-
-            let alpha_pow_input = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-            let ro_input = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-
-            let ps_at_z = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-            let mat_opening = (0..i).map(|_| random_ext()).collect::<Vec<_>>();
-
-            // Compute the outputs from the inputs.
-            let alpha_pow_output = (0..i).map(|i| alpha_pow_input[i] * alpha).collect::<Vec<EF>>();
-            let ro_output = (0..i)
-                .map(|i| {
-                    ro_input[i] + alpha_pow_input[i] * (-ps_at_z[i] + mat_opening[i]) / (-z + x)
-                })
-                .collect::<Vec<EF>>();
-
-            // Compute inputs and outputs through the builder.
-            let input_vars = CircuitV2FriFoldInput {
-                z: builder.eval(z.cons()),
-                alpha: builder.eval(alpha.cons()),
-                x: builder.eval(x),
-                mat_opening: mat_opening.iter().map(|e| builder.eval(e.cons())).collect(),
-                ps_at_z: ps_at_z.iter().map(|e| builder.eval(e.cons())).collect(),
-                alpha_pow_input: alpha_pow_input.iter().map(|e| builder.eval(e.cons())).collect(),
-                ro_input: ro_input.iter().map(|e| builder.eval(e.cons())).collect(),
-            };
-
-            let output_vars = builder.fri_fold_v2(input_vars);
-            for (lhs, rhs) in std::iter::zip(output_vars.alpha_pow_output, alpha_pow_output) {
-                builder.assert_ext_eq(lhs, rhs.cons());
-            }
-            for (lhs, rhs) in std::iter::zip(output_vars.ro_output, ro_output) {
-                builder.assert_ext_eq(lhs, rhs.cons());
-            }
-        }
-
-        test_operations(builder.into_operations());
-    }
 
     #[test]
     fn test_hint_bit_decomposition() {

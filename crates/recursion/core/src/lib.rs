@@ -23,7 +23,7 @@ pub use stark::hash_vkey_with_part_vk;
 // Re-export the stark stuff from `zkm_recursion_core` for now, until we will migrate it here.
 // pub use zkm_recursion_core::stark;
 
-use crate::chips::poseidon2_skinny::WIDTH;
+use crate::chips::poseidon2_wide::WIDTH;
 
 #[derive(Error, Debug, Serialize, Deserialize)]
 pub struct RecursionChipError;
