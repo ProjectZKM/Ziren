@@ -15,7 +15,7 @@ mod tests {
 
     use zkm_core_machine::utils::run_test_machine;
     use zkm_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
-    use zkm_pcs::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use crate::{
         circuit::{AsmBuilder, AsmCompiler, CircuitV2Builder},
@@ -24,7 +24,7 @@ mod tests {
 
     const DEGREE: usize = 3;
 
-    type SC = KoalaBearPoseidon2Inner;
+    type SC = KoalaBearPoseidon2;
     type F = <SC as StarkGenericConfig>::Val;
     type EF = <SC as StarkGenericConfig>::Challenge;
     type A = RecursionAir<F, DEGREE>;

@@ -1053,7 +1053,7 @@ mod tests {
     use zkm_core_machine::utils::{run_test_machine, setup_logger};
     use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
     use zkm_pcs::{
-        inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash, KoalaBearPoseidon2Inner,
+        inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash,
         StarkGenericConfig,
     };
 
@@ -1068,7 +1068,7 @@ mod tests {
         test_operations_with_runner(operations, |program| {
             let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
                 program,
-                KoalaBearPoseidon2Inner::new().perm,
+                KoalaBearPoseidon2::new().perm,
             );
             runtime.run().unwrap();
             runtime.record
@@ -1318,7 +1318,7 @@ mod tests {
         test_operations_with_runner(builder.into_operations(), |program| {
             let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
                 program,
-                KoalaBearPoseidon2Inner::new().perm,
+                KoalaBearPoseidon2::new().perm,
             );
             runtime.debug_stdout = Box::new(&mut buf);
             runtime.run().unwrap();

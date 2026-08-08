@@ -170,11 +170,11 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
 
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
-    ) -> Option<zkm_pcs::Com<Self>> {
+    ) -> zkm_pcs::Com<Self> {
         // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
         // BaseFold path over the Poseidon2-BN254 `OuterValMmcs` (no two-adic
         // coset LDE).
-        Some(outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces))
+        outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces)
     }
 
     type Val = OuterVal;

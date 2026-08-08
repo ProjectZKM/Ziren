@@ -508,32 +508,27 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
-        let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
+        // Only the serialisable domain description is kept -- it goes into the
+        // verifying key's `chip_information`.  The `(domain, trace.to_owned())`
+        // half of this map used to feed `pcs.commit`; that branch is gone, and
+        // with it a full clone of every preprocessed trace per setup.
+        let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
                 let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
-                ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
+                (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })
-            .unzip();
+            .collect();
 
-        // Commit to the batch of traces.  A config that defines `prep_commit`
-        // always uses it -- there is no height threshold and no per-config
-        // opt-in, matching SP1, where setup and the shard commit go through the
-        // one commit path.  Configs without one (the test-only inner/D5
-        // configs) keep the two-adic `pcs.commit`.
+        // Commit to the preprocessed traces.  One path, always -- no height
+        // threshold, no opt-in flag, no fallback -- matching SP1, where setup
+        // and the shard commit go through the same commit.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = if let Some(commit) = SC::prep_commit(&named) {
-            let _ = domains_and_traces;
-            commit
-        } else {
-            tracing::debug_span!("commit to preprocessed traces")
-                .in_scope(|| pcs.commit(domains_and_traces))
-                .0
-        };
+        let commit = SC::prep_commit(&named);
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -636,32 +631,27 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
         let pcs = self.config.pcs();
-        let (chip_information, domains_and_traces): (Vec<_>, Vec<_>) = named_preprocessed_traces
+        // Only the serialisable domain description is kept -- it goes into the
+        // verifying key's `chip_information`.  The `(domain, trace.to_owned())`
+        // half of this map used to feed `pcs.commit`; that branch is gone, and
+        // with it a full clone of every preprocessed trace per setup.
+        let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
                 let domain = pcs.natural_domain_for_degree(trace.height());
                 let ser_domain = SerializableDomain::new(domain.first_point(), domain.size().trailing_zeros() as usize);
-                ((name.to_owned(), ser_domain, (trace.width(), trace.height())), (domain, trace.to_owned()))
+                (name.to_owned(), ser_domain, (trace.width(), trace.height()))
             })
-            .unzip();
+            .collect();
 
-        // Commit to the batch of traces.  A config that defines `prep_commit`
-        // always uses it -- there is no height threshold and no per-config
-        // opt-in, matching SP1, where setup and the shard commit go through the
-        // one commit path.  Configs without one (the test-only inner/D5
-        // configs) keep the two-adic `pcs.commit`.
+        // Commit to the preprocessed traces.  One path, always -- no height
+        // threshold, no opt-in flag, no fallback -- matching SP1, where setup
+        // and the shard commit go through the same commit.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = if let Some(commit) = SC::prep_commit(&named) {
-            let _ = domains_and_traces;
-            commit
-        } else {
-            tracing::debug_span!("commit to preprocessed traces")
-                .in_scope(|| pcs.commit(domains_and_traces))
-                .0
-        };
+        let commit = SC::prep_commit(&named);
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces

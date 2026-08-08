@@ -167,7 +167,7 @@ mod tests {
 
     use crate::stark::KoalaBearPoseidon2Outer;
     use zkm_core_machine::utils::run_test_machine;
-    use zkm_pcs::{KoalaBearPoseidon2Inner, StarkGenericConfig};
+    use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
 
     use super::*;
 
@@ -182,7 +182,7 @@ mod tests {
         let program = Arc::new(program);
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
-            KoalaBearPoseidon2Inner::new().perm,
+            KoalaBearPoseidon2::new().perm,
         );
         runtime.run().unwrap();
 

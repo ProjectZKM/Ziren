@@ -83,10 +83,8 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// wrap `KoalaBearPoseidon2Outer`) both override it, so the production
     /// setup path never takes the `None` branch.
     fn prep_commit(
-        _named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
-    ) -> Option<Com<Self>> {
-        None
-    }
+        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
+    ) -> Com<Self>;
 
 }
 
