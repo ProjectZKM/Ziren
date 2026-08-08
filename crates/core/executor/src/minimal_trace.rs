@@ -25,8 +25,7 @@
 //! and `TraceChunk` (`risc.rs:316`) — adapted to MIPS register width and the
 //! Ziren executor's state layout.
 //!
-//! The JIT-side emit path is DEFAULT-ON (`ZIREN_JIT_MINIMAL_TRACE`, opt out
-//! with =0): the D.4 checkpoint pass runs on the JIT
+//! The checkpoint pass runs on the JIT
 //! (`run_fast_capture_whole_program_chunk`) and the consumer reconstructs
 //! full `ExecutionRecord`s byte-identically via `trace_checkpoint`.
 //!
@@ -69,7 +68,7 @@ pub struct MemValue {
     /// shard of the last prior write). Load-bearing: the memory
     /// argument's `prev_shard` for the first cross-shard touch is
     /// reconstructed from this. `0` on the JIT-recorder path (the JIT
-    /// does not track per-address shard bookkeeping — see D.4 gap).
+    /// does not track per-address shard bookkeeping — see the shard-bookkeeping gap below).
     pub shard: u32,
     /// full memory record: the `timestamp` field of the
     /// pre-access `MemoryRecord`. Feeds `prev_timestamp`. `0` on the
@@ -101,7 +100,7 @@ pub struct TraceChunk {
     /// `timestamp` bookkeeping the memory argument needs so a Stage-2
     /// register access reconstructs `prev_shard` / `prev_timestamp`
     /// byte-exactly. Empty on the JIT-recorder path (JIT doesn't track
-    /// per-register shard/timestamp — the D.4 gap); Stage 2 then falls
+    /// per-register shard/timestamp — the shard-bookkeeping gap); Stage 2 then falls
     /// back to `start_registers` with shard/timestamp 0.
     pub start_register_records: Vec<(u32, u32, u32)>,
     /// PC at which Stage 2 should begin re-executing this shard.
@@ -227,19 +226,6 @@ impl MinimalTrace {
     }
 }
 
-/// Environment variable gating the JIT MinimalTrace checkpoint pass.
-/// DEFAULT ON (opt out with `ZIREN_JIT_MINIMAL_TRACE=0`): the JIT runner
-/// emits a whole-program `MinimalTrace` chunk that the consumer replays
-/// byte-identically. Mutually exclusive with the parallel trace consumer
-/// (`ZIREN_USE_MINIMAL_TRACE=1`) — they don't stack (#143).
-pub const ENV_MINIMAL_TRACE: &str = "ZIREN_JIT_MINIMAL_TRACE";
-
-/// Is the minimal-trace emit path enabled for this process?
-#[must_use]
-pub fn minimal_trace_enabled() -> bool {
-    std::env::var(ENV_MINIMAL_TRACE).map(|v| v != "0").unwrap_or(true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +280,5 @@ mod tests {
     fn env_flag_default_off() {
         // The flag may be set in some CI / dev environments. Just verify
         // the helper does not panic regardless of state.
-        let _ = minimal_trace_enabled();
     }
 }

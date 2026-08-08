@@ -110,11 +110,6 @@ where
     #[cfg(feature = "debug")]
     let (all_records_tx, all_records_rx) = std::sync::mpsc::channel::<Vec<ExecutionRecord>>();
 
-    // D.4 consumer: share the program's input stream (read-only) with
-    // the trace workers so `trace_chunk`'s per-shard sub-executors can
-    // service hint-read syscalls at the exact cursor each chunk began at.
-    let shared_input_stream = std::sync::Arc::new(stdin.buffer.clone());
-
     // Record the start of the process.
     let proving_start = Instant::now();
     let span = tracing::Span::current().clone();
@@ -127,13 +122,12 @@ where
         // `ExecutionState` in RAM and send it directly through the channel.
         // The previous implementation wrote each checkpoint to a `tempfile`,
         // sent the `File` handle downstream, and the trace-gen worker
-        // `bincode::deserialize_from`'d it back.  That roundtrip costs ~5 s
-        // of wall time on the production reth wrap (per
-        // `docs/perf_reth_gpu.md`) and burns inode + page-cache pressure
-        // under `TMPDIR=/dev/shm`.  Mirrors the equivalent implementation
-        // in `ziren-gpu/prover/src/core_multi_gpu.rs:136-159` for
-        // the multi-GPU code path; this brings the 1-GPU-fallback /
-        // CPU-prover baseline into line.
+        // `bincode::deserialize_from`'d it back.  That roundtrip cost ~5 s of
+        // wall time on the production reth wrap (per `docs/perf_reth_gpu.md`)
+        // and burned inode + page-cache pressure under `TMPDIR=/dev/shm`.
+        // Mirrors `core_multi_gpu.rs`'s multi-GPU checkpoint channel in
+        // ziren-gpu (search `checkpoints_tx`); this brings the 1-GPU-fallback
+        // / CPU-prover baseline into line.
         //
         // RAM cost: an `ExecutionState` is dominated by the memory image
         // diff since the last checkpoint (typically a few MB per shard),
@@ -141,48 +135,19 @@ where
         // every cache hit/miss-equivalent (here: every send/recv) at
         // `trace` level so behaviour can be verified at runtime.
         let checkpoint_generator_span = tracing::Span::current().clone();
-        let (checkpoints_tx, checkpoints_rx) = sync_channel::<(
-            usize,
-            ExecutionState,
-            bool,
-            u64,
-            // producer wiring: optional sidecar of
-            // sealed TraceChunks accumulated since the last batch.
-            // Consumer may use these via `trace_chunk` to avoid
-            // re-executing memory state from scratch.
-            Option<std::sync::Arc<[zkm_core_executor::minimal_trace::TraceChunk]>>,
-        )>(opts.checkpoints_channel_capacity);
-        // D.4 parallel trace-replay consumer — OPT-IN (default OFF). When set,
-        // the producer collects MinimalTrace chunks during Checkpoint-mode
-        // execution and the consumer drives the parallel `trace_chunk` fan-out
-        // (the chunks' mem_reads oracle) instead of the sequential
-        // `trace_checkpoint` re-execution — SP1's parallel replay, ~1.84-2.0x.
-        // Byte-identical to the sequential path (validated byte-exact across
-        // the program surface incl. multi-shard/batch + the 2^24 #141 split).
-        // The JIT checkpoint (below) is the DEFAULT accelerator; the two are
-        // mutually exclusive (the JIT's value-only log can't feed this
-        // consumer — see #143), so enable this with ZIREN_USE_MINIMAL_TRACE=1.
-        let use_minimal_trace =
-            std::env::var("ZIREN_USE_MINIMAL_TRACE").map(|v| v == "1").unwrap_or(false);
-        if use_minimal_trace {
-            runtime.minimal_trace_collector =
-                Some(zkm_core_executor::minimal_trace::MinimalTrace::default());
-        }
-        // D.4 JIT checkpoint pass — DEFAULT ON (minimal_trace_enabled). Drive
-        // the "checkpoint pass" on the JIT (fast, single whole-program run)
-        // instead of the interpreter `execute_state` loop (the first of the
-        // two slow interpreter passes). The consumer reconstructs records
+        let (checkpoints_tx, checkpoints_rx) =
+            sync_channel::<(usize, ExecutionState, bool, u64)>(opts.checkpoints_channel_capacity);
+        // The checkpoint pass runs on the JIT: one fast whole-program run
+        // that populates `public_values_stream` + the final cycle count and
+        // captures a whole-program MinimalTrace chunk, replacing the slow
+        // interpreter `execute_state` loop.  The consumer reconstructs records
         // byte-identically via the from-start `trace_checkpoint`, so the core
-        // proof is unchanged (b26f9b47). Disabled by ZIREN_JIT_MINIMAL_TRACE=0
-        // or when the parallel consumer is opted in (they don't stack).
-        // See `minimal_trace::ENV_MINIMAL_TRACE`.
-        let d4_jit_producer =
-            zkm_core_executor::minimal_trace::minimal_trace_enabled() && !use_minimal_trace;
+        // proof is unchanged (b26f9b47).
         let checkpoint_generator_handle: ScopedJoinHandle<Result<_, ZKMCoreProverError>> =
             s.spawn(move || {
                 let _span = checkpoint_generator_span.enter();
                 tracing::debug_span!("checkpoint generator").in_scope(|| {
-                    // D.4 producer: run the whole program ONCE on the JIT
+                    // Producer: run the whole program ONCE on the JIT
                     // (fast) to (a) populate `public_values_stream` + the
                     // final cycle count and (b) capture a whole-program
                     // MinimalTrace chunk, then hand the consumer a single
@@ -191,7 +156,7 @@ where
                     // boundaries + records byte-identically. This replaces
                     // the interpreter `execute_state` loop (the slow first
                     // pass) with a single JIT pass.
-                    if d4_jit_producer {
+                    {
                         // Pristine initial state: carries the full
                         // `input_stream` / `proof_stream` (from write_vecs /
                         // write_proof), `global_clk == 0`, empty
@@ -212,14 +177,13 @@ where
                             chunk.mem_reads.len(),
                             global_clk,
                         );
-                        checkpoints_tx.send((0, initial_state, true, global_clk, None)).unwrap();
+                        checkpoints_tx.send((0, initial_state, true, global_clk)).unwrap();
                         return Ok(runtime.state.public_values_stream);
                     }
                     let mut index = 0;
                     // track how many chunks we've already
                     // sent so each batch's sidecar only carries the NEW
                     // chunks added since the last `execute_state`.
-                    let mut last_pulled_chunks = 0usize;
                     loop {
                         // Enter the span.
                         let span = tracing::debug_span!("batch");
@@ -233,45 +197,6 @@ where
                         // Send the checkpoint in-memory (no tempfile + bincode roundtrip).
                         let global_clk = runtime.state.global_clk;
 
-                        // D.4 consumer: at program halt, seal the terminal
-                        // chunk — finalize its clk_end, drop the degenerate
-                        // trailing empty chunk, and stamp the FULL final
-                        // memory image so the consumer can emit the global
-                        // memory init/finalize argument byte-exactly.
-                        if done && use_minimal_trace {
-                            runtime.seal_minimal_trace_final_memory();
-                        }
-
-                        // pull NEW chunks accumulated by the collector
-                        // during this batch. Chunks seal strictly in order
-                        // (each seals when the next opens), so the sealed
-                        // chunks form a prefix. Advance the cursor only
-                        // over that sealed prefix — NEVER past the still-
-                        // open trailing chunk. (A previous version set the
-                        // cursor to `total`, skipping the open chunk once
-                        // it sealed in a later batch — losing one shard per
-                        // batch boundary and diverging on multi-batch runs.)
-                        let chunks_sidecar = if use_minimal_trace {
-                            if let Some(trace) = runtime.minimal_trace_collector.as_ref() {
-                                let sealed_prefix = trace
-                                    .chunks
-                                    .iter()
-                                    .take_while(|c| c.clk_end != u64::MAX)
-                                    .count();
-                                if sealed_prefix > last_pulled_chunks {
-                                    let new_chunks: Vec<_> =
-                                        trace.chunks[last_pulled_chunks..sealed_prefix].to_vec();
-                                    last_pulled_chunks = sealed_prefix;
-                                    Some(std::sync::Arc::from(new_chunks))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        };
 
                         tracing::trace!(
                             target = "checkpoint_pin",
@@ -279,17 +204,9 @@ where
                             index = index,
                             done = done,
                             global_clk = global_clk,
-                            chunks = chunks_sidecar
-                                .as_ref()
-                                .map(
-                                    |c: &std::sync::Arc<
-                                        [zkm_core_executor::minimal_trace::TraceChunk],
-                                    >| c.len()
-                                )
-                                .unwrap_or(0),
                         );
                         checkpoints_tx
-                            .send((index, checkpoint, done, global_clk, chunks_sidecar))
+                            .send((index, checkpoint, done, global_clk))
                             .unwrap();
 
                         // If we've reached the final checkpoint, break out of the loop.
@@ -331,7 +248,6 @@ where
             let state = Arc::clone(&state);
             let deferred = Arc::clone(&deferred);
             let program = program.clone();
-            let shared_input_stream = Arc::clone(&shared_input_stream);
 
             let span = tracing::Span::current().clone();
 
@@ -344,7 +260,7 @@ where
                     let _: () = loop {
                         // Receive the latest checkpoint.
                         let received = { checkpoints_rx.lock().unwrap().recv() };
-                        if let Ok((index, execution_state, done, num_cycles, chunks_sidecar))
+                        if let Ok((index, execution_state, done, num_cycles))
                             = received
                         {
                             // In-memory checkpoint — no
@@ -356,15 +272,7 @@ where
                                 done = done,
                                 num_cycles = num_cycles,
                             );
-                            // if env-gated and the
-                            // producer supplied chunks, use the oracle
-                            // path (`trace_chunk`) instead of the
-                            // re-execute-from-checkpoint path
-                            // (`trace_checkpoint`). Falls back to
-                            // checkpoint if no chunks were available
-                            // (e.g. zero-cycle batches, or first batch
-                            // before any shard boundary).
-                            // D.4 JIT producer: the checkpoint below is a
+                            // JIT producer: the checkpoint below is a
                             // single FROM-START, whole-program state, so ONE
                             // `trace_checkpoint` cannot cover the program —
                             // `Executor::execute` stops after
@@ -496,26 +404,6 @@ where
                                         }
                                     }
                                 }
-                                // Diagnostic shape dump — see the `[B]` site below for the
-                                // FIX_CORE_SHAPES caveat: without it `record.shape` is `None`
-                                // and every line reads `shape: []`.
-                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() && fixed_shape {
-                                    use std::io::Write;
-                                    let mut f = std::fs::OpenOptions::new()
-                                        .create(true).append(true)
-                                        .open("/tmp/shard_shapes.log")
-                                        .expect("open shape dump");
-                                    for record in records_clone.iter() {
-                                        let mut shape_entries: Vec<(String, usize)> = record
-                                            .shape
-                                            .as_ref()
-                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
-                                            .unwrap_or_default();
-                                        shape_entries.sort();
-                                        writeln!(f, "[A] shard {} shape: {:?}", record.public_values.shard, shape_entries).unwrap();
-                                    }
-                                    eprintln!("[DUMP_SHARD_SHAPES][A] wrote {} shapes", records_clone.len());
-                                }
                                 fixed_shape.then_some(records_clone)
                             } else {
                                 None
@@ -585,41 +473,6 @@ where
                                         crate::shape::canonicalize_shape_to_cluster(record);
                                     }
                                 }
-                                // Diagnostic: dump per-shard shape to /tmp for diff'ing
-                                // across runs to find non-determinism in shape selection.
-                                //
-                                // ONLY MEANINGFUL WITH `FIX_CORE_SHAPES=true`.  `record.shape`
-                                // is populated exclusively by `shape_config.fix_shape` above,
-                                // and `shape_config` is `prover.core_shape_config`, which is
-                                // `None` unless `FIX_CORE_SHAPES=true` (see
-                                // `zkm_prover::ZKMProver::uninitialized`).  Under the
-                                // production default (FIX-off) every line therefore reads
-                                // `shape: []` and only the LINE COUNT (= shard count) carries
-                                // information.
-                                if std::env::var("DUMP_SHARD_SHAPES").is_ok() {
-                                    use std::io::Write;
-                                    let path = "/tmp/shard_shapes.log";
-                                    let mut f = std::fs::OpenOptions::new()
-                                        .create(true).append(true)
-                                        .open(path)
-                                        .expect("open shape dump file");
-                                    for record in records.iter() {
-                                        let mut shape_entries: Vec<(String, usize)> = record
-                                            .shape
-                                            .as_ref()
-                                            .map(|s| s.iter().map(|(k, v)| (format!("{k:?}"), *v)).collect())
-                                            .unwrap_or_default();
-                                        shape_entries.sort();
-                                        writeln!(
-                                            f,
-                                            "shard {} shape: {:?}",
-                                            record.public_values.shard,
-                                            shape_entries
-                                        ).expect("write shape line");
-                                    }
-                                    f.flush().expect("flush");
-                                    eprintln!("[DUMP_SHARD_SHAPES] wrote {} shard shapes", records.len());
-                                }
                                 shape_fixed_records = Some(records);
                             }
 
@@ -670,7 +523,7 @@ where
                             Ok(())
                             };
 
-                            if d4_jit_producer {
+                            if true {
                                 // Whole-program from-start checkpoint: loop
                                 // `execute_record` on ONE carried executor
                                 // until it reports `done`, mirroring the
@@ -687,68 +540,12 @@ where
                                 let (records, report) =
                                 tracing::debug_span!("trace checkpoint")
                                     .in_scope(|| {
-                                        match chunks_sidecar.as_ref() {
-                                            Some(chunks) if !chunks.is_empty() => {
-                                                // D.4 consumer: drive ALL the batch's chunks
-                                                // through ONE parallel `TracingVM` fan-out
-                                                // (rayon across shards) rather than a serial
-                                                // per-chunk `trace_chunk`. For a single-batch
-                                                // multi-shard workload (the common case) the
-                                                // trace pass now parallelizes across the
-                                                // batch's shards — byte-identical records, but
-                                                // ~2x faster on the trace pass than the
-                                                // sequential `trace_checkpoint`.
-                                                let batch_trace =
-                                                    zkm_core_executor::minimal_trace::MinimalTrace {
-                                                        chunks: chunks.to_vec(),
-                                                        public_values: Vec::new(),
-                                                        total_cycles: chunks
-                                                            .last()
-                                                            .map(|c| c.clk_end)
-                                                            .unwrap_or(0),
-                                                    };
-                                                let mut merged_records =
-                                                    zkm_core_executor::tracing_vm::drive_tracing_vm_parallel_with_streams(
-                                                        Arc::new(program.clone()),
-                                                        opts,
-                                                        &batch_trace,
-                                                        &shared_input_stream,
-                                                        &[],
-                                                    )
-                                                    .expect("drive_tracing_vm_parallel");
-                                                // D.4 consumer: `committed_value_digest` /
-                                                // `deferred_proofs_digest` are whole-run
-                                                // accumulators the COMMIT / deferred syscalls
-                                                // write into the shard they run in (typically
-                                                // the terminal shard). `trace_checkpoint`
-                                                // broadcasts the batch's final-record values
-                                                // onto EVERY record in the batch
-                                                // (executor.rs `execute` finalization loop);
-                                                // the per-chunk sub-executors run in isolation
-                                                // so only the commit-bearing chunk captures
-                                                // them. Replicate the broadcast here so
-                                                // non-terminal shards carry the same digest
-                                                // byte-for-byte. (Guests commit once at halt,
-                                                // so the last record holds the full digest.)
-                                                if let Some(last) = merged_records.last() {
-                                                    let cvd =
-                                                        last.public_values.committed_value_digest;
-                                                    let dpd =
-                                                        last.public_values.deferred_proofs_digest;
-                                                    for r in merged_records.iter_mut() {
-                                                        r.public_values.committed_value_digest = cvd;
-                                                        r.public_values.deferred_proofs_digest = dpd;
-                                                    }
-                                                }
-                                                (merged_records, ExecutionReport::default())
-                                            }
-                                            _ => trace_checkpoint::<SC>(
-                                                program.clone(),
-                                                execution_state,
-                                                opts,
-                                                shape_config,
-                                            ),
-                                        }
+                                        trace_checkpoint::<SC>(
+                                            program.clone(),
+                                            execution_state,
+                                            opts,
+                                            shape_config,
+                                        )
                                     });
                                 process_batch(records, report, done, num_cycles)?;
                             }
@@ -1145,7 +942,7 @@ where
 /// `trace_checkpoint` calls `Executor::execute_record` exactly ONCE, and
 /// `Executor::execute` returns as soon as it has closed `shard_batch_size`
 /// shards.  Over the multi-checkpoint producer that is correct — the producer
-/// sends one checkpoint per batch — but the D.4 JIT producer sends a SINGLE
+/// sends one checkpoint per batch — but the JIT producer sends a SINGLE
 /// from-start, whole-program checkpoint, so one call covers only the first
 /// batch and every later shard is silently dropped.  The truncated proof then
 /// fails verification with
@@ -1226,55 +1023,6 @@ where
     (records, runtime.report)
 }
 
-/// drop-in replacement for `trace_checkpoint` that
-/// consumes a [`zkm_core_executor::minimal_trace::TraceChunk`] instead
-/// of a full [`ExecutionState`]. The chunk's `mem_reads` oracle
-/// pre-populates the worker's memory; `start_registers` seeds the
-/// register file; `clk_end` bounds the worker.
-///
-/// Signature mirrors `trace_checkpoint` so call sites can swap in via
-/// a single conditional once the producer side of the pipeline emits
-/// chunks instead of `ExecutionState` snapshots.
-///
-/// Byte-equivalence with `trace_checkpoint` is validated by
-/// `crates/core/executor/examples/byte_equiv_probe.rs` — single-shard
-/// PASS on fibonacci/u256/biguint/ed25519; multi-shard PASS on ed25519
-/// with `SHARD_SIZE=1M` (4 shards, ~188K oracle entries/shard).
-pub fn trace_chunk<SC: StarkGenericConfig>(
-    program: Program,
-    chunk: &zkm_core_executor::minimal_trace::TraceChunk,
-    opts: ZKMCoreOpts,
-    shape_config: Option<&CoreShapeConfig<SC::Val>>,
-    input_stream: &[Vec<u8>],
-) -> (Vec<ExecutionRecord>, ExecutionReport)
-where
-    <SC as StarkGenericConfig>::Val: PrimeField32,
-{
-    use std::sync::Arc;
-    use zkm_core_executor::tracing_vm::drive_tracing_vm_parallel_with_streams;
-
-    // Single-chunk MinimalTrace; the driver returns 1 record.
-    let trace = zkm_core_executor::minimal_trace::MinimalTrace {
-        chunks: vec![chunk.clone()],
-        public_values: Vec::new(),
-        total_cycles: chunk.clk_end,
-    };
-    // Thread the shared input stream so hint-read syscalls in mid-program
-    // shards service at the chunk's captured cursor. proof_stream is not
-    // threaded here (core proofs of input-only guests carry none); a
-    // proof-verifying guest would need it added.
-    let records =
-        drive_tracing_vm_parallel_with_streams(Arc::new(program), opts, &trace, input_stream, &[])
-            .expect("drive_tracing_vm_parallel");
-    // `drive_tracing_vm_parallel` doesn't aggregate a Report; for D.4
-    // wiring the caller (consumer thread in prove.rs) reads from the
-    // record stream directly. Until the consumer migrates, this
-    // returns ExecutionReport::default() — callers that rely on the
-    // report should keep using trace_checkpoint until D.4 producer
-    // migration.
-    let _ = shape_config;
-    (records, ExecutionReport::default())
-}
 
 #[cfg(debug_assertions)]
 #[cfg(not(doctest))]

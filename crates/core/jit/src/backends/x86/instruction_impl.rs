@@ -477,7 +477,7 @@ impl MemoryInstructions for TranspilerBackend {
         self.may_early_exit = true;
         // see lw() for the guest-address stash
         // contract. When recorder unset, codegen is byte-identical to
-        // pre-D.5 (no extra mov, no call).
+        // the no-recorder path (no extra mov, no call).
         if self.mem_read_recorder.is_some() {
             self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
@@ -552,7 +552,7 @@ impl MemoryInstructions for TranspilerBackend {
         // program sees), not host pointers. TEMP_B is callee-saved
         // (rbp) so it survives the post-load extern call without
         // explicit save/restore. When no recorder is set, codegen is
-        // byte-identical to pre-D.5.
+        // byte-identical to the no-recorder path.
         if self.mem_read_recorder.is_some() {
             self.emit_register_load(rs1, TEMP_B);
             dynasm!(self.assembler ; .arch x64
@@ -584,12 +584,10 @@ impl MemoryInstructions for TranspilerBackend {
         // pop rax, pop mem, pop aligned_vaddr) — disproportionate cost
         // for a rare instruction.
         //
-        // This gap is in the JIT-CAPTURE oracle path ONLY — i.e. the D.4
-        // JIT producer (ZIREN_JIT_MINIMAL_TRACE), the sole caller that runs
-        // this backend recorder. It does NOT affect the default
-        // ZIREN_USE_MINIMAL_TRACE consumer: that path captures the oracle in
-        // the INTERPRETER's word-access layer (mr_cpu -> mr), which records
-        // EVERY load uniformly — LWL/LWR included. Validated byte-exact on
+        // This gap is in the JIT-CAPTURE oracle path ONLY — the JIT producer
+        // is the sole caller that runs this backend recorder.  The
+        // interpreter's word-access layer (mr_cpu -> mr) records EVERY load
+        // uniformly, LWL/LWR included, and was validated byte-exact on
         // ssz-withdrawals (66,668 cross-shard LWL/LWR) == default core sha.
         // So a JIT-capture caller must still restrict to programs without
         // unaligned loads until this recorder lowers LWL/LWR/SWL/SWR.

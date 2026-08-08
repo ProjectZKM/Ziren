@@ -295,7 +295,7 @@ pub struct Executor<'a> {
     /// previous chunk's `mem_reads` field (Arc<[MemValue]>).
     pub recording_chunk_mem_reads: Vec<crate::minimal_trace::MemValue>,
 
-    /// D.4 producer: when set, the JIT fast-path
+    /// Producer: when set, the JIT fast-path
     /// (`try_run_fast_jit`) captures a whole-program
     /// [`crate::minimal_trace::TraceChunk`] via
     /// `jit_runner::run_jit_capture_trace_chunk` instead of the plain
@@ -303,7 +303,7 @@ pub struct Executor<'a> {
     /// Default false — zero effect on the production JIT path.
     pub d4_capture_chunk: bool,
 
-    /// D.4 producer: the whole-program chunk captured
+    /// Producer: the whole-program chunk captured
     /// by the last `run_fast` under `d4_capture_chunk`. `None` unless a
     /// capture just ran (or the program fell back to the interpreter).
     pub d4_captured_chunk: Option<crate::minimal_trace::TraceChunk>,
@@ -2683,7 +2683,7 @@ impl<'a> Executor<'a> {
         self.records.push(removed_record);
     }
 
-    /// D.4 consumer support: seal the collected `MinimalTrace`
+    /// Consumer support: seal the collected `MinimalTrace`
     /// at program halt — finalize the last chunk's `clk_end`, drop
     /// degenerate empty chunks, and stamp the FULL final memory image
     /// (page_table + registers, with records) plus the uninitialized
@@ -2818,7 +2818,7 @@ impl<'a> Executor<'a> {
             self.state.memory.insert(addr, MemoryRecord { value: *value, shard: 0, timestamp: 0 });
         }
 
-        //.2/D.3: open chunk 0 for the collector. Subsequent
+        // Open chunk 0 for the collector. Subsequent
         // bump_record calls seal the open chunk and open the next.
         if let Some(trace) = self.minimal_trace_collector.as_mut() {
             if trace.chunks.is_empty() {
@@ -2884,7 +2884,7 @@ impl<'a> Executor<'a> {
         Ok(())
     }
 
-    /// D.4 producer: run the whole program on the JIT
+    /// Producer: run the whole program on the JIT
     /// (`run_fast`) while capturing a whole-program
     /// [`crate::minimal_trace::TraceChunk`]. This is the fast
     /// "checkpoint pass" replacement — it fast-forwards execution on the
@@ -2892,12 +2892,11 @@ impl<'a> Executor<'a> {
     /// count) and returns the chunk describing the run
     /// (`start_registers` / `pc_start` / `clk_start=0` / `clk_end=total`).
     ///
-    /// The returned chunk is the Stage-1 MinimalTrace product: today the
-    /// pipeline routes byte-equivalent record reconstruction through the
-    /// from-start `trace_checkpoint` (which needs the executor's
-    /// `input_stream` / `proof_stream` — state the per-shard
-    /// `trace_chunk` consumer does not yet carry). The chunk's
-    /// `mem_reads` oracle is captured for diagnostics but not consumed.
+    /// The returned chunk is the MinimalTrace product: the pipeline routes
+    /// byte-equivalent record reconstruction through the from-start
+    /// `trace_checkpoint`, which needs the executor's `input_stream` /
+    /// `proof_stream`.  The chunk's `mem_reads` oracle is captured for
+    /// diagnostics but not consumed.
     ///
     /// Falls back to the interpreter transparently for JIT-ineligible
     /// programs; in that case a best-effort chunk header is synthesised
@@ -2987,7 +2986,7 @@ impl<'a> Executor<'a> {
                 // run_fast is the fast-execution
                 // path; trace capture goes through a separate code path
                 // that opts into the recorder. None = byte-identical to
-                // pre-D.5.
+                // the no-recorder path.
                 mem_read_recorder: None,
             };
             // Look up (or build) the JIT function via the global
@@ -3091,7 +3090,7 @@ impl<'a> Executor<'a> {
                 None
             };
 
-            // D.4 producer: capture a whole-program TraceChunk
+            // Producer: capture a whole-program TraceChunk
             // (start registers + pc + clk bounds) via
             // run_jit_capture_trace_chunk when the caller opted in;
             // otherwise the byte-identical plain run_jit. The chunk's
