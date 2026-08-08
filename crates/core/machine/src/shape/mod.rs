@@ -1057,6 +1057,20 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
 
         let log_shard_size = max_shard_size.ilog2() as usize;
         debug_assert_eq!(1 << log_shard_size, max_shard_size);
+        // `partial_core_shapes` is keyed by the log2 shard sizes present in the
+        // maximal-shapes artifact, which tops out well below the default
+        // `opts.shard_size` (2^24).  Callers pass `opts.shard_size.ilog2()`, so an
+        // exact index panics with "no entry found for key" for any shard size larger
+        // than the artifact covers.  Select the largest key <= the request instead;
+        // the `max` above already floors it at the smallest key.
+        let log_shard_size = self
+            .partial_core_shapes
+            .range(..=log_shard_size)
+            .next_back()
+            .map(|(k, _)| *k)
+            .unwrap_or_else(|| {
+                *self.partial_core_shapes.keys().next().expect("no core shape clusters")
+            });
         let max_preprocessed = self
             .partial_preprocessed_shapes
             .iter()
