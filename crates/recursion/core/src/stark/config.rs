@@ -240,7 +240,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // The digest tunnel + the outer
         // jagged open/verify dispatch (hooks) are wired, so the wrap STARK
         // proves + host-verifies over the BN254 BaseFold jagged-PCS
-        // (OuterValMmcs + OuterChallenger). commit_basefold_path builds the BN254
+        // (OuterValMmcs + OuterChallenger). The outer commit builds the BN254
         // commit via precompute_jagged_basefold_commit_generic::<OuterValMmcs>;
         // prove_trusted_evaluations / verify_jagged_pcs_host route to the
         // recursion-core hooks. (gnark verify_wrap_basefold + wrap vk regen +
@@ -287,7 +287,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         recursion_area_pin: Option<usize>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
         // The wrap ring's BN254 jagged BaseFold precompute — EXACTLY the commit
-        // the deleted `commit_basefold_path` produced for OuterSC (same
+        // the retired outer BaseFold commit path produced for OuterSC (same
         // OuterValMmcs / wrap FRI config / `use_rev` / `recursion_area_pin`),
         // now built INLINE during the prove pass.
         zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
@@ -322,7 +322,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // former call site, which also passed `None`.
         let precomputed = precomputed.expect(
             "prove_jagged_open: outer BaseFold path requires a precomputed \
-             commit (commit_basefold_path sets it under the same use_basefold gate)",
+             commit (the outer BaseFold commit sets it under the same gate)",
         );
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
             Self::Challenger,

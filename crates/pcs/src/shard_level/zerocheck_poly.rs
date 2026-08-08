@@ -24,7 +24,7 @@
 //! `num_chips · 2^max_log_row_count`.
 //!
 //! # Conventions (must match `BasefoldConstraintFolder` + the recursion
-//! circuit; see `verify_zerocheck_cryptographic_identity_host`)
+//! circuit)
 //!
 //!   * MLE fold: adjacent pairs `(2i, 2i+1)` → `i`, last odd row
 //!     paired with the `ZERO` padding constant (LSB-first, identical to

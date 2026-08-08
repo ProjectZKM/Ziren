@@ -723,8 +723,7 @@ where
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
-        // FIX-off MISSING-CHIP INJECTION (relocated verbatim from the deleted
-        // `commit_basefold_path`; EXACT mirror of the GPU `commit`): when
+        // FIX-off MISSING-CHIP INJECTION (EXACT mirror of the GPU `commit`): when
         // `Some(cluster_widths)` is passed (the FIX-off predicate — CORE only),
         // inject a genuine HEIGHT-0 (0-row, FULL-WIDTH, zero) `RowMajorMatrix` at
         // each canonical-CLUSTER chip's width for every cluster chip this raw

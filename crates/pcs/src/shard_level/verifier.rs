@@ -308,7 +308,7 @@ impl BasefoldShardVerifier {
         // per-chip openings that feed the following jagged-PCS phase.
         //
         // The SP1-shape cross-chip RLC / GKR sum-modification identity is
-        // implemented in `verify_zerocheck_cryptographic_identity_host`
+        // implemented by the retired host crypto-identity check
         // for callers that produce that proof shape; it is intentionally
         // not invoked for the current direct-sumcheck proof.
         //
@@ -872,7 +872,7 @@ fn degree_stub_host<EF: Field + Copy>(max_log_row_count: usize) -> Vec<EF> {
 /// The full cross-chip RLC identity + GKR sum-modification identity
 /// (in-circuit equivalent at
 /// [`crate::recursion_circuit::zerocheck::BasefoldZerocheckVerifier::verify_zerocheck`])
-/// is exposed separately via [`verify_zerocheck_cryptographic_identity_host`].
+/// was exposed separately via the retired host crypto-identity check.
 /// It is not wired in here because Ziren's current shard-level zerocheck
 /// prover ([`crate::shard_level::zerocheck_prover::prove_shard_zerocheck`])
 /// produces a direct `Σ_b C(b) == 0` sumcheck with `claimed_sum = 0`,
@@ -915,7 +915,7 @@ where
     // point — and BIND it to the proof's claimed `point_and_eval.1`.
     //
     // This is the cross-chip constraint-RLC half not covered by the
-    // structural sumcheck alone (the `verify_zerocheck_cryptographic_identity_host` comment
+    // structural sumcheck alone (the retired host crypto-identity comment
     // below).  Without it the structural sumcheck only ties
     // `point_and_eval.1` back to `claimed_sum` (telescoping) and the GKR
     // openings — nothing forces it to equal the constraint-RLC of

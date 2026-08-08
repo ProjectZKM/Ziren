@@ -30,7 +30,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// Auto-precompute helper (GPU pipeline path).
 ///
 /// When `precomputed_commit` is already `Some` (the host CPU path,
-/// which precomputes in `commit_basefold_path`) or the config is not
+/// which precomputes during its own `commit`) or the config is not
 /// the KoalaBear jagged-PCS config, this is a no-op — the inputs pass
 /// through unchanged.
 ///
@@ -203,8 +203,8 @@ where
     } else {
         // ── OUTER/wrap ring (BN254 OuterValMmcs) ───────────────────────
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
-        // trait method — EXACTLY the commit the deleted `commit_basefold_path`
-        // produced for OuterSC (same OuterValMmcs / wrap FRI config / `use_rev` /
+        // trait method — EXACTLY the commit the retired eager path produced for
+        // OuterSC (same OuterValMmcs / wrap FRI config / `use_rev` /
         // `recursion_area_pin`), now built INLINE during the prove pass.  The
         // returned commit already stamps `rev` / `recursion_area_pin`.
         let precomputed_generic = <SC as BasefoldRing>::precompute_jagged_inline(
@@ -745,8 +745,8 @@ where
     // NATURAL raw height (no band-pad), so the host packing offsets == the raw
     // degree heights == the in-circuit RAW col_prefix_sums reconstruction.  The
     // core STARK proves at those same actual heights (the `FIX_CORE_SHAPES=false`
-    // perf win).  Missing (injected) chips are packed at band height (in
-    // commit_basefold_path) to preserve the chip-SET / VK, so the recursion
+    // perf win).  Missing (injected) chips are packed at band height (see the
+    // FIX-off injection in `CpuProver::commit`) to preserve the chip-SET / VK, so the recursion
     // normalize VK = f(chip-SET).
     let no_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> =
         chips.iter().map(|_| None).collect();

@@ -206,9 +206,9 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
     /// needs are discharged INSIDE each concrete impl (where `Self::BfMmcs` is a
     /// concrete `'static` MMCS), rather than propagating up the whole
-    /// shard-prover call chain.  It is EXACTLY the commit body the deleted
-    /// `commit_basefold_path` produced for the wrap ring (same MMCS / FRI config
-    /// / `use_rev` / `recursion_area_pin`), just built during the prove pass.
+    /// shard-prover call chain.  It is EXACTLY the commit body the retired
+    /// eager wrap-ring commit produced (same MMCS / FRI config / `use_rev` /
+    /// `recursion_area_pin`), just built during the prove pass.
     fn precompute_jagged_inline(
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
         use_rev: bool,

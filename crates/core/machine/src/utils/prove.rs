@@ -602,8 +602,8 @@ where
                                     // FIX-off shard lifts to (the SAME shape `fix_shape` +
                                     // `canonicalize_shape_to_cluster` produce under
                                     // FIX_CORE_SHAPES=true) and its chip NAME -> width
-                                    // map, then pass it EXPLICITLY to `commit`.  The PCS commit
-                                    // (`commit_basefold_path`) derives the missing set
+                                    // map, then pass it EXPLICITLY to `commit`.  The prover's
+                                    // `commit` (see `zkm_pcs::prover`) derives the missing set
                                     // (canonical cluster minus present), and injects a
                                     // genuine HEIGHT-0 (0-row, full-width, zero) trace
                                     // for each missing chip — so the FIX-off normalize

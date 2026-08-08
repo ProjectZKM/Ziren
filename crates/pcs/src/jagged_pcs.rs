@@ -629,7 +629,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
     NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
-/// Pure host-side implementation of [`open_jagged_pcs`] —
+/// Pure host-side implementation of the jagged-PCS open —
 /// extracted so the GPU dispatch hook can fall back to it on
 /// shape-unsupported / runtime errors without re-entering the env-flag
 /// dispatch loop.  Always runs the CPU StackedPcsProver
@@ -688,8 +688,8 @@ where
 //
 // Mirror of the GPU commit override — provided
 // statically by the prover (`MachineProver::gpu_basefold_open_hook`) and
-// threaded down to the `open_jagged_pcs` dispatch, not via a registry.
-// The hook receives the same inputs as `open_jagged_pcs` and
+// threaded down to the `open_jagged_pcs_host_generic` dispatch, not via a registry.
+// The hook receives the same inputs as `open_jagged_pcs_host_generic` and
 // returns a byte-identical `StackedBasefoldProof` — the device side is
 // responsible for:
 //
@@ -718,7 +718,7 @@ where
 // (returning `(prover_data, eval_point)` ownership so nothing is lost).
 
 // #118: the GPU BaseFold open fn is provided STATICALLY (threaded from
-// the prover down to the `open_jagged_pcs` dispatch), not via a global
+// the prover down to the `open_jagged_pcs_host_generic` dispatch), not via a global
 // registry.  The former `GPU_BASEFOLD_OPEN_HOOK` OnceLock + `register_/get_`
 // accessors were removed; the `prover` crate passes `Some(device_fn)` into
 // the `prove_shard_to_basefold` free-fn (which threads it through the
@@ -1689,7 +1689,7 @@ pub mod jagged {
 
         // ── The BaseFold open packaged as the `open` closure.  Moves
         // `prover_data` in; captures `n_chips` by copy.  Runs NO challenger op
-        // outside `open_jagged_pcs`, so the point-extend (sampled by the core
+        // outside the jagged-PCS open, so the point-extend (sampled by the core
         // immediately before) lands identically across all paths.
         //
         // (5) The jagged sumcheck reduces over `dense_q` (2^log_dense

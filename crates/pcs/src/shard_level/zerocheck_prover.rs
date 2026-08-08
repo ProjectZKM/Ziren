@@ -157,7 +157,7 @@ where
     // zerocheck to the LogUp-GKR openings exactly as the recursion
     // verifier asserts (`recursion_circuit::zerocheck::verify_zerocheck`,
     // steps 5-7) and the host identity
-    // (`verify_zerocheck_cryptographic_identity_host`).
+    // (the retired host crypto-identity check).
     //
     // Conventions are pinned to the verifier: β powers `[β¹, β², …]`,
     // columns main-then-preprocessed, chips folded in chip-NAME order
@@ -178,7 +178,7 @@ where
     // The cross-chip lambda-RLC folds in chip-NAME order (matching the
     // recursion verifier + SP1 BTreeSet<Chip>).  The incoming slices are
     // ALREADY name-ordered: `CpuProver::commit` height-sorts only to pick the
-    // commit's size order, then re-sorts by name before `commit_basefold_path`
+    // commit's size order, then re-sorts by name before committing
     // (prover.rs), whose `chip_ordering` therefore enumerates NAME order, and
     // `shard_chips_ordered(chip_ordering)` replays it into `chips`.  So this
     // permutation is an identity no-op today; it is kept as a cheap defensive
