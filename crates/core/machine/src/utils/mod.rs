@@ -195,7 +195,7 @@ pub fn zeroed_f_vec<F: Field>(len: usize) -> Vec<F> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use p3_field::FieldAlgebra;
+    use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
 
     #[test]
