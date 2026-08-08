@@ -612,18 +612,27 @@ mod basefold_over_bn254_roundtrip_test {
             .cloned()
             .unwrap_or_default();
 
+        // The jagged entry points take BORROWED `ChipTraceView`s (name + matrix view),
+        // not owned matrices; build the views once and reuse them.
+        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>> =
+            traces.iter().map(|(name, m)| (name.clone(), m.as_view())).collect();
+
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
         let precompute = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
-            &traces,
+            &trace_views,
             mmcs.clone(),
             fri.clone(),
+            // use_rev: false on the wrap/BN254 path.
+            false,
+            // recursion_area_pin: None => NATURAL own-area packing (this is a wrap-ring test).
+            None,
         );
         let commitment = precompute.commit.original_commitment.clone();
 
         let mut p_chal = make_challenger();
         p_chal.observe(commitment.clone());
         let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
-            &traces,
+            &trace_views,
             &r_row_per_chip,
             &z_row,
             None,
@@ -634,7 +643,7 @@ mod basefold_over_bn254_roundtrip_test {
         );
 
         let chip_infos =
-            zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&traces).chip_infos;
+            zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views).chip_infos;
         let mut v_chal = make_challenger();
         v_chal.observe(commitment);
         let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
