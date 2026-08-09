@@ -226,15 +226,18 @@ where
     (main_traces, main_commitment, precomputed_generic)
 }
 
-/// Shard prover body, as SP1's `prove_shard_with_data`: dispatch is the prover
-/// itself (`CpuProver` vs a `StarkGpuProver` override), not a producer generic.
+/// Shard prover body — SP1's `prove_shard_with_data` (hypercube/src/prover/
+/// shard.rs:650).  Dispatch is the prover itself (`CpuProver` vs a
+/// `StarkGpuProver` override), not a producer generic; the name carried a
+/// `_with_traces_dispatch` suffix for a producer-generic seam that no longer
+/// exists.
 ///
 /// Takes the shared per-chip trace-MLE slice directly, as SP1's
 /// `prove_shard_with_data` takes its `traces`: every downstream phase
 /// (cumulative sums, batched pre-pass, jagged-PCS clone) reads every chip's
 /// trace, so there is nothing for a borrow-or-materialize seam to decide.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_to_basefold_with_traces_dispatch<SC, A, P>(
+pub fn prove_shard_with_data<SC, A, P>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -616,7 +619,7 @@ where
 
 // ═══════════════════════════════════════════════════════════════════════════
 // C0 (Option-C Phase 0): shared NON-DEVICE shard-driver orchestration lifted
-// out of `prove_shard_to_basefold_with_traces_dispatch` into `pub` helpers so
+// out of `prove_shard_with_data` into `pub` helpers so
 // the upcoming ziren-gpu device-native drivers (C1 zerocheck, C2 logup) reuse
 // them instead of duplicating — bounding the driver-divergence surface BEFORE
 // any split.  Each helper is a VERBATIM lift of an inline block; the operation
