@@ -104,7 +104,7 @@ fn build_weight_table(
 /// `interpolate_3point_evals_at_012` (recursion `univariate.rs`) so the
 /// host prover's Fiat-Shamir challenges align with the in-circuit
 /// `verify_sumcheck`, which observes *coefficients* (not evals).
-fn observe_round_poly_coeffs<C: p3_challenger::FieldChallenger<InnerVal>>(challenger: &mut C, evals: [InnerChallenge; 3]) {
+pub fn observe_round_poly_evals<C: p3_challenger::FieldChallenger<InnerVal>>(challenger: &mut C, evals: [InnerChallenge; 3]) {
     let [p0, p1, p2] = evals;
     let two_inv = InnerChallenge::from_u8(2).inverse();
     let c0 = p0;
@@ -268,7 +268,7 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
     {
         let half = dense_q.len() / 2;
         let evals = jagged_round_evals_base_msb(&dense_q, &w, half);
-        observe_round_poly_coeffs(challenger, evals);
+        observe_round_poly_evals(challenger, evals);
         let r_0: InnerChallenge = challenger.sample_algebra_element();
         eval_point.insert(0, r_0);
         rounds.push(JaggedReductionRound { evals });
@@ -285,7 +285,7 @@ pub fn prove_jagged_reduction_owned<C: p3_challenger::FieldChallenger<InnerVal>>
     for _round in 1..n {
         let half = q_table.len() / 2;
         let evals = jagged_round_evals_msb(&q_table, &w_table, half);
-        observe_round_poly_coeffs(challenger, evals);
+        observe_round_poly_evals(challenger, evals);
         let r_i: InnerChallenge = challenger.sample_algebra_element();
         eval_point.insert(0, r_i);
 
@@ -388,7 +388,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         let [p0, p1, p2] = round.evals;
         // Observe coefficients (not evals) so the transcript matches
         // the recursion `verify_sumcheck` and the host prover.
-        observe_round_poly_coeffs(challenger, [p0, p1, p2]);
+        observe_round_poly_evals(challenger, [p0, p1, p2]);
         if p0 + p1 != current_claim {
             tracing::debug!("jagged sumcheck round {} identity failed", round_idx);
             return None;

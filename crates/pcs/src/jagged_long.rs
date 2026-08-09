@@ -134,19 +134,22 @@ impl<F: Field> LongMle<F> {
     /// [`Mle::fix_last_variable`] — NOT `Mle::fold`, which is the BaseFold rule
     /// and would silently change the polynomial being proved.
     ///
-    /// Mirrors SP1 `long.rs:62`.  SP1 additionally re-interleaves when
-    /// `log_stacking_height <= 2`; that case is rejected here rather than
-    /// silently taking a different path, because the interleaved variant needs
-    /// its own equivalence coverage before it is trusted.
+    /// Mirrors SP1 `long.rs:62`.  SP1 additionally RE-INTERLEAVES when
+    /// `log_stacking_height <= 2`, restacking the components into one before
+    /// folding.  That only changes anything when there is more than one
+    /// component: for a single component the re-interleave is the identity, and
+    /// the sumcheck always holds a single (already restacked) component.  So the
+    /// multi-component small-stack case is rejected rather than silently taking
+    /// a path with no equivalence coverage.
     pub fn fix_last_variable<EF>(&self, alpha: EF) -> LongMle<EF>
     where
         EF: ExtensionField<F> + Send + Sync,
         F: Sync,
     {
         assert!(
-            self.log_stacking_height > 2,
-            "LongMle::fix_last_variable: log_stacking_height <= 2 needs SP1's re-interleaving \
-             path (long.rs:64-84), which is not ported yet",
+            self.log_stacking_height > 2 || self.components.len() == 1,
+            "LongMle::fix_last_variable: multi-component fold at log_stacking_height <= 2 needs \
+             SP1's re-interleaving path (long.rs:64-84), which is not ported yet",
         );
         let components: Vec<Mle<EF, CpuBackend>> =
             self.components.iter().map(|mle| mle.fix_last_variable(alpha)).collect();
@@ -344,6 +347,67 @@ mod tests {
                 want.into_iter().filter(|v| *v != InnerVal::ZERO).collect();
             want_nz.sort_by_key(|v| format!("{v}"));
             assert_eq!(got, want_nz, "widths={widths:?}: trace cells not preserved");
+        }
+    }
+
+    /// The reduction must satisfy the sumcheck contract end to end:
+    ///   * round 0's `p(0) + p(1)` equals the claim `sum q*w`, and
+    ///   * the final `q_at_z` equals the trace polynomial evaluated at the
+    ///     recorded `eval_point`.
+    /// The second is the one that pins the binding order: with `push` vs
+    /// `insert(0, ..)` reversed, the point no longer addresses the variable the
+    /// fold actually bound and this fails.
+    #[test]
+    fn hadamard_reduction_satisfies_the_sumcheck_contract() {
+        use crate::kb31_poseidon2::{InnerChallenger, InnerPerm};
+
+        let mut rng = StdRng::seed_from_u64(0xD09E);
+        for widths in [vec![2usize, 2], vec![4, 4]] {
+            let lsh = 3u32;
+            let comps = build(&mut rng, &widths, lsh);
+            let total: usize =
+                comps.iter().map(|m| m.num_polynomials() << m.num_variables()).sum();
+            assert!(total.is_power_of_two());
+
+            let weights: Vec<InnerChallenge> =
+                (0..total).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
+
+            let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
+                comps.into_iter().map(std::sync::Arc::new).collect();
+
+            // Claim = sum over the restacked layout of base*ext.
+            let hp = jagged_hadamard_poly(msg.clone(), lsh, weights.clone());
+            let claim: InnerChallenge = hp
+                .ext
+                .first_component()
+                .guts()
+                .as_slice()
+                .iter()
+                .zip(hp.base.first_component().guts().as_slice().iter())
+                .map(|(e, b)| *e * *b)
+                .fold(InnerChallenge::ZERO, |a, x| a + x);
+
+            let perm: InnerPerm = zkm_primitives::poseidon2_init();
+            let mut ch = InnerChallenger::new(perm);
+            let proof = prove_jagged_reduction_hadamard(msg, lsh, weights, &mut ch);
+
+            // Round 0 opens on the claim.
+            let [p0, p1, _] = proof.rounds[0].evals;
+            assert_eq!(p0 + p1, claim, "widths={widths:?}: round 0 does not open on the claim");
+
+            // Final base value == trace poly at the recorded point.
+            let base_full = LongMle::from_components(
+                vec![Mle::from_values(
+                    hp.base.first_component().guts().as_slice().to_vec(),
+                )],
+                hp.base.num_variables(),
+            );
+            let want = base_full.eval_at(&proof.eval_point);
+            assert_eq!(
+                InnerChallenge::from(proof.q_at_z),
+                want,
+                "widths={widths:?}: q_at_z != base(eval_point) — binding order/point order disagree",
+            );
         }
     }
 
@@ -554,4 +618,78 @@ pub fn jagged_hadamard_poly(
             weights.len().ilog2(),
         ),
     }
+}
+
+/// The jagged reduction sumcheck run on [`HadamardProduct`] — SP1's structure,
+/// with NO dense materialization.
+///
+/// Differences from [`crate::jagged_sumcheck::prove_jagged_reduction_owned`],
+/// which this is intended to replace:
+///
+///   * Takes the per-chip trace MLEs, not a flat `dense_q`.  The
+///     `2^log_dense_size` base-field buffer — built twice per shard, once for
+///     the commit and again inside the reduce closure — is never allocated.
+///   * Binds the stride-1 (LSB) variable per round, as SP1 does, instead of the
+///     MSB pairing `(i, i+half)`.  The recorded `eval_point` is therefore in
+///     sample order (`push`), not reverse order (`insert(0, ..)`).
+///
+/// The wire shape is unchanged: `JaggedReductionRound` still carries the round
+/// polynomial as its evaluations at {0, 1, 2}, and the challenger still observes
+/// the coefficients — so only the VALUES move, driven by the binding order.
+pub fn prove_jagged_reduction_hadamard<C>(
+    trace_components: Message<Mle<crate::InnerVal, CpuBackend>>,
+    log_stacking_height: u32,
+    weights: alloc::vec::Vec<crate::InnerChallenge>,
+    challenger: &mut C,
+) -> crate::jagged_sumcheck::JaggedReductionProof<crate::InnerChallenge>
+where
+    C: p3_challenger::FieldChallenger<crate::InnerVal>,
+{
+    use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
+    use crate::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
+    let mut hp = jagged_hadamard_poly(trace_components, log_stacking_height, weights);
+    let n = <HadamardProduct<crate::InnerVal, crate::InnerChallenge> as
+        crate::shard_level::sumcheck_poly::SumcheckPolyBase>::num_variables(&hp);
+
+    let mut rounds: alloc::vec::Vec<JaggedReductionRound<crate::InnerChallenge>> =
+        alloc::vec::Vec::with_capacity(n as usize);
+    let mut eval_point: alloc::vec::Vec<crate::InnerChallenge> =
+        alloc::vec::Vec::with_capacity(n as usize);
+
+    // Round 0 lifts the trace side F -> EF.
+    let poly = hp.sum_as_poly_in_last_t_variables(None, 1);
+    let evals = round_evals_at_012(&poly);
+    crate::jagged_sumcheck::observe_round_poly_evals(challenger, evals);
+    let r0: crate::InnerChallenge = challenger.sample_algebra_element();
+    eval_point.push(r0);
+    rounds.push(JaggedReductionRound { evals });
+    let mut claim = poly.eval_at_point(r0);
+    let mut cur = hp.fix_t_variables(r0, 1);
+
+    for _ in 1..n {
+        let poly = cur.sum_as_poly_in_last_variable(Some(claim));
+        let evals = round_evals_at_012(&poly);
+        crate::jagged_sumcheck::observe_round_poly_evals(challenger, evals);
+        let r: crate::InnerChallenge = challenger.sample_algebra_element();
+        eval_point.push(r);
+        rounds.push(JaggedReductionRound { evals });
+        claim = poly.eval_at_point(r);
+        cur = SumcheckPoly::fix_last_variable(cur, r);
+    }
+
+    let q_at_z = cur.base.first_component().guts().as_slice()[0];
+    JaggedReductionProof { rounds, eval_point, q_at_z }
+}
+
+/// The round polynomial's evaluations at {0, 1, 2} — the wire form
+/// `JaggedReductionRound` carries.
+fn round_evals_at_012(
+    poly: &crate::shard_level::types::UnivariatePolynomial<crate::InnerChallenge>,
+) -> [crate::InnerChallenge; 3] {
+    use p3_field::PrimeCharacteristicRing;
+    [
+        poly.eval_at_point(crate::InnerChallenge::ZERO),
+        poly.eval_at_point(crate::InnerChallenge::ONE),
+        poly.eval_at_point(crate::InnerChallenge::from_u8(2)),
+    ]
 }
