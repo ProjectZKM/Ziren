@@ -1001,7 +1001,6 @@ pub fn replay_jagged_evaluation_transcript<C: p3_challenger::FieldChallenger<Inn
 // Suppress unused-import warning for bits_big_endian (re-exported
 // for downstream use; not directly called here once naive prover
 // lands).
-#[allow(dead_code)]
 fn _unused_bits_be_ref() {
     let _: fn(usize, usize) -> Vec<InnerChallenge> = bits_big_endian;
 }

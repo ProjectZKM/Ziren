@@ -984,7 +984,6 @@ mod tests {
     }
 
     /// Phantom: ensure C parameter participates in inference.
-    #[allow(dead_code)]
     fn _assert_circuit_config<C: CircuitConfig>() -> PhantomData<C> {
         PhantomData
     }
@@ -1017,7 +1016,6 @@ mod tests {
     ///         emit_branching_program_eval,
     ///         emit_prefix_sum_check,
     ///      )`.
-    #[allow(dead_code)]
     fn _machine_wiring_reference_pattern<C: CircuitConfig>() {
         use crate::jagged_eval::RecursiveJaggedEvalSumcheckConfig;
         use crate::jagged_eval_primitives::{

@@ -250,7 +250,6 @@ impl<F: Field, EF: ExtensionField<F>> GkrCircuitLayer<F, EF> {
 /// `circuit_id` scopes the handle to one `build_gkr_circuit` call so
 /// concurrent shards on the same GPU stay isolated; the registry is
 /// keyed by `(device_id, circuit_id)`.
-#[allow(dead_code)]
 pub enum LayerState<F: Field, EF: ExtensionField<F>> {
     Host(GkrCircuitLayer<F, EF>),
     Device {

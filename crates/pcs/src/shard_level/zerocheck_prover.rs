@@ -562,7 +562,6 @@ pub fn shard_max_log_degree<F: Field>(main_traces: &[RowMajorMatrix<F>]) -> usiz
 }
 
 // Anchor BTreeMap dependency for future per-chip iteration.
-#[allow(dead_code)]
 fn _btreemap_anchor() -> BTreeMap<String, ()> {
     BTreeMap::new()
 }

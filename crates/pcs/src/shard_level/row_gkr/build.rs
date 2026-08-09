@@ -233,7 +233,6 @@ mod tests {
     /// validated by inspection — the assertion at the function head
     /// is its own test.  An end-to-end runtime panic test requires a
     /// real `Chip<F, A>` instance, deferred to the top-level wiring.
-    #[allow(dead_code)]
     fn _zero_row_variables_panic_guard_is_visible_in_signature() {
         // assertion at build.rs:36: "build_gkr_circuit requires num_row_variables >= 1"
     }

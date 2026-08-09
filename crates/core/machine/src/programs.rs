@@ -1,6 +1,5 @@
 //! MIPS ELFs used for testing.
 
-#[allow(dead_code)]
 #[allow(missing_docs)]
 pub mod tests {
     use zkm_core_executor::{Instruction, Opcode, Program};

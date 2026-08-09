@@ -439,7 +439,6 @@ fn poly_coefficients_from_evals<EF: Field>(evals: [EF; 4]) -> [EF; 4] {
 ///
 /// Retained for tests; the production driver lives in
 /// `crate::shard_level::sumcheck_poly`.
-#[allow(dead_code)]
 fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
     let mut acc = EF::ZERO;
     for c in coeffs.iter().rev() {

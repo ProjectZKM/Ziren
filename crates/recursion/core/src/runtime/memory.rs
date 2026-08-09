@@ -139,7 +139,6 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 ///   `mr_unchecked` returns `&MemoryEntry<F>` and only `val` is consumed
 ///   downstream.
 #[derive(Debug, Default)]
-#[allow(dead_code)]
 pub struct ParMemVec<F>(Vec<SyncUnsafeCell<MaybeUninit<MemoryEntry<F>>>>);
 
 impl<F: PrimeField64> ParMemVec<F> {

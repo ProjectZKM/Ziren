@@ -39,7 +39,6 @@ pub fn koalabear_bytes_to_bn254(bytes: &[KoalaBear; 32]) -> Bn254 {
     result
 }
 
-#[allow(dead_code)]
 pub fn felts_to_bn254_var<C: Config>(
     builder: &mut Builder<C>,
     digest: &[Felt<C::F>; DIGEST_SIZE],
@@ -57,7 +56,6 @@ pub fn felts_to_bn254_var<C: Config>(
     result
 }
 
-#[allow(dead_code)]
 pub fn felt_bytes_to_bn254_var<C: Config>(
     builder: &mut Builder<C>,
     bytes: &[Felt<C::F>; 32],
@@ -83,7 +81,6 @@ pub fn felt_bytes_to_bn254_var<C: Config>(
     result
 }
 
-#[allow(dead_code)]
 pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
     words.iter().flat_map(|w| w.0).collect::<Vec<_>>()
 }
@@ -147,7 +144,6 @@ pub(crate) mod tests {
         }
     }
 
-    #[allow(dead_code)]
     pub(crate) fn run_test_recursion(
         operations: TracedVec<DslIr<AsmConfig<F, EF>>>,
         witness_stream: impl IntoIterator<Item = WitnessBlock<AsmConfig<F, EF>>>,

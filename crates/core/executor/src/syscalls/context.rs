@@ -11,7 +11,6 @@ use super::SyscallCode;
 
 /// A runtime for syscalls that is protected so that developers cannot arbitrarily modify the
 /// runtime.
-#[allow(dead_code)]
 pub struct SyscallContext<'a, 'b: 'a> {
     /// The current shard.
     pub current_shard: u32,

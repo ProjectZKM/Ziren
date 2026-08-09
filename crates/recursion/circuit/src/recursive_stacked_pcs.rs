@@ -317,7 +317,6 @@ mod tests {
 
     /// Phantom: silence unused-import warnings when the module
     /// builds but no test exercises the AsmBuilder path.
-    #[allow(dead_code)]
     fn _silence_unused() {
         let _: PhantomData<AsmBuilder<F, EF>> = PhantomData;
         let _ = EF::ZERO;

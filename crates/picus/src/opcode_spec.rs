@@ -2,7 +2,6 @@ use zkm_core_executor::Opcode;
 
 /// Picus specification for the Instruction opcode.
 #[derive(Clone, Debug, Default)]
-#[allow(dead_code)]
 pub struct OpcodeSpec {
     /// Selector
     pub selector: &'static str,
@@ -14,7 +13,6 @@ pub struct OpcodeSpec {
 
 /// A selection of indices inside `values`.
 #[derive(Clone, Copy, Debug)]
-#[allow(dead_code)]
 pub enum IndexSlice {
     /// A continuous half-open range [start, end). If end is `usize::MAX` then
     /// it represents [start, ``values.len()``)

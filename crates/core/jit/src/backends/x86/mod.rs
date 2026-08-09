@@ -32,7 +32,6 @@ pub(crate) const JUMP_TABLE: u8 = dynasmrt::x64::Rq::R13 as u8;
 // `PC`/`NEXT_PC`/`NEXT_NEXT_PC`/`CLK` offsets).  Do NOT delete the unused ones:
 // a PARTIAL offset map is a trap -- the next person adds `PC_OFFSET` back next
 // to a surviving `GLOBAL_CLK_OFFSET` and cannot tell which of the rest exist.
-#[allow(dead_code)]
 mod _abi_map_is_complete_on_purpose {}
 
 /// Trace buffer pointer (callee-saved).

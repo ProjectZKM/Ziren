@@ -157,7 +157,6 @@ fn observe_poly_coeffs<C, FC>(
 
 // Force PrimeCharacteristicRing to be in scope (used via
 // UnivariatePolynomial methods).
-#[allow(dead_code)]
 const _: fn() = || {
     fn _assert_ring<T: PrimeCharacteristicRing>() {}
 };
