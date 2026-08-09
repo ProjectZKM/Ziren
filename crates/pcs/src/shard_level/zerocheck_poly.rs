@@ -321,7 +321,7 @@ pub(crate) fn partial_lagrange_prefix<EF: Field>(point: &[EF], n: usize) -> Vec<
 /// monomial-basis coefficients.  Port of
 /// `slop_algebra::interpolate_univariate_polynomial`.  Panics if `xs`
 /// has duplicate points or `xs.len() != ys.len()`.
-pub(crate) fn interpolate_univariate_polynomial<EF: Field>(
+pub fn interpolate_univariate_polynomial<EF: Field>(
     xs: &[EF],
     ys: &[EF],
 ) -> UnivariatePolynomial<EF> {

@@ -257,6 +257,60 @@ mod tests {
         }
     }
 
+    /// The sumcheck invariant, which is what actually validates the round
+    /// polynomial: `p(0) + p(1)` must equal the current claim, and after
+    /// binding the variable to `alpha` the folded polynomial's total sum must
+    /// equal `p(alpha)`.  If the three-point interpolation or the 1/2
+    /// evaluation were wrong, the second half of this fails even though the
+    /// first half passes.
+    #[test]
+    fn hadamard_round_poly_satisfies_the_sumcheck_invariant() {
+        use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
+
+        let mut rng = StdRng::seed_from_u64(0x5C0DE);
+        for nv in [3u32, 4, 6] {
+            let n = 1usize << nv;
+            let bvals: Vec<InnerVal> =
+                (0..n).map(|_| InnerVal::from_u32(rng.gen::<u32>() % 1000)).collect();
+            let evals: Vec<InnerChallenge> =
+                (0..n).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
+
+            let base = LongMle::from_components(vec![Mle::from_values(bvals.clone())], nv);
+            let ext = LongMle::from_components(vec![Mle::from_values(evals.clone())], nv);
+            let hp = HadamardProduct { base, ext };
+
+            // Total sum of the pointwise product.
+            let claim: InnerChallenge = evals
+                .iter()
+                .zip(bvals.iter())
+                .map(|(e, b)| *e * *b)
+                .fold(InnerChallenge::ZERO, |a, x| a + x);
+
+            // p(0) + p(1) == claim  (computed WITHOUT the claim shortcut).
+            let p = hp.sum_as_poly_in_last_t_variables(None, 1);
+            let p0 = p.eval_at_point(InnerChallenge::ZERO);
+            let p1 = p.eval_at_point(InnerChallenge::ONE);
+            assert_eq!(p0 + p1, claim, "nv={nv}: p(0)+p(1) != claim");
+
+            // Bind and check the folded total equals p(alpha).
+            let alpha = InnerChallenge::from_u32(rng.gen::<u32>() % 1000 + 1);
+            let folded = hp.fix_t_variables(alpha, 1);
+            let folded_sum = folded
+                .ext
+                .first_component()
+                .guts()
+                .as_slice()
+                .iter()
+                .zip(folded.base.first_component().guts().as_slice().iter())
+                .map(|(e, b)| *e * *b)
+                .fold(InnerChallenge::ZERO, |a, x| a + x);
+            assert_eq!(folded_sum, p.eval_at_point(alpha), "nv={nv}: folded sum != p(alpha)");
+
+            // And the next round is the ext x ext case.
+            let _ = SumcheckPoly::sum_as_poly_in_last_variable(&folded, Some(folded_sum));
+        }
+    }
+
     /// A non-power-of-two total must be REJECTED, not silently truncated by
     /// floor-`ilog2` (SP1 `long.rs:95` has no guard; this is the ported check).
     #[test]
@@ -266,5 +320,155 @@ mod tests {
         // 3 + 2 = 5 columns over 2^3 rows => 40 values, not a power of two.
         let comps = build(&mut rng, &[3, 2], 3);
         let _ = LongMle::from_components(comps, 3).num_variables();
+    }
+}
+
+impl<F> LongMle<F> {
+    /// The single component, for the sumcheck path (which requires an
+    /// already-restacked, one-component `LongMle`).
+    #[inline]
+    pub fn first_component(&self) -> &Mle<F, CpuBackend> {
+        assert_eq!(
+            self.components.len(),
+            1,
+            "HadamardProduct sumcheck needs a restacked single-component LongMle \
+             (interleave first)",
+        );
+        &self.components[0]
+    }
+}
+
+/// The pointwise product of a base-field and an extension-field multilinear —
+/// SP1's jagged sumcheck polynomial (`slop/crates/jagged/src/hadamard.rs`).
+///
+/// Both sides must be restacked to a SINGLE component before the sumcheck runs;
+/// SP1 arranges that with `interleave_multilinears_with_fixed_rate` in
+/// `jagged_sumcheck_poly`.
+#[derive(Clone, Debug)]
+pub struct HadamardProduct<F, EF = F> {
+    /// The trace side (base field on the first round).
+    pub base: LongMle<F>,
+    /// The jagged-weight side.
+    pub ext: LongMle<EF>,
+}
+
+impl<F, EF> crate::shard_level::sumcheck_poly::SumcheckPolyBase for HadamardProduct<F, EF> {
+    #[inline]
+    fn num_variables(&self) -> u32 {
+        self.base.num_variables()
+    }
+}
+
+impl<F, EF> crate::shard_level::sumcheck_poly::ComponentPoly<EF> for HadamardProduct<F, EF>
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    fn get_component_poly_evals(&self) -> Vec<EF> {
+        let base_eval: EF = self.base.first_component().guts().as_slice()[0].into();
+        let ext_eval: EF = self.ext.first_component().guts().as_slice()[0];
+        vec![base_eval, ext_eval]
+    }
+}
+
+/// The round polynomial, shared by the first (base x ext) and later
+/// (ext x ext) rounds.
+///
+/// The product is multi-quadratic, so three evaluations pin it down.  Mirrors
+/// SP1 `hadamard.rs:95`: evaluate at 0 and 1 over the even/odd halves of the
+/// stride-1 variable, and at 1/2 via `(e0 + e1)(b0 + b1) / 4`.
+fn hadamard_round_poly<F, EF>(
+    base: &Mle<F, CpuBackend>,
+    ext: &Mle<EF, CpuBackend>,
+    claim: Option<EF>,
+) -> crate::shard_level::types::UnivariatePolynomial<EF>
+where
+    F: Field + Sync,
+    EF: ExtensionField<F> + Send + Sync,
+{
+    use p3_maybe_rayon::prelude::*;
+
+    let b = base.guts().as_slice();
+    let e = ext.guts().as_slice();
+    debug_assert_eq!(b.len(), e.len());
+
+    let eval_0: EF = e
+        .par_iter()
+        .step_by(2)
+        .zip(b.par_iter().step_by(2))
+        .map(|(x, y)| *x * *y)
+        .sum();
+
+    // `claim = p(0) + p(1)` lets the odd half be skipped entirely.
+    let eval_1: EF = claim.map(|c| c - eval_0).unwrap_or_else(|| {
+        e.par_iter()
+            .skip(1)
+            .step_by(2)
+            .zip(b.par_iter().skip(1).step_by(2))
+            .map(|(x, y)| *x * *y)
+            .sum()
+    });
+
+    let eval_half_scaled: EF = e
+        .par_iter()
+        .step_by(2)
+        .zip(e.par_iter().skip(1).step_by(2))
+        .zip(b.par_iter().step_by(2))
+        .zip(b.par_iter().skip(1).step_by(2))
+        .map(|(((e0, e1), b0), b1)| (*e0 + *e1) * (*b0 + *b1))
+        .sum();
+
+    let two_inv = EF::from_u16(2).inverse();
+    let four_inv = EF::from_u16(4).inverse();
+    crate::shard_level::zerocheck_poly::interpolate_univariate_polynomial(
+        &[EF::ZERO, EF::ONE, two_inv],
+        &[eval_0, eval_1, eval_half_scaled * four_inv],
+    )
+}
+
+impl<EF> crate::shard_level::sumcheck_poly::SumcheckPoly<EF> for HadamardProduct<EF, EF>
+where
+    EF: Field + Send + Sync,
+{
+    fn fix_last_variable(self, alpha: EF) -> Self {
+        HadamardProduct {
+            base: self.base.fix_last_variable(alpha),
+            ext: self.ext.fix_last_variable(alpha),
+        }
+    }
+
+    fn sum_as_poly_in_last_variable(
+        &self,
+        claim: Option<EF>,
+    ) -> crate::shard_level::types::UnivariatePolynomial<EF> {
+        hadamard_round_poly(self.base.first_component(), self.ext.first_component(), claim)
+    }
+}
+
+impl<F, EF> crate::shard_level::sumcheck_poly::SumcheckPolyFirstRound<EF>
+    for HadamardProduct<F, EF>
+where
+    F: Field + Sync,
+    EF: ExtensionField<F> + Send + Sync,
+{
+    /// The first round lifts the trace side F -> EF, so every later round is
+    /// the ext x ext case.
+    type NextRoundPoly = HadamardProduct<EF, EF>;
+
+    fn fix_t_variables(self, alpha: EF, t: usize) -> Self::NextRoundPoly {
+        assert_eq!(t, 1, "HadamardProduct binds one variable per round");
+        HadamardProduct {
+            base: self.base.fix_last_variable(alpha),
+            ext: self.ext.fix_last_variable(alpha),
+        }
+    }
+
+    fn sum_as_poly_in_last_t_variables(
+        &self,
+        claim: Option<EF>,
+        t: usize,
+    ) -> crate::shard_level::types::UnivariatePolynomial<EF> {
+        assert_eq!(t, 1, "HadamardProduct binds one variable per round");
+        hadamard_round_poly(self.base.first_component(), self.ext.first_component(), claim)
     }
 }
