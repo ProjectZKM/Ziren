@@ -411,6 +411,78 @@ mod tests {
         }
     }
 
+    /// Full prover -> verifier round trip for the LSB convention, replaying the
+    /// verifier's side of `verify_jagged_reduction` inline: same transcript
+    /// order (observe the round poly, check `p(0)+p(1) == claim`, sample), and
+    /// the recorded point checked in SAMPLE order rather than the reversed
+    /// order the MSB convention uses.
+    ///
+    /// This is the evidence that the Option-B switch is self-consistent before
+    /// any call site or the recursion mirror moves.
+    #[test]
+    fn hadamard_reduction_round_trips_against_a_replayed_verifier() {
+        use crate::jagged_sumcheck::observe_round_poly_evals;
+        use crate::kb31_poseidon2::{InnerChallenger, InnerPerm};
+        use p3_challenger::FieldChallenger;
+
+        let mut rng = StdRng::seed_from_u64(0xA0FF);
+        let lsh = 3u32;
+        let comps = build(&mut rng, &[4usize, 4], lsh);
+        let total: usize = comps.iter().map(|m| m.num_polynomials() << m.num_variables()).sum();
+        let weights: Vec<InnerChallenge> =
+            (0..total).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
+        let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
+            comps.into_iter().map(std::sync::Arc::new).collect();
+
+        let hp = jagged_hadamard_poly(msg.clone(), lsh, weights.clone());
+        let claim: InnerChallenge = hp
+            .ext
+            .first_component()
+            .guts()
+            .as_slice()
+            .iter()
+            .zip(hp.base.first_component().guts().as_slice().iter())
+            .map(|(e, b)| *e * *b)
+            .fold(InnerChallenge::ZERO, |a, x| a + x);
+
+        let perm: InnerPerm = zkm_primitives::poseidon2_init();
+        let mut pch = InnerChallenger::new(perm.clone());
+        let proof = prove_jagged_reduction_hadamard(msg, lsh, weights, &mut pch);
+
+        // ── verifier replay ──
+        let mut vch = InnerChallenger::new(perm);
+        let mut current = claim;
+        let mut sampled: Vec<InnerChallenge> = Vec::new();
+        for (i, round) in proof.rounds.iter().enumerate() {
+            let [p0, p1, p2] = round.evals;
+            observe_round_poly_evals(&mut vch, [p0, p1, p2]);
+            assert_eq!(p0 + p1, current, "round {i}: sumcheck identity failed");
+            let r: InnerChallenge = vch.sample_algebra_element();
+            sampled.push(r);
+            // p(r) via Lagrange on {0,1,2}, the same closed form the verifier uses.
+            let two_inv = InnerChallenge::from_u8(2).inverse();
+            let l0 = (r - InnerChallenge::ONE) * (r - InnerChallenge::from_u8(2)) * two_inv;
+            let l1 = r * (r - InnerChallenge::from_u8(2)) * (-InnerChallenge::ONE);
+            let l2 = r * (r - InnerChallenge::ONE) * two_inv;
+            current = p0 * l0 + p1 * l1 + p2 * l2;
+        }
+
+        // SAMPLE order, not reversed — this is the Option-B delta.
+        assert_eq!(sampled, proof.eval_point, "recorded point is not in sample order");
+
+        // Closing identity: q_at_z * w_at_z == final claim.
+        let w_full = LongMle::from_components(
+            vec![Mle::from_values(hp.ext.first_component().guts().as_slice().to_vec())],
+            hp.ext.num_variables(),
+        );
+        let w_at_z = w_full.eval_at(&proof.eval_point);
+        assert_eq!(
+            InnerChallenge::from(proof.q_at_z) * w_at_z,
+            current,
+            "closing identity q(z*)*w(z*) != final claim",
+        );
+    }
+
     /// A non-power-of-two total must be REJECTED, not silently truncated by
     /// floor-`ilog2` (SP1 `long.rs:95` has no guard; this is the ported check).
     #[test]
