@@ -580,7 +580,7 @@ where
     // the REAL-height big-endian degree bits in the `quotient` slot.
     let opened_values = build_opened_values::<SC, A>(
         chips,
-        &trace_at_z,
+        trace_at_z,
         &chip_log_heights,
         &chip_heights,
         max_log_row_count,
@@ -1029,7 +1029,7 @@ where
 /// `full_geq` degree.
 pub fn build_opened_values<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
+    mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     chip_log_heights: &std::collections::BTreeMap<String, u8>,
     chip_heights: &std::collections::BTreeMap<String, usize>,
     max_log_row_count: usize,
@@ -1048,10 +1048,15 @@ where
             .map(|chip| {
                 let name = MachineAir::<Val<SC>>::name(**chip);
                 let prep_width = MachineAir::<Val<SC>>::preprocessed_width(**chip);
-                let evals: Vec<Challenge<SC>> =
-                    trace_at_z.get(&name).cloned().unwrap_or_default();
-                let split = prep_width.min(evals.len());
-                let (prep_local, main_local) = evals.split_at(split);
+                // MOVE the chip's residual out of the map and split it IN PLACE:
+                // `remove` + `split_off` transfer ownership, so neither the
+                // preprocessed nor the main opening copies its cells.  This used
+                // to `.cloned()` the whole vector and then `.to_vec()` each half
+                // — three copies of the same data per chip, per shard.
+                let mut prep_local: Vec<Challenge<SC>> =
+                    trace_at_z.remove(&name).unwrap_or_default();
+                let split = prep_width.min(prep_local.len());
+                let main_local = prep_local.split_off(split);
                 let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
                 // big-endian bit decomposition of the REAL height (the
                 // VirtualGeq threshold).  bit_len = max_log_row_count + 1.
@@ -1076,11 +1081,11 @@ where
                     .collect();
                 crate::types::ChipOpenedValues {
                     preprocessed: crate::types::AirOpenedValues {
-                        local: prep_local.to_vec(),
+                        local: prep_local,
                         next: Vec::new(),
                     },
                     main: crate::types::AirOpenedValues {
-                        local: main_local.to_vec(),
+                        local: main_local,
                         next: Vec::new(),
                     },
                     permutation: crate::types::AirOpenedValues {
