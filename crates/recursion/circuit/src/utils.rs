@@ -7,38 +7,6 @@ use zkm_recursion_core::DIGEST_SIZE;
 
 use zkm_pcs::Word;
 
-/// Convert 8 KoalaBear words into a Bn254 field element by shifting by 31 bits each time. The last
-/// word becomes the least significant bits.
-#[allow(dead_code)]
-pub fn koalabears_to_bn254(digest: &[KoalaBear; 8]) -> Bn254 {
-    let mut result = Bn254::ZERO;
-    for word in digest.iter() {
-        // Since KoalaBear prime is less than 2^31, we can shift by 31 bits each time and still be
-        // within the Bn254 field, so we don't have to truncate the top 3 bits.
-        result *= Bn254::from_u64(1 << 31);
-        result += Bn254::from_u32(word.as_canonical_u32());
-    }
-    result
-}
-
-/// Convert 32 KoalaBear bytes into a Bn254 field element. The first byte's most significant 3 bits
-/// (which would become the 3 most significant bits) are truncated.
-#[allow(dead_code)]
-pub fn koalabear_bytes_to_bn254(bytes: &[KoalaBear; 32]) -> Bn254 {
-    let mut result = Bn254::ZERO;
-    for (i, byte) in bytes.iter().enumerate() {
-        debug_assert!(byte < &KoalaBear::from_u32(256));
-        if i == 0 {
-            // 32 bytes is more than Bn254 prime, so we need to truncate the top 3 bits.
-            result = Bn254::from_u32(byte.as_canonical_u32() & 0x1f);
-        } else {
-            result *= Bn254::from_u32(256);
-            result += Bn254::from_u32(byte.as_canonical_u32());
-        }
-    }
-    result
-}
-
 pub fn felts_to_bn254_var<C: Config>(
     builder: &mut Builder<C>,
     digest: &[Felt<C::F>; DIGEST_SIZE],

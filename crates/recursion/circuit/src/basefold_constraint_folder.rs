@@ -307,8 +307,11 @@ mod basefold_air_assertions_circuit {
     {
     }
 
-    /// Const used purely to force monomorphisation of all 11 chip
-    /// assertions at compile time.  Never called.
+    /// Const used purely to force monomorphisation of every chip's
+    /// `Air<BasefoldConstraintFolder>` bound at compile time.  Never called --
+    /// the body is type-checked, which is the whole point, so it needs
+    /// `allow(dead_code)` to keep the helper it references alive.
+    /// Covers the 7 production chips plus the `RecursionAir` enum.
     #[allow(dead_code)]
     const _ASSERT_ALL_CHIPS_CIRCUIT: fn() = || {
         // 1. MemoryConst
