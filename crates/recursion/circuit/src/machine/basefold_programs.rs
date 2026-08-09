@@ -311,25 +311,51 @@ mod tests {
         let public_values = vec![p3_koala_bear::KoalaBear::ZERO; zkm_pcs::PROOF_MAX_NUM_PVS];
         let mut challenger = machine.config().challenger();
 
-        prove_shard_to_basefold::<
+        // Drive the shape build through a `CpuProver`, as SP1 does — the prover
+        // IS the dispatch, there is no free-fn entry.
+        //
+        // The prover sources what the old free fn took as arguments from
+        // `self`, so the machine it is built on has to reproduce them:
+        //   * `orientation` -> CpuProver is unconditionally `Msb`.
+        //   * `recursion_area_pin` -> `pins_recursion_area()`, false here.
+        //   * `max_log_row_count` -> read back off the padded traces below.
+        //   * `dense_rev` -> `machine().core_rev()`.  THIS is why the machine is
+        //     rebuilt with `StarkMachine::new` instead of reusing the caller's:
+        //     the MIPS machine is built by `new_core_rev` (`core_rev == true`),
+        //     while this shape-only builder needs the legacy `false`.  Passing
+        //     the caller's machine straight through would silently flip the
+        //     orientation and move the synthetic proof -- and with it the
+        //     recursion shape it exists to pin.
+        let shape_machine = zkm_pcs::StarkMachine::new(
+            machine.config().clone(),
+            vec![chip.clone()],
+            machine.num_pv_elts(),
+        );
+        debug_assert!(!shape_machine.core_rev(), "shape builder must stay legacy-bitrev");
+        let prover = <zkm_pcs::CpuProver<
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-        >(
-            &chips,
-            &[prep_trace],
-            &[main_trace],
-            public_values,
-            zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-                .max_log_row_count,
+        > as zkm_pcs::prover::MachineProver<_, _>>::new(shape_machine);
+
+        let max_log_row_count = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::
+            production_default()
+            .max_log_row_count;
+        let main_traces = zkm_pcs::named_padded_traces(
+            chips.iter().map(|c| c.name()),
+            vec![main_trace],
+            max_log_row_count as u32,
+            |_| None,
+        );
+
+        zkm_pcs::prover::MachineProver::prove_shard_to_basefold(
+            &prover,
+            zkm_pcs::ShardProveData {
+                chips: &chips,
+                preprocessed_traces: &[prep_trace],
+                main_traces,
+                public_values,
+            },
             &mut challenger,
-            // CpuProver-equivalent orientation.
-            zkm_pcs::shard_level::shard_proof::FoldOrientation::Msb,
-            // per-shard rev(zeta) orientation
-            // (shape-only synthetic builder — legacy bitrev).
-            false,
-            // No recursion AREA PIN (synthetic
-            // core-shape builder → NATURAL own-area).
-            None,
         )
     }
 

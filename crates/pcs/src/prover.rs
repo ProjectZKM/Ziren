@@ -538,7 +538,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             // INLINE-commit: `maybe_auto_precompute_basefold` builds the jagged
             // commit during this prove pass (for BOTH the inner and the
             // OUTER/wrap ring).
-            &crate::shard_level::prover::ProverJaggedEval(self),
+            self,
         )
     }
 
