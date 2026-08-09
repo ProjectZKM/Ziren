@@ -242,7 +242,15 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
 
 
         // (5) Verify the jagged sumcheck.
-        verify_sumcheck::<C, FC>(builder, challenger, sumcheck_proof);
+        // The jagged REDUCTION binds the stride-1 (LSB) variable, as SP1 does, so
+        // its point is recorded in SAMPLE order.  LogUp-GKR and jagged-eval still
+        // bind the MSB and keep `PointOrder::Reversed`.
+        crate::sumcheck::verify_sumcheck_with_order::<C, FC>(
+            builder,
+            challenger,
+            sumcheck_proof,
+            crate::sumcheck::PointOrder::Sample,
+        );
 
         // (6) Run the caller-supplied jagged-eval sub-protocol.
         let sumcheck_point = &sumcheck_proof.point_and_eval.0;

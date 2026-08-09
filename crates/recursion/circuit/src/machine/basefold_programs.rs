@@ -274,7 +274,7 @@ mod tests {
         use p3_field::PrimeCharacteristicRing;
         use p3_matrix::dense::RowMajorMatrix;
         use zkm_pcs::air::MachineAir;
-        use zkm_pcs::shard_level::prove_shard_to_basefold;
+        use zkm_pcs::MachineProver;
         use zkm_pcs::StarkGenericConfig;
 
         // Pick one small, non-precompile chip with deterministic
@@ -326,16 +326,28 @@ mod tests {
         //     the caller's machine straight through would silently flip the
         //     orientation and move the synthetic proof -- and with it the
         //     recursion shape it exists to pin.
+        // `Chip` is not `Clone` (nor is `MipsAir`), so the shape machine gets a
+        // freshly constructed AddSub chip rather than a copy of the caller's.
+        // `Chip::new` derives the lookups and degree from the AIR, so the two are
+        // structurally identical — asserted below on the name and widths.
+        let owned_chip = zkm_pcs::Chip::new(zkm_core_machine::mips::MipsAir::Add(
+            zkm_core_machine::alu::AddSubChip::default(),
+        ));
+        debug_assert_eq!(MachineAir::<p3_koala_bear::KoalaBear>::name(&owned_chip), chip.name());
+        debug_assert_eq!(
+            <_ as BaseAir<p3_koala_bear::KoalaBear>>::width(&owned_chip),
+            main_width,
+        );
         let shape_machine = zkm_pcs::StarkMachine::new(
             machine.config().clone(),
-            vec![chip.clone()],
+            vec![owned_chip],
             machine.num_pv_elts(),
         );
         debug_assert!(!shape_machine.core_rev(), "shape builder must stay legacy-bitrev");
         let prover = <zkm_pcs::CpuProver<
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
             zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-        > as zkm_pcs::prover::MachineProver<_, _>>::new(shape_machine);
+        > as MachineProver<_, _>>::new(shape_machine);
 
         let max_log_row_count = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::
             production_default()
@@ -347,7 +359,7 @@ mod tests {
             |_| None,
         );
 
-        zkm_pcs::prover::MachineProver::prove_shard_to_basefold(
+        MachineProver::prove_shard_to_basefold(
             &prover,
             zkm_pcs::ShardProveData {
                 chips: &chips,

@@ -47,10 +47,38 @@ use crate::CircuitConfig;
 /// for the underlying polynomial at `point_and_eval.0` — that's
 /// what makes this a "partial" sumcheck verification.  The caller
 /// owns the open-and-verify step.
+/// Which order the prover recorded its challenge point in.
+///
+/// The sumchecks in this circuit disagree, so this is explicit rather than
+/// implied: the LogUp-GKR and jagged-eval sumchecks bind the MSB and record via
+/// `insert(0, alpha)`, while the jagged REDUCTION binds the stride-1 (LSB)
+/// variable, as SP1 does, and records in sample order.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PointOrder {
+    /// Newest challenge at the front (`insert(0, alpha)`) — MSB binding.
+    Reversed,
+    /// Challenges appended in sample order (`push`) — LSB binding.
+    Sample,
+}
+
+/// MSB-binding sumcheck verification (`PointOrder::Reversed`).
 pub fn verify_sumcheck<C, FC>(
     builder: &mut Builder<C>,
     challenger: &mut FC,
     proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
+) where
+    C: CircuitConfig,
+    FC: FieldChallengerVariable<C, C::Bit>,
+{
+    verify_sumcheck_with_order::<C, FC>(builder, challenger, proof, PointOrder::Reversed)
+}
+
+/// As [`verify_sumcheck`], with the prover's point order made explicit.
+pub fn verify_sumcheck_with_order<C, FC>(
+    builder: &mut Builder<C>,
+    challenger: &mut FC,
+    proof: &PartialSumcheckProof<Ext<C::F, C::EF>>,
+    point_order: PointOrder,
 ) where
     C: CircuitConfig,
     FC: FieldChallengerVariable<C, C::Bit>,
@@ -86,7 +114,10 @@ pub fn verify_sumcheck<C, FC>(
     // equality check below (verifier α[i] == prover point[i]) holds.
     for round_poly in proof.univariate_polys.iter().skip(1) {
         let alpha = challenger.sample_ext(builder);
-        accumulated_point.insert(0, alpha);
+        match point_order {
+            PointOrder::Reversed => accumulated_point.insert(0, alpha),
+            PointOrder::Sample => accumulated_point.push(alpha),
+        }
 
         let round_poly_symbolic = lift_to_symbolic::<C>(round_poly);
         let expected_eval = previous_poly.eval_at_point(alpha.into());
@@ -107,7 +138,10 @@ pub fn verify_sumcheck<C, FC>(
     // challenge point matches the prover's claimed point and that
     // p_{n-1}(α_n) == point_and_eval.1.
     let alpha = challenger.sample_ext(builder);
-    accumulated_point.insert(0, alpha);
+    match point_order {
+        PointOrder::Reversed => accumulated_point.insert(0, alpha),
+        PointOrder::Sample => accumulated_point.push(alpha),
+    }
 
     for (i, (verifier_alpha, prover_point_coord)) in
         accumulated_point.iter().zip(proof.point_and_eval.0.iter()).enumerate()
