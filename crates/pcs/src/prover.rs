@@ -543,10 +543,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             dense_rev,
             // Sourced from `pins_recursion_area()` above (SP1 / GPU parity).
             recursion_area_pin,
-            // INLINE-commit: no eager precompute is threaded — the lazy
-            // `maybe_auto_precompute_basefold` builds the jagged commit during this
-            // prove pass (for BOTH the inner and the OUTER/wrap ring).
-            None,
+            // INLINE-commit: `maybe_auto_precompute_basefold` builds the jagged
+            // commit during this prove pass (for BOTH the inner and the
+            // OUTER/wrap ring).
             &crate::shard_level::prover::ProverJaggedEval(self),
         )
     }

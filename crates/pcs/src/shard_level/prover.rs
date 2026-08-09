@@ -18,22 +18,16 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// dispatch path. `device_traces` is per-shard per-worker and never
 /// shared across pool workers.
 ///
-/// `precomputed_commit` (single-main-commit flow): when
-/// `Some`, the BaseFold jagged-PCS commit was produced up-front by
-/// the orchestrator and its 8-felt digest IS `main_commitment`.  The
-/// jagged-PCS opening body skips its own commit step and the in-band
-/// commit observe; the verifier counterpart
-/// (`verify_jagged_basefold_no_observe`) matches.  When `None`, the
-/// two-commit flow runs (FRI commit upstream, jagged-PCS
-/// re-commits during opening).
+/// Single-main-commit flow: the BaseFold jagged-PCS commit is built during this
+/// prove pass by `maybe_auto_precompute_basefold`, and its 8-felt digest becomes
+/// `main_commitment`.  The jagged-PCS opening body therefore skips its own commit
+/// step and the in-band commit observe, matching the verifier counterpart
+/// (`verify_jagged_basefold_no_observe`).  There is no longer a two-commit flow:
+/// the old `precomputed_commit: Option<_>` parameter was `None` at every call
+/// site and has been removed.
 /// Auto-precompute helper (GPU pipeline path).
 ///
-/// When `precomputed_commit` is already `Some` (the host CPU path,
-/// which precomputes during its own `commit`) or the config is not
-/// the KoalaBear jagged-PCS config, this is a no-op — the inputs pass
-/// through unchanged.
-///
-/// Otherwise it runs the BaseFold pre-commit on the supplied
+/// Runs the BaseFold pre-commit on the supplied
 /// (already-materialized) `main_traces` via
 /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]
 /// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
@@ -58,11 +52,6 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
     // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
     main_traces: Vec<RowMajorMatrixView<'t, Val<SC>>>,
     main_commitment: [Val<SC>; 8],
-    precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
-    >,
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -79,7 +68,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
 ) -> (
     Vec<RowMajorMatrixView<'t, Val<SC>>>,
     [Val<SC>; 8],
-    Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>>,
+    crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
 )
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -92,21 +81,27 @@ where
     use core::any::TypeId;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // Host path already supplied a precompute, or this config does not prove
-    // via BaseFold (`use_basefold() == false`, e.g. the OuterSC wrap on FRI):
-    // pass through untouched. The dispatch
-    // boolean is the `BasefoldRing` trait; the Val/Challenge/Challenger
-    // identities (which keep the KoalaBear transmutes below sound) are then
-    // asserted in debug builds.
-    if precomputed_commit.is_some() || !<SC as BasefoldRing>::use_basefold() {
-        return (main_traces, main_commitment, precomputed_commit);
-    }
+    // This used to begin with a pass-through guard on
+    // `precomputed_commit.is_some() || !use_basefold()`.  Both disjuncts were
+    // unreachable -- every caller passed `None` (the commit is built HERE, during
+    // the prove pass) and both `use_basefold()` impls return `true` -- and the
+    // branch was not merely dead but dangerous: returning `None` would leave the
+    // prover observing the BaseFold commit in-band while the verifier always uses
+    // `verify_jagged_basefold_no_observe`, i.e. a transcript desync that a green
+    // test suite cannot see.  The parameter is gone and the commit is returned
+    // unconditionally, so there is nothing left to fall through.
+    //
     // Both rings have Val == InnerVal (KoalaBear) and Challenge == InnerChallenge
-    // (KoalaBear^4) — the identities the `named_inner` relabel below relies on.
-    debug_assert!(
+    // (KoalaBear^4) -- the identities the `named_inner` relabel below relies on.
+    // This is a REAL assert, not a `debug_assert!`: it is the only thing standing
+    // between a non-KoalaBear config and the `from_raw_parts` / `transmute_copy`
+    // reinterprets below, and a `debug_assert!` compiles out in release, which is
+    // exactly where that would be UB.  Cost is one TypeId compare per shard.
+    assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
-        "maybe_auto_precompute_basefold: use_basefold()=true requires          Val==KoalaBear / Challenge==KoalaBear^4 (shared by inner + outer rings)",
+        "maybe_auto_precompute_basefold: requires Val==KoalaBear / \
+         Challenge==KoalaBear^4 (shared by inner + outer rings)",
     );
     // Ring discriminator: the INNER ring (core/compress/shrink) uses the
     // Poseidon2-KoalaBear `JaggedChallenger`; the OUTER/wrap ring uses the BN254
@@ -158,9 +153,14 @@ where
             use_rev,
             recursion_area_pin,
         );
-        // Record the per-shard orientation on the built commit (the device
-        // hook builds its dense on-device under the SAME `use_rev`, but may not
-        // stamp the flag — force it here so the step-4 reduction reads it back).
+        // Record the per-shard orientation on the built commit.  The producer
+        // builds its dense under this SAME `use_rev` but may not stamp the field,
+        // and an unstamped `false` is indistinguishable from a deliberate
+        // `false`, so this is an unconditional overwrite rather than a check.
+        // NOTE the cost of that: if a producer ever built under a DIFFERENT
+        // orientation, this would stamp the expected value over the actual one
+        // and turn a detectable mismatch into a wrong proof.  Making the producer
+        // stamp it (and asserting here) is the fix if that ever becomes possible.
         precomputed.rev = use_rev;
         // FORCE the recursion AREA PIN onto the
         // built commit (the device hook pins `log_dense_size` device-side under
@@ -228,7 +228,7 @@ where
     // move back).  They still borrow the shared `Arc<Mle>` store for the open.
     drop(named_inner);
 
-    (main_traces, main_commitment, Some(precomputed_generic))
+    (main_traces, main_commitment, precomputed_generic)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -246,11 +246,6 @@ pub fn prove_shard_to_basefold<SC, A>(
     // The recursion-layer AREA PIN.  `Some(_)` on the
     // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
-    precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
-    >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -321,7 +316,6 @@ where
         orientation,
         dense_rev,
         recursion_area_pin,
-        precomputed_commit,
     )
 }
 
@@ -541,11 +535,6 @@ pub fn prove_shard_to_basefold_with_traces<SC, A>(
     // The recursion-layer AREA PIN.  `Some(_)` on the
     // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
-    precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
-    >,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -592,7 +581,6 @@ where
         orientation,
         dense_rev,
         recursion_area_pin,
-        precomputed_commit,
         &FreeFnJaggedEval,
     )
 }
@@ -624,11 +612,6 @@ pub fn prove_shard_to_basefold_with_traces_dispatch<SC, A, D>(
     // field).  `Some(_)` on the GPU RECURSION (compress) lazy-commit path; `None`
     // elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
-    precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
-    >,
     // The jagged trusted-evaluations open producer.  Free-fn path
     // passes `&FreeFnJaggedEval`; a prover routes `&ProverJaggedEval(self)`.
     jagged_eval_producer: &D,
@@ -730,7 +713,6 @@ where
             chips,
             commit_traces,
             main_commitment,
-            precomputed_commit,
             dense_rev,
             recursion_area_pin,
         );
@@ -919,7 +901,7 @@ where
             // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
-            precomputed_commit,
+            Some(precomputed_commit),
             residual_y,
             &open_heights,
         )

@@ -332,9 +332,6 @@ mod tests {
             // No recursion AREA PIN (synthetic
             // core-shape builder → NATURAL own-area).
             None,
-            // Precomputed-commit not used for the synthetic witness
-            // builder — uses the in-band commit flow.
-            None,
         )
     }
 
