@@ -274,7 +274,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn precompute_jagged_inline(
-        named_inner: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>],
+        named_inner: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
@@ -292,7 +292,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn prove_jagged_open(
-        chip_traces: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>],
+        chip_traces: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView],
         r_row_per_chip: &[Vec<zkm_pcs::InnerChallenge>],
         z_row: &[zkm_pcs::InnerChallenge],
         _pre_y_per_chip: Option<Vec<Vec<zkm_pcs::InnerChallenge>>>,
@@ -687,9 +687,18 @@ mod basefold_over_bn254_roundtrip_test {
 
         // The jagged entry points take BORROWED `ChipTraceView`s (name + cells +
         // width), not owned matrices; build the views once and reuse them.
-        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>> = traces
+        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
             .iter()
-            .map(|(name, m)| (name.clone(), zkm_pcs::jagged::ChipTrace::new(&m.values, m.width)))
+            .map(|(name, m)| (name.clone(), {
+                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
+                        std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
+                            p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
+                        )),
+                        log_h,
+                    )
+                }))
             .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();

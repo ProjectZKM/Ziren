@@ -749,7 +749,7 @@ pub mod jagged {
     /// Device-resident chips carry an empty view (width 0); the host-fallback
     /// `rematerialize_chip_traces_via_provider` produces owned side-storage the
     /// caller re-views.
-    pub type ChipTraceView<'a> = (alloc::string::String, crate::jagged::ChipTrace<'a, InnerVal>);
+    pub type ChipTraceView = (alloc::string::String, crate::multilinear::PaddedMle<InnerVal>);
 
     use super::{
         FriConfig,
@@ -1035,7 +1035,7 @@ pub mod jagged {
     /// `main_commitment` field) at the same transcript position the
     /// verifier observes it.
     pub fn precompute_jagged_basefold_commit(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
         // threaded to `materialize_dense_jagged` and recorded on the returned
         // `PrecomputedJaggedCommit.rev` so the step-4 reduction stays in lockstep.
@@ -1099,7 +1099,7 @@ pub mod jagged {
     /// KoalaBear for BOTH rings (Val == KoalaBear everywhere), so `JaggedDft`
     /// is reused. No challenger observe (caller surfaces the commitment).
     pub fn precompute_jagged_basefold_commit_generic<MT>(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         mmcs: MT,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
         // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
@@ -1158,7 +1158,7 @@ pub mod jagged {
     /// reduction, open dense at the reduction's `z*` via BaseFold,
     /// bundle for the wire.
     pub fn prove_jagged_basefold(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
@@ -1187,7 +1187,7 @@ pub mod jagged {
     /// traces, removing the silent invalid-proof edge that an unconditional
     /// `commit_traces` D2H skip would otherwise leave.
     pub fn prove_jagged_basefold_with_precomputed_provider(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         precomputed: PrecomputedJaggedCommit,
@@ -1219,7 +1219,7 @@ pub mod jagged {
     /// former inline in-band-commit body (host commit, legacy `rev = false`,
     /// no area pin, no provider).
     pub fn prove_jagged_basefold_with_y_per_chip(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -1257,10 +1257,21 @@ pub mod jagged {
     /// them (the caller keeps it in scope).
     pub fn views_over_owned(
         owned: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
-    ) -> alloc::vec::Vec<ChipTraceView<'_>> {
+    ) -> alloc::vec::Vec<ChipTraceView> {
         owned
             .iter()
-            .map(|(name, m)| (name.clone(), crate::jagged::ChipTrace::new(&m.values, m.width)))
+            .map(|(name, m)| {
+                // The jagged path now carries `PaddedMle`, so the rematerialized
+                // side-storage is wrapped rather than borrowed.  `num_variables`
+                // is the chip's own log-height: the packer reads dims and cells
+                // back off the real trace, and never consults the padding.
+                let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                    RowMajorMatrix::new(m.values.clone(), m.width),
+                ));
+                (name.clone(), crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h))
+            })
             .collect()
     }
 
@@ -1361,7 +1372,7 @@ pub mod jagged {
     /// caller already observed the digest — the orchestrator at the Phase 1
     /// prologue position, or the wrapper just above).
     fn prove_jagged_basefold_inner(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -1449,9 +1460,9 @@ pub mod jagged {
             chip_traces
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
-                .map(|((_name, trace), r_row_c)| {
-                    let h = trace.values.len() / trace.width.max(1);
-                    let w = trace.width;
+                .map(|((_name, pm), r_row_c)| {
+                    let (trace_values, w) = crate::jagged::real_cells(pm);
+                    let h = if w == 0 { 0 } else { trace_values.len() / w };
                     // #P2S0: a genuine HEIGHT-0 (0-row) but
                     // FULL-WIDTH missing chip
                     // must still emit ONE column claim PER COLUMN (all zero),
@@ -1507,7 +1518,7 @@ pub mod jagged {
                                     row
                                 };
                                 acc += eq_c[row]
-                                    * InnerChallenge::from(trace.values[src * w + col]);
+                                    * InnerChallenge::from(trace_values[src * w + col]);
                             }
                             acc
                         })
@@ -1687,7 +1698,7 @@ pub mod jagged {
     /// emit a BaseFold-BN254 bundle. Requires a precomputed commit (Option B).
     #[allow(clippy::type_complexity)]
     pub fn prove_jagged_basefold_inner_generic<Challenger, MT>(
-        chip_traces: &[ChipTraceView<'_>],
+        chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
@@ -1720,9 +1731,9 @@ pub mod jagged {
             chip_traces
                 .par_iter()
                 .zip(r_row_per_chip.par_iter())
-                .map(|((_name, trace), r_row_c)| {
-                    let h = trace.values.len() / trace.width.max(1);
-                    let w = trace.width;
+                .map(|((_name, pm), r_row_c)| {
+                    let (trace_values, w) = crate::jagged::real_cells(pm);
+                    let h = if w == 0 { 0 } else { trace_values.len() / w };
                     if h == 0 || w == 0 {
                         return Vec::new();
                     }
@@ -1756,7 +1767,7 @@ pub mod jagged {
                                     row
                                 };
                                 acc += eq_c[row]
-                                    * InnerChallenge::from(trace.values[src * w + col]);
+                                    * InnerChallenge::from(trace_values[src * w + col]);
                             }
                             acc
                         })
@@ -2343,11 +2354,20 @@ pub mod jagged {
         /// zero-copy view over its own cells — same cells, same width.
         fn as_chip_views(
             traces: &[(alloc::string::String, RowMajorMatrix<InnerVal>)],
-        ) -> Vec<ChipTraceView<'_>> {
+        ) -> Vec<ChipTraceView> {
             traces
                 .iter()
                 .map(|(name, t)| {
-                    (name.clone(), crate::jagged::ChipTrace::new(&t.values, t.width))
+                    (name.clone(), {
+                    let h = if t.width == 0 { 0 } else { t.values.len() / t.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    crate::multilinear::PaddedMle::padded_with_zeros(
+                        std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                            p3_matrix::dense::RowMajorMatrix::new(t.values.clone(), t.width),
+                        )),
+                        log_h,
+                    )
+                })
                 })
                 .collect()
         }
@@ -2669,10 +2689,19 @@ mod test {
     /// view over its own cells — same cells, same width.
     fn as_chip_views(
         traces: &[(String, RowMajorMatrix<JaggedVal>)],
-    ) -> Vec<ChipTraceView<'_>> {
+    ) -> Vec<ChipTraceView> {
         traces
             .iter()
-            .map(|(name, t)| (name.clone(), crate::jagged::ChipTrace::new(&t.values, t.width)))
+            .map(|(name, t)| (name.clone(), {
+                    let h = if t.width == 0 { 0 } else { t.values.len() / t.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    crate::multilinear::PaddedMle::padded_with_zeros(
+                        std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                            p3_matrix::dense::RowMajorMatrix::new(t.values.clone(), t.width),
+                        )),
+                        log_h,
+                    )
+                }))
             .collect()
     }
 

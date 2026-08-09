@@ -418,7 +418,7 @@ pub mod koala_bear_poseidon2 {
         }
 
         fn precompute_jagged_inline(
-            named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+            named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
             use_rev: bool,
             recursion_area_pin: Option<usize>,
         ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
@@ -435,7 +435,7 @@ pub mod koala_bear_poseidon2 {
         /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
         /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
         fn prove_jagged_open(
-            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
             r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
             z_row: &[crate::InnerChallenge],
             pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,

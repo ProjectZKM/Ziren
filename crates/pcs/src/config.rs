@@ -193,7 +193,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// eager wrap-ring commit produced (same MMCS / FRI config / `use_rev` /
     /// `recursion_area_pin`), just built during the prove pass.
     fn precompute_jagged_inline(
-        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
@@ -228,7 +228,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// `precomputed` is `None` only on the legacy in-band-commit flow (host
     /// synthetic / tests); the single-main-commit flow always supplies it.
     fn prove_jagged_open(
-        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
         z_row: &[crate::InnerChallenge],
         pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,

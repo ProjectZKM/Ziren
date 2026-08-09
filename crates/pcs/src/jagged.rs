@@ -68,42 +68,15 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
-/// A chip's trace cells for the jagged packer: row-major `values` plus the row
-/// `width`.
-///
-/// This used to be a `RowMajorMatrixView`.  The packer indexes
-/// `values[row * width + col]` by hand throughout and needed only two things
-/// from the `Matrix` impl -- `height` and `width` -- which are inherent here, so
-/// the matrix wrapper bought a trait impl for a struct that is already just a
-/// slice and a stride.  Field names and `new` match the old view, so every
-/// consumer reads identically; only construction sites moved.
-#[derive(Clone, Copy, Debug)]
-pub struct ChipTrace<'a, F> {
-    /// Row-major trace cells.
-    pub values: &'a [F],
-    /// Number of columns per row.
-    pub width: usize,
-}
-
-impl<'a, F> ChipTrace<'a, F> {
-    /// Build a view over `values`, `width` columns per row.
-    pub const fn new(values: &'a [F], width: usize) -> Self {
-        Self { values, width }
-    }
-
-    /// Number of columns per row.
-    pub const fn width(&self) -> usize {
-        self.width
-    }
-
-    /// Number of rows; `0` for a width-0 (device-resident / unexercised) chip,
-    /// matching what `DenseMatrix::height` returned for the view this replaced.
-    pub const fn height(&self) -> usize {
-        if self.width == 0 {
-            0
-        } else {
-            self.values.len() / self.width
-        }
+/// A chip's real (unpadded) row-major cells and row width, projected out of the
+/// shared `PaddedMle` store.  A device-resident / unexercised chip has no real
+/// cells and projects to `(&[], 0)` — zero area, matching the width-0 view this
+/// replaced.
+#[inline]
+pub fn real_cells<F: Field>(pm: &crate::multilinear::PaddedMle<F>) -> (&[F], usize) {
+    match pm.real_trace_ref() {
+        Some(t) => (t.values, t.width),
+        None => (&[], 0),
     }
 }
 
@@ -161,7 +134,7 @@ pub struct JaggedPacking<F> {
 /// downstream code (sumcheck reduction, verifier weight tables) only
 /// needs the metadata, not the dense values.
 pub fn compute_jagged_metadata<F: Field>(
-    traces: &[(String, crate::jagged::ChipTrace<'_, F>)],
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
 ) -> JaggedPacking<F> {
     // Delegate to the dims-based core so callers that have only the
     // per-chip (name, height, width) — e.g. the device commit hook,
@@ -170,12 +143,14 @@ pub fn compute_jagged_metadata<F: Field>(
     // the identical packing.
     let dims: Vec<(String, usize, usize)> = traces
         .iter()
-        .map(|(name, trace)| {
-            (
-                name.clone(),
-                trace.height(),
-                trace.width(),
-            )
+        .map(|(name, pm)| {
+            // A device-resident / unexercised chip carries no real cells; it
+            // packs as zero-area, exactly as the width-0 view it replaces did.
+            let (h, w) = pm
+                .real_trace_ref()
+                .map(|t| (if t.width == 0 { 0 } else { t.values.len() / t.width }, t.width))
+                .unwrap_or((0, 0));
+            (name.clone(), h, w)
         })
         .collect();
     compute_jagged_metadata_from_dims::<F>(&dims)
@@ -244,7 +219,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 /// it to the consumer (e.g. the BaseFold commit) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
-    traces: &[(String, crate::jagged::ChipTrace<'_, F>)],
+    traces: &[(String, crate::multilinear::PaddedMle<F>)],
     log_dense_size: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
@@ -263,9 +238,9 @@ pub fn materialize_dense_jagged<F: Field>(
     // Pre-compute per-chip offset = sum of (height × width) for prior chips.
     let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
     let mut total: usize = 0;
-    for (_name, trace) in traces {
-        let h = trace.height();
-        let w = trace.width();
+    for (_name, pm) in traces {
+        let (vals, w) = real_cells(pm);
+        let h = if w == 0 { 0 } else { vals.len() / w };
         chip_offsets.push(total);
         total += h * w;
     }
@@ -320,9 +295,9 @@ pub fn materialize_dense_jagged<F: Field>(
         chip_slots
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
-            .for_each(|(slot, ((_name, trace), _))| {
-                let height = trace.height();
-                let width = trace.width();
+            .for_each(|(slot, ((_name, pm), _))| {
+                let (trace_values, width) = real_cells(pm);
+                let height = if width == 0 { 0 } else { trace_values.len() / width };
                 if width == 0 || height == 0 {
                     return;
                 }
@@ -346,7 +321,7 @@ pub fn materialize_dense_jagged<F: Field>(
                         } else {
                             row
                         };
-                        dst[row] = trace.values[src * width + col];
+                        dst[row] = trace_values[src * width + col];
                     }
                 });
             });

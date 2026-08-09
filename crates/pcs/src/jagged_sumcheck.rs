@@ -593,10 +593,19 @@ mod phase1_acceptance_gate {
         let traces = build_traces(chips, &mut rng);
         // SITE-1 trace-unification: the metadata/dense helpers now take borrowed
         // views; build them over the owned `traces` (kept alive in this scope).
-        let trace_views: Vec<(String, crate::jagged::ChipTrace<'_, _>)> =
+        let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> =
             traces
                 .iter()
-                .map(|(n, m)| (n.clone(), crate::jagged::ChipTrace::new(&m.values, m.width)))
+                .map(|(n, m)| (n.clone(), {
+                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    crate::multilinear::PaddedMle::padded_with_zeros(
+                        std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                            p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
+                        )),
+                        log_h,
+                    )
+                }))
                 .collect();
 
         // Metadata packing (column-by-column, SP1 col_prefix_sums layout).

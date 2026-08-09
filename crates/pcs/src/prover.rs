@@ -325,7 +325,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     #[allow(unused_variables)]
     fn commit_multilinears(
         &self,
-        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
@@ -354,7 +354,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // zero-copy slice relabel of these views (no clone / move).  This is the
         // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
         // mirror takes the same borrowed view.
-        main_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
+        main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
         precomputed_commit: Option<

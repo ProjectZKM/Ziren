@@ -46,7 +46,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
     // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
     // host eager-commit path; on the device / in-dispatch commit path they are
     // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
-    main_traces: Vec<crate::jagged::ChipTrace<'t, Val<SC>>>,
+    main_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>>,
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -61,7 +61,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
     // shrink / wrap path (byte-identical).
     recursion_area_pin: Option<usize>,
 ) -> (
-    Vec<crate::jagged::ChipTrace<'t, Val<SC>>>,
+    Vec<crate::multilinear::PaddedMle<Val<SC>>>,
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
 )
@@ -113,20 +113,24 @@ where
     // no copy — was the former per-chip `from_raw_parts` Vec move).  These views
     // borrow the same shared `Arc<Mle>` cells as `main_traces`, so they live as
     // long as the `'t` borrow.
-    let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView<'t>> = chips
+    let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
         .iter()
         .zip(main_traces.iter())
-        .map(|(chip, trace)| {
+        .map(|(chip, pm)| {
             let name = chip.name().to_string();
-            let width = trace.width;
-            let src: &'t [Val<SC>] = trace.values;
-            // SAFETY: Val<SC> == InnerVal under the TypeId gate above; the
-            // (ptr, len) is reused verbatim under an identical layout, so the
-            // produced `&[InnerVal]` is byte-for-byte the reinterpreted source.
-            let values_inner: &'t [InnerVal] = unsafe {
-                core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
+            // SAFETY: `Val<SC> == InnerVal` under the assert above, so
+            // `PaddedMle<Val<SC>>` and `PaddedMle<InnerVal>` are the SAME type
+            // and this is a no-op relabel — the same reinterpret the digest
+            // arrays below do, moved up a level now that the jagged path carries
+            // the MLE store rather than borrowed cells.  The clone is an `Arc`
+            // refcount bump, not a copy of the trace.
+            let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
+                core::mem::transmute_copy::<
+                    crate::multilinear::PaddedMle<Val<SC>>,
+                    crate::multilinear::PaddedMle<InnerVal>,
+                >(&core::mem::ManuallyDrop::new(pm.clone()))
             };
-            (name, crate::jagged::ChipTrace::new(values_inner, width))
+            (name, pm_inner)
         })
         .collect();
 
@@ -844,7 +848,7 @@ pub fn build_commit_trace_views<'a, SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &'a [crate::multilinear::PaddedMle<Val<SC>>],
     eager_device_remat: &'a [Option<RowMajorMatrix<Val<SC>>>],
-) -> Vec<crate::jagged::ChipTrace<'a, Val<SC>>>
+) -> Vec<crate::multilinear::PaddedMle<Val<SC>>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -855,16 +859,23 @@ where
         .zip(eager_device_remat.iter())
         .map(|((_chip, pm), remat)| {
             if pm.inner().is_none() {
-                // Device-resident / unexercised chip.
+                // Device-resident / unexercised chip: wrap the rematerialized
+                // side-storage when there is one, else hand back the dummy
+                // (which projects to zero area, as the width-0 view did).
                 if let Some(m) = remat {
-                    return crate::jagged::ChipTrace::new(&m.values, m.width);
+                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                        RowMajorMatrix::new(m.values.clone(), m.width),
+                    ));
+                    return crate::multilinear::PaddedMle::padded_with_zeros(mle, log_h);
                 }
-                return crate::jagged::ChipTrace::new(&[], 0);
+                return pm.clone();
             }
-            // Host chip: BORROW the shared MLE's real (unpadded) row-major
-            // cells (zero-copy) — was the SITE-1 deep copy.
-            let tr = pm.real_trace_ref().expect("inner Some => real_trace_ref Some");
-            crate::jagged::ChipTrace::new(tr.values, tr.width)
+            // Host chip: the shared store IS the currency — an `Arc` refcount
+            // bump, no cells touched (this was the SITE-1 deep copy, then a
+            // borrowed view, now the store itself).
+            pm.clone()
         })
         .collect()
 }
@@ -877,7 +888,7 @@ where
 /// any chip's residual is missing / shape-mismatched / non-pow2-height.
 pub fn compute_residual_y_openings<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    commit_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
+    commit_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
@@ -920,7 +931,8 @@ where
         // REAL dims so the residual openings still cover it: height from the
         // dummy's baked metadata (else the provider), width from the residual
         // itself.
-        let (w, h) = if ctrace.width == 0 {
+        let (ctrace_values, ctrace_width) = crate::jagged::real_cells(ctrace);
+        let (w, h) = if ctrace_width == 0 {
             let dev_h = heights.get(idx).copied().flatten().unwrap_or(0);
             let dev_w = trace_at_z
                 .get(&name)
@@ -928,8 +940,8 @@ where
                 .unwrap_or(0);
             (dev_w, dev_h)
         } else {
-            let w = ctrace.width;
-            (w, ctrace.values.len() / w)
+            let w = ctrace_width;
+            (w, ctrace_values.len() / w)
         };
         // #P2S0: mirror the `y_per_chip` guard in jagged_pcs.rs.  A genuine
         // HEIGHT-0 but FULL-WIDTH missing chip must still emit ONE zero column
@@ -1211,7 +1223,7 @@ where
 /// observe is suppressed) and `None` on the legacy self-contained flow, which
 /// commits and observes in-band.
 pub fn prove_jagged_open_inner(
-    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView<'_>],
+    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
     r_row_per_chip: &[Vec<crate::InnerChallenge>],
     z_row: &[crate::InnerChallenge],
     pre_y_per_chip: Option<Vec<Vec<crate::InnerChallenge>>>,
@@ -1279,7 +1291,7 @@ pub fn prove_trusted_evaluations<SC, A>(
     // SITE-1 trace-unification: BORROWED views over the shard prover's shared
     // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
     // these views (no clone / move) — retires copy-SITE 1.
-    main_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
+    main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     precomputed_commit: Option<
@@ -1369,11 +1381,12 @@ where
         .iter()
         .zip(main_traces.iter())
         .enumerate()
-        .map(|(i, (_chip, trace))| {
-            let main_height = if trace.width == 0 {
+        .map(|(i, (_chip, pm))| {
+            let (tvals, twidth) = crate::jagged::real_cells(pm);
+            let main_height = if twidth == 0 {
                 heights.get(i).copied().flatten().unwrap_or(1)
             } else {
-                trace.values.len() / trace.width
+                tvals.len() / twidth
             };
             let log_h = main_height.max(1).next_power_of_two().trailing_zeros() as usize;
             let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
@@ -1395,20 +1408,21 @@ where
     // `reinterpret_vec` Vec move (copy-SITE 2) / `trace.values.clone()`.
     // Byte-identical: same cells, same width.  The views borrow the shard
     // prover's shared `Arc<Mle>` store for the duration of this open.
-    let chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView<'_>> = chips
+    let chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
         .iter()
         .zip(main_traces.iter())
-        .map(|(chip, trace)| {
+        .map(|(chip, pm)| {
             let name = chip.name().to_string();
-            let trace_width = trace.width;
-            let src: &[Val<SC>] = trace.values;
-            // SAFETY: Val<SC> == InnerVal under the TypeId gate; the (ptr, len)
-            // is reused verbatim under an identical layout, so the produced
-            // `&[InnerVal]` is byte-for-byte the reinterpreted source view.
-            let values: &[InnerVal] = unsafe {
-                core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
+            // SAFETY: `Val<SC> == InnerVal` under the assert in this module, so
+            // `PaddedMle<Val<SC>>` and `PaddedMle<InnerVal>` are the SAME type
+            // and this is a no-op relabel.  The clone is an `Arc` refcount bump.
+            let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
+                core::mem::transmute_copy::<
+                    crate::multilinear::PaddedMle<Val<SC>>,
+                    crate::multilinear::PaddedMle<InnerVal>,
+                >(&core::mem::ManuallyDrop::new(pm.clone()))
             };
-            (name, crate::jagged::ChipTrace::new(values, trace_width))
+            (name, pm_inner)
         })
         .collect();
 
