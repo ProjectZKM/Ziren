@@ -6,7 +6,6 @@ use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
 
-use super::main_trace_loader::{EagerHostLoader, MainTraceLoader};
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use super::zerocheck_prover::prove_shard_zerocheck;
@@ -291,7 +290,7 @@ where
     // matrices: `PaddedMle` is `Option<Arc<Mle>>`, so downstream passes it by
     // value at refcount cost, and the loader needs only one representation.
     // Byte-identical to the construction this used to do inside
-    // `prove_shard_to_basefold_with_loader`.
+    // `prove_shard_to_basefold_with_traces`.
     let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
         .iter()
         .map(|t| {
@@ -308,14 +307,13 @@ where
             crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
         })
         .collect();
-    let loader = EagerHostLoader::padded_only(&shared_trace_mles);
     // Pure host-path entry (the shrink + dummy callers): no device fns.  The
     // device sites (core/compress/wrap) supply these via the
     // `MachineProver::prove_shard_to_basefold` override, not this free fn.
-    prove_shard_to_basefold_with_loader::<SC, A, _>(
+    prove_shard_to_basefold_with_traces::<SC, A>(
         chips,
         preprocessed_traces,
-        &loader,
+        &shared_trace_mles,
         main_commitment,
         public_values,
         max_log_row_count,
@@ -331,7 +329,7 @@ where
 // The jagged trusted-evaluations open as a static-dispatch
 // PRODUCER seam.
 //
-// `prove_shard_to_basefold_with_loader` calls `D::produce` rather than the
+// `prove_shard_to_basefold_with_traces` calls `D::produce` rather than the
 // free-fn `prove_trusted_evaluations` at Stage 4, so a device-resident prover
 // (`StarkGpuProver`) can OVERRIDE that open (its device hooks become an
 // inherent `MachineProver::prove_trusted_evaluations`); the free-fn path calls
@@ -524,15 +522,15 @@ where
     }
 }
 
-/// Loader-based entry point (free-fn form for ziren-gpu + the host free-fn
-/// callers).  Thin shim over
-/// [`prove_shard_to_basefold_with_loader_dispatch`] with the free-fn jagged
-/// open producer — signature + bytes IDENTICAL to a direct-dispatch call.
+/// Trace-slice entry point (free-fn form for the host free-fn callers).
+/// Thin shim over [`prove_shard_to_basefold_with_traces_dispatch`] with the
+/// free-fn jagged open producer — signature + bytes IDENTICAL to a direct-
+/// dispatch call.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_to_basefold_with_loader<SC, A, L>(
+pub fn prove_shard_to_basefold_with_traces<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-    main_trace_loader: &L,
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     main_commitment: [Val<SC>; 8],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
@@ -573,7 +571,6 @@ where
         > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-    L: MainTraceLoader<Val<SC>>,
     // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
     SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -584,10 +581,10 @@ where
             >>::Commitment,
         >,
 {
-    prove_shard_to_basefold_with_loader_dispatch::<SC, A, L, FreeFnJaggedEval>(
+    prove_shard_to_basefold_with_traces_dispatch::<SC, A, FreeFnJaggedEval>(
         chips,
         preprocessed_traces,
-        main_trace_loader,
+        shared_trace_mles,
         main_commitment,
         public_values,
         max_log_row_count,
@@ -600,16 +597,18 @@ where
     )
 }
 
-/// Loader-based entry point, generic over the jagged trusted-evaluations open
+/// Trace-slice entry point, generic over the jagged trusted-evaluations open
 /// [`JaggedEvalProducer`] (see the block comment above).
-/// Reads the shared trace-MLE slice via `MainTraceLoader::padded_slice`
-/// because every downstream phase (cumulative sums, batched pre-pass,
-/// jagged-PCS clone) reads every chip's host trace today.
+///
+/// Takes the shared per-chip trace-MLE slice directly, as SP1's
+/// `prove_shard_with_data` takes its `traces`: every downstream phase
+/// (cumulative sums, batched pre-pass, jagged-PCS clone) reads every chip's
+/// trace, so there is nothing for a borrow-or-materialize seam to decide.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_to_basefold_with_loader_dispatch<SC, A, L, D>(
+pub fn prove_shard_to_basefold_with_traces_dispatch<SC, A, D>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-    main_trace_loader: &L,
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     main_commitment: [Val<SC>; 8],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
@@ -658,7 +657,6 @@ where
         > + Sync,
     Val<SC>: PrimeField,
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-    L: MainTraceLoader<Val<SC>>,
     D: JaggedEvalProducer<SC, A>,
     // Threaded through to `prove_trusted_evaluations`'s static
     // OUTER generic BaseFold open (see its where-clause).
@@ -672,27 +670,18 @@ where
 {
     debug_assert_eq!(
         chips.len(),
-        main_trace_loader.len(),
-        "chips and main_trace_loader must be parallel arrays",
+        shared_trace_mles.len(),
+        "chips and shared_trace_mles must be parallel arrays",
     );
 
-    // The shared per-chip analytic main-trace MLE, covering ALL chips in
-    // chip-index order — the SINGLE authoritative host main-trace store
-    // (trace-unification Phase 1).  The LogUp-GKR + zerocheck stages read it
-    // directly, and (Phase 1) so do the transcript-prologue heights, the
-    // prospective-dense sizing, the cumulative-tail gate, the per-chip
-    // commit-trace assembly, and the assembly-stage chip heights below — none
-    // of them keep a separate raw `main_traces` buffer alive anymore.
-    //
-    // Source:
-    //   * host trait path (`prove_shard_to_basefold`, CpuProver + GPU-core via
-    //     open) — the loader carries the store via `padded_only`; the owned
-    //     `main_traces` were already MOVED into these `Arc<Mle>`s (no clone,
-    //     the retired copy-SITE 3).
-    //   * free-fn / device paths (no `padded_slice`: shrink, recursion
-    let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] = main_trace_loader
-        .padded_slice()
-        .expect("MainTraceLoader must carry the shared trace-MLE slice");
+    // `shared_trace_mles` is the shared per-chip analytic main-trace MLE,
+    // covering ALL chips in chip-index order — the SINGLE authoritative host
+    // main-trace store.  The LogUp-GKR + zerocheck stages read it directly, and
+    // so do the transcript-prologue heights, the prospective-dense sizing, the
+    // cumulative-tail gate, the per-chip commit-trace assembly, and the
+    // assembly-stage chip heights below; no separate raw `main_traces` buffer
+    // is kept alive.  Callers MOVE their owned traces into these `Arc<Mle>`s,
+    // so handing the slice down costs a refcount, not a copy.
 
     // Auto-precompute.  This driver is the CpuProver path ONLY: the GPU
     // pipeline assembles the shard stages device-natively in ziren-gpu's
@@ -1006,7 +995,7 @@ where
 
 // ═══════════════════════════════════════════════════════════════════════════
 // C0 (Option-C Phase 0): shared NON-DEVICE shard-driver orchestration lifted
-// out of `prove_shard_to_basefold_with_loader_dispatch` into `pub` helpers so
+// out of `prove_shard_to_basefold_with_traces_dispatch` into `pub` helpers so
 // the upcoming ziren-gpu device-native drivers (C1 zerocheck, C2 logup) reuse
 // them instead of duplicating — bounding the driver-divergence surface BEFORE
 // any split.  Each helper is a VERBATIM lift of an inline block; the operation

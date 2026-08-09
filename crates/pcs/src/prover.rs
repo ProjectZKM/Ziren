@@ -409,7 +409,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
 
     /// The shard-level BaseFold producer as a trait method.
     /// Default routes the loader pipeline through
-    /// [`crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch`]
+    /// [`crate::shard_level::prover::prove_shard_to_basefold_with_traces_dispatch`]
     /// with the jagged open dispatched via `self.prove_trusted_evaluations`
     /// (`ProverJaggedEval(self)`), so a `StarkGpuProver` that overrides
     /// `prove_trusted_evaluations` has its device body picked up here.  On
@@ -531,13 +531,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 }
             })
             .collect();
-        let loader = crate::shard_level::main_trace_loader::EagerHostLoader::padded_only(
-            &shared_trace_mles,
-        );
-        crate::shard_level::prover::prove_shard_to_basefold_with_loader_dispatch::<SC, A, _, _>(
+        crate::shard_level::prover::prove_shard_to_basefold_with_traces_dispatch::<SC, A, _>(
             chips,
             preprocessed_traces,
-            &loader,
+            &shared_trace_mles,
             main_commitment,
             public_values,
             max_log_row_count,

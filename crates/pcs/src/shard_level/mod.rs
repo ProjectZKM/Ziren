@@ -3,7 +3,6 @@
 
 pub mod basefold_constraint_folder;
 pub mod logup_gkr_prover;
-pub mod main_trace_loader;
 pub mod prover;
 pub mod shard_proof;
 pub mod row_gkr;
@@ -14,7 +13,6 @@ pub mod zerocheck_poly;
 pub mod zerocheck_prover;
 
 pub use logup_gkr_prover::*;
-pub use main_trace_loader::{EagerHostLoader, MainTraceLoader};
 pub use prover::*;
 pub use shard_proof::*;
 pub use sumcheck_poly::{
