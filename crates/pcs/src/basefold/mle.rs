@@ -235,3 +235,44 @@ pub type Message<T> = Vec<Arc<T>>;
 /// sequence indexed by round number.
 pub type Rounds<T> = Vec<T>;
 
+
+impl<F: Field> Mle<F, CpuBackend> {
+    /// Fix the *stride-1* (LSB / `point[0]`) variable to `alpha`, returning an
+    /// `Mle<EF>` over one fewer variable.
+    ///
+    /// Adjacent row pairs `(2i, 2i+1)` fold by the LAGRANGE rule
+    /// `(1-alpha)·lo + alpha·hi == lo + alpha·(hi - lo)`, per polynomial in the
+    /// batch.  Mirrors [`crate::multilinear::PaddedMle::fix_last_variable`]
+    /// minus the padding tail (an `Mle`'s hypercube height is a power of two,
+    /// so there is never a missing odd row) and SP1's `mle_fix_last_variable`.
+    ///
+    /// NOT the same operation as [`Mle::fold`], which applies the BASEFOLD rule
+    /// `lo + beta·hi` on the same variable.  The two differ by the `(1-beta)`
+    /// weight on `lo`; substituting one for the other changes the polynomial
+    /// being proved, and does so silently -- shapes and types match.  Use this
+    /// one for sumcheck / multilinear folding, `fold` for BaseFold rounds.
+    pub fn fix_last_variable<EF>(&self, alpha: EF) -> Mle<EF, CpuBackend>
+    where
+        EF: ExtensionField<F> + Send + Sync,
+        F: Sync,
+    {
+        let width = self.num_polynomials();
+        let height = self.hypercube_size();
+        assert!(height >= 2, "fix_last_variable on a 0-variable Mle");
+        let half = height / 2;
+        let g = self.guts().as_slice();
+
+        let mut out: Vec<EF> = vec![EF::ZERO; half * width];
+        if width > 0 {
+            use p3_maybe_rayon::prelude::*;
+            out.par_chunks_exact_mut(width).enumerate().for_each(|(i, dst)| {
+                for j in 0..width {
+                    let lo: EF = g[(2 * i) * width + j].into();
+                    let hi: EF = g[(2 * i + 1) * width + j].into();
+                    dst[j] = lo + alpha * (hi - lo);
+                }
+            });
+        }
+        Mle { guts: Tensor::from(RowMajorMatrix::new(out, width)) }
+    }
+}

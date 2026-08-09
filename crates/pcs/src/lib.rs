@@ -16,6 +16,7 @@ pub mod jagged_pcs;
 pub mod jagged;
 pub mod jagged_branching_program;
 pub mod jagged_eval_sumcheck;
+pub mod jagged_long;
 pub mod jagged_sumcheck;
 pub mod logup_gkr;
 pub mod multilinear;
