@@ -201,15 +201,19 @@ where
     // residency / GPU y-tuple hook) keeps the `EF` cell field (K = EF).  The
     // ring-hom `iota: F -> EF` makes the two proofs BIT-IDENTICAL.
     //
-    // The per-chip build+reduce is emitted through a local macro (rather than a
-    // generic `fn ..<K>`) because a higher-ranked `for<'b> Air<Folder<'b, F, K,
-    // EF>>` bound cannot discharge the folder's *generic* `K: ExtensionField<F>`
-    // requirement from a function environment; expanding with a CONCRETE `K`
-    // here (where `prove_shard_zerocheck` already carries both concrete-`K`
-    // folder bounds) typechecks cleanly.  `K = F` and `K = EF` are the only
-    // instantiations; identical up to the per-cell `K::from` lift (ring-hom).
-    macro_rules! run_zerocheck_for_k {
-        ($K:ty) => {{
+    // CPU/GPU prover separation: the host zerocheck is entered ONLY by the
+    // CpuProver path, which always threads `_device_traces = None`
+    // (StarkGpuProver uses the device-native `prove_shard_zerocheck_gpu`, never
+    // this free-fn).  The provider-`Some` `K = EF` cell instantiation was
+    // therefore dead; the first sumcheck round runs unconditionally in the base
+    // field (`K = Val<SC>`).  The `iota: F -> EF` ring-hom kept the two
+    // bit-identical, so that collapse was byte-neutral.
+    //
+    // This body used to be a local `macro_rules!` expanded once per concrete
+    // `K`, because a higher-ranked `for<'b> Air<Folder<'b, F, K, EF>>` bound
+    // cannot discharge the folder's *generic* `K: ExtensionField<F>` from a
+    // function environment.  With `K = EF` gone there is one instantiation left,
+    // so the macro bought nothing and the body is written out directly.
     use p3_field::PrimeCharacteristicRing;
 
     use crate::shard_level::zerocheck_poly::{
@@ -217,7 +221,7 @@ where
     };
 
     let n_chips = chips.len();
-    let mut zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, $K, Challenge<SC>, A>> =
+    let mut zerocheck_polys: Vec<ZeroCheckPoly<Val<SC>, Val<SC>, Challenge<SC>, A>> =
         Vec::with_capacity(n_chips);
     let mut chip_sumcheck_claims: Vec<Challenge<SC>> = Vec::with_capacity(n_chips);
 
@@ -362,7 +366,7 @@ where
         // IDENTICAL `main_cells`.  A chip with no MLE inner is device-resident,
         // and its cells come from the provider-materialize D2H
         // (`materialized_dev`).  Byte-neutral.
-        let main_cells: Vec<$K> = {
+        let main_cells: Vec<Val<SC>> = {
             let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
                 Some(mle) => mle.guts().as_slice(),
                 // Device-resident / unexercised chip (no host MLE inner): the
@@ -370,10 +374,10 @@ where
                 // `_device_traces = None`-only), so its cells are empty.
                 None => &[],
             };
-            cells_src.iter().map(|v| <$K>::from(*v)).collect()
+            cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
         };
-        let prep_cells: Option<Vec<$K>> = if prep_width > 0 {
-            Some(prep_trace.values.iter().map(|v| <$K>::from(*v)).collect())
+        let prep_cells: Option<Vec<Val<SC>>> = if prep_width > 0 {
+            Some(prep_trace.values.iter().map(|v| <Val<SC>>::from(*v)).collect())
         } else {
             None
         };
@@ -424,7 +428,7 @@ where
             num_variables,
         );
 
-        let poly = ZeroCheckPoly::<Val<SC>, $K, Challenge<SC>, A>::new(
+        let poly = ZeroCheckPoly::<Val<SC>, Val<SC>, Challenge<SC>, A>::new(
             chip,
             public_values,
             alpha,
@@ -460,16 +464,6 @@ where
         trace_at_z.insert(name, component_poly_evals[k].clone());
     }
     (sp1_proof, trace_at_z)
-        }};
-    }
-    // CPU/GPU prover separation: the host zerocheck is entered ONLY by the
-    // CpuProver path, which always threads `_device_traces = None`
-    // (StarkGpuProver uses the device-native `prove_shard_zerocheck_gpu`, never
-    // this free-fn).  The provider-`Some` `K = EF` cell instantiation was
-    // therefore dead; the first sumcheck round runs unconditionally in the base
-    // field (`K = F`).  The `iota: F -> EF` ring-hom kept the two bit-identical,
-    // so this collapse is byte-neutral.
-    run_zerocheck_for_k!(Val<SC>)
 }
 
 
