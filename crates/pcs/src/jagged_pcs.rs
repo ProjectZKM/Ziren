@@ -1584,19 +1584,37 @@ pub mod jagged {
             // already retained instead; `dense_from_interleaved_mles` is the
             // exact inverse of the width-1 interleave, so this is byte-identical
             // — and it drops the reduction's last dependency on `chip_traces`.
+            // SP1 shape: the reduction runs on `HadamardProduct` over the
+            // committed stripes themselves — no dense rebuild at all.  The
+            // stripes ARE `Message<Mle>`, which is what `LongMle` carries, so
+            // `jagged_hadamard_poly` restacks them into the single component the
+            // sumcheck needs and pairs them with the weight table.
+            let weights = crate::jagged_sumcheck::build_weight_table_from_z_col(
+                &packing,
+                r_row_per_chip,
+                &z_col,
+                z_row,
+            );
+            // The jagged dense area is a PREFIX of the committed stripes (which
+            // also carry the stacking padding), so it is extracted rather than
+            // handed over whole.  SP1's jagged sumcheck is dense on both sides
+            // too (`partial_jagged_little_polynomial_evaluation` builds a dense
+            // `2^log_total_area` MLE), so this matches its shape.
             let dense_q = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
                 &interleaved,
                 1usize << packing.log_dense_size,
             );
-            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                dense_q,
-                &packing,
-                r_row_per_chip,
-                &y_per_chip,
-                &z_col,
-                z_row,
-                challenger,
-            )
+            let hp = crate::jagged_long::HadamardProduct {
+                base: crate::jagged_long::LongMle::from_components(
+                    alloc::vec![crate::basefold::Mle::from_values(dense_q)],
+                    packing.log_dense_size as u32,
+                ),
+                ext: crate::jagged_long::LongMle::from_components(
+                    alloc::vec![crate::basefold::Mle::from_values(weights)],
+                    packing.log_dense_size as u32,
+                ),
+            };
+            crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
         };
         drop(_red_span);
         tracing::info!(
@@ -1787,9 +1805,23 @@ pub mod jagged {
               -> JaggedReductionProof<InnerChallenge> {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev);
-            crate::jagged_sumcheck::prove_jagged_reduction_owned(
-                dense_q, &packing, r_row_per_chip, &y_per_chip, z_col, z_row, challenger,
-            )
+            let weights = crate::jagged_sumcheck::build_weight_table_from_z_col(
+                &packing,
+                r_row_per_chip,
+                z_col,
+                z_row,
+            );
+            let hp = crate::jagged_long::HadamardProduct {
+                base: crate::jagged_long::LongMle::from_components(
+                    alloc::vec![crate::basefold::Mle::from_values(dense_q)],
+                    packing.log_dense_size as u32,
+                ),
+                ext: crate::jagged_long::LongMle::from_components(
+                    alloc::vec![crate::basefold::Mle::from_values(weights)],
+                    packing.log_dense_size as u32,
+                ),
+            };
+            crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
         };
         let area = prover_data.area;
         let open = move |extended_eval_point: Vec<InnerChallenge>,

@@ -785,9 +785,25 @@ pub fn prove_jagged_reduction_hadamard<C>(
 where
     C: p3_challenger::FieldChallenger<crate::InnerVal>,
 {
+    let hp = jagged_hadamard_poly(trace_components, log_stacking_height, weights);
+    prove_jagged_reduction_hadamard_poly(hp, challenger)
+}
+
+/// The reduction over an already-built [`HadamardProduct`].
+///
+/// The jagged dense area is a PREFIX of the commitment's interleaved stripes
+/// (the stripes also carry the stacking padding), so a caller holding the
+/// committed stripes must extract that prefix first — it cannot hand the
+/// stripes over directly.
+pub fn prove_jagged_reduction_hadamard_poly<C>(
+    hp: HadamardProduct<crate::InnerVal, crate::InnerChallenge>,
+    challenger: &mut C,
+) -> crate::jagged_sumcheck::JaggedReductionProof<crate::InnerChallenge>
+where
+    C: p3_challenger::FieldChallenger<crate::InnerVal>,
+{
     use crate::shard_level::sumcheck_poly::{SumcheckPoly, SumcheckPolyFirstRound};
     use crate::jagged_sumcheck::{JaggedReductionProof, JaggedReductionRound};
-    let mut hp = jagged_hadamard_poly(trace_components, log_stacking_height, weights);
     let n = <HadamardProduct<crate::InnerVal, crate::InnerChallenge> as
         crate::shard_level::sumcheck_poly::SumcheckPolyBase>::num_variables(&hp);
 
