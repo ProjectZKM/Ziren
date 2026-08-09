@@ -110,33 +110,6 @@ impl<F: p3_field::PrimeField64> RecursionProgram<F> {
                 // 9d1c21d4 retired these three chips, but their instructions
                 // remain in the ISA and the VM still executes them, so their
                 // addresses still count towards the allocation.
-                Instruction::ExpReverseBitsLen(i) => {
-                    see(&i.addrs.base);
-                    see(&i.addrs.result);
-                    i.addrs.exp.iter().for_each(&mut see);
-                }
-                Instruction::FriFold(i) => {
-                    see(&i.base_single_addrs.x);
-                    see(&i.ext_single_addrs.z);
-                    see(&i.ext_single_addrs.alpha);
-                    let v = &i.ext_vec_addrs;
-                    for addrs in [
-                        &v.mat_opening,
-                        &v.ps_at_z,
-                        &v.alpha_pow_input,
-                        &v.ro_input,
-                        &v.alpha_pow_output,
-                        &v.ro_output,
-                    ] {
-                        addrs.iter().for_each(&mut see);
-                    }
-                }
-                Instruction::BatchFRI(i) => {
-                    see(&i.ext_single_addrs.acc);
-                    i.base_vec_addrs.p_at_x.iter().for_each(&mut see);
-                    i.ext_vec_addrs.p_at_z.iter().for_each(&mut see);
-                    i.ext_vec_addrs.alpha_pow.iter().for_each(&mut see);
-                }
             }
         }
         max_addr.map_or(0, |m| m as usize + 1)

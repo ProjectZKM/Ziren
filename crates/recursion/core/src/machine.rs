@@ -200,9 +200,6 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             // `exp: Vec<F>` of all bits). Was over-counting by exp.len();
             // benign for push-based reserve, but UB-prone for offset
             // writes via UnsafeRecord (uninit slots → bad transmute).
-            Instruction::ExpReverseBitsLen(ExpReverseBitsInstr { .. }) => {
-                self.exp_reverse_bits_len_events += 1
-            }
             Instruction::Hint(HintInstr { output_addrs_mults })
             | Instruction::HintBits(HintBitsInstr {
                 output_addrs_mults,
@@ -216,12 +213,6 @@ impl<F> AddAssign<&Instruction<F>> for RecursionAirEventCount {
             // (one per polynomial in the batch); was off-by-default-1. Benign
             // for push-based reserve, but UB-prone for offset writes via
             // UnsafeRecord (uninit slots → bad transmute).
-            Instruction::FriFold(instr) => {
-                self.fri_fold_events += instr.ext_vec_addrs.ps_at_z.len()
-            }
-            Instruction::BatchFRI(instr) => {
-                self.batch_fri_events += instr.base_vec_addrs.p_at_x.len()
-            }
             Instruction::HintAddCurve(HintAddCurveInstr {
                 output_x_addrs_mults,
                 output_y_addrs_mults,

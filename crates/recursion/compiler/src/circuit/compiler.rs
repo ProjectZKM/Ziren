@@ -316,22 +316,6 @@ where
         })
     }
 
-    fn exp_reverse_bits(
-        &mut self,
-        dst: impl Reg<C>,
-        base: impl Reg<C>,
-        exp: impl IntoIterator<Item = impl Reg<C>>,
-    ) -> Instruction<C::F> {
-        Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-            addrs: ExpReverseBitsIo {
-                result: dst.write(self),
-                base: base.read(self),
-                exp: exp.into_iter().map(|r| r.read(self)).collect(),
-            },
-            mult: C::F::ZERO,
-        })
-    }
-
     fn hint_bit_decomposition(
         &mut self,
         value: impl Reg<C>,
@@ -367,57 +351,6 @@ where
             input2_x_addrs: input2.x.0.into_iter().map(|value| value.read_ghost(self)).collect(),
             input2_y_addrs: input2.y.0.into_iter().map(|value| value.read_ghost(self)).collect(),
         })
-    }
-
-    fn fri_fold(
-        &mut self,
-        CircuitV2FriFoldOutput { alpha_pow_output, ro_output }: CircuitV2FriFoldOutput<C>,
-        CircuitV2FriFoldInput {
-            z,
-            alpha,
-            x,
-            mat_opening,
-            ps_at_z,
-            alpha_pow_input,
-            ro_input,
-        }: CircuitV2FriFoldInput<C>,
-    ) -> Instruction<C::F> {
-        Instruction::FriFold(Box::new(FriFoldInstr {
-            // Calculate before moving the vecs.
-            alpha_pow_mults: vec![C::F::ZERO; alpha_pow_output.len()],
-            ro_mults: vec![C::F::ZERO; ro_output.len()],
-
-            base_single_addrs: FriFoldBaseIo { x: x.read(self) },
-            ext_single_addrs: FriFoldExtSingleIo { z: z.read(self), alpha: alpha.read(self) },
-            ext_vec_addrs: FriFoldExtVecIo {
-                mat_opening: mat_opening.into_iter().map(|e| e.read(self)).collect(),
-                ps_at_z: ps_at_z.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow_input: alpha_pow_input.into_iter().map(|e| e.read(self)).collect(),
-                ro_input: ro_input.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow_output: alpha_pow_output.into_iter().map(|e| e.write(self)).collect(),
-                ro_output: ro_output.into_iter().map(|e| e.write(self)).collect(),
-            },
-        }))
-    }
-
-    fn batch_fri(
-        &mut self,
-        acc: Ext<C::F, C::EF>,
-        alpha_pows: Vec<Ext<C::F, C::EF>>,
-        p_at_zs: Vec<Ext<C::F, C::EF>>,
-        p_at_xs: Vec<Felt<C::F>>,
-    ) -> Instruction<C::F> {
-        Instruction::BatchFRI(Box::new(BatchFRIInstr {
-            base_vec_addrs: BatchFRIBaseVecIo {
-                p_at_x: p_at_xs.into_iter().map(|e| e.read(self)).collect(),
-            },
-            ext_single_addrs: BatchFRIExtSingleIo { acc: acc.write(self) },
-            ext_vec_addrs: BatchFRIExtVecIo {
-                p_at_z: p_at_zs.into_iter().map(|e| e.read(self)).collect(),
-                alpha_pow: alpha_pows.into_iter().map(|e| e.read(self)).collect(),
-            },
-            acc_mult: C::F::ZERO,
-        }))
     }
 
     fn commit_public_values(
@@ -559,14 +492,9 @@ where
             DslIr::CircuitV2Poseidon2PermuteKoalaBear(data) => {
                 f(self.poseidon2_permute(data.0, data.1))
             }
-            DslIr::CircuitV2ExpReverseBits(dst, base, exp) => {
-                f(self.exp_reverse_bits(dst, base, exp))
-            }
             DslIr::CircuitV2HintBitsF(output, value) => {
                 f(self.hint_bit_decomposition(value, output))
             }
-            DslIr::CircuitV2FriFold(data) => f(self.fri_fold(data.0, data.1)),
-            DslIr::CircuitV2BatchFRI(data) => f(self.batch_fri(data.0, data.1, data.2, data.3)),
             DslIr::CircuitV2CommitPublicValues(public_values) => {
                 f(self.commit_public_values(&public_values))
             }
@@ -665,35 +593,11 @@ where
                         backfill((mult1, addr1));
                         backfill((mult2, addr2));
                     }
-                    Instruction::ExpReverseBitsLen(ExpReverseBitsInstr {
-                        addrs: ExpReverseBitsIo { result: ref addr, .. },
-                        mult,
-                    }) => backfill((mult, addr)),
                     Instruction::HintBits(HintBitsInstr { output_addrs_mults, .. })
                     | Instruction::Hint(HintInstr { output_addrs_mults, .. }) => {
                         output_addrs_mults
                             .iter_mut()
                             .for_each(|(addr, mult)| backfill((mult, addr)));
-                    }
-                    Instruction::FriFold(instr) => {
-                        let FriFoldInstr {
-                            ext_vec_addrs:
-                                FriFoldExtVecIo { ref alpha_pow_output, ref ro_output, .. },
-                            alpha_pow_mults,
-                            ro_mults,
-                            ..
-                        } = instr.as_mut();
-                        // Using `.chain` seems to be less performant.
-                        alpha_pow_mults.iter_mut().zip(alpha_pow_output).for_each(&mut backfill);
-                        ro_mults.iter_mut().zip(ro_output).for_each(&mut backfill);
-                    }
-                    Instruction::BatchFRI(instr) => {
-                        let BatchFRIInstr {
-                            ext_single_addrs: BatchFRIExtSingleIo { ref acc },
-                            acc_mult,
-                            ..
-                        } = instr.as_mut();
-                        backfill((acc_mult, acc));
                     }
                     Instruction::HintExt2Felts(HintExt2FeltsInstr {
                         output_addrs_mults, ..
@@ -882,10 +786,7 @@ const fn instr_name<F>(instr: &Instruction<F>) -> &'static str {
         Instruction::Mem(_) => "Mem",
         Instruction::Poseidon2(_) => "Poseidon2",
         Instruction::Select(_) => "Select",
-        Instruction::ExpReverseBitsLen(_) => "ExpReverseBitsLen",
         Instruction::HintBits(_) => "HintBits",
-        Instruction::FriFold(_) => "FriFold",
-        Instruction::BatchFRI(_) => "BatchFRI",
         Instruction::Print(_) => "Print",
         Instruction::HintExt2Felts(_) => "HintExt2Felts",
         Instruction::Hint(_) => "Hint",
