@@ -325,7 +325,7 @@ where
     //   * `no_device_remat` — all-`None`, which drives
     //     `build_commit_trace_views` down the pure host-trace branch, where
     //     each present chip BORROWS the shared `Arc<Mle>` store's real
-    //     (unpadded) cells (the SITE-1 zero-copy).  The views' lifetime is tied
+    //     (unpadded) cells, zero-copy.  The views' lifetime is tied
     //     to `no_device_remat`, so the driver owns it for the duration.
     //   * `chip_cum_tails` — all-`None`; `build_chip_cumulative_sums` then
     //     reads each present chip's raw host cells directly.
@@ -836,7 +836,7 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
 
 /// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
 /// views over the shared `Arc<Mle>` store + the eager remat side-store
-/// (retains the SITE-1 zero-copy).  Host chips borrow the MLE's real
+/// (still zero-copy).  Host chips borrow the MLE's real
 /// (unpadded) cells; the rare eager device-chip materialize borrows
 /// `eager_device_remat`; happy/unexercised device chips carry an empty
 /// width-0 view.  The returned views borrow BOTH inputs for `'a`.
@@ -869,7 +869,7 @@ where
                 return pm.clone();
             }
             // Host chip: the shared store IS the currency — an `Arc` refcount
-            // bump, no cells touched (this was the SITE-1 deep copy, then a
+            // bump, no cells touched (this used to deep-copy, then
             // borrowed view, now the store itself).
             pm.clone()
         })
