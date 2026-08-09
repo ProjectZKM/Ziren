@@ -207,14 +207,6 @@ pub mod ilv_prof {
     }
 }
 
-/// `ZIREN_ILV_W1_BORROW=0` restores the width-1 identity COPY as the
-/// isolating control (see [`interleave_multilinears_with_fixed_rate`]).
-#[inline]
-fn ilv_w1_borrow_enabled() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| std::env::var("ZIREN_ILV_W1_BORROW").as_deref() != Ok("0"))
-}
-
 /// Layout helper: walk a stream of MLEs and pack their values into
 /// fixed-size `[batch_size, 1 << log_stacking_height]` stripes.
 ///
@@ -242,14 +234,13 @@ fn ilv_w1_borrow_enabled() -> bool {
 /// dense IS a single width-1 MLE, so on the host commit path this is one
 /// serial full-size memcpy plus its zero-fill.  Borrowing the source
 /// directly is byte-identical and removes the allocation, the zero-fill and
-/// the copy.  `ZIREN_ILV_W1_BORROW=0` restores the copy.
+/// the copy.
 pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     batch_size: usize,
     multilinears: Vec<Arc<Mle<F>>>,
     log_stacking_height: u32,
 ) -> Vec<Arc<Mle<F>>> {
     let __ilv_t0 = std::time::Instant::now();
-    let __ilv_w1_borrow = ilv_w1_borrow_enabled();
     ilv_prof::add(&ilv_prof::CALLS, 1);
     ilv_prof::add(&ilv_prof::MLES, multilinears.len() as u64);
     let stack_height = 1usize << log_stacking_height;
@@ -286,7 +277,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         let __ilv_tc = std::time::Instant::now();
         // WIDTH-1 BORROW (see the fn header): the transpose is the identity,
         // so read the source slice directly instead of copying it.
-        let owned: Vec<F> = if width == 1 && __ilv_w1_borrow {
+        let owned: Vec<F> = if width == 1 {
             ilv_prof::add(&ilv_prof::W1_BORROWED, 1);
             Vec::new()
         } else {
@@ -301,7 +292,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             }
             data
         };
-        let data: &[F] = if width == 1 && __ilv_w1_borrow { mle_vals } else { &owned };
+        let data: &[F] = if width == 1 { mle_vals } else { &owned };
         ilv_prof::add(&ilv_prof::T_COPY_NS, __ilv_tc.elapsed().as_nanos() as u64);
         let __ilv_ts = std::time::Instant::now();
 

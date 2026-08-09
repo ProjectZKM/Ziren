@@ -509,7 +509,6 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     fn compute_round_evals(&self) -> (InnerChallenge, InnerChallenge) {
         // Field addition is associative + commutative, so a parallel tree-reduce
         // over the independent per-column contributions is BYTE-IDENTICAL to the
-        // sequential fold.  Gated (default ON) via ZIREN_JAGGED_EVAL_PAR.
         if self.par {
             use rayon::prelude::*;
             jeval_pool().install(|| {
@@ -585,16 +584,6 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 ///
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
-/// log_m up to ~30.
-fn jagged_eval_par_enabled() -> bool {
-    // Default ON (proven byte-identical — field addition is associative, so the
-    // tree-reduce == the sequential fold).  Kill-switch: ZIREN_JAGGED_EVAL_PAR=0
-    // (or false) forces the legacy sequential path.
-    std::env::var("ZIREN_JAGGED_EVAL_PAR")
-        .map(|v| !(v == "0" || v.eq_ignore_ascii_case("false")))
-        .unwrap_or(true)
-}
-
 /// Cross-check gate for the device-computed jagged `claimed_sum`.
 ///
 /// `ZIREN_GPU_JAGGED_CLAIMED_SUM_VERIFY=1` runs the host closed form ALONGSIDE
@@ -643,9 +632,10 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
         merged_prefix_sums[0].len()
     };
     // Parallelize the per-column inner loops of the structural sumcheck across
-    // host cores (byte-identical; default ON, kill-switch ZIREN_JAGGED_EVAL_PAR=0).  The
-    // 64-column floor skips tiny shards where the pool hand-off would dominate.
-    let par = jagged_eval_par_enabled() && merged_prefix_sums.len() >= 64;
+    // host cores.  Byte-identical: field addition is associative and commutative,
+    // so the tree-reduce equals the sequential fold.  The 64-column floor skips
+    // tiny shards where the pool hand-off would dominate.
+    let par = merged_prefix_sums.len() >= 64;
     let mut prover = StructuralJaggedEvalProver::new(
         z_row.to_vec(),
         z_trace.to_vec(),
@@ -712,7 +702,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
 
     // Shadow host prover: built ONLY in verify mode, run in lockstep as the
     // bit-identity oracle.  Uses the exact same `par` gate as the host path.
-    let par = jagged_eval_par_enabled() && merged_prefix_sums.len() >= 64;
+    let par = merged_prefix_sums.len() >= 64;
     let mut host_prover = if verify {
         Some(StructuralJaggedEvalProver::new(
             z_row.to_vec(),
