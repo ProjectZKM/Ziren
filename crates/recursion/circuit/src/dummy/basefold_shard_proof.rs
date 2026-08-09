@@ -544,7 +544,7 @@ pub fn dummy_jagged_basefold_bundle(
     let inner_fri = lb_fri_config();
     let num_queries = inner_fri.num_queries;
     // The component-opening Merkle path length keys off the codeword
-    // height = 2^(log_stacking + log_blowup).  At the SP1-faithful inner
+    // height = 2^(log_stacking + log_blowup).  At the inner
     // default this is blowup=2, so the dummy path length must track
     // the config, not a hardcoded `+1`.
     let inner_log_blowup = inner_fri.log_blowup();
@@ -586,7 +586,7 @@ pub fn dummy_jagged_basefold_bundle(
     // codeword of height 2^(num_variables + log_blowup - 1 - r), so its Merkle
     // path length is `num_variables + log_blowup - 1 - r` where
     // `num_variables == log_stacking`.  A `log_stacking - r` length would
-    // assume `log_blowup == 1`; the SP1-faithful inner default is
+    // assume `log_blowup == 1`; the inner default is
     // `log_blowup == 2`, so such a path would be ONE level too short.
     // In-circuit the path Select-loop count = `leaf.proof.len()`
     // (basefold_verifier.rs:555-561 via the lift's

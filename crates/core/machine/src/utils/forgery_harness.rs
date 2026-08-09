@@ -638,7 +638,7 @@ fn stage0_forge_degree_only_overclaim_keccak_recon_on() {
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// SP1-faithful jagged HASH-BIND forgeries.
+// Jagged HASH-BIND forgeries.
 //
 // The hash-bind ties the per-chip (row_count, column_count) geometry to the
 // FS-observed commitment via

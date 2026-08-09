@@ -367,7 +367,7 @@ pub mod koala_bear_poseidon2 {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
-        // SITE-1 trace-unification: the commit consumes BORROWED views over the
+        // The commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
@@ -395,8 +395,7 @@ pub mod koala_bear_poseidon2 {
     // Poseidon2-KoalaBear Merkle MMCS (`JaggedMmcs`).  `bf_mmcs()` reproduces
     // the construction in `crate::jagged_pcs::commit_jagged_pcs_host`
     // (InnerHash/InnerCompress over the shared `poseidon2_init` perm) so the
-    // generic BaseFold cores can be driven through this trait.  `use_basefold`
-    // returns `true`, matching the legacy TypeId gate's inner-config result.
+    // generic BaseFold cores can be driven through this trait.
     impl crate::config::BasefoldRing for KoalaBearPoseidon2 {
         type BfMmcs = crate::jagged_pcs::JaggedMmcs;
 

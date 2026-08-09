@@ -90,7 +90,7 @@ pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 /// stacked PCS doesn't end up over-padding past the actual data.
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
-/// SP1-faithful RECURSION-LAYER trace-area pin.
+/// RECURSION-LAYER trace-area pin.
 ///
 /// SP1's `crates/prover/src/components.rs` pins `RECURSION_LOG_TRACE_AREA = 27`
 /// for the compress/recursion machine: every recursion proof (normalize AND
@@ -122,7 +122,7 @@ pub const RECURSION_LOG_TRACE_AREA: usize = 27;
 /// SP1-parity; no soundness implication (purely a packing constant).
 pub const DEFAULT_BATCH_SIZE: usize = 32;
 
-/// SP1-faithful FIXED stacking height: ALWAYS `DEFAULT_LOG_STACKING_HEIGHT`
+/// FIXED stacking height: ALWAYS `DEFAULT_LOG_STACKING_HEIGHT`
 /// (21), never clamped down for small commits.
 ///
 /// Clamping to `min(21, log2(np2(total))-1)` for tiny commits would make
@@ -296,7 +296,7 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 
 
 // ─────────────────────────────────────────────────────────────────────
-// SP1-faithful jagged "hash-bind" (the count ↔ commitment tie).
+// Jagged "hash-bind" (the count ↔ commitment tie).
 //
 // Ziren historically returned the RAW BaseFold root as the observed
 // commitment, with NO cryptographic binding of the per-chip
@@ -368,7 +368,7 @@ pub fn jagged_counts_from_packing(
     (row_counts, column_counts)
 }
 
-/// Compute the SP1-faithful geometry hash for ONE round (one commit):
+/// Compute the geometry hash for ONE round (one commit):
 /// `hash_iter( once(len) ++ row_counts ++ column_counts )` where
 /// `len = column_counts.len()`.  Uses the inner Poseidon2-KoalaBear sponge
 /// (`InnerHash`) — the SAME hasher `SC::hash` resolves to in-circuit.
@@ -641,7 +641,7 @@ where
 // `FriCudaProver::prove` and falls back to `open_jagged_pcs_host` on `Err`
 // (returning `(prover_data, eval_point)` ownership so nothing is lost).
 
-// #118: the GPU BaseFold open fn is provided STATICALLY (threaded from
+// The GPU BaseFold open fn is provided STATICALLY (threaded from
 // the prover down to the `open_jagged_pcs_host_generic` dispatch), not via a global
 // registry.  The former `GPU_BASEFOLD_OPEN_HOOK` OnceLock + `register_/get_`
 // accessors were removed; the `prover` crate passes `Some(device_fn)` into
@@ -740,7 +740,7 @@ pub mod jagged {
     use crate::jagged_sumcheck::{JaggedReductionProof, verify_jagged_reduction};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
-    /// SITE-1 trace-unification: the per-chip commit/open trace set as a
+    /// The per-chip commit/open trace set as a
     /// BORROWED row-major view over the shard prover's single `Arc<Mle>`
     /// store (`shared_trace_mles`), instead of an owned `RowMajorMatrix`
     /// deep copy.  All commit + open consumers here are read-only (dims +
@@ -1124,7 +1124,7 @@ pub mod jagged {
             + 'static,
     {
         let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN (SP1-faithful).  When the
+        // RECURSION-LAYER AREA PIN.  When the
         // recursion (`compress`) prover passes `Some(target_log)` here, so
         // raise `log_dense_size` to the pin floor so the dense
         // materialize + commit run at a FIXED area (`2^pin`) → constant
@@ -1463,7 +1463,7 @@ pub mod jagged {
                 .map(|((_name, pm), r_row_c)| {
                     let (trace_values, w) = crate::jagged::real_cells(pm);
                     let h = if w == 0 { 0 } else { trace_values.len() / w };
-                    // #P2S0: a genuine HEIGHT-0 (0-row) but
+                    // A genuine HEIGHT-0 (0-row) but
                     // FULL-WIDTH missing chip
                     // must still emit ONE column claim PER COLUMN (all zero),
                     // NOT an empty Vec.  `build_weight_table` and the verifier's
@@ -1483,7 +1483,7 @@ pub mod jagged {
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
 
-                    // SP1-faithful column claim: full row_eq over z_row indexed
+                    // Column claim: full row_eq over z_row indexed
                     // by the NATURAL row (eq(z_row, r)), no Pi_high embedding.
                     // The full row_eq subsumes the height factor for any row <
                     // 2^log_h_c (high bits of such a row are 0).  Build over
@@ -1557,7 +1557,7 @@ pub mod jagged {
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
-        // Stage 5: the pre-reduce device-trace `release_all` (SP1 drop_ldes
+        // The pre-reduce device-trace `release_all` (SP1 drop_ldes
         // analog) is gone — dead from the GPU prover (its own device-native
         // copy owns the free) and inert on the CPU prover (no provider).
 
@@ -1630,7 +1630,7 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // Stage 5: the pre-open device-trace `release_all` (PIECE2) is gone —
+        // The pre-open device-trace `release_all` (PIECE2) is gone —
         // dead from the GPU prover (its own device-native copy owns the
         // pre-open free) and inert on the CPU prover (no provider).
 
@@ -1758,7 +1758,7 @@ pub mod jagged {
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
                     let _ = r_row_c; // SP1 convention uses the full z_row row_eq
-                    // SP1-faithful column claim: full row_eq over z_row indexed
+                    // Column claim: full row_eq over z_row indexed
                     // by the NATURAL row (eq(z_row, r)), no Pi_high embedding.
                     // Build over reversed z_row so eq_c[r] = eq(z_row, r) (undo
                     // eq_mle_table's LSB-first bitrev), matching build_weight_table.
@@ -2380,7 +2380,7 @@ pub mod jagged {
             crate::jagged_pcs::JaggedChallenger::new(zkm_primitives::poseidon2_init())
         }
 
-        /// SITE-1 trace-unification: the commit/open entry points take BORROWED
+        /// The commit/open entry points take BORROWED
         /// `ChipTraceView`s over the shard prover's shared `Arc<Mle>` store.
         /// Tests own their matrices, so relabel each owned matrix as a
         /// zero-copy view over its own cells — same cells, same width.
@@ -2715,7 +2715,7 @@ mod test {
         VerifyStage, LAST_VERIFY_STAGE,
     };
 
-    /// SITE-1 trace-unification: the commit/open entry points take BORROWED
+    /// The commit/open entry points take BORROWED
     /// `ChipTraceView`s over the shard prover's shared `Arc<Mle>` store.
     /// Tests own their matrices, so relabel each owned matrix as a zero-copy
     /// view over its own cells — same cells, same width.
@@ -2843,7 +2843,7 @@ mod test {
     }
 
     // ───────────────────────────────────────────────────────────────────
-    // G-host: LOCK THE HASH-BIND CONVENTION (SP1-faithful jagged geometry
+    // G-host: LOCK THE HASH-BIND CONVENTION (jagged geometry
     // count ↔ commitment tie) with a host-only commit → verify round-trip,
     // BEFORE any circuit consumes it.  A wrong order / missing len-prefix
     // would silently desync Fiat-Shamir; this test prints the host hash and

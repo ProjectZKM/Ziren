@@ -229,7 +229,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
 
     fn fri_config(
     ) -> zkm_pcs::basefold::config::FriConfig<zkm_pcs::jagged_pcs::JaggedVal> {
-        // WRAP-stage params: SP1-faithful (log_blowup=3, num_queries=94,
+        // WRAP-stage params: (log_blowup=3, num_queries=94,
         // pow_bits=22) for full 100-bit query-phase soundness on the on-chain
         // wrap proof.  The inner env-default (1,94,16) here would be only
         // ~55-bit.  Two-adicity: codeword = log_stacking(≤21) + 3 ≤ 24 = OK.
@@ -479,7 +479,7 @@ pub mod outer_jagged_hooks {
         
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        // SITE-1 trace-unification: the commit consumes BORROWED views over the
+        // The commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
         let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(

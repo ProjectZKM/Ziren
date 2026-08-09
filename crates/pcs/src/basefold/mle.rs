@@ -49,7 +49,7 @@ pub struct Mle<F, A: Backend = CpuBackend> {
 /// [`Tensor::as_slice`] / `From<RowMajorMatrix>`), mirroring SP1's
 /// `Message<Arc<Mle>>` shared-view model.
 ///
-/// Additive (trace-unification Phase 0): the type + accessors exist so
+/// Additive (the unified main-trace store): the type + accessors exist so
 /// later phases can source commit/open cells from the single shared
 /// `Arc<Mle>` store; nothing it produces reaches the Fiat-Shamir
 /// transcript on its own.
@@ -135,7 +135,7 @@ impl<F: Field> Mle<F, CpuBackend> {
     /// (`values` = the flat cells obtained ONCE via [`Tensor::as_slice`],
     /// `width` = [`Mle::num_polynomials`]).  The view is byte-identical to
     /// the `RowMajorMatrix` this MLE was built from — no allocation, no
-    /// copy.  Additive (trace-unification Phase 0).
+    /// copy.  Additive (the unified main-trace store).
     #[inline]
     pub fn as_trace_ref(&self) -> TraceRef<'_, F> {
         TraceRef::new(self.guts.as_slice(), self.num_polynomials())

@@ -52,7 +52,7 @@ pub trait Poseidon2KoalaBearHasherVariable<C: CircuitConfig> {
 pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     type DigestVariable: Clone + Copy;
 
-    /// Whether this ring carries the SP1-faithful jagged geometry HASH-BIND
+    /// Whether this ring carries the jagged geometry HASH-BIND
     /// (`modified_commitment = compress([raw_root, hash(counts)])`) and must
     /// re-bind it in-circuit inside
     /// [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].

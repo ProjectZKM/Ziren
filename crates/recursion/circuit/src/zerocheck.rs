@@ -723,7 +723,7 @@ where
                     .sum::<SymbolicExt<C::F, C::EF>>();
 
                 // Embedding factor from the degree one-hot prefix.
-                // SP1-faithful deferred materialization: keep the
+                // Deferred materialization: keep the
                 // per-coordinate prefix/factor accumulation in
                 // SymbolicExt (NO builder.eval inside the k-loop) and
                 // let the DSL CSE the products. The degree one-hot

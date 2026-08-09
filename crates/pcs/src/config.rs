@@ -105,7 +105,7 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// `prover.rs` / `shard_level/*`.
 ///
 /// * Inner (`KoalaBearPoseidon2`, the default core/compress/shrink config):
-///   `BfMmcs = JaggedMmcs` (Poseidon2-KoalaBear Merkle), `use_basefold = true`.
+///   `BfMmcs = JaggedMmcs` (Poseidon2-KoalaBear Merkle).
 /// * Wrap (`KoalaBearPoseidon2Outer`): `BfMmcs = OuterValMmcs`
 ///   (Poseidon2-BN254 Merkle, `Commitment = Hash<KoalaBear, Bn254, 1>`).
 ///   `bf_mmcs()` builds that MMCS so the generic BaseFold cores
@@ -113,13 +113,11 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///   in `crates/recursion/core/src/stark/config.rs` (zkm-pcs cannot import
 ///   OuterSC — the recursion-core crate depends on stark, not vice versa).
 ///
-/// `use_basefold()` returns the *same boolean* the legacy TypeId gate computed
-/// (inner = true, wrap = false) so swapping the gates is non-breaking.  The
-/// wrap can be flipped to `true` once the higher-level jagged bundle / 8-felt
-/// digest stack (`JaggedBasefoldBundle`, `prove_shard_to_basefold`'s
-/// `main_commitment: [Val; 8]`) is genericized over `BfMmcs::Commitment` — at
-/// which point the `bf_mmcs()` infrastructure provided here is consumed
-/// directly.
+/// Both rings run BaseFold.  The higher-level jagged bundle / 8-felt digest
+/// stack (`JaggedBasefoldBundle`, `prove_shard_to_basefold`'s
+/// `main_commitment: [Val; 8]`) is still concrete rather than generic over
+/// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
+/// consumed directly.
 pub trait BasefoldRing: StarkGenericConfig {
     /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
     /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;

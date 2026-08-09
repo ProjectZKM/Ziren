@@ -249,7 +249,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
     /// the storage invariant, independent of the padding's declared
     /// column count.  The view's `values` are the raw trace cells and `width`
     /// the trace width — byte-identical to the `RowMajorMatrix` the inner
-    /// `Mle` was built from.  Additive (trace-unification Phase 0).
+    /// `Mle` was built from.  Additive (the unified main-trace store).
     #[inline]
     pub fn real_trace_ref(&self) -> Option<crate::basefold::TraceRef<'_, T>> {
         self.inner.as_ref().map(|m| m.as_trace_ref())

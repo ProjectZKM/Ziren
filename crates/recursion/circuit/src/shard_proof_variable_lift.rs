@@ -238,7 +238,7 @@ pub fn build_basefold_shard_verifier_with_num_vars<HV>(
     )
 }
 
-/// WRAP-stage in-circuit verifier: SP1-faithful `wrap_default`
+/// WRAP-stage in-circuit verifier: `wrap_default`
 /// (log_blowup=3, num_queries=94, pow_bits=22) so the gnark OUTER circuit
 /// reads the wrap codeword at the same rate the wrap prover committed
 /// (100-bit query-phase soundness; the inner default would be ~55-bit).
@@ -1029,7 +1029,7 @@ mod tests {
         assert_eq!(v.max_log_row_count, 21);
         assert_eq!(v.stacked_pcs_verifier.log_stacking_height, 21);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_variables, 21);
-        // Inner production default is SP1-faithful (2, 124, 16) =
+        // Inner production default is (2, 124, 16) =
         // provable 100-bit soundness.
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.log_blowup, 2);
         assert_eq!(v.stacked_pcs_verifier.recursive_pcs_verifier.params.num_queries, 124);

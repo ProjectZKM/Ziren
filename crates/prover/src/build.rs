@@ -187,7 +187,7 @@ pub fn build_constraints_and_witness(
         .clone()
         .expect(
             "build_constraints_and_witness: wrap proof missing basefold_shard_proof \
-             (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+             (the outer ring must be a BaseFold config)",
         );
     let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
     let template_input = ZKMWrapBasefoldWitnessValues {

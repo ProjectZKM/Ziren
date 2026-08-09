@@ -74,7 +74,7 @@ pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPose
 ///     basefold shard proof from `dummy_basefold_vk_and_shard_proof`.
 ///
 /// This mirrors the real prover output shape at
-/// `crates/pcs/src/prover.rs:600-610` (the `use_basefold_path`
+/// `crates/pcs/src/prover.rs` (the BaseFold prove path
 /// return branch).  RecursionAir-parameterised because the inner
 /// `dummy_basefold_vk_and_shard_proof` already drives the
 /// `prove_shard_to_basefold` host path with the chip set from

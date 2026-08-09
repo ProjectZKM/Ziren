@@ -665,7 +665,7 @@ pub fn hierarchical_jagged_pack<F: Field>(
 }
 
 // ────────────────────────────────────────────────────────────────────────
-// <2^30 jagged round-split (SP1-faithful) — shared integer-only partition.
+// <2^30 jagged round-split — shared integer-only partition.
 //
 // SP1 reference: slop/crates/jagged/src/verifier.rs — the jagged verifier
 // asserts each round's `area < 1<<30` (verifier.rs:236-240), `log_m < 30`

@@ -1543,7 +1543,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                // RECURSION-LAYER AREA PIN (SP1-faithful, always
+                                // RECURSION-LAYER AREA PIN (always
                                 // on — no env flag): threaded EXPLICITLY as the
                                 // `commit()` `recursion_area_pin` param.  Pins
                                 // this recursion proof's (normalize
@@ -2006,7 +2006,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .clone()
             .expect(
                 "wrap_plonk_bn254: wrap proof missing basefold_shard_proof \
-                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+                 (the outer ring must be a BaseFold config)",
             );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
         let input = ZKMWrapBasefoldWitnessValues {
@@ -2054,7 +2054,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .clone()
             .expect(
                 "wrap_groth16_bn254: wrap proof missing basefold_shard_proof \
-                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+                 (the outer ring must be a BaseFold config)",
             );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
         let input = ZKMWrapBasefoldWitnessValues {
@@ -2107,7 +2107,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .clone()
             .expect(
                 "wrap_dvsnark_bn254: wrap proof missing basefold_shard_proof \
-                 (KoalaBearPoseidon2Outer::use_basefold() must be true)",
+                 (the outer ring must be a BaseFold config)",
             );
         let vk_merkle_data = ZKMMerkleProofWitnessValues::<OuterSC>::dummy(1, 1);
         let input = ZKMWrapBasefoldWitnessValues {

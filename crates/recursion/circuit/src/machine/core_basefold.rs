@@ -522,7 +522,7 @@ pub fn verify_core_basefold<C, SC, A>(
             // verify failure).  There is no runtime-conditional `observe` in
             // the fixed program to skip the padded tail.
             //
-            // The SP1-faithful fix is PROVER-SIDE: stop clamping
+            // The fix is PROVER-SIDE: stop clamping
             // `log_stacking_height` (always commit at the fixed
             // DEFAULT_LOG_STACKING_HEIGHT = 21, padding tiny commits' area UP —
             // exactly what SP1's `JaggedPcsProver::commit_multilinears` does:

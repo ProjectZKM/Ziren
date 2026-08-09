@@ -42,7 +42,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
     // and `CpuProver` takes the host default.
     prover: &P,
     chips: &[&Chip<Val<SC>, A>],
-    // SITE-1 trace-unification: BORROWED views over the shard prover's shared
+    // BORROWED views over the shard prover's shared
     // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
     // host eager-commit path; on the device / in-dispatch commit path they are
     // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
@@ -76,15 +76,11 @@ where
     use core::any::TypeId;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // This used to begin with a pass-through guard on
-    // `precomputed_commit.is_some() || !use_basefold()`.  Both disjuncts were
-    // unreachable -- every caller passed `None` (the commit is built HERE, during
-    // the prove pass) and both `use_basefold()` impls return `true` -- and the
-    // branch was not merely dead but dangerous: returning `None` would leave the
-    // prover observing the BaseFold commit in-band while the verifier always uses
-    // `verify_jagged_basefold_no_observe`, i.e. a transcript desync that a green
-    // test suite cannot see.  The parameter is gone and the commit is returned
-    // unconditionally, so there is nothing left to fall through.
+    // The BaseFold commit is built HERE, during the prove pass, and is returned
+    // UNCONDITIONALLY.  Do not reintroduce an early return: the verifier always
+    // uses `verify_jagged_basefold_no_observe`, so a path that skipped the commit
+    // would leave the prover observing it in-band -- a transcript desync a green
+    // test suite cannot see.
     //
     // Both rings have Val == InnerVal (KoalaBear) and Challenge == InnerChallenge
     // (KoalaBear^4) -- the identities the `named_inner` relabel below relies on.
@@ -169,7 +165,7 @@ where
         let raw_root_inner: [InnerVal; 8] =
             crate::jagged_pcs::basefold_commit_digest(&precomputed.commit);
 
-        // ── SP1-faithful jagged HASH-BIND (inner ring only) ────────────
+        // ── jagged HASH-BIND (inner ring only) ────────────
         // Tie the per-chip (row_count, column_count) geometry to the commitment:
         //   modified = compress([raw_root, hash(once(len) ++ row_counts ++ col_counts)])
         // The Fiat-Shamir transcript observes `modified` (set as `main_commitment`
@@ -594,7 +590,7 @@ where
         build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
 
     // C0 extraction: the final `BasefoldShardProof` construction — including
-    // the witnessed row/padding-column counts + the SP1-faithful raw BaseFold
+    // the witnessed row/padding-column counts + the raw BaseFold
     // root (`jagged_original_commitment`), both derived from `evaluation_proof`
     // — is lifted VERBATIM into a `zkm-pcs` pub helper.
     let proof = assemble_basefold_shard_proof::<SC>(
@@ -943,7 +939,7 @@ where
             let w = ctrace_width;
             (w, ctrace_values.len() / w)
         };
-        // #P2S0: mirror the `y_per_chip` guard in jagged_pcs.rs.  A genuine
+        // Mirror the `y_per_chip` guard in jagged_pcs.rs.  A genuine
         // HEIGHT-0 but FULL-WIDTH missing chip must still emit ONE zero column
         // claim PER COLUMN (the verifier k-walk advances through every
         // committed column); a truly width-0 chip skips.
@@ -1144,7 +1140,7 @@ where
 }
 
 /// C0 block 6 (part 3) — the final `BasefoldShardProof` construction.  Derives
-/// the witnessed per-round row/padding-column counts and the SP1-faithful RAW
+/// the witnessed per-round row/padding-column counts and the RAW
 /// BaseFold root (`jagged_original_commitment`) from `evaluation_proof`, then
 /// moves every piece into the proof.  PURE DATA — no transcript.
 #[allow(clippy::too_many_arguments)]
@@ -1181,7 +1177,7 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
-    // SP1-faithful jagged hash-bind: carry the RAW BaseFold root (the value the
+    // Jagged hash-bind: carry the RAW BaseFold root (the value the
     // BaseFold opening binds against) while the FS-observed `main_commitment`
     // is the MODIFIED digest.  Fall back to `main_commitment` on the
     // hash-bind-off path / non-bundle proofs.
@@ -1288,7 +1284,7 @@ pub fn prove_jagged_open_inner(
 /// own provider; this stays the CPU body.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    // SITE-1 trace-unification: BORROWED views over the shard prover's shared
+    // BORROWED views over the shard prover's shared
     // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
     // these views (no clone / move) — retires copy-SITE 1.
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
@@ -1346,7 +1342,7 @@ where
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
-        "prove_trusted_evaluations: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
+        "prove_trusted_evaluations requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",
     );
 
     // One reviewed reinterpret for the three
@@ -1403,7 +1399,7 @@ where
     // Send `trace.width` directly; the verifier reads each chip's
     // `column_count` from `PackingMeta` so padding to `chip.width()`
     // would just inflate jagged-PCS data on sparse chips.
-    // SITE-1 trace-unification: build each `chip_traces` entry as a BORROWED
+    // Build each `chip_traces` entry as a BORROWED
     // InnerVal view via a zero-copy slice relabel of the borrowed Val<SC> view
     // (Val<SC> == InnerVal under the TypeId gate) — was the former owned
     // `reinterpret_vec` Vec move (copy-SITE 2) / `trace.values.clone()`.
@@ -1462,7 +1458,7 @@ where
     // `Bytes` (rmp-serialized `JaggedBasefoldBundleGeneric<OuterValMmcs>`) and
     // passes `pre_y_per_chip = None`, exactly as this site used to.
     //
-    // #118: the two whole-pipeline jagged-PCS GPU orchestration dispatch sites
+    // The two whole-pipeline jagged-PCS GPU orchestration dispatch sites
     // that used to live here were REMOVED with their OnceLock registries — both
     // were dead (ziren-gpu never registered either), so control always reached
     // the host jagged-basefold path the ring impls now call.

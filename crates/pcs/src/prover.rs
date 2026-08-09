@@ -349,7 +349,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn prove_trusted_evaluations(
         &self,
         chips: &[&MachineChip<SC, A>],
-        // SITE-1 trace-unification: BORROWED views over the shard prover's
+        // BORROWED views over the shard prover's
         // shared `Arc<Mle>` store; the free-fn builds `chip_traces` by a
         // zero-copy slice relabel of these views (no clone / move).  This is the
         // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
@@ -501,7 +501,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                     .max_log_row_count
             });
         // The shared analytic trace-MLE store — the SINGLE authoritative host
-        // main-trace store (trace-unification Phase 1) — is now built ONCE at the
+        // main-trace store (the unified main-trace store) — is now built ONCE at the
         // construction site and handed over ready-made on `data.main_traces`
         // (SP1's name-keyed `Traces`), so this driver no longer re-derives it.
         // Re-key the name-ordered map onto the chip-INDEX order the loader and
@@ -800,7 +800,7 @@ where
 
         let degrees = traces.iter().map(|trace| trace.height()).collect::<Vec<_>>();
 
-        // #P2S0: a genuinely-missing
+        // A genuinely-missing
         // canonical-cluster chip is committed as a 0-row matrix (height 0, not a
         // power of two), so `log2_strict_usize` would panic.  This legacy
         // `log_degree` field feeds ONLY the envelope `ShardProof.opened_values`
@@ -834,7 +834,7 @@ where
             chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
 
         let pcs = config.pcs();
-        // #P2S0: `natural_domain_for_degree(0)`
+        // `natural_domain_for_degree(0)`
         // would panic (not-a-power-of-two).  `trace_domains` is legacy-FRI
         // scaffolding that is NEVER read after this point on the BaseFold path
         // (confirmed: no consumer in `open()`), so a 0-height chip maps to the
@@ -930,7 +930,7 @@ where
             // But cumulative sums are always observed (verifier does this unconditionally).
             for i in 0..chips.len() {
                 let local_sum = SC::Challenge::ZERO;
-                // #P2S0: a 0-row missing chip has
+                // A 0-row missing chip has
                 // no last row to read the septic digest from — it contributes the
                 // ZERO digest (no events, no cumulative-sum contribution).  Guard
                 // on `values.len() < 14` (NOT just `height() == 0`) so the guard is
@@ -1002,7 +1002,7 @@ where
                 .enumerate()
                 .map(|(i, (chip, log_degree))| {
                     // Extract cumulative sums matching what was observed into the transcript.
-                    // #P2S0: 0-row missing chip =>
+                    // 0-row missing chip =>
                     // ZERO digest.  `values.len() < 14` is the EXACT mirror of
                     // `chip_global_cumulative_sum` (`sz < 14 => zero`) — byte-identical
                     // for present global chips, panic-safe for any under-14 trace.
@@ -1258,15 +1258,14 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // The `!use_basefold()` early `return None` here was dead -- both
-    // `BasefoldRing` impls returned `true`.  A REAL assert, not a
+    // A REAL assert, not a
     // `debug_assert!`: it guards the KoalaBear-typed transmutes below, and
     // `debug_assert!` compiles out in release, which is where that would be UB.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
-        "try_prove_shard_to_basefold_boxed: use_basefold()=true requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
+        "try_prove_shard_to_basefold_boxed requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
     );
 
     // Build per-chip preprocessed traces aligned with `chips` (empty
@@ -1284,7 +1283,7 @@ where
     // INLINE-commit (SP1 / GPU parity): the BaseFold jagged-PCS commit is built
     // LAZILY inside `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`
     // (which observes its 8-felt digest as `main_commitment`, and applies the
-    // SP1-faithful jagged HASH-BIND for the inner ring).  So there is no eager
+    // Jagged HASH-BIND for the inner ring).  So there is no eager
     // precompute to downcast, and no digest to compute up-front here: the
     // `main_commitment` passed below is a placeholder that the lazy build
     // OVERRIDES.
@@ -1337,7 +1336,7 @@ where
     };
     // SP1-parity trace hoist: build the shared analytic trace-MLE store HERE,
     // once, as SP1's name-keyed `Traces::named_traces` — the SINGLE
-    // authoritative host main-trace store (trace-unification Phase 1).  The
+    // authoritative host main-trace store (the unified main-trace store).  The
     // per-chip `RowMajorMatrix` materialization out of the `Arc`s is the SAME
     // clone this site already paid before handing owned traces to the trait
     // method; `named_padded_traces` then MOVES each one into its `Arc<Mle>`.

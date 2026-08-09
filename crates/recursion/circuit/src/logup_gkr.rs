@@ -655,7 +655,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
             );
             let geq_eval = crate::zerocheck::full_geq::<C>(&degree_sym, &point_extended);
 
-            // SP1-faithful FULL-POINT openings (the GKR leaf is LSB-first
+            // FULL-POINT openings (the GKR leaf is LSB-first
             // natural-row).  Production FIX-off proofs always carry `*_full`;
             // panic if absent (matches the gated host assert semantics — the
             // reconstruction is only meaningful on `*_full`-carrying proofs).

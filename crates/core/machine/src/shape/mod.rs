@@ -1627,7 +1627,7 @@ pub mod tests {
     /// in-circuit, keyed on the witnessed chip-set) is enumerability-safe (the
     /// band-cap is f(chip-set) only).  If NO (the band-cap moves with raw
     /// heights), the fix re-breaks the program-length-dependent VK and must be
-    /// abandoned for the SP1-faithful hash-bound port.
+    /// abandoned for the hash-bound port.
     #[test]
     fn step0_bandcap_invariance_for_fixed_chipset() {
         use p3_koala_bear::KoalaBear;

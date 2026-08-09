@@ -70,7 +70,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub public_values: Vec<F>,
     /// Commitment digest to the main trace.
     ///
-    /// SP1-faithful jagged hash-bind: this is the **MODIFIED** digest
+    /// Jagged hash-bind: this is the **MODIFIED** digest
     /// `compress([raw_root, hash(once(len) ++ row_counts ++ column_counts)])`
     /// — the value the Fiat-Shamir transcript observes (so the per-chip
     /// geometry is cryptographically tied to the commitment).  The RAW
@@ -117,7 +117,7 @@ pub struct BasefoldShardProof<F, EF> {
     /// proof bytes.
     #[serde(default)]
     pub padding_column_counts: Vec<usize>,
-    /// SP1-faithful jagged hash-bind: the **RAW** BaseFold cap root
+    /// Jagged hash-bind: the **RAW** BaseFold cap root
     /// (pre-hash-bind) — the value the BaseFold opening binds against and
     /// the recursion lift populates `original_commitments` from.  The
     /// FS-observed [`Self::main_commitment`] is the MODIFIED digest

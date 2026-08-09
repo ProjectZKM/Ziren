@@ -78,7 +78,7 @@ where
         eq_mle_table::<EF>(&beta_seed)
     };
 
-    // SP1-faithful GKR padding (VERIFY_VK enumerability): the GKR
+    // GKR padding (VERIFY_VK enumerability): the GKR
     // round count is FIXED to `max_log_row_count - 1` regardless of
     // the actual (heterogeneous) chip heights — `build_gkr_circuit`
     // emits `num_row_variables - 1` round proofs (see `build.rs:94-117`

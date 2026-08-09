@@ -46,7 +46,7 @@ impl<F: Field> FriConfig<F> {
     }
 
     /// Inner-stage (core / compress / shrink) production parameters:
-    /// **`(log_blowup=2, num_queries=124, pow_bits=16)`** — SP1-faithful
+    /// **`(log_blowup=2, num_queries=124, pow_bits=16)`** —
     /// per-stage soundness (`core_fri_config` / `recursion_fri_config`,
     /// `crates/primitives/src/fri_params.rs`: `CORE_LOG_BLOWUP = 2`,
     /// `RECURSION_LOG_BLOWUP = 2`,

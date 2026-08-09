@@ -297,7 +297,7 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
         jagged_eval: PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
         // original_commitments[0] = the RAW BaseFold commit cap root (the
-        // value the BaseFold opening binds against).  Under the SP1-faithful
+        // value the BaseFold opening binds against).  Under the
         // hash-bind, `main_commitment` is the MODIFIED digest
         // `compress([raw_root, hash(counts)])` (observed in the FS prologue),
         // so the raw root is witnessed SEPARATELY here (from
@@ -380,7 +380,7 @@ where
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
         let main_commitment_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.main_commitment[i].read(builder));
-        // SP1-faithful hash-bind: witness the RAW BaseFold root (the value the
+        // Hash-bind: witness the RAW BaseFold root (the value the
         // BaseFold open binds against) separately from the MODIFIED
         // `main_commitment` (the FS-observed digest).  Same stream position as
         // `write` below (immediately after main_commitment).
@@ -459,7 +459,7 @@ where
         for f in self.main_commitment.iter() {
             f.write(witness);
         }
-        // SP1-faithful hash-bind: write the RAW BaseFold root immediately after
+        // Hash-bind: write the RAW BaseFold root immediately after
         // main_commitment (mirrors `read`).
         for f in self.jagged_original_commitment.iter() {
             f.write(witness);
@@ -1967,7 +1967,7 @@ where
     for _ in 1..num_rounds {
         original_commitments.push(zero_digest_var);
     }
-    // SP1-faithful hash-bind: modified_commitments[0] = the witnessed
+    // Hash-bind: modified_commitments[0] = the witnessed
     // MODIFIED (FS-observed) digest; the rest mirror original (zeros).
     let mut modified_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
     modified_commitments.push(preread_modified_commitment);

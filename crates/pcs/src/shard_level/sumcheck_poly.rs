@@ -381,7 +381,7 @@ pub trait GpuZerocheckChallenger {
 // threaded by prover TYPE; the `OnceLock` + `register_/get_` accessors + the
 // `GpuInteractionEvalFn` fn-ptr alias were dropped.
 
-// #118: the two whole-pipeline jagged-PCS GPU orchestration hooks —
+// The two whole-pipeline jagged-PCS GPU orchestration hooks —
 // `GPU_JAGGED_ORCHESTRATION_HOOK` (host-trace variant) and
 // `GPU_JAGGED_PCS_DEVICE_HOOK` (device-trace variant) — were REMOVED,
 // not static-dispatched.  Both were dead: ziren-gpu never registered

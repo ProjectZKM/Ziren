@@ -328,7 +328,7 @@ impl BasefoldShardVerifier {
             &proof.opened_values,
         )?;
 
-        // ── Stage 3.5 — SP1-faithful jagged HASH-BIND re-check ───────
+        // ── Stage 3.5 — jagged HASH-BIND re-check ───────
         //
         // Host mirror of SP1 `verify_trusted_evaluations`
         // (slop/crates/jagged/src/verifier.rs:206-217): recompute
@@ -542,7 +542,7 @@ where
     // Type gate (same as prover-side prove_trusted_evaluations).
     // This verifier-side FIELD gate is kept as a
     // TypeId transmute-safety guard for the unsafe `InnerChallenge`
-    // reinterpretation below (rather than `BasefoldRing::use_basefold()`). It is
+    // reinterpretation below. It is
     // functionally equivalent: it is reached only when the prover emitted a
     // BaseFold bundle (i.e. the config proved via BaseFold), and the TypeId check
     // is exactly the identity that makes the transmute sound. The
@@ -1876,7 +1876,7 @@ where
                     point_extended.len()
                 )));
             }
-            // #P2S0: a genuine height-0 missing chip has all-zero degree bits
+            // A genuine height-0 missing chip has all-zero degree bits
             // => full_geq == 1 => identity fraction (0,1) => excluded from the
             // reconstruction.
             let geq_eval = full_geq_host::<Challenge<SC>>(degree, &point_extended);

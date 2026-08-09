@@ -565,7 +565,7 @@ impl<P> BasefoldShardVerifier<P> {
             .map(|chip| chip.main.local.clone())
             .collect();
 
-        // ── SP1-faithful jagged HASH-BIND re-check (in-circuit) ──────────
+        // ── jagged HASH-BIND re-check (in-circuit) ──────────
         //
         // Port of SP1 `RecursiveJaggedPcsVerifier::verify_trusted_evaluations`
         // (crates/recursion/circuit/src/jagged/verifier.rs:96-115): for each
@@ -593,7 +593,7 @@ impl<P> BasefoldShardVerifier<P> {
         // own hook — guard by env so the inner default path always runs it).
         {
             use p3_field::PrimeCharacteristicRing;
-            // Only run the re-bind on rings that actually carry the SP1-faithful
+            // Only run the re-bind on rings that actually carry the
             // hash-bind (the INNER KoalaBear rings, where `modified` is the real
             // FS-observed digest distinct from the RAW root).  The OUTER BN254
             // (gnark wrap) ring's commitment IS the raw wrap root — its lift sets

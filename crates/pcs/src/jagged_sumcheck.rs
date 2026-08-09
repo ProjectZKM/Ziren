@@ -48,7 +48,7 @@ fn build_weight_table(
     let n = 1usize << packing.log_dense_size;
     let mut w = vec![InnerChallenge::ZERO; n];
 
-    // SP1-faithful row weight: the full max-log-row eq table
+    // Row weight: the full max-log-row eq table
     // over z_row, indexed by the LITERAL row index (0..h_c).  No trailing
     // slice, no stride, no explicit Pi_high embedding — the full row_eq
     // bakes the height factor in for any row < 2^log_h_c because the high
@@ -424,7 +424,7 @@ mod phase1_acceptance_gate {
     fn run_case(chips: &[(usize, usize)], seed: u64) -> (InnerChallenge, InnerChallenge) {
         let mut rng = StdRng::seed_from_u64(seed);
         let traces = build_traces(chips, &mut rng);
-        // SITE-1 trace-unification: the metadata/dense helpers now take borrowed
+        // The metadata/dense helpers now take borrowed
         // views; build them over the owned `traces` (kept alive in this scope).
         let trace_views: Vec<(String, crate::multilinear::PaddedMle<InnerVal>)> =
             traces

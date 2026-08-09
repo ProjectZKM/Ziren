@@ -519,7 +519,7 @@ mod tests {
     /// the VK — is CLAMP-INDEPENDENT (a function of the chip-SET only).
     /// This test ASSERTS that equality, since the host commit does not
     /// clamp (`log_stacking_height` fixed at 21,
-    /// SP1-faithful — see `jagged/src/prover.rs:commit_multilinears` in
+    /// — see `jagged/src/prover.rs:commit_multilinears` in
     /// the SP1 ref, which pads area UP to a FIXED stacking height and
     /// never clamps).  The verifier-side masking-to-MAX alternative is
     /// UNSOUND in isolation: the recursion challenger sponge is stateful
@@ -596,7 +596,7 @@ mod tests {
         // The stacking height is FIXED at 21 for BOTH heights — the
         // prover does not clamp small commits down
         // (`pick_log_stacking_height` ignores area; the call site pads the
-        // area up to 2^21, SP1-faithful).
+        // area up to 2^21, ).
         assert_eq!(
             small_stk, 21,
             "SMALL commit must now use the FIXED stacking height (got {small_stk}); de-clamp regressed"

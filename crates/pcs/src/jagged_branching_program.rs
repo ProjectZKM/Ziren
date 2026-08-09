@@ -315,7 +315,7 @@ pub fn full_jagged_evaluation<EF: Field>(
     z_col: &[EF],
     z_index: &[EF],
 ) -> EF {
-    // SP1-faithful prefix-sum bit width: the largest prefix sum is
+    // Prefix-sum bit width: the largest prefix sum is
     // `prefix_sums.last()` (= total area), which needs `log2_ceil(total)+1`
     // bits (matching SP1 into_verifier_params: Point::from_usize(x, log_m+1)
     // with log_m = log2_ceil(last_prefix_sum)).  Deriving `num_bits` from the
