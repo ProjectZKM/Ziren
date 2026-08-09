@@ -483,74 +483,72 @@ mod tests {
         );
     }
 
-    /// DOCUMENTED DIVERGENCE — permanent coverage for the reason the reduction
-    /// swap is not a call-site change.
+    /// ★ THE RECONCILIATION, pinned.
     ///
     /// `interleave_multilinears_with_fixed_rate` (SP1's restacking) and
-    /// `materialize_dense_jagged` (Ziren's jagged packing) produce the SAME
-    /// MULTISET of cells in DIFFERENT ORDER.  Measured, 2 chips x 2 cols x 8
-    /// rows:
-    ///     dense = [594,  74, 102, 552, 710, 606,  84, 68, ..]
-    ///     inter = [594, 710, 102,  84,  74, 606, 552, 68, ..]
+    /// `materialize_dense_jagged` produce the IDENTICAL layout — provided the
+    /// dense is built in NATURAL row order (`use_rev = true`).  The only thing
+    /// that ever separated them is Ziren's LEGACY BIT-REVERSED row order, which
+    /// `use_rev = false` applies and which SP1 has no equivalent of:
     ///
-    /// That matters because the weight side is NOT materialized alongside the
+    ///     dense(rev=false) = [594,  74, 102, 552, 710, 606,  84, 68, ..]
+    ///     dense(rev=true)  = [594, 710, 102,  84,  74, 606, 552, 68, ..]
+    ///     interleaved      = [594, 710, 102,  84,  74, 606, 552, 68, ..]
+    ///
+    /// This matters because the weight side is never materialized alongside the
     /// base: `full_jagged_evaluation` derives `w(z*)` in closed form from the
-    /// jagged PACKING geometry — chip offsets, column-major within a chip.  Pair
-    /// an interleaved base against it and the two halves of the Hadamard product
-    /// address different cells, so the sumcheck proves the wrong identity.
-    ///
-    /// Reconciling this is the open half of the port: either restack into the
-    /// jagged order, or move the weight closed form onto the interleaved order.
+    /// jagged packing geometry.  Under natural order the interleaved base
+    /// addresses exactly the cells that closed form assumes, so
+    /// `HadamardProduct` can be wired into the reduction on the CORE path
+    /// (`core_rev() == true`) with no layout work at all.  The recursion /
+    /// shrink / wrap stages still commit under the legacy bitrev and are what
+    /// the authorised VK regen has to move.
     #[test]
-    fn interleaved_layout_differs_from_jagged_dense_layout() {
-        use crate::multilinear::{Padding, PaddedMle};
+    fn interleaved_layout_equals_natural_order_dense_layout() {
+        use crate::multilinear::PaddedMle;
 
         let mut rng = StdRng::seed_from_u64(0x1A70);
-        let widths = vec![2usize, 2];
-        let lsh = 3u32;
-        let comps = build(&mut rng, &widths, lsh);
+        for widths in [vec![2usize, 2], vec![4, 4]] {
+            let lsh = 3u32;
+            let comps = build(&mut rng, &widths, lsh);
 
-        // The jagged dense layout.
-        let named: Vec<(String, PaddedMle<InnerVal>)> = comps
-            .iter()
-            .enumerate()
-            .map(|(i, m)| {
-                (
-                    format!("chip{i}"),
-                    PaddedMle::padded_with_zeros(std::sync::Arc::new(m.clone()), lsh),
-                )
-            })
-            .collect();
-        let packing = crate::jagged::compute_jagged_metadata(&named);
-        let dense = crate::jagged::materialize_dense_jagged::<InnerVal>(
-            &named,
-            packing.log_dense_size,
-            false,
-        );
+            let named: Vec<(String, PaddedMle<InnerVal>)> = comps
+                .iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    (
+                        format!("chip{i}"),
+                        PaddedMle::padded_with_zeros(std::sync::Arc::new(m.clone()), lsh),
+                    )
+                })
+                .collect();
+            let packing = crate::jagged::compute_jagged_metadata(&named);
+            let natural = crate::jagged::materialize_dense_jagged::<InnerVal>(
+                &named,
+                packing.log_dense_size,
+                true,
+            );
+            let legacy = crate::jagged::materialize_dense_jagged::<InnerVal>(
+                &named,
+                packing.log_dense_size,
+                false,
+            );
 
-        // The interleaved layout.
-        let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
-            comps.into_iter().map(std::sync::Arc::new).collect();
-        let hp = jagged_hadamard_poly(msg, lsh, vec![InnerChallenge::ZERO; dense.len()]);
-        let inter = hp.base.first_component().guts().as_slice();
+            let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
+                comps.into_iter().map(std::sync::Arc::new).collect();
+            let hp = jagged_hadamard_poly(msg, lsh, vec![InnerChallenge::ZERO; natural.len()]);
+            let inter = hp.base.first_component().guts().as_slice();
 
-        let _ = Padding::<InnerVal>::Constant(InnerVal::ZERO, 0);
-        eprintln!("dense.len={} inter.len={}", dense.len(), inter.len());
-        eprintln!("dense[0..8]  = {:?}", &dense[..8.min(dense.len())]);
-        eprintln!("inter[0..8]  = {:?}", &inter[..8.min(inter.len())]);
-        assert_eq!(dense.len(), inter.len(), "total size must agree");
-
-        let mut d = dense.clone();
-        let mut i = inter.to_vec();
-        d.sort_by_key(|v| format!("{v}"));
-        i.sort_by_key(|v| format!("{v}"));
-        assert_eq!(d, i, "same cells must survive both layouts");
-
-        assert_ne!(
-            &dense[..], inter,
-            "layouts now AGREE — if this fires the reconciliation has happened and the reduction \
-             swap is unblocked; delete this test and wire prove_jagged_reduction_hadamard in",
-        );
+            assert_eq!(
+                &natural[..], inter,
+                "widths={widths:?}: interleaved base must equal the NATURAL-order dense layout",
+            );
+            assert_ne!(
+                &legacy[..], inter,
+                "widths={widths:?}: legacy bitrev is the one real difference — if this stops \
+                 holding the orientation flag has changed meaning",
+            );
+        }
     }
 
     /// A non-power-of-two total must be REJECTED, not silently truncated by
