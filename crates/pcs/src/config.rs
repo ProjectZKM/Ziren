@@ -150,11 +150,6 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// Construct the BaseFold MMCS for this config (perm + hash + compress).
     fn bf_mmcs() -> Self::BfMmcs;
 
-    /// Whether this config proves/verifies via the BaseFold jagged-PCS path
-    /// (vs. the legacy two-adic FRI path).  Replaces the open-coded
-    /// `use_basefold_path` TypeId gate.
-    fn use_basefold() -> bool;
-
     /// Per-stage BaseFold FRI config (rate / query count / grinding).
     ///
     /// SP1 keeps SEPARATE per-stage configs (core/recursion vs shrink/wrap;

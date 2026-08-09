@@ -210,14 +210,13 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // higher-level jagged bundle + 8-felt-digest stack is genericized over
 // `BfMmcs::Commitment`.
 //
-// `use_basefold()` returns `false` for now — exactly mirroring the legacy
-// `TypeId::of::<SC::Challenger>() == TypeId::of::<JaggedChallenger>()` gate,
-// which was false for OuterSC (`Challenger = MultiField32Challenger`). This
-// keeps the swap to `BasefoldRing` dispatch non-breaking: the wrap stays on
-// the two-adic FRI path. Flip to `true` once `JaggedBasefoldBundle` /
-// `prove_shard_to_basefold`'s `main_commitment: [Val; 8]` are genericized over
-// `Self::BfMmcs::Commitment` (the remaining wrap-port work + vk regen); the
-// `bf_mmcs()` infrastructure here is then consumed directly.
+// The digest tunnel + the outer jagged open/verify dispatch are wired, so the
+// wrap STARK proves and host-verifies over the BN254 BaseFold jagged-PCS
+// (OuterValMmcs + OuterChallenger): the outer commit builds the BN254 commit
+// via `precompute_jagged_basefold_commit_generic::<OuterValMmcs>`, and
+// `prove_trusted_evaluations` / `verify_jagged_pcs_host` route to the
+// recursion-core hooks.  (gnark `verify_wrap_basefold` + wrap vk regen + FRI
+// deletion remain.)
 impl BasefoldRing for KoalaBearPoseidon2Outer {
     type BfMmcs = OuterValMmcs;
 
@@ -226,18 +225,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         let hash = OuterHash::new(perm.clone()).unwrap();
         let compress = OuterCompress::new(perm);
         OuterValMmcs::new(hash, compress, 0)
-    }
-
-    fn use_basefold() -> bool {
-        // The digest tunnel + the outer
-        // jagged open/verify dispatch (hooks) are wired, so the wrap STARK
-        // proves + host-verifies over the BN254 BaseFold jagged-PCS
-        // (OuterValMmcs + OuterChallenger). The outer commit builds the BN254
-        // commit via precompute_jagged_basefold_commit_generic::<OuterValMmcs>;
-        // prove_trusted_evaluations / verify_jagged_pcs_host route to the
-        // recursion-core hooks. (gnark verify_wrap_basefold + wrap vk regen +
-        // FRI deletion remain.)
-        true
     }
 
     fn fri_config(

@@ -407,10 +407,6 @@ pub mod koala_bear_poseidon2 {
             crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0)
         }
 
-        fn use_basefold() -> bool {
-            true
-        }
-
         fn digest_felts(
             commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
         ) -> [crate::jagged_pcs::JaggedVal; 8] {
