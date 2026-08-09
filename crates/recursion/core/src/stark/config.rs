@@ -685,10 +685,12 @@ mod basefold_over_bn254_roundtrip_test {
             .cloned()
             .unwrap_or_default();
 
-        // The jagged entry points take BORROWED `ChipTraceView`s (name + matrix view),
-        // not owned matrices; build the views once and reuse them.
-        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>> =
-            traces.iter().map(|(name, m)| (name.clone(), m.as_view())).collect();
+        // The jagged entry points take BORROWED `ChipTraceView`s (name + cells +
+        // width), not owned matrices; build the views once and reuse them.
+        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView<'_>> = traces
+            .iter()
+            .map(|(name, m)| (name.clone(), zkm_pcs::jagged::ChipTrace::new(&m.values, m.width)))
+            .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
         let precompute = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(

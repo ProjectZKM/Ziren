@@ -733,7 +733,7 @@ pub mod jagged {
 
     use p3_challenger::{CanObserve, FieldChallenger};
     use p3_field::PrimeCharacteristicRing;
-    use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+    use p3_matrix::dense::RowMajorMatrix;
 
     use crate::basefold::StackedBasefoldProof;
     use crate::jagged::{JaggedChipInfo, JaggedPacking, compute_jagged_metadata, materialize_dense_jagged};
@@ -749,7 +749,7 @@ pub mod jagged {
     /// Device-resident chips carry an empty view (width 0); the host-fallback
     /// `rematerialize_chip_traces_via_provider` produces owned side-storage the
     /// caller re-views.
-    pub type ChipTraceView<'a> = (alloc::string::String, RowMajorMatrixView<'a, InnerVal>);
+    pub type ChipTraceView<'a> = (alloc::string::String, crate::jagged::ChipTrace<'a, InnerVal>);
 
     use super::{
         FriConfig,
@@ -1260,7 +1260,7 @@ pub mod jagged {
     ) -> alloc::vec::Vec<ChipTraceView<'_>> {
         owned
             .iter()
-            .map(|(name, m)| (name.clone(), m.as_view()))
+            .map(|(name, m)| (name.clone(), crate::jagged::ChipTrace::new(&m.values, m.width)))
             .collect()
     }
 
@@ -2347,7 +2347,7 @@ pub mod jagged {
             traces
                 .iter()
                 .map(|(name, t)| {
-                    (name.clone(), RowMajorMatrixView::new(&t.values, t.width))
+                    (name.clone(), crate::jagged::ChipTrace::new(&t.values, t.width))
                 })
                 .collect()
         }
@@ -2662,7 +2662,6 @@ mod test {
         prove_jagged_basefold, verify_jagged_basefold, ChipTraceView, JaggedBasefoldBundle,
         VerifyStage, LAST_VERIFY_STAGE,
     };
-    use p3_matrix::dense::RowMajorMatrixView;
 
     /// SITE-1 trace-unification: the commit/open entry points take BORROWED
     /// `ChipTraceView`s over the shard prover's shared `Arc<Mle>` store.
@@ -2673,7 +2672,7 @@ mod test {
     ) -> Vec<ChipTraceView<'_>> {
         traces
             .iter()
-            .map(|(name, t)| (name.clone(), RowMajorMatrixView::new(&t.values, t.width)))
+            .map(|(name, t)| (name.clone(), crate::jagged::ChipTrace::new(&t.values, t.width)))
             .collect()
     }
 

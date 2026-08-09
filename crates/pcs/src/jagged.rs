@@ -65,8 +65,47 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use p3_field::Field;
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
+
+/// A chip's trace cells for the jagged packer: row-major `values` plus the row
+/// `width`.
+///
+/// This used to be a `RowMajorMatrixView`.  The packer indexes
+/// `values[row * width + col]` by hand throughout and needed only two things
+/// from the `Matrix` impl -- `height` and `width` -- which are inherent here, so
+/// the matrix wrapper bought a trait impl for a struct that is already just a
+/// slice and a stride.  Field names and `new` match the old view, so every
+/// consumer reads identically; only construction sites moved.
+#[derive(Clone, Copy, Debug)]
+pub struct ChipTrace<'a, F> {
+    /// Row-major trace cells.
+    pub values: &'a [F],
+    /// Number of columns per row.
+    pub width: usize,
+}
+
+impl<'a, F> ChipTrace<'a, F> {
+    /// Build a view over `values`, `width` columns per row.
+    pub const fn new(values: &'a [F], width: usize) -> Self {
+        Self { values, width }
+    }
+
+    /// Number of columns per row.
+    pub const fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Number of rows; `0` for a width-0 (device-resident / unexercised) chip,
+    /// matching what `DenseMatrix::height` returned for the view this replaced.
+    pub const fn height(&self) -> usize {
+        if self.width == 0 {
+            0
+        } else {
+            self.values.len() / self.width
+        }
+    }
+}
 
 /// Metadata for a single chip's trace in the jagged packing.
 ///
@@ -122,7 +161,7 @@ pub struct JaggedPacking<F> {
 /// downstream code (sumcheck reduction, verifier weight tables) only
 /// needs the metadata, not the dense values.
 pub fn compute_jagged_metadata<F: Field>(
-    traces: &[(String, RowMajorMatrixView<'_, F>)],
+    traces: &[(String, crate::jagged::ChipTrace<'_, F>)],
 ) -> JaggedPacking<F> {
     // Delegate to the dims-based core so callers that have only the
     // per-chip (name, height, width) — e.g. the device commit hook,
@@ -134,8 +173,8 @@ pub fn compute_jagged_metadata<F: Field>(
         .map(|(name, trace)| {
             (
                 name.clone(),
-                Matrix::<F>::height(trace),
-                Matrix::<F>::width(trace),
+                trace.height(),
+                trace.width(),
             )
         })
         .collect();
@@ -205,7 +244,7 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 /// it to the consumer (e.g. the BaseFold commit) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
-    traces: &[(String, RowMajorMatrixView<'_, F>)],
+    traces: &[(String, crate::jagged::ChipTrace<'_, F>)],
     log_dense_size: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
@@ -225,8 +264,8 @@ pub fn materialize_dense_jagged<F: Field>(
     let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
     let mut total: usize = 0;
     for (_name, trace) in traces {
-        let h = Matrix::<F>::height(trace);
-        let w = Matrix::<F>::width(trace);
+        let h = trace.height();
+        let w = trace.width();
         chip_offsets.push(total);
         total += h * w;
     }
@@ -282,8 +321,8 @@ pub fn materialize_dense_jagged<F: Field>(
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
             .for_each(|(slot, ((_name, trace), _))| {
-                let height = Matrix::<F>::height(trace);
-                let width = Matrix::<F>::width(trace);
+                let height = trace.height();
+                let width = trace.width();
                 if width == 0 || height == 0 {
                     return;
                 }

@@ -4,7 +4,7 @@
 use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
+use p3_matrix::dense::RowMajorMatrix;
 
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
 use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
@@ -46,7 +46,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
     // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
     // host eager-commit path; on the device / in-dispatch commit path they are
     // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
-    main_traces: Vec<RowMajorMatrixView<'t, Val<SC>>>,
+    main_traces: Vec<crate::jagged::ChipTrace<'t, Val<SC>>>,
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -61,7 +61,7 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, P>(
     // shrink / wrap path (byte-identical).
     recursion_area_pin: Option<usize>,
 ) -> (
-    Vec<RowMajorMatrixView<'t, Val<SC>>>,
+    Vec<crate::jagged::ChipTrace<'t, Val<SC>>>,
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
 )
@@ -126,7 +126,7 @@ where
             let values_inner: &'t [InnerVal] = unsafe {
                 core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
             };
-            (name, RowMajorMatrixView::new(values_inner, width))
+            (name, crate::jagged::ChipTrace::new(values_inner, width))
         })
         .collect();
 
@@ -844,7 +844,7 @@ pub fn build_commit_trace_views<'a, SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &'a [crate::multilinear::PaddedMle<Val<SC>>],
     eager_device_remat: &'a [Option<RowMajorMatrix<Val<SC>>>],
-) -> Vec<RowMajorMatrixView<'a, Val<SC>>>
+) -> Vec<crate::jagged::ChipTrace<'a, Val<SC>>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
@@ -857,14 +857,14 @@ where
             if pm.inner().is_none() {
                 // Device-resident / unexercised chip.
                 if let Some(m) = remat {
-                    return m.as_view();
+                    return crate::jagged::ChipTrace::new(&m.values, m.width);
                 }
-                return RowMajorMatrixView::new(&[], 0);
+                return crate::jagged::ChipTrace::new(&[], 0);
             }
             // Host chip: BORROW the shared MLE's real (unpadded) row-major
             // cells (zero-copy) — was the SITE-1 deep copy.
             let tr = pm.real_trace_ref().expect("inner Some => real_trace_ref Some");
-            RowMajorMatrixView::new(tr.values, tr.width)
+            crate::jagged::ChipTrace::new(tr.values, tr.width)
         })
         .collect()
 }
@@ -877,7 +877,7 @@ where
 /// any chip's residual is missing / shape-mismatched / non-pow2-height.
 pub fn compute_residual_y_openings<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    commit_traces: &[RowMajorMatrixView<'_, Val<SC>>],
+    commit_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
@@ -1279,7 +1279,7 @@ pub fn prove_trusted_evaluations<SC, A>(
     // SITE-1 trace-unification: BORROWED views over the shard prover's shared
     // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
     // these views (no clone / move) — retires copy-SITE 1.
-    main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
+    main_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
     precomputed_commit: Option<
@@ -1408,7 +1408,7 @@ where
             let values: &[InnerVal] = unsafe {
                 core::slice::from_raw_parts(src.as_ptr() as *const InnerVal, src.len())
             };
-            (name, RowMajorMatrixView::new(values, trace_width))
+            (name, crate::jagged::ChipTrace::new(values, trace_width))
         })
         .collect();
 

@@ -10,7 +10,7 @@ use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_commit::Pcs;
 use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{dense::{RowMajorMatrix, RowMajorMatrixView}, Matrix};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
 use p3_util::log2_strict_usize;
@@ -354,7 +354,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // zero-copy slice relabel of these views (no clone / move).  This is the
         // `StarkGpuProver` device-open OVERRIDE point — the coupled ziren-gpu
         // mirror takes the same borrowed view.
-        main_traces: &[RowMajorMatrixView<'_, Val<SC>>],
+        main_traces: &[crate::jagged::ChipTrace<'_, Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
         precomputed_commit: Option<
