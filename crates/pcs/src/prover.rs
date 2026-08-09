@@ -129,12 +129,6 @@ where
     /// builds `chip_ordering`, and `shard_chips_ordered` replays it — so map
     /// order already equals the `chips` slice order.
     pub main_traces: std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
-    /// Placeholder digest slot; the jagged-PCS commit is built INLINE by
-    /// `maybe_auto_precompute_basefold` during the open/prove pass (like the GPU
-    /// / SP1), which OVERRIDES this value with the computed 8-felt digest.  The
-    /// caller passes any placeholder (`[ZERO; 8]`) since the lazy build discards
-    /// it on the always-inline path.
-    pub main_commitment: [Val<SC>; 8],
     /// SP1: MainTraceData.public_values.
     pub public_values: Vec<Val<SC>>,
 }
@@ -464,7 +458,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             chips,
             preprocessed_traces,
             main_traces,
-            main_commitment,
             public_values,
         } = data;
         // SP1-parity: source the three former carrier params from `self`/traces
@@ -535,7 +528,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             chips,
             preprocessed_traces,
             &shared_trace_mles,
-            main_commitment,
             public_values,
             max_log_row_count,
             challenger,
@@ -1382,9 +1374,6 @@ where
             // `PaddedMle` store (SP1's `Traces`); the trait method no longer
             // re-derives it from raw `RowMajorMatrix`es.
             main_traces: main_traces_named,
-            // Placeholder — OVERRIDDEN by the inline `maybe_auto_precompute_basefold`
-            // digest (SP1 / GPU parity: the commit is built during the prove pass).
-            main_commitment: [Val::<SC>::ZERO; 8],
             public_values,
             // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
             // and the recursion AREA PIN are sourced inside

@@ -51,7 +51,6 @@ pub fn maybe_auto_precompute_basefold<'t, SC, A, D>(
     // host eager-commit path; on the device / in-dispatch commit path they are
     // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
     main_traces: Vec<RowMajorMatrixView<'t, Val<SC>>>,
-    main_commitment: [Val<SC>; 8],
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -236,7 +235,6 @@ pub fn prove_shard_to_basefold<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     main_traces: &[RowMajorMatrix<Val<SC>>],
-    main_commitment: [Val<SC>; 8],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
@@ -305,17 +303,17 @@ where
     // Pure host-path entry (the shrink + dummy callers): no device fns.  The
     // device sites (core/compress/wrap) supply these via the
     // `MachineProver::prove_shard_to_basefold` override, not this free fn.
-    prove_shard_to_basefold_with_traces::<SC, A>(
+    prove_shard_to_basefold_with_traces_dispatch::<SC, A, FreeFnJaggedEval>(
         chips,
         preprocessed_traces,
         &shared_trace_mles,
-        main_commitment,
         public_values,
         max_log_row_count,
         challenger,
         orientation,
         dense_rev,
         recursion_area_pin,
+        &FreeFnJaggedEval,
     )
 }
 
@@ -516,75 +514,6 @@ where
     }
 }
 
-/// Trace-slice entry point (free-fn form for the host free-fn callers).
-/// Thin shim over [`prove_shard_to_basefold_with_traces_dispatch`] with the
-/// free-fn jagged open producer — signature + bytes IDENTICAL to a direct-
-/// dispatch call.
-#[allow(clippy::too_many_arguments)]
-pub fn prove_shard_to_basefold_with_traces<SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
-    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    main_commitment: [Val<SC>; 8],
-    public_values: Vec<Val<SC>>,
-    max_log_row_count: usize,
-    challenger: &mut SC::Challenger,
-    orientation: FoldOrientation,
-    // The per-shard rev(zeta) orientation.
-    dense_rev: bool,
-    // The recursion-layer AREA PIN.  `Some(_)` on the
-    // GPU RECURSION (compress) lazy-commit path; `None` elsewhere (byte-identical).
-    recursion_area_pin: Option<usize>,
-) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
-where
-    SC: StarkGenericConfig + crate::BasefoldRing,
-    A: MachineAir<Val<SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Challenge<SC>,
-                Challenge<SC>,
-            >,
-        >
-        // The K = F (base-field first round) folder instance,
-        // required by the pure-host zerocheck round-0 path.
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Val<SC>,
-                Challenge<SC>,
-            >,
-        > + Sync,
-    Val<SC>: PrimeField,
-    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
-    // Threaded through to `prove_trusted_evaluations`'s static
-    // OUTER generic BaseFold open (see its where-clause).
-    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<
-            <<SC as crate::BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-            >>::Commitment,
-        >,
-{
-    prove_shard_to_basefold_with_traces_dispatch::<SC, A, FreeFnJaggedEval>(
-        chips,
-        preprocessed_traces,
-        shared_trace_mles,
-        main_commitment,
-        public_values,
-        max_log_row_count,
-        challenger,
-        orientation,
-        dense_rev,
-        recursion_area_pin,
-        &FreeFnJaggedEval,
-    )
-}
-
 /// Trace-slice entry point, generic over the jagged trusted-evaluations open
 /// [`JaggedEvalProducer`] (see the block comment above).
 ///
@@ -597,7 +526,6 @@ pub fn prove_shard_to_basefold_with_traces_dispatch<SC, A, D>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-    main_commitment: [Val<SC>; 8],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
     challenger: &mut SC::Challenger,
@@ -712,7 +640,6 @@ where
             jagged_eval_producer,
             chips,
             commit_traces,
-            main_commitment,
             dense_rev,
             recursion_area_pin,
         );

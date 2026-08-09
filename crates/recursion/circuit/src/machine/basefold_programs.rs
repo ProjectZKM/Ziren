@@ -308,7 +308,6 @@ mod tests {
             prep_width,
         );
 
-        let main_commit = std::array::from_fn(|_| p3_koala_bear::KoalaBear::ZERO);
         let public_values = vec![p3_koala_bear::KoalaBear::ZERO; zkm_pcs::PROOF_MAX_NUM_PVS];
         let mut challenger = machine.config().challenger();
 
@@ -319,7 +318,6 @@ mod tests {
             &chips,
             &[prep_trace],
             &[main_trace],
-            main_commit,
             public_values,
             zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
                 .max_log_row_count,
