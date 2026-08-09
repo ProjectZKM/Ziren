@@ -182,10 +182,16 @@ pub(crate) mod tests {
                 }))
                 .collect::<Vec<_>>();
 
-        let program = Arc::new(RecursionProgram {
+        // This test drives `Runtime` directly rather than going through
+        // `run_recursion_test_machines`, so it has to size memory itself: the
+        // compiler is what normally sets `total_memory`, and `ParMemVec` never
+        // grows.
+        let mut program = RecursionProgram {
             seq_blocks: crate::RawProgram::from_linear(instructions),
             ..Default::default()
-        });
+        };
+        program.total_memory = program.computed_total_memory();
+        let program = Arc::new(program);
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
             KoalaBearPoseidon2::new().perm,

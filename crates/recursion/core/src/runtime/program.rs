@@ -43,6 +43,106 @@ impl<F> RecursionProgram<F> {
     }
 }
 
+impl<F: p3_field::PrimeField64> RecursionProgram<F> {
+    /// Number of memory cells the program addresses, i.e. `max(addr) + 1`.
+    ///
+    /// `Runtime::new` sizes its `ParMemVec` from `total_memory`, and
+    /// `ParMemVec` never grows -- the disjoint-address invariant that makes
+    /// its unsafe writes sound depends on a fixed allocation.  The compiler
+    /// sets the field while lowering (`AsmCompiler::compile`), but a program
+    /// assembled by hand from instructions has no such step, and
+    /// `..Default::default()` leaves it at 0.  Every write then panics with
+    /// "address N out of bounds (len=0)".
+    ///
+    /// The match is exhaustive on purpose: a new `Instruction` variant that
+    /// addresses memory must be accounted for here, and the compiler will say
+    /// so rather than letting the omission surface as a runtime panic.
+    #[must_use]
+    pub fn computed_total_memory(&self) -> usize {
+        let mut max_addr: Option<u32> = None;
+        let mut see = |a: &Address<F>| {
+            let v = a.as_usize() as u32;
+            max_addr = Some(max_addr.map_or(v, |m| m.max(v)));
+        };
+        for instruction in self.iter_instructions() {
+            match instruction {
+                Instruction::BaseAlu(i) => {
+                    see(&i.addrs.out);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::ExtAlu(i) => {
+                    see(&i.addrs.out);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::Mem(i) => see(&i.addrs.inner),
+                Instruction::Poseidon2(i) => {
+                    i.addrs.input.iter().for_each(&mut see);
+                    i.addrs.output.iter().for_each(&mut see);
+                }
+                Instruction::Select(i) => {
+                    see(&i.addrs.bit);
+                    see(&i.addrs.out1);
+                    see(&i.addrs.out2);
+                    see(&i.addrs.in1);
+                    see(&i.addrs.in2);
+                }
+                Instruction::HintBits(i) => {
+                    see(&i.input_addr);
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::HintAddCurve(i) => {
+                    i.output_x_addrs_mults.iter().for_each(|(a, _)| see(a));
+                    i.output_y_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::Print(i) => see(&i.addr),
+                Instruction::HintExt2Felts(i) => {
+                    see(&i.input_addr);
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                Instruction::CommitPublicValues(i) => {
+                    i.pv_addrs.as_array().iter().for_each(&mut see);
+                }
+                Instruction::Hint(i) => {
+                    i.output_addrs_mults.iter().for_each(|(a, _)| see(a));
+                }
+                // 9d1c21d4 retired these three chips, but their instructions
+                // remain in the ISA and the VM still executes them, so their
+                // addresses still count towards the allocation.
+                Instruction::ExpReverseBitsLen(i) => {
+                    see(&i.addrs.base);
+                    see(&i.addrs.result);
+                    i.addrs.exp.iter().for_each(&mut see);
+                }
+                Instruction::FriFold(i) => {
+                    see(&i.base_single_addrs.x);
+                    see(&i.ext_single_addrs.z);
+                    see(&i.ext_single_addrs.alpha);
+                    let v = &i.ext_vec_addrs;
+                    for addrs in [
+                        &v.mat_opening,
+                        &v.ps_at_z,
+                        &v.alpha_pow_input,
+                        &v.ro_input,
+                        &v.alpha_pow_output,
+                        &v.ro_output,
+                    ] {
+                        addrs.iter().for_each(&mut see);
+                    }
+                }
+                Instruction::BatchFRI(i) => {
+                    see(&i.ext_single_addrs.acc);
+                    i.base_vec_addrs.p_at_x.iter().for_each(&mut see);
+                    i.ext_vec_addrs.p_at_z.iter().for_each(&mut see);
+                    i.ext_vec_addrs.alpha_pow.iter().for_each(&mut see);
+                }
+            }
+        }
+        max_addr.map_or(0, |m| m as usize + 1)
+    }
+}
+
 impl<F: Field> MachineProgram<F> for RecursionProgram<F> {
     fn pc_start(&self) -> F {
         F::ZERO

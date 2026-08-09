@@ -357,7 +357,15 @@ pub mod tests {
     type B = RecursionAir<F, 9>;
 
     /// Runs the given program on machines that use the wide and skinny Poseidon2 chips.
-    pub fn run_recursion_test_machines(program: RecursionProgram<F>) {
+    pub fn run_recursion_test_machines(mut program: RecursionProgram<F>) {
+        // Programs assembled directly from instructions (as these tests do)
+        // never run the compiler, which is what normally sets `total_memory`.
+        // `Runtime::new` sizes its `ParMemVec` from it and the vec never grows,
+        // so leaving it at `Default::default()` makes the first memory write
+        // panic with "address N out of bounds (len=0)".
+        if program.total_memory == 0 {
+            program.total_memory = program.computed_total_memory();
+        }
         let program = Arc::new(program);
         let mut runtime = Runtime::<F, EF, Poseidon2InternalLayerKoalaBear<16>>::new(
             program.clone(),
