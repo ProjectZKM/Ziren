@@ -172,9 +172,6 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// The Merkle tree for the allowed VKs.
     pub recursion_vk_tree: MerkleTree<KoalaBear, InnerSC>,
 
-    /// The core shape configuration.
-    pub core_shape_config: Option<CoreShapeConfig<KoalaBear>>,
-
     /// The recursion shape configuration.
     pub compress_shape_config: Option<RecursionShapeConfig<KoalaBear, CompressAir<KoalaBear>>>,
 
@@ -281,15 +278,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // VERIFY_VK=true-verifying (240-key vk_map).  FIX-on stays SELECTABLE as
         // a fallback: `FIX_CORE_SHAPES=true` => `Some(..)` => the band-padded
         // core shapes.
-        // NOTE: the offline vk_map regen tooling (`build_compress_vks` ->
-        // `shapes::{check_shapes,build_vk_map}`) still `.expect()`s a core shape
-        // config, so it MUST be run with `FIX_CORE_SHAPES=true` explicitly (the
-        // prove path does not require it).
-        let core_shape_config = env::var("FIX_CORE_SHAPES")
-            .map(|v| v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-            .then_some(CoreShapeConfig::default());
-
         let recursion_shape_config = env::var("FIX_RECURSION_SHAPES")
             .map(|v| v.eq_ignore_ascii_case("true"))
             .unwrap_or(true)
@@ -349,7 +337,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             recursion_vk_root: root,
             recursion_vk_tree: merkle_tree,
             recursion_vk_map: allowed_vk_map,
-            core_shape_config,
             compress_shape_config: recursion_shape_config,
             vk_verification,
             wrap_vk: OnceLock::new(),
@@ -566,10 +553,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// Get a program with an allowed preprocessed shape.
     pub fn get_program(&self, elf: &[u8]) -> eyre::Result<Program> {
-        let mut program = Program::from(elf).unwrap();
-        if let Some(core_shape_config) = &self.core_shape_config {
-            core_shape_config.fix_preprocessed_shape(&mut program)?;
-        }
+        let program = Program::from(elf).unwrap();
         Ok(program)
     }
 
@@ -617,7 +601,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 stdin,
                 opts.core_opts,
                 context,
-                self.core_shape_config.as_ref(),
+                None,
             )?;
         Self::check_for_high_cycles(cycles);
         let public_values = ZKMPublicValues::from(&public_values_stream);
@@ -2340,7 +2324,7 @@ pub mod tests {
         use std::collections::BTreeSet;
 
         let prover = ZKMProver::<DefaultProverComponents>::new();
-        let core_shape_config = prover.core_shape_config.as_ref().unwrap();
+        let core_shape_config = &CoreShapeConfig::default();
         let recursion_shape_config = prover.compress_shape_config.as_ref().unwrap();
         let compress_machine = prover.compress_prover.machine();
 
@@ -3578,7 +3562,7 @@ pub mod tests {
         // `multishard_normalize_arity_faithful`.
         let core_cfg_owned = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg_owned = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
-        let core_cfg = prover.core_shape_config.as_ref().unwrap_or(&core_cfg_owned);
+        let core_cfg = &core_cfg_owned;
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap_or(&rec_cfg_owned);
 
         // Enumerated per-shard normalize shapes (flattened across batches).
@@ -4078,7 +4062,7 @@ pub mod tests {
             {
                 use crate::shapes::ZKMProofShape;
                 use zkm_pcs::shape::OrderedShape;
-                let core_cfg = prover.core_shape_config.as_ref().unwrap();
+                let core_cfg = &CoreShapeConfig::default();
                 let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
                 let enum_rec: std::collections::BTreeSet<OrderedShape> =
                     ZKMProofShape::generate(core_cfg, rec_cfg, REDUCE_BATCH_SIZE)
@@ -4193,7 +4177,7 @@ pub mod tests {
         // gate).
         let core_cfg_owned = CoreShapeConfig::<KoalaBear>::default();
         let rec_cfg_owned = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
-        let core_cfg = prover.core_shape_config.as_ref().unwrap_or(&core_cfg_owned);
+        let core_cfg = &core_cfg_owned;
         let rec_cfg = prover.compress_shape_config.as_ref().unwrap_or(&rec_cfg_owned);
         let band_cap_cfg = CoreShapeConfig::<KoalaBear>::default();
         // HEIGHT-AGNOSTIC RECURSION: lift a raw per-shard

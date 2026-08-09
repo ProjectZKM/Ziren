@@ -16,7 +16,7 @@
 //! VERIFY_COMPRESSED_ACCEPT.
 //!
 //! Run:
-//!   FIX_CORE_SHAPES=false VERIFY_VK=true ZIREN_HA_NO_FIXSHAPE=1 \
+//!   VERIFY_VK=true ZIREN_HA_NO_FIXSHAPE=1 \
 //!   E2E_WORKLOAD=/data/stephen/ziren-shape-bin/fibonacci-1k SHARD_SIZE=262144 \
 //!   build_compress_vks-style bin (native-gnark feature on by default)
 
@@ -56,9 +56,7 @@ fn main() {
     setup_logger();
 
     let verify_vk = std::env::var("VERIFY_VK").unwrap_or_else(|_| "<unset->true>".to_string());
-    let fix_core = std::env::var("FIX_CORE_SHAPES")
-        .unwrap_or_else(|_| "<unset->default=false (FIX-off)>".to_string());
-    eprintln!("[E2E] env: VERIFY_VK={verify_vk} FIX_CORE_SHAPES={fix_core}");
+    eprintln!("[E2E] env: VERIFY_VK={verify_vk}");
 
     let (elf, stdin) = load_workload();
     let opts = ZKMProverOpts::default();
@@ -82,10 +80,8 @@ fn main() {
     }
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
-    let fix_on = prover.core_shape_config.is_some();
     eprintln!(
-        "[E2E] RESOLVED: core_shape_config.is_some()={fix_on} => mode={} ; vk_verification={}",
-        if fix_on { "FIX-ON (band padding)" } else { "FIX-OFF (height-agnostic natural commit)" },
+        "[E2E] RESOLVED: height-agnostic natural commit (core shape fixing is          retired) ; vk_verification={}",
         prover.vk_verification
     );
     let context = ZKMContext::default();

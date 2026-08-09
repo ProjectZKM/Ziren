@@ -22,7 +22,7 @@ fn main() {
     std::panic::set_hook(Box::new(|_| {}));
 
     let prover = ZKMProver::<DefaultProverComponents>::new();
-    let core_cfg = prover.core_shape_config.as_ref().unwrap();
+    let core_cfg = &zkm_core_machine::shape::CoreShapeConfig::default();
     let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
     let height = VK_MERKLE_TREE_HEIGHT;
 

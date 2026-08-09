@@ -76,7 +76,7 @@ pub fn check_shapes<C: ZKMProverComponents>(
     let (shape_tx, shape_rx) =
         std::sync::mpsc::sync_channel::<ZKMCompressProgramShape>(num_compiler_workers);
     let (panic_tx, panic_rx) = std::sync::mpsc::channel();
-    let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
+    let core_shape_config = &CoreShapeConfig::default();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
@@ -149,7 +149,7 @@ pub fn build_vk_map<C: ZKMProverComponents>(
 ) -> (BTreeSet<[KoalaBear; DIGEST_SIZE]>, Vec<usize>, usize) {
     let mut prover = ZKMProver::<C>::new();
     prover.vk_verification = !dummy;
-    let core_shape_config = prover.core_shape_config.as_ref().expect("core shape config not found");
+    let core_shape_config = &CoreShapeConfig::default();
     let recursion_shape_config =
         prover.compress_shape_config.as_ref().expect("recursion shape config not found");
 
