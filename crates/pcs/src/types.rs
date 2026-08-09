@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 use serde::{Deserialize, Serialize};
 
 use super::{Challenge, Com, StarkGenericConfig, Val};
@@ -151,15 +150,6 @@ pub struct ShardProof<SC: StarkGenericConfig> {
 impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ShardProof").finish()
-    }
-}
-
-impl<T: Send + Sync + Clone> AirOpenedValues<T> {
-    #[must_use]
-    pub fn view(&self) -> VerticalPair<RowMajorMatrixView<'_, T>, RowMajorMatrixView<'_, T>> {
-        let a = RowMajorMatrixView::new_row(&self.local);
-        let b = RowMajorMatrixView::new_row(&self.next);
-        VerticalPair::new(a, b)
     }
 }
 

@@ -226,16 +226,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             next: unflatten(&opening.permutation.next),
         };
 
-        let preprocessed_vp = opening.preprocessed.view();
-        let preprocessed_window = PairWindow {
-            local: &preprocessed_vp.top.values[..preprocessed_vp.top.width],
-            next: &preprocessed_vp.bottom.values[..preprocessed_vp.bottom.width],
-        };
         let mut folder = VerifierConstraintFolder::<SC> {
-            preprocessed: preprocessed_vp,
-            preprocessed_window,
-            main: opening.main.view(),
-            perm: perm_opening.view(),
+            preprocessed: PairWindow {
+                local: &opening.preprocessed.local,
+                next: &opening.preprocessed.next,
+            },
+            main: PairWindow { local: &opening.main.local, next: &opening.main.next },
+            perm: PairWindow { local: &perm_opening.local, next: &perm_opening.next },
             perm_challenges: permutation_challenges,
             local_cumulative_sum: &opening.local_cumulative_sum,
             global_cumulative_sum: &opening.global_cumulative_sum,

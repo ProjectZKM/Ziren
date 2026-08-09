@@ -45,8 +45,7 @@ use core::marker::PhantomData;
 use p3_air::Air;
 use p3_challenger::FieldChallenger;
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeCharacteristicRing};
-use p3_matrix::dense::{RowMajorMatrix, RowMajorMatrixView};
-use p3_matrix::stack::VerticalPair;
+use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
 use crate::air::MachineAir;
@@ -387,35 +386,19 @@ where
         // Row i = local, row (i+1) mod n = next.
         let main_local = &main_ext[i * main_width..(i + 1) * main_width];
         let main_next = &wrap_main[i * main_width..(i + 1) * main_width];
-        let main_view = VerticalPair::new(
-            RowMajorMatrixView::new(main_local, main_width),
-            RowMajorMatrixView::new(main_next, main_width),
-        );
+        let main_view = PairWindow { local: main_local, next: main_next };
 
-        let (preproc_view, preproc_window) = if preproc_width == 0 {
-            (
-                VerticalPair::new(
-                    RowMajorMatrixView::new(&[], 0),
-                    RowMajorMatrixView::new(&[], 0),
-                ),
-                PairWindow { local: &[], next: &[] },
-            )
+        let preproc_window = if preproc_width == 0 {
+            PairWindow { local: &[], next: &[] }
         } else {
             let local = &preproc_ext[i * preproc_width..(i + 1) * preproc_width];
             let next = &wrap_preproc[i * preproc_width..(i + 1) * preproc_width];
-            (
-                VerticalPair::new(
-                    RowMajorMatrixView::new(local, preproc_width),
-                    RowMajorMatrixView::new(next, preproc_width),
-                ),
-                PairWindow { local, next },
-            )
+            PairWindow { local, next }
         };
 
-        let empty_view = VerticalPair::new(
-            RowMajorMatrixView::new(&empty_perm_ext[..], 0),
-            RowMajorMatrixView::new(&empty_perm_ext[..], 0),
-        );
+        // This path skips the permutation trace entirely (LogUp-GKR handles
+        // lookup integrity), so the window is empty in both rows.
+        let empty_view = PairWindow { local: &empty_perm_ext[..], next: &empty_perm_ext[..] };
 
         let is_first = if i == 0 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
         let is_last = if i == n - 1 { Challenge::<SC>::ONE } else { Challenge::<SC>::ZERO };
@@ -423,8 +406,7 @@ where
             if i == n - 1 { Challenge::<SC>::ZERO } else { Challenge::<SC>::ONE };
 
         let mut folder = VerifierConstraintFolder::<SC> {
-            preprocessed: preproc_view,
-            preprocessed_window: preproc_window,
+            preprocessed: preproc_window,
             main: main_view,
             perm: empty_view,
             perm_challenges: &[],

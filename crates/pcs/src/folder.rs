@@ -7,7 +7,6 @@ use p3_air::{
     AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess,
 };
 use p3_field::{Algebra, ExtensionField, Field};
-use p3_matrix::{dense::RowMajorMatrixView, stack::VerticalPair};
 
 use super::{Challenge, PackedChallenge, PackedVal, StarkGenericConfig, Val};
 use crate::{
@@ -34,18 +33,12 @@ impl<T> WindowAccess<T> for PairWindow<'_, T> {
 
 /// A folder for prover constraints.
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
-    /// The preprocessed trace.
-    pub preprocessed:
-        VerticalPair<RowMajorMatrixView<'a, PackedVal<SC>>, RowMajorMatrixView<'a, PackedVal<SC>>>,
-    /// Pre-built window over the preprocessed columns.
-    pub preprocessed_window: PairWindow<'a, PackedVal<SC>>,
-    /// The main trace.
-    pub main:
-        VerticalPair<RowMajorMatrixView<'a, PackedVal<SC>>, RowMajorMatrixView<'a, PackedVal<SC>>>,
-    pub perm: VerticalPair<
-        RowMajorMatrixView<'a, PackedChallenge<SC>>,
-        RowMajorMatrixView<'a, PackedChallenge<SC>>,
-    >,
+    /// The preprocessed trace window.
+    pub preprocessed: PairWindow<'a, PackedVal<SC>>,
+    /// The main trace window.
+    pub main: PairWindow<'a, PackedVal<SC>>,
+    /// The permutation trace window.
+    pub perm: PairWindow<'a, PackedChallenge<SC>>,
     /// The challenges for the permutation.
     pub perm_challenges: &'a [PackedChallenge<SC>],
     /// The local cumulative sum for the permutation.
@@ -77,15 +70,11 @@ impl<'a, SC: StarkGenericConfig> AirBuilder for ProverConstraintFolder<'a, SC> {
     type PublicVar = Val<SC>;
 
     fn main(&self) -> Self::MainWindow {
-        let width = self.main.top.width;
-        PairWindow {
-            local: &self.main.top.values[..width],
-            next: &self.main.bottom.values[..width],
-        }
+        self.main
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -142,11 +131,7 @@ impl<'a, SC: StarkGenericConfig> PermutationAirBuilder for ProverConstraintFolde
     type PermutationVar = PackedChallenge<SC>;
 
     fn permutation(&self) -> Self::MP {
-        let width = self.perm.top.width;
-        PairWindow {
-            local: &self.perm.top.values[..width],
-            next: &self.perm.bottom.values[..width],
-        }
+        self.perm
     }
 
     fn permutation_randomness(&self) -> &[Self::RandomVar] {
@@ -183,14 +168,12 @@ pub type VerifierConstraintFolder<'a, SC> = GenericVerifierConstraintFolder<
 
 /// A folder for verifier constraints.
 pub struct GenericVerifierConstraintFolder<'a, F, EF, PubVar, Var, Expr> {
-    /// The preprocessed trace.
-    pub preprocessed: VerticalPair<RowMajorMatrixView<'a, Var>, RowMajorMatrixView<'a, Var>>,
-    /// Pre-built window over the preprocessed columns.
-    pub preprocessed_window: PairWindow<'a, Var>,
-    /// The main trace.
-    pub main: VerticalPair<RowMajorMatrixView<'a, Var>, RowMajorMatrixView<'a, Var>>,
-    /// The permutation trace.
-    pub perm: VerticalPair<RowMajorMatrixView<'a, Var>, RowMajorMatrixView<'a, Var>>,
+    /// The preprocessed trace window.
+    pub preprocessed: PairWindow<'a, Var>,
+    /// The main trace window.
+    pub main: PairWindow<'a, Var>,
+    /// The permutation trace window.
+    pub perm: PairWindow<'a, Var>,
     /// The challenges for the permutation.
     pub perm_challenges: &'a [Var],
     /// The local cumulative sum of the permutation.
@@ -251,15 +234,11 @@ where
     type PublicVar = PubVar;
 
     fn main(&self) -> Self::MainWindow {
-        let width = self.main.top.width;
-        PairWindow {
-            local: &self.main.top.values[..width],
-            next: &self.main.bottom.values[..width],
-        }
+        self.main
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -368,11 +347,7 @@ where
     type PermutationVar = Var;
 
     fn permutation(&self) -> Self::MP {
-        let width = self.perm.top.width;
-        PairWindow {
-            local: &self.perm.top.values[..width],
-            next: &self.perm.bottom.values[..width],
-        }
+        self.perm
     }
 
     fn permutation_randomness(&self) -> &[Self::Var] {

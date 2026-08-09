@@ -9,11 +9,7 @@ use p3_air::{
     PermutationAirBuilder,
 };
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing, PrimeField32};
-use p3_matrix::{
-    dense::{RowMajorMatrix, RowMajorMatrixView},
-    stack::VerticalPair,
-    Matrix,
-};
+use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::ParallelBridge;
 use p3_maybe_rayon::prelude::ParallelIterator;
 
@@ -75,31 +71,13 @@ pub fn debug_constraints<SC, A>(
         let perm_next = perm.row_slice(i_next).unwrap();
         let perm_next = &(*perm_next);
 
-        let preprocessed_pair = VerticalPair::new(
-            RowMajorMatrixView::new_row(&preprocessed_local),
-            RowMajorMatrixView::new_row(&preprocessed_next),
-        );
-        let main_pair = VerticalPair::new(
-            RowMajorMatrixView::new_row(main_local),
-            RowMajorMatrixView::new_row(main_next),
-        );
-        let perm_pair = VerticalPair::new(
-            RowMajorMatrixView::new_row(perm_local),
-            RowMajorMatrixView::new_row(perm_next),
-        );
-
-        let prep_width = preprocessed_local.len();
-        let _main_width = main_local.len();
-        let _perm_width = perm_local.len();
-
         let mut builder = DebugConstraintBuilder {
-            preprocessed: preprocessed_pair,
-            preprocessed_window: PairWindow {
-                local: &preprocessed_pair.top.values[..prep_width],
-                next: &preprocessed_pair.bottom.values[..prep_width],
+            preprocessed: PairWindow {
+                local: &preprocessed_local,
+                next: &preprocessed_next,
             },
-            main: main_pair,
-            perm: perm_pair,
+            main: PairWindow { local: main_local, next: main_next },
+            perm: PairWindow { local: perm_local, next: perm_next },
             perm_challenges,
             local_cumulative_sum,
             global_cumulative_sum,
@@ -137,15 +115,9 @@ fn catch_unwind_silent<F: FnOnce() -> R + panic::UnwindSafe, R>(f: F) -> std::th
 
 /// A builder for debugging constraints.
 pub struct DebugConstraintBuilder<'a, F: Field, EF: ExtensionField<F>> {
-    // TODO: read by the legacy windowed builder; the new
-    // `preprocessed_window` field is what eval() actually consumes.
-    // Keep this field for backwards-compat with downstream callers
-    // that still construct the builder with a populated VerticalPair.
-    #[allow(dead_code)]
-    pub(crate) preprocessed: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
-    pub(crate) preprocessed_window: PairWindow<'a, F>,
-    pub(crate) main: VerticalPair<RowMajorMatrixView<'a, F>, RowMajorMatrixView<'a, F>>,
-    pub(crate) perm: VerticalPair<RowMajorMatrixView<'a, EF>, RowMajorMatrixView<'a, EF>>,
+    pub(crate) preprocessed: PairWindow<'a, F>,
+    pub(crate) main: PairWindow<'a, F>,
+    pub(crate) perm: PairWindow<'a, EF>,
     pub(crate) local_cumulative_sum: &'a EF,
     pub(crate) global_cumulative_sum: &'a SepticDigest<F>,
     pub(crate) perm_challenges: &'a [EF],
@@ -184,11 +156,7 @@ where
     type PermutationVar = EF;
 
     fn permutation(&self) -> Self::MP {
-        let width = self.perm.top.width;
-        PairWindow {
-            local: &self.perm.top.values[..width],
-            next: &self.perm.bottom.values[..width],
-        }
+        self.perm
     }
 
     fn permutation_randomness(&self) -> &[Self::EF] {
@@ -245,15 +213,11 @@ where
     }
 
     fn main(&self) -> Self::MainWindow {
-        let width = self.main.top.width;
-        PairWindow {
-            local: &self.main.top.values[..width],
-            next: &self.main.bottom.values[..width],
-        }
+        self.main
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
+        &self.preprocessed
     }
 
     fn assert_zero<I: Into<Self::Expr>>(&mut self, x: I) {

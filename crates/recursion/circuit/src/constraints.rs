@@ -3,8 +3,6 @@ use p3_air::{AirBuilder, ExtensionBuilder, PermutationAirBuilder, WindowAccess, 
 use p3_commit::{LagrangeSelectors, PolynomialSpace};
 use p3_field::{Algebra, BasedVectorSpace, Field, PrimeCharacteristicRing, ExtensionField, TwoAdicField};
 use p3_field::coset::TwoAdicMultiplicativeCoset;
-use p3_matrix::dense::RowMajorMatrixView;
-use p3_matrix::stack::VerticalPair;
 
 use zkm_recursion_compiler::ir::{
     Builder, Config, Ext, ExtensionOperand, Felt, SymbolicExt, SymbolicFelt,
@@ -27,10 +25,9 @@ use crate::{
 /// because the recursive case needs `AirBuilder::F = EF` (the extension field), which allows
 /// `SymbolicExt<F, EF>: Algebra<EF>` without conflicting `From` impls.
 pub struct RecursiveVerifierConstraintFolder<'a, C: Config> {
-    pub preprocessed: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
-    pub preprocessed_window: PairWindow<'a, Ext<C::F, C::EF>>,
-    pub main: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
-    pub perm: VerticalPair<RowMajorMatrixView<'a, Ext<C::F, C::EF>>, RowMajorMatrixView<'a, Ext<C::F, C::EF>>>,
+    pub preprocessed: PairWindow<'a, Ext<C::F, C::EF>>,
+    pub main: PairWindow<'a, Ext<C::F, C::EF>>,
+    pub perm: PairWindow<'a, Ext<C::F, C::EF>>,
     pub perm_challenges: &'a [Ext<C::F, C::EF>],
     pub local_cumulative_sum: &'a Ext<C::F, C::EF>,
     pub global_cumulative_sum: &'a SepticDigest<Felt<C::F>>,
@@ -55,15 +52,11 @@ where
     type PublicVar = Felt<C::F>;
 
     fn main(&self) -> Self::MainWindow {
-        let width = self.main.top.width;
-        PairWindow {
-            local: &self.main.top.values[..width],
-            next: &self.main.bottom.values[..width],
-        }
+        self.main
     }
 
     fn preprocessed(&self) -> &Self::PreprocessedWindow {
-        &self.preprocessed_window
+        &self.preprocessed
     }
 
     fn is_first_row(&self) -> Self::Expr {
@@ -122,11 +115,7 @@ where
     type PermutationVar = Ext<C::F, C::EF>;
 
     fn permutation(&self) -> Self::MP {
-        let width = self.perm.top.width;
-        PairWindow {
-            local: &self.perm.top.values[..width],
-            next: &self.perm.bottom.values[..width],
-        }
+        self.perm
     }
 
     fn permutation_randomness(&self) -> &[Self::Var] {
@@ -237,16 +226,13 @@ where
             next: unflatten(&opening.permutation.next),
         };
 
-        let preprocessed_vp = opening.preprocessed.view();
-        let preprocessed_window = PairWindow {
-            local: &preprocessed_vp.top.values[..preprocessed_vp.top.width],
-            next: &preprocessed_vp.bottom.values[..preprocessed_vp.bottom.width],
-        };
         let mut folder = RecursiveVerifierConstraintFolder::<C> {
-            preprocessed: preprocessed_vp,
-            preprocessed_window,
-            main: opening.main.view(),
-            perm: perm_opening.view(),
+            preprocessed: PairWindow {
+                local: &opening.preprocessed.local,
+                next: &opening.preprocessed.next,
+            },
+            main: PairWindow { local: &opening.main.local, next: &opening.main.next },
+            perm: PairWindow { local: &perm_opening.local, next: &perm_opening.next },
             perm_challenges: permutation_challenges,
             local_cumulative_sum: &opening.local_cumulative_sum,
             global_cumulative_sum: &opening.global_cumulative_sum,
