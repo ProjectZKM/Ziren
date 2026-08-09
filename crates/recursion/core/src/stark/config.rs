@@ -283,8 +283,8 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         r_row_per_chip: &[Vec<zkm_pcs::InnerChallenge>],
         z_row: &[zkm_pcs::InnerChallenge],
         _pre_y_per_chip: Option<Vec<Vec<zkm_pcs::InnerChallenge>>>,
-        precomputed: Option<
-            zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        precomputed: zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            Self::BfMmcs,
         >,
         challenger: &mut Self::Challenger,
     ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
@@ -299,10 +299,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // generic prover's own legacy step-3 `y_per_chip` recompute (identical
         // values), so the serialized bundle bytes are unchanged from the
         // former call site, which also passed `None`.
-        let precomputed = precomputed.expect(
-            "prove_jagged_open: outer BaseFold path requires a precomputed \
-             commit (the outer BaseFold commit sets it under the same gate)",
-        );
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
             Self::Challenger,
             Self::BfMmcs,

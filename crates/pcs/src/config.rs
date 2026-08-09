@@ -218,16 +218,18 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// `CanObserve<BfCommitment<Self>>`) are discharged INSIDE each concrete
     /// impl instead of propagating up the whole shard-prover call chain.
     ///
-    /// `precomputed` is `None` only on the legacy in-band-commit flow (host
-    /// synthetic / tests); the single-main-commit flow always supplies it.
+    /// `precomputed` is NOT optional: the commit is built inline during the
+    /// prove pass and handed over.  It used to be an `Option` for a legacy
+    /// in-band-commit flow that no longer exists — and a `None` reaching here
+    /// would have made the prover observe the BaseFold commit in-band while the
+    /// verifier uses `verify_jagged_basefold_no_observe`, a transcript desync no
+    /// green test suite can see.
     fn prove_jagged_open(
         chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
         z_row: &[crate::InnerChallenge],
         pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
-        precomputed: Option<
-            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
-        >,
+        precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }

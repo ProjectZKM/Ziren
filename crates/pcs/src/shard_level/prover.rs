@@ -544,7 +544,7 @@ where
             // Open jagged at the zerocheck-reduced z*.
             &zerocheck_proof.point_and_eval.0,
             challenger,
-            Some(precomputed_commit),
+            precomputed_commit,
             residual_y,
         )
     };
@@ -1212,45 +1212,6 @@ where
     }
 }
 
-/// The INNER-ring body of [`crate::BasefoldRing::prove_jagged_open`], shared
-/// verbatim by the three KoalaBear/Poseidon2 rings — the ones whose
-/// `BfMmcs` IS `JaggedMmcs` and whose `Challenger` IS `JaggedChallenger`, so
-/// the concrete types need no runtime recovery.
-///
-/// `precomputed` is `Some` on the single-main-commit flow (the commit ran
-/// up-front and its digest was observed in the Phase 1 prologue, so the in-band
-/// observe is suppressed) and `None` on the legacy self-contained flow, which
-/// commits and observes in-band.
-pub fn prove_jagged_open_inner(
-    chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
-    r_row_per_chip: &[Vec<crate::InnerChallenge>],
-    z_row: &[crate::InnerChallenge],
-    pre_y_per_chip: Option<Vec<Vec<crate::InnerChallenge>>>,
-    precomputed: Option<crate::jagged_pcs::jagged::PrecomputedJaggedCommit>,
-    challenger: &mut crate::jagged_pcs::JaggedChallenger,
-) -> crate::shard_level::shard_proof::EvaluationProof {
-    let bundle = match precomputed {
-        Some(precomputed) => {
-            crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
-                chip_traces,
-                r_row_per_chip,
-                z_row,
-                precomputed,
-                pre_y_per_chip,
-                challenger,
-            )
-        }
-        None => crate::jagged_pcs::jagged::prove_jagged_basefold_with_y_per_chip(
-            chip_traces,
-            r_row_per_chip,
-            z_row,
-            pre_y_per_chip,
-            challenger,
-        ),
-    };
-    crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
-}
-
 /// Returns an [`EvaluationProof`] tagged with the path that produced
 /// it. Runs only when SC monomorphizes to a config that proves via BaseFold;
 /// otherwise returns `EvaluationProof::Empty`.  The per-ring jagged open is
@@ -1293,10 +1254,8 @@ pub fn prove_trusted_evaluations<SC, A>(
     main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_eval_point: &[Challenge<SC>],
     challenger: &mut SC::Challenger,
-    precomputed_commit: Option<
-        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            <SC as crate::BasefoldRing>::BfMmcs,
-        >,
+    precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::BasefoldRing>::BfMmcs,
     >,
     // Openings-for-free: per-chip main-column openings at z from
     // the zerocheck residual (trace_at_z main slice), parallel to `chips`;

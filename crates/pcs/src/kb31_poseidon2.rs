@@ -434,18 +434,20 @@ pub mod koala_bear_poseidon2 {
             r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
             z_row: &[crate::InnerChallenge],
             pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
-            precomputed: Option<
-                crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+            precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+                Self::BfMmcs,
             >,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            crate::shard_level::prover::prove_jagged_open_inner(
-                chip_traces,
-                r_row_per_chip,
-                z_row,
-                pre_y_per_chip,
-                precomputed,
-                challenger,
+            crate::shard_level::shard_proof::EvaluationProof::Bundle(
+                crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
+                    chip_traces,
+                    r_row_per_chip,
+                    z_row,
+                    precomputed,
+                    pre_y_per_chip,
+                    challenger,
+                ),
             )
         }
     }

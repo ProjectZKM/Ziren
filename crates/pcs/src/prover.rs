@@ -357,10 +357,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
         shared_eval_point: &[crate::Challenge<SC>],
         challenger: &mut SC::Challenger,
-        precomputed_commit: Option<
-            crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-                <SC as BasefoldRing>::BfMmcs,
-            >,
+        precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as BasefoldRing>::BfMmcs,
         >,
         pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
         // SP1-parity: the jagged `reducer` / `opener` are no longer carried as
