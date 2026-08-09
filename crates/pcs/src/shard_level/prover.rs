@@ -1322,15 +1322,16 @@ where
     use crate::shard_level::shard_proof::EvaluationProof;
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
 
-    // Dispatch via `BasefoldRing`. Configs
-    // that don't prove via BaseFold (OuterSC wrap on FRI) emit `Empty`. The
-    // KoalaBear identities that make the transmutes below
-    // sound are asserted in debug builds (they hold for every config that
-    // returns `use_basefold() == true` today).
-    if !<SC as BasefoldRing>::use_basefold() {
-        return EvaluationProof::Empty;
-    }
-    debug_assert!(
+    // This used to return `EvaluationProof::Empty` for configs that "don't
+    // prove via BaseFold".  No such config exists -- both `BasefoldRing` impls
+    // returned `true` -- and of all the dead branches in this file that was the
+    // worst one to leave armed: it emits an opening proof with NO openings.
+    //
+    // A REAL assert, not a `debug_assert!`: it is the only thing standing
+    // between a non-KoalaBear config and the transmutes below, and
+    // `debug_assert!` compiles out in release, which is exactly where that
+    // would be UB.  One TypeId compare per shard.
+    assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<Challenge<SC>>() == TypeId::of::<InnerChallenge>(),
         "prove_trusted_evaluations: use_basefold()=true must imply Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings) for the trace/point          transmutes below",

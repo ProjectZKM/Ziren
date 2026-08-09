@@ -1258,15 +1258,11 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // Gate via `BasefoldRing::use_basefold()`
-    // (the trait dispatch authority) instead of the open-coded TypeId check.
-    // For every config returning `true` today (the inner KoalaBear stack) the
-    // Val/Challenge/Challenger identities below hold, which keeps the
-    // subsequent KoalaBear-typed transmutes sound — asserted in debug builds.
-    if !<SC as BasefoldRing>::use_basefold() {
-        return None;
-    }
-    debug_assert!(
+    // The `!use_basefold()` early `return None` here was dead -- both
+    // `BasefoldRing` impls returned `true`.  A REAL assert, not a
+    // `debug_assert!`: it guards the KoalaBear-typed transmutes below, and
+    // `debug_assert!` compiles out in release, which is where that would be UB.
+    assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
