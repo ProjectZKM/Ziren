@@ -1,7 +1,8 @@
-//! Pluggable per-chip main-trace materialization. Decouples the
-//! orchestrator from whether traces originate on host
-//! ([`EagerHostLoader`]) or are pulled from device on demand
-//! ([`LazyDeviceLoader`]).
+//! Pluggable per-chip main-trace access.  Every loader hands the shard
+//! prover the same currency: a slice of [`crate::multilinear::PaddedMle`],
+//! which is `Option<Arc<Mle>>` and therefore cheap to pass around.  This
+//! mirrors SP1, whose `Traces` is a map of `PaddedMle` and which has no
+//! borrow-or-materialize seam at all.
 
 use p3_matrix::dense::RowMajorMatrix;
 
@@ -13,9 +14,6 @@ pub trait MainTraceLoader<F> {
         self.len() == 0
     }
 
-    /// Materialize chip `i`'s main trace. The orchestrator may call
-    /// this multiple times per chip, so implementations may cache.
-    fn get(&self, i: usize) -> RowMajorMatrix<F>;
 
     /// Read-only seam: the shared analytic trace-MLE for
     /// chip `i`, built once at trace-gen, when this loader carries one.
@@ -49,28 +47,6 @@ pub trait MainTraceLoader<F> {
         None
     }
 
-    /// Borrow the whole per-chip main-trace slice read-only, when this
-    /// loader already holds it on the host.
-    ///
-    /// Default `None`; only [`EagerHostLoader`] (host CPU path) returns
-    /// `Some(&self.traces)`.  The device [`LazyDeviceLoader`] cannot borrow
-    /// (it pulls each chip on demand) so it keeps the `None` default and the
-    /// caller falls back to [`MainTraceLoader::materialize_all`].  Returning a
-    /// borrow lets the host prover skip the full-trace `materialize_all` clone
-    /// (a pure `values.clone()` for `EagerHostLoader`) — byte-identical either
-    /// way.  Defaulted so external device loaders (ziren-gpu) stay
-    /// source-compatible.
-    fn borrow_all(&self) -> Option<&[RowMajorMatrix<F>]> {
-        None
-    }
-
-    /// Materialize all chip traces in chip-iteration order.
-    fn materialize_all(&self) -> Vec<RowMajorMatrix<F>>
-    where
-        F: Clone + Send + Sync,
-    {
-        (0..self.len()).map(|i| self.get(i)).collect()
-    }
 }
 
 /// Loader backed by a borrowed slice of host `RowMajorMatrix`s and/or
@@ -78,15 +54,8 @@ pub trait MainTraceLoader<F> {
 /// slice in chip-index order), both threaded read-only to the shard
 /// prover.
 ///
-/// Two shapes:
-///   * **raw-backed** ([`EagerHostLoader::new`] / [`with_padded`]) —
-///     carries a borrowed `traces` slice; `borrow_all` hands it back.
-///   * **MLE-authoritative** ([`EagerHostLoader::padded_only`]) — carries
-///     ONLY the shared `Arc<Mle>` store (trace-unification Phase 1: the
-///     owned `main_traces` were MOVED into it, so no separate raw buffer
-///     survives).  `borrow_all` returns `None`; `get` / `materialize_all`
-///     reconstruct a `RowMajorMatrix` from the shared MLE on demand
-///     (never hit on the hot path, which reads `padded_slice` directly).
+/// One shape: the loader carries the shared `Arc<Mle>` store
+/// (`padded[i]` = chip `i`'s analytic trace-MLE, chip-index order).
 pub struct EagerHostLoader<'a, F: p3_field::Field> {
     /// Borrowed per-chip raw traces, or `None` when the shared MLE
     /// (`padded`) is the sole authoritative store.
@@ -132,7 +101,7 @@ impl<'a, F: p3_field::Field> EagerHostLoader<'a, F> {
     /// Construct an MLE-authoritative loader carrying ONLY the shared
     /// per-chip trace-MLE store (trace-unification Phase 1): the owned
     /// `main_traces` were MOVED into these `Arc<Mle>`s, so there is no
-    /// separate raw-trace buffer.  `borrow_all` returns `None`; the shard
+    /// separate raw-trace buffer.  The shard
     /// prover reads dims / commit cells from `padded_slice` directly.
     pub fn padded_only(padded: &'a [crate::multilinear::PaddedMle<F>]) -> Self {
         Self { traces: None, padded: Some(padded) }
@@ -147,28 +116,6 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
         }
     }
 
-    fn get(&self, i: usize) -> RowMajorMatrix<F> {
-        match self.traces {
-            Some(t) => RowMajorMatrix::new(t[i].values.clone(), t[i].width),
-            None => matrix_from_padded(&self.padded.expect("padded_only carries padded")[i]),
-        }
-    }
-
-    fn materialize_all(&self) -> Vec<RowMajorMatrix<F>> {
-        match self.traces {
-            Some(t) => t
-                .iter()
-                .map(|t| RowMajorMatrix::new(t.values.clone(), t.width))
-                .collect(),
-            None => self
-                .padded
-                .expect("padded_only carries padded")
-                .iter()
-                .map(matrix_from_padded)
-                .collect(),
-        }
-    }
-
     fn padded(&self, i: usize) -> Option<&crate::multilinear::PaddedMle<F>> {
         self.padded.and_then(|p| p.get(i))
     }
@@ -177,64 +124,5 @@ impl<'a, F: p3_field::Field> MainTraceLoader<F> for EagerHostLoader<'a, F> {
         self.padded
     }
 
-    /// A raw-backed host loader hands back its borrowed traces (a pure
-    /// per-chip `values.clone()` in `materialize_all`, so the borrow is
-    /// byte-identical and lets the caller skip the full-trace copy).  The
-    /// MLE-authoritative (`padded_only`) loader has NO raw buffer, so it
-    /// returns `None` and the caller sources dims / commit cells from the
-    /// shared MLE via `padded_slice`.
-    fn borrow_all(&self) -> Option<&[RowMajorMatrix<F>]> {
-        self.traces
-    }
 }
 
-/// Loader that pulls each chip's host trace on demand via a
-/// caller-supplied closure. Does NOT memoize — wrap with a
-/// `OnceLock` if `get` is called repeatedly per chip.
-pub struct LazyDeviceLoader<F, Pull>
-where
-    Pull: Fn(usize) -> RowMajorMatrix<F>,
-{
-    n_chips: usize,
-    pull: Pull,
-    _marker: core::marker::PhantomData<F>,
-}
-
-impl<F, Pull> LazyDeviceLoader<F, Pull>
-where
-    Pull: Fn(usize) -> RowMajorMatrix<F>,
-{
-    /// `pull(i)` MUST return the host trace for chip `i`; behaviour
-    /// for `i >= n_chips` is unspecified.
-    pub fn new(n_chips: usize, pull: Pull) -> Self {
-        Self {
-            n_chips,
-            pull,
-            _marker: core::marker::PhantomData,
-        }
-    }
-}
-
-impl<F, Pull> MainTraceLoader<F> for LazyDeviceLoader<F, Pull>
-where
-    F: Clone + Send + Sync,
-    Pull: Fn(usize) -> RowMajorMatrix<F> + Sync,
-{
-    fn len(&self) -> usize {
-        self.n_chips
-    }
-
-    fn get(&self, i: usize) -> RowMajorMatrix<F> {
-        (self.pull)(i)
-    }
-
-    /// Parallel materialization. The pull closure is responsible
-    /// for setting the right CUDA device context per worker.
-    fn materialize_all(&self) -> Vec<RowMajorMatrix<F>> {
-        use p3_maybe_rayon::prelude::*;
-        (0..self.n_chips)
-            .into_par_iter()
-            .map(|i| (self.pull)(i))
-            .collect()
-    }
-}

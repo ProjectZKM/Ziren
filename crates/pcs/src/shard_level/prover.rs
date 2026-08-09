@@ -287,7 +287,28 @@ where
             >>::Commitment,
         >,
 {
-    let loader = EagerHostLoader::new(main_traces);
+    // Build the shared trace-MLEs here rather than handing the loader raw
+    // matrices: `PaddedMle` is `Option<Arc<Mle>>`, so downstream passes it by
+    // value at refcount cost, and the loader needs only one representation.
+    // Byte-identical to the construction this used to do inside
+    // `prove_shard_to_basefold_with_loader`.
+    let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = main_traces
+        .iter()
+        .map(|t| {
+            let width = t.width;
+            if width == 0 {
+                return crate::multilinear::PaddedMle::dummy(
+                    max_log_row_count as u32,
+                    crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
+                );
+            }
+            let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
+                RowMajorMatrix::new(t.values.clone(), width),
+            ));
+            crate::multilinear::PaddedMle::padded_with_zeros(mle, max_log_row_count as u32)
+        })
+        .collect();
+    let loader = EagerHostLoader::padded_only(&shared_trace_mles);
     // Pure host-path entry (the shrink + dummy callers): no device fns.  The
     // device sites (core/compress/wrap) supply these via the
     // `MachineProver::prove_shard_to_basefold` override, not this free fn.
@@ -581,7 +602,7 @@ where
 
 /// Loader-based entry point, generic over the jagged trusted-evaluations open
 /// [`JaggedEvalProducer`] (see the block comment above).
-/// Materializes all traces upfront via `MainTraceLoader::materialize_all`
+/// Reads the shared trace-MLE slice via `MainTraceLoader::padded_slice`
 /// because every downstream phase (cumulative sums, batched pre-pass,
 /// jagged-PCS clone) reads every chip's host trace today.
 #[allow(clippy::too_many_arguments)]
@@ -669,49 +690,9 @@ where
     //     `main_traces` were already MOVED into these `Arc<Mle>`s (no clone,
     //     the retired copy-SITE 3).
     //   * free-fn / device paths (no `padded_slice`: shrink, recursion
-    //     VK-witness, ziren-gpu `LazyDeviceLoader`) — build it locally from the
-    //     loader's raw traces (borrowed, or device-pulled via `materialize_all`)
-    //     so ALL downstream reads share ONE uniform source.  Construction is
-    //     byte-identical to the raw-trace path, so it never perturbs the
-    //     transcript.  A width-0 chip (device-resident / unexercised) maps to a
-    //     fully-virtual `dummy`; a host chip wraps its raw trace via
-    //     `padded_with_zeros(Mle::from_row_major(t))`.  No new D2H: device
-    //     main_traces are already width-0 → `dummy`.
-    let _built_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>>;
-    let _owned_main_traces: Vec<RowMajorMatrix<Val<SC>>>;
-    let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] =
-        match main_trace_loader.padded_slice() {
-            Some(p) => p,
-            None => {
-                let raw: &[RowMajorMatrix<Val<SC>>] = match main_trace_loader.borrow_all() {
-                    Some(borrowed) => borrowed,
-                    None => {
-                        _owned_main_traces = main_trace_loader.materialize_all();
-                        &_owned_main_traces
-                    }
-                };
-                _built_trace_mles = raw
-                    .iter()
-                    .map(|t| {
-                        let width = t.width;
-                        if width == 0 {
-                            return crate::multilinear::PaddedMle::dummy(
-                                max_log_row_count as u32,
-                                crate::multilinear::Padding::Constant(Val::<SC>::ZERO, 0),
-                            );
-                        }
-                        let mle = std::sync::Arc::new(crate::basefold::Mle::from_row_major(
-                            RowMajorMatrix::new(t.values.clone(), width),
-                        ));
-                        crate::multilinear::PaddedMle::padded_with_zeros(
-                            mle,
-                            max_log_row_count as u32,
-                        )
-                    })
-                    .collect();
-                &_built_trace_mles
-            }
-        };
+    let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] = main_trace_loader
+        .padded_slice()
+        .expect("MainTraceLoader must carry the shared trace-MLE slice");
 
     // Auto-precompute.  This driver is the CpuProver path ONLY: the GPU
     // pipeline assembles the shard stages device-natively in ziren-gpu's
