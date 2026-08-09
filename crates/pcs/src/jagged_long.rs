@@ -311,6 +311,42 @@ mod tests {
         }
     }
 
+    /// The builder must preserve the trace values: restacking through
+    /// `interleave_multilinears_with_fixed_rate` reorders and zero-pads, so the
+    /// check is that the MULTISET of non-zero cells survives and the total
+    /// length is the padded power of two.
+    #[test]
+    fn jagged_hadamard_poly_preserves_the_trace_cells() {
+        let mut rng = StdRng::seed_from_u64(0xBEEF);
+        for widths in [vec![2usize, 2], vec![3, 1, 4]] {
+            let lsh = 3u32;
+            let comps = build(&mut rng, &widths, lsh);
+            let mut want: Vec<InnerVal> = Vec::new();
+            for m in &comps {
+                want.extend_from_slice(m.guts().as_slice());
+            }
+            want.sort_by_key(|v| format!("{v}"));
+
+            let msg: Vec<std::sync::Arc<Mle<InnerVal, CpuBackend>>> =
+                comps.into_iter().map(std::sync::Arc::new).collect();
+            let total: usize = want.len().next_power_of_two();
+            let weights: Vec<InnerChallenge> =
+                (0..total).map(|_| InnerChallenge::from_u32(rng.gen::<u32>() % 1000)).collect();
+
+            let hp = jagged_hadamard_poly(msg, lsh, weights);
+
+            let got_all = hp.base.first_component().guts().as_slice();
+            assert_eq!(got_all.len(), total, "restacked length");
+            let mut got: Vec<InnerVal> =
+                got_all.iter().copied().filter(|v| *v != InnerVal::ZERO).collect();
+            got.sort_by_key(|v| format!("{v}"));
+            let mut want_nz: Vec<InnerVal> =
+                want.into_iter().filter(|v| *v != InnerVal::ZERO).collect();
+            want_nz.sort_by_key(|v| format!("{v}"));
+            assert_eq!(got, want_nz, "widths={widths:?}: trace cells not preserved");
+        }
+    }
+
     /// A non-power-of-two total must be REJECTED, not silently truncated by
     /// floor-`ilog2` (SP1 `long.rs:95` has no guard; this is the ported check).
     #[test]
@@ -470,5 +506,52 @@ where
     ) -> crate::shard_level::types::UnivariatePolynomial<EF> {
         assert_eq!(t, 1, "HadamardProduct binds one variable per round");
         hadamard_round_poly(self.base.first_component(), self.ext.first_component(), claim)
+    }
+}
+
+/// Build the jagged sumcheck polynomial from the per-chip trace MLEs and the
+/// jagged weight table — Ziren's counterpart of SP1's `jagged_sumcheck_poly`
+/// (`slop/crates/jagged/src/sumcheck.rs:13`).
+///
+/// `base` is the trace side: the per-chip component MLEs restacked into the
+/// single component the sumcheck requires, via
+/// [`crate::basefold::stacked::interleave_multilinears_with_fixed_rate`] — the
+/// same helper SP1 uses, already ported and (per its own `ILV_PROF` counters)
+/// currently never exercised.
+///
+/// `ext` is the weight side.  SP1's `partial_jagged_multilinear`
+/// (`populate.rs`) is just `partial_jagged_little_polynomial_evaluation`
+/// wrapped in a one-component `LongMle`, and Ziren's `build_weight_table`
+/// already documents itself as mirroring that same function — so the weights
+/// are wrapped here rather than recomputed.
+///
+/// NOTE this does not yet replace `prove_jagged_reduction_owned`: that swap
+/// also has to reconcile the binding order (Ziren's jagged reduction folds
+/// MSB-first, `LongMle` folds LSB) which is what moves the proof format.
+pub fn jagged_hadamard_poly(
+    trace_components: Message<Mle<crate::InnerVal, CpuBackend>>,
+    log_stacking_height: u32,
+    weights: alloc::vec::Vec<crate::InnerChallenge>,
+) -> HadamardProduct<crate::InnerVal, crate::InnerChallenge> {
+    assert!(
+        weights.len().is_power_of_two(),
+        "jagged weight table must be a power of two, got {}",
+        weights.len(),
+    );
+    let total_num_variables = LongMle::from_message(trace_components.clone(), log_stacking_height)
+        .total_values()
+        .next_power_of_two()
+        .ilog2();
+    let restacked = crate::basefold::stacked::interleave_multilinears_with_fixed_rate(
+        1,
+        trace_components,
+        total_num_variables,
+    );
+    HadamardProduct {
+        base: LongMle::from_message(restacked, total_num_variables),
+        ext: LongMle::from_components(
+            alloc::vec![Mle::from_values(weights.clone())],
+            weights.len().ilog2(),
+        ),
     }
 }
