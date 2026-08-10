@@ -109,6 +109,15 @@ where
     // no copy — was the former per-chip `from_raw_parts` Vec move).  These views
     // borrow the same shared `Arc<Mle>` cells as `main_traces`, so they live as
     // long as the `'t` borrow.
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    assert_eq!(
+        chips.len(),
+        main_traces.len(),
+        "maybe_auto_precompute_basefold: chips/main_traces must be parallel",
+    );
     let named_inner: alloc::vec::Vec<crate::jagged_pcs::jagged::ChipTraceView> = chips
         .iter()
         .zip(main_traces.iter())
@@ -645,6 +654,15 @@ pub fn observe_transcript_prologue<SC, A>(
     }
     let num_chips = Val::<SC>::from_u64(chips.len() as u64);
     challenger.observe(num_chips);
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    assert_eq!(
+        chips.len(),
+        shared_trace_mles.len(),
+        "observe_transcript_prologue: chips/shared_trace_mles must be parallel",
+    );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Per-chip log-height observe (device-residency aware): a device
         // chip's REAL height is baked into its dummy MLE, read back
@@ -924,6 +942,23 @@ where
     if !full_openings_ok {
         return None;
     }
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    // This is the site the SP1 [prep | main] packing (#192) would have broken
+    // silently: with a 2N commit set, `zip` pairs chip[i] with its PREPROCESSED
+    // trace where its MAIN trace is expected.
+    assert_eq!(
+        chips.len(),
+        commit_traces.len(),
+        "compute_residual_y_openings: chips/commit_traces must be parallel",
+    );
+    assert_eq!(
+        chips.len(),
+        preprocessed_traces.len(),
+        "compute_residual_y_openings: chips/preprocessed_traces must be parallel",
+    );
     let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
     let mut ok = true;
     for (idx, ((chip, ctrace), ptrace)) in chips
@@ -1005,6 +1040,15 @@ where
 {
     let mut chip_log_heights = std::collections::BTreeMap::new();
     let mut chip_heights = std::collections::BTreeMap::new();
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    assert_eq!(
+        chips.len(),
+        shared_trace_mles.len(),
+        "build_chip_log_heights: chips/shared_trace_mles must be parallel",
+    );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Device residency: a device chip's REAL height is baked into its
         // dummy MLE, read back via `metadata_height()`.  A MISSING
@@ -1126,6 +1170,20 @@ where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    assert_eq!(
+        chips.len(),
+        shared_trace_mles.len(),
+        "build_chip_cumulative_sums: chips/shared_trace_mles must be parallel",
+    );
+    assert_eq!(
+        chips.len(),
+        chip_cum_tails.len(),
+        "build_chip_cumulative_sums: chips/chip_cum_tails must be parallel",
+    );
     chips
         .iter()
         .zip(shared_trace_mles.iter())
@@ -1338,6 +1396,16 @@ where
         let mut v = core::mem::ManuallyDrop::new(v);
         alloc::vec::Vec::from_raw_parts(v.as_mut_ptr() as *mut B, v.len(), v.capacity())
     }
+
+    // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
+    // and `zip` TRUNCATES on a length mismatch rather than failing — so a
+    // mismatch would silently pair a chip with a DIFFERENT chip's trace.
+    // `assert_eq!`, not `debug_assert_eq!`: release is where that matters.
+    assert_eq!(
+        chips.len(),
+        main_traces.len(),
+        "prove_trusted_evaluations: chips/main_traces must be parallel",
+    );
 
     // Per-chip `r_row` = trailing log(chip_height) coords of the
     // shared eval_point.  Computed FIRST (reads dims by reference) so the
