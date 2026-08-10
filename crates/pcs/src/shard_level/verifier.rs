@@ -714,6 +714,21 @@ where
             info.row_count = h;
             col_idx += info.column_count;
         }
+
+        // COLUMN-ACCOUNTING CHECK.  The walk above assumes the verifier's chip
+        // list accounts for EVERY column in the packing: it advances `col_idx`
+        // by each chip's width and reads heights from `offsets[col_idx]`.  If
+        // the packing carried more column groups than this list covers — which
+        // is exactly what SP1's [preprocessed | main] layout would do, 2N
+        // groups for N chips — the walk would stop partway and silently read
+        // one region's heights as the other's.  Reject instead.
+        let total_cols = bundle.packing.offsets.len().saturating_sub(1);
+        if col_idx != total_cols {
+            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                "packing column accounting mismatch: chips cover {col_idx} columns \
+                 but the bundle carries {total_cols}",
+            )));
+        }
     }
 
     // Build r_row_per_chip from the shared eval_point's trailing
