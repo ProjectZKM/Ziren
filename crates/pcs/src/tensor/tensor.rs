@@ -107,13 +107,30 @@ impl<T, A: Backend> Tensor<T, A> {
     }
 }
 
+impl<T, A: Backend> Tensor<T, A> {
+    /// Adopt an existing buffer under an explicit `[rows, cols]` shape,
+    /// zero-copy, in whatever memory space the buffer already lives in.
+    ///
+    /// This is the seam a device-resident matrix crosses to become a
+    /// `Tensor<T, CudaBackend>` (and so an `Mle`) without a copy: the buffer
+    /// carries its own allocation and allocator, so ownership simply moves.
+    #[inline]
+    pub fn from_buffer_in(storage: Buffer<T, A>, rows: usize, cols: usize) -> Self {
+        debug_assert_eq!(
+            storage.len(),
+            rows * cols,
+            "Tensor::from_buffer_in: buffer len != rows*cols",
+        );
+        Self { storage, dimensions: Dimensions::new(rows, cols) }
+    }
+}
+
 impl<T> Tensor<T, CpuBackend> {
     /// Build a CPU tensor from a linear buffer and an explicit
     /// `[rows, cols]` shape.  Zero-copy.
     #[inline]
     pub fn new(storage: Buffer<T, CpuBackend>, rows: usize, cols: usize) -> Self {
-        debug_assert_eq!(storage.len(), rows * cols, "Tensor::new: buffer len != rows*cols");
-        Self { storage, dimensions: Dimensions::new(rows, cols) }
+        Self::from_buffer_in(storage, rows, cols)
     }
 
     /// Borrow the storage as a flat row-major slice (zero-copy).  This is
