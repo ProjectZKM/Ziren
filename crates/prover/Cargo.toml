@@ -107,14 +107,6 @@ name = "find_recursion_shapes"
 path = "scripts/find_recursion_shapes.rs"
 
 [[bin]]
-name = "pathb_e2e"
-path = "scripts/pathb_e2e.rs"
-
-[[bin]]
-name = "pathb_forgery"
-path = "scripts/pathb_forgery.rs"
-
-[[bin]]
 name = "test_shape_fixing"
 path = "scripts/test_shape_fixing.rs"
 
