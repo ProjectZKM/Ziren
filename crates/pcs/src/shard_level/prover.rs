@@ -239,7 +239,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_with_data<SC, A, P>(
     chips: &[&Chip<Val<SC>, A>],
-    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
@@ -888,7 +888,7 @@ where
 pub fn compute_residual_y_openings<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     commit_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
-    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
     // Per-chip metadata heights, parallel to `chips` (device dummies carry a

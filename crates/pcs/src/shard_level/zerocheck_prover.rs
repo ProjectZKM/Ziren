@@ -69,7 +69,7 @@ use crate::{Challenge, Chip, StarkGenericConfig, Val};
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    preprocessed_traces: &[RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
     public_values: &[Val<SC>],
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,

@@ -114,7 +114,7 @@ where
     /// SP1: MainTraceData.shard_chips.
     pub chips: &'a [&'a MachineChip<SC, A>],
     /// SP1: pk.preprocessed_data.preprocessed_traces.
-    pub preprocessed_traces: &'a [RowMajorMatrix<Val<SC>>],
+    pub preprocessed_traces: &'a [&'a RowMajorMatrix<Val<SC>>],
     /// SP1: `Traces::named_traces` — the shard's main traces as name-keyed
     /// [`crate::multilinear::PaddedMle`]s (SP1's `BTreeMap<String, PaddedMle>`).
     ///
@@ -1049,7 +1049,7 @@ where
                 &chips,
                 &pk.traces,
                 &pk.chip_ordering,
-                &traces,
+                traces,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
                 // SP1-parity: `dense_rev` no longer threaded — the prover's
@@ -1200,7 +1200,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     chips: &[&MachineChip<SC, A>],
     pk_traces: &[RowMajorMatrix<Val<SC>>],
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
-    main_traces: &[std::sync::Arc<RowMajorMatrix<Val<SC>>>],
+    main_traces: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     // SP1-parity: the per-shard rev(zeta) orientation (`dense_rev`) is no longer
@@ -1266,15 +1266,18 @@ where
         "try_prove_shard_to_basefold_boxed requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
     );
 
-    // Build per-chip preprocessed traces aligned with `chips` (empty
-    // when a chip has no preprocessed column).
-    let preprocessed_traces: Vec<RowMajorMatrix<Val<SC>>> = chips
+    // Per-chip preprocessed traces aligned with `chips`.  These live in the
+    // proving key for the whole session, so this BORROWS them into chip order
+    // rather than deep-copying each one per shard; chips with no preprocessed
+    // column share one empty matrix.
+    let empty_preprocessed: RowMajorMatrix<Val<SC>> = RowMajorMatrix::new(vec![], 0);
+    let preprocessed_traces: Vec<&RowMajorMatrix<Val<SC>>> = chips
         .iter()
         .map(|chip| {
             pk_chip_ordering
                 .get(&chip.name().to_string())
-                .map(|&idx| pk_traces[idx].clone())
-                .unwrap_or_else(|| RowMajorMatrix::new(vec![], 0))
+                .map(|&idx| &pk_traces[idx])
+                .unwrap_or(&empty_preprocessed)
         })
         .collect();
 
@@ -1334,13 +1337,15 @@ where
     };
     // SP1-parity trace hoist: build the shared analytic trace-MLE store HERE,
     // once, as SP1's name-keyed `Traces::named_traces` — the SINGLE
-    // authoritative host main-trace store (the unified main-trace store).  The
-    // per-chip `RowMajorMatrix` materialization out of the `Arc`s is the SAME
-    // clone this site already paid before handing owned traces to the trait
-    // method; `named_padded_traces` then MOVES each one into its `Arc<Mle>`.
+    // authoritative host main-trace store.  `commit()` is the sole producer of
+    // these `Arc`s and `open()` hands us the only `Vec`, so `try_unwrap` MOVES
+    // each backing buffer straight through into its `Arc<Mle>` with no copy;
+    // the `clone` arm is a correctness fallback for any future extra holder.
     let main_traces_named = named_padded_traces(
         chips.iter().map(|chip| chip.name()),
-        main_traces.iter().map(|arc| (**arc).clone()),
+        main_traces
+            .into_iter()
+            .map(|arc| std::sync::Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone())),
         max_log_row_count as u32,
         // CPU prover path: no device traces, so no per-chip device height to
         // bake — every width-0 chip stays a plain `dummy` (byte-identical to

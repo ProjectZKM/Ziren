@@ -27,7 +27,7 @@ use crate::Chip;
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
-    preprocessed_traces: &[RowMajorMatrix<F>],
+    preprocessed_traces: &[&RowMajorMatrix<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
     // The shared per-chip analytic main-trace MLE (chip-index order),

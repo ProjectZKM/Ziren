@@ -230,7 +230,7 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 // `CudaShardDeviceOps::interaction_eval` forwarded to VERBATIM).
 pub fn generate_first_layer<F, EF, A>(
     chips: &[&Chip<F, A>],
-    preprocessed_traces: &[RowMajorMatrix<F>],
+    preprocessed_traces: &[&RowMajorMatrix<F>],
     shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
