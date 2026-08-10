@@ -1,5 +1,5 @@
 //! PORTED VERBATIM from SP1 `slop/crates/alloc/src/raw_buffer.rs` (succinctlabs/sp1) for the
-//! Ziren backend-generic tensor stack (#125 INC-6, full SP1-fidelity Buffer port).
+//! Ziren backend-generic tensor stack — a full SP1-fidelity Buffer port.
 //! Ziren adaptations vs upstream: `crate::` -> `crate::tensor::`; `thiserror` errors
 //! hand-written; `slop_algebra` -> `p3_field`. Only `CpuBackend` is implemented here
 //! (host stays device-dependency-free); `ziren-gpu` implements `CudaBackend` against

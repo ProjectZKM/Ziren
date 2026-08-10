@@ -96,7 +96,7 @@ const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
 ///
 /// This is NOT a production knob. The two limits that actually close shards — trace area and
 /// per-chip height — are exact on every cycle and have no frequency at all; this constant only
-/// bounds the cost of the O(shapes x chips) scan that `FIX_CORE_SHAPES=true` and the
+/// bounds the cost of the O(shapes x chips) scan that a populated `core_shape_config` and the
 /// `find_maximal_shapes` script enable, neither of which runs on the prove path. It is the
 /// former `SHAPE_CHECK_FREQUENCY` default, kept so that tooling behaves exactly as before.
 const SHAPE_SEARCH_CHECK_FREQUENCY: u64 = 16;
@@ -225,8 +225,8 @@ pub struct Executor<'a> {
     /// The maximal shapes for the program.
     ///
     /// `None` on the production prove path — it is set from
-    /// `prover.core_shape_config`, which requires `FIX_CORE_SHAPES=true`. See the
-    /// `shape_match_found` note in `inc_shard_if_need`.
+    /// `prover.core_shape_config`, which only the offline shape tooling
+    /// populates.  See the `shape_match_found` note in `inc_shard_if_need`.
     pub maximal_shapes: Option<MaximalShapes>,
 
     /// The costs of the program.
@@ -3345,8 +3345,8 @@ impl<'a> Executor<'a> {
         // `shape_match_found` can only go false inside this block, and BOTH of its inputs are
         // off by default: `lde_size_check` is `false` (set true only by the offline
         // `find_maximal_shapes` script) and `maximal_shapes` is `None` (it is
-        // `prover.core_shape_config`, which needs `FIX_CORE_SHAPES=true`). Kept because FIX-on
-        // and the shape-search tooling are both still selectable.
+        // `prover.core_shape_config`, which only the offline shape tooling populates).
+        // Kept because that tooling is still selectable.
         //
         // Unlike the two production limits above this one is genuinely O(shapes x chips), so it
         // keeps a sampling frequency of its own rather than paying that cost every cycle. The

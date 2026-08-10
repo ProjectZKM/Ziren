@@ -14,7 +14,7 @@
 //! Run:
 //!   COMPOSE_DUMP=/tmp/allinput_compose_h1_i4.bin \
 //!   CORE_DUMP=/tmp/allinput_core_0.bin \
-//!   FIX_CORE_SHAPES=false FIX_RECURSION_SHAPES=true VERIFY_VK=false \
+//!   FIX_RECURSION_SHAPES=true VERIFY_VK=false \
 //!   cargo run --release -p zkm-prover --example g4_forgery_matrix
 //!
 //! NOTE: a child's public_values are Fiat-Shamir-observed by the per-child

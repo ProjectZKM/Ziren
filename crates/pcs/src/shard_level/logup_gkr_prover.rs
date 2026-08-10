@@ -283,8 +283,7 @@ mod tests {
     /// NOTE: the prior assertion of `80` was a pre-existing test bug (it
     /// claimed eq_mle_table put table[1] at (x0=0,x1=1), but the
     /// r-iteration-order build places table[1] at (x0=1,x1=0) as shown
-    /// above).  The function correctly returns 90; this matches canonical
-    /// d5e26419 (verified identical output there).  Unrelated to Phase-1.
+    /// above).  The function correctly returns 90.
     #[test]
     fn evaluate_trace_columns_2d_point() {
         use p3_field::PrimeCharacteristicRing;

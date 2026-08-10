@@ -1,5 +1,5 @@
 //! Backend-generic **tensor** primitives for the Ziren basefold port
-//! (#125 INC-6), now a **full-fidelity port of SP1's `slop-alloc` crate**.
+//! now a **full-fidelity port of SP1's `slop-alloc` crate**.
 //!
 //! Layering (mirrors SP1 `slop/crates/alloc/src`):
 //!   * [`Allocator`] / [`AllocError`] — the raw allocate/deallocate contract.

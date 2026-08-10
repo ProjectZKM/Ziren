@@ -52,7 +52,7 @@ impl<F: Field> FriConfig<F> {
     /// `RECURSION_LOG_BLOWUP = 2`,
     /// `unique_decoding_queries(2) = 124`, `SP1_PROOF_OF_WORK_BITS = 16`).
     ///
-    /// **Soundness (the #57 fix — provable 100-bit inner chain).** The
+    /// **Soundness (provable 100-bit inner chain).** The
     /// BaseFold query-phase / unique-decoding soundness is
     /// `num_queries · (-log2(0.5 + rate/2)) + pow_bits`.  At rate
     /// `1/2^2 = 1/4` (`half_rate_plus_half = 0.625`):

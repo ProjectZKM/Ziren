@@ -26,8 +26,8 @@
 //! benches don't break.  If any legacy var is set, the profile decision
 //! is OVERRIDDEN per-feature and a one-shot deprecation warn is logged.
 //!
-//! `VERIFY_VK`, `FIX_CORE_SHAPES`, `FIX_RECURSION_SHAPES` are explicitly
-//! NOT residency vars and are not grouped here.
+//! `VERIFY_VK` and `FIX_RECURSION_SHAPES` are explicitly NOT residency
+//! vars and are not grouped here.
 
 use std::env;
 use std::sync::OnceLock;
