@@ -318,7 +318,12 @@ where
         eval_point: Vec<EF>,
         mle_rounds: Vec<Vec<Arc<Mle<F>>>>,
         evaluation_claims: Vec<Vec<EF>>,
-        prover_data: Vec<BasefoldProverData<F, MT>>,
+        // BORROWED: every use below is a read (`iter()`, and
+        // `mmcs.open_batch(idx, &data.prover_data)`), so the committed Merkle
+        // tree never has to be owned — or deep-copied — to be opened.  That is
+        // what lets a long-lived commit (the preprocessed one, built once at
+        // setup and held in the proving key) be opened by every shard.
+        prover_data: &[&BasefoldProverData<F, MT>],
         challenger: &mut Challenger,
     ) -> BasefoldProof<F, EF, MT>
     where

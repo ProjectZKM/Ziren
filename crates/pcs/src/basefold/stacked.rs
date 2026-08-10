@@ -452,7 +452,11 @@ where
     pub fn prove_trusted_evaluation<Challenger>(
         &self,
         eval_point: Vec<EF>,
-        prover_data: Vec<StackedBasefoldProverData<F, MT>>,
+        // BORROWED for the same reason as
+        // `BasefoldProver::prove_trusted_mle_evaluations`: the committed data is
+        // read, never consumed, so a commit built once (preprocessed, at setup)
+        // can be opened by every shard without copying its Merkle tree.
+        prover_data: &[StackedBasefoldProverData<F, MT>],
         challenger: &mut Challenger,
     ) -> StackedBasefoldProof<F, EF, MT>
     where
@@ -476,10 +480,12 @@ where
             .map(|d| self.round_batch_evaluations(&stack_point, d))
             .collect();
 
-        let (pcs_prover_data, mle_rounds): (Vec<_>, Vec<_>) = prover_data
-            .into_iter()
-            .map(|d| (d.pcs_batch_data, d.interleaved_mles))
-            .unzip();
+        // `interleaved_mles` is `Vec<Arc<Mle>>`, so this clone is a refcount
+        // bump per stripe, not a copy of any trace.
+        let mle_rounds: Vec<Vec<Arc<Mle<F>>>> =
+            prover_data.iter().map(|d| d.interleaved_mles.clone()).collect();
+        let pcs_prover_data: Vec<&BasefoldProverData<F, MT>> =
+            prover_data.iter().map(|d| &d.pcs_batch_data).collect();
 
         // The OPEN/prove GPU hook lives one level up at
         // `jagged_pcs::open_jagged_pcs_host_generic` (a statically-provided
@@ -490,7 +496,7 @@ where
             stack_point,
             mle_rounds,
             batch_evaluations.clone(),
-            pcs_prover_data,
+            &pcs_prover_data,
             challenger,
         );
 

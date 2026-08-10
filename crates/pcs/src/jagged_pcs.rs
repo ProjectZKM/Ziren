@@ -556,7 +556,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// dispatch loop.  Always runs the CPU StackedPcsProver
 /// `prove_trusted_evaluation` body.
 pub fn open_jagged_pcs_host(
-    prover_data: JaggedProverData,
+    prover_data: &JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
 ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, JaggedMmcs> {
@@ -584,7 +584,7 @@ pub fn open_jagged_pcs_host(
 /// KoalaBear⁴ for both (the eval-point is over `JaggedChallenge`).
 #[allow(clippy::type_complexity)]
 pub fn open_jagged_pcs_host_generic<Challenger, MT, D>(
-    prover_data: JaggedProverDataGeneric<MT>,
+    prover_data: &JaggedProverDataGeneric<MT>,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut Challenger,
     mmcs: MT,
@@ -603,7 +603,11 @@ where
         prover_data.log_stacking_height,
         DEFAULT_BATCH_SIZE,
     );
-    prover.prove_trusted_evaluation(eval_point, vec![prover_data.stacked_data], challenger)
+    prover.prove_trusted_evaluation(
+        eval_point,
+        core::slice::from_ref(&prover_data.stacked_data),
+        challenger,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1679,7 +1683,7 @@ pub mod jagged {
             let _t_open = std::time::Instant::now();
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
             let proof =
-                open_jagged_pcs_host(prover_data, extended_eval_point, challenger);
+                open_jagged_pcs_host(&prover_data, extended_eval_point, challenger);
             drop(_open_span);
             tracing::info!(
                 elapsed_ms = _t_open.elapsed().as_millis() as u64,
@@ -1953,7 +1957,7 @@ pub mod jagged {
                 Challenger,
                 MT,
                 crate::jagged_pcs::JaggedDft,
-            >(prover_data, extended_eval_point, challenger, mmcs, dft, fri)
+            >(&prover_data, extended_eval_point, challenger, mmcs, dft, fri)
         };
         let (reduction, jagged_eval, proof) = prove_jagged_basefold_linear_core(
             &packing.offsets,
