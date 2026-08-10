@@ -350,137 +350,46 @@ pub trait GpuZerocheckChallenger {
     fn sample_ef(&mut self) -> Ef4;
 }
 
-// P6 static dispatch: the `GPU_ZEROCHECK_YTUPLE` hook (per-chip per-round
-// zerocheck y-tuple from HOST cells) moved to `ShardDeviceOps::zerocheck_ytuple`,
-// carried by `ZeroCheckPoly`; the `OnceLock` + `register_/get_` accessors + the
-// `GpuZerocheckYTupleFn` fn-ptr alias were dropped.  The device returns the
-// per-pair `(y_0, y_2, y_3, y_4)` accumulators BEFORE `finalize_round_poly`'s
-// `elf_X · eq_adjustment` scaling + the VirtualGeq padded-row correction — the
-// host keeps that analytic, transcript-critical finalize, so the Fiat-Shamir
-// transcript is byte-identical regardless of the dispatch.
-
-// P6 static dispatch: the `GPU_ZEROCHECK_BATCHED_YTUPLE` hook (one fused device
-// launch computing every real chip's (y_0,y_2,y_3,y_4) in a round) moved to
-// `ShardDeviceOps::zerocheck_batched_ytuple`, carried by `ZeroCheckPoly`; the
-// `OnceLock` + `register_/get_` accessors + the `GpuZerocheckBatchedYTupleFn`
-// fn-ptr alias were dropped.  The method's per-chip input struct
-// `ZerocheckChipYTupleInput` was a GPU-only device-ABI type with ZERO host
-// consumers; the AirProver seam relocated it verbatim into ziren-gpu
-// (`zkm-gpu-core::basefold::zerocheck_ytuple_input`), so the host no longer
-// defines it.
-
-// P5 dead-hook removal: the `GPU_CONSTRAINT_EVAL_BATCHED` and
-// `GPU_CONSTRAINT_EVAL_CROSS_SHARD` `OnceLock` slots were removed — both had
-// ZERO `get_*` consumers (write-only registration), dead process-global state.
-// Their `register_/get_` accessors + fn-ptr type aliases were dropped (and the
-// co-located GPU register sites).
-
-// P5 static dispatch: the `GPU_INTERACTION_EVAL` hook (per-chip LogUp-GKR
-// phase-2 interaction-table builder, provider-carried) moved to
-// `ShardDeviceOps::interaction_eval` (see `crate::shard_level::device_ops`),
-// threaded by prover TYPE; the `OnceLock` + `register_/get_` accessors + the
-// `GpuInteractionEvalFn` fn-ptr alias were dropped.
-
-// The two whole-pipeline jagged-PCS GPU orchestration hooks —
-// `GPU_JAGGED_ORCHESTRATION_HOOK` (host-trace variant) and
-// `GPU_JAGGED_PCS_DEVICE_HOOK` (device-trace variant) — were REMOVED,
-// not static-dispatched.  Both were dead: ziren-gpu never registered
-// either (verified: no `register_*`/`get_*`/`GpuJagged*Fn` reference in
-// the device crate), so their dispatch sites in
-// `crate::shard_level::prover::prove_trusted_evaluations` always fell
-// through to the host `prove_jagged_basefold_with_y_per_chip`.  Device
-// notes confirm they are architecturally retired: the host-trace
-// orchestration's "emit dispatch is statically dead under the
-// precomputed-commit path" (step-3 y_per_chip now comes from the
-// zerocheck residual — openings-for-free), and the device-trace variant
-// was "retired by the openings-for-free".  With no live consumer there
-// is nothing to thread a `Some(..)` into, so removing the OnceLock
-// registries outright (rather than threading a perpetual `None`) both
-// kills the global dispatch state and keeps the host path byte-identical.
-
-// Device-resident per-layer LogUp-GKR round result: the scalar-only
-// `GpuLogupRoundResult` (univariate_polys/point/final_eval/openings) was a
-// GPU-only device-ABI type with ZERO host consumers; the AirProver seam
-// relocated it into ziren-gpu
-// (`zkm-gpu-basefold::logup_round_device`), so the host no longer defines it.
-// Its dead `next_layer` cross-call channel (always `None`) was dropped in the
-// same stage (see the `GPU_LOGUP_ROUND_HOOK` note below).
-
-// P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK_DEVICE_FOLD` hook (device-fold
-// per-layer LogUp-GKR round driver, transcript driven via `observe_ef` /
-// `sample_ef` closures) moved to `ShardDeviceOps::logup_round_device_fold` (see
-// `crate::shard_level::device_ops`), threaded POSITIONALLY into
-// `prove_gkr_round` (the per-shard `dev` is in scope there → the
-// `try_logup_round_gpu_device_fold` helper); the `OnceLock` + `register_/get_`
-// accessors + the `GpuLogupRoundProverFnDeviceFold` fn-ptr alias were dropped.
-
-// P7 static dispatch: the `GPU_CHIP_STRUCTURED_SUMCHECK` hook (chip-structured
-// row-binding per-round sumcheck round-poly evaluator, rounds 1..N with
-// `chip_rows > 1`, data in per-chip `&[&[Ef4]]` form) moved to
-// `ShardDeviceOps::logup_chip_structured_sumcheck` (see
-// `crate::shard_level::device_ops`), read via the poly's `dev` field threaded
-// into the `round_poly_evaluations_chip_structured` free fn; the `OnceLock` +
-// `register_/get_` accessors + the `GpuChipStructuredSumcheckFn` fn-ptr alias
-// were dropped.
-
-// P7 static dispatch: the `GPU_CHIP_STRUCTURED_SUMCHECK_DEVICE` hook
-// (device-resident chip-structured sumcheck with the per-round `sumcheck_id` /
-// `round_idx` / `alpha_prev` cross-round device-layer cache) moved to
-// `ShardDeviceOps::logup_chip_structured_sumcheck_device`, carried by
-// `LogupRoundPolynomial`; the `OnceLock` + `register_/get_` accessors + the
-// `GpuChipStructuredSumcheckDeviceFn` fn-ptr alias were dropped.
-
-// ──────────────────────────────────────────────────────────────────
-// fixup: V2 logup-round hook + first-round hook stubs.
+// The per-round zerocheck / LogUp-GKR GPU entry points are methods on
+// `ShardDeviceOps` (see `crate::shard_level::device_ops`), threaded by prover
+// TYPE. They were once a set of process-global `OnceLock` fn-pointer
+// registries; the AirProver seam replaced every one of them, and the
+// GPU-only device-ABI types that travelled with them (the y-tuple input
+// struct, the LogUp round result) now live in ziren-gpu, where their only
+// consumers are.
 //
-// These are referenced by `row_gkr/round.rs` (in-flight
-// work) but were never committed on this branch.  The ziren-gpu side
-// is what `register_*`s them at startup; when zkm-core-executor (or
-// any consumer that doesn't link ziren-gpu) builds, the registry is
-// empty and `get_*_hook()` returns `None` → the host fallback path
-// runs.  Stub here so the crate type-checks; production behavior is
-// unchanged because the env flags that enable these dispatch sites
-// default OFF or no-op when the hook is missing.
-// ──────────────────────────────────────────────────────────────────
-
-// (V2 logup-round hook retired in M3 — the device pack is the production
-// first-layer path; declines route to the V1 hook.)
-
-// P8 static dispatch: the `GPU_LOGUP_ROUND_HOOK` hook (device-pack per-layer
-// LogUp-GKR round driver — drives the concrete `&mut InnerChallenger`) moved to
-// `ShardDeviceOps::logup_round` (see `crate::shard_level::device_ops`), threaded
-// POSITIONALLY into `prove_gkr_round` (the per-shard `dev` is in scope there →
-// the `try_logup_round_gpu` helper); the `OnceLock` + `register_/get_`
-// accessors + the `GpuLogupRoundProverFn` fn-ptr alias were dropped.
+// TRANSCRIPT INVARIANT, which is why any of this is safe to dispatch two
+// ways: the device returns the per-pair `(y_0, y_2, y_3, y_4)` accumulators
+// BEFORE `finalize_round_poly` applies its `elf_X · eq_adjustment` scaling
+// and the VirtualGeq padded-row correction. That finalize is analytic and
+// stays on the host, so the Fiat-Shamir transcript is byte-identical
+// whichever side computed the accumulators.
 //
-// The V3 device-handle channel — the opaque `DeviceLayerHandle`
-// (`Arc<dyn Any + Send + Sync>`) + the cross-round `LOGUP_V3_NEXT_HANDLE` TLS
-// (`take/peek/publish/clear_logup_v3_next_handle`) — was DEAD: the GPU device
-// pack never published a next-layer handle, so every `GpuLogupRoundResult` set
-// `next_layer: None` and the TLS always resolved to `None`.  The AirProver seam
-// dropped the whole channel.
+// The two whole-pipeline jagged-PCS orchestration hooks are gone rather than
+// migrated: nothing ever registered them, so `prove_trusted_evaluations`
+// always fell through to the host path. Both are architecturally retired by
+// openings-for-free — step-3 `y_per_chip` now comes from the zerocheck
+// residual.
 
 // ------------------------------------------------------------------
 // Device-built logup-round eq_row tables.
 //
-// The GKR logup-round `eq_row` weight table is up to `2^row_vars` x
-// 16 B (2^21 for a 2M-cycle shard) and was host-built via
-// `build_eq_table` then H2D-uploaded EVERY round/layer.  When the
-// device-eq path is enabled the host instead stashes the tiny
-// `row_point` coordinates here (<= row_vars Ef4 elements) and passes
-// an EMPTY `eq_row` Vec to the GPU hook; the ziren-gpu hook detects
-// the empty slot, reads this point, and builds the table on device
-// via the `partialLagrangeNaiveEf` kernel -- eliminating the
-// multi-MB per-round upload.
+// The GKR logup-round `eq_row` weight table is up to `2^row_vars` x 16 B
+// (2^21 for a 2M-cycle shard) and was host-built via `build_eq_table` then
+// H2D-uploaded EVERY round/layer. On the device-eq path the host instead
+// stashes the tiny `row_point` coordinates here (<= row_vars Ef4 elements)
+// and passes an EMPTY `eq_row` Vec; ziren-gpu detects the empty slot, reads
+// this point, and builds the table on device via `partialLagrangeNaiveEf`,
+// eliminating the multi-MB per-round upload.
 //
-// `build_eq_table` is LSB-first (index bit k <-> coords[k]), identical
-// to the kernel's `(i >> k) & 1 ? point[k] : 1-point[k]`, so the
-// device table is byte-identical to the host table -- NO point
-// reversal (unlike the big-endian fused-zerocheck device-eq path).
+// `build_eq_table` is LSB-first (index bit k <-> coords[k]), identical to the
+// kernel's `(i >> k) & 1 ? point[k] : 1-point[k]`, so the device table is
+// byte-identical to the host one -- NO point reversal here, unlike the
+// big-endian fused-zerocheck device-eq path.
 //
-// Slot is per-round transient: the host publishes immediately before
-// the hook call and the hook takes it at entry; consistent with the
-// other per-call logup TLS above.
+// Slot is per-round transient: the host publishes immediately before the hook
+// call and the hook takes it at entry.
+
 std::thread_local! {
     static LOGUP_DEVICE_EQ_ROW_POINT: std::cell::RefCell<Option<Vec<Ef4>>> =
         const { std::cell::RefCell::new(None) };
