@@ -2,7 +2,7 @@
 //!
 //! Loads a REAL honest compose (ComposeBasefold) witness + a REAL honest
 //! normalize (CoreBasefold) witness dumped by a FIX-off `compress` run
-//! (DUMP_TRIP_INPUT=1 DUMP_TRIP_INPUT_ALL=1), then for each attack mutates the
+//! serialized compose input, then for each attack mutates the
 //! witness and RUNS the in-circuit program on the host runtime
 //! (`RecursionRuntime::run`).  An in-circuit assert that catches the forgery
 //! traps the runtime (DivF/DivE/range-check); honest runs must stay GREEN.

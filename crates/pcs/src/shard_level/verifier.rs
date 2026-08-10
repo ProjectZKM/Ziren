@@ -920,7 +920,7 @@ where
     // rejects
     // at zerocheck.rs:613 yet the host would otherwise accept.  Verifier-only,
     // transcript-neutral (only already-sampled challenges + opened values),
-    // no vk regen.  Set S8J_RLC=1 for the per-shard diagnostic print.
+    // no vk regen.
     let rlc_eval = recompute_zerocheck_rlc_eval_host::<SC, A>(
         chips,
         zerocheck_proof,
@@ -1215,11 +1215,8 @@ where
     z_extended.extend_from_slice(z_star);
 
     let mut rlc_eval = Challenge::<SC>::ZERO;
-    let n_chips = chips.len();
-    let mut per_chip_lines: Vec<String> = Vec::with_capacity(n_chips);
 
-    for (idx, (chip, opening)) in chips.iter().zip(opened_values.chips.iter()).enumerate()
-    {
+    for (chip, opening) in chips.iter().zip(opened_values.chips.iter()) {
         // degree = quotient[0] (circuit opening.degree), real-height bits.
         let degree: &[Challenge<SC>] = opening
             .quotient
@@ -1266,39 +1263,8 @@ where
         // (4h) fold: rlc = rlc·λ + eq·(constraint_eval + openings_batch).
         rlc_eval = rlc_eval * lambda
             + zerocheck_eq_val * (constraint_eval + openings_batch);
-
-        per_chip_lines.push(format!(
-            "  [S8J-CHIP {idx} {name}] deg_dim={dd}/z_ext={ze} geq={geq:?} pra={pra:?} C={ce:?} ce_net={cen:?} batch={ob:?} (main={mw},prep={pw})",
-            name = <A as MachineAir<Val<SC>>>::name(&chip.air),
-            dd = degree.len(),
-            ze = z_extended.len(),
-            geq = geq_val,
-            pra = pra,
-            ce = ce,
-            cen = constraint_eval,
-            ob = openings_batch,
-            mw = opening.main.local.len(),
-            pw = opening.preprocessed.local.len(),
-        ));
     }
 
-    if std::env::var("S8J_RLC").is_ok() {
-        let claimed = zerocheck_proof.point_and_eval.1;
-        let equal = rlc_eval == claimed;
-        eprintln!(
-            "[S8J-RLC] chips={n_chips} EQUAL={equal} | host_rlc_eval={rlc_eval:?} | point_and_eval.1={claimed:?} | eq(z_gkr,z*)={zerocheck_eq_val:?} alpha={alpha:?} beta={gkr_batch_open:?} lambda={lambda:?} | z*_dim={zsd} z_gkr_dim={zgd}",
-            zsd = z_star.len(),
-            zgd = z_gkr.len(),
-        );
-        if std::env::var("S8J_PERCHIP").is_ok() {
-            for l in per_chip_lines {
-                eprintln!("{l}");
-            }
-        }
-    } else {
-        // `per_chip_lines` only feeds the gated diagnostic.
-        let _ = &per_chip_lines;
-    }
     rlc_eval
 }
 

@@ -10,7 +10,7 @@ use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use std::{cmp::Reverse, env, fmt::Debug, iter::once, sync::Arc, time::Instant};
+use std::{cmp::Reverse, fmt::Debug, iter::once, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -392,24 +392,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
                 );
             }
 
-            if env::var("SKIP_CONSTRAINTS").is_err() {
-                tracing::info_span!("debug constraints").in_scope(|| {
-                    for i in 0..chips.len() {
-                        let preprocessed_trace =
-                            pk.chip_ordering.get(&chips[i].name()).map(|index| &pk.traces[*index]);
-                        debug_constraints::<SC, A>(
-                            chips[i],
-                            preprocessed_trace,
-                            &traces[i].0,
-                            &permutation_traces[i],
-                            &permutation_challenges,
-                            &shard.public_values(),
-                            &chip_cumulative_sums[i].1,
-                            &chip_cumulative_sums[i].0,
-                        );
-                    }
-                });
-            }
+            tracing::info_span!("debug constraints").in_scope(|| {
+                for i in 0..chips.len() {
+                    let preprocessed_trace =
+                        pk.chip_ordering.get(&chips[i].name()).map(|index| &pk.traces[*index]);
+                    debug_constraints::<SC, A>(
+                        chips[i],
+                        preprocessed_trace,
+                        &traces[i].0,
+                        &permutation_traces[i],
+                        &permutation_challenges,
+                        &shard.public_values(),
+                        &chip_cumulative_sums[i].1,
+                        &chip_cumulative_sums[i].0,
+                    );
+                }
+            });
         }
 
         tracing::info!("Constraints verified successfully");

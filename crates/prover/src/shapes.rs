@@ -2,7 +2,7 @@ use eyre::Result;
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
     fs::File,
-    hash::{DefaultHasher, Hash, Hasher},
+    hash::Hash,
     panic::{catch_unwind, AssertUnwindSafe},
     path::PathBuf,
     sync::{

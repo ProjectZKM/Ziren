@@ -1958,7 +1958,7 @@ mod tests {
         // it != point_and_eval.1 — the binding the structural layer omits.
         // This test stays as the witness for WHY that binding is required.
         eprintln!(
-            "[S8J-b] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host STRUCTURAL sumcheck checks PASS (verify_zerocheck_host now binds rlc_eval, #43)"
+            "[rlc-binding] host-accepts/circuit-rejects WITNESS: claimed={claimed:?} circuit_recon={expected:?} (DIFFER) — all host STRUCTURAL sumcheck checks PASS (verify_zerocheck_host now binds rlc_eval, #43)"
         );
     }
 
