@@ -30,7 +30,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// Runs the BaseFold pre-commit on the supplied
 /// (already-materialized) `main_traces` via
 /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]
-/// (GPU-accelerated when `ZIREN_GPU_BASEFOLD=1` and the device hook is
+/// (GPU-accelerated when the device hook is
 /// registered), returns the 8-felt BaseFold digest as the new
 /// `main_commitment`, and returns `Some(precomputed)` so the caller
 /// threads it into the jagged-PCS opening.  The incoming `main_traces` views

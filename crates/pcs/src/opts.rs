@@ -20,96 +20,87 @@ const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 
-/// The default per-shard trace-AREA cap (raw main-trace cells). A shard is closed as
-/// soon as its accumulated (un-padded) main-trace cell count
-/// `Σ_chip event_counts[chip] × costs[chip]` reaches this, keeping dense (precompile/CPU-heavy)
-/// shards under the per-shard dense-area budget (log_dense ≤ 29) that the cycle / 24-bit-clk /
-/// height splits alone let run to log_dense = 30. Env-overridable via `ELEMENT_THRESHOLD`.
+/// The default per-shard trace-AREA cap (raw main-trace cells). A shard closes as
+/// soon as its accumulated un-padded main-trace cell count
+/// `Σ_chip event_counts[chip] × costs[chip]` reaches this, keeping dense
+/// (precompile/CPU-heavy) shards inside the per-shard dense-area budget
+/// (log_dense ≤ 29) that the cycle / 24-bit-clk / height splits alone let run to
+/// log_dense = 30. Env-overridable via `ELEMENT_THRESHOLD`. This is the ONLY
+/// limit that closes a core shard in practice — on reth, tendermint and goat,
+/// 100% of splits are area splits.
 ///
-/// NOT SP1's constant. SP1 uses `(1 << 28) + (1 << 27)` (sp1
-/// crates/core/executor/src/opts.rs:12), but that is calibrated against SP1's
-/// RISC-V trace density AND against a `Chip::cost()` of `preprocessed + main`.
-/// Ziren's MIPS trace is ~2.2x denser per cycle, so an SP1-sized area does not
-/// fit a 32 GB device: at `(1 << 28) + (1 << 27)` the resident jagged fold+sum
-/// kernel (ziren-gpu basefold/src/logup_round_device.rs) CUDA-OOMs on both
-/// tendermint and goat. The value below is the largest budget measured to fit
-/// BOTH (goat OOMs at `1 << 28`, so the headroom above it is thin — re-measure
-/// peak VRAM before raising it).
+/// NOT SP1's constant. SP1 uses `(1 << 28) + (1 << 27)`, calibrated against
+/// RISC-V trace density and a `Chip::cost()` of `preprocessed + main`. Ziren's
+/// MIPS trace is ~2.2x denser per cycle, so an SP1-sized area does not fit a
+/// 32 GB device: at that value the resident jagged fold+sum kernel CUDA-OOMs on
+/// both tendermint and goat. This is the largest budget measured to fit both,
+/// and the headroom is thin — goat OOMs at `1 << 28`. Re-measure peak VRAM
+/// before raising it.
 ///
-/// This is the ONLY limit that closes a core shard in practice — 100% of splits
-/// on reth / tendermint / goat are area splits.
+/// ⚠ WHAT DRIVES VRAM IS THE **DISTRIBUTION** OF SHARDS ACROSS jagged-eval SIZE
+/// CLASSES — not the largest shard, and not this value's proximity to a power
+/// of two.
 ///
-/// ⚠ WHAT ACTUALLY DRIVES VRAM IS THE **DISTRIBUTION** OF SHARDS ACROSS
-/// jagged-eval SIZE CLASSES — not the largest shard, and not this threshold's
-/// proximity to a power of two.
-/// - `log_dense = ceil(log2(total_values))` (`jagged.rs:185`) sizes the
-///   jagged-EVALUATION sumcheck buffers per shard; **class 29 costs ~2x class
-///   28**.  `total_values` counts committed `width x PADDED height`, which is a
-///   different quantity from this threshold (`Σ events x (preprocessed + main)`
-///   over UNPADDED events).
-/// - **`max(total_values)` measured 530,186,240 on reth at BOTH 251,658,240 and
-///   390,070,272 — identical to the byte.**  The largest shard does NOT scale
-///   with this threshold (it is capped elsewhere, almost certainly the height
-///   cap) and is always class 29.  Do not derive an "aligned" threshold from a
-///   ratio between the two; there isn't a stable one.
-/// - What the threshold moves is the MIX.  Raising it 251,658,240 ->
-///   390,070,272 takes the expensive-class share from **11% (228x c28, 33x c29)
-///   to 79% (14x c28, 170x c29)**, and peak live VRAM from **20.43 GiB to
-///   26.94 GiB** — with the max shard unchanged.
-/// - ⚠ **THE LARGEST SHARD IS HEIGHT-CAPPED, NOT AREA-CAPPED, AND IT SITS 1.25%
-///   BELOW `2^29`.**  `max(total_values)` measured **530,186,240** at ET =
-///   251,658,240 / 377,487,360 / 390,070,272 / 503,316,480 — identical across a
-///   **2x range of this threshold**, because `530,186,240 / 2^22 = 126.41` and
-///   `SHARD_SIZE = 4,194,305 = 2^22 + 1`: it is `SHARD_SIZE x ~126.4 committed
-///   columns`.  **The committed width can grow only ~1.26% before that shard
-///   crosses into `log_dense = 30` and its jagged-eval buffers double** — an
-///   est. +4 GiB on that one shard, taking the peak here from 20.43 to ~24.4
-///   GiB.  This is live, not hypothetical: `c5daa904` just took the committed
-///   chip set from 23 to 27 when no allowed band fits.  **The lever that
-///   controls it is `SHARD_SIZE`, not this threshold** — halving the height cap
-///   halves `total_values` and drops the max shard to class 28.
-/// - At 390,070,272 the ~5 GiB LogUp-GKR FirstLayer slab
-///   (`basefold/src/jhr_slab_device.rs`) is the largest single allocation at
-///   peak (5,007.87 MiB, 18.2%); at 251,658,240 it is **not resident at peak at
-///   all**.  Its cost is threshold-dependent, so shrinking it only pays if the
-///   threshold is raised.
+/// `log_dense = ceil(log2(total_values))` sizes the jagged-evaluation sumcheck
+/// buffers per shard, and **class 29 costs ~2x class 28**. `total_values`
+/// counts committed `width x PADDED height`, a different quantity from this
+/// threshold. Raising 251,658,240 -> 390,070,272 moves the expensive-class
+/// share from **11% (228x c28, 33x c29) to 79% (14x c28, 170x c29)** and peak
+/// live VRAM from **20.43 to 26.94 GiB** — with the max shard UNCHANGED.
+///
+/// ⚠ **THE LARGEST SHARD IS HEIGHT-CAPPED, NOT AREA-CAPPED, AND SITS 1.25%
+/// BELOW `2^29`.** `max(total_values)` measured **530,186,240** at ET =
+/// 251,658,240 / 377,487,360 / 390,070,272 / 503,316,480 — identical to the
+/// byte across a 2x range — because `530,186,240 / 2^22 = 126.41` and
+/// `SHARD_SIZE = 2^22 + 1`: it is `SHARD_SIZE x ~126.4 committed columns`. The
+/// committed width can grow only ~1.26% before that shard crosses into
+/// `log_dense = 30` and its buffers double (est. +4 GiB on that shard alone,
+/// taking peak from 20.43 to ~24.4 GiB). Live, not hypothetical: `c5daa904`
+/// took the committed chip set from 23 to 27 when no allowed band fits. **The
+/// lever is `SHARD_SIZE`, not this threshold** — halving the height cap halves
+/// `total_values` and drops the max shard to class 28. Do not derive an
+/// "aligned" threshold from a ratio between the two; there isn't a stable one.
+///
+/// The ~5 GiB LogUp-GKR FirstLayer slab is the largest single allocation at
+/// peak (5,007.87 MiB, 18.2%) at 390,070,272, and is **not resident at peak at
+/// all** at this value — so shrinking it only pays if the threshold is raised.
 ///
 /// ## Why 1.55x (390,070,272) was tried and REVERTED (Aug 8)
-/// It was landed on one run of evidence and taken back out after ~20 measured
-/// runs across two independent harnesses, two hosts and two GPUs. It bought
-/// reth 281 -> 205 shards and cost on every axis that was checked:
+///
+/// Landed on one run of evidence, taken back out after ~20 runs across two
+/// harnesses, two hosts and two GPUs. It bought reth 281 -> 205 shards and cost
+/// on every axis checked:
 /// - **Throughput**: paired same-binary A/B (env-only arms, ABBA-ordered) gave
-///   **-3.3%** on the two rounds whose load was not anomalous, and was NOT
-///   statistically resolvable with all three rounds pooled. Every paired sign
-///   was negative. An independent sweep had m=1.00 as its FASTEST arm.
+///   **-3.3%** on the two non-anomalous rounds and was not statistically
+///   resolvable pooled. Every paired sign was negative; an independent sweep
+///   had m=1.00 as its fastest arm.
 /// - **Headroom**: **8,003 MiB** free here vs **1,753 MiB** at 1.55x.
-/// - **Reliability**: 0 OOM in 9 runs here; 1.60x OOMed 1 in 4, and 1.85x/2.00x
-///   1 in 2 each, at median box loads of 15 and 13 — so load is NOT the driver.
-/// - **Peak stability**: the fixed-m run-to-run excursion is **+256 MiB** here
-///   versus **~2.4 GiB** at high m. The instability is a property of the high-m
-///   regime, not of the harness.
+/// - **Reliability**: 0 OOM in 9 runs here; 1.60x OOMed 1 in 4, 1.85x and 2.00x
+///   1 in 2 each, at median box loads of 15 and 13 — so load is not the driver.
+/// - **Peak stability**: fixed-m run-to-run excursion is **+256 MiB** here vs
+///   **~2.4 GiB** at high m — a property of the high-m regime, not the harness.
 ///
-/// The old "+11.84% kHz at m=1.72" result that motivated raising this is not
-/// wrong, it is SUPERSEDED: it rested on ~192 ms/shard of fixed cost, ~82% of
-/// it HOST-side, and `8cbd8093` ("base-field multiply + row-blocked pass in the
-/// trace MLE eval", +6.1% kHz, byte-identical, zero VRAM) then removed most of
-/// that cost directly. With little left to amortise, fewer-but-larger shards no
-/// longer pay. Re-derive the per-shard cost before reopening this.
+/// The "+11.84% kHz at m=1.72" result that motivated raising this is not wrong,
+/// it is SUPERSEDED: it rested on ~192 ms/shard of fixed cost, ~82% HOST-side,
+/// which `8cbd8093` then largely removed. With little left to amortise,
+/// fewer-but-larger shards no longer pay. Re-derive the per-shard cost before
+/// reopening this.
 ///
-/// ⚠ DO NOT trust `nvidia-smi` sampling to re-measure the peak, and note the
-/// error GROWS with the threshold: measured undersample -1 / +895 / +1,375 MiB
-/// at 1.00x / 1.40x / 1.50x. A 2 s sampler read 28,509 MiB on a run whose
-/// in-process ledger showed 30,855 MiB live. Use the allocation ledger.
+/// ⚠ DO NOT re-measure peak with `nvidia-smi` sampling; the error GROWS with
+/// the threshold (undersample -1 / +895 / +1,375 MiB at 1.00x / 1.40x / 1.50x,
+/// and a 2 s sampler read 28,509 MiB on a run whose in-process ledger showed
+/// 30,855 MiB live). Use the allocation ledger.
 ///
 /// Changing this moves shard boundaries ⇒ moves core proof bytes and goldens.
 /// The reth core digests either side of the 1.55x experiment, each reproduced
-/// on two independent harnesses, are `e71cd521cca7977f…` (281 shards, this
-/// value) and `97434314cfa58359…` (205 shards, 390,070,272).
+/// on two harnesses, are `e71cd521cca7977f…` (281 shards, this value) and
+/// `97434314cfa58359…` (205 shards, 390,070,272).
 ///
 /// Written as a plain decimal on purpose: earlier revisions spelled it
-/// `2^28 - 2^24` and built a "just under a power of two" rule on that, which
-/// measurement refuted twice.  The value has no demonstrated power-of-two
+/// `2^28 - 2^24` and built a "just under a power of two" rule on it, which
+/// measurement refuted twice. The value has no demonstrated power-of-two
 /// structure.
+
 pub const ELEMENT_THRESHOLD: usize = 251_658_240;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
