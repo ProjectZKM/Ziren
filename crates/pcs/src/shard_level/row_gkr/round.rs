@@ -1267,7 +1267,7 @@ pub struct LogupRoundPolynomial<EF> {
     /// Original (= layer-global) `num_interaction_variables` — needed
     /// at the chip→packed transition to size the packed MLE.
     layer_int_vars: usize,
-    /// Cached round-0 poly from GPU (when ZIREN_GPU_FUSED_FIRST_ROUND=1
+    /// Cached round-0 poly from GPU (when the fused first-round hook is live
     /// fires successfully).  Consumed on first sum_as_poly_in_last_variable
     /// call.  Cleared by fix_last_variable so subsequent rounds use the
     /// normal host path.

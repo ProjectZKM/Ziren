@@ -153,7 +153,7 @@ impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
     /// `ZKMCompressWitnessValues::dummy` delegate below — propagates
     /// the `Air<VerifierConstraintFolder>` bound required by the
     /// basefold-shaped dummy under
-    /// `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1`.
+    /// forcing BaseFold for recursion.
     pub fn dummy<A>(
         machine: &StarkMachine<KoalaBearPoseidon2, A>,
         shape: &ZKMCompressWithVkeyShape,

@@ -89,8 +89,7 @@ pub struct ChipEvaluation<EF> {
     /// the convention the LogUp last-layer reconstruction needs (the
     /// GKR leaf is LSB-first natural-row — see
     /// `verify_logup_gkr_host`).  `None` on older proof bytes /
-    /// non-core stages → the reconstruction is skipped (it is gated
-    /// `ZIREN_LOGUP_RECONSTRUCTION`, active by default, and additive).
+    /// non-core stages → the reconstruction is skipped (it is additive).
     /// `default = "none_opt_vec"` (not bare `default`) so serde does NOT
     /// add an `EF: Default` bound to the derive (`Option::None` needs no
     /// `EF: Default`).

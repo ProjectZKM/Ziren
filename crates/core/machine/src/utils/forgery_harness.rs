@@ -443,8 +443,7 @@ fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
 //       by `full_geq(degree, ·)` and asserts equality with the GKR round
 //       walk (verifier.rs:1861-1880).  This is the SUBSTRATE the
 //       VK-identity change relies on once heights leave both the hash and
-//       the transcript framing.  It runs by default and is disabled only
-//       with `ZIREN_LOGUP_RECONSTRUCTION=0` (the escape hatch).
+//       the transcript framing.  It always runs.
 // ─────────────────────────────────────────────────────────────────────
 
 // (A) TRANSCRIPT-COUPLED forgeries — reject via the transcript bind even
@@ -525,7 +524,7 @@ fn stage0_forge_degree_only_underclaim_fibonacci_recon_on() {
 }
 
 // (B') DEGREE-ONLY forgery with the reconstruction EXPLICITLY DISABLED
-//      (`ZIREN_LOGUP_RECONSTRUCTION=0`, the escape hatch) — DOCUMENTS that
+//      with the reconstruction disabled — DOCUMENTS that
 //      a degree-only lie SURVIVES only when the degree anchor is turned OFF
 //      on purpose.  The reconstruction is ON
 //      by default, so this case requires the explicit `=0` override (which

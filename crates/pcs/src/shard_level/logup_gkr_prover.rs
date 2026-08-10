@@ -56,7 +56,7 @@ use crate::zerocheck_prover::eq_mle_table;
 /// Instead the GPU prover (which already owns the device matrices)
 /// should call
 /// `zkm_gpu_core::basefold::per_chip_eval_at::eval_chip_columns_at_point_device`
-/// directly when `ZIREN_GPU_EVAL_AT=1` and fall back to this host
+/// directly when the device hook is registered, and fall back to this host
 /// helper otherwise.
 ///
 /// This stub exists so the host-side dispatch site

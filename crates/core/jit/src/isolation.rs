@@ -1,6 +1,6 @@
 //! Fork-based crash isolation for the MIPS-executor JIT.
 //!
-//! Linux x86_64 only.  When `ZKM_JIT_ISOLATE=1` the parent forks a
+//! Linux x86_64 only.  Under JIT isolation the parent forks a
 //! child process to run the JIT'd code.  Shared-memory regions
 //! (`ShmMemory`, `ShmTraceRing`, `CrashDetails`) survive the fork; the
 //! child inherits them via `MAP_SHARED` mmaps and `dup`'d file

@@ -3,7 +3,7 @@
 //! Counterpart to [`super::deferred_basefold`] that targets the
 //! [`zkm_recursion_core::machine::RecursionAir`] chip set rather than
 //! [`zkm_core_machine::mips::MipsAir`].  Used when
-//! `ZIREN_FORCE_BASEFOLD_FOR_RECURSION=1` widens the host prover's
+//! Forcing BaseFold for recursion widens the host prover's
 //! basefold gate to recursion shards.
 //!
 //! See the parallel scaffold at [`super::compress_basefold_recursion`]
