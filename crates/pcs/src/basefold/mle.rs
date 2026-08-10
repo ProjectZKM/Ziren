@@ -33,6 +33,7 @@ use alloc::vec::Vec;
 use p3_field::{ExtensionField, Field};
 use p3_matrix::dense::RowMajorMatrix;
 
+use crate::multilinear::base::MleBaseBackend;
 use crate::tensor::{Backend, CpuBackend, Tensor};
 
 #[derive(Clone, Debug)]
@@ -81,28 +82,10 @@ impl<'a, F> TraceRef<'a, F> {
 }
 
 impl<F, A: Backend> Mle<F, A> {
-    /// Wrap a row-major `[hypercube, num_polys]` tensor.
+    /// Wrap a backing tensor laid out in `A`'s MLE convention.
     #[inline]
     pub fn new(guts: Tensor<F, A>) -> Self {
         Self { guts }
-    }
-
-    /// Number of polynomials in the batch (tensor columns).
-    #[inline]
-    pub fn num_polynomials(&self) -> usize {
-        self.guts.sizes()[1]
-    }
-
-    /// `log2` of the hypercube size (tensor rows).
-    #[inline]
-    pub fn num_variables(&self) -> u32 {
-        self.guts.sizes()[0].trailing_zeros()
-    }
-
-    /// Hypercube size — `2^num_variables` (tensor rows).
-    #[inline]
-    pub fn hypercube_size(&self) -> usize {
-        self.guts.sizes()[0]
     }
 
     /// Borrow the backing tensor.
@@ -110,7 +93,29 @@ impl<F, A: Backend> Mle<F, A> {
     pub fn guts(&self) -> &Tensor<F, A> {
         &self.guts
     }
+}
 
+/// The shape accessors dispatch through the backend, because the batch layout
+/// is the BACKEND's convention: host is `[entries, polynomials]`, a device
+/// backend is transposed.  See [`MleBaseBackend`].
+impl<F, A: MleBaseBackend<F>> Mle<F, A> {
+    /// Number of polynomials in the batch.
+    #[inline]
+    pub fn num_polynomials(&self) -> usize {
+        A::num_polynomials(&self.guts)
+    }
+
+    /// `log2` of the hypercube size.
+    #[inline]
+    pub fn num_variables(&self) -> u32 {
+        A::num_variables(&self.guts)
+    }
+
+    /// Hypercube size — `2^num_variables`.
+    #[inline]
+    pub fn hypercube_size(&self) -> usize {
+        A::num_non_zero_entries(&self.guts)
+    }
 }
 
 impl<F: Field> Mle<F, CpuBackend> {

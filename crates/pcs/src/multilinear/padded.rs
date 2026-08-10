@@ -147,7 +147,7 @@ pub struct PaddedMle<T, A: Backend = CpuBackend> {
 /// Structural / metadata surface — backend-generic.  Every method here
 /// reads only host-side [`Padding`] metadata or backend-generic `Mle`
 /// shape accessors, never the backing cells.
-impl<T: Field, A: Backend> PaddedMle<T, A> {
+impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
     /// Wrap `inner` (its real rows) with a logical `num_variables`
     /// shape and a `padding` descriptor.  Mirrors SP1
     /// `PaddedMle::padded`.

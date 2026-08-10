@@ -5,6 +5,7 @@
 //! crate, used to build the shared trace-MLE.  (The LogUp-GKR layers use
 //! `RowMajorTable`, not a `PaddedMle`.)
 
+pub mod base;
 pub mod padded;
 
 pub use padded::{Padding, PaddedMle};
