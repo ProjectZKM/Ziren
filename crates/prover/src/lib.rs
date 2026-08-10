@@ -191,9 +191,8 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// downstream `ProvedShard { vk, .. }` can be filled from the
     /// cache instead of returned from the (skipped) `setup()` call.
     ///
-    /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
-    /// `ZIREN_COMPOSE_PK_CACHE=1` still honored with a deprecation
-    /// warn).  Default OFF — the cache is only sound when
+    /// Opt-in via `ZIREN_GPU_RESIDENCY=full`.  Default OFF — the
+    /// cache is only sound when
     /// (program, arity) → (pk, vk) is deterministic, which holds today
     /// because `compose_program_basefold` is keyed only on arity in
     /// the program cache and `setup()` is a pure function of the
@@ -223,11 +222,10 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// arity (lift heights span 5K..328K vs SP1's tight clustering).
     /// Re-using a program built for shape A with shape B's witness stream
     /// triggers `RuntimeError::EmptyWitnessStream` panics under
-    /// `ZIREN_PROGRAM_CACHE=1` / `ZIREN_GPU_RESIDENCY=full`.
+    /// `ZIREN_GPU_RESIDENCY=full`.
     ///
-    /// Opt-in via `ZIREN_GPU_RESIDENCY=full` (legacy
-    /// `ZIREN_PROGRAM_CACHE=1` still honored).  With
-    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` every cache hit rebuilds and
+    /// Opt-in via `ZIREN_GPU_RESIDENCY=full`.  With
+    /// the cache audit on (residency profile `full`) every cache hit rebuilds and
     /// asserts byte-equality (bincode) — catches the (now-rare)
     /// failure mode where two inputs collide in `shape_key()` but
     /// produce different programs.  The audit flag is orthogonal to
@@ -350,8 +348,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // fixing) at process startup instead of paying it inside the
         // first user `compress()` invocation.
         //
-        // INDEPENDENT of program-cache gating (`ZIREN_GPU_RESIDENCY=full`
-        // / legacy `ZIREN_PROGRAM_CACHE=1`, opt-in): the cache stores the
+        // INDEPENDENT of program-cache gating
+        // (`ZIREN_GPU_RESIDENCY=full`, opt-in): the cache stores the
         // *built* program; pre-warm instead warms the compiler's
         // internal caches (e.g. SeqBlock layout, plonky3 codegen
         // tables, shape-fix tables) that survive across builds even
@@ -458,9 +456,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `compose_pks_basefold_cache.get(&arity)`.
     ///
     /// Resolved via `crate::residency::compose_pk_cache_enabled()` —
-    /// `ZIREN_GPU_RESIDENCY=full` opts in, the legacy
-    /// `ZIREN_COMPOSE_PK_CACHE=1` still works (with a deprecation
-    /// warn).  Default OFF; see field docs for the soundness contract.
+    /// `ZIREN_GPU_RESIDENCY=full` opts in.  Default OFF; see field
+    /// docs for the soundness contract.
     /// Motivating bottleneck: per-shard repeated `setup()` cost on the
     /// recursion-phase GPU dispatch path.
     pub fn compose_pk_cache_enabled() -> bool {
@@ -707,9 +704,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// analog of [`Self::compress_program`].
     ///
     /// SP1-style per-arity cache (`crates/prover/src/worker/prover/recursion.rs:446`):
-    /// under `ZIREN_GPU_RESIDENCY=full` (legacy `ZIREN_PROGRAM_CACHE=1`
-    /// still honored), the program is built once per arity and reused.
-    /// With `ZIREN_VERIFY_PROGRAM_CACHE=1` (orthogonal to the residency
+    /// under `ZIREN_GPU_RESIDENCY=full` the program is built once per
+    /// arity and reused.
+    /// With the cache audit on (orthogonal to the residency
     /// profile), every cache hit rebuilds and asserts bincode
     /// byte-equality — catches the failure mode where real input
     /// shapes vary across calls of the same arity.
@@ -768,7 +765,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Uncached body of [`Self::compose_program_basefold`] — exposed so the
-    /// cache wrapper can rebuild on `ZIREN_VERIFY_PROGRAM_CACHE=1` to
+    /// cache wrapper can rebuild under the cache audit to
     /// assert byte-equality.
     fn build_compose_program_basefold_uncached(
         &self,

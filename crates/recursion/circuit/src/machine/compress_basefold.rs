@@ -1295,8 +1295,8 @@ impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPo
     /// failure mode).
     ///
     /// **Not** a cryptographic commitment — a chance 64-bit collision
-    /// would still mis-key the cache (the audit gate
-    /// `ZIREN_VERIFY_PROGRAM_CACHE=1` catches those byte-exactly).  What
+    /// would still mis-key the cache (the residency profile's cache
+    /// audit catches those byte-exactly).  What
     /// the key MUST guarantee is that no *structural* difference is
     /// silently omitted, which is a coverage property, not a hash-strength
     /// one.

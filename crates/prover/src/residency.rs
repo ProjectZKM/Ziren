@@ -2,14 +2,7 @@
 //! residency / cache / pre-warm toggles that each otherwise need their own
 //! `ZIREN_*` env var.
 //!
-//! Replaces the per-subsystem toggle set:
-//!
-//! - `ZIREN_PROGRAM_CACHE`         (compose recursion program cache)
-//! - `ZIREN_VERIFY_PROGRAM_CACHE`  (cache audit — opt-in independent)
-//! - `ZIREN_COMPOSE_PK_CACHE`      (compose host-pk cache)
-//! - `ZIREN_ENABLE_COMPOSE_PREWARM` (compose program pre-warm on startup)
-//!
-//! with one coherent profile selected by `ZIREN_GPU_RESIDENCY`:
+//! One coherent profile selected by `ZIREN_GPU_RESIDENCY`:
 //!
 //! ```text
 //! ZIREN_GPU_RESIDENCY=full   # all residency-side hooks/caches ON
@@ -110,46 +103,25 @@ pub fn resolve_gpu_residency_profile() -> GpuResidencyProfile {
 }
 
 // ---------------------------------------------------------------------
-// Per-feature accessors.  Each accessor first checks the legacy env
-// var; if set, it wins and emits a one-shot deprecation warning.
-// Otherwise the profile mapping decides.
+// Per-feature accessors.  `ZIREN_GPU_RESIDENCY` is the only knob; the
+// profile mapping decides each feature.
 // ---------------------------------------------------------------------
 
-fn legacy_bool(var: &str) -> Option<bool> {
-    let v = env::var(var).ok()?;
-    if v.is_empty() {
-        return None;
-    }
-    Some(v == "1" || v.eq_ignore_ascii_case("true"))
-}
-
-/// Compose host-pk cache — ON when `ZIREN_COMPOSE_PK_CACHE=1` (legacy)
-/// or when the profile allows it (default = `Hybrid` → OFF; only
-/// `Full` enables it).  Hybrid keeps audited-HEAD default behavior.
+/// Compose host-pk cache — ON only under the `Full` profile; the
+/// default `Hybrid` keeps audited-HEAD default behavior.
 pub fn compose_pk_cache_enabled() -> bool {
-    if let Some(v) = legacy_bool("ZIREN_COMPOSE_PK_CACHE") {
-        return v;
-    }
     resolve_gpu_residency_profile().allows_compose_pk_cache()
 }
 
-/// Compose recursion program cache — ON when `ZIREN_PROGRAM_CACHE=1`
-/// (legacy) or when the profile allows it (default = `Hybrid` → OFF).
+/// Compose recursion program cache — ON only when the profile allows
+/// it (default = `Hybrid` → OFF).
 pub fn program_cache_enabled() -> bool {
-    if let Some(v) = legacy_bool("ZIREN_PROGRAM_CACHE") {
-        return v;
-    }
     resolve_gpu_residency_profile().allows_program_cache()
 }
 
-/// Cache-divergence audit — ON when `ZIREN_VERIFY_PROGRAM_CACHE=1`
-/// (legacy).  Profile is not consulted; the audit is a CI/dev tool
-/// orthogonal to perf posture.
+/// Cache-divergence audit — ON only when the profile allows it.
 pub fn program_cache_audit_enabled() -> bool {
-    // No warn — this variable is a bring-up / soundness tool, not a
-    // residency knob.  Keep it untouched for future cache work.
-    legacy_bool("ZIREN_VERIFY_PROGRAM_CACHE").unwrap_or(false)
-        || resolve_gpu_residency_profile().allows_program_cache_audit()
+    resolve_gpu_residency_profile().allows_program_cache_audit()
 }
 
 
