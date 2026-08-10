@@ -698,47 +698,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
-    /// Should the recursion PROVE path band-snap (`fix_shape`) the program, or
-    /// build it at its NATURAL per-(cluster,arity) heights?
-    ///
-    /// HEIGHT-AGNOSTIC default (`ZIREN_HA_NO_FIXSHAPE` unset / ≠ 0): `false` —
-    /// `fix_shape` is disabled, the program keeps its organic chip heights.  The
-    /// recursion compose/normalize area is height-independent PER (cluster,
-    /// arity) (loop counts derive from `num_variables`/the fixed stacking
-    /// height, the cube,
-    /// the chip-set, and arity — NONE a child height), so the dummy that built
-    /// the program (which never `fix_shape`s) and a real proof land on the SAME
-    /// program for a fixed (cluster, arity).  The soundness substrate (full_geq
-    /// LogUp reconstruction + `*_full` binding) makes the in-circuit verifier
-    /// ACCEPT arbitrary witnessed heights — so band-snapping is not needed
-    /// for correctness, and dropping it kills the band over-padding.  This is the
-    /// height-agnostic PROVE path (VERIFY_VK=false; the enum/vk_map re-key +
-    /// regen change the VK band→natural).
-    ///
-    /// Band-snap (`ZIREN_HA_NO_FIXSHAPE=0`): `true` when a
-    /// `compress_shape_config` is installed — kept A/B-able on the same binary
-    /// so the natural-vs-band change can be isolated.  Returns `false` whenever
-    /// `compress_shape_config` is `None` (`FIX_RECURSION_SHAPES=false`), which
-    /// already skips `fix_shape`.
-    fn recursion_fix_shape_enabled(&self) -> bool {
-        if self.compress_shape_config.is_none() {
-            return false;
-        }
-        let no_fixshape = std::env::var("ZIREN_HA_NO_FIXSHAPE")
-            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-            .unwrap_or(true);
-        !no_fixshape
-    }
-
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// `fix_shape` band-snapping is disabled on the prove path by default
-    /// ([`Self::recursion_fix_shape_enabled`]) — the program is built at its
-    /// NATURAL per-(cluster,arity) heights (the height-agnostic prove path), so
-    /// a FIX-off program never panics in `fix_shape` ("no shape found") when its
-    /// organic heights exceed every band.  Set `ZIREN_HA_NO_FIXSHAPE=0` to
-    /// restore the band-snap (A/B control).
+    /// `fix_shape` band-snapping is not applied on the prove path — the
+    /// program is built at its NATURAL per-(cluster,arity) heights (the
+    /// height-agnostic prove path), so it never panics in `fix_shape`
+    /// ("no shape found") when its organic heights exceed every band.
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
@@ -753,18 +719,11 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             base,
             "normalize",
         );
-        let mut program = build_normalize_basefold_program(
+        let program = build_normalize_basefold_program(
             self.core_prover.machine(),
             input,
             max_log_row_count,
         );
-        // Band-snap disabled by default — build at natural
-        // per-(cluster,arity) heights (height-agnostic prove path).
-        if self.recursion_fix_shape_enabled() {
-            if let Some(recursion_shape_config) = &self.compress_shape_config {
-                recursion_shape_config.fix_shape(&mut program);
-            }
-        }
         let program = Arc::new(program);
         program
     }
@@ -850,20 +809,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         // The `_recursion` variant is the sole production path for
         // basefold-for-recursion.
-        let mut program = build_compose_basefold_recursion_program(
+        let program = build_compose_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
-        // Band-snap disabled by default — build at natural
-        // per-(cluster,arity) heights (height-agnostic prove path).
-        if self.recursion_fix_shape_enabled() {
-            if let Some(recursion_shape_config) = &self.compress_shape_config {
-                recursion_shape_config.fix_shape(&mut program);
-            }
-        }
         Arc::new(program)
     }
 
@@ -882,19 +834,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         // basefold-for-recursion, mirroring
         // `build_compose_program_basefold_uncached`.
-        let mut program = build_deferred_basefold_recursion_program(
+        let program = build_deferred_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
         );
-        // Band-snap disabled by default — build at natural
-        // per-(cluster,arity) heights (height-agnostic prove path).
-        if self.recursion_fix_shape_enabled() {
-            if let Some(recursion_shape_config) = &self.compress_shape_config {
-                recursion_shape_config.fix_shape(&mut program);
-            }
-        }
         Arc::new(program)
     }
 

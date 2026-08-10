@@ -350,8 +350,6 @@ where
 
     /// Compare to [zkm_recursion_core::runtime::Runtime::run].
     pub fn run(&mut self) -> Result<(), RuntimeError<F, EF>> {
-        let early_exit_ts = std::env::var("RECURSION_EARLY_EXIT_TS")
-            .map_or(usize::MAX, |ts: String| ts.parse().unwrap());
         // Replace push-based ExecutionRecord writes
         // with offset-based UnsafeRecord writes. Analyze the program
         // once at run() entry to assign per-instruction offsets, then
@@ -413,7 +411,6 @@ where
             Some(&mut witness),
             Some(&mut *debug_stdout),
             &unsafe_record,
-            early_exit_ts,
         );
 
         // Restore taken-out fields and sync state regardless of result
@@ -464,7 +461,6 @@ where
         mut witness: Option<&mut VecDeque<Block<F>>>,
         mut debug_stdout: Option<&mut (dyn Write + 'a)>,
         rec: &UnsafeRecord<F>,
-        early_exit_ts: usize,
     ) -> Result<(), RuntimeError<F, EF>> {
         for block in blocks {
             match block {
@@ -477,9 +473,6 @@ where
                             debug_stdout.as_deref_mut(),
                             rec,
                         )?;
-                        if state.timestamp >= early_exit_ts {
-                            return Ok(());
-                        }
                     }
                 }
                 SeqBlock::Parallel(par_blocks) => {
@@ -497,7 +490,6 @@ where
                                 None,
                                 None,
                                 rec,
-                                early_exit_ts,
                             )
                         },
                     )?;

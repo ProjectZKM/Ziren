@@ -216,8 +216,7 @@ impl ZKMProverOpts {
             // multi-shard concurrency fits in mempool headroom".
             //
             // Override with SHARD_SIZE env to force a specific value
-            // (default ZKMCoreOpts already honours the env). Disable
-            // the auto-shrink with ZIREN_GPU_SMALL_CARD=0.
+            // (default ZKMCoreOpts already honours the env).
             // Threshold bumped from 30 → 36 to catch 32 GB RTX 5090s
             // under SP1's `ceil() + 4` formula (32 + 4 = 36).  SP1's
             // original 30 was tuned for 24 GB 4090s (28) and 80 GB
@@ -231,17 +230,14 @@ impl ZKMProverOpts {
             // original ≤30 — 24 GB cards (28) still protected, 32 GB (36)
             // and up run large-card (un-halved).
             if gpu_ram_gb <= 30 {
-                let small_card_enabled = std::env::var("ZIREN_GPU_SMALL_CARD")
-                    .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-                    .unwrap_or(true);
                 let shard_size_overridden = std::env::var("SHARD_SIZE").is_ok();
-                if small_card_enabled && !shard_size_overridden {
+                if !shard_size_overridden {
                     let current_log2 = opts.core_opts.shard_size.trailing_zeros() as usize;
                     let reduced_log2 = current_log2.saturating_sub(1).max(15);
                     opts.core_opts.shard_size = 1 << reduced_log2;
                     tracing::info!(
-                        "SP1 small-card adaptation: gpu_ram_gb={} <= 30, halving \
-                         shard_size to 1 << {} ({}); set ZIREN_GPU_SMALL_CARD=0 to disable",
+                        "small-card adaptation: gpu_ram_gb={} <= 30, halving \
+                         shard_size to 1 << {} ({}); override with SHARD_SIZE",
                         gpu_ram_gb,
                         reduced_log2,
                         opts.core_opts.shard_size,
@@ -287,13 +283,8 @@ impl ZKMProverOpts {
         // 2 workers (the safe profile) instead of 4 — per-GPU
         // concurrency stays ≤ 2 at every device count
         // (1 GPU → 2, 2 GPU → 4, 4 GPU → 8: unchanged for ≥2 GPUs).
-        // RECURSION_SHARD_BATCH_SIZE always overrides; restore the legacy
-        // `.clamp(4,8)` with ZIREN_GPU_SMALL_CARD_SBS=0.
-        let small_card_sbs = gpu_ram_gb <= 36
-            && std::env::var("ZIREN_GPU_SMALL_CARD_SBS")
-                .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
-                .unwrap_or(true);
-        let sbs_lo = if small_card_sbs { 2 } else { 4 };
+        // RECURSION_SHARD_BATCH_SIZE always overrides.
+        let sbs_lo = if gpu_ram_gb <= 36 { 2 } else { 4 };
         opts.recursion_opts.shard_batch_size = env::var("RECURSION_SHARD_BATCH_SIZE")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
