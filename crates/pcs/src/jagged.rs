@@ -685,15 +685,32 @@ pub fn hierarchical_jagged_pack<F: Field>(
 /// smaller dense area so its prefix-sum bit-width (`log_m + 1`) stays ≤ 31.
 pub const MAX_ROUND_LOG_AREA: u32 = 30;
 
-/// Derive the round partition directly from name-sorted [`JaggedChipInfo`]s
-/// (the form both the prover's packing and the verifier's `chip_infos`
-/// carry).  SP1-parity: a single stacked commit over ALL chips ⇒ always ONE
-/// group over every chip.  Kept because both the prover and the verifier call
-/// it (the verifier compares the proof's group map against this identity
-/// cover), so they must derive the identical (single) partition.
+/// Derive the round partition from name-sorted [`JaggedChipInfo`]s (the form
+/// both the prover's packing and the verifier's `chip_infos` carry) plus the
+/// number of leading PREPROCESSED entries.
+///
+/// SP1 commits preprocessed once at setup and main once per shard, and opens
+/// the two as separate rounds (`vk.preprocessed_commit` then
+/// `main_commitment`, `hypercube/src/verifier/shard.rs:638`).  So:
+///
+/// * `n_prep == 0` — one group over every chip (the main-only proof).
+/// * `n_prep > 0` — two groups: `[0, n_prep)` preprocessed, `[n_prep, n)` main.
+///
+/// Both the prover and the verifier call this, and the verifier compares the
+/// proof's group map against its own run of it, so the two must derive the
+/// identical partition from the identical `n_prep`.  `n_prep` counts the chips
+/// that actually HAVE a preprocessed trace, which the verifier reads off the
+/// verifying key — never off the proof.
 #[must_use]
-pub fn partition_from_chip_infos(chip_infos: &[JaggedChipInfo]) -> Vec<Vec<usize>> {
-    alloc::vec![(0..chip_infos.len()).collect()]
+pub fn partition_from_chip_infos(
+    chip_infos: &[JaggedChipInfo],
+    n_prep: usize,
+) -> Vec<Vec<usize>> {
+    let n = chip_infos.len();
+    if n_prep == 0 || n_prep >= n {
+        return alloc::vec![(0..n).collect()];
+    }
+    alloc::vec![(0..n_prep).collect(), (n_prep..n).collect()]
 }
 
 #[cfg(test)]

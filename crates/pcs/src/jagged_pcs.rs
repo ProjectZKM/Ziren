@@ -1371,14 +1371,38 @@ pub mod jagged {
     /// were run up-front and the in-band commit observe is suppressed (the
     /// caller already observed the digest — the orchestrator at the Phase 1
     /// prologue position, or the wrapper just above).
-    fn prove_jagged_basefold_inner(
+    /// One group's share of a jagged-BaseFold proof: everything
+    /// [`JaggedBasefoldBundleGeneric`] stores per group, before the groups are
+    /// assembled into a bundle.
+    ///
+    /// A single-round proof has exactly one of these (it becomes the bundle's
+    /// scalar group-0 fields); SP1's two-round shape has two — preprocessed then
+    /// main — and the second lands in the `extra_*` vecs.
+    pub struct JaggedGroupProof {
+        pub reduction: JaggedReductionProof<InnerChallenge>,
+        pub basefold_proof: StackedBasefoldProof<InnerVal, InnerChallenge, crate::jagged_pcs::JaggedMmcs>,
+        pub commit: crate::jagged_pcs::JaggedCommit,
+        pub packing: PackingMeta,
+        pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
+        /// This group's chips only, in the group's own membership order.
+        pub y_per_chip: Vec<Vec<InnerChallenge>>,
+    }
+
+    /// Prove ONE jagged group against `z_row`, consuming that group's
+    /// precomputed commit.
+    ///
+    /// Every challenger operation happens inside
+    /// [`prove_jagged_basefold_linear_core`], in the order the verifier's
+    /// per-group loop replays it, so calling this once per group back-to-back on
+    /// the same challenger lands the multi-round transcript the verifier expects.
+    fn prove_one_jagged_group(
         chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         precomputed: PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
-    ) -> JaggedBasefoldBundle {
+    ) -> JaggedGroupProof {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
         // the numbered protocol steps below: (1) metadata, (2) commit
         // (incl. dense materialize + BaseFold encode), (3) per-chip
@@ -1690,16 +1714,114 @@ pub mod jagged {
                 .map(|ci| ci.column_count)
                 .collect(),
         };
-        // G==1: scalar group-0 fields; `extra_*` + `groups` empty ⇒ the wire
-        // bytes are byte-identical to the pre-split bundle.
         let _ = n_chips;
-        JaggedBasefoldBundle {
+        JaggedGroupProof {
             reduction,
             basefold_proof: proof,
-            y_per_chip,
             commit,
             packing: packing_meta,
             jagged_eval,
+            y_per_chip,
+        }
+    }
+
+    /// SP1's TWO-ROUND prove: the PREPROCESSED round then the MAIN round.
+    ///
+    /// Mirrors `hypercube/src/verifier/shard.rs:638`, which opens
+    /// `vec![vk.preprocessed_commit, *main_commitment]`.  The preprocessed
+    /// commit is NOT built here — it was built once by `setup` and lives in the
+    /// proving key (`StarkProvingKey::preprocessed_jagged`), so a shard pays for
+    /// its OPENING only, never for re-committing it.
+    ///
+    /// Both rounds are opened at the SAME `z_row`.  Group order is load-bearing:
+    /// the verifier's per-group loop samples each group's `z_col` from the shared
+    /// challenger in group order, so preprocessed must be proven first.  Neither
+    /// commit is observed in-band — the preprocessed one is already in the
+    /// transcript via `vk.observe_into` and the main one via the shard-level
+    /// Phase 1 prologue, matching SP1's ordering.
+    ///
+    /// `y_per_chip` is the FLAT concatenation `[prep | main]`; `groups` indexes
+    /// into it, and the verifier rebuilds the same cover from the vk.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prove_jagged_basefold_two_round(
+        prep_chip_traces: &[ChipTraceView],
+        prep_r_row_per_chip: &[Vec<InnerChallenge>],
+        prep_precomputed: PrecomputedJaggedCommit,
+        prep_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        main_chip_traces: &[ChipTraceView],
+        main_r_row_per_chip: &[Vec<InnerChallenge>],
+        main_precomputed: PrecomputedJaggedCommit,
+        main_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        z_row: &[InnerChallenge],
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+    ) -> JaggedBasefoldBundle {
+        let prep = prove_one_jagged_group(
+            prep_chip_traces,
+            prep_r_row_per_chip,
+            z_row,
+            prep_pre_y_per_chip,
+            prep_precomputed,
+            challenger,
+        );
+        let main = prove_one_jagged_group(
+            main_chip_traces,
+            main_r_row_per_chip,
+            z_row,
+            main_pre_y_per_chip,
+            main_precomputed,
+            challenger,
+        );
+
+        let n_prep = prep.y_per_chip.len();
+        let n_main = main.y_per_chip.len();
+        let mut y_per_chip = prep.y_per_chip;
+        y_per_chip.extend(main.y_per_chip);
+
+        JaggedBasefoldBundle {
+            reduction: prep.reduction,
+            basefold_proof: prep.basefold_proof,
+            y_per_chip,
+            commit: prep.commit,
+            packing: prep.packing,
+            jagged_eval: prep.jagged_eval,
+            extra_reduction: alloc::vec![main.reduction],
+            extra_basefold_proof: alloc::vec![main.basefold_proof],
+            extra_commit: alloc::vec![main.commit],
+            extra_packing: alloc::vec![main.packing],
+            extra_jagged_eval: alloc::vec![main.jagged_eval],
+            groups: alloc::vec![
+                (0..n_prep).collect(),
+                (n_prep..n_prep + n_main).collect(),
+            ],
+        }
+    }
+
+    /// Single-round prove: one group, emitted as the bundle's scalar group-0
+    /// fields with `extra_*` / `groups` empty — byte-identical to the pre-split
+    /// wire format.
+    fn prove_jagged_basefold_inner(
+        chip_traces: &[ChipTraceView],
+        r_row_per_chip: &[Vec<InnerChallenge>],
+        z_row: &[InnerChallenge],
+        pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
+        precomputed: PrecomputedJaggedCommit,
+        challenger: &mut crate::jagged_pcs::JaggedChallenger,
+    ) -> JaggedBasefoldBundle {
+        let g = prove_one_jagged_group(
+            chip_traces,
+            r_row_per_chip,
+            z_row,
+            pre_y_per_chip,
+            precomputed,
+            challenger,
+        );
+        JaggedBasefoldBundle {
+            reduction: g.reduction,
+            basefold_proof: g.basefold_proof,
+            y_per_chip: g.y_per_chip,
+            commit: g.commit,
+            packing: g.packing,
+            jagged_eval: g.jagged_eval,
             extra_reduction: Vec::new(),
             extra_basefold_proof: Vec::new(),
             extra_commit: Vec::new(),
@@ -1878,6 +2000,8 @@ pub mod jagged {
             chip_infos,
             r_row_per_chip,
             z_row,
+            // Synthetic single-round bundles: no preprocessed group.
+            0,
             bundle,
             // Synthetic-bundle callers (unit tests) carry no shard
             // openings — the cross-bind is a no-op here.
@@ -1897,6 +2021,11 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge], // full z* for embedding factor
+        // Number of leading PREPROCESSED entries in `chip_infos` — 0 for a
+        // main-only proof, otherwise SP1's two-round split.  Read off the
+        // VERIFYING KEY, never off the proof: it is what the coverage check
+        // measures the proof's group map against.
+        n_prep: usize,
         bundle: &JaggedBasefoldBundle,
         // Cross-bind: per-chip `opened_values.chips[].main.local` (index-
         // aligned with `chip_infos` / `bundle.y_per_chip`); `None` disables the bind.
@@ -1907,6 +2036,7 @@ pub mod jagged {
             chip_infos,
             r_row_per_chip,
             z_row,
+            n_prep,
             bundle,
             opened_main,
             challenger,
@@ -1919,6 +2049,7 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge], // full z* for embedding factor
+        n_prep: usize,
         bundle: &JaggedBasefoldBundle,
         // Cross-bind: per-chip `opened_values.chips[].main.local` trace
         // openings (index-aligned with `chip_infos` / `bundle.y_per_chip`), or
@@ -1935,7 +2066,7 @@ pub mod jagged {
         // Without this a malicious prover could OMIT a chip from every
         // group — that chip's trace is then never opened, and nothing
         // downstream would notice.
-        let expected_groups = crate::jagged::partition_from_chip_infos(chip_infos);
+        let expected_groups = crate::jagged::partition_from_chip_infos(chip_infos, n_prep);
         let proof_groups: Vec<Vec<usize>> = bundle.groups_or_identity(chip_infos.len());
         if proof_groups != expected_groups {
             eprintln!(

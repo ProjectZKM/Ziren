@@ -808,6 +808,11 @@ where
         &chip_infos,
         &r_row_per_chip,
         &z_row_inner,
+        // SINGLE ROUND: `chip_infos` above is main-only, so there is no
+        // preprocessed group to cover.  When the prover emits SP1's two-round
+        // proof this becomes the number of chips that carry a preprocessed
+        // trace, read off the verifying key.
+        0,
         &bundle,
         Some(&opened_main),
         lb_challenger,
