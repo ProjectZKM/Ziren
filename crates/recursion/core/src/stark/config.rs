@@ -227,6 +227,12 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // recursion-core hooks.  (gnark `verify_wrap_basefold` + wrap vk regen + FRI
 // deletion remain.)
 impl BasefoldRing for KoalaBearPoseidon2Outer {
+    fn prep_open_data(
+        prep: &Self::PrepPrecomputed,
+    ) -> &zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        prep
+    }
+
     type BfMmcs = OuterValMmcs;
 
     fn bf_mmcs() -> Self::BfMmcs {

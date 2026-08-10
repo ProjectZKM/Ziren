@@ -152,6 +152,18 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 /// `BfMmcs::Commitment`; genericizing it is what would let `bf_mmcs()` be
 /// consumed directly.
 pub trait BasefoldRing: StarkGenericConfig {
+    /// Borrow this config's [`PrepPrecomputed`](StarkGenericConfig::PrepPrecomputed)
+    /// as the concrete jagged commit the BaseFold prove path opens.
+    ///
+    /// `PrepPrecomputed` has to stay opaque on `StarkGenericConfig`, because
+    /// `setup` is generic over configs that know nothing about BaseFold — but
+    /// every implementor IS a `PrecomputedJaggedCommitGeneric<Self::BfMmcs>`,
+    /// and the shard prover (which is `BasefoldRing`-bounded) needs it as
+    /// exactly that to open the preprocessed round against the vk's commitment.
+    fn prep_open_data(
+        prep: &Self::PrepPrecomputed,
+    ) -> &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
+
     /// The MMCS (Merkle commitment scheme over `Val<Self>` = KoalaBear) used by
     /// the BaseFold jagged-PCS for this config.  Inner = Poseidon2-KoalaBear;
     /// wrap = Poseidon2-BN254 (`Commitment = Hash<KoalaBear, Bn254, 1>`).
