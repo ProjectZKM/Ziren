@@ -1256,14 +1256,17 @@ where
     use core::any::TypeId;
     use crate::{InnerChallenge, InnerVal};
 
-    // A REAL assert, not a
-    // `debug_assert!`: it guards the KoalaBear-typed transmutes below, and
-    // `debug_assert!` compiles out in release, which is where that would be UB.
+    // A REAL assert, not a `debug_assert!`: it is the precondition the
+    // downstream per-ring jagged open relies on, and `debug_assert!` compiles
+    // out in release.
     assert!(
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
-        "try_prove_shard_to_basefold_boxed requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
+        "try_prove_shard_to_basefold_boxed requires Val == KoalaBear and \
+         Challenge == KoalaBear^4 (shared by the inner and outer rings); the \
+         per-ring jagged open is dispatched downstream in \
+         prove_trusted_evaluations",
     );
 
     // INLINE-commit (SP1 / GPU parity): the BaseFold jagged-PCS commit is built
@@ -1386,5 +1389,8 @@ where
         &mut shard_challenger,
     );
 
+    // Always `Some`: there is no decline path (see the no-fallback note above).
+    // The `Option` exists because it feeds `ShardProof::basefold_shard_proof`,
+    // which IS optional in the proof format — `mock.rs` emits `None`.
     Some(Box::new(proof))
 }
