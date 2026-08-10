@@ -324,14 +324,9 @@ where
     // → transcript desync.
     //
     // Every chip is host-resident on this driver, so the device-residency
-    // parameters the shared helpers accept are inert here:
-    //   * `no_device_remat` — all-`None`, which drives
-    //     `build_commit_trace_views` down the pure host-trace branch, where
-    //     each present chip BORROWS the shared `Arc<Mle>` store's real
-    //     (unpadded) cells, zero-copy.  The views' lifetime is tied
-    //     to `no_device_remat`, so the driver owns it for the duration.
-    //   * `chip_cum_tails` — all-`None`; `build_chip_cumulative_sums` then
-    //     reads each present chip's raw host cells directly.
+    // parameters the shared helpers accept are inert here: `chip_cum_tails` is
+    // all-`None`, and `build_chip_cumulative_sums` then reads each present
+    // chip's raw host cells directly.
     // The live device-remat / commit-traces-D2H-skip logic (and the soundness
     // gate around the device dense handle) lives in ziren-gpu's
     // `shard_helpers::{build_eager_device_remat, compute_skip_device_d2h,
@@ -345,10 +340,10 @@ where
     // perf win).  Missing (injected) chips are packed at band height (see the
     // FIX-off injection in `CpuProver::commit`) to preserve the chip-SET / VK, so the recursion
     // normalize VK = f(chip-SET).
-    let no_device_remat: Vec<Option<RowMajorMatrix<Val<SC>>>> =
-        chips.iter().map(|_| None).collect();
-    let commit_traces =
-        build_commit_trace_views::<SC, A>(chips, shared_trace_mles, &no_device_remat);
+    // Every chip is host-resident here, so there is nothing to splice: the
+    // shared store IS the commit trace set (an `Arc` bump per chip).
+    let commit_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
+        shared_trace_mles.to_vec();
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
         chips.iter().map(|_| None).collect();
     let (commit_traces, main_commitment, precomputed_commit) =
@@ -837,26 +832,38 @@ pub fn observe_zerocheck_openings_from_residual<SC, A>(
     );
 }
 
+/// Splice D2H-rematerialized device traces into the shared host trace store.
+///
+/// A device-resident chip has an EMPTY host `PaddedMle` (`inner() == None`);
+/// when `eager_device_remat` carries a matrix for one, rebuild its `Mle` from
+/// those cells.  Every other chip is an `Arc` bump.
+///
+/// The remat slots are almost always `None`: `compute_skip_device_d2h` is
+/// `prospective_log_dense >= ZIREN_GPU_JAGGED_PCS_MIN_LOG_SIZE`, which
+/// defaults to 0 and so is always true, leaving the eager D2H for the one case
+/// where a device chip has no provider height.  On the pure-host driver every
+/// slot is `None` by construction, making this `shared_trace_mles.to_vec()`.
+///
+/// This function exists only because a device trace cannot yet BE a
+/// `PaddedMle<F, CudaBackend>` — see the `MleBaseBackend` work; once it can,
+/// there is nothing left to splice.
 /// C0 block 2 (part 3) — the per-chip commit-trace set as BORROWED row-major
 /// views over the shared `Arc<Mle>` store + the eager remat side-store
 /// (still zero-copy).  Host chips borrow the MLE's real
 /// (unpadded) cells; the rare eager device-chip materialize borrows
 /// `eager_device_remat`; happy/unexercised device chips carry an empty
 /// width-0 view.  The returned views borrow BOTH inputs for `'a`.
-pub fn build_commit_trace_views<'a, SC, A>(
-    chips: &[&Chip<Val<SC>, A>],
-    shared_trace_mles: &'a [crate::multilinear::PaddedMle<Val<SC>>],
-    eager_device_remat: &'a [Option<RowMajorMatrix<Val<SC>>>],
+pub fn splice_device_remat_traces<SC>(
+    shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
+    eager_device_remat: &[Option<RowMajorMatrix<Val<SC>>>],
 ) -> Vec<crate::multilinear::PaddedMle<Val<SC>>>
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>,
 {
-    chips
+    shared_trace_mles
         .iter()
-        .zip(shared_trace_mles.iter())
         .zip(eager_device_remat.iter())
-        .map(|((_chip, pm), remat)| {
+        .map(|(pm, remat)| {
             if pm.inner().is_none() {
                 // Device-resident / unexercised chip: wrap the rematerialized
                 // side-storage when there is one, else hand back the dummy
