@@ -668,8 +668,8 @@ mod basefold_over_bn254_roundtrip_test {
             .cloned()
             .unwrap_or_default();
 
-        // The jagged entry points take BORROWED `ChipTraceView`s (name + cells +
-        // width), not owned matrices; build the views once and reuse them.
+        // The jagged entry points take `(name, PaddedMle)` pairs, not owned
+        // matrices; build them once and reuse.
         let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
             .iter()
             .map(|(name, m)| (name.clone(), {

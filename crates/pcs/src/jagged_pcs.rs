@@ -740,15 +740,15 @@ pub mod jagged {
     use crate::jagged_sumcheck::{JaggedReductionProof, verify_jagged_reduction};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
-    /// The per-chip commit/open trace set as a
-    /// BORROWED row-major view over the shard prover's single `Arc<Mle>`
-    /// store (`shared_trace_mles`), instead of an owned `RowMajorMatrix`
-    /// deep copy.  All commit + open consumers here are read-only (dims +
-    /// `.values`), so they take `&[ChipTraceView]`; the Val↔InnerVal relabel
-    /// stays the zero-copy slice reinterpret under the caller's TypeId gate.
-    /// Device-resident chips carry an empty view (width 0); the host-fallback
-    /// `rematerialize_chip_traces_via_provider` produces owned side-storage the
-    /// caller re-views.
+    /// A named per-chip trace in the form the jagged commit and open consume:
+    /// the same `(name, PaddedMle)` pairing SP1 keys its `Traces` map by.
+    /// Padding is virtual, so cloning one is an `Arc` bump rather than a
+    /// matrix copy, and the Val<->InnerVal relabel stays a zero-copy slice
+    /// reinterpret under the caller's TypeId gate.
+    ///
+    /// Device-resident chips carry a width-0 entry; the host fallback
+    /// `rematerialize_chip_traces_via_provider` produces owned side-storage
+    /// the caller re-wraps.
     pub type ChipTraceView = (alloc::string::String, crate::multilinear::PaddedMle<InnerVal>);
 
     use super::{
