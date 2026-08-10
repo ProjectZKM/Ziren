@@ -584,16 +584,6 @@ impl<'a> StructuralJaggedEvalProver<'a> {
 ///
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
-/// Cross-check gate for the device-computed jagged `claimed_sum`.
-///
-/// `ZIREN_GPU_JAGGED_CLAIMED_SUM_VERIFY=1` runs the host closed form ALONGSIDE
-/// the device one and asserts equality.  A perf-only substitution that is
-/// CORRECT is indistinguishable from one that silently never runs, so this is
-/// the positive control: it computes both and fails loudly on any mismatch.
-fn claimed_sum_verify_enabled() -> bool {
-    std::env::var("ZIREN_GPU_JAGGED_CLAIMED_SUM_VERIFY").is_ok()
-}
-
 // Dedicated rayon pool for the jagged-eval structural sumcheck.  The jagged-eval
 // runs INSIDE the single-thread basefold worker pool, so a bare `par_iter` there
 // stays sequential; installing on this pool routes the per-column inner loops to
@@ -871,17 +861,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     let claimed_sum = {
         let _s = tracing::info_span!("jeval_claimed_sum").entered();
         match engine_and_verify.as_mut().and_then(|(engine, _)| engine.claimed_sum()) {
-            Some(device_sum) => {
-                if claimed_sum_verify_enabled() {
-                    let host_sum =
-                        full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace);
-                    assert_eq!(
-                        device_sum, host_sum,
-                        "device jagged claimed_sum != host full_jagged_evaluation"
-                    );
-                }
-                device_sum
-            }
+            Some(device_sum) => device_sum,
             None => full_jagged_evaluation(prefix_sums, z_row, z_col, z_trace),
         }
     };

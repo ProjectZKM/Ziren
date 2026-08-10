@@ -307,24 +307,12 @@ pub fn verify_compress_basefold<C, SC, A>(
         // VERIFY_VK=true height-binding site: per-chip WITNESSED heights
         // (2^log_h) from the opened `degree`, name-sorted to align with
         // column_counts_by_round_pre — same pattern as core_basefold.rs.
-        // Height-agnostic (low-placement) path: when gated, SKIP the opened-degree
-        // recompose entirely — it returns RAW heights (wrong source for the BAND
-        // commit) and its trailing ext2felt asserts base-field, which fails under
-        // FIX-off (acc gains a nonzero extension component).  Sound to skip: the
-        // recompose consumes no Witnessable stream and num2bits/ext2felt are
-        // runtime-self-computed hints, so removing these self-contained ops can't
-        // misalign the stream; real + dummy take the same branch (VK matched).
-        // When NOT gated, compute Some(raw).
         let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-            if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
-                None
-            } else {
-                Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                    builder,
-                    &chip_names,
-                    &proof_opened_values,
-                ))
-            };
+            Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                builder,
+                &chip_names,
+                &proof_opened_values,
+            ));
         let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
 
         // Bundle lift is the production (and only) path.

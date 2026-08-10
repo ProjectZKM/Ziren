@@ -2037,11 +2037,6 @@ where
             v
         }
     };
-    // Low-placement gate flag for the offset-diff
-    // row_counts below (so they match the baked band col_prefix_sums under
-    // ZIREN_HA_BAKED_COLPS).  The col_prefix_sums path is unchanged (baked when
-    // chip_height_felts is None / gated).
-    let ha_baked_band = std::env::var("ZIREN_HA_BAKED_COLPS").is_ok();
     let jagged_dim_metadata = if let Some(heights) = chip_height_felts {
         // reconstruct col_prefix_sums IN-CIRCUIT
         // from the WITNESSED per-chip heights instead of baking
@@ -2206,36 +2201,12 @@ where
         // preprocessed + main traces share one height,
         // so the same per-chip heights are reused for every round; chip_dims is
         // in the same (name-sorted) chip order as `column_counts_by_round`.
-        // Low-placement: when gated, derive the per-chip
-        // row counts from the BAND offset DIFFS (the committed slot heights) so
-        // they match the baked col_prefix_sums (= bundle.packing.offsets); the
-        // default chip_dims path decodes the RAW height, which diverges from the
-        // band offsets under low-placement and trips the step-7 prefix-sum
-        // assert.  (FIX-on: offset diffs == 1<<chip_dims.log_h ⇒ same.)
-        let heights: Vec<Felt<C::F>> = if ha_baked_band {
-            let offs = &bundle.packing.offsets;
-            let mut hs: Vec<Felt<C::F>> = Vec::new();
-            let mut col = 0usize;
-            if let Some(round0) = column_counts_by_round.first() {
-                for &w in round0.iter() {
-                    let h = if w > 0 && col + 1 < offs.len() {
-                        offs[col + 1].saturating_sub(offs[col])
-                    } else {
-                        0
-                    };
-                    hs.push(builder.constant(C::F::from_u64(h as u64)));
-                    col += w;
-                }
-            }
-            hs
-        } else {
-            bundle
-                .commit
-                .chip_dims
-                .iter()
-                .map(|&(_w, log_h)| builder.constant(C::F::from_u64(1u64 << log_h)))
-                .collect()
-        };
+        let heights: Vec<Felt<C::F>> = bundle
+            .commit
+            .chip_dims
+            .iter()
+            .map(|&(_w, log_h)| builder.constant(C::F::from_u64(1u64 << log_h)))
+            .collect();
         column_counts_by_round.iter().map(|_| heights.clone()).collect()
     };
 

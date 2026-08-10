@@ -347,17 +347,6 @@ mod platform {
                 );
             }
             self.seen_addrs.insert(addr & !3);
-            // Targeted diagnostic — set ZIREN_TRACE_ADDR=0xADDR to log
-            // every store_word to that aligned address with caller info.
-            if let Ok(t) = std::env::var("ZIREN_TRACE_ADDR") {
-                if let Ok(target) = u32::from_str_radix(t.trim_start_matches("0x"), 16) {
-                    if (addr & !3) == (target & !3) {
-                        eprintln!(
-                            "[trace_addr] store_word addr={addr:#x} val={value:#x} (target {target:#x})"
-                        );
-                    }
-                }
-            }
         }
 
         /// Read a 4-byte word at the host offset corresponding to
@@ -457,27 +446,12 @@ mod platform {
 
         pub fn flush_to_executor(&self, executor: &mut Executor<'_>) {
             use crate::events::MemoryRecord;
-            if std::env::var_os("ZIREN_TRACE_ADDR").is_some() {
-                eprintln!(
-                    "[flush] {} seen_addrs to executor.page_table",
-                    self.seen_addrs.len()
-                );
-            }
             for &addr in &self.seen_addrs {
                 let word = self.load_word(addr);
                 executor.state.memory.page_table.insert(
                     addr,
                     MemoryRecord { value: word, shard: 0, timestamp: 0 },
                 );
-                if let Ok(t) = std::env::var("ZIREN_TRACE_ADDR") {
-                    if let Ok(target) = u32::from_str_radix(t.trim_start_matches("0x"), 16) {
-                        if (addr & !3) == (target & !3) {
-                            eprintln!(
-                                "[flush] page_table.insert addr={addr:#x} val={word:#x} (target {target:#x})"
-                            );
-                        }
-                    }
-                }
             }
         }
 
@@ -485,13 +459,6 @@ mod platform {
         /// buffer.  Called after a syscall returns so JIT'd loads
         /// see the syscall's writes (e.g., HINT_READ).
         pub fn refresh_from_executor(&mut self, executor: &Executor<'_>) {
-            if std::env::var_os("ZIREN_TRACE_ADDR").is_some() {
-                eprintln!(
-                    "[refresh] page_table={} keys, uninit_memory={} keys",
-                    executor.state.memory.page_table.exact_len(),
-                    executor.state.uninitialized_memory.page_table.exact_len(),
-                );
-            }
             // Only sync `state.uninitialized_memory` to host — those
             // are NEW bytes the syscall wrote (HINT_READ specifically
             // is the only such syscall in current workloads).

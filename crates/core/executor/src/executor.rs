@@ -101,30 +101,6 @@ const CORE_SHARD_CLK_24BIT_LIMIT: u32 = 1 << 24;
 /// former `SHAPE_CHECK_FREQUENCY` default, kept so that tooling behaves exactly as before.
 const SHAPE_SEARCH_CHECK_FREQUENCY: u64 = 16;
 
-/// Per-shard split-reason profiler (`ZIREN_SPLIT_PROF=1`, default OFF).
-///
-/// A core shard is closed by the disjunction of five independent limits
-/// (cycle budget / 24-bit clk / no-fitting-shape / per-chip height /
-/// trace area).  Which of them actually fires is workload-dependent and is
-/// NOT observable from the shard count alone, so tuning any one of them
-/// blind is guesswork.  When enabled, every split emits one line naming the
-/// firing limit(s) plus the live area / tallest-chip estimates, on stderr.
-#[inline]
-fn split_prof_on() -> bool {
-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ON.get_or_init(|| {
-        std::env::var("ZIREN_SPLIT_PROF").map(|v| v != "0" && !v.is_empty()).unwrap_or(false)
-    })
-}
-
-std::thread_local! {
-    /// `(global_clk at the previous split, last area estimate, last tallest-chip estimate)`.
-    /// The area / height estimates only refresh every `shape_check_frequency`
-    /// cycles, so the most recent value is carried here.
-    static SPLIT_PROF_STATE: std::cell::Cell<(u64, u64, u64)> =
-        const { std::cell::Cell::new((0, 0, 0)) };
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// Whether to verify deferred proofs during execution.
 pub enum DeferredProofVerification {
@@ -490,18 +466,6 @@ impl<'a> Executor<'a> {
         // single-thread realloc storm on the trace-emit hot path.
         let event_reservation = (opts.shard_size / 8).max(1);
         let record = ExecutionRecord::new_preallocated(program.clone(), event_reservation);
-
-        if split_prof_on() {
-            eprintln!(
-                "[SPLIT] CONFIG shard_size={} clk_budget={} clk24_limit={} element_threshold={} \
-                 height_threshold={}",
-                opts.shard_size,
-                (opts.shard_size as u64) * 4,
-                CORE_SHARD_CLK_24BIT_LIMIT,
-                opts.element_threshold,
-                CORE_SHARD_HEIGHT_THRESHOLD,
-            );
-        }
 
         // Determine the maximum number of cycles for any syscall.
         let syscall_map = default_syscall_map();
@@ -3377,17 +3341,6 @@ impl<'a> Executor<'a> {
         // over that window. With the figures exact on every cycle, both are dead weight.
         let (area_split, height_split) = self.split_acct.check_shard_limit(cpu_cycles);
 
-        if split_prof_on() {
-            SPLIT_PROF_STATE.with(|s| {
-                let (last_g, _, _) = s.get();
-                s.set((
-                    last_g,
-                    self.split_acct.trace_area(cpu_cycles),
-                    self.split_acct.max_height(cpu_cycles),
-                ));
-            });
-        }
-
         // Offline shape-search tooling only; INERT ON THE PRODUCTION PROVE PATH.
         // `shape_match_found` can only go false inside this block, and BOTH of its inputs are
         // off by default: `lde_size_check` is `false` (set true only by the offline
@@ -3479,27 +3432,6 @@ impl<'a> Executor<'a> {
         }
 
         if cpu_exit || clk_exit || !shape_match_found || height_split || area_split {
-            if split_prof_on() {
-                SPLIT_PROF_STATE.with(|s| {
-                    let (last_g, area, maxh) = s.get();
-                    eprintln!(
-                        "[SPLIT] mode={:?} shard={} cycles={} clk={} area={} maxh={} \
-                         cpu={} clk24={} noshape={} height={} elem={}",
-                        self.executor_mode,
-                        self.state.current_shard,
-                        self.state.global_clk.saturating_sub(last_g),
-                        self.state.clk,
-                        area,
-                        maxh,
-                        u8::from(cpu_exit),
-                        u8::from(clk_exit),
-                        u8::from(!shape_match_found),
-                        u8::from(height_split),
-                        u8::from(area_split),
-                    );
-                    s.set((self.state.global_clk, area, maxh));
-                });
-            }
             if self.executor_mode == ExecutorMode::Checkpoint {
                 self.state.records_clk.push(self.state.clk);
             }

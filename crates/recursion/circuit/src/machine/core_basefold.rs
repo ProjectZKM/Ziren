@@ -296,30 +296,12 @@ pub fn verify_core_basefold<C, SC, A>(
             // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
             // / row_counts are reconstructed value-independently instead of
             // baked from the compile-time bundle offsets/chip_dims.
-            // Height-agnostic (low-placement) path: when gated, SKIP the
-            // opened-degree recompose entirely.  It returns RAW per-chip heights
-            // (the wrong source for the BAND-offset low-placement commit —
-            // col_prefix_sums must be band) and its trailing
-            // `ext2felt` asserts the Horner-recomposed degree is base-field,
-            // which fails under FIX-off (acc gains a nonzero extension
-            // component, e.g. 680210629).  Skipping it is sound: the recompose
-            // does NOT consume the Witnessable stream (opened_values were
-            // already read in BasefoldShardProof::read), and num2bits/ext2felt
-            // are runtime-self-computed hints (HintBits decomposes the in-memory
-            // value, runtime/mod.rs:683) — so removing these self-contained ops
-            // cannot misalign the witness stream.  Real + dummy take the same
-            // branch, so the program shape (VK) stays matched.  When NOT gated,
-            // compute Some(raw).
             let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-                if std::env::var("ZIREN_HA_BAKED_COLPS").is_ok() {
-                    None
-                } else {
-                    Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                        builder,
-                        &chip_names,
-                        &proof_opened_values,
-                    ))
-                };
+                Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                ));
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
 
             // Bundle lift is the production (and only) path.

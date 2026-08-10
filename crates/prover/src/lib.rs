@@ -367,10 +367,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // `ZIREN_GPU_RESIDENCY` — that profile still gates broader
         // residency features (program cache, compose-pk cache, audit)
         // which carry their own characterization needs.
-        //
-        // Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1` skips prewarm
-        // entirely (useful for cold-start timing experiments or when
-        // the calling process never reaches `compress()`).
         prover.prewarm_compose_programs();
 
         prover
@@ -387,34 +383,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// inside the first user `compress()` invocation, so it is
     /// universally beneficial and runs by default.
     ///
-    /// Kill-switch: `ZIREN_DISABLE_COMPOSE_PREWARM=1` (accepts
-    /// `"1"` or `"true"`, case-insensitive) skips prewarm.  This
-    /// gate is intentionally NOT coupled to the
-    /// `ZIREN_GPU_RESIDENCY` profile — that profile gates broader
-    /// residency features (program cache, compose-pk cache, audit)
-    /// orthogonal to the compose-program pre-warm.
-    ///
-    /// Also bails when:
+    /// Bails when:
     ///   - `compress_shape_config` is None
     ///     (`FIX_RECURSION_SHAPES=false` — no allowed shape to drive
     ///     `fix_shape`, would panic or build a non-canonical program),
     ///   - the recursion shape config has no allowed shapes
     ///     (defensive — should not happen with the default config).
     fn prewarm_compose_programs(&self) {
-        let prewarm_disabled = std::env::var("ZIREN_DISABLE_COMPOSE_PREWARM")
-            .map(|v| {
-                let v = v.trim();
-                v == "1" || v.eq_ignore_ascii_case("true")
-            })
-            .unwrap_or(false);
-        if prewarm_disabled {
-            tracing::debug!(
-                "compose pre-warm skipped: \
-                 ZIREN_DISABLE_COMPOSE_PREWARM kill-switch set"
-            );
-            return;
-        }
-
         let Some(recursion_shape_config) = self.compress_shape_config.as_ref() else {
             tracing::debug!(
                 "compose pre-warm skipped: compress_shape_config is None \
@@ -1668,26 +1643,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
-        // Byte-identity canary (ZIREN_BF_PROOF_DIGEST=1): digest of the
-        // INPUT (root compress) basefold proof, to localize divergence
-        // between the compress and shrink stages across A/B legs.
-        if std::env::var("ZIREN_BF_PROOF_DIGEST").as_deref() == Ok("1") {
-            fn fnv(bytes: &[u8]) -> u64 {
-                let mut h: u64 = 0xcbf29ce484222325;
-                for &b in bytes {
-                    h ^= b as u64;
-                    h = h.wrapping_mul(0x100000001b3);
-                }
-                h
-            }
-            if let Ok(bytes) = bincode::serialize(&basefold_proof) {
-                eprintln!(
-                    "[bf-digest] shrink-input-compress bytes={} fnv=0x{:016x}",
-                    bytes.len(),
-                    fnv(&bytes)
-                );
-            }
-        }
         // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
