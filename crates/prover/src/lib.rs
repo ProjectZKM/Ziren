@@ -964,7 +964,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             assert_eq!(
                 batch.len(),
                 1,
-                "normalize is single-shard (#88/#82): get_recursion_core_inputs_basefold \
+                "normalize is single-shard: get_recursion_core_inputs_basefold \
                  must be called with batch_size=1 (one core shard per normalize); \
                  got a batch of {} shards",
                 batch.len()

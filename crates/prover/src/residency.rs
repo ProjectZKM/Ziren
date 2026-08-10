@@ -2,7 +2,11 @@
 //! residency / cache / pre-warm toggles that each otherwise need their own
 //! `ZIREN_*` env var.
 //!
-//! One coherent profile selected by `ZIREN_GPU_RESIDENCY`:
+//! One coherent profile selected by `ZIREN_GPU_RESIDENCY`.  The
+//! cache-divergence audit is the one exception and keeps its own
+//! `ZIREN_VERIFY_PROGRAM_CACHE` opt-in — see `program_cache_audit_enabled`.
+//!
+//! Profiles:
 //!
 //! ```text
 //! ZIREN_GPU_RESIDENCY=full   # all residency-side hooks/caches ON
@@ -119,9 +123,20 @@ pub fn program_cache_enabled() -> bool {
     resolve_gpu_residency_profile().allows_program_cache()
 }
 
-/// Cache-divergence audit — ON only when the profile allows it.
+/// Cache-divergence audit — ON only under `ZIREN_VERIFY_PROGRAM_CACHE=1`.
+///
+/// This is the ONE feature here that is NOT profile-driven, and
+/// deliberately so: `allows_program_cache_audit()` is `false` for every
+/// profile including `full`, because the audit rebuilds and bincode-compares
+/// on every cache hit. Binding it to `full` would make the perf profile
+/// slower than the default. It is a bring-up / soundness tool, so it keeps
+/// its own opt-in.
 pub fn program_cache_audit_enabled() -> bool {
-    resolve_gpu_residency_profile().allows_program_cache_audit()
+    let v = match std::env::var("ZIREN_VERIFY_PROGRAM_CACHE") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return resolve_gpu_residency_profile().allows_program_cache_audit(),
+    };
+    v == "1" || v.eq_ignore_ascii_case("true")
 }
 
 

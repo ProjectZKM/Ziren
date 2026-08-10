@@ -45,14 +45,14 @@ pub fn assert_recursion_stacking_height_fixed(
     let expected = DEFAULT_LOG_STACKING_HEIGHT as usize;
     assert_eq!(
         bundle_num_vars, expected,
-        "[{stage}] DE-CLAMP REGRESSION (#88/#82): recursion bundle num_variables \
+        "[{stage}] DE-CLAMP REGRESSION: recursion bundle num_variables \
          (fri_commitments.len() = {bundle_num_vars}) != DEFAULT_LOG_STACKING_HEIGHT \
          ({expected}); the prover de-clamp (pick_log_stacking_height fixed at 21) \
          regressed → the recursion VK is no longer enumerable",
     );
     assert_eq!(
         log_stacking_height as usize, expected,
-        "[{stage}] DE-CLAMP REGRESSION (#88/#82): bundle log_stacking_height \
+        "[{stage}] DE-CLAMP REGRESSION: bundle log_stacking_height \
          ({log_stacking_height}) != DEFAULT_LOG_STACKING_HEIGHT ({expected})",
     );
 }

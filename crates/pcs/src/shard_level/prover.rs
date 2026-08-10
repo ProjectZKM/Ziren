@@ -974,7 +974,7 @@ where
         Some(out)
     } else {
         tracing::warn!(
-            "#33 residual_y DECLINED (missing/shape-mismatched residual or \
+            "residual_y DECLINED (missing/shape-mismatched residual or \
              non-pow2 height) — legacy jagged step-3 recompute"
         );
         None

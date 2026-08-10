@@ -1285,7 +1285,7 @@ mod tests {
         let expected: BTreeSet<usize> = BTreeSet::from([1]);
         assert_eq!(
             arities, expected,
-            "normalize is single-shard (#88/#82): must emit exactly arity {{1}}, got {arities:?}"
+            "normalize is single-shard: must emit exactly arity {{1}}, got {arities:?}"
         );
         eprintln!("[ARITY] per_arity_recursion_counts = {per_arity:?}");
     }

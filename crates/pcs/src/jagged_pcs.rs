@@ -2085,7 +2085,7 @@ pub mod jagged {
         if let Some(opened_main_g) = opened_main {
             if opened_main_g.len() != y_per_chip.len() {
                 eprintln!(
-                    "[basefold verify] group {g}: #121 cross-bind FAILED — opened-main \
+                    "[basefold verify] group {g}: cross-bind FAILED — opened-main \
                      chip count {} != y_per_chip {}",
                     opened_main_g.len(),
                     y_per_chip.len(),
@@ -2120,7 +2120,7 @@ pub mod jagged {
             }
             if !ok || sum_open != sum_y {
                 eprintln!(
-                    "[basefold verify] group {g}: #121 CROSS-BIND FAILED — the bundle's \
+                    "[basefold verify] group {g}: CROSS-BIND FAILED — the bundle's \
                      y_per_chip column claims are inconsistent with \
                      opened_values.main.local at z_col \
                      (evaluate_mle(opened_main, z_col) != jagged claimed_sum)"
@@ -2454,7 +2454,7 @@ pub mod jagged {
                     &infos, &r_row_per_chip, &z_row, &bundle,
                     Some(&opened_ok), &mut v, false,
                 ),
-                "#121: honest openings must verify"
+                "honest openings must verify"
             );
 
             // (2) DIVERGENT openings + cross-bind ON → REJECT.
@@ -2466,7 +2466,7 @@ pub mod jagged {
                     &infos, &r_row_per_chip, &z_row, &bundle,
                     Some(&opened_bad), &mut v, false,
                 ),
-                "#121: y_per_chip diverging from openings MUST be rejected by the cross-bind"
+                "y_per_chip diverging from openings MUST be rejected by the cross-bind"
             );
 
             // (3) SAME divergent openings but bind OFF (None) → ACCEPT.
@@ -2477,7 +2477,7 @@ pub mod jagged {
                     &infos, &r_row_per_chip, &z_row, &bundle,
                     None, &mut v, false,
                 ),
-                "#121 pre-fix baseline: with no opened-values bind the divergent proof is (wrongly) accepted"
+                "pre-fix baseline: with no opened-values bind the divergent proof is (wrongly) accepted"
             );
         }
     }

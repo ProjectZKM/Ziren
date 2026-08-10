@@ -209,7 +209,7 @@ pub fn verify_core_basefold<C, SC, A>(
     assert_eq!(
         shard_proof_tuples.len(),
         1,
-        "normalize is single-shard (#88/#82): verify_core_basefold expects exactly \
+        "normalize is single-shard: verify_core_basefold expects exactly \
          one shard proof per normalize, got {}",
         shard_proof_tuples.len()
     );
@@ -899,7 +899,7 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
         assert_eq!(
             shape.proof_shapes.len(),
             1,
-            "normalize is single-shard (#88/#82): ZKMCoreBasefoldWitnessValues::dummy \
+            "normalize is single-shard: ZKMCoreBasefoldWitnessValues::dummy \
              expects exactly one proof shape, got {}",
             shape.proof_shapes.len()
         );

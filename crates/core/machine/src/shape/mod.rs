@@ -1725,7 +1725,7 @@ pub mod tests {
         }
         eprintln!(
             "[STEP0] VERDICT: bandcap_invariant_for_fixed_chipset={bandcap_invariant} \
-             (true => fix is enumerability-safe; false => fix re-breaks #82)"
+             (true => fix is enumerability-safe; false => the fix regresses)"
         );
 
         // ESCAPE-HATCH CHECK: would rounding to the cluster's MAXIMAL per-chip
