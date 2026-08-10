@@ -624,23 +624,6 @@ mod platform {
         // `[arg0, arg0+arg1]` — sync that range AFTER the syscall.
         let syscall_id_peek = ctx.registers[Register::V0 as usize];
         let syscall_peek = SyscallCode::from_u32(syscall_id_peek);
-        if std::env::var_os("ZIREN_JIT_PC_TRACE").is_some() {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/jit-syscall.log")
-            {
-                let _ = writeln!(
-                    f,
-                    "syscall {:?} a0={:#x} a1={:#x} a2={:#x}",
-                    syscall_peek,
-                    ctx.registers[Register::A0 as usize],
-                    ctx.registers[Register::A1 as usize],
-                    ctx.registers[Register::A2 as usize],
-                );
-            }
-        }
         // Per-syscall input range pre-sync.  Each known memory-touching
         // syscall has its inputs at a (ptr, len)-style register pair we
         // can identify up front.  Sync only those bytes from host →
@@ -933,12 +916,6 @@ mod platform {
                         // (instruction_impl.rs::syscall), so subsequent
                         // JIT'd block loads/stores hit the COW.
                         ctx.memory = std::ptr::NonNull::new(cow_ptr);
-                        if std::env::var_os("ZIREN_JIT_PC_TRACE").is_some() {
-                            eprintln!(
-                                "[unconstr] ENTER COW ptr={:#x}",
-                                cow_ptr as usize
-                            );
-                        }
                     }
                     Err(_) => {
                         // Couldn't get a COW — surface a clean error so
@@ -965,9 +942,6 @@ mod platform {
                 // during the block in one O(1) syscall (munmap).
                 let primary = mem_bridge.exit_unconstrained();
                 ctx.memory = std::ptr::NonNull::new(primary);
-                if std::env::var_os("ZIREN_JIT_PC_TRACE").is_some() {
-                    eprintln!("[unconstr] EXIT primary={:#x}", primary as usize);
-                }
                 // V0 holds the EXIT_UNCONSTRAINED return value (0).
                 ctx.registers[Register::V0 as usize] = v0_after;
                 // The executor rolled state.pc back to `unconstrained_state.pc`
@@ -1098,46 +1072,6 @@ mod platform {
             _ => {
                 let len = a1.min(4096);
                 mem_bridge.sync_range_from_executor(executor, a0, len);
-            }
-        }
-        if std::env::var_os("ZIREN_JIT_PC_TRACE").is_some()
-            && matches!(syscall_peek, SyscallCode::SYSHINTREAD)
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/jit-syscall.log")
-            {
-                let buf = ctx.registers[Register::A0 as usize];
-                let host_word = mem_bridge.load_word(buf & !3);
-                let exec_word = executor
-                    .state
-                    .memory
-                    .page_table
-                    .get(buf & !3)
-                    .map(|r| r.value)
-                    .unwrap_or(0);
-                let _ = writeln!(
-                    f,
-                    "  HINTREAD post-sync buf={buf:#x} host={host_word:#x} exec={exec_word:#x}"
-                );
-            }
-        }
-        if std::env::var_os("ZIREN_JIT_PC_TRACE").is_some()
-            && matches!(syscall_peek, SyscallCode::SYSHINTLEN)
-        {
-            use std::io::Write;
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open("/tmp/jit-syscall.log")
-            {
-                let _ = writeln!(
-                    f,
-                    "  SYSHINTLEN return: V0={:#x} (ctx.regs[2])",
-                    ctx.registers[Register::V0 as usize]
-                );
             }
         }
 
@@ -1399,87 +1333,6 @@ mod platform {
         }
     }
 
-    /// SIGSEGV probe: stash a `*mut JitContext` into a global atomic
-    /// before `run_jit`, install a handler that — on SEGV — prints
-    /// `last_executed_pc`, faulting address, and key pinned regs to
-    /// stderr, then defers to the default handler.  Caller drops the
-    /// returned guard after `run_jit` returns to remove the handler
-    /// and clear the global pointer.
-    pub fn install_segv_probe(ctx: &mut JitContext) -> SegvProbeGuard {
-        use std::sync::atomic::Ordering;
-        LIVE_CTX.store(ctx as *mut _, Ordering::Relaxed);
-        unsafe {
-            let mut act: libc::sigaction = std::mem::zeroed();
-            act.sa_flags = libc::SA_SIGINFO | libc::SA_NODEFER;
-            act.sa_sigaction = segv_probe_handler as *const () as usize;
-            libc::sigemptyset(&mut act.sa_mask);
-            let mut prev: libc::sigaction = std::mem::zeroed();
-            libc::sigaction(libc::SIGSEGV, &act, &mut prev);
-            SegvProbeGuard { prev }
-        }
-    }
-
-    /// Restore the previous SIGSEGV disposition + clear LIVE_CTX
-    /// when dropped.  Returned by [`install_segv_probe`].
-    pub struct SegvProbeGuard {
-        prev: libc::sigaction,
-    }
-
-    impl Drop for SegvProbeGuard {
-        fn drop(&mut self) {
-            use std::sync::atomic::Ordering;
-            LIVE_CTX.store(std::ptr::null_mut(), Ordering::Relaxed);
-            unsafe {
-                libc::sigaction(libc::SIGSEGV, &self.prev, std::ptr::null_mut());
-            }
-        }
-    }
-
-    static LIVE_CTX: std::sync::atomic::AtomicPtr<JitContext> =
-        std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
-
-    extern "C" fn segv_probe_handler(
-        sig: libc::c_int,
-        info: *mut libc::siginfo_t,
-        ucontext: *mut libc::c_void,
-    ) {
-        use std::sync::atomic::Ordering;
-        let ctx = LIVE_CTX.load(Ordering::Relaxed);
-        let last_pc = if ctx.is_null() {
-            0
-        } else {
-            unsafe { (*ctx).last_executed_pc }
-        };
-        let instr_count = if ctx.is_null() {
-            0
-        } else {
-            unsafe { (*ctx).instr_count_executed }
-        };
-        let fault_addr: u64 = unsafe { (*info).si_addr() as u64 };
-        let (rip, rbx, rbp, r10, r13, r14): (u64, u64, u64, u64, u64, u64) = unsafe {
-            let uctx = ucontext as *const libc::ucontext_t;
-            let g = &(*uctx).uc_mcontext.gregs;
-            (
-                g[libc::REG_RIP as usize] as u64,
-                g[libc::REG_RBX as usize] as u64,
-                g[libc::REG_RBP as usize] as u64,
-                g[libc::REG_R10 as usize] as u64,
-                g[libc::REG_R13 as usize] as u64,
-                g[libc::REG_R14 as usize] as u64,
-            )
-        };
-        eprintln!(
-            "\n*** [JIT SEGV {sig}] last_pc={last_pc:#08x} instrs_executed={instr_count}\n    fault_addr={fault_addr:#x}\n    rip={rip:#x} rbx(TEMP_A)={rbx:#x} rbp(TEMP_B)={rbp:#x}\n    r10(MEMORY_PTR)={r10:#x} r13(JUMP_TABLE)={r13:#x} r14($ra)={r14:#x}\n"
-        );
-        // Re-raise default handler.
-        unsafe {
-            let mut act: libc::sigaction = std::mem::zeroed();
-            act.sa_sigaction = libc::SIG_DFL;
-            libc::sigaction(sig, &act, std::ptr::null_mut());
-            libc::raise(sig);
-        }
-    }
-
     /// Translate a guest MIPS byte address to its host-buffer offset
     /// under the JIT's `[8-byte header | 8-byte data]` paired layout
     /// (see `cuda/jit/src/backends/x86/mod.rs:emit_address_translate`).
@@ -1632,10 +1485,9 @@ mod platform {
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 pub use platform::{
     build_context, build_jit_function, cached_jit_function, first_unsupported_opcode,
-    host_buffer_size_for, host_offset_of, install_segv_probe, jit_syscall_handler,
+    host_buffer_size_for, host_offset_of, jit_syscall_handler,
     program_fingerprint_of, run_jit, run_jit_capture_trace_chunk, BuildParams, JitBridgeState,
-    JitMemoryBridge, JitRunOutcome, RunnerError, SegvProbeGuard,
-};
+    JitMemoryBridge, JitRunOutcome, RunnerError,};
 
 /// Re-export of the JIT crate's syscall handler signature so the
 /// executor can register [`jit_syscall_handler`] without depending on
@@ -1671,7 +1523,6 @@ mod tests {
         assert_eq!(d.op_a, 5);
     }
 }
-
 
 // ──────────────────────────────────────────────────────────────────
 // JIT-side mem_reads oracle (scaffold)

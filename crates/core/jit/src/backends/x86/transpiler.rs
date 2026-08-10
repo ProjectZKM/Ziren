@@ -44,31 +44,6 @@ impl MipsTranspiler for TranspilerBackend {
         self.jump_table.push(self.assembler.offset().0);
         self.may_early_exit = false;
 
-        // Optional PC trace + halt-after-N counter for post-mortem
-        // SEGV diagnosis.  Emit early — even before the exit-
-        // code gate — so we capture the broken instruction even when
-        // the JIT'd code faults inside its own prologue check.
-        if self.emit_pc_trace {
-            let cur_pc = self.pc_base.wrapping_add((self.jump_table.len() as u32 - 1) * 4);
-            dynasm!(self.assembler ; .arch x64
-                ; mov DWORD [Rq(super::CONTEXT) + super::LAST_EXECUTED_PC_OFFSET],
-                       DWORD cur_pc as i32
-                // Bump instruction count and check halt-after-N.
-                // Setting halt_after_n_instrs=0 disables the check.
-                ; add QWORD [Rq(super::CONTEXT) + super::INSTR_COUNT_OFFSET], 1
-                ; mov rax, QWORD [Rq(super::CONTEXT) + super::HALT_AFTER_N_OFFSET]
-                ; test rax, rax
-                ; jz >no_halt_after_n
-                ; cmp QWORD [Rq(super::CONTEXT) + super::INSTR_COUNT_OFFSET], rax
-                ; jb >no_halt_after_n
-                // Trip exit_code = HALT-with-zero sentinel; the next
-                // instruction's exit-code gate jumps to exit_label
-                // which spills regs and returns to the host.
-                ; mov DWORD [Rq(super::CONTEXT) + super::EXIT_CODE_OFFSET],
-                       DWORD 0x8000_0000u32 as i32
-                ; no_halt_after_n:
-            );
-        }
 
         // Bind a per-PC dynamic label so direct branches/jumps in
         // this program can target it.  Indexing matches jump_table:

@@ -3061,18 +3061,6 @@ impl<'a> Executor<'a> {
             };
             ctx.user_data = &mut bridge_state as *mut _ as *mut std::ffi::c_void;
 
-            // Optional SIGSEGV diagnostic: when ZIREN_JIT_SIGSEGV_TRACE
-            // is set, install a one-shot handler that dumps
-            // ctx.last_executed_pc, the faulting host address, and the
-            // pinned-register state before the default handler aborts.
-            // Pairs with `ZIREN_JIT_PC_TRACE=1` (which makes the JIT
-            // emit the last_executed_pc bookkeeping per cycle).
-            #[cfg(target_os = "linux")]
-            let _segv_guard = if std::env::var_os("ZIREN_JIT_SIGSEGV_TRACE").is_some() {
-                Some(crate::jit_runner::install_segv_probe(&mut ctx))
-            } else {
-                None
-            };
 
             // Producer: capture a whole-program TraceChunk
             // (start registers + pc + clk bounds) via
@@ -3089,8 +3077,6 @@ impl<'a> Executor<'a> {
                 unsafe { run_jit(&jit_fn, &mut ctx) };
             }
 
-            #[cfg(target_os = "linux")]
-            drop(_segv_guard);
             // Clear user_data immediately so a stale pointer can't be
             // dereferenced if anything else inspects ctx later.
             ctx.user_data = std::ptr::null_mut();

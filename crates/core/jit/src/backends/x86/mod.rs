@@ -82,18 +82,11 @@ pub(crate) const DELAYED_JUMP_TARGET_OFFSET: i32 =
 /// 1-cycle delay-slot rolling discipline.
 pub(crate) const PENDING_JUMP_AT_START_OFFSET: i32 =
     offset_of!(JitContext, pending_jump_at_start) as i32;
-/// Offset of the post-mortem "last executed PC" tracker.  Written
-/// by every `start_instr` block when [`TranspilerBackend::emit_pc_trace`]
-/// is set; read by signal handlers / test fixtures after a SEGV to
-/// localise the broken codegen to a specific MIPS PC.
+/// Offset of the "last executed PC" tracker.  Written at every
+/// SYSCALL emission so the host handler can recover the syscall's
+/// guest PC — ENTER_UNCONSTRAINED needs it to snapshot `state.pc`.
 pub(crate) const LAST_EXECUTED_PC_OFFSET: i32 =
     offset_of!(JitContext, last_executed_pc) as i32;
-/// Offsets of the bisection counters — see
-/// [`JitContext::instr_count_executed`] / `halt_after_n_instrs`.
-pub(crate) const INSTR_COUNT_OFFSET: i32 =
-    offset_of!(JitContext, instr_count_executed) as i32;
-pub(crate) const HALT_AFTER_N_OFFSET: i32 =
-    offset_of!(JitContext, halt_after_n_instrs) as i32;
 
 /// Where each MIPS register physically lives during JIT execution.
 ///
@@ -198,14 +191,6 @@ pub struct TranspilerBackend {
     /// [`Self::set_clk_bump`] from the trait `new`.
     pub(crate) clk_bump: u64,
 
-    /// When true, every `start_instr` block emits a `mov DWORD
-    /// [ctx + LAST_EXECUTED_PC_OFFSET], <PC>` so that post-mortem
-    /// signal handlers can read [`JitContext::last_executed_pc`] to
-    /// determine which MIPS instruction was running at SEGV time.
-    /// Off by default; turn on via env `ZIREN_JIT_PC_TRACE=1` in
-    /// the host caller.
-    pub(crate) emit_pc_trace: bool,
-
     /// Set when an instruction may exit early (load/store with
     /// possible page fault) so the prologue knows to save state.
     pub(crate) may_early_exit: bool,
@@ -244,7 +229,6 @@ impl TranspilerBackend {
             exit_label_bound: false,
             pc_base: 0,
             clk_bump: 0,
-            emit_pc_trace: std::env::var_os("ZIREN_JIT_PC_TRACE").is_some(),
             may_early_exit: false,
             syscall_handler: None,
             mem_read_recorder: None,
