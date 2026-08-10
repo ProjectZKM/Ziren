@@ -69,7 +69,7 @@ use crate::{Challenge, Chip, StarkGenericConfig, Val};
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
-    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: &[Val<SC>],
     logup_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
     max_log_row_count: usize,
@@ -254,7 +254,7 @@ where
         // device-resident / unexercised chip is a width-0 `dummy` whose cells come
         // from the empty-slice fallback below.
         let prep_trace = &preprocessed_traces[chip_idx];
-        let prep_width = prep_trace.width;
+        let prep_width = prep_trace.num_polynomials();
         // Main-trace dims from the shared MLE (`num_polynomials`/`num_real_entries`;
         // a `dummy` yields (0, 0), matching an empty raw trace).
         let (main_width, main_height): (usize, usize) =
@@ -376,8 +376,8 @@ where
             };
             cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()
         };
-        let prep_cells: Option<Vec<Val<SC>>> = if prep_width > 0 {
-            Some(prep_trace.values.iter().map(|v| <Val<SC>>::from(*v)).collect())
+        let prep_cells: Option<Vec<Val<SC>>> = if let Some(pt) = prep_trace.real_trace_ref() {
+            Some(pt.values.iter().map(|v| <Val<SC>>::from(*v)).collect())
         } else {
             None
         };

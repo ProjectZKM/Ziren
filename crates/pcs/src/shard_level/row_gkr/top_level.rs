@@ -27,7 +27,7 @@ use crate::Chip;
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_logup_gkr_rows<F, EF, A, Challenger>(
     chips: &[&Chip<F, A>],
-    preprocessed_traces: &[&RowMajorMatrix<F>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
     max_log_row_count: usize,
     challenger: &mut Challenger,
     // The shared per-chip analytic main-trace MLE (chip-index order),
@@ -331,8 +331,9 @@ where
                 )
             };
 
-            let prep_evals = if prep_trace.width > 0 {
-                let prep_height = prep_trace.values.len() / prep_trace.width.max(1);
+            let prep_ref = prep_trace.real_trace_ref();
+            let prep_evals = if let Some(pt) = prep_ref {
+                let prep_height = pt.values.len() / pt.width.max(1);
                 let log_prep_height =
                     prep_height.max(1).next_power_of_two().trailing_zeros() as usize;
                 let prep_eval_point: &[EF] = if eval_point.len() >= log_prep_height {
@@ -341,8 +342,8 @@ where
                     &eval_point[..]
                 };
                 Some(evaluate_trace_columns_at_point::<F, EF>(
-                    &prep_trace.values,
-                    prep_trace.width,
+                    pt.values,
+                    pt.width,
                     prep_eval_point,
                 ))
             } else {
@@ -372,10 +373,10 @@ where
             } else {
                 Some(Vec::new())
             };
-            let prep_evals_full: Option<Vec<EF>> = if prep_trace.width > 0 {
+            let prep_evals_full: Option<Vec<EF>> = if let Some(pt) = prep_ref {
                 Some(evaluate_trace_columns_at_point::<F, EF>(
-                    &prep_trace.values,
-                    prep_trace.width,
+                    pt.values,
+                    pt.width,
                     full_eval_point,
                 ))
             } else {

@@ -45,7 +45,7 @@ use crate::Chip;
 // ziren-gpu layer-lifecycle + interaction-eval kernels DIRECTLY.
 pub fn build_gkr_circuit<F, EF, A>(
     chips: &[&Chip<F, A>],
-    preprocessed_traces: &[&RowMajorMatrix<F>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
     shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],

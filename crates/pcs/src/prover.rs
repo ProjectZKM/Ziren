@@ -114,7 +114,7 @@ where
     /// SP1: MainTraceData.shard_chips.
     pub chips: &'a [&'a MachineChip<SC, A>],
     /// SP1: pk.preprocessed_data.preprocessed_traces.
-    pub preprocessed_traces: &'a [&'a RowMajorMatrix<Val<SC>>],
+    pub preprocessed_traces: &'a [crate::multilinear::PaddedMle<Val<SC>>],
     /// SP1: `Traces::named_traces` — the shard's main traces as name-keyed
     /// [`crate::multilinear::PaddedMle`]s (SP1's `BTreeMap<String, PaddedMle>`).
     ///
@@ -1047,7 +1047,7 @@ where
             let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A, _>(
                 self,
                 &chips,
-                &pk.traces,
+                pk.preprocessed_mles(),
                 &pk.chip_ordering,
                 traces,
                 data.public_values.clone(),
@@ -1198,7 +1198,7 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     // the free-fn → byte-identical.
     prover: &P,
     chips: &[&MachineChip<SC, A>],
-    pk_traces: &[RowMajorMatrix<Val<SC>>],
+    pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
     main_traces: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>>,
     public_values: Vec<Val<SC>>,
@@ -1266,21 +1266,6 @@ where
         "try_prove_shard_to_basefold_boxed requires Val==KoalaBear /          Challenge==KoalaBear^4 (shared by inner + outer rings); the per-ring jagged          open is dispatched downstream in prove_trusted_evaluations",
     );
 
-    // Per-chip preprocessed traces aligned with `chips`.  These live in the
-    // proving key for the whole session, so this BORROWS them into chip order
-    // rather than deep-copying each one per shard; chips with no preprocessed
-    // column share one empty matrix.
-    let empty_preprocessed: RowMajorMatrix<Val<SC>> = RowMajorMatrix::new(vec![], 0);
-    let preprocessed_traces: Vec<&RowMajorMatrix<Val<SC>>> = chips
-        .iter()
-        .map(|chip| {
-            pk_chip_ordering
-                .get(&chip.name().to_string())
-                .map(|&idx| &pk_traces[idx])
-                .unwrap_or(&empty_preprocessed)
-        })
-        .collect();
-
     // INLINE-commit (SP1 / GPU parity): the BaseFold jagged-PCS commit is built
     // LAZILY inside `prove_shard_to_basefold` -> `maybe_auto_precompute_basefold`
     // (which observes its 8-felt digest as `main_commitment`, and applies the
@@ -1335,6 +1320,27 @@ where
         }
         cube
     };
+    // Preprocessed traces in prove-path form (SP1's `Traces`): the per-key
+    // `Arc<Mle>`s are built once by `preprocessed_mles()` and shared by every
+    // shard; only the cube-dependent `PaddedMle` wrapper is per shard, and
+    // that is an `Arc` bump because the padding is virtual.  Chips with no
+    // preprocessed column get a width-0 dummy.
+    let preprocessed_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
+        .iter()
+        .map(|chip| {
+            match pk_chip_ordering.get(&chip.name().to_string()) {
+                Some(&idx) => crate::multilinear::PaddedMle::padded_with_zeros(
+                    pk_preprocessed_mles[idx].clone(),
+                    max_log_row_count as u32,
+                ),
+                None => crate::multilinear::PaddedMle::dummy(
+                    max_log_row_count as u32,
+                    crate::multilinear::Padding::Constant(<Val<SC>>::ZERO, 0),
+                ),
+            }
+        })
+        .collect();
+
     // SP1-parity trace hoist: build the shared analytic trace-MLE store HERE,
     // once, as SP1's name-keyed `Traces::named_traces` — the SINGLE
     // authoritative host main-trace store.  `commit()` is the sole producer of

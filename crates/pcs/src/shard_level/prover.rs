@@ -239,7 +239,7 @@ where
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_with_data<SC, A, P>(
     chips: &[&Chip<Val<SC>, A>],
-    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
@@ -888,7 +888,7 @@ where
 pub fn compute_residual_y_openings<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     commit_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
-    preprocessed_traces: &[&RowMajorMatrix<Val<SC>>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     trace_at_z: &std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
     logup_evaluations: &crate::shard_level::types::LogUpEvaluations<Challenge<SC>>,
     // Per-chip metadata heights, parallel to `chips` (device dummies carry a
@@ -935,7 +935,7 @@ where
             let dev_h = heights.get(idx).copied().flatten().unwrap_or(0);
             let dev_w = trace_at_z
                 .get(&name)
-                .map(|evals| evals.len().saturating_sub(ptrace.width))
+                .map(|evals| evals.len().saturating_sub(ptrace.num_polynomials()))
                 .unwrap_or(0);
             (dev_w, dev_h)
         } else {
@@ -961,8 +961,8 @@ where
         match trace_at_z.get(&name) {
             // Strict shape check: prep-then-main, main slice is the last `w`
             // values (zerocheck num_main_cols == trace width).
-            Some(evals) if evals.len() == ptrace.width + w => {
-                out.push(evals[ptrace.width..].to_vec());
+            Some(evals) if evals.len() == ptrace.num_polynomials() + w => {
+                out.push(evals[ptrace.num_polynomials()..].to_vec());
             }
             _ => {
                 ok = false;

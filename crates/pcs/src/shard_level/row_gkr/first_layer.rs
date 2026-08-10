@@ -62,7 +62,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
     interactions: &[(&Lookup<F>, bool)],
     main_values: &[F],
     main_width: usize,
-    preprocessed_trace: Option<&RowMajorMatrix<F>>,
+    preprocessed_trace: Option<crate::basefold::TraceRef<'_, F>>,
     alpha: EF,
     betas: &[EF],
 ) -> (RowMajorMatrix<F>, RowMajorMatrix<EF>) {
@@ -85,7 +85,7 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
         use p3_maybe_rayon::prelude::*;
         let main_w = main_width;
         let prep_w = preprocessed_trace.map(|pt| pt.width).unwrap_or(0);
-        let prep_values: Option<&[F]> = preprocessed_trace.map(|pt| pt.values.as_slice());
+        let prep_values: Option<&[F]> = preprocessed_trace.map(|pt| pt.values);
         numer_evals
             .par_chunks_exact_mut(num_interactions)
             .zip(denom_evals.par_chunks_exact_mut(num_interactions))
@@ -230,7 +230,7 @@ fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (V
 // `CudaShardDeviceOps::interaction_eval` forwarded to VERBATIM).
 pub fn generate_first_layer<F, EF, A>(
     chips: &[&Chip<F, A>],
-    preprocessed_traces: &[&RowMajorMatrix<F>],
+    preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
     shared_trace_mles: &[PaddedMle<F>],
     alpha: EF,
     betas: &[EF],
@@ -286,7 +286,7 @@ where
             &interactions,
             mt_values,
             mt_width,
-            if prep_trace.width > 0 { Some(prep_trace) } else { None },
+            prep_trace.real_trace_ref(),
             alpha,
             betas,
         );

@@ -121,8 +121,21 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub pc_start: Val<SC>,
     /// The starting global digest of the program, after incorporating the initial memory.
     pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
-    /// The preprocessed traces.
+    /// The preprocessed traces, row-major.  These are the AIR-side form:
+    /// serialized with the key and handed to the constraint folder / debug
+    /// paths, exactly as SP1 keeps `RowMajorMatrix` on its AIR side.
     pub traces: Vec<RowMajorMatrix<Val<SC>>>,
+    /// The same preprocessed traces in the PROVE-path form: one `Arc<Mle>`
+    /// per entry of `traces`, built once on first use and shared by every
+    /// shard.  SP1 carries this as `ShardProverData::preprocessed_traces`
+    /// (`Traces` = name-keyed `PaddedMle`); the shard cube differs per stage,
+    /// so the cube-dependent `PaddedMle` wrapper is applied per shard —
+    /// that wrap is an `Arc` bump because `PaddedMle` padding is virtual.
+    ///
+    /// Not serialized: it is derived from `traces`, and rebuilding it is a
+    /// one-time cost per key.  A deserialized key simply rebuilds on demand.
+    #[serde(skip)]
+    preprocessed_mles: std::sync::OnceLock<Vec<std::sync::Arc<crate::basefold::Mle<Val<SC>>>>>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -137,6 +150,9 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             pc_start: self.pc_start,
             initial_global_cumulative_sum: self.initial_global_cumulative_sum,
             traces: self.traces.clone(),
+            // Derived cache: the clone rebuilds it on first use rather than
+            // deep-copying the MLEs.
+            preprocessed_mles: std::sync::OnceLock::new(),
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -144,6 +160,43 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
 }
 
 impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
+    /// Build a proving key from its parts.  The prove-path MLE cache is
+    /// derived from `traces`, so it is never supplied by the caller — that
+    /// keeps the two representations from drifting apart.
+    pub fn from_parts(
+        commit: Com<SC>,
+        pc_start: Val<SC>,
+        initial_global_cumulative_sum: SepticDigest<Val<SC>>,
+        traces: Vec<RowMajorMatrix<Val<SC>>>,
+        chip_ordering: HashMap<String, usize>,
+        constraints_map: HashMap<String, usize>,
+    ) -> Self {
+        Self {
+            commit,
+            pc_start,
+            initial_global_cumulative_sum,
+            traces,
+            preprocessed_mles: std::sync::OnceLock::new(),
+            chip_ordering,
+            constraints_map,
+        }
+    }
+
+    /// The preprocessed traces in prove-path form, built once per key.
+    ///
+    /// Each entry is the zero-copy `Mle` view of the corresponding
+    /// `self.traces[i]` (`Mle::from_row_major` moves the backing buffer and
+    /// preserves row-major order, so `Mle::as_trace_ref()` round-trips the
+    /// original cells byte-for-byte).
+    pub fn preprocessed_mles(&self) -> &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>] {
+        self.preprocessed_mles.get_or_init(|| {
+            self.traces
+                .iter()
+                .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t.clone())))
+                .collect()
+        })
+    }
+
     /// Observes the values of the proving key into the challenger.
     pub fn observe_into(&self, challenger: &mut SC::Challenger) {
         challenger.observe(self.commit.clone());
@@ -550,6 +603,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
+                preprocessed_mles: std::sync::OnceLock::new(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -672,6 +726,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 pc_start,
                 initial_global_cumulative_sum,
                 traces,
+                preprocessed_mles: std::sync::OnceLock::new(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
