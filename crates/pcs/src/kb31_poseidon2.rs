@@ -346,6 +346,17 @@ pub mod koala_bear_poseidon2 {
             inner_prep_commit(named_preprocessed_traces)
         }
 
+        type PrepPrecomputed = crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
+
+        fn prep_precompute(
+            named_preprocessed_traces: &[(
+                String,
+                p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+            )],
+        ) -> Self::PrepPrecomputed {
+            inner_prep_precompute(named_preprocessed_traces)
+        }
+
     }
 
     /// SP1-style PREPROCESSED-trace setup commit for the inner
@@ -358,12 +369,32 @@ pub mod koala_bear_poseidon2 {
     /// `JaggedMmcs == InnerValMmcs` (same Poseidon2-KoalaBear Merkle root).
     /// Preprocessed-trace commit for the inner config: the jagged BaseFold
     /// path (no two-adic coset LDE), returning `Com<KoalaBearPoseidon2>`.
+    impl crate::config::PrepCommitRoot<KoalaBearPoseidon2>
+        for crate::jagged_pcs::jagged::PrecomputedJaggedCommit
+    {
+        fn commit_root(&self) -> Com<KoalaBearPoseidon2> {
+            self.commit.original_commitment.clone()
+        }
+    }
+
     pub fn inner_prep_commit(
         chip_traces: &[(
             String,
             p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
         )],
     ) -> Com<KoalaBearPoseidon2> {
+        inner_prep_precompute(chip_traces).commit.original_commitment
+    }
+
+    /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data
+    /// and jagged packing so the preprocessed round can be OPENED, not just
+    /// observed.  See `StarkGenericConfig::PrepPrecomputed`.
+    pub fn inner_prep_precompute(
+        chip_traces: &[(
+            String,
+            p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
+        )],
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
         let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
@@ -381,7 +412,7 @@ pub mod koala_bear_poseidon2 {
             // → no AREA PIN (`None`), byte-identical.
             None,
         );
-        pre.commit.original_commitment
+        pre
     }
 
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {

@@ -86,6 +86,39 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
     ) -> Com<Self>;
 
+    /// The PRECOMPUTED preprocessed commit: the commitment together with the
+    /// BaseFold prover data (codeword + Merkle tree) and the jagged packing.
+    ///
+    /// [`prep_commit`](Self::prep_commit) throws all of that away and keeps only
+    /// the root, which is enough to OBSERVE the preprocessed commitment but not
+    /// to OPEN it.  SP1 retains both — `setup` produces
+    /// `(preprocessed_commit, preprocessed_data)`
+    /// (`hypercube/src/prover/shard.rs:416`), stores the commit in the vk and the
+    /// data in the proving key, and opens the preprocessed traces as their OWN
+    /// ROUND of every shard proof
+    /// (`hypercube/src/verifier/shard.rs:638` opens
+    /// `vec![vk.preprocessed_commit, *main_commitment]`).
+    ///
+    /// Committed once per program, NOT once per shard.
+    type PrepPrecomputed: PrepCommitRoot<Self> + Send + Sync + 'static;
+
+    /// Build the precomputed preprocessed commit.  Deterministic in its input,
+    /// so a key that was deserialized without it can rebuild it on demand.
+    fn prep_precompute(
+        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
+    ) -> Self::PrepPrecomputed;
+}
+
+/// Read the commitment root out of a config's
+/// [`PrepPrecomputed`](StarkGenericConfig::PrepPrecomputed).
+///
+/// The precomputed value is opaque to generic code, but `setup` must publish its
+/// root as the verifying key's preprocessed commitment — this is the one thing
+/// generic code needs from it.
+pub trait PrepCommitRoot<SC: StarkGenericConfig> {
+    /// The commitment this precompute produced — byte-identical to what
+    /// [`StarkGenericConfig::prep_commit`] would return for the same traces.
+    fn commit_root(&self) -> Com<SC>;
 }
 
 pub trait ZeroCommitment<SC: StarkGenericConfig> {

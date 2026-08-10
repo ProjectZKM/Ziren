@@ -17,6 +17,7 @@ use super::{debug_constraints, Dom};
 use crate::PROOF_MAX_NUM_PVS;
 use crate::{
     air::{LookupScope, MachineAir, MachineProgram},
+    config::PrepCommitRoot,
     count_permutation_constraints,
     lookup::{debug_lookups_with_all_chips, LookupKind},
     record::MachineRecord,
@@ -136,6 +137,19 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// one-time cost per key.  A deserialized key simply rebuilds on demand.
     #[serde(skip)]
     preprocessed_mles: std::sync::OnceLock<Vec<std::sync::Arc<crate::basefold::Mle<Val<SC>>>>>,
+    /// The PRECOMPUTED preprocessed commit — the commitment plus the BaseFold
+    /// prover data and jagged packing needed to OPEN the preprocessed traces,
+    /// not merely observe them.  `self.commit` is the root of exactly this
+    /// commit; SP1 keeps the pair as `(preprocessed_commit, preprocessed_data)`
+    /// out of `setup` (`hypercube/src/prover/shard.rs:416`), the commit in the
+    /// vk and the data in the proving key, and opens the preprocessed traces as
+    /// their own ROUND of every shard proof.
+    ///
+    /// Not serialized: it is a deterministic function of `traces`, so a
+    /// deserialized key rebuilds it on first use — same contract as
+    /// `preprocessed_mles`.
+    #[serde(skip)]
+    preprocessed_jagged: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -153,6 +167,7 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             // Derived cache: the clone rebuilds it on first use rather than
             // deep-copying the MLEs.
             preprocessed_mles: std::sync::OnceLock::new(),
+            preprocessed_jagged: std::sync::OnceLock::new(),
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -177,6 +192,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             initial_global_cumulative_sum,
             traces,
             preprocessed_mles: std::sync::OnceLock::new(),
+            preprocessed_jagged: std::sync::OnceLock::new(),
             chip_ordering,
             constraints_map,
         }
@@ -194,6 +210,24 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
                 .iter()
                 .map(|t| std::sync::Arc::new(crate::basefold::Mle::from_row_major(t.clone())))
                 .collect()
+        })
+    }
+
+    /// The precomputed preprocessed commit, built on first use from `traces`
+    /// in the SAME name/height order `setup` committed them in (the order
+    /// `chip_ordering` records), so the rebuilt commitment reproduces
+    /// `self.commit` exactly.
+    pub fn preprocessed_jagged(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
+        self.preprocessed_jagged.get_or_init(|| {
+            let mut names: Vec<(usize, &String)> =
+                self.chip_ordering.iter().map(|(n, i)| (*i, n)).collect();
+            names.sort_unstable();
+            let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = names
+                .into_iter()
+                .zip(self.traces.iter())
+                .map(|((_, name), trace)| (name.clone(), trace.clone()))
+                .collect();
+            std::sync::Arc::new(SC::prep_precompute(&named))
         })
     }
 
@@ -579,7 +613,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = SC::prep_commit(&named);
+        // SP1 parity: setup produces the commitment AND the data needed to open
+        // it (`hypercube/src/prover/shard.rs:416` returns
+        // `(preprocessed_commit, preprocessed_data)`).  Keep both — the root goes
+        // to the vk, the precompute is seeded into the proving key below, so the
+        // opening round never has to re-derive the committed order.
+        let prep_precomputed = SC::prep_precompute(&named);
+        let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -604,6 +644,14 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
+                // Seeded from the very precompute whose root became `commit`
+                // above, so the opening round reuses the committed data
+                // directly instead of rebuilding it from `traces`.
+                preprocessed_jagged: {
+                    let cell = std::sync::OnceLock::new();
+                    let _ = cell.set(std::sync::Arc::new(prep_precomputed));
+                    cell
+                },
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -727,6 +775,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
+            preprocessed_jagged: std::sync::OnceLock::new(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },

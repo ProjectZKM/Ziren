@@ -177,6 +177,15 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
         outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces)
     }
 
+    type PrepPrecomputed =
+        zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs>;
+
+    fn prep_precompute(
+        named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+    ) -> Self::PrepPrecomputed {
+        outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces)
+    }
+
     type Val = OuterVal;
     type Domain = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Domain;
     type Pcs = OuterPcs;
@@ -468,9 +477,26 @@ pub mod outer_jagged_hooks {
     /// is `Com<KoalaBearPoseidon2Outer>` since
     /// `OuterPcs = TwoAdicFriPcs<_, _, OuterValMmcs, _>` -- the equality the
     /// generic `setup` cannot see, which is why this impl exists.
+    impl zkm_pcs::PrepCommitRoot<KoalaBearPoseidon2Outer>
+        for zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs>
+    {
+        fn commit_root(&self) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
+            self.commit.original_commitment.clone()
+        }
+    }
+
     pub(crate) fn outer_prep_commit(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
     ) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
+        outer_prep_precompute(chip_traces).commit.original_commitment
+    }
+
+    /// Same commit as [`outer_prep_commit`], keeping the BaseFold prover data
+    /// so the preprocessed round can be OPENED.  See
+    /// `StarkGenericConfig::PrepPrecomputed`.
+    pub(crate) fn outer_prep_precompute(
+        chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+    ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         
         let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
@@ -489,7 +515,7 @@ pub mod outer_jagged_hooks {
             // a recursion prove commit → no AREA PIN (`None`), byte-identical.
             None,
         );
-        pre.commit.original_commitment
+        pre
     }
 }
 
