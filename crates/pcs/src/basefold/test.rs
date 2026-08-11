@@ -90,7 +90,7 @@ fn test_basefold_roundtrip_single_round() {
         eval_point.clone(),
         vec![vec![mle.clone()]],
         vec![eval_claims_one_round.clone()],
-        vec![prover_data],
+        &[&prover_data],
         &mut p_chal,
     );
 
@@ -161,7 +161,7 @@ fn test_basefold_roundtrip_two_rounds() {
         eval_point.clone(),
         vec![mle_round_0, mle_round_1],
         vec![claims_0.clone(), claims_1.clone()],
-        vec![data_0, data_1],
+        &[&data_0, &data_1],
         &mut p_chal,
     );
 

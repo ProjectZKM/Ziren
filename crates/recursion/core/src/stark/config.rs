@@ -425,7 +425,7 @@ mod basefold_over_bn254_generic_typecheck {
     ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            pd, eval_point, ch, mmcs, dft, fri,
+            &pd, eval_point, ch, mmcs, dft, fri,
         )
     }
 
@@ -627,7 +627,7 @@ mod basefold_over_bn254_roundtrip_test {
         };
 
         let proof = open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-            prover_data,
+            &prover_data,
             eval_point.clone(),
             &mut p_chal,
             mmcs.clone(),

@@ -726,7 +726,7 @@ mod test {
             eval_multilinear_padded::<F, EF>(&batch_evals_flat, batch_point);
 
         let proof =
-            prover.prove_trusted_evaluation(eval_point.clone(), vec![data], &mut p_chal);
+            prover.prove_trusted_evaluation(eval_point.clone(), &[data], &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.clone());
@@ -833,7 +833,7 @@ mod test {
         // Open over BOTH rounds' prover data, in partition order.
         let proof = prover.prove_trusted_evaluation(
             eval_point.clone(),
-            vec![data0, data1],
+            &[data0, data1],
             &mut p_chal,
         );
 
@@ -903,7 +903,7 @@ mod test {
         for m in d0.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
         for m in d1.interleaved_mles.iter() { bef.extend(m.eval_at::<EF>(&sp)); }
         let claim = eval_multilinear_padded::<F, EF>(&bef, bp);
-        let proof = prover.prove_trusted_evaluation(eval_point.clone(), vec![d0, d1], &mut p_chal);
+        let proof = prover.prove_trusted_evaluation(eval_point.clone(), &[d0, d1], &mut p_chal);
 
         // WRONG order: observe c1 then c0.
         let mut v_chal = build_challenger();

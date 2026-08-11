@@ -1203,7 +1203,7 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             pre_y_per_chip,
-            precomputed,
+            &precomputed,
             challenger,
         )
     }
@@ -1404,7 +1404,11 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        precomputed: PrecomputedJaggedCommit,
+        // BORROWED so a commit built ONCE can be opened by every shard — the
+        // preprocessed round opens the proving key's copy directly.  Only the
+        // (small) commitment is cloned into the proof; the packing and the
+        // BaseFold prover data are read in place.
+        precomputed: &PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedGroupProof {
         // Per-shard jagged-PCS sub-phase timing.  Five sub-phases mirror
@@ -1446,6 +1450,8 @@ pub mod jagged {
             rev: _,
             recursion_area_pin,
         } = precomputed;
+        let commit = commit.clone();
+        let recursion_area_pin = *recursion_area_pin;
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
@@ -1750,11 +1756,11 @@ pub mod jagged {
     pub fn prove_jagged_basefold_two_round(
         prep_chip_traces: &[ChipTraceView],
         prep_r_row_per_chip: &[Vec<InnerChallenge>],
-        prep_precomputed: PrecomputedJaggedCommit,
+        prep_precomputed: &PrecomputedJaggedCommit,
         prep_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         main_chip_traces: &[ChipTraceView],
         main_r_row_per_chip: &[Vec<InnerChallenge>],
-        main_precomputed: PrecomputedJaggedCommit,
+        main_precomputed: &PrecomputedJaggedCommit,
         main_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         z_row: &[InnerChallenge],
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
@@ -1808,7 +1814,7 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        precomputed: PrecomputedJaggedCommit,
+        precomputed: &PrecomputedJaggedCommit,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
         let g = prove_one_jagged_group(
@@ -2586,7 +2592,7 @@ pub mod jagged {
             let mut v = chal();
             assert!(
                 verify_jagged_basefold_inner(
-                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    &infos, &r_row_per_chip, &z_row, /* n_prep = */ 0, &bundle,
                     Some(&opened_ok), &mut v, false,
                 ),
                 "honest openings must verify"
@@ -2598,7 +2604,7 @@ pub mod jagged {
             let mut v = chal();
             assert!(
                 !verify_jagged_basefold_inner(
-                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    &infos, &r_row_per_chip, &z_row, /* n_prep = */ 0, &bundle,
                     Some(&opened_bad), &mut v, false,
                 ),
                 "y_per_chip diverging from openings MUST be rejected by the cross-bind"
@@ -2609,7 +2615,7 @@ pub mod jagged {
             let mut v = chal();
             assert!(
                 verify_jagged_basefold_inner(
-                    &infos, &r_row_per_chip, &z_row, &bundle,
+                    &infos, &r_row_per_chip, &z_row, /* n_prep = */ 0, &bundle,
                     None, &mut v, false,
                 ),
                 "pre-fix baseline: with no opened-values bind the divergent proof is (wrongly) accepted"
@@ -2704,7 +2710,7 @@ mod test {
             current[0]
         };
 
-        let proof = open_jagged_pcs_host(prover_data, eval_point.clone(), &mut p_chal);
+        let proof = open_jagged_pcs_host(&prover_data, eval_point.clone(), &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.original_commitment.clone());
