@@ -228,14 +228,26 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
     });
     use p3_air::BaseAir;
-    // The preprocessed round's chips, in the MACHINE's name order — the order
-    // `setup` committed them.  A machine with none proves the single main
-    // round, which is the pre-existing shape.
-    let prep_widths: Vec<usize> = shard_chips
-        .iter()
-        .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
-        .filter(|w| *w > 0)
-        .collect();
+    // The preprocessed round is the MACHINE's preprocessed chips in chip-NAME
+    // order — the order `setup` commits them, which is a property of the
+    // machine and NOT of this shard.  Taking the shard's own chip list instead
+    // drops any committed chip the shard happens not to carry, and the round's
+    // column space then disagrees with the packing's.  Mirrors
+    // core_basefold.rs.
+    let prep_widths: Vec<usize> = {
+        let mut dims: Vec<(String, usize)> = machine
+            .chips()
+            .iter()
+            .filter_map(|c| {
+                let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                (w > 0).then(|| {
+                    (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
+                })
+            })
+            .collect();
+        dims.sort_by(|a, b| a.0.cmp(&b.0));
+        dims.into_iter().map(|(_, w)| w).collect()
+    };
     let main_widths: Vec<usize> = shard_chips
         .iter()
         .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
