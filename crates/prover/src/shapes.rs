@@ -953,7 +953,7 @@ mod tests {
             }
             eprintln!("[HDEP] arity={arity}: {} distinct vks over {} bands", seen.len(), bands.len());
             for (d, idxs) in &seen {
-                eprintln!("[HDEP]   {} <- bands {idxs:?}", &d[..40.min(d.len())]);
+                eprintln!("[HDEP]   {d} <- bands {idxs:?}");
             }
         }
     }
