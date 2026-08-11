@@ -270,12 +270,25 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
     // opened `degree` — same pattern as core/compress/deferred.  Computed
     // before the lift (borrows proof_opened_values; the move into
     // finalize_carried_opened_values happens later).
-    let chip_height_felts_pre =
-        crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-            builder,
-            &chip_names,
-            &proof_opened_values,
+    // The height cursor the lift walks runs across ALL rounds in column order,
+    // so it has to START with the preprocessed round's WITNESSED heights — a
+    // preprocessed trace's height is a property of the committed key, not of
+    // this shard's main traces.  Feeding only the opened degrees makes the lift
+    // read main-chip heights for the preprocessed columns and then run off the
+    // end for the main ones, so every offset past the first preprocessed chip
+    // is wrong and the step-7 prefix-sum chain rejects.  Mirrors
+    // core_basefold.rs.
+    let chip_height_felts_pre: Vec<Felt<C::F>> = {
+        let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+        hs.extend(
+            crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                builder,
+                &chip_names,
+                &proof_opened_values,
+            ),
         );
+        hs
+    };
 
     // Bundle lift is the production (and only) path.
     use crate::shard_level_witness::LiftedEvalProof;
