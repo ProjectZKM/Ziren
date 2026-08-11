@@ -533,7 +533,7 @@ where
     // byte-neutral.  Threading it first keeps that flip to one coherent change.
     let _ = preprocessed_commit_data;
 
-    let residual_y: Option<Vec<Vec<Challenge<SC>>>> = compute_residual_y_openings::<SC, A>(
+    let residual_y: Vec<Vec<Challenge<SC>>> = compute_residual_y_openings::<SC, A>(
         chips,
         &commit_traces,
         preprocessed_traces,
@@ -938,22 +938,37 @@ pub fn compute_residual_y_openings<SC, A>(
     // the reuse is valid for ANY height; only the LEGACY (`!use_rev`) bitrev
     // convention needs a power-of-two height.
     use_rev: bool,
-) -> Option<Vec<Vec<Challenge<SC>>>>
+) -> Vec<Vec<Challenge<SC>>>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
-    let full_openings_ok = !logup_evaluations.chip_openings.is_empty()
-        && logup_evaluations
-            .chip_openings
-            .values()
-            .all(|ce| ce.main_trace_evaluations_full.is_some());
-    // Residual fast-path is unconditional (SP1-parity).  Declines whole-shard
-    // (legacy fallback, identical bytes) only when the full openings are
-    // unavailable.
-    if !full_openings_ok {
-        return None;
-    }
+    // The zerocheck residual IS the jagged round's column claims — SP1 feeds
+    // `prove_trusted_evaluations` the claims it already has rather than keeping
+    // a second path that recomputes them.  This function used to return
+    // `Option` and hand a `None` to that recompute; every `None` was a silent
+    // whole-shard fall back to a full extra pass over the trace cells, invisible
+    // to a byte gate because the recomputed values are identical.
+    //
+    // It cannot decline any more.  Each former decline is now a named panic,
+    // because each would be a REAL bug:
+    //
+    //   * missing full openings — structurally impossible: both producers
+    //     (`row_gkr::top_level` and ziren-gpu's `device_logup_gkr`) return
+    //     `Some` on every branch, zero-filling a device-only or width-0 chip;
+    //   * a non-power-of-two height under the LEGACY (`!use_rev`) bitrev
+    //     convention, where the residual's row order would not match the
+    //     jagged one;
+    //   * a residual whose width does not match the chip — a desync between
+    //     the zerocheck and the commit.
+    //
+    // Measured before removing the fallback: zero declines across 22 gate
+    // programs (all 18 precompile guests, tendermint, goat, Go, fib), reth core
+    // at 281 shards, and fib compress (the `use_rev = false` recursion path).
+    assert!(
+        !logup_evaluations.chip_openings.is_empty(),
+        "compute_residual_y_openings: LogUp-GKR produced no chip openings",
+    );
     // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
     // and `zip` TRUNCATES on a length mismatch rather than failing — so a
     // mismatch would silently pair a chip with a DIFFERENT chip's trace.
@@ -972,7 +987,6 @@ where
         "compute_residual_y_openings: chips/preprocessed_traces must be parallel",
     );
     let mut out: Vec<Vec<Challenge<SC>>> = Vec::with_capacity(chips.len());
-    let mut ok = true;
     for (idx, ((chip, ctrace), ptrace)) in chips
         .iter()
         .zip(commit_traces.iter())
@@ -1008,31 +1022,31 @@ where
             out.push(vec![Challenge::<SC>::ZERO; w]);
             continue;
         }
-        if !use_rev && !h.is_power_of_two() {
-            ok = false;
-            break;
-        }
-        match trace_at_z.get(&name) {
-            // Strict shape check: prep-then-main, main slice is the last `w`
-            // values (zerocheck num_main_cols == trace width).
-            Some(evals) if evals.len() == ptrace.num_polynomials() + w => {
-                out.push(evals[ptrace.num_polynomials()..].to_vec());
-            }
-            _ => {
-                ok = false;
-                break;
-            }
-        }
-    }
-    if ok {
-        Some(out)
-    } else {
-        tracing::warn!(
-            "residual_y DECLINED (missing/shape-mismatched residual or \
-             non-pow2 height) — legacy jagged step-3 recompute"
+        assert!(
+            use_rev || h.is_power_of_two(),
+            "compute_residual_y_openings: chip {name} has height {h}, which is not a \
+             power of two, under the LEGACY (use_rev = false) bitrev convention — the \
+             zerocheck residual's row order would not match the jagged one",
         );
-        None
+        // Strict shape check: prep-then-main, main slice is the last `w` values
+        // (zerocheck num_main_cols == trace width).
+        let prep_cols = ptrace.num_polynomials();
+        let evals = trace_at_z.get(&name).unwrap_or_else(|| {
+            panic!(
+                "compute_residual_y_openings: chip {name} has no zerocheck residual — \
+                 the zerocheck and the commit disagree on the chip set",
+            )
+        });
+        assert_eq!(
+            evals.len(),
+            prep_cols + w,
+            "compute_residual_y_openings: chip {name} residual is {} wide but the chip \
+             has {prep_cols} preprocessed + {w} main columns",
+            evals.len(),
+        );
+        out.push(evals[prep_cols..].to_vec());
     }
+    out
 }
 
 /// C0 block 6 (part 1) — per-chip log-height (u8, stored on the proof) + REAL
@@ -1343,7 +1357,10 @@ pub fn prove_trusted_evaluations<SC, A>(
     // the zerocheck residual (trace_at_z main slice), parallel to `chips`;
     // empty Vec per empty chip.  `Some` skips the jagged step-3 host
     // recompute (identical values, identical bytes); `None` = legacy.
-    pre_y_per_chip: Option<Vec<Vec<Challenge<SC>>>>,
+    // UNCONDITIONAL per-chip column claims from the zerocheck residual (SP1
+    // shape).  The jagged layer still accepts `Option` for synthetic callers
+    // that genuinely have no claims; the production path always supplies them.
+    pre_y_per_chip: Vec<Vec<Challenge<SC>>>,
     // Per-chip metadata heights, parallel to `chips` (device dummies carry a
     // baked height; host chips `None`).  Consulted before `_device_traces` for
     // an empty (width-0) commit trace's REAL height in `r_row_per_chip` below.
@@ -1493,12 +1510,11 @@ where
     // the same relabel `r_row_per_chip` and `chip_traces` already went through
     // on every ring).  The wrap ring's impl ignores these and keeps its own
     // legacy step-3 recompute — identical values either way.
-    let pre_y_inner: Option<Vec<Vec<InnerChallenge>>> = pre_y_per_chip.map(|per| {
-        per.into_iter()
-            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
-            .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
-            .collect()
-    });
+    let pre_y_inner: Vec<Vec<InnerChallenge>> = pre_y_per_chip
+        .into_iter()
+        // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
+        .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
+        .collect();
 
     // Per-ring jagged open.  Each `BasefoldRing` impl supplies its own concrete
     // `BfMmcs` + `Challenger`, so `precomputed_commit` — typed
@@ -1520,7 +1536,10 @@ where
         &chip_traces,
         &r_row_per_chip,
         z_row,
-        pre_y_inner,
+        // The per-RING seam keeps `Option`: the wrap ring's impl ignores the
+        // claims and keeps its own recompute.  The production inner path always
+        // supplies them.
+        Some(pre_y_inner),
         precomputed_commit,
         challenger,
     )

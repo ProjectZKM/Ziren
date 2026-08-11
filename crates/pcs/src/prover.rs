@@ -372,7 +372,10 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         precomputed_commit: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
             <SC as BasefoldRing>::BfMmcs,
         >,
-        pre_y_per_chip: Option<Vec<Vec<crate::Challenge<SC>>>>,
+        // The zerocheck residual's per-chip column claims.  UNCONDITIONAL, as
+        // in SP1: the claims the prover already computed ARE the jagged round's
+        // input, not a fast path with a recompute behind it.
+        pre_y_per_chip: Vec<Vec<crate::Challenge<SC>>>,
         // SP1-parity: the jagged `reducer` / `opener` are no longer carried as
         // params (SP1's `prove_trusted_evaluations` has neither — it reduces/opens
         // inline, dispatched by prover TYPE).  The CpuProver default sources the
