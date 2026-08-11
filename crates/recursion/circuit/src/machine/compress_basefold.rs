@@ -304,19 +304,58 @@ pub fn verify_compress_basefold<C, SC, A>(
             .iter()
             .map(|c| _Base1::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        let column_counts_by_round_pre: Vec<Vec<usize>> =
-            vec![main_widths_pre];
+        // SP1's two opening rounds: [preprocessed, main].  The preprocessed round
+        // is the MACHINE's preprocessed chips in chip-NAME order — the order
+        // `setup` commits them.  Same shape as core_basefold.rs; the recursion
+        // machine has its own preprocessed chips, so its shards are two-round
+        // exactly like the core machine's.
+        let prep_widths_pre: Vec<usize> = {
+            let mut dims: Vec<(String, usize)> = machine
+                .chips()
+                .iter()
+                .filter_map(|c| {
+                    let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                    (w > 0).then(|| {
+                        (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
+                    })
+                })
+                .collect();
+            dims.sort_by(|a, b| a.0.cmp(&b.0));
+            dims.into_iter().map(|(_, w)| w).collect()
+        };
+        let column_counts_by_round_pre: Vec<Vec<usize>> = if prep_widths_pre.is_empty() {
+            vec![main_widths_pre]
+        } else {
+            vec![prep_widths_pre.clone(), main_widths_pre]
+        };
 
-        // VERIFY_VK=true height-binding site: per-chip WITNESSED heights
-        // (2^log_h) from the opened `degree`, name-sorted to align with
-        // column_counts_by_round_pre — same pattern as core_basefold.rs.
-        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-            Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                builder,
-                &chip_names,
-                &proof_opened_values,
-            ));
+        // Heights run across BOTH rounds in column order: the preprocessed
+        // round's are WITNESSED, the main round's come from the opened degrees.
+        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
+            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            hs.extend(
+                crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                ),
+            );
+            hs
+        });
         let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
+        // The preprocessed round's RAW root paired with the digest the KEY
+        // holds; the hash-bind re-derives one from the other.
+        let basefold_vk_pre =
+            crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
+                builder,
+                &vk_legacy,
+            );
+        let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
+            if prep_widths_pre.is_empty() {
+                Vec::new()
+            } else {
+                vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
+            };
 
         // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
@@ -331,8 +370,8 @@ pub fn verify_compress_basefold<C, SC, A>(
                         *expected_eval,
                         *commit_root,
                         *modified_commitment,
-                    &[],
-                    &[],
+                    &preceding_commitments,
+                    &preprocessed_round.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,
@@ -412,8 +451,10 @@ pub fn verify_compress_basefold<C, SC, A>(
             .iter()
             .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        let _column_counts_by_round: Vec<Vec<usize>> =
-            vec![main_widths];
+        // The SAME per-round table the lift got — its LENGTH tells the shard
+        // verifier whether the proof is two-round.
+        let _ = main_widths;
+        let _column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
         let _insertion_points = crate::shard_basefold::BasefoldShardVerifier::<
             crate::basefold_verifier::RecursiveBasefoldVerifier,
         >::insertion_points_from_column_counts(&_column_counts_by_round);

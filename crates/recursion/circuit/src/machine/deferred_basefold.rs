@@ -233,16 +233,52 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .iter()
             .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
+        // SP1's two opening rounds: [preprocessed, main] — same shape as
+        // core/compress; the machine's preprocessed chips in chip-NAME order.
+        let prep_widths: Vec<usize> = {
+            let mut dims: Vec<(String, usize)> = machine
+                .chips()
+                .iter()
+                .filter_map(|c| {
+                    let w = MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(c);
+                    (w > 0).then(|| {
+                        (MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(c), w)
+                    })
+                })
+                .collect();
+            dims.sort_by(|a, b| a.0.cmp(&b.0));
+            dims.into_iter().map(|(_, w)| w).collect()
+        };
+        let column_counts_by_round: Vec<Vec<usize>> = if prep_widths.is_empty() {
+            vec![main_widths]
+        } else {
+            vec![prep_widths.clone(), main_widths]
+        };
 
-        // VERIFY_VK=true: per-chip WITNESSED heights from the
-        // opened `degree` — same pattern as core/compress.
-        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-            Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+        // Heights across BOTH rounds: preprocessed WITNESSED, main from the
+        // opened degrees.
+        let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
+            let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+            hs.extend(
+                crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                    builder,
+                    &chip_names,
+                    &proof_opened_values,
+                ),
+            );
+            hs
+        });
+        let basefold_vk_pre =
+            crate::shard_proof_variable_lift::build_basefold_verifying_key_variable::<C, SC>(
                 builder,
-                &chip_names,
-                &proof_opened_values,
-            ));
+                &vk_legacy,
+            );
+        let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
+            if prep_widths.is_empty() {
+                Vec::new()
+            } else {
+                vec![(preprocessed_round.raw_commit, basefold_vk_pre.preprocessed_commit)]
+            };
 
         // Bundle lift is the production (and only) path.
         use crate::shard_level_witness::LiftedEvalProof;
@@ -257,8 +293,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
                         *expected_eval,
                         *commit_root,
                         *modified_commitment,
-                    &[],
-                    &[],
+                    &preceding_commitments,
+                    &preprocessed_round.padding_heights,
                     max_log_row_count,
                     &column_counts_by_round,
                     None,

@@ -433,7 +433,13 @@ pub fn verify_core_basefold<C, SC, A>(
                 .iter()
                 .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
+            // The SAME per-round table the lift got: `insertion_points` carries
+            // one entry per opening ROUND, and the shard verifier reads its
+            // length to know whether the proof is two-round.  Deriving it from a
+            // second, single-round table here is what made the two sides
+            // disagree (the columns two-round, the claims one-round).
+            let _ = main_widths;
+            let column_counts_by_round: Vec<Vec<usize>> = column_counts_by_round_pre.clone();
             let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
                 crate::basefold_verifier::RecursiveBasefoldVerifier,
             >::chip_metadata_from_chips::<SC, A>(&shard_chips);
