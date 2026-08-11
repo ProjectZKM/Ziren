@@ -228,15 +228,31 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
     });
     use p3_air::BaseAir;
-    let _preprocessed_widths: Vec<usize> = shard_chips
+    // The preprocessed round's chips, in the MACHINE's name order — the order
+    // `setup` committed them.  A machine with none proves the single main
+    // round, which is the pre-existing shape.
+    let prep_widths: Vec<usize> = shard_chips
         .iter()
         .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
+        .filter(|w| *w > 0)
         .collect();
     let main_widths: Vec<usize> = shard_chips
         .iter()
         .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
         .collect();
-    let column_counts_by_round: Vec<Vec<usize>> = vec![main_widths];
+    let column_counts_by_round: Vec<Vec<usize>> = if prep_widths.is_empty() {
+        vec![main_widths]
+    } else {
+        vec![prep_widths.clone(), main_widths]
+    };
+    // The preprocessed round's commitment: the RAW root the BaseFold open binds
+    // against, paired with the digest the KEY holds.
+    let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
+        if prep_widths.is_empty() {
+            Vec::new()
+        } else {
+            vec![(preprocessed_round.raw_commit, basefold_vk.preprocessed_commit)]
+        };
 
     // Under VK enforcement: per-chip WITNESSED heights from the
     // opened `degree` — same pattern as core/compress/deferred.  Computed
@@ -282,6 +298,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
                 *expected_eval,
                 *commit_root,
                 *modified_commitment,
+                &preceding_commitments,
+                &preprocessed_round.padding_heights,
                 max_log_row_count,
                 &column_counts_by_round,
                 None,
@@ -361,7 +379,10 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             max_log_row_count,
         );
     let eval_public_values_fn = super::compress_basefold::noop_eval_public_values_fn::<C>();
-    let wrap_real_num_cols: usize = column_counts_by_round.iter().flatten().sum();
+    // Chip columns + each round's stacking-padding columns (see
+    // core_basefold.rs for why the pads have to be counted).
+    let wrap_real_num_cols: usize = column_counts_by_round.iter().flatten().sum::<usize>()
+        + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let jagged_evaluator_fn =
         super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
             builder,

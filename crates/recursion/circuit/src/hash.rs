@@ -187,6 +187,11 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         // The inner impl threads it into modified_commitments; the outer impl
         // (dead bundle arm) ignores it.
         modified_commitment: [Felt<C::F>; 8],
+        // Rounds committed BEFORE the main one, as (raw root, key digest) — the
+        // preprocessed round.  Empty on a machine with no preprocessed traces.
+        preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+        // Each round's stacking-padding column heights.
+        padding_heights: &[Vec<Felt<C::F>>],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
@@ -412,6 +417,11 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
         modified_commitment: [Felt<C::F>; 8],
+        // Rounds committed BEFORE the main one, as (raw root, key digest) — the
+        // preprocessed round.  Empty on a machine with no preprocessed traces.
+        preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+        // Each round's stacking-padding column heights.
+        padding_heights: &[Vec<Felt<C::F>>],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         row_counts_by_round: Option<&[Vec<usize>]>,
@@ -439,8 +449,8 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             expected_eval,
             commit_root,
             modified_commitment,
-            &[],
-            &[],
+            preceding_commitments,
+            padding_heights,
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,
@@ -670,6 +680,8 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         _expected_eval: Ext<C::F, C::EF>,
         _commit_root: [Felt<C::F>; 8],
         _modified_commitment: [Felt<C::F>; 8],
+        _preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+        _padding_heights: &[Vec<Felt<C::F>>],
         max_log_row_count: usize,
         column_counts_by_round: &[Vec<usize>],
         _row_counts_by_round: Option<&[Vec<usize>]>,
