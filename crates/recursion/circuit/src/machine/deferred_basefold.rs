@@ -375,7 +375,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
                 // Chip columns + each round's stacking-padding column (see
                 // core_basefold.rs for why the pads have to be counted).
                 column_counts_by_round.iter().flatten().sum::<usize>()
-                    + preprocessed_round.padding_heights.len(),
+                    + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
             );
         let mut challenger = machine.config().challenger_variable(builder);
 

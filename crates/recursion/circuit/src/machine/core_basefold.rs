@@ -503,7 +503,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     // included, so leaving them out here both drops their terms and
                     // shifts every column after the preprocessed round's pad by one.
                     column_counts_by_round.iter().flatten().sum::<usize>()
-                        + preprocessed_round.padding_heights.len(),
+                        + preprocessed_round.padding_heights.iter().map(|p| p.len()).sum::<usize>(),
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 
