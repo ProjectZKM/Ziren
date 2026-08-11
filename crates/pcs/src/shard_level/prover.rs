@@ -1359,26 +1359,39 @@ where
             let raw = unsafe {
                 core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
             };
-            let mut heights: Vec<Val<SC>> = bundle.packing.round_counts[0]
+            let heights: Vec<Val<SC>> = bundle.packing.round_counts[0]
                 .iter()
                 .map(|(h, _w)| Val::<SC>::from_usize(*h))
                 .collect();
-            // The round's padding column closes it out to its committed area.
-            let real: usize = bundle.packing.round_counts[0]
-                .iter()
-                .map(|(h, w)| h.saturating_mul(*w))
-                .sum();
-            let log_stack = bundle.commit.log_stacking_height as usize;
-            let area = real.next_multiple_of(1usize << log_stack);
-            heights.push(Val::<SC>::from_usize(area - real));
             (raw, heights)
         }
         _ => ([Val::<SC>::ZERO; 8], Vec::new()),
     };
 
+    // Each round's single stacking-padding column height — what closes that
+    // round out to its committed area.
+    let padding_row_heights: Vec<Val<SC>> = match &evaluation_proof {
+        crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
+            let log_stack = bundle.commit.log_stacking_height as usize;
+            bundle
+                .packing
+                .round_counts
+                .iter()
+                .map(|round| {
+                    let real: usize =
+                        round.iter().map(|(h, w)| h.saturating_mul(*w)).sum();
+                    let area = real.next_multiple_of(1usize << log_stack);
+                    Val::<SC>::from_usize(area - real)
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+
     BasefoldShardProof {
         public_values,
         main_commitment,
+        padding_row_heights,
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,

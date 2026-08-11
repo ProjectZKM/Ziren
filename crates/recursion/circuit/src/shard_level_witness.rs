@@ -394,7 +394,9 @@ where
             core::array::from_fn(|i| self.preprocessed_original_commitment[i].read(builder));
         let preprocessed_row_counts: Vec<Felt<C::F>> =
             self.preprocessed_row_counts.iter().map(|f| f.read(builder)).collect();
-        let _ = (&preprocessed_commit_arr, &preprocessed_row_counts);
+        let padding_row_heights: Vec<Felt<C::F>> =
+            self.padding_row_heights.iter().map(|f| f.read(builder)).collect();
+        let _ = (&preprocessed_commit_arr, &preprocessed_row_counts, &padding_row_heights);
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
@@ -477,6 +479,9 @@ where
             f.write(witness);
         }
         for f in self.preprocessed_row_counts.iter() {
+            f.write(witness);
+        }
+        for f in self.padding_row_heights.iter() {
             f.write(witness);
         }
         self.public_values.write(witness);

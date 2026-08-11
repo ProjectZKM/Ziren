@@ -397,8 +397,11 @@ where
         .filter(|c| <A as MachineAir<F>>::preprocessed_width(&c.air) > 0)
         .count();
     let preprocessed_row_counts: Vec<F> =
-        if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep + 1] };
+        if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep] };
     let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
+    // One padding height per opening round: preprocessed (when the machine has
+    // one) and main.
+    let padding_row_heights: Vec<F> = vec![F::ZERO; if n_prep == 0 { 1 } else { 2 }];
 
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
@@ -406,6 +409,7 @@ where
         main_commitment,
         preprocessed_original_commitment,
         preprocessed_row_counts,
+        padding_row_heights,
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,

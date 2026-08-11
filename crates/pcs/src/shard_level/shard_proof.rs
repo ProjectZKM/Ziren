@@ -135,17 +135,25 @@ pub struct BasefoldShardProof<F, EF> {
     #[serde(default = "default_zero_digest")]
     pub preprocessed_original_commitment: [F; 8],
     /// The PREPROCESSED round's per-chip row counts, in the order `setup`
-    /// committed them (chip-name order), followed by the round's single
-    /// stacking-padding column height.
+    /// committed them (chip-name order).
     ///
     /// Heights are the one part of that round's geometry a verifier cannot
     /// reconstruct — the chips and their widths come from the machine, and the
     /// hash-bind against the key's commitment pins these — so they travel here
-    /// as a FIXED-length list (one per preprocessed chip, plus the pad), which
-    /// is what keeps the recursion program's read count independent of the
-    /// program being verified.
+    /// as a FIXED-length list (one per preprocessed chip), which is what keeps
+    /// the recursion program's read count independent of the program being
+    /// verified.
     #[serde(default)]
     pub preprocessed_row_counts: Vec<F>,
+    /// Each opening round's stacking-PADDING column height, in round order.
+    ///
+    /// Every round carries exactly one such column (SP1's `.max(1)`, and the
+    /// gap is always under one stripe), and its height is what closes the round
+    /// out to its committed area.  Like the row counts above it is
+    /// height-derived, so a height-agnostic verifier takes it from here; the
+    /// per-round hash-bind pins it.
+    #[serde(default)]
+    pub padding_row_heights: Vec<F>,
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
@@ -177,6 +185,7 @@ where
             jagged_original_commitment: [F::ZERO; 8],
             preprocessed_original_commitment: [F::ZERO; 8],
             preprocessed_row_counts: Vec::new(),
+            padding_row_heights: Vec::new(),
         }
     }
 }
