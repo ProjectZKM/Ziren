@@ -782,7 +782,21 @@ where
             });
             prep_total += width.saturating_mul(*height);
         }
-        let prep_area = prep_total.next_multiple_of(1usize << log_stack);
+        // The area the preprocessed commitment actually covers.  The dense
+        // vector is materialized at `2^log_dense_size` cells and only THEN
+        // rounded out to whole stripes, so the area is
+        //     (1 << ceil(log2(real))).next_multiple_of(1 << log_stacking_height)
+        // — NOT `real.next_multiple_of(...)`, which under-counts it whenever
+        // `real` is not itself a power of two and leaves the padding short.
+        // Derived, not read from the proof: this is what pins round 0's
+        // padding, and with it the column space the jagged evaluation runs
+        // over.
+        let prep_area = if prep_total == 0 {
+            0
+        } else {
+            (1usize << (prep_total.next_power_of_two().trailing_zeros() as usize))
+                .next_multiple_of(1usize << log_stack)
+        };
         push_padding(&mut chip_infos, prep_area.saturating_sub(prep_total));
         n_prep_infos = chip_infos.len();
     }
