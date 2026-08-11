@@ -374,8 +374,24 @@ pub mod koala_bear_poseidon2 {
     impl crate::config::PrepCommitRoot<KoalaBearPoseidon2>
         for crate::jagged_pcs::jagged::PrecomputedJaggedCommit
     {
+        /// The HASH-BOUND commitment, as SP1's `commit_multilinears` returns
+        /// (`slop/crates/jagged/src/prover.rs:141-150`): the raw BaseFold root
+        /// with the committed GEOMETRY folded in,
+        /// `compress([root, hash(row_counts ++ column_counts)])`.
+        ///
+        /// This is what makes a verifying key say anything about the shape of
+        /// what it committed.  Ziren already binds the MAIN round this way; the
+        /// key holding only the raw root left the preprocessed geometry
+        /// prover-supplied, so a verifier that cannot see the traces (the
+        /// recursion circuit) had nothing to pin the preprocessed row counts
+        /// against.  The raw root travels in the PROOF, and the verifier
+        /// re-derives this digest from it (SP1
+        /// `slop/crates/jagged/src/verifier.rs:206`).
         fn commit_root(&self) -> Com<KoalaBearPoseidon2> {
-            self.commit.original_commitment.clone()
+            let raw = crate::jagged_pcs::basefold_commit_digest(&self.commit);
+            let modified =
+                crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(raw, &self.packing);
+            Com::<KoalaBearPoseidon2>::new(alloc::vec![modified])
         }
     }
 
@@ -386,7 +402,8 @@ pub mod koala_bear_poseidon2 {
         )],
         use_rev: bool,
     ) -> Com<KoalaBearPoseidon2> {
-        inner_prep_precompute(chip_traces, use_rev).commit.original_commitment
+        use crate::config::PrepCommitRoot;
+        inner_prep_precompute(chip_traces, use_rev).commit_root()
     }
 
     /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data

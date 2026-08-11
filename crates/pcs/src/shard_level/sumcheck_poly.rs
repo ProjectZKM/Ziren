@@ -480,7 +480,7 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
 // + register/get accessors) were RETIRED. The shard prover
 // (`prove_trusted_evaluations`) and host verifier (`verify_jagged_pcs_host`) now
 // name `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
-// and call `prove_jagged_basefold_inner_generic` / `build_jagged_verify_inputs`
+// and call `prove_jagged_basefold_single_round_generic` / `build_jagged_verify_inputs`
 // + `verify_jagged_basefold_inner_generic` statically, so the dyn-Any open/verify
 // hooks are dead. The PREP-COMMIT indirection is gone too: the setup commit is
 // now the typed `StarkGenericConfig::prep_commit` method, implemented directly

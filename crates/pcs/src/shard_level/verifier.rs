@@ -705,7 +705,13 @@ where
     // recovered positionally from the flattened counts.  Rebuild it here from
     // the per-round counts, and pin round 0 (preprocessed) against the
     // VERIFYING KEY, which is what makes that round mean anything.
-    let n_prep = vk.chip_information.len();
+    // How many chips the preprocessed round has is a property of the MACHINE, so
+    // the verifier counts them itself.  Taking it from the proof would let a
+    // prover drop the round and skip its binding entirely.
+    let n_prep = chips
+        .iter()
+        .filter(|c| <_ as crate::air::MachineAir<Val<SC>>>::preprocessed_width(**c) > 0)
+        .count();
     let combined_packing = &bundle.packing;
     let log_stack = bundle.commit.log_stacking_height as usize;
     let cube = 1usize << shared_eval_point.len();
@@ -734,7 +740,20 @@ where
     };
 
     if n_prep > 0 {
-        // Round 0 geometry comes from the KEY, never the proof.
+        // Round 0's geometry is CLAIMED by the proof and PINNED by the
+        // hash-bind below: the key's commitment is
+        // `compress([raw_root, hash(these counts)])`, so a proof that claims
+        // different counts cannot re-derive it.  That is SP1's structure — its
+        // verifying key carries no chip metadata at all
+        // (`hypercube/src/verifier/config.rs:73`), because the commitment
+        // already says what shape was committed.
+        // The NAMES still come from the key: the round is committed in
+        // `(Reverse(height), name)` order, which the verifier cannot reproduce
+        // from the machine alone, and the cross-bind below has to know which
+        // chip each committed column belongs to.  Retiring `chip_information`
+        // (SP1's key has none) therefore needs the preprocessed round committed
+        // in the machine's own chip order FIRST — see the hash-bind below, which
+        // already removes the key's role in pinning the GEOMETRY.
         let mut prep_total = 0usize;
         for (name, _domain, (width, height)) in vk.chip_information.iter() {
             chip_infos.push(JaggedChipInfo {
@@ -744,16 +763,12 @@ where
             });
             prep_total += width.saturating_mul(*height);
         }
-        // ...and the proof must agree with it.
         if let Some(prep_round) = combined_packing.round_counts.first() {
-            let claimed: Vec<(usize, usize)> = chip_infos
-                .iter()
-                .map(|i| (i.row_count, i.column_count))
-                .collect();
+            let claimed: Vec<(usize, usize)> =
+                chip_infos.iter().map(|i| (i.row_count, i.column_count)).collect();
             if prep_round != &claimed {
                 return Err(BasefoldVerifyError::JaggedPcs(
-                    "preprocessed round geometry disagrees with the verifying key"
-                        .into(),
+                    "preprocessed round geometry disagrees with the verifying key".into(),
                 ));
             }
         }
@@ -987,12 +1002,38 @@ where
         let log_stack = bundle.commit.log_stacking_height as usize;
         let stripes = prep_cells.div_ceil(1usize << log_stack);
         let area = stripes << log_stack;
+
+        // The BaseFold open Merkle-verifies against the round's RAW root, which
+        // only the proof has; the KEY holds the HASH-BOUND digest
+        // `compress([raw, hash(geometry)])`.  So re-derive the bound form from
+        // the claimed raw root and the geometry this verifier is about to open
+        // against, and require it to equal the key's.  That single check is
+        // what pins BOTH the root and the preprocessed row/column counts — SP1
+        // `slop/crates/jagged/src/verifier.rs:206`.
+        let Some(raw) = bundle.preceding_commits.first() else {
+            return Err(BasefoldVerifyError::JaggedPcs(
+                "preprocessed round: the proof carries no raw commitment for it".into(),
+            ));
+        };
+        // Only the REAL preprocessed chips: the stacking-pad columns appended
+        // above belong to the BATCHED layout, not to what `setup` committed, so
+        // the commit-time hash never saw them.
+        let (prep_rows, prep_cols): (Vec<usize>, Vec<usize>) = chip_infos
+            .iter()
+            .take(n_prep)
+            .map(|i| (i.row_count, i.column_count))
+            .unzip();
+        let rebound = crate::jagged_pcs::jagged_hash_bind_modified(
+            crate::jagged_pcs::basefold_commit_digest_felts(raw),
+            &prep_rows,
+            &prep_cols,
+        );
         // SAFETY: `Com<SC> == JaggedMmcs::Commitment` under the inner TypeId
         // gate.  The commitment OWNS a heap allocation (`MerkleCap` is a Vec of
         // digests), so this must relabel a CLONE that is then forgotten — a
         // bitwise `transmute_copy` of the borrowed original duplicates the
         // ownership and double-frees.
-        let commitment = unsafe {
+        let key_commitment = unsafe {
             core::mem::transmute_copy::<
                 crate::Com<SC>,
                 <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
@@ -1000,7 +1041,14 @@ where
                 >>::Commitment,
             >(&core::mem::ManuallyDrop::new(vk.commit.clone()))
         };
-        alloc::vec![(commitment, area)]
+        if crate::jagged_pcs::basefold_commit_digest_felts(&key_commitment) != rebound {
+            return Err(BasefoldVerifyError::JaggedPcs(
+                "preprocessed round: the claimed commitment and geometry do not \
+                 re-derive the verifying key's commitment"
+                    .into(),
+            ));
+        }
+        alloc::vec![(raw.clone(), area)]
     };
 
     // Delegate to the existing host-side verifier.

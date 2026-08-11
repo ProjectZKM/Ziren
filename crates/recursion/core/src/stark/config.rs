@@ -322,7 +322,7 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // The round's `claims` are deliberately DROPPED: this path keeps the
         // generic prover's own legacy step-3 `y_per_chip` recompute (identical
         // values), so the serialized bundle bytes are unchanged.
-        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
+        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_single_round_generic::<
             Self::Challenger,
             Self::BfMmcs,
         >(
@@ -377,7 +377,7 @@ mod basefold_over_bn254_generic_typecheck {
     use p3_challenger::CanObserve;
     use std::sync::Arc;
     use zkm_pcs::jagged_pcs::{
-        commit_jagged_pcs_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+        commit_jagged_pcs_generic, open_jagged_pcs_generic, verify_jagged_pcs_generic,
         JaggedCommitGeneric, JaggedProverDataGeneric,
         JaggedChallenge, JaggedMmcs, JaggedVal,
     };
@@ -432,7 +432,7 @@ mod basefold_over_bn254_generic_typecheck {
         dft: Arc<OuterDft>,
     ) -> StackedBasefoldProof<JaggedVal, JaggedChallenge, OuterValMmcs> {
         let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
-        open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        open_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &pd, eval_point, ch, mmcs, dft, fri,
         )
     }
@@ -494,6 +494,12 @@ pub mod outer_jagged_hooks {
     impl zkm_pcs::PrepCommitRoot<KoalaBearPoseidon2Outer>
         for zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs>
     {
+        /// The RAW root, NOT the hash-bound digest the inner ring now returns.
+        /// The bind is `compress([root, hash(counts)])` over the Poseidon2-
+        /// KOALABEAR compressor, and this ring's digest is a BN254 element; the
+        /// wrap machine also opens a single round, so there is no preceding
+        /// round whose geometry would need pinning here.  If the wrap ever
+        /// grows a preprocessed opening round, it needs its own BN254 bind.
         fn commit_root(&self) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
             self.commit.original_commitment.clone()
         }
@@ -582,7 +588,7 @@ mod basefold_over_bn254_roundtrip_test {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::basefold::FriConfig;
         use zkm_pcs::jagged_pcs::{
-            commit_jagged_pcs_generic, open_jagged_pcs_host_generic, verify_jagged_pcs_generic,
+            commit_jagged_pcs_generic, open_jagged_pcs_generic, verify_jagged_pcs_generic,
             JaggedChallenge,
         };
 
@@ -635,7 +641,7 @@ mod basefold_over_bn254_roundtrip_test {
             current[0]
         };
 
-        let proof = open_jagged_pcs_host_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+        let proof = open_jagged_pcs_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
             &prover_data,
             eval_point.clone(),
             &mut p_chal,
@@ -668,7 +674,7 @@ mod basefold_over_bn254_roundtrip_test {
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
-            precompute_jagged_basefold_commit_generic, prove_jagged_basefold_inner_generic,
+            precompute_jagged_basefold_commit_generic, prove_jagged_basefold_single_round_generic,
             verify_jagged_basefold_inner_generic,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
@@ -739,7 +745,7 @@ mod basefold_over_bn254_roundtrip_test {
 
         let mut p_chal = make_challenger();
         p_chal.observe(commitment.clone());
-        let bundle = prove_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
+        let bundle = prove_jagged_basefold_single_round_generic::<OuterChallenger, OuterValMmcs>(
             &trace_views,
             &r_row_per_chip,
             &z_row,

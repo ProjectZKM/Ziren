@@ -689,6 +689,7 @@ pub fn dummy_jagged_basefold_bundle(
         extra_packing: Vec::new(),
         extra_jagged_eval: Vec::new(),
         groups: Vec::new(),
+        preceding_commits: Vec::new(),
     }
 }
 

@@ -563,7 +563,7 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
 /// NOT one proof per round.  Every round's stripes are `log_stacking_height`
 /// tall, so `BasefoldProver::batch` folds them into one codeword regardless of
 /// how many stripes each round contributes.
-pub fn open_jagged_pcs_host_rounds(
+pub fn open_jagged_pcs_rounds(
     rounds: &[&JaggedProverData],
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
@@ -590,7 +590,7 @@ pub fn open_jagged_pcs_host_rounds(
     prover.prove_trusted_evaluation(eval_point, &stacked, challenger)
 }
 
-pub fn open_jagged_pcs_host(
+pub fn open_jagged_pcs(
     prover_data: &JaggedProverData,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut JaggedChallenger,
@@ -601,7 +601,7 @@ pub fn open_jagged_pcs_host(
     let mmcs = JaggedMmcs::new(hash, compress, 0);
     let dft = Arc::new(JaggedDft::default());
     // Delegate to the GC-generic core (inner = Poseidon2-KoalaBear Mmcs).
-    open_jagged_pcs_host_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
+    open_jagged_pcs_generic::<JaggedChallenger, JaggedMmcs, JaggedDft>(
         prover_data,
         eval_point,
         challenger,
@@ -618,7 +618,7 @@ pub fn open_jagged_pcs_host(
 /// challenger + Poseidon2-BN254 Mmcs.  `Val`/`Challenge` stay KoalaBear /
 /// KoalaBear⁴ for both (the eval-point is over `JaggedChallenge`).
 #[allow(clippy::type_complexity)]
-pub fn open_jagged_pcs_host_generic<Challenger, MT, D>(
+pub fn open_jagged_pcs_generic<Challenger, MT, D>(
     prover_data: &JaggedProverDataGeneric<MT>,
     eval_point: Vec<JaggedChallenge>,
     challenger: &mut Challenger,
@@ -647,8 +647,8 @@ where
 //
 // Mirror of the GPU commit override — provided
 // statically by the prover (`MachineProver::gpu_basefold_open_hook`) and
-// threaded down to the `open_jagged_pcs_host_generic` dispatch, not via a registry.
-// The hook receives the same inputs as `open_jagged_pcs_host_generic` and
+// threaded down to the `open_jagged_pcs_generic` dispatch, not via a registry.
+// The hook receives the same inputs as `open_jagged_pcs_generic` and
 // returns a byte-identical `StackedBasefoldProof` — the device side is
 // responsible for:
 //
@@ -673,16 +673,16 @@ where
 // `GpuBasefoldOpenFn` (the device open fn-ptr type) was removed in the
 // SP1-parity static-dispatch collapse — the device open now lives in the
 // `JaggedOpener` impl `DeviceJaggedOpener` (zkm-gpu-basefold), which calls
-// `FriCudaProver::prove` and falls back to `open_jagged_pcs_host` on `Err`
+// `FriCudaProver::prove` and falls back to `open_jagged_pcs` on `Err`
 // (returning `(prover_data, eval_point)` ownership so nothing is lost).
 
 // The GPU BaseFold open fn is provided STATICALLY (threaded from
-// the prover down to the `open_jagged_pcs_host_generic` dispatch), not via a global
+// the prover down to the `open_jagged_pcs_generic` dispatch), not via a global
 // registry.  The former `GPU_BASEFOLD_OPEN_HOOK` OnceLock + `register_/get_`
 // accessors were removed; the `prover` crate passes `Some(device_fn)` into
 // the `prove_shard_to_basefold` free-fn (which threads it through the
 // jagged-eval producer + `prove_trusted_evaluations` down to
-// `prove_jagged_basefold_inner`'s open closure).
+// `prove_jagged_basefold_single_round`'s open closure).
 
 /// Verify the proof against a previously observed commitment.
 /// Multi-ROUND verify: one BaseFold proof covering every round's commitment.
@@ -828,7 +828,7 @@ pub mod jagged {
 
     use super::{
         FriConfig,
-        open_jagged_pcs_host,
+        open_jagged_pcs,
         verify_jagged_pcs,
     };
 
@@ -949,6 +949,19 @@ pub mod jagged {
         /// `serde(default)` so existing wire-format bundles deserialize.
         #[serde(default = "crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy")]
         pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
+
+        /// The RAW BaseFold roots of the opening rounds BEFORE the last, in
+        /// round order — SP1's `original_commitments`.
+        ///
+        /// A round's commitment as the VERIFYING KEY holds it is the HASH-BOUND
+        /// digest `compress([raw, hash(geometry)])`, but the BaseFold open
+        /// Merkle-verifies its leaves against the RAW root.  So the proof
+        /// carries the raw root and the verifier re-derives the bound form to
+        /// check it against the key — which is what pins that round's geometry
+        /// (SP1 `slop/crates/jagged/src/verifier.rs:206`).  Empty on a
+        /// single-round proof.
+        #[serde(default)]
+        pub preceding_commits: Vec<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
 
         // ── Per-round split (Architecture A) extra groups (G≥2 only) ──────
         // All `serde(default)` empty so a G==1 bundle is byte-identical to the
@@ -1135,52 +1148,16 @@ pub mod jagged {
         // the twin in `precompute_jagged_basefold_commit_generic`.
         recursion_area_pin: Option<usize>,
     ) -> PrecomputedJaggedCommit {
-        let n_chips = chip_traces.len();
-
-        let _t_meta = std::time::Instant::now();
-        let _meta_span = tracing::info_span!("jagged_compute_metadata_pre").entered();
-        let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN: see the twin in
-        // `precompute_jagged_basefold_commit_generic`.  Carrier-keyed
-        // (recursion-only); `None` on CORE/shrink/wrap → byte-identical.
-        if let Some(target) = recursion_area_pin {
-            if packing.log_dense_size < target {
-                packing.log_dense_size = target;
-            }
-        }
-        drop(_meta_span);
-        tracing::info!(
-            elapsed_ms = _t_meta.elapsed().as_millis() as u64,
-            chips = n_chips,
-            sub_phase = "compute_metadata_pre",
-            "jagged sub-phase done"
-        );
-
-        let _t_commit = std::time::Instant::now();
-        let _commit_span = tracing::info_span!("jagged_dense_commit_pre").entered();
-        let (commit, prover_data) = {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
-            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
-            let dense_traces = vec![(
-                alloc::string::String::from("<jagged-dense>"),
-                RowMajorMatrix::new(dense_q, 1),
-            )];
-            crate::jagged_pcs::commit_jagged_pcs(dense_traces)
-        };
-        drop(_commit_span);
-        tracing::info!(
-            elapsed_ms = _t_commit.elapsed().as_millis() as u64,
-            chips = n_chips,
-            log_dense_size = packing.log_dense_size as u64,
-            sub_phase = "dense_commit_pre",
-            "jagged sub-phase done"
-        );
-
-        // This host precompute does not carry a re-materialized dense_q; the
-        // GPU prover commits device-side in its `commit_multilinears` override
-        // (SP1-parity, no host fallback) and produces its own carried dense_q.
-        PrecomputedJaggedCommit { packing, commit, prover_data, rev: use_rev, recursion_area_pin }
+        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+        let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+        let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+        precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
+            chip_traces,
+            crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0),
+            FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default(),
+            use_rev,
+            recursion_area_pin,
+        )
     }
 
     /// BaseFold-over-BN254 generic precompute: build the BaseFold commit
@@ -1303,7 +1280,7 @@ pub mod jagged {
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
-        prove_jagged_basefold_inner(
+        prove_jagged_basefold_single_round(
             chip_traces,
             r_row_per_chip,
             z_row,
@@ -1497,53 +1474,6 @@ pub mod jagged {
         pub y_per_chip: Vec<Vec<InnerChallenge>>,
     }
 
-    /// Compose SP1's two rounds from a preprocessed group and a main-round
-    /// bundle.
-    ///
-    /// The preprocessed round is host work — its commit was built once by
-    /// `setup` and its traces live on the host — while the main round may be
-    /// proven on device.  This lets the GPU prover reuse its device-native
-    /// main bundle unchanged: prove the preprocessed group FIRST (transcript
-    /// order is load-bearing), then fold the device bundle in behind it.
-    ///
-    /// `main` must be a SINGLE-group bundle; its scalar group-0 fields move
-    /// into the `extra_*` slots so the preprocessed round becomes group 0.
-    #[must_use]
-    pub fn compose_two_round(
-        prep: JaggedGroupProof,
-        main: JaggedBasefoldBundle,
-    ) -> JaggedBasefoldBundle {
-        assert_eq!(
-            main.num_groups(),
-            1,
-            "compose_two_round: the main bundle must carry exactly one group",
-        );
-        assert!(
-            main.groups.is_empty(),
-            "compose_two_round: the main bundle must not already carry a group map",
-        );
-        let n_prep = prep.y_per_chip.len();
-        let n_main = main.y_per_chip.len();
-        let mut y_per_chip = prep.y_per_chip;
-        y_per_chip.extend(main.y_per_chip);
-        JaggedBasefoldBundle {
-            reduction: prep.reduction,
-            basefold_proof: prep.basefold_proof,
-            y_per_chip,
-            commit: prep.commit,
-            packing: prep.packing,
-            jagged_eval: prep.jagged_eval,
-            extra_reduction: alloc::vec![main.reduction],
-            extra_basefold_proof: alloc::vec![main.basefold_proof],
-            extra_commit: alloc::vec![main.commit],
-            extra_packing: alloc::vec![main.packing],
-            extra_jagged_eval: alloc::vec![main.jagged_eval],
-            groups: alloc::vec![
-                (0..n_prep).collect(),
-                (n_prep..n_prep + n_main).collect(),
-            ],
-        }
-    }
 
     /// Prove ONE jagged group against `z_row`, consuming that group's
     /// precomputed commit.
@@ -1842,7 +1772,7 @@ pub mod jagged {
             let _t_open = std::time::Instant::now();
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
             let proof =
-                open_jagged_pcs_host(&prover_data, extended_eval_point, challenger);
+                open_jagged_pcs(&prover_data, extended_eval_point, challenger);
             drop(_open_span);
             tracing::info!(
                 elapsed_ms = _t_open.elapsed().as_millis() as u64,
@@ -2053,7 +1983,7 @@ pub mod jagged {
             let _open_span = tracing::info_span!("jagged_basefold_open").entered();
             let datas: Vec<&crate::jagged_pcs::JaggedProverData> =
                 rounds.iter().map(|r| &r.precomputed.prover_data).collect();
-            crate::jagged_pcs::open_jagged_pcs_host_rounds(
+            crate::jagged_pcs::open_jagged_pcs_rounds(
                 &datas,
                 extended_eval_point,
                 challenger,
@@ -2084,11 +2014,16 @@ pub mod jagged {
         let _ = n_chips;
 
         // The bundle carries the LAST round's commit — the main one, which the
-        // hash-bind ties to `main_commitment`.  Earlier rounds' commitments are
-        // the verifying key's, so the verifier supplies them itself rather than
-        // trusting the proof (SP1 `verifier/shard.rs:638` builds
+        // hash-bind ties to `main_commitment`.  An earlier round's commitment as
+        // the KEY holds it is the hash-bound digest, so the proof carries only
+        // its RAW root and the verifier re-derives the bound form to check it
+        // (SP1 `verifier/shard.rs:638` builds
         // `vec![vk.preprocessed_commit, *main_commitment]`).
         let main = rounds.last().expect("non-empty");
+        let preceding_commits: Vec<_> = rounds[..rounds.len() - 1]
+            .iter()
+            .map(|r| r.precomputed.commit.original_commitment.clone())
+            .collect();
         let packing_meta = PackingMeta {
             offsets,
             total_values,
@@ -2121,84 +2056,15 @@ pub mod jagged {
             extra_packing: Vec::new(),
             extra_jagged_eval: Vec::new(),
             groups: Vec::new(),
+            preceding_commits,
         }
     }
 
-    /// SP1's TWO-ROUND prove: the PREPROCESSED round then the MAIN round.
-    ///
-    /// Mirrors `hypercube/src/verifier/shard.rs:638`, which opens
-    /// `vec![vk.preprocessed_commit, *main_commitment]`.  The preprocessed
-    /// commit is NOT built here — it was built once by `setup` and lives in the
-    /// proving key (`StarkProvingKey::preprocessed_jagged`), so a shard pays for
-    /// its OPENING only, never for re-committing it.
-    ///
-    /// Both rounds are opened at the SAME `z_row`.  Group order is load-bearing:
-    /// the verifier's per-group loop samples each group's `z_col` from the shared
-    /// challenger in group order, so preprocessed must be proven first.  Neither
-    /// commit is observed in-band — the preprocessed one is already in the
-    /// transcript via `vk.observe_into` and the main one via the shard-level
-    /// Phase 1 prologue, matching SP1's ordering.
-    ///
-    /// `y_per_chip` is the FLAT concatenation `[prep | main]`; `groups` indexes
-    /// into it, and the verifier rebuilds the same cover from the vk.
-    #[allow(clippy::too_many_arguments)]
-    pub fn prove_jagged_basefold_two_round(
-        prep_chip_traces: &[ChipTraceView],
-        prep_r_row_per_chip: &[Vec<InnerChallenge>],
-        prep_precomputed: &PrecomputedJaggedCommit,
-        prep_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        main_chip_traces: &[ChipTraceView],
-        main_r_row_per_chip: &[Vec<InnerChallenge>],
-        main_precomputed: &PrecomputedJaggedCommit,
-        main_pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        z_row: &[InnerChallenge],
-        challenger: &mut crate::jagged_pcs::JaggedChallenger,
-    ) -> JaggedBasefoldBundle {
-        let prep = prove_one_jagged_group(
-            prep_chip_traces,
-            prep_r_row_per_chip,
-            z_row,
-            prep_pre_y_per_chip,
-            prep_precomputed,
-            challenger,
-        );
-        let main = prove_one_jagged_group(
-            main_chip_traces,
-            main_r_row_per_chip,
-            z_row,
-            main_pre_y_per_chip,
-            main_precomputed,
-            challenger,
-        );
-
-        let n_prep = prep.y_per_chip.len();
-        let n_main = main.y_per_chip.len();
-        let mut y_per_chip = prep.y_per_chip;
-        y_per_chip.extend(main.y_per_chip);
-
-        JaggedBasefoldBundle {
-            reduction: prep.reduction,
-            basefold_proof: prep.basefold_proof,
-            y_per_chip,
-            commit: prep.commit,
-            packing: prep.packing,
-            jagged_eval: prep.jagged_eval,
-            extra_reduction: alloc::vec![main.reduction],
-            extra_basefold_proof: alloc::vec![main.basefold_proof],
-            extra_commit: alloc::vec![main.commit],
-            extra_packing: alloc::vec![main.packing],
-            extra_jagged_eval: alloc::vec![main.jagged_eval],
-            groups: alloc::vec![
-                (0..n_prep).collect(),
-                (n_prep..n_prep + n_main).collect(),
-            ],
-        }
-    }
 
     /// Single-round prove: one group, emitted as the bundle's scalar group-0
     /// fields with `extra_*` / `groups` empty — byte-identical to the pre-split
     /// wire format.
-    fn prove_jagged_basefold_inner(
+    fn prove_jagged_basefold_single_round(
         chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
@@ -2227,16 +2093,18 @@ pub mod jagged {
             extra_packing: Vec::new(),
             extra_jagged_eval: Vec::new(),
             groups: Vec::new(),
+            preceding_commits: Vec::new(),
         }
     }
 
-    /// BaseFold-over-BN254 generic host open orchestration: the
-    /// challenger + Mmcs-generic mirror of the HOST path of
-    /// `prove_jagged_basefold_inner` (no GPU jagged-reduction hooks -- those are
-    /// inner-typed). The wrap (OuterChallenger + OuterValMmcs) calls this to
-    /// emit a BaseFold-BN254 bundle. Requires a precomputed commit (Option B).
+    /// The ring-generic single-round prove: challenger + Mmcs generic, so the
+    /// wrap (OuterChallenger + OuterValMmcs) can emit a BaseFold-BN254 bundle
+    /// from the same body.  `prove_jagged_basefold_single_round` above is the
+    /// inner-ring instantiation, which additionally reaches the GPU
+    /// jagged-reduction hooks (those are inner-typed).  Requires a precomputed
+    /// commit.
     #[allow(clippy::type_complexity)]
-    pub fn prove_jagged_basefold_inner_generic<Challenger, MT>(
+    pub fn prove_jagged_basefold_single_round_generic<Challenger, MT>(
         chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
@@ -2355,7 +2223,7 @@ pub mod jagged {
         let open = move |extended_eval_point: Vec<InnerChallenge>,
                          challenger: &mut Challenger| {
             let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            crate::jagged_pcs::open_jagged_pcs_host_generic::<
+            crate::jagged_pcs::open_jagged_pcs_generic::<
                 Challenger,
                 MT,
                 crate::jagged_pcs::JaggedDft,
@@ -2398,6 +2266,7 @@ pub mod jagged {
             extra_packing: Vec::new(),
             extra_jagged_eval: Vec::new(),
             groups: Vec::new(),
+            preceding_commits: Vec::new(),
         }
     }
     /// Verifier mirror.
@@ -2847,7 +2716,7 @@ pub mod jagged {
     }
 
     /// BaseFold-over-BN254 wrap port: verifier mirror of
-    /// `prove_jagged_basefold_inner_generic`, generic over the challenger + MMCS.
+    /// `prove_jagged_basefold_single_round_generic`, generic over the challenger + MMCS.
     /// The OUTER (wrap) ring drives this with OuterChallenger + OuterValMmcs via
     /// the registered verify hook; the inner ring keeps the concrete
     /// `verify_jagged_basefold_inner`.
@@ -3164,7 +3033,7 @@ mod test {
             current[0]
         };
 
-        let proof = open_jagged_pcs_host(&prover_data, eval_point.clone(), &mut p_chal);
+        let proof = open_jagged_pcs(&prover_data, eval_point.clone(), &mut p_chal);
 
         let mut v_chal = build_challenger();
         v_chal.observe(commit.original_commitment.clone());

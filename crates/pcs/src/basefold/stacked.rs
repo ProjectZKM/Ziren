@@ -488,7 +488,7 @@ where
             prover_data.iter().map(|d| &d.pcs_batch_data).collect();
 
         // The OPEN/prove GPU hook lives one level up at
-        // `jagged_pcs::open_jagged_pcs_host_generic` (a statically-provided
+        // `jagged_pcs::open_jagged_pcs_generic` (a statically-provided
         // `GpuBasefoldOpenFn`), where it can see the full `JaggedProverData`;
         // there is no dispatch at this site.  (The COMMIT side is the
         // `StarkGpuProver` override of `MachineProver::commit_multilinears`.)

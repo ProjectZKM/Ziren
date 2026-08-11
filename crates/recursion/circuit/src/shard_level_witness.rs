@@ -2775,6 +2775,7 @@ mod tests {
             extra_packing: vec![],
             extra_jagged_eval: vec![],
             groups: vec![],
+            preceding_commits: Vec::new(),
         };
         let bytes = bundle.to_bytes();
         let cols: Vec<Vec<usize>> = vec![vec![3]];
