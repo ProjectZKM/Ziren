@@ -297,42 +297,26 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
 
     fn prove_jagged_open(
         z_row: &[zkm_pcs::InnerChallenge],
-        mut rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
+        rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
-        // The wrap machine has no preprocessed round to open, so this ring only
-        // ever sees the single main round.
-        assert_eq!(
-            rounds.len(),
-            1,
-            "wrap ring prove_jagged_open: expected exactly 1 round, got {}",
-            rounds.len(),
-        );
-        let round = rounds.pop().expect("len checked");
-        let chip_traces = round.chip_traces;
-        let r_row_per_chip = round.r_row_per_chip;
-        let precomputed = round.precomputed;
-        // The wrap ring's jagged open, over `OuterValMmcs` + `OuterChallenger`.
-        // This is the body `prove_trusted_evaluations` used to reach through a
-        // `TypeId::of::<SC::Challenger>() != JaggedChallenger` test; the wrap
-        // ring is the only non-`JaggedChallenger` ring, so naming the types
-        // here is that test made static — and it is what lets the INNER arm
-        // stop inferring `BfMmcs == JaggedMmcs` from a challenger identity.
+        // ONE jagged proof spanning every round, exactly as the inner ring
+        // does — the wrap machine has preprocessed chips, so its terminal proof
+        // opens `[preprocessed, main]` and binds the preprocessed round to the
+        // key like every stage before it.
         //
-        // The round's `claims` are deliberately DROPPED: this path keeps the
-        // generic prover's own legacy step-3 `y_per_chip` recompute (identical
-        // values), so the serialized bundle bytes are unchanged.
-        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_single_round_generic::<
+        // The round's `claims` reach the generic body, which weighs them into
+        // the reduction; the ring only names its own commitment family here.
+        let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_rounds_generic::<
             Self::Challenger,
             Self::BfMmcs,
+            zkm_pcs::jagged_pcs::JaggedDft,
         >(
-            chip_traces,
-            r_row_per_chip,
+            &rounds,
             z_row,
-            None,
-            precomputed,
             challenger,
             Self::bf_mmcs(),
+            std::sync::Arc::new(zkm_pcs::jagged_pcs::JaggedDft::default()),
             Self::fri_config(),
         );
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
@@ -769,6 +753,8 @@ mod basefold_over_bn254_roundtrip_test {
             mmcs,
             /* skip_commit_observe = */ true,
             fri,
+            // Single-round fixture: no preceding rounds.
+            &[],
         );
         assert!(
             ok,

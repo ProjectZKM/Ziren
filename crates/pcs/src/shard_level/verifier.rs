@@ -658,6 +658,30 @@ where
             mmcs,
             /* skip_commit_observe = */ true,
             fri,
+            // The rounds committed before this one — the preprocessed round.
+            // Its area is exactly its real cells plus the stacking padding that
+            // closes it out, both of which the packing carries, so nothing is
+            // re-derived here.
+            &bundle
+                .preceding_commits
+                .iter()
+                .enumerate()
+                .map(|(r, c)| {
+                    let real: usize = bundle
+                        .packing
+                        .round_counts
+                        .get(r)
+                        .map(|round| round.iter().map(|(h, w)| h * w).sum())
+                        .unwrap_or(0);
+                    let pad: usize = bundle
+                        .packing
+                        .padding_heights
+                        .get(r)
+                        .map(|p| p.iter().sum())
+                        .unwrap_or(0);
+                    (c.clone(), real + pad)
+                })
+                .collect::<Vec<_>>(),
         );
         return if ok {
             Ok(())

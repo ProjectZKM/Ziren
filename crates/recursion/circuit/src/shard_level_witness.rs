@@ -1299,7 +1299,11 @@ where
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
         .map(|cc| cc.iter().sum::<usize>())
-        .sum();
+        .sum::<usize>()
+        // Plus each round's stacking-padding columns: the outer bundle carries
+        // the prover's own heights, so the column space is baked from them
+        // rather than re-derived.
+        + bundle.packing.padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
     let num_rounds = column_counts_by_round.len().max(1);
@@ -1462,7 +1466,20 @@ where
         jagged_eval_proof,
         pcs_proof: stacked_pcs_proof,
         column_counts: column_counts_by_round.to_vec(),
-        padding_row_heights: Vec::new(),
+        // Baked from the bundle: the outer ring's lift reads the packing
+        // directly, so the padding heights are constants rather than
+        // witnessed felts.
+        padding_row_heights: bundle
+            .packing
+            .padding_heights
+            .iter()
+            .map(|round| {
+                round
+                    .iter()
+                    .map(|&h| builder.constant(C::F::from_u64(h as u64)))
+                    .collect()
+            })
+            .collect(),
         row_counts,
         original_commitments,
         modified_commitments,
