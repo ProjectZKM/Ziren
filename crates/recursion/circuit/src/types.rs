@@ -118,37 +118,29 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> Verif
     }
 
     /// Hash the verifying key into a single digest.
-    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum ||
-    ///            prep[N].{name_digest, prep_width} )
+    /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum )
     ///
-    /// VK = f(chip-SET).  The
-    /// per-prep-domain HEIGHT block (log_n / 2^log_n / shift / generator) is
-    /// NOT folded, so the recursion program's vk does not depend on the
-    /// verified core vk's preprocessed trace heights.  Instead fold, per
-    /// prep chip, the chip NAME-DIGEST and preprocessed WIDTH — read from the
-    /// WITNESSED `prep_name_width_hash_inputs` (a FIXED 2 felts per prep
-    /// chip).  WITNESSING (not baking from compile-time `chip_information`) is
-    /// what keeps the program VALUE-INDEPENDENT: the loop emits exactly 2
-    /// reads per prep chip regardless of the core vk's heights, name lengths,
-    /// or (height-driven) sort order, so the recursion VK is keyed on the
-    /// chip SET only.  MUST stay byte-identical to the host
-    /// (prover/src/types.rs) and host-verifier (verifier/src/stark/mod.rs)
-    /// folds: poseidon2 inputs (name_digest then width) and order identical.
+    /// SP1's inputs, in SP1's order
+    /// (hypercube/src/verifier/hashable_key.rs:107).  Nothing about the chips
+    /// is folded in: the preprocessed commitment is the HASH-BOUND digest
+    /// `compress([root, hash(row_counts ++ column_counts)])`, so it already
+    /// discriminates the committed geometry, and the chip set and its widths
+    /// are a property of the MACHINE.  The per-prep-chip
+    /// `[name_digest, width]` fold this replaces existed only because the
+    /// commitment did not yet say what shape it committed -- and it is also
+    /// what made the program's input length depend on the verified core vk.
+    /// MUST stay byte-identical to the host (prover/src/types.rs) and
+    /// host-verifier (verifier/src/stark/mod.rs) folds.
     pub fn hash(&self, builder: &mut Builder<C>) -> SC::DigestVariable
     where
         C::F: TwoAdicField,
         SC::DigestVariable: IntoIterator<Item = Felt<C::F>>,
     {
-        let num_inputs = DIGEST_SIZE + 1 + 14 + (2 * self.prep_name_width_hash_inputs.len());
-        let mut inputs: Vec<Felt<C::F>> = Vec::with_capacity(num_inputs);
+        let mut inputs: Vec<Felt<C::F>> = Vec::with_capacity(DIGEST_SIZE + 1 + 14);
         inputs.extend(self.commitment);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for fields in self.prep_name_width_hash_inputs.iter() {
-            inputs.push(fields[0]); // name_digest
-            inputs.push(fields[1]); // prep_width
-        }
 
         SC::hash(builder, &inputs)
     }

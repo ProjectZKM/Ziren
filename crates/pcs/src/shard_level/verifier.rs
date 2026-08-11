@@ -128,6 +128,8 @@ impl BasefoldShardVerifier {
         &self,
         _vk: &StarkVerifyingKey<SC>,
         chips: &[&Chip<Val<SC>, A>],
+        // The MACHINE's preprocessed chips (name, width), name ordered.
+        prep_chip_dims: &[(String, usize)],
         proof: &BasefoldShardProof<Val<SC>, Challenge<SC>>,
         challenger: &mut SC::Challenger,
         num_pv_elts: usize,
@@ -438,6 +440,7 @@ impl BasefoldShardVerifier {
         verify_jagged_pcs_host::<SC, A>(
             _vk,
             chips,
+            prep_chip_dims,
             // Jagged verified at the zerocheck-reduced z*.
             &proof.zerocheck_proof.point_and_eval.0,
             &proof.evaluation_proof,
@@ -525,6 +528,8 @@ fn verify_jagged_pcs_host<SC, A>(
     // `vk.commit`.
     vk: &StarkVerifyingKey<SC>,
     chips: &[&Chip<Val<SC>, A>],
+    // The MACHINE's preprocessed chips (name, width), name ordered.
+    prep_chip_dims: &[(String, usize)],
     shared_eval_point: &[Challenge<SC>],
     evaluation_proof: &super::shard_proof::EvaluationProof,
     _gkr_evaluations: &super::types::LogUpEvaluations<Challenge<SC>>,
@@ -690,12 +695,11 @@ where
     // SP1's two rounds: `[preprocessed, main]`.  The proof carries the
     // preprocessed round as group 0 and main as group 1.
     //
-    // The PREPROCESSED round's geometry is read off the VERIFYING KEY, never
-    // off the proof: `vk.chip_information` records (name, domain, (width,
-    // height)) for exactly the chips `setup` committed, in exactly the order it
-    // committed them ((Reverse(height), name) — NOT the main round's name
-    // order).  Taking it from the proof would let a prover claim whatever
-    // geometry made its opening check out.
+    // The PREPROCESSED round's chips and WIDTHS come from the MACHINE (name
+    // ordered, exactly the set and order `setup` commits); its HEIGHTS are
+    // claimed by the proof and pinned by the hash-bind against the key's
+    // commitment.  Nothing here reads chip metadata off the key -- SP1's key
+    // carries none (`hypercube/src/verifier/config.rs:73`).
     // ── Rebuild the batched column layout, round by round ────────────────
     //
     // The proof is ONE jagged instance whose columns run
@@ -747,30 +751,36 @@ where
         // verifying key carries no chip metadata at all
         // (`hypercube/src/verifier/config.rs:73`), because the commitment
         // already says what shape was committed.
-        // The NAMES still come from the key: the round is committed in
-        // `(Reverse(height), name)` order, which the verifier cannot reproduce
-        // from the machine alone, and the cross-bind below has to know which
-        // chip each committed column belongs to.  Retiring `chip_information`
-        // (SP1's key has none) therefore needs the preprocessed round committed
-        // in the machine's own chip order FIRST — see the hash-bind below, which
-        // already removes the key's role in pinning the GEOMETRY.
+        // NAMES and WIDTHS come from the MACHINE (its preprocessed chips, name
+        // ordered -- the same set and order `setup` commits); HEIGHTS are
+        // claimed by the proof and pinned by the hash-bind below.
+        let Some(prep_round) = combined_packing.round_counts.first() else {
+            return Err(BasefoldVerifyError::JaggedPcs(
+                "preprocessed round: the proof carries no geometry for it".into(),
+            ));
+        };
+        if prep_round.len() != n_prep {
+            return Err(BasefoldVerifyError::JaggedPcs(format!(
+                "preprocessed round: the proof claims {} chips, the machine has {n_prep}",
+                prep_round.len(),
+            )));
+        }
         let mut prep_total = 0usize;
-        for (name, _domain, (width, height)) in vk.chip_information.iter() {
+        for ((name, width), (height, claimed_width)) in
+            prep_chip_dims.iter().zip(prep_round.iter())
+        {
+            if claimed_width != width {
+                return Err(BasefoldVerifyError::JaggedPcs(format!(
+                    "preprocessed round: chip {name} is {claimed_width} columns in the proof \
+                     but {width} in the machine",
+                )));
+            }
             chip_infos.push(JaggedChipInfo {
                 name: name.clone(),
                 row_count: *height,
                 column_count: *width,
             });
             prep_total += width.saturating_mul(*height);
-        }
-        if let Some(prep_round) = combined_packing.round_counts.first() {
-            let claimed: Vec<(usize, usize)> =
-                chip_infos.iter().map(|i| (i.row_count, i.column_count)).collect();
-            if prep_round != &claimed {
-                return Err(BasefoldVerifyError::JaggedPcs(
-                    "preprocessed round geometry disagrees with the verifying key".into(),
-                ));
-            }
         }
         let prep_area = prep_total.next_multiple_of(1usize << log_stack);
         push_padding(&mut chip_infos, prep_area.saturating_sub(prep_total));

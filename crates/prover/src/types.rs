@@ -81,28 +81,27 @@ where
     <SC::Pcs as Pcs<SC::Challenge, SC::Challenger>>::Commitment: std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // VK = f(chip-SET): the per-prep-domain HEIGHT block (log_size /
-        // 2^log_size / shift / generator) is DROPPED so the digest does not
-        // depend on the verified program's preprocessed (Program/Byte) trace
-        // heights.
-        // To keep the chip-SET discriminant (different prep chip-sets must
-        // not collide) we fold, per prep chip in order, the chip NAME-DIGEST
-        // (`prep_chip_name_digest`, a single fixed-width felt) and the
-        // preprocessed WIDTH (chip_information tuple = (width, height)).  MUST
-        // stay byte-identical to the in-circuit (recursion/circuit/src/types.rs,
-        // which reads these as WITNESSED felts) and host-verifier
-        // (verifier/src/stark/mod.rs) folds — order: name_digest then width.
-        // Result: VK = f(chip-set + prep-commit + pc_start + cumulative_sum).
-        let mut inputs: Vec<KoalaBear> = Vec::new();
+        // SP1's inputs, in SP1's order (hypercube/src/verifier/hashable_key.rs:107):
+        // the preprocessed commitment, pc_start, and the initial cumulative sum.
+        //
+        // Nothing about the chips is folded in, and nothing needs to be: the
+        // preprocessed commitment is the HASH-BOUND digest
+        // `compress([root, hash(row_counts ++ column_counts)])`, so it already
+        // discriminates the committed geometry, and the chip SET and its
+        // widths are a property of the MACHINE that any verifier reconstructs
+        // (`StarkMachine::preprocessed_chip_dims`).  The per-prep-chip
+        // `[name_digest, width]` fold this replaces existed only because the
+        // commitment did not yet say what shape it committed.
+        //
+        // MUST stay byte-identical to the host verifier's fold
+        // (crates/verifier/src/stark/mod.rs) and the in-circuit one
+        // (crates/recursion/circuit/src/types.rs).
+        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(DIGEST_SIZE + 1 + 14);
         let cap: &[[KoalaBear; DIGEST_SIZE]] = self.commit.borrow();
         inputs.extend(&cap[0]);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for (name, _domain, dims) in self.chip_information.iter() {
-            inputs.push(zkm_primitives::prep_chip_name_digest(name));
-            inputs.push(KoalaBear::from_usize(dims.0));
-        }
 
         poseidon2_hash(inputs)
     }

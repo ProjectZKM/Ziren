@@ -836,6 +836,27 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         )
     }
 
+    /// The preprocessed round's chip set: every chip with preprocessed columns,
+    /// BY NAME -- exactly what `setup` commits, and in the order it commits it.
+    ///
+    /// `setup` asserts that a chip's generated preprocessed trace is `Some` iff
+    /// `preprocessed_width() > 0` (the `map_or(0, width) == preprocessed_width()`
+    /// check), so the set is a property of the MACHINE and needs neither the
+    /// program nor the verifying key to reconstruct.  That is what lets the key
+    /// stop carrying `chip_information` -- SP1's carries none.
+    pub fn preprocessed_chip_dims(&self) -> Vec<(String, usize)> {
+        let mut dims: Vec<(String, usize)> = self
+            .chips()
+            .iter()
+            .filter_map(|c| {
+                let w = <A as MachineAir<Val<SC>>>::preprocessed_width(&c.air);
+                (w > 0).then(|| (<A as MachineAir<Val<SC>>>::name(&c.air), w))
+            })
+            .collect();
+        dims.sort_by(|a, b| a.0.cmp(&b.0));
+        dims
+    }
+
     /// Generates the dependencies of the given records.
     #[allow(clippy::needless_for_each)]
     pub fn generate_dependencies(
@@ -933,6 +954,10 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // the serial verdict exactly, we collect the indices of all failing shards and, if any,
         // re-verify the lowest-index failure serially to reconstruct the original typed error —
         // identical to what the serial `for` loop returned (it returned the first failure).
+        // The preprocessed opening round's chip set, derived from the MACHINE
+        // once for the whole proof.
+        let prep_chip_dims = self.preprocessed_chip_dims();
+        let prep_chip_dims = &prep_chip_dims;
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
@@ -944,6 +969,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                         &self.config,
                         vk,
                         &chips,
+                        prep_chip_dims,
                         &mut shard_challenger,
                         shard_proof,
                         self.core_rev,

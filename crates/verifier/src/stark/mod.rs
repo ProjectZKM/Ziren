@@ -157,22 +157,19 @@ impl StarkVerifier {
 impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2>
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // VK = f(chip-SET): no per-prep-domain HEIGHT block; instead fold, per
-        // prep chip in order, the chip NAME-DIGEST (`prep_chip_name_digest`) and
-        // the preprocessed WIDTH (chip_information tuple = (width, height)).
-        // MUST stay byte-identical to the host (prover/src/types.rs) and
-        // in-circuit (recursion/circuit/src/types.rs) folds — order:
-        // name_digest then width.
-        let commit_elems: Vec<KoalaBear> = self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
-        let mut inputs: Vec<KoalaBear> = Vec::new();
+        // SP1's inputs, in SP1's order
+        // (hypercube/src/verifier/hashable_key.rs:107).  Nothing about the
+        // chips: the preprocessed commitment is hash-bound to its geometry, and
+        // the chip set is a property of the machine.  MUST stay byte-identical
+        // to the prover (prover/src/types.rs) and in-circuit
+        // (recursion/circuit/src/types.rs) folds.
+        let commit_elems: Vec<KoalaBear> =
+            self.commit.roots().iter().flat_map(|d| d.iter().copied()).collect();
+        let mut inputs: Vec<KoalaBear> = Vec::with_capacity(commit_elems.len() + 1 + 14);
         inputs.extend(commit_elems);
         inputs.push(self.pc_start);
         inputs.extend(self.initial_global_cumulative_sum.0.x.0);
         inputs.extend(self.initial_global_cumulative_sum.0.y.0);
-        for (name, _domain, dims) in self.chip_information.iter() {
-            inputs.push(zkm_primitives::prep_chip_name_digest(name));
-            inputs.push(KoalaBear::from_usize(dims.0));
-        }
 
         poseidon2_hash(inputs)
     }

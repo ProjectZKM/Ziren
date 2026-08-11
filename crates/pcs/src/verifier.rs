@@ -29,6 +29,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
         _config: &SC,
         vk: &StarkVerifyingKey<SC>,
         chips: &[&MachineChip<SC, A>],
+        // The MACHINE's preprocessed chip set (name, preprocessed_width), name
+        // ordered -- `StarkMachine::preprocessed_chip_dims`.  The preprocessed
+        // opening round is over exactly these, and they come from the machine
+        // rather than the shard's chip subset or the key.
+        prep_chip_dims: &[(String, usize)],
         challenger: &mut SC::Challenger,
         proof: &ShardProof<SC>,
         // `true` for the CORE machine (rev shard proofs), `false`
@@ -76,6 +81,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
             .verify_shard::<SC, A>(
                 vk,
                 chips,
+                prep_chip_dims,
                 basefold_proof.as_ref(),
                 challenger,
                 num_pv_elts,
