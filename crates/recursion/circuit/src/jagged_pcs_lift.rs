@@ -384,6 +384,7 @@ where
         jagged_eval_proof,
         pcs_proof: stacked_pcs_proof,
         column_counts,
+        padding_row_heights: Vec::new(),
         row_counts,
         original_commitments,
         modified_commitments,

@@ -112,6 +112,14 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// (`assert_row_count_le_cube` + the SP1 main-padding-column
     /// bit-bound) instead of baking them.
     pub row_counts: Vec<Vec<Felt<F>>>,
+    /// Each round's stacking-padding column heights, in round order.
+    ///
+    /// The padding column is part of the committed COLUMN SPACE (it is what
+    /// closes a round out to its area) but not of the round's chip geometry, so
+    /// it belongs here rather than in `row_counts` / `column_counts` — those two
+    /// are what the hash-bind hashes, and the commitment binds the real chips
+    /// only.  The prefix-sum walk splices it back in at the round boundary.
+    pub padding_row_heights: Vec<Vec<Felt<F>>>,
     /// Per-round original commitment digests (before any
     /// chip-info-hash mix-in).  The BaseFold opening binds against THESE
     /// (the RAW BaseFold roots).

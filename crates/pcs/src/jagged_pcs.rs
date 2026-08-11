@@ -904,6 +904,23 @@ pub mod jagged {
         /// legacy wire format byte-identical.
         #[serde(default)]
         pub round_counts: Vec<Vec<(usize, usize)>>,
+        /// Each round's stacking-padding column heights, in round order — the
+        /// gap between the round's real cells and the area the stacked
+        /// commitment actually covers, split into columns no taller than the
+        /// row cube (a taller column has no eq table to be weighed against, so
+        /// SP1 carries a padding column COUNT for the same reason).
+        ///
+        /// It is NOT derivable from `round_counts`: a round whose cells already
+        /// fill a whole number of stripes still gets a full extra stripe, so
+        /// `next_multiple_of` under-counts it by `1 << log_stacking_height` and
+        /// the reconstructed final offset lands a stripe short.  The recursion
+        /// lift closes its column space with this height, so it has to be the
+        /// prover's own value.
+        ///
+        /// `serde(default)` empty on a bundle with no padding columns, which
+        /// keeps the legacy wire format byte-identical.
+        #[serde(default)]
+        pub padding_heights: Vec<Vec<usize>>,
     }
 
     // BaseFold-over-BN254: generic over the Mmcs so the wrap (OuterSC)
@@ -1812,6 +1829,8 @@ pub mod jagged {
                 .iter()
                 .map(|ci| (ci.row_count, ci.column_count))
                 .collect()],
+            // No padding columns on this path.
+            padding_heights: Vec::new(),
         };
         let _ = n_chips;
         JaggedGroupProof {
@@ -1851,6 +1870,7 @@ pub mod jagged {
         // ── Concatenate the rounds into one column space ──────────────────
         let mut chip_infos: Vec<crate::jagged::JaggedChipInfo> = Vec::new();
         let mut offsets: Vec<usize> = Vec::new();
+        let mut round_padding_heights: Vec<Vec<usize>> = Vec::with_capacity(rounds.len());
         let mut y_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut r_row_per_chip: Vec<Vec<InnerChallenge>> = Vec::new();
         let mut base = 0usize;
@@ -1900,8 +1920,10 @@ pub mod jagged {
                 let cube = 1usize << z_row.len();
                 let mut done = 0usize;
                 let mut pad_off = base + pk.total_values;
+                let mut this_round_pads: Vec<usize> = Vec::new();
                 loop {
                     let h = core::cmp::min(cube, pad - done);
+                    this_round_pads.push(h);
                     offsets.push(pad_off);
                     chip_infos.push(crate::jagged::JaggedChipInfo {
                         name: alloc::format!("<stacking-pad:{}>", chip_infos.len()),
@@ -1917,6 +1939,7 @@ pub mod jagged {
                         break;
                     }
                 }
+                round_padding_heights.push(this_round_pads);
             }
             base += area;
         }
@@ -2042,6 +2065,7 @@ pub mod jagged {
                         .collect()
                 })
                 .collect(),
+            padding_heights: round_padding_heights,
         };
         JaggedBasefoldBundle {
             reduction,
@@ -2250,6 +2274,8 @@ pub mod jagged {
                 .iter()
                 .map(|ci| (ci.row_count, ci.column_count))
                 .collect()],
+            // No padding columns on this path.
+            padding_heights: Vec::new(),
         };
         // The BN254 wrap path is always single-round (G==1): scalar fields,
         // empty extra_* / groups (byte-identical to the pre-split bundle).
@@ -3332,6 +3358,7 @@ mod test {
             column_counts: column_counts.clone(),
             // Synthetic single-round packing.
             round_counts: Vec::new(),
+            padding_heights: Vec::new(),
         };
 
         // The derived per-chip (row_counts, column_counts) — the EXACT felt

@@ -1370,21 +1370,20 @@ where
 
     // Each round's single stacking-padding column height — what closes that
     // round out to its committed area.
-    let padding_row_heights: Vec<Val<SC>> = match &evaluation_proof {
-        crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => {
-            let log_stack = bundle.commit.log_stacking_height as usize;
-            bundle
-                .packing
-                .round_counts
-                .iter()
-                .map(|round| {
-                    let real: usize =
-                        round.iter().map(|(h, w)| h.saturating_mul(*w)).sum();
-                    let area = real.next_multiple_of(1usize << log_stack);
-                    Val::<SC>::from_usize(area - real)
-                })
-                .collect()
-        }
+    // Straight from the packing: the height the prover actually gave each
+    // round's padding column.  Re-deriving it as
+    // `real.next_multiple_of(1 << log_stacking_height) - real` is WRONG for a
+    // round whose cells already fill whole stripes — the commitment still
+    // covers one more stripe than that, so the derived height is a full stripe
+    // short and the recursion's reconstructed final offset (and with it the
+    // last column's jagged evaluation) misses by `1 << log_stacking_height`.
+    let padding_row_heights: Vec<Vec<Val<SC>>> = match &evaluation_proof {
+        crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle) => bundle
+            .packing
+            .padding_heights
+            .iter()
+            .map(|round| round.iter().map(|h| Val::<SC>::from_usize(*h)).collect())
+            .collect(),
         _ => Vec::new(),
     };
 

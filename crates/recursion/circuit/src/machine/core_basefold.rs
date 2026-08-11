@@ -495,7 +495,15 @@ pub fn verify_core_basefold<C, SC, A>(
             let jagged_evaluator_fn =
                 super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                     builder,
-                    column_counts_by_round.iter().flatten().sum(),
+                    // Every REAL column of the packing, which is each round's chip
+                    // columns PLUS the one stacking-padding column that closes the
+                    // round out to its committed area (`<stacking-pad:*>` in
+                    // `crates/pcs/src/jagged_pcs.rs`).  The host sums its jagged
+                    // evaluation over `packing.offsets.len() - 1` columns, pads
+                    // included, so leaving them out here both drops their terms and
+                    // shifts every column after the preprocessed round's pad by one.
+                    column_counts_by_round.iter().flatten().sum::<usize>()
+                        + preprocessed_round.padding_heights.len(),
                 );
             let mut challenger = machine.config().challenger_variable(builder);
 

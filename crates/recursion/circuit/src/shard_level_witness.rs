@@ -370,8 +370,11 @@ pub struct PreprocessedRoundWitness<C: CircuitConfig> {
     pub raw_commit: [Felt<C::F>; 8],
     /// One height per preprocessed chip, in the machine's chip-name order.
     pub row_counts: Vec<Felt<C::F>>,
-    /// One stacking-padding column height per opening round, in round order.
-    pub padding_heights: Vec<Felt<C::F>>,
+    /// Each opening round's stacking-padding column heights, in round order.
+    /// A round's gap is split into columns no taller than the row cube, so a
+    /// recursion round (whose committed area is PINNED far above its real
+    /// cells) carries many where a core round carries one.
+    pub padding_heights: Vec<Vec<Felt<C::F>>>,
 }
 
 impl<C> Witnessable<C>
@@ -413,8 +416,11 @@ where
             core::array::from_fn(|i| self.preprocessed_original_commitment[i].read(builder));
         let preprocessed_row_counts: Vec<Felt<C::F>> =
             self.preprocessed_row_counts.iter().map(|f| f.read(builder)).collect();
-        let padding_row_heights: Vec<Felt<C::F>> =
-            self.padding_row_heights.iter().map(|f| f.read(builder)).collect();
+        let padding_row_heights: Vec<Vec<Felt<C::F>>> = self
+            .padding_row_heights
+            .iter()
+            .map(|round| round.iter().map(|f| f.read(builder)).collect())
+            .collect();
         let preprocessed_round = PreprocessedRoundWitness::<C> {
             raw_commit: preprocessed_commit_arr,
             row_counts: preprocessed_row_counts,
@@ -505,8 +511,10 @@ where
         for f in self.preprocessed_row_counts.iter() {
             f.write(witness);
         }
-        for f in self.padding_row_heights.iter() {
-            f.write(witness);
+        for round in self.padding_row_heights.iter() {
+            for f in round.iter() {
+                f.write(witness);
+            }
         }
         self.public_values.write(witness);
         self.logup_gkr_proof.write(witness);
@@ -1454,6 +1462,7 @@ where
         jagged_eval_proof,
         pcs_proof: stacked_pcs_proof,
         column_counts: column_counts_by_round.to_vec(),
+        padding_row_heights: Vec::new(),
         row_counts,
         original_commitments,
         modified_commitments,
@@ -1925,7 +1934,7 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // `col_prefix_sums` and the z_col count) but NOT part of a round's
     // GEOMETRY, and the hash-bind is taken over the geometry alone -- the host
     // hashes `round_counts.last()`, its real chips (verifier.rs:379).
-    padding_heights: &[Felt<C::F>],
+    padding_heights: &[Vec<Felt<C::F>>],
     max_log_row_count: usize,
     // Each round's REAL chip widths, no padding column.
     column_counts_by_round: &[Vec<usize>],
@@ -1971,7 +1980,7 @@ where
         .iter()
         .map(|cc| cc.iter().sum::<usize>())
         .sum::<usize>()
-        + padding_heights.len();
+        + padding_heights.iter().map(|p| p.len()).sum::<usize>();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
     let _num_col_variables = padded_cols.trailing_zeros() as usize;
@@ -2158,27 +2167,24 @@ where
         // heights again for the main chips.
         let mut height_idx = 0usize;
         'outer: for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
-            // The round's real chips, then its ONE stacking-padding column,
-            // which is what closes the round out to its committed area.
-            let pad = padding_heights.get(round_idx).copied();
-            for (&w, h) in cc
-                .iter()
-                .chain(core::iter::once(&1usize).take(pad.is_some() as usize))
-                .zip(
-                    (0..cc.len())
-                        .map(|_| {
-                            let h = heights
-                                .get(height_idx)
-                                .copied()
-                                .unwrap_or_else(|| builder.constant(C::F::ZERO));
-                            height_idx += 1;
-                            h
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .chain(pad),
-                )
-            {
+            // The round's real chips, then its stacking-padding columns, which
+            // are what close the round out to its committed area.
+            let pads: &[Felt<C::F>] =
+                padding_heights.get(round_idx).map(|v| v.as_slice()).unwrap_or(&[]);
+            let widths: Vec<usize> =
+                cc.iter().copied().chain(core::iter::repeat(1).take(pads.len())).collect();
+            let col_heights: Vec<Felt<C::F>> = (0..cc.len())
+                .map(|_| {
+                    let h = heights
+                        .get(height_idx)
+                        .copied()
+                        .unwrap_or_else(|| builder.constant(C::F::ZERO));
+                    height_idx += 1;
+                    h
+                })
+                .chain(pads.iter().copied())
+                .collect();
+            for (w, h) in widths.into_iter().zip(col_heights) {
                 for _ in 0..w {
                     if col_prefix_sums.len() >= col_prefix_sums_len {
                         break 'outer;
@@ -2329,6 +2335,7 @@ where
         pcs_proof: stacked_pcs_proof,
         column_counts: column_counts_by_round.to_vec(),
         row_counts,
+        padding_row_heights: padding_heights.to_vec(),
         original_commitments,
         modified_commitments,
         expected_eval,
@@ -2848,6 +2855,7 @@ mod tests {
                 log_dense_size: 0,
                 column_counts: vec![],
                             round_counts: Vec::new(),
+                padding_heights: Vec::new(),
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
             // Single-group (G==1) test bundle.

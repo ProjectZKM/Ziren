@@ -175,6 +175,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             params,
             column_counts,
             row_counts,
+            padding_row_heights,
             original_commitments,
             expected_eval,
             // `JaggedPcsProofVariable` carries no baked numeric
@@ -213,22 +214,37 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             .flat_map(|round| round.iter().copied())
             .collect();
 
-        // Host parity: Ziren's host packing has NO artificial zero
-        // columns — `packing.offsets.len()-1 == Σ chip widths` always
-        // (the dense vector's stripe-alignment padding extends the LAST
-        // column's tail entries, it does not add columns), and the host
-        // claim is the FLAT `Σ z_col_lagrange[k]·y[k]` walk
-        // (jagged_sumcheck.rs verify_jagged_reduction).  An SP1-style
-        // `cc[len-2]+1` per-round zero-insertion would inflate the padded
-        // column count, and whenever `next_pow2(flat+added) !=
-        // next_pow2(flat)` (e.g. the keccak 415-column shard: 1024 vs 512)
-        // the circuit would sample a different number of z_col challenges
-        // than the host → transcript desync → the claim assert below trips.
-        // Zeros appear only as the power-of-two tail padding
-        // (weight-orthogonal to the real claims, matching the host's
-        // missing-column tail).
-        let _ = insertion_points;
+        // Each opening round is padded out to its committed area by ONE
+        // stacking-padding column of zeros (`<stacking-pad:*>` in
+        // `crates/pcs/src/jagged_pcs.rs`), which the host weighs into the
+        // column claim with `y = 0`.  Those columns carry no chip, so they are
+        // absent from `evaluation_claims` and have to be spliced back in at the
+        // round boundaries — exactly SP1's `column_claims.insert` loop
+        // (sp1 crates/recursion/circuit/src/jagged/verifier.rs:88).
+        //
+        // With a single round the pad lands past the last real claim, where the
+        // power-of-two `resize` below already supplied a zero, so this is a
+        // no-op; with the preprocessed round in front, round 0's pad sits
+        // BETWEEN the rounds and shifts every later column by one, which is what
+        // `insertion_points` is for.  Splicing also makes `column_claims.len()`
+        // equal the packing's real column count, so the `next_power_of_two`
+        // below agrees with the `num_col_variables` drawn from
+        // `col_prefix_sums` — otherwise a round total that lands exactly on a
+        // power of two samples one challenge too few.
+        //
+        // The host's pad loop is bounded by the row cube (`2^z_row.len()`), but
+        // an area is a whole number of stacking stripes, so the gap is always
+        // below one stripe (`2^log_stacking_height` < the cube) and the loop
+        // emits exactly one column per round — the same one the lift lays out in
+        // `col_prefix_sums`.
         let zero_ext: Ext<C::F, C::EF> = builder.eval(SymbolicExt::ZERO);
+        for (round_idx, insertion_point) in insertion_points.iter().enumerate().rev() {
+            let pad_cols =
+                padding_row_heights.get(round_idx).map(|p| p.len()).unwrap_or(0);
+            for _ in 0..pad_cols {
+                column_claims.insert(*insertion_point, zero_ext);
+            }
+        }
 
         // (3) Pad the column claims to the next power of two so
         // the MLE evaluation is well-defined.
@@ -366,12 +382,22 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // (7) Check prefix-sum consistency: accumulating the
         // per-chip row counts must match the per-column prefix
         // sums the jagged-eval protocol emitted.
-        let repeated_row_counts: Vec<Felt<C::F>> = row_counts
-            .iter()
-            .flatten()
-            .zip(column_counts.iter().flatten())
-            .flat_map(|(row, col)| core::iter::repeat(*row).take(*col))
-            .collect();
+        // One entry per REAL column, in packing order: each round's chips, then
+        // that round's stacking-padding column (one column, its own height).
+        // `prefix_sum_felts` is indexed by the same column space, so the pads
+        // have to be spliced in at the round boundaries or the walk falls a
+        // column behind from the first boundary on.
+        let mut repeated_row_counts: Vec<Felt<C::F>> = Vec::new();
+        for (round_idx, (round_rows, round_cols)) in
+            row_counts.iter().zip(column_counts.iter()).enumerate()
+        {
+            for (row, col) in round_rows.iter().zip(round_cols.iter()) {
+                repeated_row_counts.extend(core::iter::repeat(*row).take(*col));
+            }
+            if let Some(pads) = padding_row_heights.get(round_idx) {
+                repeated_row_counts.extend(pads.iter().copied());
+            }
+        }
         let mut acc: Felt<C::F> = builder.constant(C::F::ZERO);
         for (row_count, expected) in
             repeated_row_counts.iter().zip(prefix_sum_felts.iter())

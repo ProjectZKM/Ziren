@@ -561,16 +561,13 @@ impl<P> BasefoldShardVerifier<P> {
         // vk_map regen.
         // The column claims, in the batched layout's column order:
         //   [prep chips | prep pad | main chips | main pad]
-        // A padding column is committed zeros, so its claim is ZERO -- SP1
-        // inserts `padding_column_count` zero claims per round
-        // (slop/crates/jagged/src/prover.rs:190).  The preprocessed round's
-        // claims are each chip's `preprocessed.local`, taken in the MACHINE's
-        // chip-name order, which is the order `setup` committed them.
-        let zero_claim = |builder: &mut Builder<C>| -> Vec<Ext<C::F, C::EF>> {
-            use p3_field::PrimeCharacteristicRing;
-            let z: Ext<C::F, C::EF> = builder.constant(<C::EF as PrimeCharacteristicRing>::ZERO);
-            vec![z]
-        };
+        // A padding column is committed zeros, so its claim is ZERO; those
+        // claims are spliced in by the jagged verifier from `insertion_points`
+        // (`crates/recursion/circuit/src/recursive_jagged_pcs.rs`), as SP1 does
+        // -- what this builds is the REAL per-chip claims only.  The
+        // preprocessed round's claims are each chip's `preprocessed.local`,
+        // taken in the MACHINE's chip-name order, which is the order `setup`
+        // committed them.
         //
         // `opened_values.chips` is POSITIONAL, aligned with `shard_chips`, which
         // the caller name-sorts -- so the chips with preprocessed columns, taken
@@ -592,13 +589,9 @@ impl<P> BasefoldShardVerifier<P> {
             for &i in prep_positions.iter() {
                 evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
             }
-            evaluation_claims.push(zero_claim(builder));
         }
         evaluation_claims
             .extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
-        if two_round {
-            evaluation_claims.push(zero_claim(builder));
-        }
 
         // ── jagged HASH-BIND re-check (in-circuit) ──────────
         //
@@ -971,7 +964,8 @@ where
             jagged_eval_proof,
             pcs_proof: stacked_pcs_proof,
             column_counts: vec![vec![1]],
-            row_counts: vec![vec![zero_felt(builder)]],
+            padding_row_heights: Vec::new(),
+        row_counts: vec![vec![zero_felt(builder)]],
             original_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             modified_commitments: vec![std::array::from_fn(|_| zero_felt(builder))],
             expected_eval: zero_ext(builder),

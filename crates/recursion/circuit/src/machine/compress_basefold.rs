@@ -499,7 +499,10 @@ pub fn verify_compress_basefold<C, SC, A>(
         // emit_prefix_sum_check + partial_lagrange_symbolic.
         let _jagged_evaluator_fn = real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
             builder,
-            _column_counts_by_round.iter().flatten().sum(),
+            // Chip columns + each round's stacking-padding column (see
+            // core_basefold.rs for why the pads have to be counted).
+            _column_counts_by_round.iter().flatten().sum::<usize>()
+                + preprocessed_round.padding_heights.len(),
         );
 
         // opened_values — use the CARRIED per-chip trace@z

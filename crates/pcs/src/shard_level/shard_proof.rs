@@ -153,7 +153,7 @@ pub struct BasefoldShardProof<F, EF> {
     /// height-derived, so a height-agnostic verifier takes it from here; the
     /// per-round hash-bind pins it.
     #[serde(default)]
-    pub padding_row_heights: Vec<F>,
+    pub padding_row_heights: Vec<Vec<F>>,
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {

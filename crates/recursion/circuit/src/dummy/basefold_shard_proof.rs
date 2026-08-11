@@ -399,9 +399,52 @@ where
     let preprocessed_row_counts: Vec<F> =
         if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep] };
     let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
-    // One padding height per opening round: preprocessed (when the machine has
-    // one) and main.
-    let padding_row_heights: Vec<F> = vec![F::ZERO; if n_prep == 0 { 1 } else { 2 }];
+    // Each round's padding COLUMN COUNT.  A round's gap is
+    //     area - total_values,  area = 2^log_dense.next_multiple_of(1 << 21)
+    // split into columns no taller than the row cube, so a round whose
+    // `log_dense_size` is PINNED far above its real cells (every recursion
+    // round) needs many columns where a core round needs one.  Only the LENGTH
+    // matters here — the values are witnessed from the real proof — but it has
+    // to be the real count or the program lays out the wrong column space.
+    let cube = 1usize << max_log_row_count;
+    let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+    let pad_columns = |real: usize, pin: Option<usize>| -> usize {
+        if real == 0 {
+            return 1;
+        }
+        let mut log_dense = real.next_power_of_two().trailing_zeros() as usize;
+        if let Some(target) = pin {
+            log_dense = log_dense.max(target);
+        }
+        let area = (1usize << log_dense).next_multiple_of(1usize << log_stack);
+        area.saturating_sub(real).div_ceil(cube).max(1)
+    };
+    let heights_by_name: BTreeMap<String, u8> =
+        chip_log_heights_pairs.iter().cloned().collect();
+    let round_real = |preprocessed: bool| -> usize {
+        chips
+            .iter()
+            .map(|c| {
+                let w = if preprocessed {
+                    <A as MachineAir<F>>::preprocessed_width(&c.air)
+                } else {
+                    <_ as BaseAir<F>>::width(&c.air)
+                };
+                let log_h = heights_by_name
+                    .get(&MachineAir::<F>::name(*c))
+                    .copied()
+                    .unwrap_or(0) as usize;
+                w * (1usize << log_h)
+            })
+            .sum()
+    };
+    let mut padding_row_heights: Vec<Vec<F>> = Vec::new();
+    if n_prep > 0 {
+        // The preprocessed round is committed by `setup`, never area-pinned.
+        padding_row_heights.push(vec![F::ZERO; pad_columns(round_real(true), None)]);
+    }
+    padding_row_heights
+        .push(vec![F::ZERO; pad_columns(round_real(false), recursion_area_pin)]);
 
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
@@ -544,6 +587,9 @@ pub fn dummy_jagged_basefold_bundle(
             .iter()
             .map(|ci| (ci.row_count, ci.column_count))
             .collect()],
+        // Shape-only: the dummy's witness stream carries no padding heights of
+        // its own (the real proof's are read as witnessed felts).
+        padding_heights: Vec::new(),
     };
 
     // ── Derived sub-lengths ──

@@ -372,7 +372,10 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let jagged_evaluator_fn =
             super::compress_basefold::real_jagged_evaluator_fn::<C, SC::FriChallengerVariable>(
                 builder,
-                column_counts_by_round.iter().flatten().sum(),
+                // Chip columns + each round's stacking-padding column (see
+                // core_basefold.rs for why the pads have to be counted).
+                column_counts_by_round.iter().flatten().sum::<usize>()
+                    + preprocessed_round.padding_heights.len(),
             );
         let mut challenger = machine.config().challenger_variable(builder);
 
