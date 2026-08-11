@@ -2816,11 +2816,22 @@ pub mod jagged {
     ) {
         use crate::jagged::JaggedChipInfo;
         let column_counts = &packing.column_counts;
-        let mut chip_infos: Vec<JaggedChipInfo> = (0..chip_widths.len())
+        // One entry per COLUMN GROUP the prover emitted — every round's chips
+        // AND the stacking-padding columns between them.  `chip_widths` (the
+        // machine's main chips) is only the legacy fallback for a bundle that
+        // predates `column_counts`: taking its LENGTH as the group count reads
+        // a two-round packing as if the preprocessed round's widths were the
+        // main chips', and stops before the main round entirely.
+        let n_groups =
+            if column_counts.is_empty() { chip_widths.len() } else { column_counts.len() };
+        let mut chip_infos: Vec<JaggedChipInfo> = (0..n_groups)
             .map(|i| JaggedChipInfo {
                 name: alloc::format!("chip{i}"),
                 row_count: 0,
-                column_count: column_counts.get(i).copied().unwrap_or(chip_widths[i]),
+                column_count: column_counts
+                    .get(i)
+                    .copied()
+                    .unwrap_or_else(|| chip_widths.get(i).copied().unwrap_or(0)),
             })
             .collect();
         // Patch row_count from the offsets sentinel walk (same as the host verifier).
