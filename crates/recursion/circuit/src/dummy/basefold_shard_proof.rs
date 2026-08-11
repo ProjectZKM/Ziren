@@ -399,24 +399,23 @@ where
     let preprocessed_row_counts: Vec<F> =
         if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep] };
     let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
-    // Each round's padding COLUMN COUNT.  A round's gap is
-    //     area - total_values,  area = 2^log_dense.next_multiple_of(1 << 21)
-    // split into columns no taller than the row cube, so a round whose
-    // `log_dense_size` is PINNED far above its real cells (every recursion
-    // round) needs many columns where a core round needs one.  Only the LENGTH
-    // matters here — the values are witnessed from the real proof — but it has
-    // to be the real count or the program lays out the wrong column space.
+    // Each round's padding COLUMN COUNT.  A round's gap is `area - real`, with
+    // `area` the committed length the prover's commit lands on
+    // (`zkm_pcs::jagged::committed_dense_len`, raised to the pin floor for a
+    // recursion round), split into columns no taller than the row cube.  Only
+    // the LENGTH matters here — the values are witnessed from the real proof —
+    // but it has to be the real count or the program lays out the wrong column
+    // space.
     let cube = 1usize << max_log_row_count;
     let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
     let pad_columns = |real: usize, pin: Option<usize>| -> usize {
         if real == 0 {
             return 1;
         }
-        let mut log_dense = real.next_power_of_two().trailing_zeros() as usize;
+        let mut area = zkm_pcs::jagged::committed_dense_len(real, log_stack);
         if let Some(target) = pin {
-            log_dense = log_dense.max(target);
+            area = area.max(1usize << target);
         }
-        let area = (1usize << log_dense).next_multiple_of(1usize << log_stack);
         area.saturating_sub(real).div_ceil(cube).max(1)
     };
     let heights_by_name: BTreeMap<String, u8> =
@@ -568,12 +567,15 @@ pub fn dummy_jagged_basefold_bundle(
     // the `log_m` note below) — it tracks the PINNED dense, mirroring the real
     // prover's pinned `prove_jagged_evaluation` (`half = z_trace.len() + 1`).
     let recursion_pin = recursion_area_pin;
-    let mut log_dense_size = packing.log_dense_size;
+    let mut dense_len = packing.dense_len;
     if let Some(target) = recursion_pin {
-        if log_dense_size < target {
-            log_dense_size = target;
-        }
+        dense_len = dense_len.max(1usize << target);
     }
+    // The committed length is a whole number of stacking blocks; the sumcheck
+    // hypercube (and with it the reduction's round count and eval_point) is the
+    // power of two that encloses it.
+    let log_dense_size =
+        if dense_len == 0 { 0 } else { dense_len.next_power_of_two().trailing_zeros() as usize };
     let column_counts: Vec<usize> =
         packing.chip_infos.iter().map(|ci| ci.column_count).collect();
     let packing_meta = PackingMeta {
@@ -611,7 +613,10 @@ pub fn dummy_jagged_basefold_bundle(
     // at `machine/core_basefold.rs` (the per-proof verifier rebuild) for why
     // masking-to-MAX in the verifier alone is unsound (Fiat-Shamir desync).
     let log_stacking = pick_log_stacking_height(total_values) as usize;
-    let num_stripes = 1usize << l.saturating_sub(log_stacking); // batch_evaluations width
+    // The commitment covers `dense_len` cells in whole stacking blocks, so the
+    // stripe count is that block count — NOT `2^(l - log_stacking)`, which
+    // over-counts whenever the committed length is not a power of two.
+    let num_stripes = dense_len >> log_stacking; // batch_evaluations width
     let inner_fri = lb_fri_config();
     let num_queries = inner_fri.num_queries;
     // The component-opening Merkle path length keys off the codeword

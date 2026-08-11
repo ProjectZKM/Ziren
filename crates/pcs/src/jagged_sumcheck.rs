@@ -45,7 +45,7 @@ fn build_weight_table(
     // 2^log_h_c are 0).  Mirrors SP1 partial_jagged_little_polynomial_evaluation.
     z_row: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
-    let n = 1usize << packing.log_dense_size;
+    let n = 1usize << packing.log_dense_size();
     let mut w = vec![InnerChallenge::ZERO; n];
 
     // Row weight: the full max-log-row eq table
@@ -186,14 +186,14 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     z_row: &[InnerChallenge], // ITEM-12: full z* for the embedding factor
     challenger: &mut C,
 ) -> Option<(Vec<InnerChallenge>, InnerChallenge, InnerChallenge)> {
-    if proof.rounds.len() != packing.log_dense_size
-        || proof.eval_point.len() != packing.log_dense_size
+    if proof.rounds.len() != packing.log_dense_size()
+        || proof.eval_point.len() != packing.log_dense_size()
         || r_row_per_chip.len() != packing.chip_infos.len()
         || y_per_chip.len() != packing.chip_infos.len()
     {
         tracing::debug!(
             "jagged reduction dim mismatch: rounds={} eval_point={} log_dense_size={} r_row={} y_per_chip={} chip_infos={}",
-            proof.rounds.len(), proof.eval_point.len(), packing.log_dense_size,
+            proof.rounds.len(), proof.eval_point.len(), packing.log_dense_size(),
             r_row_per_chip.len(), y_per_chip.len(), packing.chip_infos.len(),
         );
         return None;
@@ -276,7 +276,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     // EXPLICITLY below (and as a graceful reject rather than a panic).  SP1
     // makes the same monotonicity check on its prefix sums (verifier.rs:338-347).
     {
-        let n_dense = 1usize << packing.log_dense_size;
+        let n_dense = 1usize << packing.log_dense_size();
         // (a) One offset per global column plus the sentinel.
         let num_cols_total: usize =
             packing.chip_infos.iter().map(|c| c.column_count).sum();
@@ -297,7 +297,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
                 "jagged reduction: offsets sentinel {} != total_values {} (or > 2^{})",
                 packing.offsets[num_cols_total],
                 packing.total_values,
-                packing.log_dense_size,
+                packing.log_dense_size(),
             );
             return None;
         }
@@ -447,7 +447,12 @@ mod phase1_acceptance_gate {
         // Dense q (column-by-column, natural row order) padded to 2^n.
         // This unit test uses the LEGACY bitrev convention (`use_rev = false`),
         // matching the `use_rev_y = false` companion below — byte-identical.
-        let dense_q = crate::jagged::materialize_dense_jagged(&trace_views, packing.log_dense_size, false);
+        let dense_q = {
+            let mut d =
+                crate::jagged::materialize_dense_jagged(&trace_views, packing.dense_len, false);
+            d.resize(1usize << packing.log_dense_size(), InnerVal::ZERO);
+            d
+        };
 
         // z_row: full max_log_row_count point (the shared zerocheck point).
         let max_log_row = chips.iter().map(|c| c.0).max().unwrap();
@@ -525,11 +530,11 @@ mod phase1_acceptance_gate {
         let hp = crate::jagged_long::HadamardProduct {
             base: crate::jagged_long::LongMle::from_components(
                 vec![crate::basefold::Mle::from_values(dense_q.clone())],
-                packing.log_dense_size as u32,
+                packing.log_dense_size() as u32,
             ),
             ext: crate::jagged_long::LongMle::from_components(
                 vec![crate::basefold::Mle::from_values(weights_ref)],
-                packing.log_dense_size as u32,
+                packing.log_dense_size() as u32,
             ),
         };
         let proof =
@@ -895,7 +900,7 @@ mod closed_form_weight_equivalence {
             chip_infos,
             offsets,
             total_values: running,
-            log_dense_size,
+            dense_len: 1usize << log_dense_size,
         }
     }
 
@@ -912,7 +917,7 @@ mod closed_form_weight_equivalence {
         let z_col: Vec<InnerChallenge> =
             (0..num_col_vars).map(|_| rand_ef(&mut rng)).collect();
         let z_star: Vec<InnerChallenge> =
-            (0..packing.log_dense_size).map(|_| rand_ef(&mut rng)).collect();
+            (0..packing.log_dense_size()).map(|_| rand_ef(&mut rng)).collect();
         let r_row_per_chip: Vec<Vec<InnerChallenge>> =
             packing.chip_infos.iter().map(|_| z_row.clone()).collect();
 
@@ -931,7 +936,7 @@ mod closed_form_weight_equivalence {
             table_form, closed_form,
             "closed form != materialized weight table for chips {chips:?} \
              (seed {seed}, z_row_dim {z_row_dim}, log_dense {})",
-            packing.log_dense_size,
+            packing.log_dense_size(),
         );
     }
 
@@ -1000,10 +1005,10 @@ mod closed_form_weight_equivalence {
         // A well-shaped but arbitrary reduction proof: the layout guards run
         // before the closing identity, so this must be rejected on layout.
         let proof = JaggedReductionProof::<InnerChallenge> {
-            rounds: (0..packing.log_dense_size)
+            rounds: (0..packing.log_dense_size())
                 .map(|_| JaggedReductionRound { evals: [InnerChallenge::ZERO; 3] })
                 .collect(),
-            eval_point: (0..packing.log_dense_size).map(|_| rand_ef(&mut rng)).collect(),
+            eval_point: (0..packing.log_dense_size()).map(|_| rand_ef(&mut rng)).collect(),
             q_at_z: InnerChallenge::ZERO,
         };
         let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();

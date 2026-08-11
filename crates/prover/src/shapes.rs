@@ -429,11 +429,11 @@ impl ZKMProofShape {
         // shapes produce exactly the real proofs' normalize vks.  We over-emit;
         // `build_compress_vks` catch_unwinds the few overflow shapes
         // (log_dense>30) and the vk_set dedups equal-log_dense shapes.
-        // Cheap log_dense (= jagged `packing.log_dense_size`) for an
+        // Cheap log_dense (= jagged `JaggedPacking::log_dense_size`) for an
         // OrderedShape WITHOUT building a full dummy bundle.  The jagged
-        // packing's total_values = Σ_chips width·2^log_h and
-        // log_dense_size = log2(np2(total_values)) — see
-        // `zkm_pcs::jagged::pack_traces_jagged` (uses only height/width).
+        // packing's total_values = Σ_chips width·2^log_h, the commitment rounds
+        // that out to whole stacking blocks, and the hypercube is the enclosing
+        // power of two — see `zkm_pcs::jagged::committed_dense_len`.
         // BaseAir::width(chip) gives the dense width the dummy bundle uses.
         let chip_width = |name: &str| -> usize {
             chips_by_name
@@ -447,10 +447,17 @@ impl ZKMProofShape {
                 .iter()
                 .map(|(name, log_h)| chip_width(name) * (1usize << *log_h))
                 .sum();
-            if total == 0 {
+            // The commitment covers whole stacking blocks, and the sumcheck
+            // hypercube is the power of two that encloses them — the same two
+            // steps `JaggedPacking::log_dense_size` takes.
+            let dense = zkm_pcs::jagged::committed_dense_len(
+                total,
+                zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+            );
+            if dense == 0 {
                 0
             } else {
-                total.next_power_of_two().trailing_zeros() as usize
+                dense.next_power_of_two().trailing_zeros() as usize
             }
         };
 

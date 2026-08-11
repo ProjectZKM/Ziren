@@ -162,8 +162,16 @@ pub fn chips_to_mles_owned(
     for (_, trace) in chip_traces.into_iter() {
         let width = trace.width.max(1);
         let raw_height = trace.values.len() / width;
-        let padded_height = raw_height.next_power_of_two();
-        let log_h = padded_height.trailing_zeros();
+        // Round out to whole stacking blocks, NOT to a power of two.  The only
+        // caller hands over the single width-1 jagged dense, and the interleave
+        // below re-stripes it at exactly this granularity, so a power-of-two
+        // round-up buys nothing and costs up to half the committed area — the
+        // waste SP1 does not pay (`hypercube/src/prover/simple.rs:33`).
+        let padded_height = raw_height.next_multiple_of(1usize << DEFAULT_LOG_STACKING_HEIGHT);
+        // `log_h` is the dims' height slot and stays a LOG, so for a
+        // non-power-of-two block count it is the enclosing hypercube, an upper
+        // bound rather than the exact height.
+        let log_h = padded_height.max(1).next_power_of_two().trailing_zeros();
 
         let values = if raw_height == padded_height {
             trace.values
@@ -1281,20 +1289,18 @@ pub mod jagged {
         let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
         // RECURSION-LAYER AREA PIN.  When the
         // recursion (`compress`) prover passes `Some(target_log)` here, so
-        // raise `log_dense_size` to the pin floor so the dense
+        // raise the committed `dense_len` to the pin floor so the dense
         // materialize + commit run at a FIXED area (`2^pin`) → constant
         // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
         // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
         let pin = recursion_area_pin;
         if let Some(target) = pin {
-            if packing.log_dense_size < target {
-                packing.log_dense_size = target;
-            }
+            packing.dense_len = packing.dense_len.max(1usize << target);
         }
         let (commit, prover_data) = {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, use_rev);
-            debug_assert_eq!(dense_q.len(), 1usize << packing.log_dense_size);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.dense_len, use_rev);
+            debug_assert_eq!(dense_q.len(), packing.dense_len);
             let dense_traces = vec![(
                 alloc::string::String::from("<jagged-dense>"),
                 RowMajorMatrix::new(dense_q, 1),
@@ -1804,18 +1810,23 @@ pub mod jagged {
             // handed over whole.  SP1's jagged sumcheck is dense on both sides
             // too (`partial_jagged_little_polynomial_evaluation` builds a dense
             // `2^log_total_area` MLE), so this matches its shape.
-            let dense_q = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
+            let mut dense_q = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
                 &interleaved,
-                1usize << packing.log_dense_size,
+                packing.dense_len,
             );
+            // The committed area is a whole number of stacking blocks, not a
+            // power of two, so the sumcheck hypercube runs past it; the gap is
+            // zero (this host reduction materializes it, the device one folds
+            // the real prefix and leaves the tail implicit).
+            dense_q.resize(1usize << packing.log_dense_size(), InnerVal::ZERO);
             let hp = crate::jagged_long::HadamardProduct {
                 base: crate::jagged_long::LongMle::from_components(
                     alloc::vec![crate::basefold::Mle::from_values(dense_q)],
-                    packing.log_dense_size as u32,
+                    packing.log_dense_size() as u32,
                 ),
                 ext: crate::jagged_long::LongMle::from_components(
                     alloc::vec![crate::basefold::Mle::from_values(weights)],
-                    packing.log_dense_size as u32,
+                    packing.log_dense_size() as u32,
                 ),
             };
             crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
@@ -1885,7 +1896,7 @@ pub mod jagged {
         let packing_meta = PackingMeta {
             offsets: packing.offsets.clone(),
             total_values: packing.total_values,
-            log_dense_size: packing.log_dense_size,
+            log_dense_size: packing.log_dense_size(),
             // fix: per-chip *actual* column count, so verifier
             // does not need to consult `BaseAir::width(chip)`.
             column_counts: packing
@@ -2058,17 +2069,14 @@ pub mod jagged {
         }
         let total_values = base;
         offsets.push(total_values);
-        let log_dense_size = if total_values == 0 {
-            0
-        } else {
-            total_values.next_power_of_two().trailing_zeros() as usize
-        };
+        // The rounds' areas are already carried as explicit padding columns, so
+        // the concatenated instance's committed length IS its column space.
         let packing = crate::jagged::JaggedPacking::<InnerVal> {
             dense_values: Vec::new(),
             chip_infos: chip_infos.clone(),
             offsets: offsets.clone(),
             total_values,
-            log_dense_size,
+            dense_len: total_values,
         };
         let n_chips = chip_infos.len();
 
@@ -2086,6 +2094,7 @@ pub mod jagged {
             // Each round's dense cells are the PREFIX of its committed stripes;
             // laid end to end they are the concatenated jagged matrix, then
             // zero-padded to the combined hypercube.
+            let log_dense_size = packing.log_dense_size();
             let mut dense_q: Vec<InnerVal> = Vec::with_capacity(1usize << log_dense_size);
             for r in rounds.iter() {
                 // Each round contributes its FULL committed cell space — real
@@ -2166,7 +2175,7 @@ pub mod jagged {
         let packing_meta = PackingMeta {
             offsets,
             total_values,
-            log_dense_size,
+            log_dense_size: packing.log_dense_size(),
             column_counts: chip_infos.iter().map(|ci| ci.column_count).collect(),
             // Each round's REAL chip geometry, as committed — no stacking
             // padding, which is an artifact of flattening the rounds together.
@@ -2340,7 +2349,7 @@ pub mod jagged {
                       challenger: &mut Challenger|
               -> JaggedReductionProof<InnerChallenge> {
             let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.log_dense_size, dense_rev);
+                materialize_dense_jagged::<InnerVal>(chip_traces, packing.dense_len, dense_rev);
             let weights = crate::jagged_sumcheck::build_weight_table_from_z_col(
                 &packing,
                 r_row_per_chip,
@@ -2350,11 +2359,11 @@ pub mod jagged {
             let hp = crate::jagged_long::HadamardProduct {
                 base: crate::jagged_long::LongMle::from_components(
                     alloc::vec![crate::basefold::Mle::from_values(dense_q)],
-                    packing.log_dense_size as u32,
+                    packing.log_dense_size() as u32,
                 ),
                 ext: crate::jagged_long::LongMle::from_components(
                     alloc::vec![crate::basefold::Mle::from_values(weights)],
-                    packing.log_dense_size as u32,
+                    packing.log_dense_size() as u32,
                 ),
             };
             crate::jagged_long::prove_jagged_reduction_hadamard_poly(hp, challenger)
@@ -2382,7 +2391,7 @@ pub mod jagged {
         let packing_meta = PackingMeta {
             offsets: packing.offsets.clone(),
             total_values: packing.total_values,
-            log_dense_size: packing.log_dense_size,
+            log_dense_size: packing.log_dense_size(),
             column_counts: packing.chip_infos.iter().map(|ci| ci.column_count).collect(),
             // The wrap ring is always single-round: its own geometry.
             round_counts: alloc::vec![packing
@@ -2565,7 +2574,9 @@ pub mod jagged {
                 chip_infos: chip_infos_g,
                 offsets: pkg.offsets.clone(),
                 total_values: pkg.total_values,
-                log_dense_size: pkg.log_dense_size,
+                // Bundle-level: the rounds' areas are already explicit padding
+                // columns, so the committed length IS the column space.
+                dense_len: pkg.total_values,
             };
             if !verify_one_jagged_group(
                 &packing,
@@ -2911,7 +2922,7 @@ pub mod jagged {
             chip_infos: chip_infos.to_vec(),
             offsets: bundle.packing.offsets.clone(),
             total_values: bundle.packing.total_values,
-            log_dense_size: bundle.packing.log_dense_size,
+            dense_len: bundle.packing.total_values,
         };
         let num_cols = packing.offsets.len().saturating_sub(1);
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;

@@ -525,12 +525,12 @@ mod tests {
             let packing = crate::jagged::compute_jagged_metadata(&named);
             let natural = crate::jagged::materialize_dense_jagged::<InnerVal>(
                 &named,
-                packing.log_dense_size,
+                packing.dense_len,
                 true,
             );
             let legacy = crate::jagged::materialize_dense_jagged::<InnerVal>(
                 &named,
-                packing.log_dense_size,
+                packing.dense_len,
                 false,
             );
 

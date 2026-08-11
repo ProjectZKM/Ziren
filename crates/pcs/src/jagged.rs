@@ -68,6 +68,8 @@ use p3_field::Field;
 use p3_matrix::dense::RowMajorMatrix;
 use p3_matrix::Matrix;
 
+use crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
+
 /// A chip's real (unpadded) row-major cells and row width, projected out of the
 /// shared `PaddedMle` store.  A device-resident / unexercised chip has no real
 /// cells and projects to `(&[], 0)` — zero area, matching the width-0 view this
@@ -118,8 +120,57 @@ pub struct JaggedPacking<F> {
     pub offsets: Vec<usize>,
     /// Total number of values in the dense vector.
     pub total_values: usize,
-    /// log2 of the padded dense vector length (rounded up to power of 2).
-    pub log_dense_size: usize,
+    /// The length of the dense vector the commitment actually covers.
+    ///
+    /// For one committed ROUND this is the round's area: its real cells
+    /// rounded out to whole stacking blocks (see [`committed_dense_len`]).
+    /// For the combined jagged instance the rounds' areas are already carried
+    /// as explicit padding columns, so it equals `total_values`.
+    pub dense_len: usize,
+}
+
+/// The dense length a round's commitment covers, given its real cell count.
+///
+/// SP1 rounds a round's committed area out to whole stacking blocks and
+/// nothing more (`hypercube/src/prover/simple.rs:33`:
+/// `.next_multiple_of(1 << log_stacking_height)`).  Rounding up to a power of
+/// two instead — which Ziren used to do — wastes up to half the area, and with
+/// preprocessed opening in its own round the waste is paid twice and lands in
+/// the middle of the concatenated dense, where no implicit-tail optimization
+/// can reach it.
+///
+/// The one deviation from SP1: ziren-gpu's streaming Merkle first-digest layer
+/// requires every stripe's width to be a multiple of the Poseidon2 rate
+/// (`core/src/merkle_tree/mod.rs:179`), and a stripe is `DEFAULT_BATCH_SIZE`
+/// stacking blocks wide, so the commit is rate-safe exactly when the block
+/// count is a multiple of 8.  Commits of four blocks or fewer take the
+/// accumulate-all path, which has no rate constraint and cannot run out of
+/// memory at that size; anything larger has to stay on the streaming path, so
+/// its block count is rounded out to a multiple of 8.  Under the old
+/// power-of-two area the same split held by construction (a power-of-two block
+/// count is either <= 4 or a multiple of 8), so this preserves exactly which
+/// commits take which path.
+pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
+    if total_values == 0 {
+        return 0;
+    }
+    let block = 1usize << log_stacking_height;
+    let blocks = total_values.div_ceil(block).max(1);
+    let blocks = if blocks > 4 { blocks.next_multiple_of(8) } else { blocks };
+    blocks * block
+}
+
+impl<F> JaggedPacking<F> {
+    /// `log2` of the hypercube the jagged sumcheck runs over: the dense length
+    /// rounded up to a power of two.  The gap is an IMPLICIT zero tail — it is
+    /// never materialized (see `jagged_sumcheck`'s `implicit_tail_out_len`).
+    pub fn log_dense_size(&self) -> usize {
+        if self.dense_len == 0 {
+            0
+        } else {
+            self.dense_len.next_power_of_two().trailing_zeros() as usize
+        }
+    }
 }
 
 /// **Metadata-only jagged-pack** (no dense materialization).
@@ -196,31 +247,25 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
     // `recursion/circuit/src/recursive_jagged_pcs.rs:178`).
     offsets.push(total_values);
 
-    let log_dense_size = if total_values == 0 {
-        0
-    } else {
-        (total_values.next_power_of_two()).trailing_zeros() as usize
-    };
-
     JaggedPacking {
         dense_values: Vec::new(),
         chip_infos,
         offsets,
         total_values,
-        log_dense_size,
+        dense_len: committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize),
     }
 }
 
 /// **Materialize the dense polynomial** from chip traces according
 /// to the jagged layout: columnar concatenation per chip, then
-/// zero-padding to `2^log_dense_size`.
+/// zero-padding out to the round's committed `dense_len`.
 ///
 /// Caller is expected to drop the result immediately after handing
 /// it to the consumer (e.g. the BaseFold commit) to avoid holding
 /// the dense vector in memory longer than necessary.
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
-    log_dense_size: usize,
+    dense_len: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
     // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
@@ -233,7 +278,7 @@ pub fn materialize_dense_jagged<F: Field>(
     // implementation pushed 134M elements one-at-a-time (called twice
     // per shard for commit + reduction), totaling ~150ms × 2 calls.
     // The parallel version writes in independent column slots.
-    let padded_size = 1usize << log_dense_size;
+    let padded_size = dense_len;
 
     // Pre-compute per-chip offset = sum of (height × width) for prior chips.
     let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
@@ -380,21 +425,15 @@ pub fn pack_traces_jagged<F: Field>(
     // `compute_jagged_metadata` for the rationale.
     offsets.push(total_values);
 
-    // Pad to next power of two.
-    let log_dense_size = if total_values == 0 {
-        0
-    } else {
-        (total_values.next_power_of_two()).trailing_zeros() as usize
-    };
-    let padded_size = 1 << log_dense_size;
-    dense_values.resize(padded_size, F::ZERO);
+    let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
+    dense_values.resize(dense_len, F::ZERO);
 
     JaggedPacking {
         dense_values,
         chip_infos,
         offsets,
         total_values,
-        log_dense_size,
+        dense_len,
     }
 }
 
@@ -494,7 +533,7 @@ pub struct JaggedStats {
 /// Compute statistics about the Jagged packing.
 pub fn jagged_stats(packing: &JaggedPacking<impl Field>) -> JaggedStats {
     let total_columns: usize = packing.chip_infos.iter().map(|c| c.column_count).sum();
-    let padded_size = 1 << packing.log_dense_size;
+    let padded_size = packing.dense_len;
 
     // Compute what per-chip padding would cost.
     let per_chip_padded_total: usize = packing
@@ -629,20 +668,15 @@ pub fn pack_folded_tables_jagged<F: Field>(
     // For SP1 parity: final sentinel — see
     // `compute_jagged_metadata` for the rationale.
     offsets.push(total_values);
-    let log_dense_size = if total_values == 0 {
-        0
-    } else {
-        (total_values.next_power_of_two()).trailing_zeros() as usize
-    };
-    let padded_size = 1 << log_dense_size;
-    dense_values.resize(padded_size, F::ZERO);
+    let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
+    dense_values.resize(dense_len, F::ZERO);
 
     JaggedPacking {
         dense_values,
         chip_infos,
         offsets,
         total_values,
-        log_dense_size,
+        dense_len,
     }
 }
 
