@@ -361,6 +361,16 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     fn prove_trusted_evaluations(
         &self,
         chips: &[&MachineChip<SC, A>],
+        // SP1's FIRST opening round: the preprocessed traces, in the order
+        // `setup` committed them (by (Reverse(height), name) — NOT the main
+        // round's name order), their column claims, and the proving key's
+        // commit.  Empty for a machine with no preprocessed traces, which then
+        // proves a single main round.
+        preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
+        preprocessed_claims: Vec<Vec<crate::Challenge<SC>>>,
+        preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+            <SC as BasefoldRing>::BfMmcs,
+        >,
         // BORROWED views over the shard prover's
         // shared `Arc<Mle>` store; the free-fn builds `chip_traces` by a
         // zero-copy slice relabel of these views (no clone / move).  This is the
@@ -400,6 +410,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     {
         crate::shard_level::prover::prove_trusted_evaluations::<SC, A>(
             chips,
+            preprocessed_named,
+            preprocessed_claims,
+            preprocessed_commit,
             main_traces,
             shared_eval_point,
             challenger,

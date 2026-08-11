@@ -351,6 +351,11 @@ impl BasefoldShardVerifier {
                     == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
             if inner_ring {
                 if let EvaluationProof::Bundle(bundle) = &proof.evaluation_proof {
+                    // The raw root must be the MAIN round's, to match
+                    // `proof.main_commitment`: under SP1's two rounds the
+                    // preprocessed round occupies group 0, so main is group 1.
+                    // The batched proof carries the MAIN round's commit (the
+                    // preprocessed one is the verifying key's).
                     let raw_inner =
                         crate::jagged_pcs::basefold_commit_digest(&bundle.commit);
 
@@ -361,8 +366,22 @@ impl BasefoldShardVerifier {
                     // total area must be 0 < area < 2^30 (field-arith overflow
                     // bound).  These are host-side usize checks on the SAME
                     // per-chip (row, col) counts the hash is taken over.
-                    let (rc_g, cc_g) =
-                        crate::jagged_pcs::jagged_counts_from_packing(&bundle.packing);
+                    // The hash-bind ties the MAIN round's geometry to the MAIN
+                    // commitment (`proof.main_commitment`), and the prover
+                    // computed it over that round's OWN counts.  Read them from
+                    // the per-round list rather than recovering them from the
+                    // flattened packing — the flattened column space also
+                    // carries the stacking padding between rounds, so a round's
+                    // geometry is not a positional slice of it.
+                    let (rc_g, cc_g): (Vec<usize>, Vec<usize>) =
+                        match bundle.packing.round_counts.last() {
+                            Some(main_round) => main_round.iter().copied().unzip(),
+                            // Legacy single-round bundle: the whole packing IS
+                            // the main round.
+                            None => crate::jagged_pcs::jagged_counts_from_packing(
+                                &bundle.packing,
+                            ),
+                        };
                     let order = <InnerVal as p3_field::PrimeField32>::ORDER_U32 as usize;
                     if rc_g.iter().chain(cc_g.iter()).any(|&c| c >= order) {
                         return Err(BasefoldVerifyError::JaggedPcs(
@@ -387,9 +406,10 @@ impl BasefoldShardVerifier {
                     // hashed felt sequence is byte-identical to the host emit
                     // (which used the full JaggedPacking; both derive the same
                     // per-chip (row, col) counts).
-                    let recomputed = crate::jagged_pcs::jagged_hash_bind_from_packing(
+                    let recomputed = crate::jagged_pcs::jagged_hash_bind_modified(
                         raw_inner,
-                        &bundle.packing,
+                        &rc_g,
+                        &cc_g,
                     );
                     // SAFETY: [InnerVal;8] == [Val<SC>;8] under the inner gate.
                     let observed_inner: [InnerVal; 8] = unsafe {
@@ -416,6 +436,7 @@ impl BasefoldShardVerifier {
         // after deserialising the bundle bytes.  See detailed rationale
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
+            _vk,
             chips,
             // Jagged verified at the zerocheck-reduced z*.
             &proof.zerocheck_proof.point_and_eval.0,
@@ -498,6 +519,11 @@ fn derive_effective_max_log_row_count(
 /// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
 /// for non-KoalaBear configs (nothing to verify in that path).
 fn verify_jagged_pcs_host<SC, A>(
+    // The verifying key pins the PREPROCESSED round: which chips it covers,
+    // in which order, and at what dimensions.  Read from here, never from the
+    // proof — the round exists to bind the preprocessed traces to
+    // `vk.commit`.
+    vk: &StarkVerifyingKey<SC>,
     chips: &[&Chip<Val<SC>, A>],
     shared_eval_point: &[Challenge<SC>],
     evaluation_proof: &super::shard_proof::EvaluationProof,
@@ -661,23 +687,99 @@ where
     // sparse-column chips.  Falls back to `BaseAir::width(chip)` for
     // legacy bundles (column_counts vec is empty when serde-default
     // populated from older wire format).
-    use p3_air::BaseAir;
-    let column_counts_from_bundle: &[usize] = &bundle.packing.column_counts;
-    let chip_infos: Vec<JaggedChipInfo> = chips
-        .iter()
-        .enumerate()
-        .map(|(i, chip)| {
-            let column_count = column_counts_from_bundle
-                .get(i)
-                .copied()
-                .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(*chip));
-            JaggedChipInfo {
-                name: chip.name().to_string(),
-                row_count: 0, // unknown at verifier time; filled via bundle offsets below
-                column_count,
+    // SP1's two rounds: `[preprocessed, main]`.  The proof carries the
+    // preprocessed round as group 0 and main as group 1.
+    //
+    // The PREPROCESSED round's geometry is read off the VERIFYING KEY, never
+    // off the proof: `vk.chip_information` records (name, domain, (width,
+    // height)) for exactly the chips `setup` committed, in exactly the order it
+    // committed them ((Reverse(height), name) — NOT the main round's name
+    // order).  Taking it from the proof would let a prover claim whatever
+    // geometry made its opening check out.
+    // ── Rebuild the batched column layout, round by round ────────────────
+    //
+    // The proof is ONE jagged instance whose columns run
+    // `[round 0 real | round 0 stacking pad | round 1 real | round 1 pad | ..]`.
+    // The pad is not chip geometry — it is the space the stacked commitment
+    // added rounding each round up to a stripe boundary — so it cannot be
+    // recovered positionally from the flattened counts.  Rebuild it here from
+    // the per-round counts, and pin round 0 (preprocessed) against the
+    // VERIFYING KEY, which is what makes that round mean anything.
+    let n_prep = vk.chip_information.len();
+    let combined_packing = &bundle.packing;
+    let log_stack = bundle.commit.log_stacking_height as usize;
+    let cube = 1usize << shared_eval_point.len();
+
+    let mut chip_infos: Vec<JaggedChipInfo> = Vec::new();
+    // How many leading entries belong to the preprocessed round (its real chips
+    // plus its padding) — the cross-bind and `n_prep` bookkeeping key off this.
+    let mut n_prep_infos = 0usize;
+
+    // ALWAYS at least one padding column per round, even on a round that lands
+    // exactly on a stripe boundary — SP1's `.max(1)`.  Mirrors the prover.
+    let mut push_padding = |infos: &mut Vec<JaggedChipInfo>, pad: usize| {
+        let mut done = 0usize;
+        loop {
+            let h = core::cmp::min(cube, pad - done);
+            infos.push(JaggedChipInfo {
+                name: alloc::format!("<stacking-pad:{}>", infos.len()),
+                row_count: h,
+                column_count: 1,
+            });
+            done += h;
+            if done >= pad {
+                break;
             }
-        })
-        .collect();
+        }
+    };
+
+    if n_prep > 0 {
+        // Round 0 geometry comes from the KEY, never the proof.
+        let mut prep_total = 0usize;
+        for (name, _domain, (width, height)) in vk.chip_information.iter() {
+            chip_infos.push(JaggedChipInfo {
+                name: name.clone(),
+                row_count: *height,
+                column_count: *width,
+            });
+            prep_total += width.saturating_mul(*height);
+        }
+        // ...and the proof must agree with it.
+        if let Some(prep_round) = combined_packing.round_counts.first() {
+            let claimed: Vec<(usize, usize)> = chip_infos
+                .iter()
+                .map(|i| (i.row_count, i.column_count))
+                .collect();
+            if prep_round != &claimed {
+                return Err(BasefoldVerifyError::JaggedPcs(
+                    "preprocessed round geometry disagrees with the verifying key"
+                        .into(),
+                ));
+            }
+        }
+        let prep_area = prep_total.next_multiple_of(1usize << log_stack);
+        push_padding(&mut chip_infos, prep_area.saturating_sub(prep_total));
+        n_prep_infos = chip_infos.len();
+    }
+
+    // Round 1: the shard's main chips, widths from the packing.
+    use p3_air::BaseAir;
+    let main_column_counts: &[usize] = combined_packing
+        .column_counts
+        .get(n_prep_infos..)
+        .unwrap_or(&[]);
+    chip_infos.extend(chips.iter().enumerate().map(|(i, chip)| {
+        let column_count = main_column_counts
+            .get(i)
+            .copied()
+            .unwrap_or_else(|| <_ as BaseAir<Val<SC>>>::width(*chip));
+        JaggedChipInfo {
+            name: chip.name().to_string(),
+            row_count: 0, // filled from the packing offsets below
+            column_count,
+        }
+    }));
+    let n_main_infos = chip_infos.len() - n_prep_infos;
 
     // Patch row_count from bundle.packing.offsets.
     //
@@ -695,38 +797,81 @@ where
     // legacy bundles serialized before the sentinel was added.
     let mut chip_infos = chip_infos;
     {
+        // Only the MAIN region's heights come from the packing; the
+        // preprocessed region's are already pinned by the verifying key above,
+        // which is the whole point of opening it against `vk.commit`.
         let mut col_idx = 0usize;
-        for info in chip_infos.iter_mut() {
+        for (i, info) in chip_infos.iter_mut().enumerate() {
             if info.column_count == 0 {
                 continue;
             }
-            let h = if col_idx + 1 < bundle.packing.offsets.len() {
-                bundle.packing.offsets[col_idx + 1]
-                    .saturating_sub(bundle.packing.offsets[col_idx])
-            } else if col_idx < bundle.packing.offsets.len() {
-                bundle
-                    .packing
+            let h = if col_idx + 1 < combined_packing.offsets.len() {
+                combined_packing.offsets[col_idx + 1]
+                    .saturating_sub(combined_packing.offsets[col_idx])
+            } else if col_idx < combined_packing.offsets.len() {
+                combined_packing
                     .total_values
-                    .saturating_sub(bundle.packing.offsets[col_idx])
+                    .saturating_sub(combined_packing.offsets[col_idx])
             } else {
                 0
             };
-            info.row_count = h;
+            if i < n_prep_infos {
+                // Round 0 (preprocessed, including its padding) is already
+                // pinned — by the verifying key for the real chips, and by the
+                // key-derived area for the padding.  The packing must AGREE.
+                // This is the bind that makes the preprocessed round mean
+                // anything.
+                if info.row_count != h {
+                    return Err(BasefoldVerifyError::JaggedPcs(format!(
+                        "preprocessed round: {} is {} rows in the packing but {} as \
+                         pinned by the verifying key",
+                        info.name, h, info.row_count,
+                    )));
+                }
+            } else if i < n_prep_infos + n_main_infos {
+                info.row_count = h;
+            } else {
+                // Round 1's padding: heights are whatever the packing says, but
+                // they must still be covered by the accounting below.
+                info.row_count = h;
+            }
             col_idx += info.column_count;
         }
 
         // COLUMN-ACCOUNTING CHECK.  The walk above assumes the verifier's chip
-        // list accounts for EVERY column in the packing: it advances `col_idx`
-        // by each chip's width and reads heights from `offsets[col_idx]`.  If
-        // the packing carried more column groups than this list covers — which
-        // is exactly what SP1's [preprocessed | main] layout would do, 2N
-        // groups for N chips — the walk would stop partway and silently read
-        // one region's heights as the other's.  Reject instead.
-        let total_cols = bundle.packing.offsets.len().saturating_sub(1);
+        // list accounts for EVERY column in the main packing: it advances
+        // `col_idx` by each chip's width and reads heights from
+        // `offsets[col_idx]`.  If the packing carried more column groups than
+        // this list covers, the walk would stop partway and silently read one
+        // region's heights as the other's.  Reject instead.
+        // The MAIN round's stacking padding closes out the column space; append
+        // however many columns the packing still has left, so the accounting is
+        // exact rather than approximate.
+        let total_cols = combined_packing.offsets.len().saturating_sub(1);
+        if col_idx < total_cols {
+            let mut pad_idx = col_idx;
+            while pad_idx < total_cols {
+                let h = if pad_idx + 1 < combined_packing.offsets.len() {
+                    combined_packing.offsets[pad_idx + 1]
+                        .saturating_sub(combined_packing.offsets[pad_idx])
+                } else {
+                    combined_packing
+                        .total_values
+                        .saturating_sub(combined_packing.offsets[pad_idx])
+                };
+                chip_infos.push(JaggedChipInfo {
+                    name: alloc::format!("<stacking-pad:{}>", chip_infos.len()),
+                    row_count: h,
+                    column_count: 1,
+                });
+                pad_idx += 1;
+            }
+            col_idx = pad_idx;
+        }
         if col_idx != total_cols {
             return Err(BasefoldVerifyError::JaggedPcs(format!(
-                "packing column accounting mismatch: chips cover {col_idx} columns \
-                 but the bundle carries {total_cols}",
+                "packing column accounting mismatch: [preprocessed | main] covers \
+                 {col_idx} columns but the packing carries {total_cols}",
             )));
         }
     }
@@ -782,19 +927,81 @@ where
     // so a malicious proof could ship y_per_chip ≠ opened_values.main and be
     // accepted by both the zerocheck (opened_values) and jagged (y_per_chip)
     // phases independently.  See `verify_one_jagged_group`.
-    let opened_main: Vec<Vec<InnerChallenge>> = opened_values
-        .chips
-        .iter()
-        .map(|c| {
-            let cloned: Vec<Challenge<SC>> = c.main.local.clone();
-            let (ptr, len, cap) = {
-                let mut v = core::mem::ManuallyDrop::new(cloned);
-                (v.as_mut_ptr(), v.len(), v.capacity())
-            };
-            // SAFETY: Challenge<SC> == InnerChallenge under the TypeId gate.
-            unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
-        })
-        .collect();
+    // SAFETY (used twice below): Challenge<SC> == InnerChallenge under the
+    // TypeId gate.
+    let relabel = |cloned: Vec<Challenge<SC>>| -> Vec<InnerChallenge> {
+        let (ptr, len, cap) = {
+            let mut v = core::mem::ManuallyDrop::new(cloned);
+            (v.as_mut_ptr(), v.len(), v.capacity())
+        };
+        unsafe { Vec::from_raw_parts(ptr as *mut InnerChallenge, len, cap) }
+    };
+    // The cross-bind runs over BOTH rounds, index-aligned with `chip_infos`:
+    // the preprocessed round binds each committed chip's `preprocessed.local`
+    // (looked up BY NAME, because that round is ordered by the verifying key,
+    // not by the shard's chip order), the main round binds `main.local`.
+    // Index-aligned with `chip_infos`, which now runs
+    // `[prep real | prep pad | main real | main pad]`.  A padding entry is one
+    // column of committed zeros, so its claim is ZERO — the prover emits the
+    // same (SP1 inserts `padding_column_count` zero claims per round).
+    let zero_claim = || alloc::vec![InnerChallenge::ZERO];
+    let mut opened_main: Vec<Vec<InnerChallenge>> = Vec::with_capacity(chip_infos.len());
+    for info in chip_infos.iter().take(n_prep_infos) {
+        if info.name.starts_with("<stacking-pad:") {
+            opened_main.push(zero_claim());
+            continue;
+        }
+        let idx = chips
+            .iter()
+            .position(|c| c.name() == info.name)
+            .ok_or_else(|| {
+                BasefoldVerifyError::JaggedPcs(format!(
+                    "preprocessed round covers chip {} which the shard does not have",
+                    info.name,
+                ))
+            })?;
+        opened_main.push(relabel(opened_values.chips[idx].preprocessed.local.clone()));
+    }
+    opened_main.extend(
+        opened_values.chips.iter().map(|c| relabel(c.main.local.clone())),
+    );
+    // The main round's trailing padding.
+    for _ in opened_main.len()..chip_infos.len() {
+        opened_main.push(zero_claim());
+    }
+
+    // The preprocessed round, as the batched open sees it: the vk's commitment
+    // plus the committed area implied by the vk's geometry (stripes rounded up
+    // to the stacking height, as `StackedPcsVerifier` requires).
+    let prep_rounds: Vec<(
+        <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
+        usize,
+    )> = if n_prep_infos == 0 {
+        Vec::new()
+    } else {
+        let prep_cells: usize = chip_infos
+            .iter()
+            .take(n_prep_infos)
+            .map(|i| i.row_count.saturating_mul(i.column_count))
+            .sum();
+        let log_stack = bundle.commit.log_stacking_height as usize;
+        let stripes = prep_cells.div_ceil(1usize << log_stack);
+        let area = stripes << log_stack;
+        // SAFETY: `Com<SC> == JaggedMmcs::Commitment` under the inner TypeId
+        // gate.  The commitment OWNS a heap allocation (`MerkleCap` is a Vec of
+        // digests), so this must relabel a CLONE that is then forgotten — a
+        // bitwise `transmute_copy` of the borrowed original duplicates the
+        // ownership and double-frees.
+        let commitment = unsafe {
+            core::mem::transmute_copy::<
+                crate::Com<SC>,
+                <crate::jagged_pcs::JaggedMmcs as p3_commit::Mmcs<
+                    crate::jagged_pcs::JaggedVal,
+                >>::Commitment,
+            >(&core::mem::ManuallyDrop::new(vk.commit.clone()))
+        };
+        alloc::vec![(commitment, area)]
+    };
 
     // Delegate to the existing host-side verifier.
     //
@@ -808,11 +1015,12 @@ where
         &chip_infos,
         &r_row_per_chip,
         &z_row_inner,
-        // SINGLE ROUND: `chip_infos` above is main-only, so there is no
-        // preprocessed group to cover.  When the prover emits SP1's two-round
-        // proof this becomes the number of chips that carry a preprocessed
-        // trace, read off the verifying key.
-        0,
+        // The PREPROCESSED round's commitment comes from the VERIFYING KEY, and
+        // its committed area follows from the geometry the key pins — so the
+        // proof carries neither.  SP1 does the same:
+        // `vec![vk.preprocessed_commit, *main_commitment]`.
+        &prep_rounds,
+        n_prep_infos,
         &bundle,
         Some(&opened_main),
         lb_challenger,

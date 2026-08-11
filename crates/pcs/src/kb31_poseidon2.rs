@@ -342,8 +342,9 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
+            use_rev: bool,
         ) -> Com<Self> {
-            inner_prep_commit(named_preprocessed_traces)
+            inner_prep_commit(named_preprocessed_traces, use_rev)
         }
 
         type PrepPrecomputed = crate::jagged_pcs::jagged::PrecomputedJaggedCommit;
@@ -353,8 +354,9 @@ pub mod koala_bear_poseidon2 {
                 String,
                 p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
             )],
+            use_rev: bool,
         ) -> Self::PrepPrecomputed {
-            inner_prep_precompute(named_preprocessed_traces)
+            inner_prep_precompute(named_preprocessed_traces, use_rev)
         }
 
     }
@@ -382,8 +384,9 @@ pub mod koala_bear_poseidon2 {
             String,
             p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
         )],
+        use_rev: bool,
     ) -> Com<KoalaBearPoseidon2> {
-        inner_prep_precompute(chip_traces).commit.original_commitment
+        inner_prep_precompute(chip_traces, use_rev).commit.original_commitment
     }
 
     /// Same commit as [`inner_prep_commit`], keeping the BaseFold prover data
@@ -394,6 +397,7 @@ pub mod koala_bear_poseidon2 {
             String,
             p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>,
         )],
+        use_rev: bool,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
         use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
@@ -405,9 +409,10 @@ pub mod koala_bear_poseidon2 {
             &chip_trace_views,
             mmcs,
             fri,
-            // Preprocessed-trace commit helper (setup / vk path): LEGACY bitrev
-            // orientation (`use_rev = false`), byte-identical.
-            false,
+            // The MACHINE's orientation: the preprocessed round is opened at
+            // the same shard point as main, so both rounds must agree on row
+            // order.
+            use_rev,
             // Preprocessed / setup commit is never a recursion prove commit
             // → no AREA PIN (`None`), byte-identical.
             None,
@@ -468,44 +473,18 @@ pub mod koala_bear_poseidon2 {
         /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
         fn prove_jagged_open(
             z_row: &[crate::InnerChallenge],
-            mut rounds: alloc::vec::Vec<
+            rounds: alloc::vec::Vec<
                 crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>,
             >,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            let bundle = match rounds.len() {
-                1 => {
-                    let r = rounds.pop().expect("len checked");
-                    crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
-                        r.chip_traces,
-                        r.r_row_per_chip,
-                        z_row,
-                        r.precomputed,
-                        Some(r.claims),
-                        challenger,
-                    )
-                }
-                2 => {
-                    // SP1's [preprocessed, main]: the preprocessed round is
-                    // proven FIRST, because the verifier samples each group's
-                    // z_col from the shared challenger in group order.
-                    let main = rounds.pop().expect("len checked");
-                    let prep = rounds.pop().expect("len checked");
-                    crate::jagged_pcs::jagged::prove_jagged_basefold_two_round(
-                        prep.chip_traces,
-                        prep.r_row_per_chip,
-                        prep.precomputed,
-                        Some(prep.claims),
-                        main.chip_traces,
-                        main.r_row_per_chip,
-                        main.precomputed,
-                        Some(main.claims),
-                        z_row,
-                        challenger,
-                    )
-                }
-                n => panic!("prove_jagged_open: {n} rounds; expected 1 (main only) or 2 ([preprocessed, main])"),
-            };
+            // ONE jagged proof spanning every round — SP1's shape.  A
+            // per-round proof would cost a reduction, an eval and an open each.
+            let bundle = crate::jagged_pcs::jagged::prove_jagged_basefold_rounds(
+                &rounds,
+                z_row,
+                challenger,
+            );
             crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
     }

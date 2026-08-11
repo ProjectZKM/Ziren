@@ -519,6 +519,12 @@ pub fn dummy_jagged_basefold_bundle(
         total_values,
         log_dense_size,
         column_counts,
+        // The dummy shape carries a single round.
+        round_counts: vec![packing
+            .chip_infos
+            .iter()
+            .map(|ci| (ci.row_count, ci.column_count))
+            .collect()],
     };
 
     // ── Derived sub-lengths ──

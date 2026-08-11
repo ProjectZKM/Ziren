@@ -366,7 +366,7 @@ mod tests {
         let prep_named = vec![(chip.name().to_string(), prep_trace.clone())];
         let prep_precomputed =
             <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::StarkGenericConfig>
-                ::prep_precompute(&prep_named);
+                ::prep_precompute(&prep_named, prover.machine().core_rev());
         let prep_padded = zkm_pcs::named_padded_traces(
             core::iter::once(chip.name()),
             vec![prep_trace],

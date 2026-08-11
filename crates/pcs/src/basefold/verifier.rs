@@ -248,9 +248,10 @@ where
         // (9) Verify component-poly Merkle proofs.  Each round's
         // commitment was over codewords on a domain of size
         // `1 << log_max_height` — one matrix per Mle in the round.
-        for (commit, opening) in commitments
+        for (round_idx, (commit, opening)) in commitments
             .iter()
             .zip_eq(proof.component_polynomials_query_openings_and_proofs.iter())
+            .enumerate()
         {
             for (q, &idx) in query_indices.iter().enumerate() {
                 let leaf = &opening.leaves[q];
@@ -272,7 +273,15 @@ where
                             opening_proof: &leaf.proof,
                         },
                     )
-                    .map_err(|e| BasefoldVerifierError::Mmcs(format!("{e:?}")))?;
+                    // Name the ROUND: with a batched multi-round open, a bare
+                    // `CapMismatch` says nothing about which commitment the
+                    // openings failed against.
+                    .map_err(|e| {
+                        BasefoldVerifierError::Mmcs(format!(
+                            "{e:?} (round {round_idx} of {}, query {q})",
+                            commitments.len(),
+                        ))
+                    })?;
             }
         }
 

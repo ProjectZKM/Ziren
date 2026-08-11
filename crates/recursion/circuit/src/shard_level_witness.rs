@@ -1470,7 +1470,8 @@ where
             core::array::from_fn(|i| builder.constant(modified[i]))
         };
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, cp, sc, je, ee, cr, mc, max_log_row_count, column_counts_by_round,
+            builder, &bundle, cp, sc, je, ee, cr, mc, &[], max_log_row_count,
+            column_counts_by_round,
             None, None,
         )
     } else {
@@ -1867,6 +1868,12 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // modified_commitments[0] (the value the hash-bind assert checks).  On the
     // hash-bind-off path this equals preread_commit_root.
     preread_modified_commitment: [Felt<C::F>; 8],
+    // The commitments of the rounds BEFORE the main one, in round order.  SP1
+    // opens `vec![vk.preprocessed_commit, *main_commitment]`
+    // (hypercube/src/verifier/shard.rs:638): the preprocessed round's commitment
+    // is the VERIFYING KEY's, so the verifier supplies it rather than trusting
+    // the proof for it.  Empty for a single-round proof.
+    preceding_commitments: &[[Felt<C::F>; 8]],
     max_log_row_count: usize,
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
@@ -1957,23 +1964,26 @@ where
     // via const_digest — this is the final value-dependence in the lift, and
     // witnessing it is what lets a same-shape dummy match the real program.
     // (HV::DigestVariable == [Felt;8] for the inner ring per the where-bound.)
-    let first_commit_digest: HV::DigestVariable = preread_commit_root;
-    let zero_digest_var: HV::DigestVariable = HV::const_digest(
-        builder,
-        <HV as crate::hash::FieldHasher<C::F>>::Digest::default(),
+    // The rounds run [preceding.., main]: the preceding rounds' commitments come
+    // from the caller (the verifying key), the LAST is the witnessed main
+    // commit.  The BaseFold open Merkle-verifies each query's leaf against
+    // `original_commitments[round]`, so a round whose commitment is missing here
+    // is a round nothing binds.
+    assert_eq!(
+        preceding_commitments.len() + 1,
+        num_rounds,
+        "jagged lift: {} preceding commitments for a {num_rounds}-round proof",
+        preceding_commitments.len(),
     );
     let mut original_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
-    original_commitments.push(first_commit_digest);
-    for _ in 1..num_rounds {
-        original_commitments.push(zero_digest_var);
-    }
-    // Hash-bind: modified_commitments[0] = the witnessed
-    // MODIFIED (FS-observed) digest; the rest mirror original (zeros).
+    original_commitments.extend_from_slice(preceding_commitments);
+    original_commitments.push(preread_commit_root);
+    // Hash-bind: the MAIN round's observed digest is the witnessed MODIFIED
+    // (FS-observed) one; a preceding round's commitment is already the value the
+    // key pins, so it is its own modified digest.
     let mut modified_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
+    modified_commitments.extend_from_slice(preceding_commitments);
     modified_commitments.push(preread_modified_commitment);
-    for _ in 1..num_rounds {
-        modified_commitments.push(zero_digest_var);
-    }
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
     // The host prover emits SP1's branching-program jagged-eval
@@ -2083,12 +2093,18 @@ where
         // `current_offset_felt` mirrors the baked path's `current_offset`:
         // the last real-column offset pushed (artificial/pad columns reuse it).
         let mut current_offset_felt: Felt<C::F> = acc;
+        // The height cursor runs across ALL rounds: with a preprocessed round in
+        // front of the main one, `heights` is the concatenation of every round's
+        // chips, so restarting the index per round would read the preprocessed
+        // heights again for the main chips.
+        let mut height_idx = 0usize;
         'outer: for cc in column_counts_by_round.iter() {
-            for (chip_idx, &w) in cc.iter().enumerate() {
+            for &w in cc.iter() {
                 let h = heights
-                    .get(chip_idx)
+                    .get(height_idx)
                     .copied()
                     .unwrap_or_else(|| builder.constant(C::F::ZERO));
+                height_idx += 1;
                 for _ in 0..w {
                     if col_prefix_sums.len() >= col_prefix_sums_len {
                         break 'outer;
@@ -2175,11 +2191,25 @@ where
     // max_log_row_count is well within KoalaBear's 31-bit range, the
     // raw count fits in a single Felt constant.
     let row_counts: Vec<Vec<Felt<C::F>>> = if let Some(heights) = chip_height_felts {
-        // per-chip row counts = the WITNESSED
-        // heights (2^log_h), reused for every round (a chip's prep + main
-        // traces share one height).  Value-independent (vs the baked
-        // chip_dims fallback below).
-        column_counts_by_round.iter().map(|_| heights.to_vec()).collect()
+        // per-chip row counts = the WITNESSED heights (2^log_h).  `heights` runs
+        // across ALL rounds in column order, so each round takes its own SLICE —
+        // the preprocessed round's chips are not the main round's.
+        let mut cursor = 0usize;
+        column_counts_by_round
+            .iter()
+            .map(|cc| {
+                let round: Vec<Felt<C::F>> = (0..cc.len())
+                    .map(|i| {
+                        heights
+                            .get(cursor + i)
+                            .copied()
+                            .unwrap_or_else(|| builder.constant(C::F::ZERO))
+                    })
+                    .collect();
+                cursor += cc.len();
+                round
+            })
+            .collect()
     } else if let Some(row_counts_src) = row_counts_by_round {
         row_counts_src
             .iter()
@@ -2735,6 +2765,7 @@ mod tests {
                 total_values: 0,
                 log_dense_size: 0,
                 column_counts: vec![],
+                            round_counts: Vec::new(),
             },
             jagged_eval: zkm_pcs::jagged_eval_sumcheck::JaggedSumcheckEvalProof::dummy(),
             // Single-group (G==1) test bundle.

@@ -194,25 +194,27 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // / reth have batch_dim>0 and tripped recursive_stacked_pcs.rs:159.
         let (stack_point, batch_point) = padded_point.split_at(stack_dim);
 
-        // Flatten per-round per-stripe evaluations into one big
-        // batch_evaluations Mle of length 2^batch_dim.
-        let batch_evals_flat: Vec<Ext<C::F, C::EF>> = proof
+        // Flatten the per-round per-stripe evaluations into one
+        // batch_evaluations Mle over `batch_dim` variables.
+        //
+        // The rounds' stripes need not add up to a power of two — the batch
+        // hypercube is the CEILING, and the cells past the last real stripe are
+        // committed as nothing, i.e. zero.  So the tail is zero-padded, exactly
+        // as the host verifier's `eval_multilinear_padded` does
+        // (`crates/pcs/src/basefold/stacked.rs`).  A proof with several opening
+        // rounds makes a non-power-of-two total the norm rather than the
+        // exception: SP1's preprocessed round contributes its own stripes.
+        let mut batch_evals_flat: Vec<Ext<C::F, C::EF>> = proof
             .batch_evaluations
             .iter()
             .flatten()
             .copied()
             .collect();
-        // Diagnostic: on assertion failure, log per-round lengths +
-        // dimensions so the exact shape mismatch can be fingerprinted.
-        assert_eq!(
-            batch_evals_flat.len(),
-            1 << batch_dim,
-            "stacked PCS: total batch_evaluations length ({}) must equal 2^batch_dim ({}).\n\
+        assert!(
+            batch_evals_flat.len() <= 1 << batch_dim,
+            "stacked PCS: total batch_evaluations length ({}) overflows 2^batch_dim ({}).\n\
              input point.len()={}, stack_dim={}, total_dim={}, batch_dim={}\n\
-             batch_evaluations shape: {} rounds, per-round lengths={:?}\n\
-             HINT: see docs/phase2_gate3_analysis.md — likely H1 (prover\n\
-             emits point of len=log2(actual_cells) not log_total_area)\n\
-             or H2 (interleaving factor off-by-one).  Fix A = align prover.",
+             batch_evaluations shape: {} rounds, per-round lengths={:?}",
             batch_evals_flat.len(),
             1 << batch_dim,
             point.len(),
@@ -222,6 +224,9 @@ impl<P> RecursiveStackedPcsVerifier<P> {
             proof.batch_evaluations.len(),
             proof.batch_evaluations.iter().map(|r| r.len()).collect::<Vec<_>>()
         );
+        while batch_evals_flat.len() < 1 << batch_dim {
+            batch_evals_flat.push(builder.constant(C::EF::ZERO));
+        }
 
         // Reconstructed evaluation at batch_point must equal claim.
         let expected_evaluation =

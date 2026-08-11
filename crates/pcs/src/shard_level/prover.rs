@@ -528,10 +528,51 @@ where
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
 
-    // Wired but not yet opened: the preprocessed ROUND is switched on together
-    // with the verifier and the recursion G-loop, since none of that is
-    // byte-neutral.  Threading it first keeps that flip to one coherent change.
-    let _ = preprocessed_commit_data;
+    // ── The PREPROCESSED round (SP1's first opening round) ────────────────
+    //
+    // Its chip set, ORDER and dims come from the commit itself
+    // (`packing.chip_infos`), which is authoritative: `setup` sorted the
+    // preprocessed traces by (Reverse(height), name) and committed them in that
+    // order, which is NOT the main round's name order.  Reading the order off
+    // the commit means the round can never disagree with what was committed.
+    //
+    // A machine with no preprocessed traces yields an empty round set and a
+    // single (main-only) round downstream.
+    let prep_chip_infos = &preprocessed_commit_data.packing.chip_infos;
+    let mut preprocessed_named: Vec<(String, crate::multilinear::PaddedMle<Val<SC>>)> =
+        Vec::with_capacity(prep_chip_infos.len());
+    let mut preprocessed_claims: Vec<Vec<Challenge<SC>>> =
+        Vec::with_capacity(prep_chip_infos.len());
+    for info in prep_chip_infos.iter() {
+        let idx = chips
+            .iter()
+            .position(|c| MachineAir::<Val<SC>>::name(*c) == info.name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "preprocessed round: committed chip {} is absent from the shard's \
+                     chip set — the proving key and the shard disagree",
+                    info.name,
+                )
+            });
+        preprocessed_named.push((info.name.clone(), preprocessed_traces[idx].clone()));
+        // This chip's PREPROCESSED columns at z are the PREFIX of its zerocheck
+        // residual (`preprocessed.local ++ main.local`, split by
+        // `preprocessed_width` — see the opened-values builder).  They are
+        // already computed; the round proves them against the vk's commitment,
+        // which is what nothing did before.
+        let evals = trace_at_z.get(&info.name).unwrap_or_else(|| {
+            panic!("preprocessed round: chip {} has no zerocheck residual", info.name)
+        });
+        assert!(
+            evals.len() >= info.column_count,
+            "preprocessed round: chip {} residual is {} wide but the commit has {} \
+             preprocessed columns",
+            info.name,
+            evals.len(),
+            info.column_count,
+        );
+        preprocessed_claims.push(evals[..info.column_count].to_vec());
+    }
 
     let residual_y: Vec<Vec<Challenge<SC>>> = compute_residual_y_openings::<SC, A>(
         chips,
@@ -553,6 +594,11 @@ where
         // its own `prove_trusted_evaluations`).
         prover.prove_trusted_evaluations(
             chips,
+            // The PREPROCESSED round: its traces (in the order `setup`
+            // committed them), its claims, and the proving key's commit.
+            &preprocessed_named,
+            preprocessed_claims,
+            preprocessed_commit_data,
             // Commit-coverage trace set (BORROWED views over the shared
             // `Arc<Mle>` store) — MUST be the same traces the precompute
             // committed, or the openings won't bind.
@@ -1344,6 +1390,12 @@ where
 /// own provider; this stays the CPU body.
 pub fn prove_trusted_evaluations<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
+    // SP1's FIRST opening round — see the trait method.
+    preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
+    preprocessed_claims: Vec<Vec<Challenge<SC>>>,
+    preprocessed_commit: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::BasefoldRing>::BfMmcs,
+    >,
     // BORROWED views over the shard prover's shared
     // `Arc<Mle>` store; `chip_traces` is built by a zero-copy slice relabel of
     // these views (no clone / move) — retires copy-SITE 1.
@@ -1532,19 +1584,65 @@ where
     // that used to live here were REMOVED with their OnceLock registries — both
     // were dead (ziren-gpu never registered either), so control always reached
     // the host jagged-basefold path the ring impls now call.
-    // ONE round today: the main commit.  The preprocessed round is appended
-    // here when the two-round proof switches on, and the ring impl dispatches
-    // on `rounds.len()`.
-    <SC as BasefoldRing>::prove_jagged_open(
-        z_row,
-        alloc::vec![crate::jagged_pcs::jagged::JaggedOpenRound {
-            chip_traces: &chip_traces,
-            r_row_per_chip: &r_row_per_chip,
-            claims: pre_y_inner,
-            precomputed: &precomputed_commit,
-        }],
-        challenger,
-    )
+    // ── The PREPROCESSED round's views, mirroring the main round's ────────
+    //
+    // Its heights come from the trace itself; every preprocessed trace is
+    // host-resident (it was committed once at setup), so there is no
+    // device-dummy height to resolve as there is for main.
+    let prep_r_row_per_chip: Vec<Vec<InnerChallenge>> = preprocessed_named
+        .iter()
+        .map(|(_name, pm)| {
+            let (tvals, twidth) = crate::jagged::real_cells(pm);
+            let h = if twidth == 0 { 1 } else { tvals.len() / twidth };
+            let log_h = h.max(1).next_power_of_two().trailing_zeros() as usize;
+            let slice: &[Challenge<SC>] = if shared_eval_point.len() >= log_h {
+                &shared_eval_point[shared_eval_point.len() - log_h..]
+            } else {
+                shared_eval_point
+            };
+            // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate above).
+            unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(slice.to_vec()) }
+        })
+        .collect();
+    let prep_chip_traces: Vec<crate::jagged_pcs::jagged::ChipTraceView> = preprocessed_named
+        .iter()
+        .map(|(name, pm)| {
+            // SAFETY: same no-op relabel as the main round above.
+            let pm_inner: crate::multilinear::PaddedMle<InnerVal> = unsafe {
+                core::mem::transmute_copy::<
+                    crate::multilinear::PaddedMle<Val<SC>>,
+                    crate::multilinear::PaddedMle<InnerVal>,
+                >(&core::mem::ManuallyDrop::new(pm.clone()))
+            };
+            (name.clone(), pm_inner)
+        })
+        .collect();
+    let prep_claims_inner: Vec<Vec<InnerChallenge>> = preprocessed_claims
+        .into_iter()
+        // SAFETY: Challenge<SC> == InnerChallenge (TypeId gate).
+        .map(|v| unsafe { reinterpret_vec::<Challenge<SC>, InnerChallenge>(v) })
+        .collect();
+
+    // SP1's rounds: [preprocessed, main].  The preprocessed round comes FIRST
+    // because the verifier samples each round's z_col from the shared
+    // challenger in round order.  A machine with no preprocessed traces emits
+    // the single main round, which is the pre-existing proof shape.
+    let mut rounds: Vec<crate::jagged_pcs::jagged::JaggedOpenRound<'_, _>> = Vec::with_capacity(2);
+    if !prep_chip_traces.is_empty() {
+        rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
+            chip_traces: &prep_chip_traces,
+            r_row_per_chip: &prep_r_row_per_chip,
+            claims: prep_claims_inner,
+            precomputed: preprocessed_commit,
+        });
+    }
+    rounds.push(crate::jagged_pcs::jagged::JaggedOpenRound {
+        chip_traces: &chip_traces,
+        r_row_per_chip: &r_row_per_chip,
+        claims: pre_y_inner,
+        precomputed: &precomputed_commit,
+    });
+    <SC as BasefoldRing>::prove_jagged_open(z_row, rounds, challenger)
 }
 
 

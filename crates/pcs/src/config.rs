@@ -84,6 +84,7 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     /// setup path never takes the `None` branch.
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
+        use_rev: bool,
     ) -> Com<Self>;
 
     /// The PRECOMPUTED preprocessed commit: the commitment together with the
@@ -104,8 +105,14 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
 
     /// Build the precomputed preprocessed commit.  Deterministic in its input,
     /// so a key that was deserialized without it can rebuild it on demand.
+    /// `use_rev` is the MACHINE's row orientation (`StarkMachine::core_rev`).
+    /// The preprocessed round is opened at the same shard point as main, so it
+    /// must be committed under the SAME orientation — a preprocessed commit
+    /// built LEGACY-bitrev while the shard reduces natural-row makes the two
+    /// rounds disagree on row order, and the preprocessed reduction fails.
     fn prep_precompute(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<Val<Self>>)],
+        use_rev: bool,
     ) -> Self::PrepPrecomputed;
 }
 

@@ -170,11 +170,12 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
 
     fn prep_commit(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+        use_rev: bool,
     ) -> zkm_pcs::Com<Self> {
         // The OuterSC wrap-machine PREPROCESSED commit goes through the jagged
         // BaseFold path over the Poseidon2-BN254 `OuterValMmcs` (no two-adic
         // coset LDE).
-        outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces)
+        outer_jagged_hooks::outer_prep_commit(named_preprocessed_traces, use_rev)
     }
 
     type PrepPrecomputed =
@@ -182,8 +183,9 @@ impl StarkGenericConfig for KoalaBearPoseidon2Outer {
 
     fn prep_precompute(
         named_preprocessed_traces: &[(String, p3_matrix::dense::RowMajorMatrix<zkm_pcs::jagged_pcs::JaggedVal>)],
+        use_rev: bool,
     ) -> Self::PrepPrecomputed {
-        outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces)
+        outer_jagged_hooks::outer_prep_precompute(named_preprocessed_traces, use_rev)
     }
 
     type Val = OuterVal;
@@ -499,8 +501,9 @@ pub mod outer_jagged_hooks {
 
     pub(crate) fn outer_prep_commit(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+        use_rev: bool,
     ) -> zkm_pcs::Com<KoalaBearPoseidon2Outer> {
-        outer_prep_precompute(chip_traces).commit.original_commitment
+        outer_prep_precompute(chip_traces, use_rev).commit.original_commitment
     }
 
     /// Same commit as [`outer_prep_commit`], keeping the BaseFold prover data
@@ -508,6 +511,7 @@ pub mod outer_jagged_hooks {
     /// `StarkGenericConfig::PrepPrecomputed`.
     pub(crate) fn outer_prep_precompute(
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
+        use_rev: bool,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
         use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
         
@@ -520,9 +524,8 @@ pub mod outer_jagged_hooks {
             &chip_trace_views,
             mmcs,
             fri,
-            // outer/wrap prep commit is LEGACY
-            // bitrev (`use_rev = false`), byte-identical.
-            false,
+            // The machine's orientation (the wrap machine is LEGACY bitrev).
+            use_rev,
             // setup/preprocessed commit is never
             // a recursion prove commit → no AREA PIN (`None`), byte-identical.
             None,

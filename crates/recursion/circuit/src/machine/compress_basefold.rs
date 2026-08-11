@@ -328,6 +328,7 @@ pub fn verify_compress_basefold<C, SC, A>(
                         *expected_eval,
                         *commit_root,
                         *modified_commitment,
+                    &[],
                     max_log_row_count,
                     &column_counts_by_round_pre,
                     None,

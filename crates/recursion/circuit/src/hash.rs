@@ -439,6 +439,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
             expected_eval,
             commit_root,
             modified_commitment,
+            &[],
             max_log_row_count,
             column_counts_by_round,
             row_counts_by_round,

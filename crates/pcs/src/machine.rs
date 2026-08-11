@@ -150,6 +150,17 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// `preprocessed_mles`.
     #[serde(skip)]
     preprocessed_jagged: std::sync::OnceLock<std::sync::Arc<SC::PrepPrecomputed>>,
+    /// The row orientation the PREPROCESSED commit was built under at `setup`
+    /// (`StarkMachine::core_rev`).
+    ///
+    /// It has to travel WITH the key.  The preprocessed round is opened against
+    /// `vk.commit`, so the prover must rebuild the commit under the exact
+    /// orientation `setup` used — and a caller-supplied flag is the wrong
+    /// source: a key that has been round-tripped through `pk_to_host` reaches a
+    /// prover whose machine may report a different `core_rev`, and the only
+    /// symptom is a Merkle `CapMismatch` on round 0, far from the cause.
+    #[serde(default)]
+    pub prep_rev: bool,
     /// The preprocessed chip ordering.
     pub chip_ordering: HashMap<String, usize>,
     /// The preprocessed chip local only information.
@@ -168,6 +179,7 @@ impl<SC: StarkGenericConfig> Clone for StarkProvingKey<SC> {
             // deep-copying the MLEs.
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_jagged: std::sync::OnceLock::new(),
+            prep_rev: self.prep_rev,
             chip_ordering: self.chip_ordering.clone(),
             constraints_map: self.constraints_map.clone(),
         }
@@ -185,6 +197,8 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
         traces: Vec<RowMajorMatrix<Val<SC>>>,
         chip_ordering: HashMap<String, usize>,
         constraints_map: HashMap<String, usize>,
+        // The orientation `setup` committed the preprocessed traces under.
+        prep_rev: bool,
     ) -> Self {
         Self {
             commit,
@@ -193,6 +207,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
             traces,
             preprocessed_mles: std::sync::OnceLock::new(),
             preprocessed_jagged: std::sync::OnceLock::new(),
+            prep_rev,
             chip_ordering,
             constraints_map,
         }
@@ -217,7 +232,11 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
     /// in the SAME name/height order `setup` committed them in (the order
     /// `chip_ordering` records), so the rebuilt commitment reproduces
     /// `self.commit` exactly.
+    /// The precomputed preprocessed commit, built on first use from `traces`
+    /// under the orientation recorded on the key (`prep_rev`), so a rebuild
+    /// always reproduces the commitment the verifying key carries.
     pub fn preprocessed_jagged(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
+        let use_rev = self.prep_rev;
         self.preprocessed_jagged.get_or_init(|| {
             let mut names: Vec<(usize, &String)> =
                 self.chip_ordering.iter().map(|(n, i)| (*i, n)).collect();
@@ -227,7 +246,7 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
                 .zip(self.traces.iter())
                 .map(|((_, name), trace)| (name.clone(), trace.clone()))
                 .collect();
-            std::sync::Arc::new(SC::prep_precompute(&named))
+            std::sync::Arc::new(SC::prep_precompute(&named, use_rev))
         })
     }
 
@@ -618,7 +637,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // `(preprocessed_commit, preprocessed_data)`).  Keep both — the root goes
         // to the vk, the precompute is seeded into the proving key below, so the
         // opening round never has to re-derive the committed order.
-        let prep_precomputed = SC::prep_precompute(&named);
+        let prep_precomputed = SC::prep_precompute(&named, self.core_rev());
         let commit = prep_precomputed.commit_root();
 
         // Get the chip ordering.
@@ -652,6 +671,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                     let _ = cell.set(std::sync::Arc::new(prep_precomputed));
                     cell
                 },
+                prep_rev: self.core_rev(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
@@ -751,7 +771,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        let commit = SC::prep_commit(&named);
+        let commit = SC::prep_commit(&named, self.core_rev());
 
         // Get the chip ordering.
         let chip_ordering = named_preprocessed_traces
@@ -775,7 +795,8 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
                 initial_global_cumulative_sum,
                 traces,
                 preprocessed_mles: std::sync::OnceLock::new(),
-            preprocessed_jagged: std::sync::OnceLock::new(),
+                preprocessed_jagged: std::sync::OnceLock::new(),
+                prep_rev: self.core_rev(),
                 chip_ordering: chip_ordering.clone(),
                 constraints_map,
             },
