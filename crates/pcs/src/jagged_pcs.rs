@@ -1190,11 +1190,29 @@ pub mod jagged {
     /// byte-neutral — it only ARMS the fallback against empty device-chip
     /// traces, removing the silent invalid-proof edge that an unconditional
     /// `commit_traces` D2H skip would otherwise leave.
+    /// One commitment ROUND's inputs to the jagged open.
+    ///
+    /// SP1 passes `prover_data: Rounds<JaggedProverData>` and
+    /// `evaluation_claims: Rounds<Evaluations>` as parallel per-round
+    /// collections (`slop/crates/jagged/src/prover.rs:162`); this is the same
+    /// thing with the parallel arms collapsed into one record, so a round's
+    /// commit can never be paired with another round's claims.
+    ///
+    /// `precomputed` is BORROWED: the preprocessed round opens the proving
+    /// key's commit, built once by `setup` and shared by every shard.
+    pub struct JaggedOpenRound<'a, MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
+        pub chip_traces: &'a [ChipTraceView],
+        pub r_row_per_chip: &'a [Vec<InnerChallenge>],
+        /// This round's per-chip column claims (SP1's `Evaluations`).
+        pub claims: Vec<Vec<InnerChallenge>>,
+        pub precomputed: &'a PrecomputedJaggedCommitGeneric<MT>,
+    }
+
     pub fn prove_jagged_basefold_with_precomputed_provider(
         chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
-        precomputed: PrecomputedJaggedCommit,
+        precomputed: &PrecomputedJaggedCommit,
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
         challenger: &mut crate::jagged_pcs::JaggedChallenger,
     ) -> JaggedBasefoldBundle {
@@ -1203,7 +1221,7 @@ pub mod jagged {
             r_row_per_chip,
             z_row,
             pre_y_per_chip,
-            &precomputed,
+            precomputed,
             challenger,
         )
     }
@@ -1248,7 +1266,7 @@ pub mod jagged {
             chip_traces,
             r_row_per_chip,
             z_row,
-            precomputed,
+            &precomputed,
             pre_y_per_chip,
             challenger,
         )
@@ -1852,7 +1870,9 @@ pub mod jagged {
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge],
         pre_y_per_chip: Option<Vec<Vec<InnerChallenge>>>,
-        precomputed: PrecomputedJaggedCommitGeneric<MT>,
+        // Borrowed, like the concrete path: a commit built once can be opened
+        // by every shard.
+        precomputed: &PrecomputedJaggedCommitGeneric<MT>,
         challenger: &mut Challenger,
         mmcs: MT,
         fri: FriConfig<crate::jagged_pcs::JaggedVal>,
@@ -1865,6 +1885,11 @@ pub mod jagged {
     {
         use p3_maybe_rayon::prelude::*;
         let PrecomputedJaggedCommitGeneric { packing, commit, prover_data, rev: dense_rev, recursion_area_pin } = precomputed;
+        // Borrowed commit: only the (small) commitment is cloned into the
+        // proof; the packing and BaseFold prover data are read in place.
+        let commit = commit.clone();
+        let dense_rev = *dense_rev;
+        let recursion_area_pin = *recursion_area_pin;
 
         // (3) per-chip per-column row-MLE values y_{c,j} (field-only; mirrors
         // the host path including the row-eq embedding factor + empty-chip skip).

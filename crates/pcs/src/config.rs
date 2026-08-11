@@ -269,12 +269,18 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// would have made the prover observe the BaseFold commit in-band while the
     /// verifier uses `verify_jagged_basefold_no_observe`, a transcript desync no
     /// green test suite can see.
+    /// Open the jagged PCS over one or more commitment ROUNDS at the shared
+    /// `z_row`.
+    ///
+    /// SP1 passes per-round `prover_data` / `evaluation_claims`
+    /// (`slop/crates/jagged/src/prover.rs:162`); `rounds` is the same, with
+    /// each round's commit, traces and claims kept together.  One round is the
+    /// main-only proof; two are SP1's `[preprocessed, main]`.
     fn prove_jagged_open(
-        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
-        r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
         z_row: &[crate::InnerChallenge],
-        pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
-        precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>,
+        rounds: alloc::vec::Vec<
+            crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>,
+        >,
         challenger: &mut Self::Challenger,
     ) -> crate::shard_level::shard_proof::EvaluationProof;
 }

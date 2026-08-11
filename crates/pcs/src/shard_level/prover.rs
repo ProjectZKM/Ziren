@@ -1532,15 +1532,17 @@ where
     // that used to live here were REMOVED with their OnceLock registries — both
     // were dead (ziren-gpu never registered either), so control always reached
     // the host jagged-basefold path the ring impls now call.
+    // ONE round today: the main commit.  The preprocessed round is appended
+    // here when the two-round proof switches on, and the ring impl dispatches
+    // on `rounds.len()`.
     <SC as BasefoldRing>::prove_jagged_open(
-        &chip_traces,
-        &r_row_per_chip,
         z_row,
-        // The per-RING seam keeps `Option`: the wrap ring's impl ignores the
-        // claims and keeps its own recompute.  The production inner path always
-        // supplies them.
-        Some(pre_y_inner),
-        precomputed_commit,
+        alloc::vec![crate::jagged_pcs::jagged::JaggedOpenRound {
+            chip_traces: &chip_traces,
+            r_row_per_chip: &r_row_per_chip,
+            claims: pre_y_inner,
+            precomputed: &precomputed_commit,
+        }],
         challenger,
     )
 }

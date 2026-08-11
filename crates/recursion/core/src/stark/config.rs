@@ -294,15 +294,22 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
     }
 
     fn prove_jagged_open(
-        chip_traces: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView],
-        r_row_per_chip: &[Vec<zkm_pcs::InnerChallenge>],
         z_row: &[zkm_pcs::InnerChallenge],
-        _pre_y_per_chip: Option<Vec<Vec<zkm_pcs::InnerChallenge>>>,
-        precomputed: zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-            Self::BfMmcs,
-        >,
+        mut rounds: Vec<zkm_pcs::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>>,
         challenger: &mut Self::Challenger,
     ) -> zkm_pcs::shard_level::shard_proof::EvaluationProof {
+        // The wrap machine has no preprocessed round to open, so this ring only
+        // ever sees the single main round.
+        assert_eq!(
+            rounds.len(),
+            1,
+            "wrap ring prove_jagged_open: expected exactly 1 round, got {}",
+            rounds.len(),
+        );
+        let round = rounds.pop().expect("len checked");
+        let chip_traces = round.chip_traces;
+        let r_row_per_chip = round.r_row_per_chip;
+        let precomputed = round.precomputed;
         // The wrap ring's jagged open, over `OuterValMmcs` + `OuterChallenger`.
         // This is the body `prove_trusted_evaluations` used to reach through a
         // `TypeId::of::<SC::Challenger>() != JaggedChallenger` test; the wrap
@@ -310,10 +317,9 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         // here is that test made static — and it is what lets the INNER arm
         // stop inferring `BfMmcs == JaggedMmcs` from a challenger identity.
         //
-        // `_pre_y_per_chip` is deliberately DROPPED: this path keeps the
+        // The round's `claims` are deliberately DROPPED: this path keeps the
         // generic prover's own legacy step-3 `y_per_chip` recompute (identical
-        // values), so the serialized bundle bytes are unchanged from the
-        // former call site, which also passed `None`.
+        // values), so the serialized bundle bytes are unchanged.
         let bundle = zkm_pcs::jagged_pcs::jagged::prove_jagged_basefold_inner_generic::<
             Self::Challenger,
             Self::BfMmcs,
@@ -735,7 +741,7 @@ mod basefold_over_bn254_roundtrip_test {
             &r_row_per_chip,
             &z_row,
             None,
-            precompute,
+            &precompute,
             &mut p_chal,
             mmcs.clone(),
             fri.clone(),

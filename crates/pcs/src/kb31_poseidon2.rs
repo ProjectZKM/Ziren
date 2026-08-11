@@ -467,25 +467,46 @@ pub mod koala_bear_poseidon2 {
         /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared
         /// inner body takes both directly — no `Box<dyn Any>` / `downcast_mut`.
         fn prove_jagged_open(
-            chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
-            r_row_per_chip: &[alloc::vec::Vec<crate::InnerChallenge>],
             z_row: &[crate::InnerChallenge],
-            pre_y_per_chip: Option<alloc::vec::Vec<alloc::vec::Vec<crate::InnerChallenge>>>,
-            precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-                Self::BfMmcs,
+            mut rounds: alloc::vec::Vec<
+                crate::jagged_pcs::jagged::JaggedOpenRound<'_, Self::BfMmcs>,
             >,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            crate::shard_level::shard_proof::EvaluationProof::Bundle(
-                crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
-                    chip_traces,
-                    r_row_per_chip,
-                    z_row,
-                    precomputed,
-                    pre_y_per_chip,
-                    challenger,
-                ),
-            )
+            let bundle = match rounds.len() {
+                1 => {
+                    let r = rounds.pop().expect("len checked");
+                    crate::jagged_pcs::jagged::prove_jagged_basefold_with_precomputed_provider(
+                        r.chip_traces,
+                        r.r_row_per_chip,
+                        z_row,
+                        r.precomputed,
+                        Some(r.claims),
+                        challenger,
+                    )
+                }
+                2 => {
+                    // SP1's [preprocessed, main]: the preprocessed round is
+                    // proven FIRST, because the verifier samples each group's
+                    // z_col from the shared challenger in group order.
+                    let main = rounds.pop().expect("len checked");
+                    let prep = rounds.pop().expect("len checked");
+                    crate::jagged_pcs::jagged::prove_jagged_basefold_two_round(
+                        prep.chip_traces,
+                        prep.r_row_per_chip,
+                        prep.precomputed,
+                        Some(prep.claims),
+                        main.chip_traces,
+                        main.r_row_per_chip,
+                        main.precomputed,
+                        Some(main.claims),
+                        z_row,
+                        challenger,
+                    )
+                }
+                n => panic!("prove_jagged_open: {n} rounds; expected 1 (main only) or 2 ([preprocessed, main])"),
+            };
+            crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
         }
     }
 
