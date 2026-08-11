@@ -720,105 +720,25 @@ impl ZKMProofShape {
         // Shrink.  Since the geometry is a function of L alone, ANY height
         // profile landing at a given L yields the same program — so a single
         // greedy representative per L is exact, not approximate.
+        // The children a compose/deferred/shrink program can be built over are
+        // EXACTLY the recursion bands, because every recursion program is
+        // snapped onto one of them before it is proven
+        // (`ZKMProver::fix_recursion_shape`).
+        //
+        // This used to be a synthetic sweep that emitted ONE representative per
+        // log-dense class, on the premise that a compose vk is a function of the
+        // chip set and arity alone.  MEASURED (`compose_vk_height_dependence`):
+        // it is not — seven bands give seven DISTINCT compose vks at arity 1 and
+        // again at arity 4.  So a representative whose per-chip heights differ
+        // from a real child's produces a different key, which is why a freshly
+        // regenerated allowlist still rejected every produced compress vk.
         let compress_child_classes: Vec<OrderedShape> = {
-            use p3_koala_bear::KoalaBear as KB;
-            use zkm_pcs::stacked_shapes::types::consts;
-            let compress_machine =
-                CompressAir::<KB>::compress_machine(crate::InnerSC::default());
-            let rec_chip_widths: BTreeMap<String, usize> = compress_machine
-                .chips()
-                .iter()
-                .map(|c| {
-                    (
-                        <_ as MachineAir<KB>>::name(c),
-                        p3_air::BaseAir::<KB>::width(c).max(1),
-                    )
-                })
+            let mut classes: Vec<OrderedShape> = recursion_shape_config
+                .get_all_shape_combinations(1)
+                .map(|mut v| v.pop().expect("one shape per combination"))
                 .collect();
-            let rec_names: Vec<String> = rec_chip_widths.keys().cloned().collect();
-            let log_dense_rec = |os: &OrderedShape| -> usize {
-                let total: usize = os
-                    .inner
-                    .iter()
-                    .map(|(name, log_h)| {
-                        rec_chip_widths.get(name).copied().unwrap_or(1) * (1usize << *log_h)
-                    })
-                    .sum();
-                if total == 0 {
-                    0
-                } else {
-                    total.next_power_of_two().trailing_zeros() as usize
-                }
-            };
-            // Greedily pack area into the recursion chips (each capped at
-            // `2^cube`, so the per-stage cube stays the base 22 and matches real
-            // children) until the shape's NATURAL log_dense lands exactly on the
-            // requested target.
-            let cube_rec = consts::CORE_MAX_LOG_ROW_COUNT;
-            let rec_shape_at_ld = |target: usize| -> Option<OrderedShape> {
-                let mut heights: Vec<(String, usize)> =
-                    rec_names.iter().map(|n| (n.clone(), 1usize)).collect();
-                let area_of = |hs: &[(String, usize)]| -> u128 {
-                    hs.iter()
-                        .map(|(n, h)| {
-                            (rec_chip_widths.get(n).copied().unwrap_or(1) as u128) * (1u128 << *h)
-                        })
-                        .sum()
-                };
-                let cap_area: u128 = 1u128 << target;
-                for i in 0..heights.len() {
-                    let mut best = 1usize;
-                    for h in 1..=cube_rec {
-                        let mut trial = heights.clone();
-                        trial[i].1 = h;
-                        if area_of(&trial) <= cap_area {
-                            best = h;
-                        } else {
-                            break;
-                        }
-                    }
-                    heights[i].1 = best;
-                }
-                let os = OrderedShape::from_log2_heights(&heights);
-                if log_dense_rec(&os) == target {
-                    Some(os)
-                } else {
-                    None
-                }
-            };
-            let pin = zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA;
-            // Largest natural area the recursion machine can reach: every chip
-            // at the cube.  Heights above the cube are impossible — the shard
-            // verifier's `max_log_row_count` is the cube, so a taller chip has
-            // no zerocheck to verify against.
-            let l_max = {
-                let total: u128 = rec_chip_widths
-                    .values()
-                    .map(|w| (*w as u128) * (1u128 << cube_rec))
-                    .sum();
-                let mut l = 0usize;
-                while (1u128 << l) < total {
-                    l += 1;
-                }
-                l
-            };
-            // The under-floor classes (natural L < pin) all collapse onto the
-            // pinned representative: the pin raises every one of them to
-            // L = pin, and `pick_log_stacking_height` is a CONSTANT
-            // (`DEFAULT_LOG_STACKING_HEIGHT`, not area-derived), so their
-            // `num_stripes` / reduction / jagged_n are the pinned ones too.  So
-            // the sweep starts at the pin and walks up to the machine ceiling.
-            let mut classes: Vec<OrderedShape> = Vec::new();
-            let mut seen: BTreeSet<Vec<(String, usize)>> = BTreeSet::new();
-            // Anchor: the largest natural L at or below the pin (its committed
-            // geometry is the pinned one, shared by every smaller child).
-            let anchor = (1..=pin).rev().find_map(&rec_shape_at_ld);
-            for os in anchor.into_iter().chain((pin + 1..=l_max).filter_map(&rec_shape_at_ld)) {
-                let mut inner = os.inner.clone();
-                inner.sort();
-                if seen.insert(inner.clone()) {
-                    classes.push(OrderedShape { inner });
-                }
+            for os in classes.iter_mut() {
+                os.inner.sort();
             }
             classes
         };
@@ -988,6 +908,55 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Does a compose program — and with it its verifying key — depend on its
+    /// children's PER-CHIP heights, or only on their committed-geometry class?
+    ///
+    /// `ZKMProofShape::generate` emits ONE synthetic representative per
+    /// log-dense class (`compress_child_classes`), which is only sound if the
+    /// answer is "only the class".  If the program moves with the heights, no
+    /// synthetic representative can ever reproduce a real child's vk and the
+    /// allowlist can never contain a produced key.
+    #[test]
+    #[ignore]
+    fn compose_vk_height_dependence() {
+        use crate::components::DefaultProverComponents;
+        use zkm_recursion_circuit::machine::{ZKMCompressWithVkeyShape, ZKMCompressShape};
+
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let rec_cfg = prover.compress_shape_config.as_ref().unwrap();
+        let bands: Vec<OrderedShape> = rec_cfg
+            .get_all_shape_combinations(1)
+            .map(|mut v| v.pop().unwrap())
+            .collect();
+        eprintln!("[HDEP] bands = {}", bands.len());
+
+        let vk_of = |os: &OrderedShape, arity: usize| -> String {
+            let compress_shape: ZKMCompressShape = vec![os.clone(); arity].into();
+            let shape = ZKMCompressWithVkeyShape {
+                compress_shape,
+                merkle_tree_height: crate::VK_MERKLE_TREE_HEIGHT,
+            };
+            let input = zkm_recursion_circuit::machine::ZKMCompressBasefoldWitnessValues::dummy(
+                prover.compress_prover.machine(),
+                &shape,
+            );
+            let program = prover.compose_program_basefold(&input);
+            let (_pk, vk) = prover.compress_prover.setup(&program);
+            format!("{:?}", vk.hash_koalabear())
+        };
+
+        for arity in [1usize, 4] {
+            let mut seen: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+            for (i, os) in bands.iter().enumerate() {
+                seen.entry(vk_of(os, arity)).or_default().push(i);
+            }
+            eprintln!("[HDEP] arity={arity}: {} distinct vks over {} bands", seen.len(), bands.len());
+            for (d, idxs) in &seen {
+                eprintln!("[HDEP]   {} <- bands {idxs:?}", &d[..40.min(d.len())]);
+            }
+        }
+    }
 
     /// TEMP analysis: measure the per-shard normalize band structure
     /// (distinct OrderedShapes per cluster) to size the arity

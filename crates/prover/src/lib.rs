@@ -670,13 +670,33 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         )
     }
 
+    /// Snap a basefold recursion program onto one of the allowed recursion
+    /// shapes, as SP1 does before proving a recursion shard.
+    ///
+    /// This is what makes the produced verifying keys ENUMERABLE.  A program
+    /// left at its organic heights produces a proof whose per-chip heights are
+    /// whatever execution happened to yield, so the parent compose program —
+    /// which is built from its children's shapes — is a function of those
+    /// organic heights and can never coincide with a program built from
+    /// `ZKMProofShape::generate`'s band-snapped shapes.  That is why
+    /// `VERIFY_VK=true` rejected at compress with the vk absent from a FRESHLY
+    /// regenerated map: the map was not stale, the produced key was simply
+    /// outside the enumerated space.
+    ///
+    /// `None` (`FIX_RECURSION_SHAPES=false`) leaves the program at its organic
+    /// heights and gives up vk enumerability with it.
+    fn fix_recursion_shape(&self, program: &mut RecursionProgram<KoalaBear>) {
+        if let Some(config) = self.compress_shape_config.as_ref() {
+            config.fix_shape(program);
+        }
+    }
+
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// `fix_shape` band-snapping is not applied on the prove path — the
-    /// program is built at its NATURAL per-(cluster,arity) heights (the
-    /// height-agnostic prove path), so it never panics in `fix_shape`
-    /// ("no shape found") when its organic heights exceed every band.
+    /// Band-snapped through [`Self::fix_recursion_shape`], as SP1 snaps a
+    /// recursion program before proving it — that is what keeps the produced
+    /// verifying key inside `ZKMProofShape::generate`'s enumerated space.
     pub fn recursion_program_basefold(
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
@@ -691,13 +711,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             base,
             "normalize",
         );
-        let program = build_normalize_basefold_program(
+        let mut program = build_normalize_basefold_program(
             self.core_prover.machine(),
             input,
             max_log_row_count,
         );
-        let program = Arc::new(program);
-        program
+        self.fix_recursion_shape(&mut program);
+        Arc::new(program)
     }
 
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
@@ -781,13 +801,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         // The `_recursion` variant is the sole production path for
         // basefold-for-recursion.
-        let program = build_compose_basefold_recursion_program(
+        let mut program = build_compose_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
             PublicValuesOutputDigest::Reduce,
         );
+        self.fix_recursion_shape(&mut program);
         Arc::new(program)
     }
 
@@ -806,19 +827,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         );
         // basefold-for-recursion, mirroring
         // `build_compose_program_basefold_uncached`.
-        let program = build_deferred_basefold_recursion_program(
+        let mut program = build_deferred_basefold_recursion_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
         );
+        self.fix_recursion_shape(&mut program);
         Arc::new(program)
     }
 
     /// Build the Wrap (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::shrink_program`] / [`Self::wrap_program`].
-    /// Skips `fix_shape` for the same reason as `recursion_program_basefold`
-    /// — basefold programs are sized differently from the FRI path.
+    /// Band-snapped through [`Self::fix_recursion_shape`], like every other
+    /// recursion stage whose verifying key the allowlist has to contain.
     pub fn shrink_program_basefold(
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
@@ -831,12 +853,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             Self::perstage_base_cube(),
             "shrink",
         );
-        let program = build_wrap_basefold_program(
+        let mut program = build_wrap_basefold_program(
             self.compress_prover.machine(),
             input,
             max_log_row_count,
             self.vk_verification,
         );
+        self.fix_recursion_shape(&mut program);
         Arc::new(program)
     }
 

@@ -83,6 +83,15 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
         }
 
         if let Some(shape) = closest_shape {
+            if std::env::var("ZIREN_FIXSHAPE_DIAG").is_ok() {
+                let mut organic: Vec<(String, usize)> =
+                    heights.iter().map(|(n, h)| (n.clone(), *h)).collect();
+                organic.sort();
+                let mut band: Vec<(String, usize)> =
+                    shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
+                band.sort();
+                eprintln!("FIXSHAPE organic={organic:?} -> band={band:?}");
+            }
             let shape = RecursionShape { inner: shape.into_iter().collect() };
             *program.shape_mut() = Some(shape);
         } else {
@@ -250,18 +259,75 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
             // (`FIX_CORE_SHAPES=false`) proofs, whose recursion heights reach
             // ExtAlu ~2^24 (a max band of ExtAlu 2^21 would reject them at
             // shape.rs:91 "no shape found").
+            // Soundness compose band.  The comment above describes a band that
+            // bumps Select 20->21 and keeps every other chip at the
+            // component-opening caps — it was never actually added, so the next
+            // thing a deep compose level could snap onto was the row-cube band
+            // below, which over-pads by 8-16x and runs the card out of memory.
+            // Measured maxima over tendermint's whole compose tree
+            // (`ZIREN_FIXSHAPE_DIAG=1`): Select 1,182,816 (2^21),
+            // MemoryVar 778,723 (2^20), BaseAlu 521,377 (2^20),
+            // ExtAlu 448,221 (2^19), MemoryConst 275,464 (2^19),
+            // Poseidon2WideDeg3 172,988 (2^18).  Caps sit exactly one power of
+            // two above each, so the deepest level pads ~1.9x instead of ~8x.
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 21),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 20),
+                (ext_alu.clone(), 19),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // One step up, for compose trees deeper than tendermint's (reth).
+            // A strict superset of the band above and a strict subset of the
+            // row-cube band below, so a program that overflows the tuned band
+            // pays 2x rather than jumping straight to the cube.
+            [
+                (mem_var.clone(), 21),
+                (select.clone(), 21),
+                (mem_const.clone(), 21),
+                (base_alu.clone(), 21),
+                (ext_alu.clone(), 21),
+                (poseidon2_wide.clone(), 19),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
+            // FIXED `max_log_row_count` (22 — `ZKMProver::perstage_base_cube`),
+            // and a chip's trace is wrapped as `PaddedMle::padded(inner, cube,
+            // ..)`, which asserts the padded rows fit `2^cube`.  A band taller
+            // than the cube therefore cannot be padded TO: measured, tendermint
+            // compose snapped onto the old `base_alu = 23` entry and died with
+            // "PaddedMle::padded: real rows 8388608 exceed 2^num_variables
+            // 4194304" (`crates/pcs/src/multilinear/padded.rs:155`).  The old
+            // 23/24 caps came from a natural-height sweep taken before the cube
+            // was pinned; a program whose ORGANIC height really exceeded the
+            // cube could not be proven at all, so nothing is lost by capping.
             [
                 (mem_var.clone(), 22),
                 (select.clone(), 21),
                 (mem_const.clone(), 22),
-                (base_alu.clone(), 23),
-                (ext_alu.clone(), 24),
+                (base_alu.clone(), 22),
+                (ext_alu.clone(), 22),
                 (poseidon2_wide.clone(), 20),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
         ]
         .map(HashMap::from)
         .to_vec();
+        // No band may exceed the row cube every recursion stage proves at:
+        // `PaddedMle::padded` asserts the padded rows fit `2^cube`, so a taller
+        // band is a shape nothing can be snapped onto.
+        let cube = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
+        for shape in allowed_shapes.iter() {
+            for (name, log_height) in shape.iter() {
+                assert!(
+                    *log_height <= cube,
+                    "recursion band {name} = 2^{log_height} exceeds the row cube 2^{cube}",
+                );
+            }
+        }
         Self { allowed_shapes, _marker: PhantomData }
     }
 }
