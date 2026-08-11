@@ -1338,6 +1338,44 @@ where
         _ => main_commitment,
     };
 
+    // The PREPROCESSED round, for a verifier that cannot see the key's chip
+    // metadata: its RAW root (the key holds the hash-bound digest) and its per
+    // chip row counts followed by its single padding column's height.  Heights
+    // are the one part of that round's geometry the machine does not already
+    // give a verifier, and the hash-bind pins them.
+    let (preprocessed_original_commitment, preprocessed_row_counts): (
+        [Val<SC>; 8],
+        Vec<Val<SC>>,
+    ) = match &evaluation_proof {
+        crate::shard_level::shard_proof::EvaluationProof::Bundle(bundle)
+            if !bundle.preceding_commits.is_empty()
+                && bundle.packing.round_counts.len() >= 2 =>
+        {
+            let raw_inner = crate::jagged_pcs::basefold_commit_digest_felts(
+                &bundle.preceding_commits[0],
+            );
+            // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the inner-ring TypeId
+            // identity (the only ring that produces a multi-round Bundle).
+            let raw = unsafe {
+                core::mem::transmute_copy::<[crate::InnerVal; 8], [Val<SC>; 8]>(&raw_inner)
+            };
+            let mut heights: Vec<Val<SC>> = bundle.packing.round_counts[0]
+                .iter()
+                .map(|(h, _w)| Val::<SC>::from_usize(*h))
+                .collect();
+            // The round's padding column closes it out to its committed area.
+            let real: usize = bundle.packing.round_counts[0]
+                .iter()
+                .map(|(h, w)| h.saturating_mul(*w))
+                .sum();
+            let log_stack = bundle.commit.log_stacking_height as usize;
+            let area = real.next_multiple_of(1usize << log_stack);
+            heights.push(Val::<SC>::from_usize(area - real));
+            (raw, heights)
+        }
+        _ => ([Val::<SC>::ZERO; 8], Vec::new()),
+    };
+
     BasefoldShardProof {
         public_values,
         main_commitment,
@@ -1351,6 +1389,8 @@ where
         row_counts,
         padding_column_counts,
         jagged_original_commitment,
+        preprocessed_original_commitment,
+        preprocessed_row_counts,
     }
 }
 

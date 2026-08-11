@@ -386,6 +386,15 @@ where
         // `write` below (immediately after main_commitment).
         let jagged_original_commitment_arr: [Felt<C::F>; 8] =
             core::array::from_fn(|i| self.jagged_original_commitment[i].read(builder));
+        // The PREPROCESSED round's raw root + per-chip row counts (its chips'
+        // heights, then its padding column's).  Fixed length for a given
+        // machine, so the program's read count does not depend on the program
+        // being verified.  Same stream position as `write`.
+        let preprocessed_commit_arr: [Felt<C::F>; 8] =
+            core::array::from_fn(|i| self.preprocessed_original_commitment[i].read(builder));
+        let preprocessed_row_counts: Vec<Felt<C::F>> =
+            self.preprocessed_row_counts.iter().map(|f| f.read(builder)).collect();
+        let _ = (&preprocessed_commit_arr, &preprocessed_row_counts);
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
@@ -462,6 +471,12 @@ where
         // Hash-bind: write the RAW BaseFold root immediately after
         // main_commitment (mirrors `read`).
         for f in self.jagged_original_commitment.iter() {
+            f.write(witness);
+        }
+        for f in self.preprocessed_original_commitment.iter() {
+            f.write(witness);
+        }
+        for f in self.preprocessed_row_counts.iter() {
             f.write(witness);
         }
         self.public_values.write(witness);

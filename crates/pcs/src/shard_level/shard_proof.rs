@@ -127,6 +127,25 @@ pub struct BasefoldShardProof<F, EF> {
     /// deserializable.
     #[serde(default = "default_zero_digest")]
     pub jagged_original_commitment: [F; 8],
+    /// The PREPROCESSED opening round's **RAW** BaseFold cap root — the same
+    /// role [`Self::jagged_original_commitment`] plays for the main round.  The
+    /// verifying key holds that round's HASH-BOUND digest, so the opening binds
+    /// against this and the verifier re-derives the bound form to check it.
+    /// Zero when the machine has no preprocessed chips.
+    #[serde(default = "default_zero_digest")]
+    pub preprocessed_original_commitment: [F; 8],
+    /// The PREPROCESSED round's per-chip row counts, in the order `setup`
+    /// committed them (chip-name order), followed by the round's single
+    /// stacking-padding column height.
+    ///
+    /// Heights are the one part of that round's geometry a verifier cannot
+    /// reconstruct — the chips and their widths come from the machine, and the
+    /// hash-bind against the key's commitment pins these — so they travel here
+    /// as a FIXED-length list (one per preprocessed chip, plus the pad), which
+    /// is what keeps the recursion program's read count independent of the
+    /// program being verified.
+    #[serde(default)]
+    pub preprocessed_row_counts: Vec<F>,
 }
 
 fn default_zero_digest<F: p3_field::Field>() -> [F; 8] {
@@ -156,6 +175,8 @@ where
             padding_column_counts: Vec::new(),
             // Hash-bind: no raw root for the empty/dummy proof.
             jagged_original_commitment: [F::ZERO; 8],
+            preprocessed_original_commitment: [F::ZERO; 8],
+            preprocessed_row_counts: Vec::new(),
         }
     }
 }

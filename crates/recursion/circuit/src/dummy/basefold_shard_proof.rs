@@ -387,10 +387,25 @@ where
             _ => (Vec::new(), Vec::new()),
         };
 
+    // The PREPROCESSED round's witnessed inputs.  The recursion program's read
+    // count is what has to match the real proof, so the LENGTH is what matters
+    // here: one height per preprocessed chip of this machine plus the round's
+    // single padding column.  The VALUES are zero, like every other dummy
+    // field.
+    let n_prep = chips
+        .iter()
+        .filter(|c| <A as MachineAir<F>>::preprocessed_width(&c.air) > 0)
+        .count();
+    let preprocessed_row_counts: Vec<F> =
+        if n_prep == 0 { Vec::new() } else { vec![F::ZERO; n_prep + 1] };
+    let preprocessed_original_commitment: [F; 8] = std::array::from_fn(|_| F::ZERO);
+
     #[allow(clippy::needless_update)]
     BasefoldShardProof {
         public_values,
         main_commitment,
+        preprocessed_original_commitment,
+        preprocessed_row_counts,
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
