@@ -357,6 +357,23 @@ pub enum LiftedEvalProof<C: CircuitConfig> {
 // variable-reconstruction step downstream can match the variant
 // directly (Bundle → bundle lift; Bytes → bytes lift; Empty →
 // placeholder).
+/// The preprocessed opening round's witnessed inputs.
+///
+/// Its chips and their WIDTHS come from the machine, so the only things a
+/// height-agnostic circuit cannot reconstruct are the RAW BaseFold root (the
+/// key holds the hash-bound digest) and the heights.  All three are read at a
+/// fixed stream position, and the per-round hash-bind pins them.
+pub struct PreprocessedRoundWitness<C: CircuitConfig> {
+    /// The round's RAW BaseFold cap root, which the BaseFold open binds
+    /// against.  `compress([this, hash(counts)])` must equal the key's
+    /// preprocessed commitment.
+    pub raw_commit: [Felt<C::F>; 8],
+    /// One height per preprocessed chip, in the machine's chip-name order.
+    pub row_counts: Vec<Felt<C::F>>,
+    /// One stacking-padding column height per opening round, in round order.
+    pub padding_heights: Vec<Felt<C::F>>,
+}
+
 impl<C> Witnessable<C>
     for zkm_pcs::shard_level::shard_proof::BasefoldShardProof<InnerVal, InnerChallenge>
 where
@@ -375,6 +392,8 @@ where
             Felt<C::F>,
             Ext<C::F, C::EF>,
         >,
+        // The preprocessed opening round's witnessed inputs.
+        PreprocessedRoundWitness<C>,
     );
 
     fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
@@ -396,7 +415,11 @@ where
             self.preprocessed_row_counts.iter().map(|f| f.read(builder)).collect();
         let padding_row_heights: Vec<Felt<C::F>> =
             self.padding_row_heights.iter().map(|f| f.read(builder)).collect();
-        let _ = (&preprocessed_commit_arr, &preprocessed_row_counts, &padding_row_heights);
+        let preprocessed_round = PreprocessedRoundWitness::<C> {
+            raw_commit: preprocessed_commit_arr,
+            row_counts: preprocessed_row_counts,
+            padding_heights: padding_row_heights,
+        };
         let public_values = self.public_values.read(builder);
         let logup_gkr_proof = self.logup_gkr_proof.read(builder);
         let zerocheck_proof = self.zerocheck_proof.read(builder);
@@ -463,6 +486,7 @@ where
             zerocheck_proof,
             evaluation_proof,
             opened_values,
+            preprocessed_round,
         )
     }
 
@@ -2393,7 +2417,15 @@ mod tests {
             InnerVal,
             InnerChallenge,
         >::empty(std::array::from_fn(|_| InnerVal::ZERO), 8);
-        let (main_commit, pvs, _logup, _zerocheck, evaluation_proof, _opened_values) =
+        let (
+            main_commit,
+            pvs,
+            _logup,
+            _zerocheck,
+            evaluation_proof,
+            _opened_values,
+            _preprocessed_round,
+        ) =
             <_ as Witnessable<C>>::read(&proof, &mut builder);
         assert_eq!(main_commit.len(), 8);
         assert_eq!(pvs.len(), 8);

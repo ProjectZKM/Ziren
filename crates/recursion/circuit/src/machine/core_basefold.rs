@@ -89,6 +89,8 @@ pub struct ZKMCoreBasefoldWitnessVariable<
         // constrains the SAME values the prover reduced to the
         // zerocheck point (not the trace@z_gkr LogUp-GKR openings).
         crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        // The preprocessed opening round's witnessed inputs.
+        crate::shard_level_witness::PreprocessedRoundWitness<C>,
     )>,
     /// per-shard per-chip cumulative sums.
     pub chip_cumulative_sums_per_shard: Vec<
@@ -265,6 +267,7 @@ pub fn verify_core_basefold<C, SC, A>(
                 zerocheck_proof,
                 evaluation_proof,
                 proof_opened_values,
+                preprocessed_round,
             ) = proof_tuple;
             let chip_names: Vec<String> =
                 logup_gkr_proof.logup_evaluations.chip_openings.keys().cloned().collect();

@@ -67,6 +67,8 @@ pub struct ZKMWrapBasefoldWitnessVariable<
             >,
             crate::shard_level_witness::LiftedEvalProof<C>,
             crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+            // The preprocessed opening round's witnessed inputs.
+            crate::shard_level_witness::PreprocessedRoundWitness<C>,
         ),
     )>,
     /// per-input per-chip cumulative sums.
@@ -168,6 +170,8 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         >,
         crate::shard_level_witness::LiftedEvalProof<C>,
         crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
+        // The preprocessed opening round's witnessed inputs.
+        crate::shard_level_witness::PreprocessedRoundWitness<C>,
     ),
     chip_cumulative_sums_per_input: Vec<
         std::collections::BTreeMap<
@@ -201,6 +205,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         zerocheck_proof,
         evaluation_proof,
         proof_opened_values,
+        preprocessed_round,
     ) = proof_tuple;
 
     let chip_names: Vec<String> =
