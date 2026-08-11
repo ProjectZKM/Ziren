@@ -559,11 +559,46 @@ impl<P> BasefoldShardVerifier<P> {
         // Sourcing the raw residual keeps FIX-on byte-identical; FIX-off
         // recursion-verify is gated behind that port plus the chip-set
         // vk_map regen.
-        let evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = opened_values
-            .chips
+        // The column claims, in the batched layout's column order:
+        //   [prep chips | prep pad | main chips | main pad]
+        // A padding column is committed zeros, so its claim is ZERO -- SP1
+        // inserts `padding_column_count` zero claims per round
+        // (slop/crates/jagged/src/prover.rs:190).  The preprocessed round's
+        // claims are each chip's `preprocessed.local`, taken in the MACHINE's
+        // chip-name order, which is the order `setup` committed them.
+        let zero_claim = |builder: &mut Builder<C>| -> Vec<Ext<C::F, C::EF>> {
+            use p3_field::PrimeCharacteristicRing;
+            let z: Ext<C::F, C::EF> = builder.constant(<C::EF as PrimeCharacteristicRing>::ZERO);
+            vec![z]
+        };
+        //
+        // `opened_values.chips` is POSITIONAL, aligned with `shard_chips`, which
+        // the caller name-sorts -- so the chips with preprocessed columns, taken
+        // in that order, ARE the preprocessed round in the order `setup`
+        // committed it.
+        let prep_positions: Vec<usize> = shard_chips
             .iter()
-            .map(|chip| chip.main.local.clone())
+            .enumerate()
+            .filter(|(_, c)| c.preprocessed_width() > 0)
+            .map(|(i, _)| i)
             .collect();
+        // `insertion_points` carries one entry per opening ROUND (the caller
+        // derives it from the same per-round column-count table the lift gets),
+        // so it is the one signal that cannot drift from the lift's layout.  A
+        // machine still on the single-round lift takes the old path exactly.
+        let two_round = insertion_points.len() >= 2;
+        let mut evaluation_claims: Vec<Vec<Ext<C::F, C::EF>>> = Vec::new();
+        if two_round && !prep_positions.is_empty() {
+            for &i in prep_positions.iter() {
+                evaluation_claims.push(opened_values.chips[i].preprocessed.local.clone());
+            }
+            evaluation_claims.push(zero_claim(builder));
+        }
+        evaluation_claims
+            .extend(opened_values.chips.iter().map(|chip| chip.main.local.clone()));
+        if two_round {
+            evaluation_claims.push(zero_claim(builder));
+        }
 
         // ── jagged HASH-BIND re-check (in-circuit) ──────────
         //

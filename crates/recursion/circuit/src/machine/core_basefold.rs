@@ -283,29 +283,71 @@ pub fn verify_core_basefold<C, SC, A>(
                 MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*a)
                     .cmp(&MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::name(*b))
             });
-            let _preprocessed_widths_pre: Vec<usize> = shard_chips_pre
-                .iter()
-                .map(|c| MachineAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::preprocessed_width(*c))
-                .collect();
             let main_widths_pre: Vec<usize> = shard_chips_pre
                 .iter()
                 .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            let column_counts_by_round_pre: Vec<Vec<usize>> =
-                vec![main_widths_pre];
+            // SP1's two opening rounds: [preprocessed, main]
+            // (hypercube/src/verifier/shard.rs:638).  The preprocessed round is
+            // the MACHINE's preprocessed chips in chip-NAME order -- the order
+            // `setup` commits them, and one a verifier reproduces without the
+            // key, which is why the key no longer carries chip metadata.
+            let prep_widths_pre: Vec<usize> = {
+                let mut dims: Vec<(String, usize)> = machine
+                    .chips()
+                    .iter()
+                    .filter_map(|c| {
+                        let w = MachineAir::<
+                            <SC as zkm_pcs::StarkGenericConfig>::Val,
+                        >::preprocessed_width(c);
+                        (w > 0).then(|| {
+                            (MachineAir::<
+                                <SC as zkm_pcs::StarkGenericConfig>::Val,
+                            >::name(c), w)
+                        })
+                    })
+                    .collect();
+                dims.sort_by(|a, b| a.0.cmp(&b.0));
+                dims.into_iter().map(|(_, w)| w).collect()
+            };
+            let column_counts_by_round_pre: Vec<Vec<usize>> = if prep_widths_pre.is_empty() {
+                vec![main_widths_pre]
+            } else {
+                vec![prep_widths_pre.clone(), main_widths_pre]
+            };
 
             // VERIFY_VK=true: per-chip WITNESSED heights (2^log_h),
             // name-sorted (aligned with column_counts_by_round_pre, both from
             // name-sorted chips).  Passed into the bundle lift so col_prefix_sums
             // / row_counts are reconstructed value-independently instead of
             // baked from the compile-time bundle offsets/chip_dims.
-            let chip_height_felts_pre: Option<Vec<Felt<C::F>>> =
-                Some(crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
-                    builder,
-                    &chip_names,
-                    &proof_opened_values,
-                ));
+            // Heights run across BOTH rounds in column order: the preprocessed
+            // round's are WITNESSED (a preprocessed trace's height is a property
+            // of the PROGRAM, which this circuit is deliberately agnostic to,
+            // and the hash-bind below pins them); the main round's come from the
+            // opened degrees as before.
+            let chip_height_felts_pre: Option<Vec<Felt<C::F>>> = Some({
+                let mut hs: Vec<Felt<C::F>> = preprocessed_round.row_counts.clone();
+                hs.extend(
+                    crate::shard_proof_variable_lift::chip_height_felts_from_opened_degrees::<C>(
+                        builder,
+                        &chip_names,
+                        &proof_opened_values,
+                    ),
+                );
+                hs
+            });
             let cps_heights: Option<&[Felt<C::F>]> = chip_height_felts_pre.as_deref();
+            // The preprocessed round's commitment: the RAW root the BaseFold
+            // open binds against, paired with the digest the KEY holds -- the
+            // hash-bind re-derives one from the other and asserts equality,
+            // which is what pins that round's geometry to the key.
+            let preceding_commitments: Vec<([Felt<C::F>; 8], [Felt<C::F>; 8])> =
+                if prep_widths_pre.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![(preprocessed_round.raw_commit, basefold_vk_ref.preprocessed_commit)]
+                };
 
             // Bundle lift is the production (and only) path.
             use crate::shard_level_witness::LiftedEvalProof;
@@ -320,7 +362,8 @@ pub fn verify_core_basefold<C, SC, A>(
                         *expected_eval,
                         *commit_root,
                         *modified_commitment,
-                        &[],
+                        &preceding_commitments,
+                        &preprocessed_round.padding_heights,
                         max_log_row_count,
                         &column_counts_by_round_pre,
                         None,

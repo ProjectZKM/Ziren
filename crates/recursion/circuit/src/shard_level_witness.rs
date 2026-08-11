@@ -1514,7 +1514,7 @@ where
             core::array::from_fn(|i| builder.constant(modified[i]))
         };
         lift_jagged_basefold_bundle::<C, HV>(
-            builder, &bundle, cp, sc, je, ee, cr, mc, &[], max_log_row_count,
+            builder, &bundle, cp, sc, je, ee, cr, mc, &[], &[], max_log_row_count,
             column_counts_by_round,
             None, None,
         )
@@ -1917,8 +1917,17 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // (hypercube/src/verifier/shard.rs:638): the preprocessed round's commitment
     // is the VERIFYING KEY's, so the verifier supplies it rather than trusting
     // the proof for it.  Empty for a single-round proof.
-    preceding_commitments: &[[Felt<C::F>; 8]],
+    preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
+    // One stacking-PADDING column height per opening round, in round order.
+    // The lift appends the column itself rather than taking it in
+    // `column_counts_by_round`, because the two lists are used for different
+    // things: the padding is part of the COLUMN SPACE (it moves
+    // `col_prefix_sums` and the z_col count) but NOT part of a round's
+    // GEOMETRY, and the hash-bind is taken over the geometry alone -- the host
+    // hashes `round_counts.last()`, its real chips (verifier.rs:379).
+    padding_heights: &[Felt<C::F>],
     max_log_row_count: usize,
+    // Each round's REAL chip widths, no padding column.
     column_counts_by_round: &[Vec<usize>],
     row_counts_by_round: Option<&[Vec<usize>]>,
     // per-chip WITNESSED height felts (2^log_h),
@@ -1956,10 +1965,13 @@ where
     // `+ (cc[len-2]+1)` heuristic inflates this across a power-of-two
     // boundary for some chip sets (keccak shard: 568→1024 vs host 415→512),
     // desyncing the transcript under host-parity enforcement.
+    // The column space is every round's real chips PLUS its one stacking-padding
+    // column, which is what the host's flattened `offsets` carries.
     let total_cols_before_pad: usize = column_counts_by_round
         .iter()
         .map(|cc| cc.iter().sum::<usize>())
-        .sum();
+        .sum::<usize>()
+        + padding_heights.len();
     let padded_cols = total_cols_before_pad.max(1).next_power_of_two();
     let col_prefix_sums_len = padded_cols + 1;
     let _num_col_variables = padded_cols.trailing_zeros() as usize;
@@ -2020,13 +2032,16 @@ where
         preceding_commitments.len(),
     );
     let mut original_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
-    original_commitments.extend_from_slice(preceding_commitments);
+    original_commitments.extend(preceding_commitments.iter().map(|(raw, _)| *raw));
     original_commitments.push(preread_commit_root);
     // Hash-bind: the MAIN round's observed digest is the witnessed MODIFIED
     // (FS-observed) one; a preceding round's commitment is already the value the
     // key pins, so it is its own modified digest.
+    // A preceding round's MODIFIED digest is the one the VERIFYING KEY holds:
+    // the hash-bind below re-derives `compress([raw, hash(counts)])` and asserts
+    // it equals this, which is what pins that round's geometry to the key.
     let mut modified_commitments: Vec<HV::DigestVariable> = Vec::with_capacity(num_rounds);
-    modified_commitments.extend_from_slice(preceding_commitments);
+    modified_commitments.extend(preceding_commitments.iter().map(|(_, m)| *m));
     modified_commitments.push(preread_modified_commitment);
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
@@ -2142,13 +2157,28 @@ where
         // chips, so restarting the index per round would read the preprocessed
         // heights again for the main chips.
         let mut height_idx = 0usize;
-        'outer: for cc in column_counts_by_round.iter() {
-            for &w in cc.iter() {
-                let h = heights
-                    .get(height_idx)
-                    .copied()
-                    .unwrap_or_else(|| builder.constant(C::F::ZERO));
-                height_idx += 1;
+        'outer: for (round_idx, cc) in column_counts_by_round.iter().enumerate() {
+            // The round's real chips, then its ONE stacking-padding column,
+            // which is what closes the round out to its committed area.
+            let pad = padding_heights.get(round_idx).copied();
+            for (&w, h) in cc
+                .iter()
+                .chain(core::iter::once(&1usize).take(pad.is_some() as usize))
+                .zip(
+                    (0..cc.len())
+                        .map(|_| {
+                            let h = heights
+                                .get(height_idx)
+                                .copied()
+                                .unwrap_or_else(|| builder.constant(C::F::ZERO));
+                            height_idx += 1;
+                            h
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .chain(pad),
+                )
+            {
                 for _ in 0..w {
                     if col_prefix_sums.len() >= col_prefix_sums_len {
                         break 'outer;

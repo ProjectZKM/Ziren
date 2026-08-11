@@ -136,6 +136,7 @@ where
                 cr,
                 mc,
                 &[],
+                &[],
                 max_log_row_count,
                 column_counts_by_round,
                 None,
