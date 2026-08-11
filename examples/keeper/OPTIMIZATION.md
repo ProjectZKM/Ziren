@@ -5906,3 +5906,82 @@ is byte-correct too.
 
 Warning counts unchanged: zkm-gpu-core 194, zkm-gpu-basefold 14.
 Switches: none; the grid shape is unconditional.
+
+## Aug 11 — round the committed jagged area to whole stacking blocks, not to a power of two
+
+Host `6b996dfd`, ziren-gpu `ffdcb20`, on top of the two-round preprocessed
+opening (host `d3f87a54` / gpu `4e41e2c`).
+
+### What was wrong
+
+A committed round's area was
+`(1 << ceil(log2(total_values))).next_multiple_of(1 << 21)` — the real cells
+rounded up to a power of two and only then out to whole stacking blocks. SP1
+does only the second step (`hypercube/src/prover/simple.rs:33`,
+`.next_multiple_of(1 << log_stacking_height)`), so Ziren was carrying up to
+**2x** the committed area it needed.
+
+With preprocessed opening in its own round that waste is paid twice, and — this
+is the part that bites — the first round's share lands in the MIDDLE of the
+concatenated dense, where the jagged reduction's implicit zero tail cannot
+reach it.
+
+Instrumented on reth (per-round area/real dump at the rounds-prove entry):
+
+| shard | areas | real cells | concatenated | log_dense |
+|---|---|---|---|---|
+| biggest compose | `[2^29, 2^29]` | 272,760,992 + 279,052,304 | **2^30 exactly** | 30 |
+| mid-size core | `[2^24, 2^28]` | 15,466,496 + 150,929,408 | 285,212,672 | 29 |
+
+The compose row is the failure: the concatenation hits the hypercube exactly,
+so no implicit tail survives, and round 0 of the jagged sumcheck allocates the
+full `2^29 x 16 B = 8 GiB` fold table. Measured: `CUDA Error out of memory` at
+`basefold/src/jagged_sumcheck.rs:1346`, `free=3663 MiB`. **reth could not get
+through the recursion path at all.** Two control experiments ruled out memory
+management as the cause — `ZIREN_CUDA_MEMPOOL_RELEASE_THRESHOLD_BYTES=0` freed
+only 2.5 GiB more (still short of 8), and `TRACE_GEN_WORKERS=1` made it worse.
+
+### The change
+
+`JaggedPacking.log_dense_size` was a LOG and so could not express a committed
+length that is not a power of two. It becomes `dense_len`, a count, with the
+hypercube log derived from it. The rename is what makes the compiler point at
+every site that meant one or the other (~120 host references plus the ziren-gpu
+mirrors, the verifier's derived `prep_area`, the dummy shape builder's padding
+column count, the shape enumeration, and the device dense buffer).
+
+One deviation from SP1, documented at `committed_dense_len`: ziren-gpu's
+streaming Merkle first-digest layer asserts every stripe width is a multiple of
+the Poseidon2 rate (`core/src/merkle_tree/mod.rs:179`), and a stripe is
+`DEFAULT_BATCH_SIZE` stacking blocks wide, so a commit is rate-safe exactly when
+its block count is a multiple of 8. Commits of four blocks or fewer take the
+accumulate-all path, which has no rate constraint and cannot run out of memory
+at that size; anything larger rounds its block count out to a multiple of 8.
+Under the old power-of-two area that split held by construction, so this
+preserves exactly which commits take which path.
+
+### Measured
+
+- **reth core -> compress completes and verifies for the first time.**
+  `GATE_RC=0`, `COMPRESS VERIFY OK prog=Reth`, compress_bytes 1,484,964.
+- reth core, 3 SOLO runs on GPU 4: 200.925 / 196.676 / 200.143 s =
+  2090 / 2135 / 2098 core_khz, mean **2108 kHz**, 281 shards, 419,960,677
+  cycles, `CORE VERIFY OK` 3/3, all three byte-identical
+  (`7a2135bb7205ca8d…`). Same-session A/B against the two-round change alone
+  (2055 kHz solo): **+2.6 %**.
+- reth core VRAM peak 30,875 MiB of 32,120 (nvidia-smi dmon, 5 s), SM mean
+  34-48 %, idle ~30 %. Tight — worth watching.
+- fib wrap chain (core -> compress -> shrink -> wrap_bn254), GPU: all four
+  stages `VERIFY OK`, 59 s (was 397 s).
+- CPU `test_e2e_wrap_fibonacci`: passed, 293.19 s (was 397.27 s).
+- tendermint compress (33 shards) and keccak-sponge compress (3 shards,
+  precompile): both `CORE VERIFY OK` + `COMPRESS VERIFY OK`.
+- `cargo check --workspace --all-targets` and
+  `cargo check -p zkm-recursion-core --features sys`: 0 errors.
+
+Proof bytes move (the committed geometry changed), so every golden is new:
+fib core `c313f628bea4b501…`, reth core `7a2135bb7205ca8d…`,
+tendermint core `0257016181d4fa2b…`, keccak-sponge core `26b32ea05890c83b…`.
+
+Switches: none. The formula is unconditional and shared by prover, verifier,
+the recursion circuit's dummy shape and the shape enumeration.
