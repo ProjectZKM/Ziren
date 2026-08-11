@@ -973,7 +973,10 @@ impl ZKMCoreBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseid
             .collect();
         // (Reverse(height), name) — the prover's preprocessed trace ordering
         // (machine.rs:454).
-        chip_information.sort_by(|a, b| b.1.log_size.cmp(&a.1.log_size).then_with(|| a.0.cmp(&b.0)));
+        // Match `setup`'s preprocessed commit order, which is BY NAME (see
+        // `StarkMachine::setup`): the order a verifier can reproduce from the
+        // machine's chip set without the key.
+        chip_information.sort_by(|a, b| a.0.cmp(&b.0));
         let chip_ordering = chip_information
             .iter()
             .enumerate()

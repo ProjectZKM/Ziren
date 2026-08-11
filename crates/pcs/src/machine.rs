@@ -10,7 +10,7 @@ use p3_uni_stark::{get_symbolic_constraints, AirLayout, SymbolicAirBuilder};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
-use std::{cmp::Reverse, fmt::Debug, iter::once, time::Instant};
+use std::{fmt::Debug, iter::once, time::Instant};
 use tracing::instrument;
 
 use super::{debug_constraints, Dom};
@@ -607,9 +607,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let mut named_preprocessed_traces =
             named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
 
-        // Order the chips and traces by trace size (biggest first), and get the ordering map.
-        named_preprocessed_traces
-            .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
+        // Order the preprocessed chips BY NAME.
+        //
+        // The order is the order the round is committed in, and a verifier has
+        // to know which committed column belongs to which chip.  Under a
+        // height-first order that mapping can only come from the key
+        // (`chip_information`); under NAME order any verifier reproduces it
+        // from the machine's chip set alone, which is what lets the key stop
+        // carrying chip metadata at all — SP1's `MachineVerifyingKey` carries
+        // none (hypercube/src/verifier/config.rs:73).
+        //
+        // Nothing downstream wanted the heights descending: the jagged packer
+        // walks the list in the given order and accumulates offsets
+        // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
+        // `traces` by the same list either way.  The height-first order is a
+        // habit from the coset-LDE commit that predates jagged.
+        named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
         let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
@@ -746,9 +759,22 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let mut named_preprocessed_traces =
             named_preprocessed_traces.into_iter().flatten().collect::<Vec<_>>();
 
-        // Order the chips and traces by trace size (biggest first), and get the ordering map.
-        named_preprocessed_traces
-            .sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
+        // Order the preprocessed chips BY NAME.
+        //
+        // The order is the order the round is committed in, and a verifier has
+        // to know which committed column belongs to which chip.  Under a
+        // height-first order that mapping can only come from the key
+        // (`chip_information`); under NAME order any verifier reproduces it
+        // from the machine's chip set alone, which is what lets the key stop
+        // carrying chip metadata at all — SP1's `MachineVerifyingKey` carries
+        // none (hypercube/src/verifier/config.rs:73).
+        //
+        // Nothing downstream wanted the heights descending: the jagged packer
+        // walks the list in the given order and accumulates offsets
+        // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
+        // `traces` by the same list either way.  The height-first order is a
+        // habit from the coset-LDE commit that predates jagged.
+        named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
         let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
