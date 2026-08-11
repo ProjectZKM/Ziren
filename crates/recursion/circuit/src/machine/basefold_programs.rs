@@ -359,11 +359,29 @@ mod tests {
             |_| None,
         );
 
+        // The preprocessed trace in prove-path form, and the commit over it.
+        // `setup` normally builds this pair once and stores it on the proving
+        // key; this synthetic shape builder has no key, so it commits its own
+        // single preprocessed trace the same way `SC::prep_precompute` does.
+        let prep_named = vec![(chip.name().to_string(), prep_trace.clone())];
+        let prep_precomputed =
+            <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::StarkGenericConfig>
+                ::prep_precompute(&prep_named);
+        let prep_padded = zkm_pcs::named_padded_traces(
+            core::iter::once(chip.name()),
+            vec![prep_trace],
+            max_log_row_count as u32,
+            |_| None,
+        );
+        let prep_traces: Vec<zkm_pcs::multilinear::PaddedMle<p3_koala_bear::KoalaBear>> =
+            prep_padded.into_values().collect();
+
         MachineProver::prove_shard_to_basefold(
             &prover,
             zkm_pcs::ShardProveData {
                 chips: &chips,
-                preprocessed_traces: &[prep_trace],
+                preprocessed_traces: &prep_traces,
+                preprocessed_commit_data: &prep_precomputed,
                 main_traces,
                 public_values,
             },

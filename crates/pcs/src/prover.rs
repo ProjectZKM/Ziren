@@ -131,6 +131,18 @@ where
     pub main_traces: std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
     /// SP1: MainTraceData.public_values.
     pub public_values: Vec<Val<SC>>,
+    /// SP1: `pk.preprocessed_data`'s committed half — the PRECOMPUTED
+    /// preprocessed commit, built once by `setup` and held in the proving key
+    /// (`StarkProvingKey::preprocessed_jagged`).
+    ///
+    /// SP1 opens the preprocessed traces as their own ROUND of every shard
+    /// proof, against `vk.preprocessed_commit`
+    /// (`hypercube/src/verifier/shard.rs:638` opens
+    /// `vec![vk.preprocessed_commit, *main_commitment]`), so the shard needs the
+    /// committed data — not just the traces — to produce that round.  Borrowed:
+    /// the same commit serves every shard.
+    pub preprocessed_commit_data:
+        &'a crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::BfMmcs>,
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -455,6 +467,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         let ShardProveData {
             chips,
             preprocessed_traces,
+            preprocessed_commit_data,
             main_traces,
             public_values,
         } = data;
@@ -525,6 +538,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         crate::shard_level::prover::prove_shard_with_data::<SC, A, _>(
             chips,
             preprocessed_traces,
+            preprocessed_commit_data,
             &shared_trace_mles,
             public_values,
             max_log_row_count,
@@ -1048,6 +1062,7 @@ where
                 self,
                 &chips,
                 pk.preprocessed_mles(),
+                <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_jagged()),
                 &pk.chip_ordering,
                 traces,
                 data.public_values.clone(),
@@ -1199,6 +1214,13 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
     prover: &P,
     chips: &[&MachineChip<SC, A>],
     pk_preprocessed_mles: &[std::sync::Arc<crate::basefold::Mle<Val<SC>>>],
+    // The proving key's PRECOMPUTED preprocessed commit
+    // (`StarkProvingKey::preprocessed_jagged`, via
+    // `BasefoldRing::prep_open_data`) — the committed half of SP1's
+    // `pk.preprocessed_data`, opened as a round of every shard proof.
+    pk_preprocessed_jagged: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        SC::BfMmcs,
+    >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
     main_traces: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>>,
     public_values: Vec<Val<SC>>,
@@ -1377,6 +1399,7 @@ where
         ShardProveData {
             chips: &chips_reborrow,
             preprocessed_traces: &preprocessed_traces,
+            preprocessed_commit_data: pk_preprocessed_jagged,
             // SP1-parity trace hoist: hand over the ready-made name-keyed
             // `PaddedMle` store (SP1's `Traces`); the trait method no longer
             // re-derives it from raw `RowMajorMatrix`es.

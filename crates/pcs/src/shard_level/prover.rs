@@ -249,6 +249,13 @@ where
 pub fn prove_shard_with_data<SC, A, P>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
+    // The proving key's PRECOMPUTED preprocessed commit — built once by `setup`,
+    // shared by every shard.  SP1 opens the preprocessed traces against it as a
+    // round of each shard proof (`vk.preprocessed_commit` in
+    // `hypercube/src/verifier/shard.rs:638`).
+    preprocessed_commit_data: &crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
+        <SC as crate::BasefoldRing>::BfMmcs,
+    >,
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
     public_values: Vec<Val<SC>>,
     max_log_row_count: usize,
@@ -520,6 +527,11 @@ where
         .iter()
         .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
         .collect();
+
+    // Wired but not yet opened: the preprocessed ROUND is switched on together
+    // with the verifier and the recursion G-loop, since none of that is
+    // byte-neutral.  Threading it first keeps that flip to one coherent change.
+    let _ = preprocessed_commit_data;
 
     let residual_y: Option<Vec<Vec<Challenge<SC>>>> = compute_residual_y_openings::<SC, A>(
         chips,
