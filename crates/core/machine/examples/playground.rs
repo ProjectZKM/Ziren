@@ -30,8 +30,9 @@ use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{Executor, Program};
 use zkm_pcs::air::MachineAir;
 use zkm_core_machine::{
+    io::ZKMStdin,
     mips::MipsAir,
-    utils::{run_test, setup_logger},
+    utils::{run_test, run_test_io, setup_logger},
 };
 use zkm_pcs::{
     debug_lookups_with_all_chips, koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, LookupKind,
@@ -275,11 +276,61 @@ fn main() {
                 ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
                 ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
             ];
+            // Fixtures that READ STDIN get their canonical inputs; an empty
+            // stream hits the executor's "insufficient input data" error.
+            fn hexb(s: &str) -> Vec<u8> {
+                (0..s.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                    .collect()
+            }
+            fn artifact_stdin(name: &str) -> ZKMStdin {
+                match name {
+                    "sha2-rust" => {
+                        // The guest reads (expected_hash, input) via io::read.
+                        let input = b"hello world".to_vec();
+                        let expected =
+                            hexb("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+                        let mut stdin = ZKMStdin::new();
+                        stdin.write(&expected);
+                        stdin.write(&input);
+                        stdin
+                    }
+                    // The curve generators, SEC1-compressed.
+                    "secp256k1-decompress" => ZKMStdin::from(
+                        hexb("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+                            .as_slice(),
+                    ),
+                    "secp256r1-decompress" => ZKMStdin::from(
+                        hexb("036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+                            .as_slice(),
+                    ),
+                    "bls12381-decompress" => ZKMStdin::from(
+                        hexb("97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb")
+                            .as_slice(),
+                    ),
+                    _ => ZKMStdin::new(),
+                }
+            }
+
+            // Optional comma-separated subset: `playground all a,b,c`.
+            let filter: Option<Vec<String>> = std::env::args()
+                .nth(2)
+                .map(|f| f.split(',').map(str::to_string).collect());
+
             let mut failed: Vec<&str> = vec![];
             for (name, elf) in artifacts {
+                if let Some(f) = &filter {
+                    if !f.iter().any(|x| x == name) {
+                        continue;
+                    }
+                }
                 eprint!("{name:<24} ");
                 let program = Program::from(elf).expect("artifact must parse");
-                match std::panic::catch_unwind(|| run_test::<CpuProver<_, _>>(program)) {
+                let stdin = artifact_stdin(name);
+                match std::panic::catch_unwind(|| {
+                    run_test_io::<CpuProver<_, _>>(program, stdin).map(|_| ())
+                }) {
                     Ok(Ok(_)) => eprintln!("PASS"),
                     Ok(Err(e)) => {
                         eprintln!("FAIL: {e:?}");
