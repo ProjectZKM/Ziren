@@ -75,7 +75,8 @@ where
             is_check_memory.clone(),
             AB::Expr::zero(),
             AB::Expr::one(),
-            is_check_memory,
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_cm_dep.into(),
         );
 
         builder.receive_instruction(
@@ -95,7 +96,67 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
-            local.is_sext + local.is_teq + local.is_ext + local.is_ins,
+            // Dependency rows only.
+            local.is_other_dep.into(),
+        );
+
+        let is_real_all = local.is_maddu
+            + local.is_msubu
+            + local.is_madd
+            + local.is_msub
+            + local.is_sext
+            + local.is_teq
+            + local.is_ext
+            + local.is_ins;
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_cm_dep);
+        builder.assert_bool(local.is_other_dep);
+        builder
+            .when(local.is_instruction)
+            .assert_zero(AB::Expr::one() - is_real_all.clone());
+        builder.assert_zero(
+            local.is_cm_dep
+                - (is_check_memory.clone() - is_check_memory.clone() * local.is_instruction),
+        );
+        let others = local.is_sext + local.is_teq + local.is_ext + local.is_ins;
+        builder.assert_zero(
+            local.is_other_dep - (others.clone() - others * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  Misc instructions are sequential, never halt.
+        crate::frame::eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
+        // MADDU/MSUBU/MADD/MSUB/INS read-and-write op_a; TEQ reads it
+        // immutably; both flags bind the frame rules.
+        let is_rw_a_tie = local.is_maddu
+            + local.is_msubu
+            + local.is_madd
+            + local.is_msub
+            + local.is_ins;
+        builder.assert_eq(local.frame.is_rw_a, is_rw_a_tie * local.is_instruction);
+        builder
+            .assert_eq(local.frame.op_a_immutable, local.is_teq * local.is_instruction);
+        builder
+            .when(local.is_instruction)
+            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+        // The HI-writing group keeps private shard/clk columns for its memory
+        // access (the Mul coupling): tie them to the frame exactly there.
+        let cm_and_instr = is_check_memory * local.is_instruction;
+        builder.when(cm_and_instr.clone()).assert_eq(local.shard, local.frame.shard);
+        builder.when(cm_and_instr).assert_eq(
+            local.clk,
+            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
+                + local.frame.clk_16bit_limb,
         );
 
         self.eval_ext(builder, local);

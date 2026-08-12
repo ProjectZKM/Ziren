@@ -22,7 +22,7 @@ use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
     AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
-    JumpEvent, MemoryRecordEnum, MovCondEvent, OptionMemoryRecordEnumTag,
+    JumpEvent, MemoryRecordEnum, MiscEvent, MovCondEvent, OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -430,6 +430,40 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         self.hi_or_prev_a = event.prev_a.into();
         if !matches!(event.opcode, zkm_core_executor::Opcode::WSBH) {
             self.is_rw_a = F::ONE;
+        }
+    }
+
+    /// `MiscEvent` variant of [`Self::populate_from_alu`].
+    /// MADDU/MSUBU/MADD/MSUB/INS read-and-write op_a (`is_rw_a`); TEQ reads
+    /// op_a immutably.  The chip ties both flags in its AIR.
+    pub fn populate_from_misc(
+        &mut self,
+        event: &MiscEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+        self.hi_or_prev_a = event.prev_a.into();
+        use zkm_core_executor::Opcode as Op;
+        if matches!(event.opcode, Op::MADDU | Op::MSUBU | Op::MADD | Op::MSUB | Op::INS) {
+            self.is_rw_a = F::ONE;
+        }
+        if matches!(event.opcode, Op::TEQ) {
+            self.op_a_immutable = F::ONE;
         }
     }
 

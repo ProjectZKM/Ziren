@@ -359,6 +359,15 @@ pub struct MiscEvent {
     pub prev_a: u32,
     /// The hi operand memory record.
     pub hi_record: MemoryWriteRecord,
+
+    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    pub is_instruction: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
 }
 
 impl MiscEvent {
@@ -377,7 +386,23 @@ impl MiscEvent {
         prev_a: u32,
         hi_record: MemoryWriteRecord,
     ) -> Self {
-        Self { clk, shard, pc, next_pc, opcode, a, b, c, prev_a, hi_record }
+        Self {
+            clk,
+            shard,
+            pc,
+            next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            prev_a,
+            hi_record,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
+        }
     }
 }
 

@@ -1735,7 +1735,7 @@ impl<'a> Executor<'a> {
                 _ => MemoryWriteRecord::default(),
             };
 
-            let event = MiscEvent::new(
+            let mut event = MiscEvent::new(
                 clk,
                 self.shard(),
                 self.state.pc,
@@ -1747,6 +1747,12 @@ impl<'a> Executor<'a> {
                 prev_a,
                 hi_access,
             );
+            // A REAL instruction: carry the frame (see AluEvent).
+            event.is_instruction = 1;
+            event.recv_next_pc = recv_next_pc;
+            event.a_record = record.a.into();
+            event.b_record = record.b.into();
+            event.c_record = record.c.into();
             self.record.misc_events.push(event);
             emit_misc_dependencies(self, event);
         }

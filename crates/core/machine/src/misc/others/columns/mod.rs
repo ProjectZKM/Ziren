@@ -19,6 +19,18 @@ pub const NUM_MISC_INSTR_COLS: usize = size_of::<MiscInstrColumns<u8>>();
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MiscInstrColumns<T: Copy> {
+    /// Whether this row is a REAL instruction (all misc rows are today).
+    pub is_instruction: T,
+
+    /// Dependency-row multiplicities for the two Instruction-bus receives,
+    /// materialised so they stay degree 1.
+    pub is_cm_dep: T,
+    pub is_other_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: crate::frame::InstructionFrameCols<T>,
+
     /// The shard number.
     pub shard: T,
     /// The clock cycle number.

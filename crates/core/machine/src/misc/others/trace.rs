@@ -66,7 +66,18 @@ impl<F: PrimeField32> MachineAir<F> for MiscInstrsChip {
 
                     if idx < input.misc_events.len() {
                         let event = &input.misc_events[idx];
-                        self.event_to_row(event, cols, &mut blu);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut blu,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
+                    } else {
+                        // Padding rows carry no instruction: neutralise the
+                        // frame or its register-access multiplicities break the
+                        // Memory bus.
+                        cols.frame.populate_dependency();
                     }
                 });
                 blu
@@ -94,7 +105,23 @@ impl MiscInstrsChip {
         event: &MiscEvent,
         cols: &mut MiscInstrColumns<F>,
         blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
+        shard: u32,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        let is_cm = matches!(
+            event.opcode,
+            Opcode::MADDU | Opcode::MSUBU | Opcode::MADD | Opcode::MSUB
+        );
+        cols.is_cm_dep = F::from_bool(is_cm && !is_instruction);
+        cols.is_other_dep = F::from_bool(!is_cm && !is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_misc(event, program, shard, blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
