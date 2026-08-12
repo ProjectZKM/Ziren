@@ -21,8 +21,8 @@
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
-    AluEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum,
-    OptionMemoryRecordEnumTag,
+    AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
+    MemoryRecordEnum, OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -332,6 +332,33 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             shard,
             blu,
         );
+    }
+
+    /// `BranchEvent` variant of [`Self::populate_from_alu`].  The caller must
+    /// additionally set `op_a_immutable = ONE`: a branch READS `op_a`, and both
+    /// the frame rule and Cpu's legacy bus tuple carry that flag high.
+    pub fn populate_from_branch(
+        &mut self,
+        event: &BranchEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+        self.op_a_immutable = F::ONE;
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

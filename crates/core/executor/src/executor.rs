@@ -1426,7 +1426,17 @@ impl<'a> Executor<'a> {
         {
             self.emit_mem_instr_event(instruction.opcode, a, b, c, hi_or_prev_a.unwrap_or(0));
         } else if instruction.is_branch_instruction() {
-            self.emit_branch_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
+            self.emit_branch_event(
+                clk,
+                instruction.opcode,
+                a,
+                b,
+                c,
+                next_pc,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_jump_instruction() {
             self.emit_jump_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
         } else if instruction.is_misc_instruction() {
@@ -1624,14 +1634,32 @@ impl<'a> Executor<'a> {
     #[allow(clippy::too_many_arguments)]
     fn emit_branch_event(
         &mut self,
+        clk: u32,
         opcode: Opcode,
         a: u32,
         b: u32,
         c: u32,
         next_pc: u32,
         next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let event = BranchEvent { pc: self.state.pc, next_pc, next_next_pc, opcode, a, b, c };
+        // A REAL instruction: carry the frame (see AluEvent).
+        let event = BranchEvent {
+            pc: self.state.pc,
+            next_pc,
+            next_next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            is_instruction: 1,
+            clk,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
+        };
         self.record.branch_events.push(event);
         emit_branch_dependencies(self, event);
     }

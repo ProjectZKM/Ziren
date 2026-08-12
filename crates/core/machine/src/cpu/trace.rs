@@ -295,6 +295,12 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
                     | Opcode::DIVU
                     | Opcode::MOD
                     | Opcode::MODU
+                    | Opcode::BEQ
+                    | Opcode::BNE
+                    | Opcode::BLTZ
+                    | Opcode::BGTZ
+                    | Opcode::BLEZ
+                    | Opcode::BGEZ
             ))
         .collect()
 }

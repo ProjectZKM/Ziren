@@ -81,8 +81,34 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            is_real.clone(),
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep.into(),
         );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+        builder.assert_zero(
+            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  A branch's next_next_pc is the TARGET (or the
+        // fallthrough), already a constrained Word column; branches never halt.
+        crate::frame::eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc.into(),
+            local.next_pc.reduce::<AB>(),
+            local.next_next_pc.reduce::<AB>(),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc.reduce::<AB>());
+        // A branch READS op_a; the frame rule needs the flag high exactly on
+        // instruction rows.
+        builder.assert_eq(local.frame.op_a_immutable, local.is_instruction);
 
         // Evaluate program counter constraints.
         {

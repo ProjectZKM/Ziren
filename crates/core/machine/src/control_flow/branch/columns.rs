@@ -10,6 +10,17 @@ pub const NUM_BRANCH_COLS: usize = size_of::<BranchColumns<u8>>();
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct BranchColumns<T> {
+    /// Whether this row is a REAL instruction (all branch rows are today; the
+    /// gate keeps the recipe uniform).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: crate::frame::InstructionFrameCols<T>,
+
     /// The current program counter.
     pub pc: T,
 
