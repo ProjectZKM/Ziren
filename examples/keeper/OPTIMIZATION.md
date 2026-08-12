@@ -6368,3 +6368,62 @@ the COORDINATOR, i.e. the serial path, which is why those paid.
 rule (break the total down by payload size — tiny payloads carrying the time means
 WAIT, not bandwidth), these two filters killed four of the five candidates chased
 on Aug 12.
+
+## Aug 12–13 — the SP1 chip architecture lands: every instruction chip owns its frame, the Cpu chip is gone
+
+The largest structural change of the effort so far.  Ziren's `CpuChip` was a
+dispatch hub: one 59-column row per executed instruction that fetched the
+instruction (`send_program`), did the register accesses, chained `(clk, pc)`
+on the State bus, and handed the decoded instruction to the opcode chip over
+the Instruction bus.  SP1 has no such chip.  Now neither does Ziren:
+
+- every instruction chip (8 ALU + Branch + Jump + MovCond + Misc + 5 memory +
+  SyscallInstrs) embeds a 52-column `InstructionFrameCols` and evaluates its
+  own program fetch, register access, and `(clk, pc)` State chaining;
+- the halt endpoint telescopes through a single degree-3 exemption in
+  SyscallInstrs (`state_recv == next_pc + is_halt·(pc+4−next_pc)`);
+- `MipsAir` has no Cpu variant; `MipsAirId::Cpu` survives only as the VIRTUAL
+  cycles axis for shard splitting and shape banding; execution shards are
+  classified by instruction-chip presence (`EXECUTION_CHIP_NAMES`);
+- the GPU side mirrors it: 18 tracegen kernels take the device program table,
+  fetch the instruction only on real rows, and pad in-kernel with the frame's
+  imm-flags template; column parity is asserted device-vs-host on a REAL
+  executed fibonacci record for all 18 chips.
+
+### What it took to keep it honest
+
+- an 18-chip host FFI parity suite (fibonacci + keccak-sponge + u256x2048-mul,
+  live frames + per-chip pad templates) — caught the shift_right pad drift;
+- the device CpuChip had to mirror the empty `cpu_owned_events` filter or 32
+  rogue REAL rows broke every bus (LogUp PV balance);
+- `program_instr_table`'s par_iter compare under the cache mutex deadlocked
+  tendermint/reth once 18 chips × 8 workers hit it (was once per shard) —
+  the compare is sequential now;
+- the FIX-off canonical-cluster injection had to stop injecting the
+  non-machine "Cpu" name: a width-1 trace shifted the alphabetical
+  chips⇄traces zip one over (DivRem chip against the Cpu trace).
+
+### Measured (reth core, GPU box, 4-run ABBA per slot, slots swapped, all verified)
+
+| arm | mean core_khz | shards |
+|---|---|---|
+| baseline 60e45272 (pre-frame) | 2954 (2930–3000) | 281 |
+| frame tree (Cpu dropped)      | 2452 (2437–2477) | 314 |
+
+**−17.0 % on reth core, +11.7 % shards.**  The per-instruction arithmetic:
+a REAL instruction row nets −7 cells (+52 frame, −59 Cpu row), but every
+DEPENDENCY row (the Instruction-bus request rows: Branch→Lt comparisons,
+DivRem→Mul/Lt, …) pays the full +52 with nothing removed — e.g. one branch
+went 59+62+32 = 153 cells to 114+84 = 198 (+29 %).  On keccak-sponge, 34.7 %
+of ALU rows are dependency rows.  Tendermint core (36 shards) measured
+4401 kHz on the frame tree — cycle-dense workloads win, dep-heavy ones lose.
+
+### The lever this opens
+
+SP1 has NO Instruction bus and NO dependency rows at all — each chip inlines
+the arithmetic it needs (Branch does its own comparison, the memory chips
+already inline their address add).  Now that every chip owns its frame, that
+inlining is the remaining delta to SP1's core architecture, and it removes
+BOTH the dep rows' area (the whole −17 % above and then some) and a bus.
+The memory-instruction split already did this once: inlining the address add
+removed one 19-cell AddSub dep row per memory instruction.
