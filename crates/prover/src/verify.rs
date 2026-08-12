@@ -104,7 +104,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         for shard_proof in proof.0.iter() {
             let public_values: &PublicValues<Word<_>, _> =
                 shard_proof.public_values.as_slice().borrow();
-            if shard_proof.contains_cpu() {
+            if shard_proof.contains_execution() {
                 current_execution_shard += KoalaBear::ONE;
                 if public_values.execution_shard != current_execution_shard {
                     return Err(MachineVerificationError::InvalidPublicValues(
@@ -138,12 +138,12 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc_prev: start_pc should equal next_pc_prev for all shards",
                 ));
-            } else if !shard_proof.contains_cpu() && public_values.start_pc != public_values.next_pc
+            } else if !shard_proof.contains_execution() && public_values.start_pc != public_values.next_pc
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc != next_pc: start_pc should equal next_pc for non-cpu shards",
                 ));
-            } else if shard_proof.contains_cpu() && public_values.start_pc == KoalaBear::ZERO {
+            } else if shard_proof.contains_execution() && public_values.start_pc == KoalaBear::ZERO {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "start_pc == 0: execution should never start at halted state",
                 ));
@@ -250,13 +250,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "deferred_proofs_digest != deferred_proofs_digest_prev",
                 ));
-            } else if !shard_proof.contains_cpu()
+            } else if !shard_proof.contains_execution()
                 && public_values.committed_value_digest != committed_value_digest_prev
             {
                 return Err(MachineVerificationError::InvalidPublicValues(
                     "committed_value_digest != committed_value_digest_prev",
                 ));
-            } else if !shard_proof.contains_cpu()
+            } else if !shard_proof.contains_execution()
                 && public_values.deferred_proofs_digest != deferred_proofs_digest_prev
             {
                 return Err(MachineVerificationError::InvalidPublicValues(

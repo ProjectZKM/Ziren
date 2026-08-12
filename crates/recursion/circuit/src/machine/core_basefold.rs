@@ -240,7 +240,13 @@ pub fn verify_core_basefold<C, SC, A>(
             // `contains_memory_init` would be FALSE and the
             // "no-init ⇒ prev_bits == last_bits" constraint would be emitted on
             // EVERY shard — violated on any shard that initializes memory.
-            (cc("Cpu"), cc("MemoryGlobalInit"), cc("MemoryGlobalFinalize"))
+            // Execution-shard signal: any INSTRUCTION chip present (there is
+            // no Cpu chip any more — mirrors `ShardProof::contains_execution`).
+            (
+                zkm_pcs::EXECUTION_CHIP_NAMES.iter().any(|n| cc(n)),
+                cc("MemoryGlobalInit"),
+                cc("MemoryGlobalFinalize"),
+            )
         })
         .collect();
 

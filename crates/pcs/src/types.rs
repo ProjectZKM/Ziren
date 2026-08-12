@@ -153,6 +153,30 @@ impl<SC: StarkGenericConfig> Debug for ShardProof<SC> {
     }
 }
 
+/// The instruction-bearing chips of the core machine: present in a shard
+/// proof IFF the shard executed instructions.  Mirrored by the recursion
+/// circuit's execution-shard detection (`core_basefold.rs`).
+pub const EXECUTION_CHIP_NAMES: &[&str] = &[
+    "AddSub",
+    "Bitwise",
+    "ShiftLeft",
+    "ShiftRight",
+    "Lt",
+    "CloClz",
+    "Mul",
+    "DivRem",
+    "Branch",
+    "Jump",
+    "MovCond",
+    "MiscInstrs",
+    "LoadNarrow",
+    "LoadWord",
+    "StoreNarrow",
+    "StoreWord",
+    "MemoryUnaligned",
+    "SyscallInstrs",
+];
+
 impl<SC: StarkGenericConfig> ShardProof<SC> {
     pub fn local_cumulative_sum(&self) -> Challenge<SC> {
         self.opened_values.chips.iter().map(|c| c.local_cumulative_sum).sum()
@@ -162,13 +186,13 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
         self.opened_values.chips.iter().map(|c| c.global_cumulative_sum).sum()
     }
 
-    pub fn log_degree_cpu(&self) -> usize {
-        let idx = self.chip_ordering.get("Cpu").expect("Cpu chip not found");
-        self.opened_values.chips[*idx].log_degree
-    }
-
-    pub fn contains_cpu(&self) -> bool {
-        self.chip_ordering.contains_key("Cpu")
+    /// Whether this shard proof carries any INSTRUCTION chip — the
+    /// execution-shard signal.  There is no Cpu chip any more (every
+    /// instruction chip owns its frame), so "is this an execution shard"
+    /// is answered by the instruction-chip set instead: a memory-global or
+    /// precompile shard contains none of these.
+    pub fn contains_execution(&self) -> bool {
+        EXECUTION_CHIP_NAMES.iter().any(|n| self.chip_ordering.contains_key(*n))
     }
 
     pub fn contains_global_memory_init(&self) -> bool {

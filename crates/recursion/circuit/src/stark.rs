@@ -386,14 +386,6 @@ impl<'a, SC: StarkGenericConfig, A: MachineAir<SC::Val>> VerifyingKeyHint<'a, SC
 
 
 impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> ShardProofVariable<C, SC> {
-    pub fn contains_cpu(&self) -> bool {
-        self.chip_ordering.contains_key("Cpu")
-    }
-
-    pub fn log_degree_cpu(&self) -> usize {
-        let idx = self.chip_ordering.get("Cpu").expect("Cpu chip not found");
-        self.opened_values.chips[*idx].log_degree
-    }
 
     pub fn contains_memory_init(&self) -> bool {
         self.chip_ordering.contains_key("MemoryGlobalInit")
