@@ -6250,3 +6250,76 @@ no error, no warning, and a correct proof — only the profile shows it.
 
 Switches: none. The guard is unconditional on the live path, matching the dead
 path it mirrors.
+
+## Aug 12 — the pinned-pages upload path was already in the tree, switched off
+
+An "async" H2D off **pageable** host memory blocks: the driver has to stage it
+through its own bounce buffer. Measured on reth core (nsys, 90 s window):
+`cudaMemcpyAsync` averaged **185 µs** across 569,349 calls and burned **92 s of
+host time** against **6.5 s of actual DMA**.
+
+Both reference provers avoid this the same way:
+
+| | SP1 | matter-labs/zksync-crypto-gpu |
+|---|---|---|
+| pinning | `PinnedAllocator` over `cudaMallocHost`, as a real `Allocator` | `HostAllocation` over `cudaHostAlloc` (incl. `WRITE_COMBINED`) |
+| pooling | `WorkerQueue<PinnedBuffer>`, `num_workers × max_trace_size`, async checkout | one contiguous slab, fixed blocks, bitmap + atomic CAS |
+
+**Ziren already had this and had it disabled.** `core/src/allocator/` is a port of
+shivini's `StaticHostAllocator`, built on `era_cudart` — a crate this repo
+already depends on (`era_cudart = "0.154"`). `RowMajorMatrixHost` was already
+wired into the trace upload. All of it sat behind a `pinned-pages` cargo feature
+with `default = []`.
+
+### Unconditional, not default-on
+
+The pinned host path is the SP1-parity path, so the feature flag is deleted
+rather than flipped (six `Cargo.toml`s, four `#[cfg]` gates, and a `cfg_if` that
+chose between pinned and pageable). `allocator_api` becomes an unconditional
+`#![feature]`; the repo pins nightly, so that costs nothing.
+
+A failed pinned allocation is a **hard error by design — there is no pageable
+fallback.** A prover that quietly downgraded to pageable would hide the very
+stall this pool exists to remove.
+
+### Measured
+
+4 ABBA rounds each, arms swapped between GPU slots, against a build without the
+pinned path:
+
+| pool | r1 | r2 | r3 | r4 | mean |
+|---|---|---|---|---|---|
+| 32 GB (`PRE_ALLOC_HOST=16`, the old default) | +0.12 % | +3.08 % | +1.76 % | +0.45 % | **+1.35 %** |
+| 4 GB (`PRE_ALLOC_HOST=2`, the new default) | +5.23 % | +1.49 % | +0.29 % | +0.13 % | **+1.79 %** |
+
+**8/8 rounds positive, mean ~+1.6 %.** The extra 28 GB buys nothing, and pinned
+pages are page-locked and unswappable, so the pool is sized down 8×.
+`core.proof 7a2135bb7205ca8d` on all 16 arms.
+
+Default-features build: `BUILD_RC=0`, the pool logs
+`host allocation size: 2 * 2 GB`, reth core 162.553 s / **2584 kHz** solo,
+`core.proof 7a2135bb7205ca8d`, `CORE VERIFY OK`.
+
+### Documentation that was actively wrong
+
+- The Cargo comments advertised runtime opt-in via `ZIREN_GPU_PINNED_PULLBACK=1`.
+  That variable was removed in the env sweep and is **read nowhere** — following
+  the comment produces an A/B whose two arms are the same binary.
+- They described a "device→host pull-back". The function they name,
+  `pull_device_trace_to_host_pinned`, **exists only in that comment** and was
+  never implemented. The path pins **H2D trace uploads**.
+
+### NOT done: pinning the D2H readbacks
+
+Those copies genuinely are pageable (`copyKind=2, dstKind=0`, 118,263 calls,
+8.01 s) and look like the same bug. They are not. Broken down by size, a
+**1,296-byte** readback averages **8.2 ms** and a **32-byte** one 152 µs — that
+cannot be bandwidth. A D2H API duration *includes waiting for prior work on the
+stream*, so the time is the host blocking on the GPU: Fiat-Shamir
+serialisation. Pinning the destination recovers none of it.
+
+**Rule:** break an API-time total down by payload size before calling it
+recoverable. If tiny payloads carry the time, it is wait, not bandwidth.
+
+Switches: none — the `pinned-pages` feature is gone. `PRE_ALLOC_HOST` remains as
+the pool-size knob (default 2 = 4 GB).
