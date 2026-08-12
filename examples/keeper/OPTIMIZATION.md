@@ -6323,3 +6323,48 @@ recoverable. If tiny payloads carry the time, it is wait, not bandwidth.
 
 Switches: none — the `pinned-pages` feature is gone. `PRE_ALLOC_HOST` remains as
 the pool-size knob (default 2 = 4 GB).
+
+## Aug 12 — post-fix census, and the pinned-quadrant NEGATIVE
+
+Re-profiled with every Aug 12 change landed (nsys, same 90 s window):
+
+| metric | before the day's work | after |
+|---|---|---|
+| GPU busy | 44.22 s | **51.87 s** |
+| GPU idle | 45.83 s (51.2 %) | **37.23 s (41.4 %)** |
+| gaps >= 10 ms | 31.77 s | **21.9 s** |
+| `cudaMemcpyAsync` host time | 75.81 s | **74.94 s** (but see below) |
+
+The pinned upload path shows up unambiguously in the H2D split:
+
+| H2D srcKind | calls | GB | API host s |
+|---|---|---|---|
+| 0 (pageable) | 385,169 | 61.09 | 65.22 |
+| **1 (pinned)** | **537** | **44.80** | **0.22** |
+
+**44.8 GB now moves pinned for 0.22 s of host time**, and the coordinator's memcpy
+time fell **14.50 s -> 4.50 s**.
+
+### The negative
+
+The residual pageable H2D has a bucket that looks like an obvious win:
+**64KB-1MB, 11,674 calls, 17.46 s of API time for 0.06 s of DMA** — ~25,000x
+overhead. At ~85 calls/shard it is `upload_chip_quadrant` (GKR layer init,
+~22 chips x 4 quadrants). Staging it through the same pinned pool is safe and
+easy: the loop already has a per-chunk `stream.synchronize()`, so the staging
+`Vec` is simply cleared after it.
+
+**It is not a win.** 4 ABBA rounds (arms swapped between slots):
+`-0.28 / -4.86 / +2.11 / -0.88 %`, **mean -0.98 %, 3/4 negative**, byte-identical
+on all 8 arms. Reverted.
+
+**Why it failed where the trace uploads succeeded:** those quadrant uploads run on
+WORKER threads, where they already overlap GPU work, so making them async buys
+nothing — while the added CPU memcpy costs real time. The trace uploads were on
+the COORDINATOR, i.e. the serial path, which is why those paid.
+
+**Rule:** `GROUP BY globalTid` before believing any API-time total. A pathological
+µs/byte on overlapped worker threads is not a lever. Combined with the earlier
+rule (break the total down by payload size — tiny payloads carrying the time means
+WAIT, not bandwidth), these two filters killed four of the five candidates chased
+on Aug 12.
