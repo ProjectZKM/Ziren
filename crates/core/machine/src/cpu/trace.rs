@@ -272,7 +272,10 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
     input
         .cpu_events
         .iter()
-        .filter(|e| !matches!(input.program.fetch(e.pc).opcode, Opcode::ADD | Opcode::SUB))
+        .filter(|e| !matches!(
+                input.program.fetch(e.pc).opcode,
+                Opcode::ADD | Opcode::SUB | Opcode::XOR | Opcode::OR | Opcode::AND | Opcode::NOR
+            ))
         .collect()
 }
 

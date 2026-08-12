@@ -5,7 +5,7 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator, ParallelSlice};
@@ -20,6 +20,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
@@ -63,6 +64,22 @@ pub struct BitwiseCols<T> {
     /// If the opcode is AND.
     #[picus(selector)]
     pub is_and: T,
+
+    /// Whether this row is a REAL instruction rather than a synthetic
+    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).  An instruction row
+    /// owns its frame; a dependency row keeps receiving on the Instruction bus
+    /// from whichever chip requested the arithmetic.
+    #[picus(selector)]
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — its own column so the
+    /// Instruction-bus multiplicity stays degree 1.
+    #[picus(selector)]
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: InstructionFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
@@ -101,7 +118,13 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
                 let mut row = [F::ZERO; NUM_BITWISE_COLS];
                 let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
                 let mut blu = Vec::new();
-                self.event_to_row(event, cols, &mut blu);
+                self.event_to_row(
+                    event,
+                    cols,
+                    &mut blu,
+                    &input.program,
+                    input.public_values.execution_shard,
+                );
                 row
             })
             .collect::<Vec<_>>();
@@ -109,7 +132,14 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
         // Pad the trace to a power of two.
         pad_rows_mult32(
             &mut rows,
-            || [F::ZERO; NUM_BITWISE_COLS],
+            || {
+                let mut row = [F::ZERO; NUM_BITWISE_COLS];
+                let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
+                // Padding rows carry no instruction: neutralise the frame or
+                // its register-access multiplicities break the Memory bus.
+                cols.frame.populate_dependency();
+                row
+            },
             input.fixed_log2_rows::<F, _>(self),
             <BitwiseChip as MachineAir<F>>::name(self).as_str(),
         );
@@ -133,7 +163,13 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_BITWISE_COLS];
                     let cols: &mut BitwiseCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                    event,
+                    cols,
+                    &mut blu,
+                    &input.program,
+                    input.public_values.execution_shard,
+                );
                 });
                 blu
             })
@@ -155,12 +191,23 @@ impl<F: PrimeField32> MachineAir<F> for BitwiseChip {
 
 impl BitwiseChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
         cols: &mut BitwiseCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        cols.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_alu(event, program, shard, blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
         let c = event.c.to_le_bytes();
@@ -240,7 +287,8 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
-            local.is_xor + local.is_or + local.is_and + local.is_nor,
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep,
         );
 
         let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
@@ -248,7 +296,29 @@ where
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
         builder.assert_bool(local.is_nor);
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        // Only a real row can be an instruction row, and `is_dep` is exactly
+        // the real non-instruction rows (degree-1 bus multiplicity).
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+        builder.assert_zero(
+            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  Bitwise ops are sequential and can never halt.
+        eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc,
+            local.next_pc,
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
 
