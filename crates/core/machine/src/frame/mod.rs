@@ -93,8 +93,10 @@ impl<T: Copy> InstructionFrameCols<T> {
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
     frame: &InstructionFrameCols<AB::Var>,
-    pc: AB::Var,
-    next_pc: AB::Var,
+    // Exprs, not Vars: the control-flow and memory chips carry `next_pc` /
+    // `next_next_pc` as `Word` columns and pass `word.reduce::<AB>()`.
+    pc: AB::Expr,
+    next_pc: AB::Expr,
     next_next_pc: AB::Expr,
     is_real: AB::Expr,
 ) where
@@ -117,7 +119,7 @@ pub fn eval_instruction_frame<AB>(
     builder.when(not_real).assert_zero(AB::Expr::ONE - frame.instruction.imm_c);
 
     // The instruction at `pc` must be the one the program committed to.
-    builder.send_program(pc, frame.instruction, is_real.clone());
+    builder.send_program(pc.clone(), frame.instruction, is_real.clone());
 
     // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
     // Mirrors `CpuChip::eval_shard_clk` — the trace side must add the matching

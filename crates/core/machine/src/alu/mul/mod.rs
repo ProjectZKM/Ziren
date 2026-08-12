@@ -543,8 +543,8 @@ where
         eval_instruction_frame(
             builder,
             &local.frame,
-            local.pc,
-            local.next_pc,
+            local.pc.into(),
+            local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
             local.is_instruction.into(),
         );
