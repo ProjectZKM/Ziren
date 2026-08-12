@@ -1438,7 +1438,17 @@ impl<'a> Executor<'a> {
                 &record,
             );
         } else if instruction.is_jump_instruction() {
-            self.emit_jump_event(instruction.opcode, a, b, c, next_pc, next_next_pc);
+            self.emit_jump_event(
+                clk,
+                instruction.opcode,
+                a,
+                b,
+                c,
+                next_pc,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_misc_instruction() {
             self.emit_misc_event(
                 clk,
@@ -1669,14 +1679,24 @@ impl<'a> Executor<'a> {
     #[allow(clippy::too_many_arguments)]
     fn emit_jump_event(
         &mut self,
+        clk: u32,
         opcode: Opcode,
         a: u32,
         b: u32,
         c: u32,
         next_pc: u32,
         next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c);
+        // A REAL instruction: carry the frame (see AluEvent).
+        let mut event = JumpEvent::new(self.state.pc, next_pc, next_next_pc, opcode, a, b, c);
+        event.is_instruction = 1;
+        event.clk = clk;
+        event.recv_next_pc = recv_next_pc;
+        event.a_record = record.a.into();
+        event.b_record = record.b.into();
+        event.c_record = record.c.into();
         self.record.jump_events.push(event);
         emit_jump_dependencies(self, event);
     }

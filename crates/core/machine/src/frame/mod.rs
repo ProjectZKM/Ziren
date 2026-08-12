@@ -22,7 +22,7 @@ use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
     AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
-    MemoryRecordEnum, OptionMemoryRecordEnumTag,
+    JumpEvent, MemoryRecordEnum, OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -291,20 +291,33 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             self.op_c_access.populate(c_record.read, blu);
         }
 
-        let a_bytes = a.to_le_bytes();
+        // The op_a word range check reads back the COLUMN value, exactly as
+        // `cpu/trace.rs` does — NOT `a`.  `populate` above overwrites
+        // `access.value` with the RECORD's value, and the two differ on a
+        // no-link jump (op_a = r0: record value 0, while `a` carries the link).
+        // Supplying `a`'s bytes there leaves the AIR's request for (0, 0)
+        // unmatched and breaks the Byte bus by exactly 2 events per such row.
+        let a_bytes = self
+            .op_a_access
+            .access
+            .value
+            .0
+            .iter()
+            .map(|x| x.as_canonical_u32())
+            .collect::<Vec<_>>();
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::U8Range,
             a1: 0,
             a2: 0,
-            b: a_bytes[0],
-            c: a_bytes[1],
+            b: a_bytes[0] as u8,
+            c: a_bytes[1] as u8,
         });
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::U8Range,
             a1: 0,
             a2: 0,
-            b: a_bytes[2],
-            c: a_bytes[3],
+            b: a_bytes[2] as u8,
+            c: a_bytes[3] as u8,
         });
     }
 
@@ -359,6 +372,34 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             blu,
         );
         self.op_a_immutable = F::ONE;
+    }
+
+    /// `JumpEvent` variant of [`Self::populate_from_alu`].  Unlike a branch, a
+    /// jump WRITES `op_a` (the link register), so `op_a_immutable` stays 0.  On
+    /// a NO-link jump `op_a` is register 0: the record value is 0 while
+    /// `event.a` still carries the would-be link — which is why the op_a range
+    /// check inside `populate_raw` reads back the COLUMN, not the event.
+    pub fn populate_from_jump(
+        &mut self,
+        event: &JumpEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

@@ -301,6 +301,9 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
                     | Opcode::BGTZ
                     | Opcode::BLEZ
                     | Opcode::BGEZ
+                    | Opcode::Jump
+                    | Opcode::Jumpi
+                    | Opcode::JumpDirect
             ))
         .collect()
 }

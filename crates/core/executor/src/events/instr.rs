@@ -296,6 +296,17 @@ pub struct JumpEvent {
     pub b: u32,
     /// The third operand value.
     pub c: u32,
+
+    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    pub is_instruction: u32,
+    /// The clock cycle.
+    pub clk: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
 }
 
 impl JumpEvent {
@@ -311,7 +322,15 @@ impl JumpEvent {
         b: u32,
         c: u32,
     ) -> Self {
-        Self { pc, next_pc, next_next_pc, opcode, a, b, c }
+        Self {
+            pc, next_pc, next_next_pc, opcode, a, b, c,
+            is_instruction: 0,
+            clk: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
+        }
     }
 }
 

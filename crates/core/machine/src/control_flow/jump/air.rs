@@ -59,8 +59,31 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ZERO,
-            is_real.clone(),
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep.into(),
         );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+        builder.assert_zero(
+            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  A jump's next_next_pc is the TARGET; jumps
+        // WRITE the link register, so op_a_immutable stays 0; never halt.
+        crate::frame::eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc.into(),
+            local.next_pc.reduce::<AB>(),
+            local.next_next_pc.reduce::<AB>(),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc.reduce::<AB>());
 
         // Verify that the local.next_pc + 4 is op_a_value for all jump instructions.
         builder.when(is_real.clone()).assert_eq(

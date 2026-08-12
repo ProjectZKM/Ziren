@@ -63,7 +63,18 @@ impl<F: PrimeField32> MachineAir<F> for JumpChip {
 
                     if idx < input.jump_events.len() {
                         let event = &input.jump_events[idx];
-                        self.event_to_row(event, cols, &mut blu);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut blu,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
+                    } else {
+                        // Padding rows carry no instruction: neutralise the
+                        // frame or its register-access multiplicities break the
+                        // Memory bus.
+                        cols.frame.populate_dependency();
                     }
                 });
                 blu
@@ -93,7 +104,18 @@ impl JumpChip {
         event: &JumpEvent,
         cols: &mut JumpColumns<F>,
         _blu: &mut HashMap<ByteLookupEvent, usize>,
+        program: &zkm_core_executor::Program,
+        shard: u32,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        cols.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_jump(event, program, shard, _blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         cols.pc = F::from_u32(event.pc);
         cols.is_jump = F::from_bool(matches!(event.opcode, Opcode::Jump));
         cols.is_jumpi = F::from_bool(matches!(event.opcode, Opcode::Jumpi));
