@@ -21,7 +21,7 @@
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
-    AluEvent, ByteLookupEvent, ByteRecord, MemoryAccessPosition, MemoryRecordEnum,
+    AluEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum,
     OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
@@ -216,9 +216,44 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         shard: u32,
         blu: &mut impl ByteRecord,
     ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+    }
+
+    /// The shared population body — see [`Self::populate_from_alu`] for the
+    /// contract.  Split out because `AluEvent` and `CompAluEvent` carry the
+    /// same frame fields but are distinct FFI types.
+    #[allow(clippy::too_many_arguments)]
+    fn populate_raw(
+        &mut self,
+        clk: u32,
+        pc: u32,
+        recv_next_pc: u32,
+        a: u32,
+        b: u32,
+        c: u32,
+        a_record: zkm_core_executor::events::OptionMemoryRecordEnum,
+        b_record: zkm_core_executor::events::OptionMemoryReadRecord,
+        c_record: zkm_core_executor::events::OptionMemoryReadRecord,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
         self.shard = F::from_u32(shard);
-        let clk_16 = (event.clk & 0xffff) as u16;
-        let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+        let clk_16 = (clk & 0xffff) as u16;
+        let clk_8 = ((clk >> 16) & 0xff) as u8;
         self.clk_16bit_limb = F::from_u16(clk_16);
         self.clk_8bit_limb = F::from_u8(clk_8);
         blu.add_byte_lookup_event(ByteLookupEvent::new(
@@ -231,30 +266,30 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
 
-        self.instruction.populate(&program.fetch(event.pc));
-        self.state_recv_next_pc = F::from_u32(event.recv_next_pc);
+        self.instruction.populate(&program.fetch(pc));
+        self.state_recv_next_pc = F::from_u32(recv_next_pc);
 
-        self.op_a_value = event.a.into();
-        *self.op_a_access.value_mut() = event.a.into();
-        *self.op_b_access.value_mut() = event.b.into();
-        *self.op_c_access.value_mut() = event.c.into();
-        match event.a_record.tag {
+        self.op_a_value = a.into();
+        *self.op_a_access.value_mut() = a.into();
+        *self.op_b_access.value_mut() = b.into();
+        *self.op_c_access.value_mut() = c.into();
+        match a_record.tag {
             OptionMemoryRecordEnumTag::Read => {
-                self.op_a_access.populate(MemoryRecordEnum::Read(event.a_record.read), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Read(a_record.read), blu)
             }
             OptionMemoryRecordEnumTag::Write => {
-                self.op_a_access.populate(MemoryRecordEnum::Write(event.a_record.write), blu)
+                self.op_a_access.populate(MemoryRecordEnum::Write(a_record.write), blu)
             }
             OptionMemoryRecordEnumTag::None => {}
         }
-        if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
-            self.op_b_access.populate(event.b_record.read, blu);
+        if let OptionMemoryRecordEnumTag::Read = b_record.tag {
+            self.op_b_access.populate(b_record.read, blu);
         }
-        if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
-            self.op_c_access.populate(event.c_record.read, blu);
+        if let OptionMemoryRecordEnumTag::Read = c_record.tag {
+            self.op_c_access.populate(c_record.read, blu);
         }
 
-        let a_bytes = event.a.to_le_bytes();
+        let a_bytes = a.to_le_bytes();
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::U8Range,
             a1: 0,
@@ -269,6 +304,32 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             b: a_bytes[2],
             c: a_bytes[3],
         });
+    }
+
+    /// `CompAluEvent` variant of [`Self::populate_from_alu`] — the frame
+    /// fields carry the same names, so the body is delegated through the
+    /// shared raw form.
+    pub fn populate_from_comp_alu(
+        &mut self,
+        event: &CompAluEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

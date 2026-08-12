@@ -73,6 +73,13 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
         hi: upper_word,
         hi_record_is_real: false,
         hi_record: MemoryWriteRecord::default(),
+        // Synthetic dependency event: no frame.
+        is_instruction: 0,
+        next_next_pc: 0,
+        recv_next_pc: 0,
+        a_record: None.into(),
+        b_record: None.into(),
+        c_record: None.into(),
     };
     executor.record.mul_events.push(multiplication);
 
@@ -217,7 +224,14 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             c: event.c,
             hi_record_is_real: false,
             hi_record: MemoryWriteRecord::default(),
-        };
+        // Synthetic dependency event: no frame.
+        is_instruction: 0,
+        next_next_pc: 0,
+        recv_next_pc: 0,
+        a_record: None.into(),
+        b_record: None.into(),
+        c_record: None.into(),
+    };
         executor.record.add_mul_event(mul_event);
     } else if matches!(event.opcode, Opcode::MADD | Opcode::MSUB) {
         let multiply = ((event.b as i32 as i64) * (event.c as i32 as i64)) as u64;
@@ -235,7 +249,14 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             c: event.c,
             hi_record_is_real: false,
             hi_record: MemoryWriteRecord::default(),
-        };
+        // Synthetic dependency event: no frame.
+        is_instruction: 0,
+        next_next_pc: 0,
+        recv_next_pc: 0,
+        a_record: None.into(),
+        b_record: None.into(),
+        c_record: None.into(),
+    };
         executor.record.add_mul_event(mul_event);
     } else if matches!(event.opcode, Opcode::EXT) {
         let lsb = event.c & 0x1f;

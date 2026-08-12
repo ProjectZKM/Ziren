@@ -1547,6 +1547,13 @@ impl<'a> Executor<'a> {
             c,
             hi_record: hi_access,
             hi_record_is_real,
+            // A REAL instruction: same frame the plain `event` above carries.
+            is_instruction: 1,
+            next_next_pc,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
         };
 
         match opcode {

@@ -119,7 +119,22 @@ pub struct CompAluEvent {
     /// The `op_hi` memory write record.
     pub hi_record: MemoryWriteRecord,
     pub hi_record_is_real: bool,
-        }
+
+    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    /// Non-zero when this event is a REAL instruction.  The synthetic
+    /// dependency events from `dependencies.rs` keep 0, and every field below
+    /// is then meaningless.  FFI-safe: `u32` flag + the `Option*` mirrors, for
+    /// the same cbindgen reason as `AluEvent`.
+    pub is_instruction: u32,
+    /// The pc after `next_pc` (MIPS delay-slot lookahead).
+    pub next_next_pc: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
+}
 
 impl CompAluEvent {
     /// Create a new [`CompAluEvent`].
@@ -137,6 +152,12 @@ impl CompAluEvent {
             c,
             hi_record_is_real: false,
             hi_record: MemoryWriteRecord::default(),
+            is_instruction: 0,
+            next_next_pc: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
         }
     }
 

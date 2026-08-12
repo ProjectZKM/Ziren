@@ -288,6 +288,9 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
                     | Opcode::SLTU
                     | Opcode::CLZ
                     | Opcode::CLO
+                    | Opcode::MUL
+                    | Opcode::MULT
+                    | Opcode::MULTU
             ))
         .collect()
 }
