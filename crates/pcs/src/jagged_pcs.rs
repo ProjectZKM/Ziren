@@ -1297,6 +1297,19 @@ pub mod jagged {
         if let Some(target) = pin {
             packing.dense_len = packing.dense_len.max(1usize << target);
         }
+        // A round with NO CELLS still has to produce a well-formed commitment.
+        // `setup` drops every chip that generates no preprocessed trace, so a
+        // machine whose chips all have `preprocessed_width() == 0` reaches here
+        // with an empty trace list and a zero-length dense — and the Merkle
+        // commit cannot commit zero matrices ("all matrices have height 0").
+        // The shard prover already handles the empty round downstream: it reads
+        // the round's chips off `packing.chip_infos`, which stays EMPTY here, so
+        // no preprocessed round is opened and the proof is single-round.  All
+        // that is needed is one cell to hang a commitment on; nothing is ever
+        // opened against it.
+        if packing.dense_len == 0 {
+            packing.dense_len = 1;
+        }
         let (commit, prover_data) = {
             let dense_q =
                 materialize_dense_jagged::<InnerVal>(chip_traces, packing.dense_len, use_rev);

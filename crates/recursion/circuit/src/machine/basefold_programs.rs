@@ -261,134 +261,6 @@ mod tests {
     /// That's exactly what the recursion verifier's shape asserts
     /// expect.
     #[allow(clippy::type_complexity)]
-    fn produce_real_basefold_shard_proof(
-        machine: &zkm_pcs::StarkMachine<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-        >,
-    ) -> zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
-        zkm_pcs::InnerVal,
-        zkm_pcs::InnerChallenge,
-    > {
-        use p3_air::BaseAir;
-        use p3_field::PrimeCharacteristicRing;
-        use p3_matrix::dense::RowMajorMatrix;
-        use zkm_pcs::air::MachineAir;
-        use zkm_pcs::MachineProver;
-        use zkm_pcs::StarkGenericConfig;
-
-        // Pick one small, non-precompile chip with deterministic
-        // preprocessed/main widths: AddSub.  The actual trace
-        // content doesn't need to be AIR-valid — prove_shard_to_basefold
-        // just threads it through LogUp-GKR + zerocheck.
-        let chip: &zkm_pcs::Chip<
-            p3_koala_bear::KoalaBear,
-            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-        > = machine
-            .chips()
-            .iter()
-            .find(|c| c.name() == "AddSub")
-            .expect("AddSub chip must exist in MipsAir");
-        let chips = vec![chip];
-
-        let main_width = <_ as BaseAir<p3_koala_bear::KoalaBear>>::width(chip);
-        let prep_width = MachineAir::<p3_koala_bear::KoalaBear>::preprocessed_width(chip);
-        let log_height: usize = 3; // 8-row trace (2^3)
-        let height = 1usize << log_height;
-
-        let main_trace = RowMajorMatrix::<p3_koala_bear::KoalaBear>::new(
-            vec![p3_koala_bear::KoalaBear::ZERO; main_width * height],
-            main_width,
-        );
-        // Use the chip's actual preprocessed width (0 for AddSub —
-        // no preprocessed trace).  Empty values + width 0 is valid
-        // for RowMajorMatrix and matches the verifier's shape check.
-        let prep_trace = RowMajorMatrix::<p3_koala_bear::KoalaBear>::new(
-            vec![p3_koala_bear::KoalaBear::ZERO; prep_width * height],
-            prep_width,
-        );
-
-        let public_values = vec![p3_koala_bear::KoalaBear::ZERO; zkm_pcs::PROOF_MAX_NUM_PVS];
-        let mut challenger = machine.config().challenger();
-
-        // Drive the shape build through a `CpuProver`, as SP1 does — the prover
-        // IS the dispatch, there is no free-fn entry.
-        //
-        // The prover sources what the old free fn took as arguments from
-        // `self`, so the machine it is built on has to reproduce them:
-        //   * `orientation` -> CpuProver is unconditionally `Msb`.
-        //   * `recursion_area_pin` -> `pins_recursion_area()`, false here.
-        //   * `max_log_row_count` -> read back off the padded traces below.
-        //   * `dense_rev` -> `machine().core_rev()`.  THIS is why the machine is
-        //     rebuilt with `StarkMachine::new` instead of reusing the caller's:
-        //     the MIPS machine is built by `new_core_rev` (`core_rev == true`),
-        //     while this shape-only builder needs the legacy `false`.  Passing
-        //     the caller's machine straight through would silently flip the
-        //     orientation and move the synthetic proof -- and with it the
-        //     recursion shape it exists to pin.
-        // `Chip` is not `Clone` (nor is `MipsAir`), so the shape machine gets a
-        // freshly constructed AddSub chip rather than a copy of the caller's.
-        // `Chip::new` derives the lookups and degree from the AIR, so the two are
-        // structurally identical — asserted below on the name and widths.
-        let owned_chip = zkm_pcs::Chip::new(zkm_core_machine::mips::MipsAir::Add(
-            zkm_core_machine::alu::AddSubChip::default(),
-        ));
-        debug_assert_eq!(MachineAir::<p3_koala_bear::KoalaBear>::name(&owned_chip), chip.name());
-        debug_assert_eq!(
-            <_ as BaseAir<p3_koala_bear::KoalaBear>>::width(&owned_chip),
-            main_width,
-        );
-        let shape_machine = zkm_pcs::StarkMachine::new(
-            machine.config().clone(),
-            vec![owned_chip],
-            machine.num_pv_elts(),
-        );
-        debug_assert!(!shape_machine.core_rev(), "shape builder must stay legacy-bitrev");
-        let prover = <zkm_pcs::CpuProver<
-            zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
-            zkm_core_machine::mips::MipsAir<p3_koala_bear::KoalaBear>,
-        > as MachineProver<_, _>>::new(shape_machine);
-
-        let max_log_row_count = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::
-            production_default()
-            .max_log_row_count;
-        let main_traces = zkm_pcs::named_padded_traces(
-            chips.iter().map(|c| c.name()),
-            vec![main_trace],
-            max_log_row_count as u32,
-            |_| None,
-        );
-
-        // The preprocessed trace in prove-path form, and the commit over it.
-        // `setup` normally builds this pair once and stores it on the proving
-        // key; this synthetic shape builder has no key, so it commits its own
-        // single preprocessed trace the same way `SC::prep_precompute` does.
-        let prep_named = vec![(chip.name().to_string(), prep_trace.clone())];
-        let prep_precomputed =
-            <zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2 as zkm_pcs::StarkGenericConfig>
-                ::prep_precompute(&prep_named, prover.machine().core_rev());
-        let prep_padded = zkm_pcs::named_padded_traces(
-            core::iter::once(chip.name()),
-            vec![prep_trace],
-            max_log_row_count as u32,
-            |_| None,
-        );
-        let prep_traces: Vec<zkm_pcs::multilinear::PaddedMle<p3_koala_bear::KoalaBear>> =
-            prep_padded.into_values().collect();
-
-        MachineProver::prove_shard_to_basefold(
-            &prover,
-            zkm_pcs::ShardProveData {
-                chips: &chips,
-                preprocessed_traces: &prep_traces,
-                preprocessed_commit_data: &prep_precomputed,
-                main_traces,
-                public_values,
-            },
-            &mut challenger,
-        )
-    }
-
     /// Construct a minimal-but-real ZKMCoreBasefoldWitnessValues by
     /// driving the host-side `prove_shard_to_basefold` path with a
     /// single zero-filled AddSub trace.  The proof's structural
@@ -403,30 +275,30 @@ mod tests {
     ) -> super::ZKMCoreBasefoldWitnessValues<
         zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,
     > {
-        use p3_field::PrimeCharacteristicRing;
-        use p3_koala_bear::KoalaBear;
-        use zkm_recursion_core::DIGEST_SIZE;
-        use zkm_pcs::StarkVerifyingKey;
+        use zkm_pcs::shape::OrderedShape;
 
-        // Minimal VK — empty preprocessed traces, dummy commit.
-        let vk = StarkVerifyingKey {
-            commit: crate::fri::dummy_commit(),
-            pc_start: KoalaBear::ZERO,
-            initial_global_cumulative_sum:
-                zkm_pcs::septic_digest::SepticDigest::<KoalaBear>::zero(),
-            chip_information: Vec::new(),
-            chip_ordering: Default::default(),
-        };
-
-        let proof = produce_real_basefold_shard_proof(machine);
-
-        super::ZKMCoreBasefoldWitnessValues {
-            vk,
-            shard_proofs: vec![proof],
+        // Use the SHAPE-FAITHFUL dummy, built for the SAME machine the
+        // normalize circuit verifies.
+        //
+        // The previous helper hand-rolled a "real" proof by driving
+        // `prove_shard_to_basefold` over a synthetic ONE-CHIP machine (AddSub),
+        // then handed it to a circuit built for the full MipsAir machine.  The
+        // two disagree on everything the column layout is derived from: the
+        // circuit lays out insertion points for the full machine's rounds
+        // (`insertion index 45`) while the proof carries one round of nineteen
+        // columns.  AddSub also has `preprocessed_width() == 0`, so that
+        // machine had NO preprocessed chips at all and its proof was
+        // single-round, while every real core proof is two-round.  The dummy
+        // builder exists precisely to produce a witness whose shape matches
+        // what a real proof of that machine carries, so use it.
+        let shape = super::super::core::ZKMRecursionShape {
+            proof_shapes: vec![OrderedShape::from_log2_heights(&[
+                ("AddSub".to_string(), 3),
+                ("Bitwise".to_string(), 3),
+            ])],
             is_complete: false,
-            is_first_shard: false,
-            vk_root: [KoalaBear::ZERO; DIGEST_SIZE],
-        }
+        };
+        super::ZKMCoreBasefoldWitnessValues::dummy(machine, &shape)
     }
 
     /// Compile-only smoke test: each program-builder function exists
