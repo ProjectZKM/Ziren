@@ -1458,6 +1458,8 @@ impl<'a> Executor<'a> {
                 c,
                 hi_or_prev_a.unwrap_or(0),
                 record.hi,
+                recv_next_pc,
+                &record,
             );
         } else if instruction.is_syscall_instruction() {
             self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
@@ -1713,10 +1715,19 @@ impl<'a> Executor<'a> {
         c: u32,
         prev_a: u32,
         hi_record: Option<MemoryRecordEnum>,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
         if matches!(opcode, Opcode::MNE | Opcode::MEQ | Opcode::WSBH) {
-            let event =
+            // A REAL instruction: carry the frame (see AluEvent).
+            let mut event =
                 MovCondEvent::new(self.state.pc, self.state.next_pc, opcode, a, b, c, prev_a);
+            event.is_instruction = 1;
+            event.clk = clk;
+            event.recv_next_pc = recv_next_pc;
+            event.a_record = record.a.into();
+            event.b_record = record.b.into();
+            event.c_record = record.c.into();
             self.record.movcond_events.push(event);
         } else {
             let hi_access = match hi_record {

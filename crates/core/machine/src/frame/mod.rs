@@ -22,7 +22,7 @@ use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
     AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
-    JumpEvent, MemoryRecordEnum, OptionMemoryRecordEnumTag,
+    JumpEvent, MemoryRecordEnum, MovCondEvent, OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -400,6 +400,37 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             shard,
             blu,
         );
+    }
+
+    /// `MovCondEvent` variant of [`Self::populate_from_alu`].  MNE/MEQ are
+    /// `is_rw_a` instructions: op_a keeps its previous value when the condition
+    /// fails, so the frame carries `hi_or_prev_a = prev_a` and the caller sets
+    /// `is_rw_a` for them (WSBH is a plain write).
+    pub fn populate_from_movcond(
+        &mut self,
+        event: &MovCondEvent,
+        program: &Program,
+        shard: u32,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            shard,
+            blu,
+        );
+        self.hi_or_prev_a = event.prev_a.into();
+        if !matches!(event.opcode, zkm_core_executor::Opcode::WSBH) {
+            self.is_rw_a = F::ONE;
+        }
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

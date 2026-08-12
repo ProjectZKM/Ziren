@@ -62,6 +62,16 @@ pub struct MovCondCols<T> {
     /// Flag indicating whether the opcode is `WSBH`.
     #[picus(selector)]
     pub is_wsbh: T,
+
+    /// Whether this row is a REAL instruction (all movcond rows are today).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: crate::frame::InstructionFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for MovCondChip {
@@ -109,7 +119,18 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
 
                     if idx < input.movcond_events.len() {
                         let event = &input.movcond_events[idx];
-                        self.event_to_row(event, cols, &mut blu);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut blu,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
+                    } else {
+                        // Padding rows carry no instruction: neutralise the
+                        // frame or its register-access multiplicities break the
+                        // Memory bus.
+                        cols.frame.populate_dependency();
                     }
                 });
                 blu
@@ -134,12 +155,23 @@ impl<F: PrimeField32> MachineAir<F> for MovCondChip {
 
 impl MovCondChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &MovCondEvent,
         cols: &mut MovCondCols<F>,
         _blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
+        shard: u32,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        cols.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_movcond(event, program, shard, _blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
@@ -193,8 +225,39 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
-            is_real.clone(),
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep.into(),
         );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+        builder.assert_zero(
+            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  MNE/MEQ/WSBH are sequential and never halt.
+        crate::frame::eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
+        // MNE/MEQ read-and-write op_a (the frame's is_rw_a rule binds
+        // hi_or_prev_a to the record's prev value); WSBH is a plain write.
+        builder.assert_eq(
+            local.frame.is_rw_a,
+            (local.is_mne + local.is_meq) * local.is_instruction,
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
 
         IsZeroWordOperation::<AB::F>::eval(
             builder,

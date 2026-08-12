@@ -400,6 +400,17 @@ pub struct MovCondEvent {
     pub c: u32,
     /// The third operand value.
     pub prev_a: u32,
+
+    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    pub is_instruction: u32,
+    /// The clock cycle.
+    pub clk: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
 }
 
 impl MovCondEvent {
@@ -407,6 +418,20 @@ impl MovCondEvent {
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(pc: u32, next_pc: u32, opcode: Opcode, a: u32, b: u32, c: u32, prev_a: u32) -> Self {
-        Self { pc, next_pc, opcode, a, b, c, prev_a }
+        Self {
+            pc,
+            next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            prev_a,
+            is_instruction: 0,
+            clk: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
+        }
     }
 }
