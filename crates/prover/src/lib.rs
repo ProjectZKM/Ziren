@@ -3107,19 +3107,40 @@ pub mod tests {
                 .map(|c| (<_ as MachineAir<KoalaBear>>::name(c), c))
                 .collect()
         };
-        let log_dense_of = |os: &OrderedShape| -> usize {
-            let total: usize = os
-                .inner
-                .iter()
-                .map(|(name, log_h)| {
-                    let w = chips_by_name
-                        .get(name)
-                        .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
-                        .unwrap_or(1);
-                    w * (1usize << *log_h)
-                })
-                .sum();
-            if total == 0 { 0 } else { total.next_power_of_two().trailing_zeros() as usize }
+        // The class key.  `log_dense` — the power of two ENCLOSING the committed
+        // length — is too coarse: the recursion program is built over the
+        // committed length itself, whose stacking-BLOCK count sets
+        // `num_stripes`.  Two shapes sharing a `log_dense` can commit different
+        // block counts and yield different keys, so match on the block count.
+        // A proof commits TWO rounds — preprocessed then main — and each round's
+        // committed area is its real cells rounded out to whole stacking
+        // blocks.  The block counts are what set the per-round stripe multiples
+        // and the reduction dimension, so the class key is the PAIR.
+        let blocks_of = |os: &OrderedShape| -> (usize, usize) {
+            use zkm_pcs::air::MachineAir;
+            let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+            let cells = |prep: bool| -> usize {
+                os.inner
+                    .iter()
+                    .map(|(name, log_h)| {
+                        let w = chips_by_name
+                            .get(name)
+                            .map(|c| {
+                                if prep {
+                                    MachineAir::<KoalaBear>::preprocessed_width(*c)
+                                } else {
+                                    p3_air::BaseAir::<KoalaBear>::width(*c).max(1)
+                                }
+                            })
+                            .unwrap_or(0);
+                        w * (1usize << *log_h)
+                    })
+                    .sum()
+            };
+            let blocks = |total: usize| -> usize {
+                zkm_pcs::jagged::committed_dense_len(total, log_stack) >> log_stack
+            };
+            (blocks(cells(true)), blocks(cells(false)))
         };
 
         // Use the first real core shard.
@@ -3127,7 +3148,280 @@ pub mod tests {
         let real_os = real_sp.shape();
         let mut real_names: Vec<String> = real_os.inner.iter().map(|(n, _)| n.clone()).collect();
         real_names.sort();
-        let real_ld = log_dense_of(&real_os);
+        let real_ld = blocks_of(&real_os);
+
+        // For each arity 1..=REDUCE_BATCH_SIZE: real-replicated vs enumerated-rep.
+        let real_bf = *real_sp
+            .basefold_shard_proof
+            .as_ref()
+            .expect("real shard carries basefold side channel")
+            .clone();
+
+        // FAITHFULNESS CONTROL.  Build the dummy at the real shard's OWN shape
+        // and compare its key against the real one.  That separates the two
+        // remaining explanations: if they agree the dummy reproduces a real
+        // proof and the only gap is that the enumeration never emits this
+        // shape; if they differ the dummy builder itself is unfaithful and no
+        // enumeration can close it.
+        {
+            let dummy_at_real = ZKMCoreBasefoldWitnessValues::dummy(
+                machine,
+                &ZKMRecursionShape {
+                    proof_shapes: vec![real_os.clone()],
+                    is_complete: true,
+                },
+            );
+            let vk_dummy_at_real = prover
+                .compress_prover
+                .setup(&prover.recursion_program_basefold(&dummy_at_real))
+                .1
+                .hash_koalabear()
+                .map(|x| x.as_canonical_u32());
+            let real_witness_1 = ZKMCoreBasefoldWitnessValues {
+                vk: vk.vk.clone(),
+                shard_proofs: vec![real_bf.clone()],
+                is_complete: true,
+                is_first_shard: true,
+                vk_root: prover.recursion_vk_root,
+            };
+            let vk_real_1 = prover
+                .compress_prover
+                .setup(&prover.recursion_program_basefold(&real_witness_1))
+                .1
+                .hash_koalabear()
+                .map(|x| x.as_canonical_u32());
+            eprintln!(
+                "[ARITY-REPR] FAITHFUL? dummy_at_real_shape == real: {} \
+                 (dummy={vk_dummy_at_real:?} real={vk_real_1:?})",
+                vk_dummy_at_real == vk_real_1,
+            );
+            assert_eq!(
+                vk_dummy_at_real, vk_real_1,
+                "[ARITY-REPR] the dummy built at the REAL shard's own shape does not reproduce \
+                 the real normalize vk — the dummy shard proof is not shape-faithful, and no \
+                 enumeration can close that (SP1 guards the same property in \
+                 `recursion/circuit/src/dummy/jagged.rs`, which asserts the dummy's \
+                 `batch_evaluations.rounds` matches a real proof's)",
+            );
+
+            // Field-by-field LENGTH diff.  Only lengths reach the compiled
+            // program (every value is witnessed), so a length that differs
+            // between the dummy and a real proof of the same shape is exactly
+            // what makes the produced key unenumerable.
+            use zkm_pcs::shard_level::shard_proof::EvaluationProof as EP;
+            use zkm_pcs::InnerChallenge;
+            let describe = |bf: &zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
+                KoalaBear,
+                InnerChallenge,
+            >|
+             -> Vec<(String, String)> {
+                let mut v: Vec<(String, String)> = Vec::new();
+                v.push(("public_values".into(), bf.public_values.len().to_string()));
+                v.push(("opened_values.chips".into(), bf.opened_values.chips.len().to_string()));
+                v.push(("chip_log_heights".into(), format!("{:?}", bf.chip_log_heights)));
+                v.push((
+                    "chip_cumulative_sums".into(),
+                    bf.chip_cumulative_sums.len().to_string(),
+                ));
+                v.push((
+                    "row_counts".into(),
+                    format!("{:?}", bf.row_counts.iter().map(|r| r.len()).collect::<Vec<_>>()),
+                ));
+                v.push(("padding_column_counts".into(), format!("{:?}", bf.padding_column_counts)));
+                v.push((
+                    "preprocessed_row_counts".into(),
+                    bf.preprocessed_row_counts.len().to_string(),
+                ));
+                v.push((
+                    "padding_row_heights".into(),
+                    format!(
+                        "{:?}",
+                        bf.padding_row_heights.iter().map(|r| r.len()).collect::<Vec<_>>()
+                    ),
+                ));
+                v.push((
+                    "opened per-chip (prep,main)".into(),
+                    format!(
+                        "{:?}",
+                        bf.opened_values
+                            .chips
+                            .iter()
+                            .map(|c| (
+                                c.preprocessed.local.len(),
+                                c.main.local.len(),
+                                c.log_degree,
+                            ))
+                            .collect::<Vec<_>>()
+                    ),
+                ));
+                if let EP::Bundle(b) = &bf.evaluation_proof {
+                    v.push(("packing.offsets".into(), b.packing.offsets.len().to_string()));
+                    v.push((
+                        "packing.column_counts".into(),
+                        b.packing.column_counts.len().to_string(),
+                    ));
+                    v.push(("packing.total_values".into(), b.packing.total_values.to_string()));
+                    v.push((
+                        "packing.log_dense_size".into(),
+                        b.packing.log_dense_size.to_string(),
+                    ));
+                    v.push((
+                        "packing.round_counts".into(),
+                        format!(
+                            "{:?}",
+                            b.packing.round_counts.iter().map(|r| r.len()).collect::<Vec<_>>()
+                        ),
+                    ));
+                    v.push((
+                        "packing.padding_heights".into(),
+                        format!(
+                            "{:?}",
+                            b.packing.padding_heights.iter().map(|r| r.len()).collect::<Vec<_>>()
+                        ),
+                    ));
+                    v.push(("y_per_chip".into(), b.y_per_chip.len().to_string()));
+                    v.push((
+                        "y_per_chip inner".into(),
+                        format!(
+                            "{:?}",
+                            b.y_per_chip.iter().map(|y| y.len()).collect::<Vec<_>>()
+                        ),
+                    ));
+                    v.push((
+                        "batch_evaluations".into(),
+                        format!(
+                            "{:?}",
+                            b.basefold_proof
+                                .batch_evaluations
+                                .iter()
+                                .map(|r| r.len())
+                                .collect::<Vec<_>>()
+                        ),
+                    ));
+                    v.push((
+                        "fri_commitments".into(),
+                        b.basefold_proof.basefold_proof.fri_commitments.len().to_string(),
+                    ));
+                    v.push((
+                        "univariate_messages".into(),
+                        b.basefold_proof.basefold_proof.univariate_messages.len().to_string(),
+                    ));
+                    v.push((
+                        "query_phase_openings".into(),
+                        b.basefold_proof
+                            .basefold_proof
+                            .query_phase_openings_and_proofs
+                            .len()
+                            .to_string(),
+                    ));
+                    v.push((
+                        "reduction.rounds".into(),
+                        format!("{:?}", b.reduction.rounds.len()),
+                    ));
+                    v.push((
+                        "reduction.eval_point".into(),
+                        format!("{:?}", b.reduction.eval_point.len()),
+                    ));
+                    v.push((
+                        "preceding_commits".into(),
+                        b.preceding_commits.len().to_string(),
+                    ));
+                    v.push((
+                        "commit.chip_dims".into(),
+                        format!("{:?}", b.commit.chip_dims),
+                    ));
+                    v.push((
+                        "commit.log_stacking_height".into(),
+                        b.commit.log_stacking_height.to_string(),
+                    ));
+                    v.push((
+                        "component_openings".into(),
+                        format!(
+                            "rounds={} leaves={:?} vals={:?} path={:?}",
+                            b.basefold_proof
+                                .basefold_proof
+                                .component_polynomials_query_openings_and_proofs
+                                .len(),
+                            b.basefold_proof
+                                .basefold_proof
+                                .component_polynomials_query_openings_and_proofs
+                                .iter()
+                                .map(|m| m.leaves.len())
+                                .collect::<Vec<_>>(),
+                            b.basefold_proof
+                                .basefold_proof
+                                .component_polynomials_query_openings_and_proofs
+                                .iter()
+                                .map(|m| m
+                                    .leaves
+                                    .first()
+                                    .map(|l| l.values.iter().map(|v| v.len()).collect::<Vec<_>>())
+                                    .unwrap_or_default())
+                                .collect::<Vec<_>>(),
+                            b.basefold_proof
+                                .basefold_proof
+                                .component_polynomials_query_openings_and_proofs
+                                .iter()
+                                .map(|m| m.leaves.first().map(|l| l.proof.len()).unwrap_or(0))
+                                .collect::<Vec<_>>(),
+                        ),
+                    ));
+                    v.push((
+                        "query_openings".into(),
+                        format!(
+                            "rounds={} leaves={:?} paths={:?}",
+                            b.basefold_proof.basefold_proof.query_phase_openings_and_proofs.len(),
+                            b.basefold_proof
+                                .basefold_proof
+                                .query_phase_openings_and_proofs
+                                .iter()
+                                .map(|m| m.leaves.len())
+                                .collect::<Vec<_>>(),
+                            b.basefold_proof
+                                .basefold_proof
+                                .query_phase_openings_and_proofs
+                                .iter()
+                                .map(|m| m.leaves.first().map(|l| l.proof.len()).unwrap_or(0))
+                                .collect::<Vec<_>>(),
+                        ),
+                    ));
+                    v.push((
+                        "jagged_eval.univariate_polys".into(),
+                        b.jagged_eval.partial_sumcheck_proof.univariate_polys.len().to_string(),
+                    ));
+                    v.push((
+                        "extra_{reduction,bf,commit,packing,eval}".into(),
+                        format!(
+                            "{} {} {} {} {}",
+                            b.extra_reduction.len(),
+                            b.extra_basefold_proof.len(),
+                            b.extra_commit.len(),
+                            b.extra_packing.len(),
+                            b.extra_jagged_eval.len(),
+                        ),
+                    ));
+                    v.push((
+                        "packing.round_counts detail".into(),
+                        format!("{:?}", b.packing.round_counts),
+                    ));
+                    v.push((
+                        "packing.padding_heights detail".into(),
+                        format!("{:?}", b.packing.padding_heights),
+                    ));
+                } else {
+                    v.push(("evaluation_proof".into(), "NOT A BUNDLE".into()));
+                }
+                v
+            };
+            let dr = describe(&dummy_at_real.shard_proofs[0]);
+            let rr = describe(&real_bf);
+            for ((k, dv), (_, rv)) in dr.iter().zip(rr.iter()) {
+                if dv != rv {
+                    eprintln!("[DIFF] {k}:\n    dummy = {dv}\n    real  = {rv}");
+                }
+            }
+            eprintln!("[DIFF] fields compared = {}", dr.len());
+        }
 
         // Find the enumerated per-shard shape of the SAME (chip_set, log_dense) class.
         let enum_os = enum_norm
@@ -3135,22 +3429,22 @@ pub mod tests {
             .find(|e| {
                 let mut en: Vec<String> = e.inner.iter().map(|(n, _)| n.clone()).collect();
                 en.sort();
-                en == real_names && log_dense_of(e) == real_ld
+                en == real_names && blocks_of(e) == real_ld
             })
             .cloned();
         let enum_os = match enum_os {
             Some(e) => e,
             None => {
                 panic!(
-                    "[ARITY-REPR] real shard (chip_set, log_dense={real_ld}) class NOT enumerated \
+                    "[ARITY-REPR] real shard (chip_set, blocks={real_ld:?}) class NOT enumerated \
                      — enumeration gap"
                 );
             }
         };
         eprintln!(
-            "[ARITY-REPR] real_ld={real_ld} real_chips={} enum_ld={} enum_matched=true",
+            "[ARITY-REPR] real_blocks={real_ld:?} real_chips={} enum_blocks={:?} enum_matched=true",
             real_names.len(),
-            log_dense_of(&enum_os),
+            blocks_of(&enum_os),
         );
         // The class matched on (chip_set, log_dense) — but the vk is a function
         // of the PER-CHIP heights, so print both height vectors and the chips
@@ -3173,12 +3467,9 @@ pub mod tests {
             eprintln!("[ARITY-REPR] per-chip height MISMATCHES ({}): {diffs:?}", diffs.len());
         }
 
-        // For each arity 1..=REDUCE_BATCH_SIZE: real-replicated vs enumerated-rep.
-        let real_bf = *real_sp
-            .basefold_shard_proof
-            .as_ref()
-            .expect("real shard carries basefold side channel")
-            .clone();
+
+
+
         for arity in 1..=REDUCE_BATCH_SIZE {
             // REAL arity-N witness: replicate the real shard's bundle N times
             // (a real arity-N batch of identical shards).
@@ -3216,6 +3507,158 @@ pub mod tests {
             );
         }
         Ok(())
+    }
+
+    /// PROBE: which AGGREGATE does the normalize vk key on?
+    ///
+    /// `normalize_vk_height_sensitivity` shows the vk survives moving one
+    /// chip's height but not bumping them all, so it is not the per-chip vector.
+    /// The enumeration dedups on `log_dense` — the power of two ENCLOSING the
+    /// committed length — while the prover's BaseFold geometry keys on the
+    /// committed length itself: `dense_len` in whole stacking blocks, and
+    /// `num_stripes = dense_len >> log_stacking`.  Two shapes can share a
+    /// `log_dense` and still differ in block count.  This builds pairs that
+    /// isolate the two candidates.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn normalize_vk_aggregate_key_probe() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let machine = prover.core_prover.machine();
+        let widths: std::collections::BTreeMap<String, usize> = machine
+            .chips()
+            .iter()
+            .map(|c| {
+                (
+                    <_ as MachineAir<KoalaBear>>::name(c),
+                    p3_air::BaseAir::<KoalaBear>::width(c).max(1),
+                )
+            })
+            .collect();
+        let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+        let stats = |hs: &[(&str, usize)]| -> (usize, usize, usize, usize) {
+            let total: usize = hs
+                .iter()
+                .map(|(n, h)| widths.get(*n).copied().unwrap_or(1) * (1usize << h))
+                .sum();
+            let dense = zkm_pcs::jagged::committed_dense_len(total, log_stack);
+            let blocks = dense >> log_stack;
+            let log_dense =
+                if dense == 0 { 0 } else { dense.next_power_of_two().trailing_zeros() as usize };
+            (total, dense, blocks, log_dense)
+        };
+        let vk_of = |hs: &[(&str, usize)]| -> [u32; 8] {
+            let os = OrderedShape::from_log2_heights(
+                &hs.iter().map(|(n, h)| (n.to_string(), *h)).collect::<Vec<_>>(),
+            );
+            let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: false };
+            let d = ZKMCoreBasefoldWitnessValues::dummy(machine, &shape);
+            let p = prover.recursion_program_basefold(&d);
+            use p3_field::PrimeField32;
+            prover.compress_prover.setup(&p).1.hash_koalabear().map(|x| x.as_canonical_u32())
+        };
+        let report = |tag: &str, hs: &[(&str, usize)]| -> ([u32; 8], (usize, usize, usize, usize)) {
+            let st = stats(hs);
+            let vk = vk_of(hs);
+            eprintln!(
+                "[AGGKEY] {tag}: total={} dense_len={} blocks={} log_dense={} vk={vk:?}",
+                st.0, st.1, st.2, st.3,
+            );
+            (vk, st)
+        };
+
+        // The shape a snapped fib core shard lands on.
+        let base: &[(&str, usize)] = &[
+            ("AddSub", 13), ("Bitwise", 12), ("Branch", 11), ("Byte", 16),
+            ("CloClz", 10), ("Cpu", 14), ("DivRem", 10), ("Global", 9),
+            ("Jump", 10), ("Lt", 12), ("LoadNarrow", 10), ("LoadWord", 10),
+            ("StoreNarrow", 10), ("StoreWord", 10), ("MemoryUnaligned", 10),
+            ("MemoryLocal", 10), ("MiscInstrs", 1), ("MovCond", 10), ("Mul", 10),
+            ("Program", 19), ("ShiftLeft", 9), ("ShiftRight", 9),
+            ("SyscallCore", 10), ("SyscallInstrs", 10),
+        ];
+        let (vk_base, st_base) = report("base       ", base);
+
+        // (a) SAME chip set, area moved around but the BLOCK COUNT held.
+        let same_blocks: Vec<(&str, usize)> = base
+            .iter()
+            .map(|(n, h)| match *n {
+                "Global" => (*n, 12),
+                "Mul" => (*n, 11),
+                _ => (*n, *h),
+            })
+            .collect();
+        let (vk_sb, st_sb) = report("same-blocks", &same_blocks);
+
+        // (b) SAME chip set, block count moved but `log_dense` held.
+        let same_logdense: Vec<(&str, usize)> = base
+            .iter()
+            .map(|(n, h)| if *n == "Cpu" { (*n, 15) } else { (*n, *h) })
+            .collect();
+        let (vk_sl, st_sl) = report("more-blocks", &same_logdense);
+
+        eprintln!(
+            "[AGGKEY] (a) blocks {}=={} -> vk_eq={}",
+            st_base.2, st_sb.2, vk_base == vk_sb,
+        );
+        eprintln!(
+            "[AGGKEY] (b) log_dense {}=={} but blocks {} vs {} -> vk_eq={}",
+            st_base.3, st_sl.3, st_base.2, st_sl.2, vk_base == vk_sl,
+        );
+        // (c) SAME chip set, SAME main-round geometry, but the PREPROCESSED
+        // round's height moved (Program is a preprocessed chip, and post-#192
+        // the proof commits preprocessed as its own round).
+        let prep_moved: Vec<(&str, usize)> = base
+            .iter()
+            .map(|(n, h)| if *n == "Program" { (*n, 17) } else { (*n, *h) })
+            .collect();
+        let (vk_pm, st_pm) = report("prep-moved ", &prep_moved);
+        eprintln!(
+            "[AGGKEY] (c) Program 19->17: blocks {} vs {} -> vk_eq={}",
+            st_base.2, st_pm.2, vk_base == vk_pm,
+        );
+
+        eprintln!(
+            "[AGGKEY] CONCLUSION: the vk keys on the committed BLOCK COUNT, not log_dense: {}",
+            (vk_base == vk_sb && st_base.2 == st_sb.2)
+                && !(vk_base == vk_sl && st_base.2 != st_sl.2),
+        );
+    }
+
+    /// PROBE: how large is the shape space `fix_shape` can actually snap a core
+    /// record onto?  That set is what the enumeration has to cover, and the vk
+    /// merkle tree has a FIXED capacity, so its size decides whether a full
+    /// SP1-style enumeration is even representable.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn core_shape_space_size_probe() {
+        use zkm_core_machine::shape::CoreShapeConfig;
+        setup_logger();
+        let cfg = CoreShapeConfig::<KoalaBear>::default();
+        let t = std::time::Instant::now();
+        let mut n = 0usize;
+        const CAP: usize = 5_000_000;
+        for _ in cfg.all_shapes() {
+            n += 1;
+            if n >= CAP {
+                break;
+            }
+        }
+        eprintln!(
+            "[SHAPESPACE] all_shapes count={n}{} in {:?} (vk merkle capacity = 2^{} = {})",
+            if n >= CAP { " (CAPPED)" } else { "" },
+            t.elapsed(),
+            VK_MERKLE_TREE_HEIGHT,
+            1usize << VK_MERKLE_TREE_HEIGHT,
+        );
+        eprintln!(
+            "[SHAPESPACE] canonical cluster shapes = {}",
+            cfg.enumerate_canonical_cluster_shapes().len(),
+        );
     }
 
     /// PROBE: does a RECURSION proving key carry a PREPROCESSED opening round?
