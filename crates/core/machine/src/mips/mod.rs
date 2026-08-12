@@ -879,7 +879,11 @@ pub mod tests {
     #[test]
     fn test_primitives_and_machine_air_names_match() {
         let chips = MipsAir::<KoalaBear>::chips();
-        for (a, b) in chips.iter().zip_eq(MipsAirId::iter()) {
+        // `MipsAirId::Cpu` survives only as the VIRTUAL cycles axis for shard
+        // splitting / shape banding — there is no chip behind it.
+        for (a, b) in
+            chips.iter().zip_eq(MipsAirId::iter().filter(|id| *id != MipsAirId::Cpu))
+        {
             assert_eq!(a.name(), b.to_string());
         }
     }
