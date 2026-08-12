@@ -6178,3 +6178,75 @@ it simply was not followed.
 **Standing rule going forward:** swap the arms between GPU slots each round
 (ABBA), or subtract a measured A/A bias — and always cross-check a lever against
 the span it is supposed to move.
+
+## Aug 12 — the jagged-eval device engine was installed on the DEAD path, so 20 % of a core shard ran on the host
+
+`prove_trusted_evaluations_gpu` forks on `!preprocessed_named.is_empty()`:
+
+| lines | function | taken when |
+|---|---|---|
+| 475-694 | `prove_jagged_basefold_rounds_gpu` | there ARE preprocessed chips — i.e. **every real proof** since the two-round preprocessed opening |
+| 695+ | `prove_jagged_basefold_inner_gpu` | no preprocessed chips (tests, and the machine the empty-preprocessed fix supports) |
+
+`install_device_jagged_eval_engine(..)` sat at line 1268 — inside the SECOND
+one. The live path never installed it, and `prove_jagged_evaluation`'s device
+seam falls back to the host prover **silently** when no factory is registered for
+the thread. So the structural jagged-eval sumcheck had been running entirely on
+host CPU.
+
+### How it was found (three independent signals, none of them reading the code)
+
+- **No `jagged_eval_*` / `fix_last_var` / `bp_round` kernel appears anywhere in an
+  nsys capture of reth core.** The `jagged_sumcheck_*` kernels that DO appear are
+  the reduction — a different closure.
+- `jeval_claimed_sum` measured 6.97 s / 281 = **24.8 ms/shard**, matching the
+  comment in `jagged_eval_sumcheck.rs` describing the *host* form's cost:
+  "27.3 ms/shard of the reth serial path with the GPU 0 % busy".
+- Span subtraction: `jagged_linear_core` 57.44 s minus its instrumented children
+  left **~28.8 s (102 ms/shard)** inside `prove_jagged_evaluation` — pure host
+  time, no kernels under it.
+
+⇒ `prove_jagged_evaluation` ≈ **35.8 s of a 182 s run, ~20 %**, on the host.
+
+### Correctness
+
+Built first with `verify = true`, which constructs a shadow host
+`StructuralJaggedEvalProver` and runs it in lockstep, asserting per-round
+bit-identity (`assert!(hp.rhos == rhos_out)`). reth core, 281 shards: no assert
+fired, `CORE VERIFY OK`, `core.proof 7a2135bb7205ca8d`.
+
+**The check that matters:** `jeval_claimed_sum` fell **6.97 s -> 0.05 s**. Without
+it, a guard that silently failed to install would have "passed" the lockstep run
+trivially — it would simply have run host-only again. Always demand positive
+evidence that the device path executed, not just the absence of a failure.
+
+### Throughput
+
+4 ABBA rounds with the arms swapped between GPU slots (this box has a measured
+~1.55 % per-slot bias — see the correction entry above):
+
+| round | slots | base | treatment | delta |
+|---|---|---|---|---|
+| r1 | base@6, new@7 | 2019 | 2172 | +7.58 % |
+| r2 | base@7, new@6 | 2041 | 2291 | +12.25 % |
+| r3 | base@6, new@7 | 2102 | 2236 | +6.37 % |
+| r4 | base@7, new@6 | 2146 | 2367 | +10.30 % |
+
+**Mean +9.1 %, 4/4 positive**, `core.proof 7a2135bb7205ca8d` on all 8 arms.
+Rounds 2 and 4 put the treatment on the *disadvantaged* slot and produced the
+largest gains, so the effect is not a slot artifact.
+
+Span delta, which is the mechanism and a far more sensitive check than kHz:
+`jagged_linear_core` **57.44 s -> 24.83 s (-32.6 s)**, `open_s4_jagged_pcs`
+57.52 -> 24.99 s.
+
+### The class of bug
+
+Identical in shape to the dummy shard proof that was left single-round after the
+two-round change: **a path duplicated for a new shape, with a seam registration
+landing in only one copy.** When a path forks on shape, grep every `install_*` /
+factory registration and check which fork it is in. A silent host fallback gives
+no error, no warning, and a correct proof — only the profile shows it.
+
+Switches: none. The guard is unconditional on the live path, matching the dead
+path it mirrors.
