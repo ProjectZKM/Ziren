@@ -315,6 +315,20 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
                     | Opcode::TEQ
                     | Opcode::EXT
                     | Opcode::INS
+                    | Opcode::LB
+                    | Opcode::LBU
+                    | Opcode::LH
+                    | Opcode::LHU
+                    | Opcode::LW
+                    | Opcode::LL
+                    | Opcode::SB
+                    | Opcode::SH
+                    | Opcode::SW
+                    | Opcode::SC
+                    | Opcode::LWL
+                    | Opcode::LWR
+                    | Opcode::SWL
+                    | Opcode::SWR
             ))
         .collect()
 }

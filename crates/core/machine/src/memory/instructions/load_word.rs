@@ -106,8 +106,9 @@ impl LoadWordChip {
         event: &MemInstrEvent,
         cols: &mut LoadWordColumns<F>,
         blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
     ) {
-        cols.common.populate(event, blu);
+        cols.common.populate(event, blu, program);
         cols.is_lw = F::from_bool(matches!(event.opcode, Opcode::LW));
         cols.is_ll = F::from_bool(matches!(event.opcode, Opcode::LL));
         debug_assert!(matches!(event.opcode, Opcode::LW | Opcode::LL));
@@ -147,7 +148,11 @@ impl<F: PrimeField32> MachineAir<F> for LoadWordChip {
             NUM_LOAD_WORD_COLS,
             |event, row, blu: &mut HashMap<ByteLookupEvent, usize>| {
                 let cols: &mut LoadWordColumns<F> = row.borrow_mut();
-                self.event_to_row(event, cols, blu);
+                self.event_to_row(event, cols, blu, &input.program);
+            },
+            |row| {
+                let cols: &mut LoadWordColumns<F> = row.borrow_mut();
+                cols.common.frame.populate_dependency();
             },
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

@@ -22,7 +22,8 @@ use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use zkm_core_executor::events::{
     AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
-    JumpEvent, MemoryRecordEnum, MiscEvent, MovCondEvent, OptionMemoryRecordEnumTag,
+    JumpEvent, MemInstrEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
+    OptionMemoryRecordEnumTag,
 };
 use zkm_core_executor::{ByteOpcode, Program};
 use zkm_derive::AlignedBorrow;
@@ -463,6 +464,39 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             self.is_rw_a = F::ONE;
         }
         if matches!(event.opcode, Op::TEQ) {
+            self.op_a_immutable = F::ONE;
+        }
+    }
+
+    /// `MemInstrEvent` variant of [`Self::populate_from_alu`].  Every memory
+    /// instruction reads-and-writes op_a (`is_rw_a = 1` — loads write it,
+    /// stores carry the previous value through), and the plain stores
+    /// (SB/SH/SW/SWL/SWR, but NOT SC, which writes the success flag) read it
+    /// immutably.
+    pub fn populate_from_mem(
+        &mut self,
+        event: &MemInstrEvent,
+        program: &Program,
+        blu: &mut impl ByteRecord,
+    ) {
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a,
+            event.b,
+            event.c,
+            event.a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            event.shard,
+            blu,
+        );
+        self.hi_or_prev_a = event.prev_a_val.into();
+        self.is_rw_a = F::ONE;
+        use zkm_core_executor::Opcode as Op;
+        if matches!(event.opcode, Op::SB | Op::SH | Op::SW | Op::SWL | Op::SWR) {
             self.op_a_immutable = F::ONE;
         }
     }

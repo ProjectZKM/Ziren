@@ -144,8 +144,9 @@ impl StoreNarrowChip {
         event: &MemInstrEvent,
         cols: &mut StoreNarrowColumns<F>,
         blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
     ) {
-        let addr_ls_two_bits = cols.common.populate(event, blu);
+        let addr_ls_two_bits = cols.common.populate(event, blu, program);
         populate_offset_flags(
             addr_ls_two_bits,
             &mut cols.ls_bits_is_one,
@@ -191,7 +192,11 @@ impl<F: PrimeField32> MachineAir<F> for StoreNarrowChip {
             NUM_STORE_NARROW_COLS,
             |event, row, blu: &mut HashMap<ByteLookupEvent, usize>| {
                 let cols: &mut StoreNarrowColumns<F> = row.borrow_mut();
-                self.event_to_row(event, cols, blu);
+                self.event_to_row(event, cols, blu, &input.program);
+            },
+            |row| {
+                let cols: &mut StoreNarrowColumns<F> = row.borrow_mut();
+                cols.common.frame.populate_dependency();
             },
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());

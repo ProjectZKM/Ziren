@@ -28,6 +28,7 @@ use zkm_core_executor::{
 };
 use zkm_primitives::consts::WORD_SIZE;
 
+use crate::air::WordAirBuilder;
 use crate::{
     air::ZKMCoreAirBuilder,
     memory::MemoryReadWriteCols,
@@ -42,6 +43,16 @@ pub const NUM_MEMORY_INSTR_COMMON_COLS: usize = size_of::<MemoryInstrCommonCols<
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryInstrCommonCols<T> {
+    /// Whether this row is a REAL instruction (all memory rows are today).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: crate::frame::InstructionFrameCols<T>,
+
     /// The current/next program counter of the instruction.
     pub pc: T,
     pub next_pc: T,
@@ -183,7 +194,7 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
 /// Every memory chip supplies the same constants: `next_next_pc = next_pc + 4`,
 /// `num_extra_cycles = 0`, `is_rw_a = 1`, `is_check_memory = 1`, `is_halt = 0`,
 /// `is_sequential = 1`.
-pub fn receive_memory_instruction<AB: ZKMAirBuilder>(
+pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     builder: &mut AB,
     cols: &MemoryInstrCommonCols<AB::Var>,
     opcode: AB::Expr,
@@ -202,12 +213,48 @@ pub fn receive_memory_instruction<AB: ZKMAirBuilder>(
         cols.op_b_value,
         cols.op_c_value,
         cols.prev_a_val,
-        op_a_immutable,
+        op_a_immutable.clone(),
         AB::Expr::ONE,
         AB::Expr::ONE,
         AB::Expr::ZERO,
         AB::Expr::ONE,
-        is_real,
+        // Dependency rows only: an instruction row serves itself via the frame.
+        cols.is_dep.into(),
+    );
+
+    builder.assert_bool(cols.is_instruction);
+    builder.assert_bool(cols.is_dep);
+    builder.when(cols.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+    builder.assert_zero(
+        cols.is_dep - (is_real.clone() - is_real.clone() * cols.is_instruction),
+    );
+
+    // A real instruction carries its own program fetch, register access and
+    // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
+    crate::frame::eval_instruction_frame(
+        builder,
+        &cols.frame,
+        cols.pc.into(),
+        cols.next_pc.into(),
+        cols.next_pc + AB::Expr::from_u32(4),
+        cols.is_instruction.into(),
+    );
+    builder
+        .when(cols.is_instruction)
+        .assert_eq(cols.frame.state_recv_next_pc, cols.next_pc);
+    // Every memory instruction reads-and-writes op_a; the plain stores read it
+    // immutably (the per-chip `op_a_immutable` expr, NOT including SC).
+    builder.assert_eq(cols.frame.is_rw_a, cols.is_instruction);
+    builder.assert_eq(cols.frame.op_a_immutable, op_a_immutable * cols.is_instruction);
+    builder
+        .when(cols.is_instruction)
+        .assert_word_eq(cols.frame.hi_or_prev_a, cols.prev_a_val);
+    // The chips keep private shard/clk columns for the Memory-position access:
+    // tie them to the frame (the Mul coupling).
+    builder.when(cols.is_instruction).assert_eq(cols.shard, cols.frame.shard);
+    builder.when(cols.is_instruction).assert_eq(
+        cols.clk,
+        AB::Expr::from_u32(1u32 << 16) * cols.frame.clk_8bit_limb + cols.frame.clk_16bit_limb,
     );
 }
 
@@ -228,7 +275,21 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
     ///
     /// Returns the two least significant bits of the effective address, which the
     /// per-chip populate functions use to derive their offset flags and values.
-    pub fn populate(&mut self, event: &MemInstrEvent, blu: &mut impl ByteRecord) -> u8 {
+    pub fn populate(
+        &mut self,
+        event: &MemInstrEvent,
+        blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
+    ) -> u8 {
+        let is_instruction = event.is_instruction != 0;
+        self.is_instruction = F::from_bool(is_instruction);
+        self.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            self.frame.populate_from_mem(event, program, blu);
+        } else {
+            self.frame.populate_dependency();
+        }
+
         self.shard = F::from_u32(event.shard);
         debug_assert!(self.shard != F::ZERO);
         self.clk = F::from_u32(event.clk);
@@ -290,6 +351,7 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
     event_to_row: impl Fn(&MemInstrEvent, &mut [F], &mut HashMap<ByteLookupEvent, usize>)
         + Sync
         + Send,
+    pad_row: impl Fn(&mut [F]) + Sync + Send,
 ) -> (RowMajorMatrix<F>, Vec<HashMap<ByteLookupEvent, usize>>) {
     let chunk_size = std::cmp::max(events.len() / num_cpus::get(), 1);
     let mut values = zeroed_f_vec(padded_nb_rows * num_cols);
@@ -304,6 +366,11 @@ pub(crate) fn generate_memory_trace<F: PrimeField32>(
                 let idx = i * chunk_size + j;
                 if idx < events.len() {
                     event_to_row(&events[idx], row, &mut blu);
+                } else {
+                    // Padding rows carry no instruction: neutralise the frame
+                    // or its register-access multiplicities break the Memory
+                    // bus.
+                    pad_row(row);
                 }
             });
             blu

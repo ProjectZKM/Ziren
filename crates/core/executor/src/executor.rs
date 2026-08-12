@@ -1424,7 +1424,15 @@ impl<'a> Executor<'a> {
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
-            self.emit_mem_instr_event(instruction.opcode, a, b, c, hi_or_prev_a.unwrap_or(0));
+            self.emit_mem_instr_event(
+                instruction.opcode,
+                a,
+                b,
+                c,
+                hi_or_prev_a.unwrap_or(0),
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_branch_instruction() {
             self.emit_branch_event(
                 clk,
@@ -1611,7 +1619,17 @@ impl<'a> Executor<'a> {
 
     /// Emit a memory instruction event.
     #[inline]
-    fn emit_mem_instr_event(&mut self, opcode: Opcode, a: u32, b: u32, c: u32, prev_a_val: u32) {
+    fn emit_mem_instr_event(
+        &mut self,
+        opcode: Opcode,
+        a: u32,
+        b: u32,
+        c: u32,
+        prev_a_val: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
+    ) {
+        // A REAL instruction: carry the frame (see AluEvent).
         let event = MemInstrEvent {
             shard: self.shard(),
             clk: self.state.clk,
@@ -1623,6 +1641,11 @@ impl<'a> Executor<'a> {
             c,
             mem_access: self.memory_accesses.memory.expect("Must have memory access"),
             prev_a_val,
+            is_instruction: 1,
+            recv_next_pc,
+            a_record: record.a.into(),
+            b_record: record.b.into(),
+            c_record: record.c.into(),
         };
 
         // Partition the event by access width/direction: each memory chip owns the

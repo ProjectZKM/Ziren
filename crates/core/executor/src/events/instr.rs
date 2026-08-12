@@ -188,6 +188,15 @@ pub struct MemInstrEvent {
     pub mem_access: MemoryRecordEnum,
     /// The memory access record for memory operations.
     pub prev_a_val: u32,
+
+    /// ── instruction frame (see `AluEvent`) ───────────────────────────
+    pub is_instruction: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
 }
 
 impl MemInstrEvent {
@@ -206,7 +215,23 @@ impl MemInstrEvent {
         mem_access: MemoryRecordEnum,
         prev_a_val: u32,
     ) -> Self {
-        Self { shard, clk, pc, next_pc, opcode, a, b, c, mem_access, prev_a_val }
+        Self {
+            shard,
+            clk,
+            pc,
+            next_pc,
+            opcode,
+            a,
+            b,
+            c,
+            mem_access,
+            prev_a_val,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
+        }
     }
 }
 

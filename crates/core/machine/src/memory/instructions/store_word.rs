@@ -107,8 +107,9 @@ impl StoreWordChip {
         event: &MemInstrEvent,
         cols: &mut StoreWordColumns<F>,
         blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
     ) {
-        cols.common.populate(event, blu);
+        cols.common.populate(event, blu, program);
         cols.is_sw = F::from_bool(matches!(event.opcode, Opcode::SW));
         cols.is_sc = F::from_bool(matches!(event.opcode, Opcode::SC));
         debug_assert!(matches!(event.opcode, Opcode::SW | Opcode::SC));
@@ -148,7 +149,11 @@ impl<F: PrimeField32> MachineAir<F> for StoreWordChip {
             NUM_STORE_WORD_COLS,
             |event, row, blu: &mut HashMap<ByteLookupEvent, usize>| {
                 let cols: &mut StoreWordColumns<F> = row.borrow_mut();
-                self.event_to_row(event, cols, blu);
+                self.event_to_row(event, cols, blu, &input.program);
+            },
+            |row| {
+                let cols: &mut StoreWordColumns<F> = row.borrow_mut();
+                cols.common.frame.populate_dependency();
             },
         );
         output.add_byte_lookup_events_from_maps(blu_events.iter().collect_vec());
