@@ -180,8 +180,60 @@ fn main() {
             }
             eprintln!("{:<28} {:>7}", "TOTAL main width", total);
         }
+        "rows" => {
+            // Per-chip ROW census, and — for the ALU chips — the split between
+            // REAL instruction rows and the SYNTHETIC dependency rows that
+            // `dependencies.rs` pushes at `pc: UNUSED_PC` so DivRem and friends
+            // can outsource sub-computations.
+            //
+            // That split is the number the CpuChip-removal case rests on: a
+            // migrated ALU chip must carry an instruction frame, but a
+            // dependency row has no instruction at its pc, no clk and no
+            // registers.  Gating the frame leaves those columns dead on every
+            // dependency row, so a high dependency share erodes (or reverses)
+            // the area win, and argues for splitting the chip instead.
+            let mut rt = Executor::new(program, ZKMCoreOpts::default());
+            rt.run().expect("execution failed");
+            let mut cpu = 0usize;
+            let mut tot_real = 0usize;
+            let mut tot_dep = 0usize;
+            eprintln!("{:<22} {:>10} {:>10} {:>8}", "alu chip", "real", "dependency", "dep%");
+            for rec in &rt.records {
+                cpu += rec.cpu_events.len();
+            }
+            let mut report = |name: &str, real: usize, dep: usize| {
+                tot_real += real;
+                tot_dep += dep;
+                let pct = if real + dep == 0 { 0.0 } else { 100.0 * dep as f64 / (real + dep) as f64 };
+                eprintln!("{name:<22} {real:>10} {dep:>10} {pct:>7.1}%");
+            };
+            macro_rules! census {
+                ($field:ident, $label:literal) => {{
+                    let (mut r, mut d) = (0usize, 0usize);
+                    for rec in &rt.records {
+                        for e in &rec.$field {
+                            if e.pc == zkm_core_executor::UNUSED_PC { d += 1 } else { r += 1 }
+                        }
+                    }
+                    report($label, r, d);
+                }};
+            }
+            census!(add_sub_events, "AddSub");
+            census!(bitwise_events, "Bitwise");
+            census!(shift_left_events, "ShiftLeft");
+            census!(shift_right_events, "ShiftRight");
+            census!(lt_events, "Lt");
+            census!(cloclz_events, "CloClz");
+            census!(mul_events, "Mul");
+            census!(divrem_events, "DivRem");
+            let alu = tot_real + tot_dep;
+            eprintln!("{:<22} {:>10} {:>10} {:>7.1}%", "ALU TOTAL", tot_real, tot_dep,
+                if alu == 0 { 0.0 } else { 100.0 * tot_dep as f64 / alu as f64 });
+            eprintln!("cpu_events (one per executed instruction) = {cpu}");
+            eprintln!("shards = {}", rt.records.len());
+        }
         other => {
-            panic!("unknown command {other:?}; expected execute | buses | prove | widths")
+            panic!("unknown command {other:?}; expected execute | buses | prove | widths | rows")
         }
     }
 }
