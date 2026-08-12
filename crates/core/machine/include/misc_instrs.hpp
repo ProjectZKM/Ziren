@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bit>
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
@@ -111,7 +112,24 @@ namespace zkm_core_machine_sys::misc_instrs {
     }
 
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row(const MiscEvent& event, MiscInstrColumns<F>& cols) {
+    __ZKM_HOSTDEV__ void event_to_row(
+    const MiscEvent& event,
+    MiscInstrColumns<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    const bool is_instruction = event.is_instruction != 0;
+    cols.is_instruction = F::from_bool(is_instruction);
+    const bool is_cm = event.opcode == Opcode::MADDU || event.opcode == Opcode::MSUBU
+        || event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
+    cols.is_cm_dep = F::from_bool(is_cm && !is_instruction);
+    cols.is_other_dep = F::from_bool(!is_cm && !is_instruction);
+    if (is_instruction) {
+        frame::populate_from_misc<F>(cols.frame, event, instruction, shard);
+    } else {
+        frame::populate_dependency<F>(cols.frame);
+    }
+
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 

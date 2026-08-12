@@ -23,19 +23,6 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_shard_clk(const CpuEventFfi& event,
 }
 
 template<class F>
-__ZKM_HOSTDEV__ __ZKM_INLINE__ void
-populate_instruction(InstructionCols<F>& self, const InstructionFfi& instruction) {
-    self.opcode = F::from_canonical_u32((uint32_t)instruction.opcode);
-    self.op_a = F::from_canonical_u32((uint32_t)instruction.op_a);
-    write_word_from_u32_v2<F>(self.op_b, instruction.op_b);
-    write_word_from_u32_v2<F>(self.op_c, instruction.op_c);
-
-    self.op_a_0 = F::from_bool(instruction.op_a == 0);  // 0 = Register::X0
-    self.imm_b = F::from_bool(instruction.imm_b);
-    self.imm_c = F::from_bool(instruction.imm_c);
-}
-
-template<class F>
 __ZKM_HOSTDEV__ void event_to_row(
     const CpuEventFfi& event,
     const uint32_t shard,

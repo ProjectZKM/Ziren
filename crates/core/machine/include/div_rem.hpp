@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <climits>
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
@@ -9,7 +10,23 @@
 
 namespace zkm_core_machine_sys::div_rem {
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row(const CompAluEvent& event, DivRemCols<F>& cols) {
+    __ZKM_HOSTDEV__ void event_to_row(
+    const CompAluEvent& event,
+    DivRemCols<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    const bool is_instruction = event.is_instruction != 0;
+    cols.is_instruction = F::from_bool(is_instruction);
+    const bool is_dd = event.opcode == Opcode::DIV || event.opcode == Opcode::DIVU;
+    cols.is_dd_dep = F::from_bool(is_dd && !is_instruction);
+    cols.is_mm_dep = F::from_bool(!is_dd && !is_instruction);
+    if (is_instruction) {
+        frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
+    } else {
+        frame::populate_dependency<F>(cols.frame);
+    }
+
         assert(
             event.opcode == Opcode::DIVU
                 || event.opcode == Opcode::DIV

@@ -642,6 +642,13 @@ mod tests {
                 prev_timestamp: 790387,
             },
             hi_record_is_real: true,
+            // Dependency shape: no frame.
+            is_instruction: 0,
+            next_next_pc: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
         }];
 
         let chip = MulChip::default();
@@ -676,9 +683,25 @@ mod tests {
 
                     if idx < nb_rows {
                         let event = &input.mul_events[idx];
+                        let instruction: zkm_core_executor::InstructionFfi =
+                            if event.is_instruction != 0 {
+                                input.program.fetch(event.pc).into()
+                            } else {
+                                zkm_core_executor::Instruction::new(
+                                    Opcode::ADD, 0, 0, 0, true, true,
+                                ).into()
+                            };
                         unsafe {
-                            crate::sys::mul_event_to_row_koalabear(event, cols);
+                            crate::sys::mul_event_to_row_koalabear(
+                                event,
+                                cols,
+                                instruction,
+                                input.public_values.execution_shard,
+                            );
                         }
+                    } else {
+                        // Mirror `generate_trace`'s padding: neutralise the frame.
+                        cols.frame.populate_dependency();
                     }
                 });
             },

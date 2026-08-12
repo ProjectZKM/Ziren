@@ -1,5 +1,6 @@
 #pragma once
 
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "memory.hpp"
@@ -26,7 +27,20 @@ mem_value_of(const MemInstrEvent& event) {
 /// Mirrors `MemoryInstrCommonCols::populate`.  Returns `addr & 0b11`.
 template<class F>
 __ZKM_HOSTDEV__ __ZKM_INLINE__ uint8_t
-populate_common(MemoryInstrCommonCols<F>& cols, const MemInstrEvent& event) {
+populate_common(
+    MemoryInstrCommonCols<F>& cols,
+    const MemInstrEvent& event,
+    const InstructionFfi& instruction
+) {
+    const bool is_instruction = event.is_instruction != 0;
+    cols.is_instruction = F::from_bool(is_instruction);
+    cols.is_dep = F::from_bool(!is_instruction);
+    if (is_instruction) {
+        frame::populate_from_mem<F>(cols.frame, event, instruction);
+    } else {
+        frame::populate_dependency<F>(cols.frame);
+    }
+
     cols.shard = F::from_canonical_u32(event.shard);
     assert(cols.shard != F::zero());
     cols.clk = F::from_canonical_u32(event.clk);
@@ -66,8 +80,12 @@ populate_offset_flags(F& one, F& two, F& three, const uint8_t addr_ls_two_bits) 
 /// `LB`, `LBU`, `LH`, `LHU`.
 template<class F>
 __ZKM_HOSTDEV__ void
-load_narrow_event_to_row(const MemInstrEvent& event, LoadNarrowColumns<F>& cols) {
-    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event);
+load_narrow_event_to_row(
+    const MemInstrEvent& event,
+    LoadNarrowColumns<F>& cols,
+    const InstructionFfi& instruction
+) {
+    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
 
@@ -109,8 +127,12 @@ load_narrow_event_to_row(const MemInstrEvent& event, LoadNarrowColumns<F>& cols)
 /// `LW`, `LL`.
 template<class F>
 __ZKM_HOSTDEV__ void
-load_word_event_to_row(const MemInstrEvent& event, LoadWordColumns<F>& cols) {
-    populate_common<F>(cols.common, event);
+load_word_event_to_row(
+    const MemInstrEvent& event,
+    LoadWordColumns<F>& cols,
+    const InstructionFfi& instruction
+) {
+    populate_common<F>(cols.common, event, instruction);
     cols.is_lw = F::from_bool(event.opcode == Opcode::LW);
     cols.is_ll = F::from_bool(event.opcode == Opcode::LL);
 }
@@ -118,8 +140,12 @@ load_word_event_to_row(const MemInstrEvent& event, LoadWordColumns<F>& cols) {
 /// `SB`, `SH`.
 template<class F>
 __ZKM_HOSTDEV__ void
-store_narrow_event_to_row(const MemInstrEvent& event, StoreNarrowColumns<F>& cols) {
-    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event);
+store_narrow_event_to_row(
+    const MemInstrEvent& event,
+    StoreNarrowColumns<F>& cols,
+    const InstructionFfi& instruction
+) {
+    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
     cols.is_sb = F::from_bool(event.opcode == Opcode::SB);
@@ -129,8 +155,12 @@ store_narrow_event_to_row(const MemInstrEvent& event, StoreNarrowColumns<F>& col
 /// `SW`, `SC`.
 template<class F>
 __ZKM_HOSTDEV__ void
-store_word_event_to_row(const MemInstrEvent& event, StoreWordColumns<F>& cols) {
-    populate_common<F>(cols.common, event);
+store_word_event_to_row(
+    const MemInstrEvent& event,
+    StoreWordColumns<F>& cols,
+    const InstructionFfi& instruction
+) {
+    populate_common<F>(cols.common, event, instruction);
     cols.is_sw = F::from_bool(event.opcode == Opcode::SW);
     cols.is_sc = F::from_bool(event.opcode == Opcode::SC);
 }
@@ -138,8 +168,12 @@ store_word_event_to_row(const MemInstrEvent& event, StoreWordColumns<F>& cols) {
 /// `LWL`, `LWR`, `SWL`, `SWR`.
 template<class F>
 __ZKM_HOSTDEV__ void
-unaligned_event_to_row(const MemInstrEvent& event, MemoryUnalignedColumns<F>& cols) {
-    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event);
+unaligned_event_to_row(
+    const MemInstrEvent& event,
+    MemoryUnalignedColumns<F>& cols,
+    const InstructionFfi& instruction
+) {
+    const uint8_t addr_ls_two_bits = populate_common<F>(cols.common, event, instruction);
     populate_offset_flags<F>(
         cols.ls_bits_is_one, cols.ls_bits_is_two, cols.ls_bits_is_three, addr_ls_two_bits);
     cols.is_lwl = F::from_bool(event.opcode == Opcode::LWL);

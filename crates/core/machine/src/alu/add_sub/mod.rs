@@ -473,8 +473,24 @@ mod tests {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                         let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                        // A dependency event never reads the instruction; a
+                        // real one is fetched from the program by pc, exactly
+                        // as the Rust `event_to_row` does.
+                        let instruction: zkm_core_executor::InstructionFfi =
+                            if event.is_instruction != 0 {
+                                input.program.fetch(event.pc).into()
+                            } else {
+                                zkm_core_executor::Instruction::new(
+                                    Opcode::ADD, 0, 0, 0, true, true,
+                                ).into()
+                            };
                         unsafe {
-                            crate::sys::add_sub_event_to_row_koalabear(event, cols);
+                            crate::sys::add_sub_event_to_row_koalabear(
+                                event,
+                                cols,
+                                instruction,
+                                input.public_values.execution_shard,
+                            );
                         }
                         row
                     })
@@ -488,7 +504,20 @@ mod tests {
             rows.extend(row_batch);
         }
 
-        pad_rows_mult32(&mut rows, || [F::ZERO; NUM_ADD_SUB_COLS], None, "AddSub");
+        pad_rows_mult32(
+            &mut rows,
+            || {
+                // Mirror `generate_trace`'s padding: the frame's not-real rule
+                // requires the immediate flags high.
+                let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
+                let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
+                cols.frame.instruction.imm_b = F::ONE;
+                cols.frame.instruction.imm_c = F::ONE;
+                row
+            },
+            None,
+            "AddSub",
+        );
 
         // Convert the trace to a row major matrix.
         RowMajorMatrix::new(rows.into_iter().flatten().collect::<Vec<_>>(), NUM_ADD_SUB_COLS)

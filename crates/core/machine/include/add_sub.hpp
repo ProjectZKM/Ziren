@@ -1,5 +1,6 @@
 #pragma once
 
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 
@@ -21,14 +22,32 @@ populate(AddOperation<F>& op, const uint32_t a_u32, const uint32_t b_u32) {
     return expected;
 }
 
+// Mirrors `AddSubChip::event_to_row`.  `instruction` is only read when the
+// event is a REAL instruction (`is_instruction != 0`); a dependency row keeps
+// receiving on the Instruction bus and carries a neutralised frame.
 template<class F>
-__ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, AddSubCols<F>& cols) {
+__ZKM_HOSTDEV__ void event_to_row(
+    const AluEvent& event,
+    AddSubCols<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
 
+    const bool is_instruction = event.is_instruction != 0;
+    cols.is_instruction = F::from_bool(is_instruction);
+    if (is_instruction) {
+        frame::populate_from_alu<AluEvent, F>(cols.frame, event, instruction, shard);
+    } else {
+        frame::populate_dependency<F>(cols.frame);
+    }
+
     bool is_add = event.opcode == Opcode::ADD;
     cols.is_add = F::from_bool(is_add);
-    cols.is_sub = F::from_bool(!is_add);
+    cols.is_add_dep = F::from_bool(is_add && !is_instruction);
+    cols.is_sub_dep = F::from_bool(event.opcode == Opcode::SUB && !is_instruction);
+    cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
     auto operand_1 = is_add ? event.b : event.a;
     auto operand_2 = event.c;
@@ -37,4 +56,4 @@ __ZKM_HOSTDEV__ void event_to_row(const AluEvent& event, AddSubCols<F>& cols) {
     write_word_from_u32_v2<F>(cols.operand_1, operand_1);
     write_word_from_u32_v2<F>(cols.operand_2, operand_2);
 }
-}  // namespace zkm::add_sub
+}  // namespace zkm_core_machine_sys::add_sub

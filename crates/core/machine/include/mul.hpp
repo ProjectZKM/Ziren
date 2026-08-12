@@ -1,5 +1,6 @@
 #pragma once
 
+#include "frame.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
@@ -7,7 +8,21 @@
 
 namespace zkm_core_machine_sys::mul {
     template<class F>
-    __ZKM_HOSTDEV__ void event_to_row(const CompAluEvent& event, MulCols<F>& cols) {
+    __ZKM_HOSTDEV__ void event_to_row(
+    const CompAluEvent& event,
+    MulCols<F>& cols,
+    const InstructionFfi& instruction,
+    const uint32_t shard
+) {
+    const bool is_instruction = event.is_instruction != 0;
+    cols.is_instruction = F::from_bool(is_instruction);
+    cols.is_dep = F::from_bool(!is_instruction);
+    if (is_instruction) {
+        frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
+    } else {
+        frame::populate_dependency<F>(cols.frame);
+    }
+
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
 

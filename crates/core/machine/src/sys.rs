@@ -1,6 +1,6 @@
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::events::{
-    AluEvent, BranchEvent, CompAluEvent, CpuEventFfi, JumpEvent, MemoryBumpEvent,
+    AluEvent, BranchEvent, CompAluEvent, CpuEventFfi, JumpEvent, MemInstrEvent, MemoryBumpEvent,
     MemoryInitializeFinalizeEvent, MemoryLocalEvent, MiscEvent, MovCondEvent, SyscallEvent,
 };
 use zkm_core_executor::InstructionFfi;
@@ -10,7 +10,10 @@ use crate::{
     alu::{AddSubCols, LtCols, MulCols, ShiftLeftCols, ShiftRightCols},
     control_flow::{BranchColumns, JumpColumns},
     cpu::columns::CpuCols,
-    memory::{MemoryBumpCols, MemoryInitCols, SingleMemoryLocal},
+    memory::{
+        LoadNarrowColumns, LoadWordColumns, MemoryBumpCols, MemoryInitCols,
+        MemoryUnalignedColumns, SingleMemoryLocal, StoreNarrowColumns, StoreWordColumns,
+    },
     misc::columns::MiscInstrColumns,
     misc::mov_cond::MovCondCols,
     syscall::chip::SyscallCols,
@@ -25,7 +28,12 @@ extern "C-unwind" {
         instruction: InstructionFfi,
         cols: &mut CpuCols<KoalaBear>,
     );
-    pub fn add_sub_event_to_row_koalabear(event: &AluEvent, cols: &mut AddSubCols<KoalaBear>);
+    pub fn add_sub_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut AddSubCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
     pub fn memory_local_event_to_row_koalabear(
         event: &MemoryLocalEvent,
         cols: &mut SingleMemoryLocal<KoalaBear>,
@@ -47,26 +55,102 @@ extern "C-unwind" {
         event: &SyscallEvent,
         cols: &mut SyscallCols<KoalaBear>,
     );
-    pub fn lt_event_to_row_koalabear(event: &AluEvent, cols: &mut LtCols<KoalaBear>);
-    pub fn bitwise_event_to_row_koalabear(event: &AluEvent, cols: &mut BitwiseCols<KoalaBear>);
-    pub fn clo_clz_event_to_row_koalabear(event: &AluEvent, cols: &mut CloClzCols<KoalaBear>);
-    pub fn branch_event_to_row_koalabear(event: &BranchEvent, cols: &mut BranchColumns<KoalaBear>);
-    pub fn jump_event_to_row_koalabear(event: &JumpEvent, cols: &mut JumpColumns<KoalaBear>);
+    pub fn lt_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut LtCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn bitwise_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut BitwiseCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn clo_clz_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut CloClzCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn branch_event_to_row_koalabear(
+        event: &BranchEvent,
+        cols: &mut BranchColumns<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn jump_event_to_row_koalabear(
+        event: &JumpEvent,
+        cols: &mut JumpColumns<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
     pub fn misc_instrs_event_to_row_koalabear(
         event: &MiscEvent,
         cols: &mut MiscInstrColumns<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
     );
-    pub fn mov_cond_event_to_row_koalabear(event: &MovCondEvent, cols: &mut MovCondCols<KoalaBear>);
-    pub fn shift_left_event_to_row_koalabear(event: &AluEvent, cols: &mut ShiftLeftCols<KoalaBear>);
+    pub fn mov_cond_event_to_row_koalabear(
+        event: &MovCondEvent,
+        cols: &mut MovCondCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn shift_left_event_to_row_koalabear(
+        event: &AluEvent,
+        cols: &mut ShiftLeftCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
     pub fn shift_right_event_to_row_koalabear(
         event: &AluEvent,
         cols: &mut ShiftRightCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
     );
-    pub fn div_rem_event_to_row_koalabear(event: &CompAluEvent, cols: &mut DivRemCols<KoalaBear>);
-    pub fn mul_event_to_row_koalabear(event: &CompAluEvent, cols: &mut MulCols<KoalaBear>);
+    pub fn div_rem_event_to_row_koalabear(
+        event: &CompAluEvent,
+        cols: &mut DivRemCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn mul_event_to_row_koalabear(
+        event: &CompAluEvent,
+        cols: &mut MulCols<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
+    );
+    pub fn memory_load_narrow_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        cols: &mut LoadNarrowColumns<KoalaBear>,
+        instruction: InstructionFfi,
+    );
+    pub fn memory_load_word_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        cols: &mut LoadWordColumns<KoalaBear>,
+        instruction: InstructionFfi,
+    );
+    pub fn memory_store_narrow_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        cols: &mut StoreNarrowColumns<KoalaBear>,
+        instruction: InstructionFfi,
+    );
+    pub fn memory_store_word_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        cols: &mut StoreWordColumns<KoalaBear>,
+        instruction: InstructionFfi,
+    );
+    pub fn memory_unaligned_event_to_row_koalabear(
+        event: &MemInstrEvent,
+        cols: &mut MemoryUnalignedColumns<KoalaBear>,
+        instruction: InstructionFfi,
+    );
     pub fn syscall_instrs_event_to_row_koalabear(
         event: &SyscallEvent,
         cols: &mut SyscallInstrColumns<KoalaBear>,
+        instruction: InstructionFfi,
+        shard: u32,
     );
 
     pub fn test_mul();
@@ -85,5 +169,403 @@ mod tests {
         unsafe { test_inv() };
         unsafe { test_sqrt() };
         unsafe { test_curve_formula() };
+    }
+}
+
+#[cfg(test)]
+mod parity_tests {
+    //! FFI ⇔ Rust trace parity on REAL executed records.
+    //!
+    //! The per-chip fixtures (`alu::add_sub`, `alu::mul`) only exercise
+    //! dependency-shaped events; this suite executes real programs so every
+    //! instruction chip's C++ `event_to_row` is checked against the Rust one
+    //! on rows that carry a live instruction frame — the exact bytes the GPU
+    //! tracegen kernels must reproduce.
+
+    use std::borrow::BorrowMut;
+
+    use p3_koala_bear::KoalaBear;
+    use p3_matrix::dense::RowMajorMatrix;
+    use p3_matrix::Matrix;
+    use zkm_core_executor::{
+        ExecutionRecord, Executor, Instruction, InstructionFfi, Opcode, Program,
+    };
+    use zkm_pcs::{air::MachineAir, ZKMCoreOpts};
+
+    use crate::alu::{
+        AddSubChip, AddSubCols, BitwiseChip, BitwiseCols, CloClzChip, CloClzCols, DivRemChip,
+        DivRemCols, LtChip, LtCols, MulChip, MulCols, ShiftLeft, ShiftLeftCols, ShiftRightChip,
+        ShiftRightCols, NUM_ADD_SUB_COLS, NUM_BITWISE_COLS, NUM_CLOCLZ_COLS, NUM_DIVREM_COLS,
+        NUM_LT_COLS, NUM_MUL_COLS, NUM_SHIFT_LEFT_COLS, NUM_SHIFT_RIGHT_COLS,
+    };
+    use crate::control_flow::{
+        BranchChip, BranchColumns, JumpChip, JumpColumns, NUM_BRANCH_COLS, NUM_JUMP_COLS,
+    };
+    use crate::memory::{
+        LoadNarrowChip, LoadNarrowColumns, LoadWordChip, LoadWordColumns, MemoryUnalignedChip,
+        MemoryUnalignedColumns, StoreNarrowChip, StoreNarrowColumns, StoreWordChip,
+        StoreWordColumns, NUM_LOAD_NARROW_COLS, NUM_LOAD_WORD_COLS, NUM_MEMORY_UNALIGNED_COLS,
+        NUM_STORE_NARROW_COLS, NUM_STORE_WORD_COLS,
+    };
+    use crate::misc::mov_cond::{MovCondChip, MovCondCols, NUM_MOV_COND_COLS};
+    use crate::misc::others::columns::{MiscInstrColumns, NUM_MISC_INSTR_COLS};
+    use crate::misc::MiscInstrsChip;
+    use crate::programs::tests::fibonacci_program;
+    use crate::syscall::instructions::{
+        columns::{SyscallInstrColumns, NUM_SYSCALL_INSTR_COLS},
+        SyscallInstrsChip,
+    };
+
+    type F = KoalaBear;
+
+    /// The instruction passed for a dependency row — never read by the C++
+    /// side (`is_instruction == 0` skips the frame), any well-formed value do.
+    fn dummy_instruction() -> InstructionFfi {
+        Instruction::new(Opcode::ADD, 0, 0, 0, true, true).into()
+    }
+
+    /// Build the FFI-side trace: one C++ `event_to_row` call per event row,
+    /// the chip's pad shape beyond.
+    #[allow(clippy::too_many_arguments)]
+    fn build_ffi_trace<E>(
+        events: &[E],
+        num_cols: usize,
+        height: usize,
+        program: &Program,
+        shard: u32,
+        is_instruction: impl Fn(&E) -> bool,
+        pc_of: impl Fn(&E) -> u32,
+        fill: impl Fn(&E, &mut [F], InstructionFfi, u32),
+        pad: impl Fn(&mut [F]),
+    ) -> RowMajorMatrix<F> {
+        let mut values = vec![F::default(); height * num_cols];
+        for (i, row) in values.chunks_mut(num_cols).enumerate() {
+            if i < events.len() {
+                let event = &events[i];
+                let instruction = if is_instruction(event) {
+                    program.fetch(pc_of(event)).into()
+                } else {
+                    dummy_instruction()
+                };
+                fill(event, row, instruction, shard);
+            } else {
+                pad(row);
+            }
+        }
+        RowMajorMatrix::new(values, num_cols)
+    }
+
+    /// Panic with the first few differing cells, chip-relative.
+    fn assert_traces_eq(rust: &RowMajorMatrix<F>, ffi: &RowMajorMatrix<F>, what: &str) {
+        if rust == ffi {
+            return;
+        }
+        let w = rust.width();
+        let mut diffs = vec![];
+        for (i, (r, f)) in rust.values.iter().zip(ffi.values.iter()).enumerate() {
+            if r != f {
+                diffs.push((i / w, i % w, *r, *f));
+                if diffs.len() >= 12 {
+                    break;
+                }
+            }
+        }
+        panic!("{what}: FFI trace diverges from Rust; first diffs (row, col, rust, ffi): {diffs:?}");
+    }
+
+    /// Run every instruction chip of `record` through both sides and compare.
+    fn check_record(record: &ExecutionRecord, label: &str) {
+        let program = &record.program;
+        let shard = record.public_values.execution_shard;
+
+        macro_rules! check {
+            ($chip:expr, $events:expr, $ColsTy:ty, $num_cols:expr, $ffi:ident, $pad:expr) => {{
+                let chip = $chip;
+                let rust: RowMajorMatrix<F> =
+                    chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+                let ffi = build_ffi_trace(
+                    $events,
+                    $num_cols,
+                    rust.height(),
+                    program,
+                    shard,
+                    |e| e.is_instruction != 0,
+                    |e| e.pc,
+                    |e, row, instr, sh| {
+                        let cols: &mut $ColsTy = row.borrow_mut();
+                        unsafe {
+                            crate::sys::$ffi(e, cols, instr, sh);
+                        }
+                    },
+                    $pad,
+                );
+                assert_traces_eq(
+                    &rust,
+                    &ffi,
+                    &format!("{label}: {}", MachineAir::<F>::name(&chip)),
+                );
+            }};
+        }
+
+        // The universal pad: zero row + neutralised frame.
+        macro_rules! dep_pad {
+            ($ColsTy:ty) => {
+                |row: &mut [F]| {
+                    let cols: &mut $ColsTy = row.borrow_mut();
+                    cols.frame.populate_dependency();
+                }
+            };
+        }
+
+        check!(
+            AddSubChip::default(),
+            &record.add_sub_events,
+            AddSubCols<F>,
+            NUM_ADD_SUB_COLS,
+            add_sub_event_to_row_koalabear,
+            dep_pad!(AddSubCols<F>)
+        );
+        check!(
+            BitwiseChip::default(),
+            &record.bitwise_events,
+            BitwiseCols<F>,
+            NUM_BITWISE_COLS,
+            bitwise_event_to_row_koalabear,
+            dep_pad!(BitwiseCols<F>)
+        );
+        check!(
+            LtChip::default(),
+            &record.lt_events,
+            LtCols<F>,
+            NUM_LT_COLS,
+            lt_event_to_row_koalabear,
+            dep_pad!(LtCols<F>)
+        );
+        check!(
+            CloClzChip::default(),
+            &record.cloclz_events,
+            CloClzCols<F>,
+            NUM_CLOCLZ_COLS,
+            clo_clz_event_to_row_koalabear,
+            |row: &mut [F]| {
+                let cols: &mut CloClzCols<F> = row.borrow_mut();
+                // Mirrors clo_clz's padded_row_template.
+                cols.a = zkm_pcs::Word::from(32);
+                cols.is_bb_zero = p3_field::PrimeCharacteristicRing::ONE;
+                cols.frame.populate_dependency();
+            }
+        );
+        check!(
+            ShiftLeft::default(),
+            &record.shift_left_events,
+            ShiftLeftCols<F>,
+            NUM_SHIFT_LEFT_COLS,
+            shift_left_event_to_row_koalabear,
+            |row: &mut [F]| {
+                let cols: &mut ShiftLeftCols<F> = row.borrow_mut();
+                // Mirrors shift_left's padded_row_template.
+                use p3_field::PrimeCharacteristicRing;
+                cols.shift_by_n_bits[0] = F::ONE;
+                cols.shift_by_n_bytes[0] = F::ONE;
+                cols.bit_shift_multiplier = F::ONE;
+                cols.frame.populate_dependency();
+            }
+        );
+        check!(
+            ShiftRightChip::default(),
+            &record.shift_right_events,
+            ShiftRightCols<F>,
+            NUM_SHIFT_RIGHT_COLS,
+            shift_right_event_to_row_koalabear,
+            |row: &mut [F]| {
+                let cols: &mut ShiftRightCols<F> = row.borrow_mut();
+                // Mirrors shift_right's padding branch.
+                use p3_field::PrimeCharacteristicRing;
+                cols.shift_by_n_bits[0] = F::ONE;
+                cols.shift_by_n_bytes[0] = F::ONE;
+                cols.frame.populate_dependency();
+            }
+        );
+        check!(
+            MulChip::default(),
+            &record.mul_events,
+            MulCols<F>,
+            NUM_MUL_COLS,
+            mul_event_to_row_koalabear,
+            dep_pad!(MulCols<F>)
+        );
+        check!(
+            DivRemChip::default(),
+            &record.divrem_events,
+            DivRemCols<F>,
+            NUM_DIVREM_COLS,
+            div_rem_event_to_row_koalabear,
+            dep_pad!(DivRemCols<F>)
+        );
+        check!(
+            BranchChip::default(),
+            &record.branch_events,
+            BranchColumns<F>,
+            NUM_BRANCH_COLS,
+            branch_event_to_row_koalabear,
+            dep_pad!(BranchColumns<F>)
+        );
+        check!(
+            JumpChip::default(),
+            &record.jump_events,
+            JumpColumns<F>,
+            NUM_JUMP_COLS,
+            jump_event_to_row_koalabear,
+            dep_pad!(JumpColumns<F>)
+        );
+        check!(
+            MovCondChip::default(),
+            &record.movcond_events,
+            MovCondCols<F>,
+            NUM_MOV_COND_COLS,
+            mov_cond_event_to_row_koalabear,
+            dep_pad!(MovCondCols<F>)
+        );
+        check!(
+            MiscInstrsChip::default(),
+            &record.misc_events,
+            MiscInstrColumns<F>,
+            NUM_MISC_INSTR_COLS,
+            misc_instrs_event_to_row_koalabear,
+            dep_pad!(MiscInstrColumns<F>)
+        );
+        check!(
+            SyscallInstrsChip::default(),
+            &record.syscall_events,
+            SyscallInstrColumns<F>,
+            NUM_SYSCALL_INSTR_COLS,
+            syscall_instrs_event_to_row_koalabear,
+            dep_pad!(SyscallInstrColumns<F>)
+        );
+
+        // The five memory chips: the FFI takes no shard (the event carries it).
+        macro_rules! check_mem {
+            ($chip:expr, $events:expr, $ColsTy:ty, $num_cols:expr, $ffi:ident) => {{
+                let chip = $chip;
+                let rust: RowMajorMatrix<F> =
+                    chip.generate_trace(record, &mut ExecutionRecord::default()).unwrap();
+                let ffi = build_ffi_trace(
+                    $events,
+                    $num_cols,
+                    rust.height(),
+                    program,
+                    shard,
+                    |e| e.is_instruction != 0,
+                    |e| e.pc,
+                    |e, row, instr, _sh| {
+                        let cols: &mut $ColsTy = row.borrow_mut();
+                        unsafe {
+                            crate::sys::$ffi(e, cols, instr);
+                        }
+                    },
+                    |row: &mut [F]| {
+                        let cols: &mut $ColsTy = row.borrow_mut();
+                        cols.common.frame.populate_dependency();
+                    },
+                );
+                assert_traces_eq(
+                    &rust,
+                    &ffi,
+                    &format!("{label}: {}", MachineAir::<F>::name(&chip)),
+                );
+            }};
+        }
+
+        check_mem!(
+            LoadNarrowChip::default(),
+            &record.memory_load_narrow_events,
+            LoadNarrowColumns<F>,
+            NUM_LOAD_NARROW_COLS,
+            memory_load_narrow_event_to_row_koalabear
+        );
+        check_mem!(
+            LoadWordChip::default(),
+            &record.memory_load_word_events,
+            LoadWordColumns<F>,
+            NUM_LOAD_WORD_COLS,
+            memory_load_word_event_to_row_koalabear
+        );
+        check_mem!(
+            StoreNarrowChip::default(),
+            &record.memory_store_narrow_events,
+            StoreNarrowColumns<F>,
+            NUM_STORE_NARROW_COLS,
+            memory_store_narrow_event_to_row_koalabear
+        );
+        check_mem!(
+            StoreWordChip::default(),
+            &record.memory_store_word_events,
+            StoreWordColumns<F>,
+            NUM_STORE_WORD_COLS,
+            memory_store_word_event_to_row_koalabear
+        );
+        check_mem!(
+            MemoryUnalignedChip::default(),
+            &record.memory_unaligned_events,
+            MemoryUnalignedColumns<F>,
+            NUM_MEMORY_UNALIGNED_COLS,
+            memory_unaligned_event_to_row_koalabear
+        );
+    }
+
+    fn run_and_check(program: Program, label: &str) {
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        for (i, record) in runtime.records.iter().enumerate() {
+            // Coverage note: a chip with zero events still validates its
+            // padding shape, but not the live instruction frame.
+            eprintln!(
+                "{label}[shard {i}] events: add_sub={} bitwise={} lt={} cloclz={} sll={} sr={} \
+                 mul={} divrem={} branch={} jump={} movcond={} misc={} syscall={} \
+                 mem(ln={} lw={} sn={} sw={} un={})",
+                record.add_sub_events.len(),
+                record.bitwise_events.len(),
+                record.lt_events.len(),
+                record.cloclz_events.len(),
+                record.shift_left_events.len(),
+                record.shift_right_events.len(),
+                record.mul_events.len(),
+                record.divrem_events.len(),
+                record.branch_events.len(),
+                record.jump_events.len(),
+                record.movcond_events.len(),
+                record.misc_events.len(),
+                record.syscall_events.len(),
+                record.memory_load_narrow_events.len(),
+                record.memory_load_word_events.len(),
+                record.memory_store_narrow_events.len(),
+                record.memory_store_word_events.len(),
+                record.memory_unaligned_events.len(),
+            );
+            check_record(record, &format!("{label}[shard {i}]"));
+        }
+    }
+
+    #[test]
+    fn test_all_instruction_chips_ffi_eq_rust_fibonacci() {
+        run_and_check(fibonacci_program(), "fibonacci");
+    }
+
+    #[test]
+    fn test_all_instruction_chips_ffi_eq_rust_u256_mul() {
+        // The long-multiplication guest exercises the Misc chip
+        // (MADDU/MSUBU) that fibonacci and keccak never touch.
+        run_and_check(
+            Program::from(test_artifacts::U256XU2048_MUL_ELF).unwrap(),
+            "u256x2048-mul",
+        );
+    }
+
+    #[test]
+    fn test_all_instruction_chips_ffi_eq_rust_keccak() {
+        run_and_check(
+            Program::from(test_artifacts::KECCAK_SPONGE_ELF).unwrap(),
+            "keccak-sponge",
+        );
     }
 }
