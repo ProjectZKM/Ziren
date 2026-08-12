@@ -6427,3 +6427,27 @@ inlining is the remaining delta to SP1's core architecture, and it removes
 BOTH the dep rows' area (the whole −17 % above and then some) and a bus.
 The memory-instruction split already did this once: inlining the address add
 removed one 19-cell AddSub dep row per memory instruction.
+
+### Addendum: the dependency rows were also invisible to the shard splitter
+
+ed25519 (test artifact) failed core verify with `AreaOutOfBounds` (committed
+area ≥ 2^30) on the frame tree while its pre-frame baseline passes.  Two
+stacked causes:
+
+1. `ShardSplitAccumulator::add_opcode` / `estimate_mips_event_counts` only
+   modelled DivRem's Mul/Lt request rows.  Branch (2 SLT + 1 ADD), JumpDirect,
+   CLZ/CLO, the MADD family, EXT/INS — all invisible.  Pre-frame the slack
+   absorbed it; at +52 cols per row it is a real hole.  Fixed with worst-case
+   per-opcode bumps, consistency-tested between both functions.
+2. The remaining violation comes from the SHAPE-FITTED path only
+   (`run_test_io` → `CoreShapeConfig`): the pow2 height bands in
+   `maximal_shapes.json` were generated for PRE-frame widths, and
+   band-padding × the new widths crosses 2^30 (measured geometry: AddSub
+   2^21×72 alone is 151M).  The production prove path commits UNFITTED
+   (shape=None, multiple-of-32 heights) and is unaffected — shape/vk artifact
+   regeneration is its own workstream.
+
+Cost of the sound splitter on reth core (single verified solo run):
+353 shards / 2056 kHz, vs 314 / 2452 unmodelled, vs 281 / 2954 pre-frame.
+All of this is the same story: dependency rows are pure overhead the SP1
+architecture does not have, and inlining them is the recovery path.
