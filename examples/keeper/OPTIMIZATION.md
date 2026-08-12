@@ -6135,3 +6135,46 @@ NEXT in the same file: `bn_divmod` is still bit-serial and is now the dominant
 term in every remaining field op (~11 per weierstrass row).
 
 Switches: none. The inverse is unconditional.
+
+## Aug 12 — CORRECTION: a per-GPU-slot bias inflated every paired number above
+
+An A/A control (identical binary, both slots, same session) measured:
+
+| pair | GPU 6 | GPU 7 | GPU 7 advantage |
+|---|---|---|---|
+| a1 | 2004 kHz | 2019 kHz | +0.75 % |
+| a2 | 1834 kHz | 1877 kHz | +2.34 % |
+
+**GPU 7 is ~1.55 % faster than GPU 6 on the same binary** — the same size as most
+levers worth measuring here.
+
+Every paired A/B in the two Aug 12 entries above pinned the baseline to GPU 6 and
+the treatment to GPU 7, so GPU identity was perfectly correlated with arm role and
+each treatment collected that bias for free. Dividing it out:
+
+| change | measured | corrected |
+|---|---|---|
+| record/trace channel 1 -> 8 | +7.2 % | **~+5.6 %** |
+| weierstrass `bn_modinv` | +2.6 % | **~+1.0 %** |
+
+Both remain real, positive and byte-identical (`7a2135bb7205ca8d` on every arm),
+so both stay; only the quoted magnitudes were wrong. The channel entry's
+*mechanism* evidence is unaffected, because that was a span delta
+(`dispatch_recv_records` 14.90 s -> nil with `open_s4_jagged_pcs` and
+`dispatch_recv_commit_wait` flat as controls), not a kHz ratio.
+
+**Also retracted:** the "solo 2306 kHz vs the Aug 11 solo mean of 2108 = +9.4 %"
+cross-check quoted with those entries. That anchors on a historical cross-session
+mean, which the Aug 6 canonical-perf entry explicitly forbids ("anchor claims on
+a WITHIN-SESSION A/B, never a historical mean"). It should not have been used.
+
+**What caught it:** not the kHz. The fold-sync experiment below was 3/3 positive
+on kHz yet its *span* delta for the one phase it changed was inconsistent
+(-1.8 s / +1.0 s). Three runs of a biased design is still biased — the 3-run rule
+does not rescue it. This file already prescribed the fix ("3 paired ABBA rounds
+with the arms swapped between GPU slots"; "use ABBA blocks or swapped pairs");
+it simply was not followed.
+
+**Standing rule going forward:** swap the arms between GPU slots each round
+(ABBA), or subtract a measured A/A bias — and always cross-check a lever against
+the span it is supposed to move.
