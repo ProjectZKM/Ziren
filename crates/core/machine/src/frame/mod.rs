@@ -18,6 +18,7 @@
 //! both exist the area is WORSE (both rows are present), so the win only lands
 //! when the last chip migrates and `Cpu` is dropped from `MipsAir`.
 
+use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::events::MemoryAccessPosition;
 use zkm_derive::AlignedBorrow;
@@ -96,6 +97,20 @@ pub fn eval_instruction_frame<AB>(
     AB: ZKMCoreAirBuilder,
 {
     let clk = AB::Expr::from_u32(1u32 << 16) * frame.clk_8bit_limb + frame.clk_16bit_limb;
+
+    // ★ On a NON-instruction row every frame column is zero, which would leave
+    // the op_b / op_c register-access multiplicities below (`ONE - imm_b`)
+    // equal to ONE — the chip would RECEIVE register accesses nobody sent and
+    // the LogUp multiset would break with "public-values balance failed".
+    //
+    // Force the immediate flags high there instead of multiplying the
+    // multiplicities by `is_real`: that keeps them degree 1, where
+    // `is_real * (ONE - imm_b)` would be degree 2 and risks "degree multiple is
+    // too high".  This is exactly the trick `CpuChip::eval` already uses for its
+    // padding rows.
+    let not_real = AB::Expr::ONE - is_real.clone();
+    builder.when(not_real.clone()).assert_zero(AB::Expr::ONE - frame.instruction.imm_b);
+    builder.when(not_real).assert_zero(AB::Expr::ONE - frame.instruction.imm_c);
 
     // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc, frame.instruction, is_real.clone());

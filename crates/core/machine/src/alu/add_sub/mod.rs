@@ -5,7 +5,7 @@ use core::{
 
 use hashbrown::HashMap;
 use itertools::Itertools;
-use p3_air::{WindowAccess, Air, BaseAir};
+use p3_air::{WindowAccess, Air, AirBuilder, BaseAir};
 use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
@@ -20,6 +20,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    frame::{eval_instruction_frame, InstructionFrameCols},
     operations::AddOperation,
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -62,6 +63,28 @@ pub struct AddSubCols<T> {
     /// Flag indicating whether the opcode is `SUB`.
     #[picus(selector)]
     pub is_sub: T,
+
+    /// Whether this row is a REAL instruction, rather than one of the synthetic
+    /// dependency rows `dependencies.rs` pushes at `pc: UNUSED_PC` so DivRem and
+    /// friends can outsource sub-computations.  An instruction row owns its
+    /// frame; a dependency row has no instruction at its pc, no clk and no
+    /// registers, so it keeps receiving on the `Instruction` bus from whichever
+    /// chip requested the arithmetic and every frame constraint is gated off.
+    #[picus(selector)]
+    pub is_instruction: T,
+
+    /// `is_add` / `is_sub` restricted to DEPENDENCY rows.  Their own columns so
+    /// the bus multiplicity stays degree 1 — writing
+    /// `is_add * (1 - is_instruction)` inline trips "degree multiple is too
+    /// high".
+    #[picus(selector)]
+    pub is_add_dep: T,
+    #[picus(selector)]
+    pub is_sub_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: InstructionFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for AddSubChip {
@@ -108,6 +131,13 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.add_sub_events[idx];
                         self.event_to_row(event, cols, &mut byte_lookup_events);
+                    } else {
+                        // PADDING row.  The frame's not-real rule requires the
+                        // immediate flags high, otherwise `ONE - imm_b` leaves
+                        // the op_b / op_c register-access multiplicities at ONE
+                        // on an all-zero row and the LogUp multiset breaks.
+                        cols.frame.instruction.imm_b = F::ONE;
+                        cols.frame.instruction.imm_c = F::ONE;
                     }
                 });
             },
@@ -165,6 +195,14 @@ impl AddSubChip {
         cols.next_pc = F::from_u32(event.next_pc);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
+        // `is_instruction` stays 0 for now: the frame is wired but not yet the
+        // authority, so `CpuChip` still dispatches every ADD/SUB.  The frame's
+        // not-real rule requires the immediate flags high so the op_b / op_c
+        // register-access multiplicities (`ONE - imm_b`) vanish.
+        cols.frame.instruction.imm_b = F::ONE;
+        cols.frame.instruction.imm_c = F::ONE;
+        cols.is_add_dep = F::from_bool(event.opcode == Opcode::ADD);
+        cols.is_sub_dep = F::from_bool(event.opcode == Opcode::SUB);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
         let is_add = event.opcode == Opcode::ADD;
@@ -218,7 +256,7 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
-            local.is_add,
+            local.is_add_dep,
         );
 
         // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
@@ -239,13 +277,33 @@ where
             AB::Expr::ZERO,
             AB::Expr::ZERO,
             AB::Expr::ONE,
-            local.is_sub,
+            local.is_sub_dep,
         );
 
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
-        builder.assert_bool(is_real);
+        builder.assert_bool(is_real.clone());
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_add_dep);
+        builder.assert_bool(local.is_sub_dep);
+        // Only a real row can be an instruction row.
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
+        // Tie the dependency selectors to their opcode flag and `is_instruction`.
+        builder.assert_zero(local.is_add_dep - (local.is_add - local.is_add * local.is_instruction));
+        builder.assert_zero(local.is_sub_dep - (local.is_sub - local.is_sub * local.is_instruction));
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  ADD/SUB are sequential, so `next_next_pc` is
+        // `next_pc + 4` — the value this chip already puts on the bus.
+        eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc,
+            local.next_pc,
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
     }
 }
 
