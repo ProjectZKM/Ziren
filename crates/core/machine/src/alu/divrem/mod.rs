@@ -84,6 +84,7 @@ use zkm_pcs::{
 
 use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
+    frame::{eval_instruction_frame, InstructionFrameCols},
     memory::MemoryCols,
     operations::{IsEqualWordOperation, IsZeroWordOperation},
     utils::{next_multiple_of_32, pad_rows_mult32},
@@ -155,6 +156,19 @@ pub struct DivRemCols<T> {
     /// Flag to indicate whether the opcode is MODU.
     #[picus(selector)]
     pub is_modu: T,
+
+    /// Whether this row is a REAL instruction (all divrem events are today —
+    /// no chip outsources to DivRem — but the gate keeps the invariant local).
+    pub is_instruction: T,
+
+    /// Dependency-row multiplicities for the two Instruction-bus receives,
+    /// materialised so they stay degree 1.
+    pub is_dd_dep: T,
+    pub is_mm_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: InstructionFrameCols<T>,
 
     /// Flag to indicate whether the division operation overflows.
     ///
@@ -255,6 +269,23 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_modu = F::from_bool(event.opcode == Opcode::MODU);
                 cols.is_mod = F::from_bool(event.opcode == Opcode::MOD);
                 cols.is_c_0.populate(event.c);
+
+                let is_instruction = event.is_instruction != 0;
+                cols.is_instruction = F::from_bool(is_instruction);
+                let is_dd =
+                    event.opcode == Opcode::DIV || event.opcode == Opcode::DIVU;
+                cols.is_dd_dep = F::from_bool(is_dd && !is_instruction);
+                cols.is_mm_dep = F::from_bool(!is_dd && !is_instruction);
+                if is_instruction {
+                    cols.frame.populate_from_comp_alu(
+                        event,
+                        &input.program,
+                        input.public_values.execution_shard,
+                        output,
+                    );
+                } else {
+                    cols.frame.populate_dependency();
+                }
 
                 if event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV {
                     // DivRem Chip is only used for DIV and DIVU instruction currently.
@@ -364,7 +395,14 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
         // Pad the trace to a power of two depending on the proof shape in `input`.
         pad_rows_mult32(
             &mut rows,
-            || [F::ZERO; NUM_DIVREM_COLS],
+            || {
+                let mut row = [F::ZERO; NUM_DIVREM_COLS];
+                let cols: &mut DivRemCols<F> = row.as_mut_slice().borrow_mut();
+                // Padding rows carry no instruction: neutralise the frame or
+                // its register-access multiplicities break the Memory bus.
+                cols.frame.populate_dependency();
+                row
+            },
             input.fixed_log2_rows::<F, _>(self),
             <DivRemChip as MachineAir<F>>::name(self).as_str(),
         );
@@ -732,7 +770,8 @@ where
                 AB::Expr::ONE,
                 AB::Expr::ZERO,
                 AB::Expr::ONE,
-                local.is_div + local.is_divu,
+                // Dependency rows only: an instruction row serves itself.
+                local.is_dd_dep,
             );
 
             builder.receive_instruction(
@@ -752,7 +791,46 @@ where
                 AB::Expr::ZERO,
                 AB::Expr::ZERO,
                 AB::Expr::ONE,
-                local.is_mod + local.is_modu,
+                // Dependency rows only: an instruction row serves itself.
+                local.is_mm_dep,
+            );
+
+            builder.assert_bool(local.is_instruction);
+            builder.assert_bool(local.is_dd_dep);
+            builder.assert_bool(local.is_mm_dep);
+            let dd = local.is_div + local.is_divu;
+            let mm = local.is_mod + local.is_modu;
+            builder
+                .when(local.is_instruction)
+                .assert_zero(AB::Expr::ONE - (dd.clone() + mm.clone()));
+            builder.assert_zero(
+                local.is_dd_dep - (dd.clone() - dd.clone() * local.is_instruction),
+            );
+            builder.assert_zero(
+                local.is_mm_dep - (mm.clone() - mm * local.is_instruction),
+            );
+
+            // A real instruction carries its own program fetch, register access
+            // and `(clk, pc)` chaining.  DIV/MOD are sequential, never halt.
+            eval_instruction_frame(
+                builder,
+                &local.frame,
+                local.pc,
+                local.next_pc,
+                local.next_pc + AB::Expr::from_u32(4),
+                local.is_instruction.into(),
+            );
+            builder
+                .when(local.is_instruction)
+                .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
+            // shard/clk are populated only on DIV/DIVU rows (they write HI —
+            // same coupling as Mul): tie them to the frame exactly there.
+            let dd_and_instr = dd * local.is_instruction;
+            builder.when(dd_and_instr.clone()).assert_eq(local.shard, local.frame.shard);
+            builder.when(dd_and_instr).assert_eq(
+                local.clk,
+                AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
+                    + local.frame.clk_16bit_limb,
             );
 
             // Write the HI register, the register can only be Register::HI（33）.
