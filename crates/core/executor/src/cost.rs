@@ -199,12 +199,34 @@ pub fn estimate_mips_event_counts(
     // Compute the number of events in the global chip.
     events_counts[MipsAirId::Global] = 2 * touched_addresses + syscalls_sent;
 
-    // Adjust for divrem dependencies.
+    // DEPENDENCY rows (executor/src/dependencies.rs), worst case per opcode —
+    // this MUST mirror `ShardSplitAccumulator::add_opcode`.  Before the frame
+    // refactor most of these rows were narrow enough to ignore; each now
+    // carries the 52-column frame, and an unmodelled row is a real hole in
+    // the 2^30 committed-area budget (ed25519 measured over the bound).
+    //
+    // emit_divrem_dependencies: 2 ADD + 1 MULT/MULTU + 1 SLTU.
+    events_counts[MipsAirId::AddSub] += 2 * events_counts[MipsAirId::DivRem];
     events_counts[MipsAirId::Mul] += events_counts[MipsAirId::DivRem];
     events_counts[MipsAirId::Lt] += events_counts[MipsAirId::DivRem];
-
-    // Note: we ignore the additional dependencies for addsub, since they are accounted for in
-    // the maximal shapes.
+    // emit_branch_dependencies: 2 SLT always, 1 ADD when branching.
+    events_counts[MipsAirId::Lt] += 2 * events_counts[MipsAirId::Branch];
+    events_counts[MipsAirId::AddSub] += events_counts[MipsAirId::Branch];
+    // emit_jump_dependencies: JumpDirect pushes 1 ADD.
+    events_counts[MipsAirId::AddSub] += opcode_counts[Opcode::JumpDirect];
+    // emit_cloclz_dependencies: 1 SRL.
+    events_counts[MipsAirId::ShiftRight] += events_counts[MipsAirId::CloClz];
+    // emit_misc_dependencies: MADDU/MSUBU/MADD/MSUB -> 1 MULT[U];
+    // EXT -> 1 SLL + 1 SRL; INS -> 4 SR + 1 SLL + 1 ADD.
+    events_counts[MipsAirId::Mul] += opcode_counts[Opcode::MADDU]
+        + opcode_counts[Opcode::MSUBU]
+        + opcode_counts[Opcode::MADD]
+        + opcode_counts[Opcode::MSUB];
+    events_counts[MipsAirId::ShiftLeft] +=
+        opcode_counts[Opcode::EXT] + opcode_counts[Opcode::INS];
+    events_counts[MipsAirId::ShiftRight] +=
+        opcode_counts[Opcode::EXT] + 4 * opcode_counts[Opcode::INS];
+    events_counts[MipsAirId::AddSub] += opcode_counts[Opcode::INS];
 
     events_counts
 }
@@ -355,9 +377,47 @@ impl ShardSplitAccumulator {
             return;
         };
         self.bump(air, count);
-        if air == MipsAirId::DivRem {
-            self.bump(MipsAirId::Mul, count);
-            self.bump(MipsAirId::Lt, count);
+        // DEPENDENCY rows (executor/src/dependencies.rs): the Instruction-bus
+        // request rows an instruction pushes into OTHER chips.  Modelled at
+        // worst case per opcode — before the frame refactor these rows were
+        // narrow enough that ignoring most of them stayed under the verifier's
+        // 2^30 committed-area bound; each now carries the 52-column frame and
+        // an unmodelled row is a real hole (ed25519 measured OVER the bound).
+        use Opcode as Op;
+        match opcode {
+            // emit_divrem_dependencies: 2 ADD + 1 MULT/MULTU + 1 SLTU.
+            Op::DIV | Op::DIVU | Op::MOD | Op::MODU => {
+                self.bump(MipsAirId::AddSub, 2 * count);
+                self.bump(MipsAirId::Mul, count);
+                self.bump(MipsAirId::Lt, count);
+            }
+            // emit_branch_dependencies: 2 SLT always, 1 ADD when branching.
+            Op::BEQ | Op::BNE | Op::BLTZ | Op::BLEZ | Op::BGTZ | Op::BGEZ => {
+                self.bump(MipsAirId::Lt, 2 * count);
+                self.bump(MipsAirId::AddSub, count);
+            }
+            // emit_jump_dependencies: JumpDirect pushes 1 ADD.
+            Op::JumpDirect => {
+                self.bump(MipsAirId::AddSub, count);
+            }
+            // emit_cloclz_dependencies: 1 SRL.
+            Op::CLZ | Op::CLO => {
+                self.bump(MipsAirId::ShiftRight, count);
+            }
+            // emit_misc_dependencies.
+            Op::MADDU | Op::MSUBU | Op::MADD | Op::MSUB => {
+                self.bump(MipsAirId::Mul, count);
+            }
+            Op::EXT => {
+                self.bump(MipsAirId::ShiftLeft, count);
+                self.bump(MipsAirId::ShiftRight, count);
+            }
+            Op::INS => {
+                self.bump(MipsAirId::ShiftRight, 4 * count);
+                self.bump(MipsAirId::ShiftLeft, count);
+                self.bump(MipsAirId::AddSub, count);
+            }
+            _ => {}
         }
     }
 
