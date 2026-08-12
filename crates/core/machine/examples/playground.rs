@@ -28,6 +28,7 @@
 
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{Executor, Program};
+use zkm_pcs::air::MachineAir;
 use zkm_core_machine::{
     mips::MipsAir,
     utils::{run_test, setup_logger},
@@ -146,6 +147,41 @@ fn main() {
             run_test::<CpuProver<_, _>>(program).expect("prove + verify failed");
             eprintln!("prove + verify OK");
         }
-        other => panic!("unknown command {other:?}; expected execute | buses | prove"),
+        "widths" => {
+            // Per-chip main-trace WIDTH census.  "Where does the trace area go"
+            // is the recurring question behind every density comparison against
+            // SP1, and answering it otherwise means re-deriving column counts by
+            // hand from the `*Cols` struct definitions.  Width is static, so this
+            // needs no execution; multiply by the per-chip row count for area.
+            let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =
+                MipsAir::machine(KoalaBearPoseidon2::new());
+            let mut rows: Vec<(String, usize, usize)> = machine
+                .chips()
+                .iter()
+                .map(|c| {
+                    (
+                        MachineAir::<KoalaBear>::name(c),
+                        p3_air::BaseAir::<KoalaBear>::width(c).max(1),
+                        MachineAir::<KoalaBear>::preprocessed_width(c),
+                    )
+                })
+                .collect();
+            rows.sort_by(|a, b| b.1.cmp(&a.1));
+            let total: usize = rows.iter().map(|r| r.1).sum();
+            eprintln!("{:<28} {:>7} {:>7}  {:>6}", "chip", "main_w", "prep_w", "%main");
+            for (name, w, pw) in &rows {
+                eprintln!(
+                    "{:<28} {:>7} {:>7}  {:>5.1}%",
+                    name,
+                    w,
+                    pw,
+                    100.0 * *w as f64 / total as f64
+                );
+            }
+            eprintln!("{:<28} {:>7}", "TOTAL main width", total);
+        }
+        other => {
+            panic!("unknown command {other:?}; expected execute | buses | prove | widths")
+        }
     }
 }
