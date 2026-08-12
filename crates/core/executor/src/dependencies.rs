@@ -29,6 +29,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             a: 0,
             b: event.c,
             c: (event.c as i32).unsigned_abs(),
+            ..Default::default()
         });
     }
     if rem_neg == 1 {
@@ -40,6 +41,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             a: 0,
             b: remainder,
             c: (remainder as i32).unsigned_abs(),
+            ..Default::default()
         });
     }
 
@@ -83,6 +85,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             a: 1,
             b: (remainder as i32).unsigned_abs(),
             c: u32::max(1, (event.c as i32).unsigned_abs()),
+            ..Default::default()
         }
     } else {
         AluEvent {
@@ -93,6 +96,7 @@ pub fn emit_divrem_dependencies(executor: &mut Executor, event: AluEvent) {
             a: 1,
             b: remainder,
             c: u32::max(1, event.c),
+            ..Default::default()
         }
     };
 
@@ -114,6 +118,7 @@ pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
             a: b >> (31 - event.a),
             b,
             c: 31 - event.a,
+            ..Default::default()
         };
 
         executor.record.shift_right_events.push(srl_event);
@@ -134,7 +139,8 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
         a: a_lt_b as u32,
         b: event.a,
         c: event.b,
-    };
+            ..Default::default()
+        };
     let gt_comp_event = AluEvent {
         pc: UNUSED_PC,
         next_pc: UNUSED_PC + DEFAULT_PC_INC,
@@ -143,7 +149,8 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
         a: a_gt_b as u32,
         b: event.b,
         c: event.a,
-    };
+            ..Default::default()
+        };
     executor.record.lt_events.push(lt_comp_event);
     executor.record.lt_events.push(gt_comp_event);
     let branching = match event.opcode {
@@ -164,6 +171,7 @@ pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
             a: event.next_next_pc,
             b: event.next_pc,
             c: event.c,
+            ..Default::default()
         };
         executor.record.add_sub_events.push(add_event);
     }
@@ -182,7 +190,8 @@ pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
                 a: target_pc,
                 b: event.next_pc,
                 c: event.b,
-            };
+            ..Default::default()
+        };
             executor.record.add_sub_events.push(add_event);
         }
         Opcode::Jump | Opcode::Jumpi => {}
@@ -246,6 +255,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: sll_val,
             b: event.b,
             c: 31 - lsb - msbd,
+            ..Default::default()
         };
         executor.record.shift_left_events.push(sll_event);
         let srl_event = AluEvent {
@@ -256,6 +266,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: event.a,
             b: sll_val,
             c: 31 - msbd,
+            ..Default::default()
         };
         assert_eq!(event.a, sll_val >> (31 - msbd));
         executor.record.shift_right_events.push(srl_event);
@@ -271,6 +282,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: ror_val,
             b: event.prev_a,
             c: lsb,
+            ..Default::default()
         };
         executor.record.shift_right_events.push(ror_event);
 
@@ -283,6 +295,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: srl1_val,
             b: ror_val,
             c: 1,
+            ..Default::default()
         };
         executor.record.shift_right_events.push(srl1_event);
 
@@ -295,6 +308,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: srl_val,
             b: srl1_val,
             c: msb - lsb,
+            ..Default::default()
         };
         executor.record.shift_right_events.push(srl_event);
 
@@ -307,6 +321,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: sll_val,
             b: event.b,
             c: 31 - msb + lsb,
+            ..Default::default()
         };
         executor.record.shift_left_events.push(sll_event);
 
@@ -319,6 +334,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: extra_shift,
             b: srl_val,
             c: sll_val,
+            ..Default::default()
         };
         executor.record.add_sub_events.push(add_event);
 
@@ -330,6 +346,7 @@ pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {
             a: event.a,
             b: extra_shift,
             c: 31 - msb,
+            ..Default::default()
         };
         assert_eq!(event.a, extra_shift.rotate_right(31 - msb));
         executor.record.shift_right_events.push(ror_event2);

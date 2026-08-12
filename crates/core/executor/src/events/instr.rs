@@ -1,5 +1,6 @@
 use super::MemoryRecordEnum;
 use super::MemoryWriteRecord;
+use super::cpu::{OptionMemoryReadRecord, OptionMemoryRecordEnum};
 use crate::Opcode;
 use serde::{Deserialize, Serialize};
 
@@ -14,6 +15,37 @@ pub struct AluEvent {
     pub next_pc: u32,
     /// The opcode.
     pub opcode: Opcode,
+    /// ── instruction frame ─────────────────────────────────────────────
+    /// Non-zero when this event is a REAL instruction, i.e. when the chip must
+    /// carry its own program fetch / state chaining / register access rather
+    /// than receiving a decoded instruction from `CpuChip` over the
+    /// `Instruction` bus.  See `zkm_core_machine::frame`.
+    ///
+    /// ★ The ALU event vectors ALSO carry SYNTHETIC dependency rows that
+    /// `dependencies.rs` pushes at `pc: UNUSED_PC`, so DivRem and friends can
+    /// outsource sub-computations.  Those rows have no instruction at their pc,
+    /// no clk and no registers: `is_instruction == 0` and every field below is
+    /// meaningless.  ANY frame constraint in an AIR must be gated on it.
+    /// Measured share (playground `rows`): Lt is 73-87% dependency, but in
+    /// absolute cells that is <0.5% of the area at stake, so gating beats
+    /// splitting the chip.
+    ///
+    /// ⚠ FFI: this is a `u32` and the records use the `Option*` MIRROR types,
+    /// NOT `bool` / `Option<T>`.  `crates/core/machine/include/*.hpp` consume
+    /// `AluEvent` directly through cbindgen, and a plain `Option<T>` there
+    /// compiles on the host while failing `--features sys` with "field has
+    /// incomplete type".
+    pub is_instruction: u32,
+    /// The clock cycle (frame).
+    pub clk: u32,
+    /// The pc after `next_pc` (MIPS delay-slot lookahead).
+    pub next_next_pc: u32,
+    /// The `next_pc` RECEIVED on the `State` bus.
+    pub recv_next_pc: u32,
+    /// Register memory records for the three operands.
+    pub a_record: OptionMemoryRecordEnum,
+    pub b_record: OptionMemoryReadRecord,
+    pub c_record: OptionMemoryReadRecord,
     /// The upper bits of the output operand.
     /// This is used for the MULT, MULTU, DIV and DIVU opcodes.
     pub hi: u32,
@@ -25,11 +57,35 @@ pub struct AluEvent {
     pub c: u32,
 }
 
+impl Default for AluEvent {
+    /// A DEPENDENCY row: no instruction at its pc, no clk, no registers.
+    /// The synthetic paths in `dependencies.rs` want exactly this shape, so it
+    /// is the default and a real instruction must opt in via `is_instruction`.
+    fn default() -> Self {
+        Self {
+            pc: 0,
+            next_pc: 0,
+            opcode: Opcode::ADD,
+            is_instruction: 0,
+            clk: 0,
+            next_next_pc: 0,
+            recv_next_pc: 0,
+            a_record: None.into(),
+            b_record: None.into(),
+            c_record: None.into(),
+            hi: 0,
+            a: 0,
+            b: 0,
+            c: 0,
+        }
+    }
+}
+
 impl AluEvent {
     /// Create a new [`AluEvent`].
     #[must_use]
     pub fn new(pc: u32, opcode: Opcode, a: u32, b: u32, c: u32) -> Self {
-        Self { pc, next_pc: pc + 4, opcode, a, b, c, hi: 0 }
+        Self { pc, next_pc: pc + 4, opcode, a, b, c, hi: 0, ..Default::default() }
     }
 
 }
@@ -63,7 +119,7 @@ pub struct CompAluEvent {
     /// The `op_hi` memory write record.
     pub hi_record: MemoryWriteRecord,
     pub hi_record_is_real: bool,
-}
+        }
 
 impl CompAluEvent {
     /// Create a new [`CompAluEvent`].

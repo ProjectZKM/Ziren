@@ -1499,6 +1499,7 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
+            ..Default::default()
         };
 
         let (hi_access, hi_record_is_real) = match hi_record {
