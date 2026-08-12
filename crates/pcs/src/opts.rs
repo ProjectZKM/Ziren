@@ -13,6 +13,20 @@ use sysinfo::System;
 const MAX_SHARD_SIZE: usize = 1 << 21;
 const RECURSION_MAX_SHARD_SIZE: usize = 1 << 21;
 const MAX_SHARD_BATCH_SIZE: usize = 8;
+/// MEASURED INERT on reth core (Aug12): a `TRACE_GEN_WORKERS` sweep at
+/// `RECORDS_AND_TRACES_CHANNEL_CAPACITY=8` gave 2211/2242 kHz at ONE worker and
+/// 2198-2304 kHz at EIGHT — flat inside run-to-run spread, with the core proof
+/// byte-identical throughout.  Raising this default is therefore NOT a
+/// throughput change on that workload and is left alone.
+///
+/// ⚠ What is still UNMEASURED is the shipped default PAIR (one worker AND a
+/// one-deep record/trace channel).  Every perf harness on the box overrides
+/// both to 8, so no published Ziren number was taken at these values.
+///
+/// ⚠ `DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY` looks overridden by the harnesses
+/// (`DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY=512`) but is NOT: the parse arm below
+/// reads `CHECKPOINTS_CHANNEL_CAPACITY`, so that export has never taken effect
+/// and every measured run used this 128.
 const DEFAULT_TRACE_GEN_WORKERS: usize = 1;
 const DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY: usize = 128;
 const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;

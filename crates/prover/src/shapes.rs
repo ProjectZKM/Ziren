@@ -410,55 +410,73 @@ impl ZKMProofShape {
         let _ = SAFE_BYTE_LOOKUP_BUDGET; // retained for reference
         let machine_shape = build_mips_machine_shape();
 
-        // Area enumeration (for VERIFY_VK=true): the normalize program is
-        // (chip_set, log_dense)-determined, so the recursion vk_map must cover
-        // each cluster's chip set at the log_dense (total-trace-area) bands real
-        // proofs hit.  The prior `create_all_input_shapes -> to_ordered_shape
-        // (uniform) + byte-lookup cap` collapsed every cluster to ONE tiny
-        // log_dense (~13), missing real proofs (e.g. fib needs log_dense=27).
+        // Area enumeration (for VERIFY_VK=true).  The map has to contain the
+        // key every real proof produces, so the enumeration's job is to emit
+        // one shape per CLASS the key can take — and to get the class right.
         //
-        // Construction (validated in `tests::vkroot_site5_construct`): per
-        // cluster, sweep a uniform height `h` on the byte-lookup-FREE chips
-        // (`num_sent_byte_lookups == 0`, each <= 2^CORE_MAX_LOG_ROW_COUNT so no
-        // single chip overflows the max-height); pin byte-lookup chips minimal
-        // (h=1) so the VK-setup `Σ byte_lookups·2^h ≤ |F|` always holds; pin
-        // Byte at its 2^16 lookup-table height.  Spreading area across the
-        // free fillers makes total_values span log_dense ~20..30 as `h` sweeps.
-        // Since the program is (chip_set, log_dense)-determined, any distribution
-        // hitting a target log_dense yields the same vk — so these synthetic
-        // shapes produce exactly the real proofs' normalize vks.  We over-emit;
-        // `build_compress_vks` catch_unwinds the few overflow shapes
-        // (log_dense>30) and the vk_set dedups equal-log_dense shapes.
-        // Cheap log_dense (= jagged `JaggedPacking::log_dense_size`) for an
-        // OrderedShape WITHOUT building a full dummy bundle.  The jagged
-        // packing's total_values = Σ_chips width·2^log_h, the commitment rounds
-        // that out to whole stacking blocks, and the hypercube is the enclosing
-        // power of two — see `zkm_pcs::jagged::committed_dense_len`.
-        // BaseAir::width(chip) gives the dense width the dummy bundle uses.
+        // It used to key on `log_dense`, the power of two enclosing the
+        // committed length, on the premise that any height distribution
+        // reaching a given `log_dense` yields the same key.  Half of that is
+        // true — the distribution IS free — but the granularity was wrong: the
+        // committed length is measured in whole stacking BLOCKS, and two shapes
+        // sharing a `log_dense` can commit different block counts.  A real
+        // fibonacci shard sat in exactly such a gap, which is why a freshly
+        // regenerated map still rejected it.
+        //
+        // Construction, per cluster: Byte at its 2^16 lookup-table height, the
+        // Program band SWEPT (it is what moves the preprocessed round, and a
+        // real program's height is not the enumeration's to choose), every
+        // other byte-lookup-EMITTING chip pinned minimal so the VK-setup
+        // `Σ byte_lookups·2^h ≤ |F|` always holds, and the byte-lookup-FREE
+        // fillers greedily absorbing the rest of the main area up to a target
+        // block count.  `BaseAir::width` gives the main dense width and
+        // `MachineAir::preprocessed_width` the preprocessed one.
         let chip_width = |name: &str| -> usize {
             chips_by_name
                 .get(name)
                 .map(|c| p3_air::BaseAir::<KoalaBear>::width(*c).max(1))
                 .unwrap_or(1)
         };
-        let log_dense_of = |os: &OrderedShape| -> usize {
-            let total: usize = os
-                .inner
-                .iter()
-                .map(|(name, log_h)| chip_width(name) * (1usize << *log_h))
-                .sum();
-            // The commitment covers whole stacking blocks, and the sumcheck
-            // hypercube is the power of two that encloses them — the same two
-            // steps `JaggedPacking::log_dense_size` takes.
-            let dense = zkm_pcs::jagged::committed_dense_len(
-                total,
-                zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
-            );
-            if dense == 0 {
-                0
-            } else {
-                dense.next_power_of_two().trailing_zeros() as usize
-            }
+        // The CLASS key.  A proof commits TWO rounds — preprocessed then main —
+        // and each round's committed area is its real cells rounded out to
+        // whole stacking blocks.  Those two block counts are what set the
+        // per-round stripe multiples, the concatenated column space and the
+        // reduction dimension, so the recursion program — and with it the
+        // verifying key — is a function of `(chip set, prep blocks, main
+        // blocks)` and nothing finer.
+        //
+        // MEASURED (`zkm_prover::tests::normalize_vk_aggregate_key_probe`):
+        // moving a shape's cells from 3,494,544 to 3,912,336 with the block
+        // count HELD leaves the key byte-identical; changing either round's
+        // block count changes it.  `log_dense` — the power of two ENCLOSING the
+        // committed length — is the WRONG granularity: shapes sharing a
+        // `log_dense` can commit different block counts, which is how a real
+        // fibonacci shard ended up outside a freshly regenerated map.
+        let blocks_of = |os: &OrderedShape| -> (usize, usize) {
+            use zkm_pcs::air::MachineAir;
+            let log_stack = zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize;
+            let cells = |prep: bool| -> usize {
+                os.inner
+                    .iter()
+                    .map(|(name, log_h)| {
+                        let w = chips_by_name
+                            .get(name)
+                            .map(|c| {
+                                if prep {
+                                    MachineAir::<KoalaBear>::preprocessed_width(*c)
+                                } else {
+                                    p3_air::BaseAir::<KoalaBear>::width(*c).max(1)
+                                }
+                            })
+                            .unwrap_or(0);
+                        w * (1usize << *log_h)
+                    })
+                    .sum()
+            };
+            let blocks = |total: usize| -> usize {
+                zkm_pcs::jagged::committed_dense_len(total, log_stack) >> log_stack
+            };
+            (blocks(cells(true)), blocks(cells(false)))
         };
 
         // Per-shard normalize shapes — FAITHFUL representatives.
@@ -533,93 +551,103 @@ impl ZKMProofShape {
         // Build the canonical shape for `cluster` at a target log_dense `target`.
         // Returns None when `target` is below the fixed-overhead floor or above
         // the all-chips-at-cube ceiling for this cluster.
-        let shape_at_log_dense =
-            |names: &[String], fillers: &std::collections::HashSet<&String>, target: usize| -> Option<OrderedShape> {
-                // Fixed overhead: Byte (2^16), Program (minimal), other
-                // byte-lookup chips (minimal).  The fillers absorb the rest.
-                let mut heights: Vec<(String, usize)> = names
-                    .iter()
-                    .map(|n| {
-                        let h = if n == "Byte" {
-                            16
-                        } else {
-                            1
-                        };
-                        (n.clone(), h)
-                    })
-                    .collect();
-                let area_of = |hs: &[(String, usize)]| -> u128 {
-                    hs.iter().map(|(n, h)| (chip_width(n) as u128) * (1u128 << *h)).sum()
-                };
-                // Greedily raise filler heights to approach 2^target without
-                // overshooting (so log_dense lands EXACTLY at `target`).
-                let cap_area: u128 = 1u128 << target;
-                // Iterate height levels high→low; for each filler, set the
-                // largest height whose marginal area still fits under cap_area.
-                let mut filler_idx: Vec<usize> = heights
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (n, _))| fillers.contains(n))
-                    .map(|(i, _)| i)
-                    .collect();
-                // Stable order so the produced shape is deterministic.
-                filler_idx.sort_by(|&a, &b| heights[a].0.cmp(&heights[b].0));
-                for &i in &filler_idx {
-                    // Largest h ≤ cube with this chip's marginal area still
-                    // fitting under cap_area.
-                    let mut best = 1usize;
-                    for h in 1..=cube {
-                        let mut trial = heights.clone();
-                        trial[i].1 = h;
-                        if area_of(&trial) <= cap_area {
-                            best = h;
-                        } else {
-                            break;
-                        }
-                    }
-                    heights[i].1 = best;
-                }
-                let os = OrderedShape::from_log2_heights(&heights);
-                if log_dense_of(&os) == target {
-                    Some(os)
-                } else {
-                    None
-                }
-            };
-        // FULL reachable per-cluster log_dense range — covers the enumeration
-        // completeness requirement WITHOUT core-area padding.
-        //
-        // A cluster's MINIMAL feasible L (all fillers at 1, Byte at its fixed
-        // 2^16 lookup-table height) is its natural floor; every real core shard
-        // carries the Byte table, so no provable shard lands below L_min = 20.
-        // The UPPER bound is the AreaOutOfBounds guard (shard_level/verifier.rs:
-        // ~365): a proof is rejected unless `0 < total_values < 2^30`, so the
-        // largest provable shard has `log_dense = ceil(log2(total_values)) <= 30`.
-        // We therefore emit EVERY integer L in `[L_min, L_HARD_CAP]` the greedy
-        // construction can hit, filtered to `total_values < 2^30` (the provable
-        // set).  A narrower window would MISS real shards whose natural
-        // log_dense is 29/30 ("Invalid verification key" / "vk not allowed").
-        // The complete grid is small: 268 normalize (+ 6
-        // compress/deferred/shrink) = 274 keys, well under the
-        // VK_MERKLE_TREE_HEIGHT=11 (2048) ceiling — measured by
-        // scripts/pathb_grid.rs; regen-only (vk_root witnessed, no re-ceremony).
-        // L_WINDOW is kept generous so the AreaOutOfBounds cap binds for every
-        // cluster (l_min + L_WINDOW >= L_HARD_CAP always).
-        const L_WINDOW: usize = 64;
-        const L_HARD_CAP: usize = 30;
-        // AreaOutOfBounds: a real proof's total trace-cell count must be
-        // strictly below 2^30 to verify (host hash-bind guard).  Skip any
-        // greedy shape that would land at/above it so the map contains only
-        // provable normalize VKs.
-        const MAX_TOTAL_VALUES: u128 = 1u128 << 30;
-        let total_values_of = |os: &OrderedShape| -> u128 {
-            os.inner
+        // Build the representative shape for one class: a chip set, a Program
+        // band (which sets the PREPROCESSED round), and a target MAIN block
+        // count.  Byte sits at its 2^16 lookup-table height, every other
+        // byte-lookup-EMITTING chip is pinned minimal so the VK-setup
+        // `Σ byte_lookups·2^h ≤ |F|` always holds, and the byte-lookup-FREE
+        // fillers greedily absorb the rest of the main area.  Since the key is
+        // a function of the two block counts and nothing finer, ANY shape
+        // landing in the class reproduces the real proof's key — the
+        // distribution across fillers is free.
+        let shape_at_class = |names: &[String],
+                              fillers: &std::collections::HashSet<&String>,
+                              prog_h: usize,
+                              target_main_blocks: usize|
+         -> Option<OrderedShape> {
+            let mut heights: Vec<(String, usize)> = names
                 .iter()
-                .map(|(name, log_h)| (chip_width(name) as u128) * (1u128 << *log_h))
-                .sum()
+                .map(|n| {
+                    let h = if n == "Byte" {
+                        16
+                    } else if n == "Program" {
+                        prog_h
+                    } else {
+                        1
+                    };
+                    (n.clone(), h)
+                })
+                .collect();
+            let area_of = |hs: &[(String, usize)]| -> u128 {
+                hs.iter().map(|(n, h)| (chip_width(n) as u128) * (1u128 << *h)).sum()
+            };
+            let cap_area: u128 =
+                (target_main_blocks as u128) << (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT);
+            if area_of(&heights) > cap_area {
+                return None;
+            }
+            // Iterate fillers in a stable order; for each, take the largest
+            // height whose marginal area still fits under the target.
+            let mut filler_idx: Vec<usize> = heights
+                .iter()
+                .enumerate()
+                .filter(|(_, (n, _))| {
+                    fillers.contains(n) && n != "Program" && n != "Byte"
+                })
+                .map(|(i, _)| i)
+                .collect();
+            filler_idx.sort_by(|&a, &b| heights[a].0.cmp(&heights[b].0));
+            for &i in &filler_idx {
+                let mut best = 1usize;
+                for h in 1..=cube {
+                    let mut trial = heights.clone();
+                    trial[i].1 = h;
+                    if area_of(&trial) <= cap_area {
+                        best = h;
+                    } else {
+                        break;
+                    }
+                }
+                heights[i].1 = best;
+            }
+            let os = OrderedShape::from_log2_heights(&heights);
+            (blocks_of(&os).1 == target_main_blocks).then_some(os)
         };
+
+        // The reachable MAIN block counts.  `committed_dense_len` rounds a
+        // round out to whole stacking blocks and, past four blocks, on to a
+        // multiple of eight (the ziren-gpu Poseidon2 stripe-rate rule), so
+        // those are the only counts a commitment can land on.
+        //
+        // The ceiling is the PROVER's own per-shard area cap, not the
+        // verifier's outer guard.  `ELEMENT_THRESHOLD` closes a core shard at
+        // 251,658,240 main-trace cells — exactly 120 stacking blocks — and it
+        // is what closes every shard in practice (100% of splits on reth,
+        // tendermint and goat are area splits, `pcs/src/opts.rs:28`).  A shard
+        // therefore cannot commit a main round past that, and enumerating up to
+        // the AreaOutOfBounds guard at 2^30 cells instead would quadruple the
+        // map for classes no prover can reach.
+        //
+        // The splitter closes a shard WHEN it reaches the threshold, so the
+        // event that closes it can carry the total slightly past; one extra
+        // eight-block rounding step covers that overshoot.  The commit adds no
+        // cells of its own — a missing canonical-cluster chip is injected at
+        // height ZERO — so nothing else pushes past the cap.
+        //
+        // ⚠️ `ELEMENT_THRESHOLD` is env-overridable.  Raising it past this
+        // bound puts real shards outside the map — the same class of change as
+        // any other shape-affecting config, and it needs a regen.
+        const MAX_BLOCKS: usize = (zkm_pcs::ELEMENT_THRESHOLD
+            >> (zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize))
+            + 8;
+        let main_block_targets: Vec<usize> = (1..=4)
+            .chain((1..).map(|k| k * 8).take_while(|b| *b < MAX_BLOCKS))
+            .collect();
+
         let small_shapes: Vec<OrderedShape> = {
-            let mut by_shape: BTreeMap<Vec<(String, usize)>, OrderedShape> = BTreeMap::new();
+            // ONE representative per (chip set, prep blocks, main blocks).
+            let mut by_class: BTreeMap<(Vec<String>, usize, usize), OrderedShape> =
+                BTreeMap::new();
             for cluster in &machine_shape.chip_clusters {
                 let names: Vec<String> = cluster
                     .iter()
@@ -636,32 +664,31 @@ impl ZKMProofShape {
                             && chips_by_name[n.as_str()].num_sent_byte_lookups() == 0
                     })
                     .collect();
-                // Find this cluster's L_min (first feasible target), then sweep
-                // the realistic window above it.
-                let mut l_min = None;
-                for target in 1..=L_HARD_CAP {
-                    if shape_at_log_dense(&names, &fillers, target).is_some() {
-                        l_min = Some(target);
-                        break;
-                    }
-                }
-                let Some(l_min) = l_min else { continue };
-                let l_max = (l_min + L_WINDOW).min(L_HARD_CAP);
-                for target in l_min..=l_max {
-                    if let Some(os) = shape_at_log_dense(&names, &fillers, target) {
-                        // Keep only provable shapes (AreaOutOfBounds).
-                        if total_values_of(&os) >= MAX_TOTAL_VALUES {
+                // Sweep the Program band — it is what moves the preprocessed
+                // round, and a real program's height is not something the
+                // enumeration gets to choose.  Distinct bands collapsing onto
+                // the same prep block count are deduped by the class key.
+                for prog_h in 1..=cube {
+                    for &target in &main_block_targets {
+                        let Some(os) = shape_at_class(&names, &fillers, prog_h, target) else {
+                            continue;
+                        };
+                        let (prep_blocks, main_blocks) = blocks_of(&os);
+                        // AreaOutOfBounds: the CONCATENATED instance is what the
+                        // proof commits, so both rounds count toward the guard.
+                        if prep_blocks + main_blocks >= MAX_BLOCKS {
                             continue;
                         }
                         let mut inner = os.inner.clone();
                         inner.sort();
-                        by_shape.entry(inner.clone()).or_insert(OrderedShape { inner });
+                        by_class
+                            .entry((names.clone(), prep_blocks, main_blocks))
+                            .or_insert(OrderedShape { inner });
                     }
                 }
             }
-            by_shape.into_values().collect()
+            by_class.into_values().collect()
         };
-        let _ = &log_dense_of;
 
         // SINGLE-SHARD NORMALIZE: emit ONLY arity-1 normalize shapes.
         // The production normalize is single-shard (`compress` →

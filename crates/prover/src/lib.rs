@@ -108,7 +108,7 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
     MipsAir<KoalaBear>,
 >>::DeviceProvingKey;
 
-/// Fixed height of the allowed-vk Merkle tree (capacity 2^11 = 2048 vks).
+/// Fixed height of the allowed-vk Merkle tree (capacity 2^12 = 4096 vks).
 ///
 /// BOTH the shape enumeration (`ZKMCompressProgramShape::from_proof_shape`,
 /// which bakes `merkle_tree_height` into every compose/deferred/shrink
@@ -117,7 +117,17 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// cardinality (enumerated-shape count vs vk_map size), the two
 /// derivations could diverge and the witnessed merkle paths would desync
 /// from the program shape.  A fixed ceiling kills that circularity.
-pub const VK_MERKLE_TREE_HEIGHT: usize = 11;
+///
+/// It has to CONTAIN the enumeration, which is not a tuning knob: a normalize
+/// key is a function of `(chip set, preprocessed block count, main block
+/// count)`, and the reachable main block counts run up to the prover's own
+/// per-shard area cap (`ELEMENT_THRESHOLD` = 120 stacking blocks).  That is
+/// 2707 keys today.  A height that cannot hold them is not "a smaller map" —
+/// it is a map that rejects real proofs, which is what 2^11 (2048) did.
+/// `tests::enumeration_size_probe` asserts the fit.
+/// SP1 does not fix the height at all: it derives it as
+/// `log2_ceil_usize(num_shapes)` (`prover/src/shapes.rs:508`).
+pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
 
 const COMPRESS_DEGREE: usize = 3;
 const SHRINK_DEGREE: usize = 3;
@@ -3150,7 +3160,11 @@ pub mod tests {
         real_names.sort();
         let real_ld = blocks_of(&real_os);
 
-        // For each arity 1..=REDUCE_BATCH_SIZE: real-replicated vs enumerated-rep.
+        // Arity 1 ONLY.  Normalize is single-shard by construction —
+        // `verify_core_basefold` asserts `shard_proof_tuples.len() == 1` and the
+        // enumerator emits no multi-shard normalize shape — so replicating the
+        // shard to arity 2..4 builds a program that cannot exist.  Aggregation
+        // across shards lives in COMPRESS.
         let real_bf = *real_sp
             .basefold_shard_proof
             .as_ref()
@@ -3470,7 +3484,7 @@ pub mod tests {
 
 
 
-        for arity in 1..=REDUCE_BATCH_SIZE {
+        for arity in 1..=1 {
             // REAL arity-N witness: replicate the real shard's bundle N times
             // (a real arity-N batch of identical shards).
             let real_witness = ZKMCoreBasefoldWitnessValues {
@@ -3507,6 +3521,81 @@ pub mod tests {
             );
         }
         Ok(())
+    }
+
+    /// What does the allowed-vk Merkle tree's HEIGHT cost the recursion
+    /// programs?  Every compose / deferred / shrink program verifies a vk
+    /// membership path in-circuit, so its length is `VK_MERKLE_TREE_HEIGHT`
+    /// Poseidon2 compressions plus the selects around them, per child.  This
+    /// reports the compiled instruction count so the cost of a height change is
+    /// a measured number rather than an argument.  Deterministic — no wall
+    /// clock, so it is immune to box contention.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn compose_program_size_probe() {
+        use zkm_recursion_circuit::machine::{ZKMCompressShape, ZKMCompressWithVkeyShape};
+        use zkm_pcs::shape::OrderedShape;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let compress_machine = prover.compress_prover.machine();
+        let child: Vec<(String, usize)> = vec![
+            ("BaseAlu".into(), 18), ("ExtAlu".into(), 18), ("MemoryConst".into(), 17),
+            ("MemoryVar".into(), 18), ("Poseidon2WideDeg3".into(), 18),
+            ("PublicValues".into(), 4), ("Select".into(), 18),
+        ];
+        let os = OrderedShape::from_log2_heights(&child);
+        for arity in [1usize, REDUCE_BATCH_SIZE] {
+            let with_vkey = ZKMCompressWithVkeyShape {
+                compress_shape: ZKMCompressShape::from(vec![os.clone(); arity]),
+                merkle_tree_height: VK_MERKLE_TREE_HEIGHT,
+            };
+            let d = ZKMCompressBasefoldWitnessValues::dummy::<CompressAir<KoalaBear>>(
+                compress_machine,
+                &with_vkey,
+            );
+            let p = prover.compose_program_basefold(&d);
+            eprintln!(
+                "[PROGSIZE] merkle_height={} arity={arity} compose_instructions={}",
+                VK_MERKLE_TREE_HEIGHT,
+                p.instruction_count(),
+            );
+        }
+    }
+
+    /// How many keys does the enumeration emit, and does it fit the vk merkle
+    /// tree's FIXED capacity?  The tree height is baked into every enumerated
+    /// recursion program, so an over-large map is not a tuning problem — it
+    /// does not fit at all.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn enumeration_size_probe() {
+        use crate::shapes::ZKMProofShape;
+        use zkm_core_machine::shape::CoreShapeConfig;
+        setup_logger();
+        let core_cfg = CoreShapeConfig::<KoalaBear>::default();
+        let rec_cfg = RecursionShapeConfig::<KoalaBear, CompressAir<KoalaBear>>::default();
+        let all: Vec<ZKMProofShape> =
+            ZKMProofShape::generate(&core_cfg, &rec_cfg, REDUCE_BATCH_SIZE).collect();
+        let normalize = all
+            .iter()
+            .filter(|s| matches!(s, ZKMProofShape::Recursion(_)))
+            .count();
+        eprintln!(
+            "[ENUMSIZE] total={} normalize={} other={} capacity=2^{}={}",
+            all.len(),
+            normalize,
+            all.len() - normalize,
+            VK_MERKLE_TREE_HEIGHT,
+            1usize << VK_MERKLE_TREE_HEIGHT,
+        );
+        assert!(
+            all.len() <= (1usize << VK_MERKLE_TREE_HEIGHT),
+            "[ENUMSIZE] the enumeration ({}) exceeds the vk merkle capacity {}",
+            all.len(),
+            1usize << VK_MERKLE_TREE_HEIGHT,
+        );
     }
 
     /// PROBE: which AGGREGATE does the normalize vk key on?
