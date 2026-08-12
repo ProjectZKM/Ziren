@@ -3152,6 +3152,26 @@ pub mod tests {
             real_names.len(),
             log_dense_of(&enum_os),
         );
+        // The class matched on (chip_set, log_dense) — but the vk is a function
+        // of the PER-CHIP heights, so print both height vectors and the chips
+        // where they disagree.  That difference is the whole reason a produced
+        // key can fall outside the enumeration.
+        {
+            let r: std::collections::BTreeMap<&String, &usize> =
+                real_os.inner.iter().map(|(n, h)| (n, h)).collect();
+            let e: std::collections::BTreeMap<&String, &usize> =
+                enum_os.inner.iter().map(|(n, h)| (n, h)).collect();
+            eprintln!("[ARITY-REPR] real heights = {r:?}");
+            eprintln!("[ARITY-REPR] enum heights = {e:?}");
+            let diffs: Vec<String> = r
+                .iter()
+                .filter_map(|(n, h)| {
+                    let eh = e.get(*n).copied();
+                    (eh != Some(*h)).then(|| format!("{n}: real={h} enum={eh:?}"))
+                })
+                .collect();
+            eprintln!("[ARITY-REPR] per-chip height MISMATCHES ({}): {diffs:?}", diffs.len());
+        }
 
         // For each arity 1..=REDUCE_BATCH_SIZE: real-replicated vs enumerated-rep.
         let real_bf = *real_sp
@@ -3196,6 +3216,128 @@ pub mod tests {
             );
         }
         Ok(())
+    }
+
+    /// PROBE: does a RECURSION proving key carry a PREPROCESSED opening round?
+    ///
+    /// `prove_shard_with_data` builds the preprocessed round from
+    /// `preprocessed_commit_data.packing.chip_infos` and emits a single
+    /// (main-only) round when that list is empty, while the enumeration's dummy
+    /// child derives its own two-round geometry from the machine's chip set.
+    /// If the two disagree the hint streams differ and so does the compose vk.
+    /// Setup only — no proving.
+    #[test]
+    #[serial]
+    #[ignore]
+    fn recursion_pk_preprocessed_round_probe() {
+        use zkm_pcs::air::MachineAir;
+        use zkm_pcs::shape::OrderedShape;
+        use zkm_recursion_circuit::machine::ZKMCoreBasefoldWitnessValues;
+        setup_logger();
+        let prover = ZKMProver::<DefaultProverComponents>::new();
+        let core_machine = prover.core_prover.machine();
+
+        // What the compress machine's chips CLAIM: a chip must generate a
+        // preprocessed trace iff `preprocessed_width() > 0` (`machine.rs`
+        // asserts it), so this is the round the key ought to commit.
+        for c in prover.compress_prover.machine().chips().iter() {
+            eprintln!(
+                "[PREPROBE] compress chip {} preprocessed_width={}",
+                <_ as MachineAir<KoalaBear>>::name(c),
+                c.preprocessed_width(),
+            );
+        }
+
+        // A normalize program over one dummy core child.  The child's shape
+        // does not affect whether the recursion KEY has a preprocessed round.
+        let cluster: Vec<&str> = vec![
+            "AddSub", "Bitwise", "Branch", "Byte", "CloClz", "Cpu", "DivRem", "Global",
+            "Jump", "Lt", "MemoryGlobalFinalize", "MemoryGlobalInit", "LoadNarrow",
+            "LoadWord", "StoreNarrow", "StoreWord", "MemoryUnaligned", "MemoryLocal",
+            "MiscInstrs", "MovCond", "Mul", "Program", "ShiftLeft", "ShiftRight",
+            "SyscallCore", "SyscallInstrs",
+        ];
+        let hs: Vec<(String, usize)> = cluster
+            .iter()
+            .map(|n| ((*n).to_string(), if *n == "Byte" { 16 } else { 18 }))
+            .collect();
+        let os = OrderedShape::from_log2_heights(&hs);
+        let shape = ZKMRecursionShape { proof_shapes: vec![os], is_complete: true };
+        let dummy = ZKMCoreBasefoldWitnessValues::dummy(core_machine, &shape);
+        let prog = prover.recursion_program_basefold(&dummy);
+        let (pk, _vk) = prover.compress_prover.setup(&prog);
+        let infos = &pk.preprocessed_jagged().packing.chip_infos;
+        eprintln!(
+            "[PREPROBE] normalize pk: prep_chip_infos={} pk.traces={} chip_ordering={}",
+            infos.len(),
+            pk.traces.len(),
+            pk.chip_ordering.len(),
+        );
+        for i in infos.iter() {
+            eprintln!(
+                "[PREPROBE]   committed prep chip {} rows={} cols={}",
+                i.name, i.row_count, i.column_count,
+            );
+        }
+        eprintln!(
+            "[PREPROBE] CONCLUSION: the recursion prove path opens {} round(s)",
+            if infos.is_empty() { 1 } else { 2 },
+        );
+
+        // ── The preprocessed round's COLUMN COUNT, real vs. enumerated ──
+        //
+        // The real round's padding is `area - real` split into columns no
+        // taller than the row cube, at least one (`prove_jagged_basefold_rounds`).
+        // The dummy child the enumeration builds derives the SAME quantity from
+        // the child's MAIN band heights, which is a different number whenever a
+        // chip's preprocessed height differs from its main height.
+        let packing = &pk.preprocessed_jagged().packing;
+        let cube = 1usize << ZKMProver::<DefaultProverComponents>::perstage_base_cube();
+        let real_cells = packing.total_values;
+        let real_area = packing.dense_len;
+        let real_pads = real_area.saturating_sub(real_cells).div_ceil(cube).max(1);
+        eprintln!(
+            "[PREPROBE] REAL prep round: cells={real_cells} area={real_area} \
+             gap={} cube={cube} pad_columns={real_pads}",
+            real_area.saturating_sub(real_cells),
+        );
+
+        // What the dummy computes for the same child, from the band's MAIN
+        // heights (`round_real(true)` in `dummy/basefold_shard_proof.rs`).
+        let band = prog
+            .shape
+            .as_ref()
+            .map(|sh| sh.clone_into_hash_map())
+            .unwrap_or_default();
+        let mut band_sorted: Vec<_> = band.iter().collect();
+        band_sorted.sort();
+        eprintln!("[PREPROBE] program band (main heights) = {band_sorted:?}");
+        let dummy_cells: usize = prover
+            .compress_prover
+            .machine()
+            .chips()
+            .iter()
+            .map(|c| {
+                let name = <_ as MachineAir<KoalaBear>>::name(c);
+                let log_h = band.get(&name).copied().unwrap_or(0);
+                c.preprocessed_width() * (1usize << log_h)
+            })
+            .sum();
+        let dummy_area = zkm_pcs::jagged::committed_dense_len(
+            dummy_cells,
+            zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT as usize,
+        );
+        let dummy_pads = dummy_area.saturating_sub(dummy_cells).div_ceil(cube).max(1);
+        eprintln!(
+            "[PREPROBE] DUMMY prep round: cells={dummy_cells} area={dummy_area} \
+             gap={} pad_columns={dummy_pads}",
+            dummy_area.saturating_sub(dummy_cells),
+        );
+        eprintln!(
+            "[PREPROBE] VERDICT: real_pad_columns={real_pads} dummy_pad_columns={dummy_pads} \
+             match={}",
+            real_pads == dummy_pads,
+        );
     }
 
     /// Compose VK height-sensitivity: does the COMPOSE vk depend on the
