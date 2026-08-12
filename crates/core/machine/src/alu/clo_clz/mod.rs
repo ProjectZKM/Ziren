@@ -27,6 +27,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
+    frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
 };
@@ -68,6 +69,17 @@ pub struct CloClzCols<T> {
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
+
+    /// Whether this row is a REAL instruction rather than a synthetic
+    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: InstructionFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for CloClzChip {
@@ -113,6 +125,14 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             cols.next_pc = F::from_u32(event.next_pc);
             cols.is_real = F::ONE;
             cols.is_clz = F::from_bool(event.opcode == Opcode::CLZ);
+            let is_instruction = event.is_instruction != 0;
+            cols.is_instruction = F::from_bool(is_instruction);
+            cols.is_dep = F::from_bool(!is_instruction);
+            if is_instruction {
+                cols.frame.populate_from_alu(event, &input.program, input.public_values.execution_shard, output);
+            } else {
+                cols.frame.populate_dependency();
+            }
 
             let bb = if event.opcode == Opcode::CLZ { event.b } else { 0xffffffff - event.b };
             cols.bb = Word::from(bb);
@@ -154,6 +174,9 @@ impl<F: PrimeField32> MachineAir<F> for CloClzChip {
             // is_bb_zero=1 ensures send_alu for SRL has zero multiplicity.
             cols.a = Word::from(32);
             cols.is_bb_zero = F::ONE;
+            // Padding rows carry no instruction: neutralise the frame or its
+            // register-access multiplicities break the Memory bus.
+            cols.frame.populate_dependency();
 
             row
         };
@@ -242,8 +265,30 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
-            local.is_real,
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep,
         );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(one.clone() - local.is_real);
+        builder.assert_zero(
+            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  CLZ/CLO are sequential and can never halt.
+        eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc,
+            local.next_pc,
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
 
         // if is_bb_zero == 1, bb == 0, and result is 32
         {

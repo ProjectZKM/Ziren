@@ -63,6 +63,7 @@ use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
     air::ZKMCoreAirBuilder,
+    frame::{eval_instruction_frame, InstructionFrameCols},
     alu::sr::utils::{nb_bits_to_shift, nb_bytes_to_shift},
     bytes::utils::shr_carry,
     utils::{next_multiple_of_32, zeroed_f_vec},
@@ -134,6 +135,17 @@ pub struct ShiftRightCols<T> {
 
     /// Selector to know whether this row is enabled.
     pub is_real: T,
+
+    /// Whether this row is a REAL instruction rather than a synthetic
+    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: InstructionFrameCols<T>,
 }
 
 impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
@@ -180,10 +192,20 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
                     if idx < nb_rows {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.shift_right_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut byte_lookup_events,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
                     } else {
                         cols.shift_by_n_bits[0] = F::ONE;
                         cols.shift_by_n_bytes[0] = F::ONE;
+                        // Padding rows carry no instruction: neutralise the
+                        // frame or its register-access multiplicities break the
+                        // Memory bus.
+                        cols.frame.populate_dependency();
                     }
                 });
             },
@@ -208,7 +230,13 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_SHIFT_RIGHT_COLS];
                     let cols: &mut ShiftRightCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -229,12 +257,23 @@ impl<F: PrimeField32> MachineAir<F> for ShiftRightChip {
 
 impl ShiftRightChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
         cols: &mut ShiftRightCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        cols.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_alu(event, program, shard, blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         // Initialize cols with basic operands and flags derived from the current event.
         {
             cols.pc = F::from_u32(event.pc);
@@ -539,8 +578,30 @@ where
             AB::Expr::zero(),
             AB::Expr::zero(),
             AB::Expr::one(),
-            local.is_real,
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep,
         );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
+        builder.assert_zero(
+            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  SRL/SRA/ROR are sequential and can never halt.
+        eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc,
+            local.next_pc,
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
 
