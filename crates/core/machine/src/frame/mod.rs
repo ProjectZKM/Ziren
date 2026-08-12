@@ -21,6 +21,7 @@
 use p3_air::AirBuilder;
 use p3_field::PrimeCharacteristicRing;
 use zkm_core_executor::events::MemoryAccessPosition;
+use zkm_core_executor::ByteOpcode;
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::{air::ZKMAirBuilder, Word};
 
@@ -115,6 +116,23 @@ pub fn eval_instruction_frame<AB>(
     // The instruction at `pc` must be the one the program committed to.
     builder.send_program(pc, frame.instruction, is_real.clone());
 
+    // Shard fits in 16 bits; clk decomposes into a 16-bit and an 8-bit limb.
+    // Mirrors `CpuChip::eval_shard_clk` — the trace side must add the matching
+    // U16Range/U8Range byte events for every instruction row.
+    builder.send_byte(
+        AB::Expr::from_u8(ByteOpcode::U16Range as u8),
+        frame.shard,
+        AB::Expr::ZERO,
+        AB::Expr::ZERO,
+        is_real.clone(),
+    );
+    builder.eval_range_check_24bits(
+        clk.clone(),
+        frame.clk_16bit_limb,
+        frame.clk_8bit_limb,
+        is_real.clone(),
+    );
+
     // Immediates bypass the register read.
     builder
         .when(frame.instruction.imm_b)
@@ -157,6 +175,16 @@ pub fn eval_instruction_frame<AB>(
         &frame.op_a_access,
         is_real.clone(),
     );
+
+    // Always range check the word written to `op_a` — mirrors
+    // `CpuChip::eval_registers` (JUMP instructions may witness an invalid word).
+    builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
+
+    // If `op_a` is immutable (stores/branches/teq), the logical value is the
+    // PREVIOUS register value.  Trivial for chips that never set the flag.
+    builder
+        .when(frame.op_a_immutable)
+        .assert_word_eq(frame.op_a_value, frame.op_a_access.prev_value);
 
     // `(clk, pc)` chaining.  The LogUp multiset balance forces row i+1's
     // `(pc, next_pc)` to equal row i's `(next_pc, next_next_pc)`; the boundary

@@ -29,7 +29,7 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
     }
 
     fn num_rows(&self, input: &Self::Record) -> Option<usize> {
-        let n_real_rows = input.cpu_events.len();
+        let n_real_rows = cpu_owned_events(input).len();
         let padded_nb_rows = if let Some(shape) = &input.shape {
             shape.height(&self.id()).unwrap()
         } else {
@@ -47,21 +47,22 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         let padded_nb_rows = <CpuChip as MachineAir<F>>::num_rows(self, input).unwrap();
         let mut values = zeroed_f_vec(padded_nb_rows * NUM_CPU_COLS);
         let shard = input.public_values.execution_shard;
+        let owned = cpu_owned_events(input);
 
-        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
+        let chunk_size = std::cmp::max(owned.len() / num_cpus::get(), 1);
         values.chunks_mut(chunk_size * NUM_CPU_COLS).enumerate().par_bridge().for_each(
             |(i, rows)| {
                 rows.chunks_mut(NUM_CPU_COLS).enumerate().for_each(|(j, row)| {
                     let idx = i * chunk_size + j;
                     let cols: &mut CpuCols<F> = row.borrow_mut();
 
-                    if idx >= input.cpu_events.len() {
+                    if idx >= owned.len() {
                         cols.instruction.imm_b = F::ONE;
                         cols.instruction.imm_c = F::ONE;
                         cols.is_rw_a = F::ONE;
                     } else {
                         let mut byte_lookup_events = Vec::new();
-                        let event = &input.cpu_events[idx];
+                        let event = owned[idx];
                         let instruction = &input.program.fetch(event.pc);
                         self.event_to_row(event, cols, &mut byte_lookup_events, shard, instruction);
                     }
@@ -79,14 +80,15 @@ impl<F: PrimeField32> MachineAir<F> for CpuChip {
         input: &ExecutionRecord,
         output: &mut ExecutionRecord,
     ) -> Result<(), Self::Error> {
-        // Generate the trace rows for each event.
-        let chunk_size = std::cmp::max(input.cpu_events.len() / num_cpus::get(), 1);
+        // Generate the trace rows for each event — the OWNED ones only, or the
+        // ByteChip multiplicities include rows whose constraints migrated away.
+        let owned = cpu_owned_events(input);
+        let chunk_size = std::cmp::max(owned.len() / num_cpus::get(), 1);
         let shard = input.public_values.execution_shard;
 
-        let blu_events: Vec<_> = input
-            .cpu_events
+        let blu_events: Vec<_> = owned
             .par_chunks(chunk_size)
-            .map(|ops: &[CpuEvent]| {
+            .map(|ops: &[&CpuEvent]| {
                 // The blu map stores shard -> map(byte lookup event -> multiplicity).
                 let mut blu: HashMap<ByteLookupEvent, usize> = HashMap::new();
                 ops.iter().for_each(|op| {
@@ -255,6 +257,23 @@ impl CpuChip {
             clk_8bit_limb as u8,
         ));
     }
+}
+
+
+/// The CPU rows `CpuChip` still owns.
+///
+/// ADD/SUB have migrated: `AddSubChip` carries its own instruction frame
+/// (program fetch, register access, `(clk, pc)` chaining), so a Cpu row for
+/// those would double-send on the Program, State, Memory and Byte buses.
+/// EVERY consumer of `cpu_events` in this file must go through this filter —
+/// `num_rows`, `generate_trace` AND `generate_dependencies` — or the ByteChip
+/// multiplicities drift from the constraints that remain.
+fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
+    input
+        .cpu_events
+        .iter()
+        .filter(|e| !matches!(input.program.fetch(e.pc).opcode, Opcode::ADD | Opcode::SUB))
+        .collect()
 }
 
 #[cfg(test)]

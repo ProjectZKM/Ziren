@@ -10,8 +10,10 @@ use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator};
 use zkm_core_executor::{
-    events::{AluEvent, ByteLookupEvent, ByteRecord},
-    ExecutionRecord, Opcode, Program,
+    events::{
+        AluEvent, ByteLookupEvent, ByteRecord, MemoryRecordEnum, OptionMemoryRecordEnumTag,
+    },
+    ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{
@@ -21,6 +23,7 @@ use zkm_pcs::{
 
 use crate::{
     frame::{eval_instruction_frame, InstructionFrameCols},
+    memory::RegisterCols,
     operations::AddOperation,
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -130,7 +133,13 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                     if idx < input.add_sub_events.len() {
                         let mut byte_lookup_events = Vec::new();
                         let event = &input.add_sub_events[idx];
-                        self.event_to_row(event, cols, &mut byte_lookup_events);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut byte_lookup_events,
+                            &input.program,
+                            input.public_values.execution_shard,
+                        );
                     } else {
                         // PADDING row.  The frame's not-real rule requires the
                         // immediate flags high, otherwise `ONE - imm_b` leaves
@@ -163,7 +172,13 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
                 events.iter().for_each(|event| {
                     let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                     let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                    self.event_to_row(event, cols, &mut blu);
+                    self.event_to_row(
+                        event,
+                        cols,
+                        &mut blu,
+                        &input.program,
+                        input.public_values.execution_shard,
+                    );
                 });
                 blu
             })
@@ -185,24 +200,97 @@ impl<F: PrimeField32> MachineAir<F> for AddSubChip {
 
 impl AddSubChip {
     /// Create a row from an event.
-    fn event_to_row<F: PrimeField>(
+    fn event_to_row<F: PrimeField32>(
         &self,
         event: &AluEvent,
         cols: &mut AddSubCols<F>,
         blu: &mut impl ByteRecord,
+        program: &Program,
+        shard: u32,
     ) {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
+        // A REAL instruction owns its frame — program fetch, register access,
+        // `(clk, pc)` chaining.  A synthetic dependency row (pushed by
+        // `dependencies.rs` at `pc: UNUSED_PC`) keeps receiving on the
+        // Instruction bus from whichever chip requested the arithmetic.
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        if is_instruction {
+            // Shard + clk limbs, with the byte range events the frame's
+            // `eval_shard_clk` mirror requests (see `populate_shard_clk`).
+            cols.frame.shard = F::from_u32(shard);
+            let clk_16 = (event.clk & 0xffff) as u16;
+            let clk_8 = ((event.clk >> 16) & 0xff) as u8;
+            cols.frame.clk_16bit_limb = F::from_u16(clk_16);
+            cols.frame.clk_8bit_limb = F::from_u8(clk_8);
+            blu.add_byte_lookup_event(ByteLookupEvent::new(
+                ByteOpcode::U16Range,
+                shard as u16,
+                0,
+                0,
+                0,
+            ));
+            blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U16Range, clk_16, 0, 0, 0));
+            blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
+
+            // The instruction is fetched from the program by pc, exactly as
+            // `cpu/trace.rs` does — it is not carried in the event.
+            cols.frame.instruction.populate(&program.fetch(event.pc));
+            cols.frame.state_recv_next_pc = F::from_u32(event.recv_next_pc);
+
+            // Register accesses.  Values first, then the memory records (which
+            // also emit the byte events the consistency columns request).
+            cols.frame.op_a_value = event.a.into();
+            *cols.frame.op_a_access.value_mut() = event.a.into();
+            *cols.frame.op_b_access.value_mut() = event.b.into();
+            *cols.frame.op_c_access.value_mut() = event.c.into();
+            match event.a_record.tag {
+                OptionMemoryRecordEnumTag::Read => cols
+                    .frame
+                    .op_a_access
+                    .populate(MemoryRecordEnum::Read(event.a_record.read), blu),
+                OptionMemoryRecordEnumTag::Write => cols
+                    .frame
+                    .op_a_access
+                    .populate(MemoryRecordEnum::Write(event.a_record.write), blu),
+                OptionMemoryRecordEnumTag::None => {}
+            }
+            if let OptionMemoryRecordEnumTag::Read = event.b_record.tag {
+                cols.frame.op_b_access.populate(event.b_record.read, blu);
+            }
+            if let OptionMemoryRecordEnumTag::Read = event.c_record.tag {
+                cols.frame.op_c_access.populate(event.c_record.read, blu);
+            }
+
+            // The frame always range checks the op_a word (see
+            // `slice_range_check_u8` in `eval_instruction_frame`).
+            let a_bytes = event.a.to_le_bytes();
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[0],
+                c: a_bytes[1],
+            });
+            blu.add_byte_lookup_event(ByteLookupEvent {
+                opcode: ByteOpcode::U8Range,
+                a1: 0,
+                a2: 0,
+                b: a_bytes[2],
+                c: a_bytes[3],
+            });
+        } else {
+            // Frame off: the not-real rule needs the immediate flags high so
+            // the op_b / op_c register-access multiplicities vanish.
+            cols.frame.instruction.imm_b = F::ONE;
+            cols.frame.instruction.imm_c = F::ONE;
+        }
+
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
-        // `is_instruction` stays 0 for now: the frame is wired but not yet the
-        // authority, so `CpuChip` still dispatches every ADD/SUB.  The frame's
-        // not-real rule requires the immediate flags high so the op_b / op_c
-        // register-access multiplicities (`ONE - imm_b`) vanish.
-        cols.frame.instruction.imm_b = F::ONE;
-        cols.frame.instruction.imm_c = F::ONE;
-        cols.is_add_dep = F::from_bool(event.opcode == Opcode::ADD);
-        cols.is_sub_dep = F::from_bool(event.opcode == Opcode::SUB);
+        cols.is_add_dep = F::from_bool(event.opcode == Opcode::ADD && !is_instruction);
+        cols.is_sub_dep = F::from_bool(event.opcode == Opcode::SUB && !is_instruction);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
         let is_add = event.opcode == Opcode::ADD;
@@ -304,6 +392,11 @@ where
             local.next_pc + AB::Expr::from_u32(4),
             local.is_instruction.into(),
         );
+        // ADD/SUB can never halt, so the received continuation is always the
+        // real `next_pc` (the halt exemption lives in the syscall chip).
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
 
