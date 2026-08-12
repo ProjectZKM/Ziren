@@ -69,7 +69,54 @@ where
             AB::Expr::ONE,
             local.is_halt,
             is_sequential,
-            local.is_real,
+            // Dependency rows only: an instruction row serves itself via the frame.
+            local.is_dep.into(),
+        );
+
+        builder.assert_bool(local.is_instruction);
+        builder.assert_bool(local.is_dep);
+        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
+        builder.assert_zero(
+            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
+        );
+
+        // A real instruction carries its own program fetch, register access and
+        // `(clk, pc)` chaining.  On the halt row `next_pc` is the exit signal 0
+        // and the sent lookahead 0 + 4 = 4, exactly the tuple the legacy Cpu row
+        // sent — the PV final endpoint receives it.
+        crate::frame::eval_instruction_frame(
+            builder,
+            &local.frame,
+            local.pc.into(),
+            local.next_pc.into(),
+            local.next_pc + AB::Expr::from_u32(4),
+            local.is_instruction.into(),
+        );
+        // THE HALT EXEMPTION: the received continuation equals `next_pc` on
+        // every row except the halt, where the predecessor sent `pc + 4` (its
+        // lookahead) while this row's own `next_pc` is overridden to 0.
+        builder.when(local.is_instruction).assert_zero(
+            local.frame.state_recv_next_pc
+                - local.next_pc
+                - local.is_halt * (local.pc + AB::Expr::from_u32(4) - local.next_pc),
+        );
+        // A syscall reads-and-writes op_a; the frame rule binds hi_or_prev_a to
+        // the record's previous value, which is also where the syscall id and
+        // the extra-cycle count come from.
+        builder.assert_eq(local.frame.is_rw_a, local.is_instruction);
+        builder
+            .when(local.is_instruction)
+            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+        builder
+            .when(local.is_instruction)
+            .assert_eq(local.frame.num_extra_cycles, local.num_extra_cycles);
+        // Private shard/clk columns feed the syscall table send: tie them to
+        // the frame (the Mul coupling).
+        builder.when(local.is_instruction).assert_eq(local.shard, local.frame.shard);
+        builder.when(local.is_instruction).assert_eq(
+            local.clk,
+            AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
+                + local.frame.clk_16bit_limb,
         );
 
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`

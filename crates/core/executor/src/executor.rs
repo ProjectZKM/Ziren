@@ -1470,7 +1470,16 @@ impl<'a> Executor<'a> {
                 &record,
             );
         } else if instruction.is_syscall_instruction() {
-            self.emit_syscall_event(clk, record.a, syscall_code, b, c, next_pc);
+            self.emit_syscall_event(
+                clk,
+                record.a,
+                syscall_code,
+                b,
+                c,
+                next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else {
             log::debug!("wrong {}\n", instruction.opcode);
             unreachable!()
@@ -1807,9 +1816,14 @@ impl<'a> Executor<'a> {
             syscall_id,
             arg1,
             arg2,
+            is_instruction: 0,
+            recv_next_pc: 0,
+            b_record: None.into(),
+            c_record: None.into(),
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_arguments)]
     fn emit_syscall_event(
         &mut self,
@@ -1819,9 +1833,15 @@ impl<'a> Executor<'a> {
         arg1: u32,
         arg2: u32,
         next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
-        let syscall_event = self.syscall_event(clk, a_record, next_pc, syscall_id, arg1, arg2);
-
+        // A REAL instruction: carry the frame (see AluEvent).
+        let mut syscall_event = self.syscall_event(clk, a_record, next_pc, syscall_id, arg1, arg2);
+        syscall_event.is_instruction = 1;
+        syscall_event.recv_next_pc = recv_next_pc;
+        syscall_event.b_record = record.b.into();
+        syscall_event.c_record = record.c.into();
         self.record.syscall_events.push(syscall_event);
     }
     /// Fetch the destination register and input operand values for an ALU instruction.

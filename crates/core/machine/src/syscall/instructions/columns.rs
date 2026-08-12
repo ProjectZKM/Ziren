@@ -9,6 +9,16 @@ pub const NUM_SYSCALL_INSTR_COLS: usize = size_of::<SyscallInstrColumns<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct SyscallInstrColumns<T> {
+    /// Whether this row is a REAL instruction (all syscall rows are today).
+    pub is_instruction: T,
+
+    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
+    pub is_dep: T,
+
+    /// Program fetch, register access and `(clk, pc)` chaining; live only when
+    /// `is_instruction`.
+    pub frame: crate::frame::InstructionFrameCols<T>,
+
     pub pc: T,
     pub next_pc: T,
     pub shard: T,

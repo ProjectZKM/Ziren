@@ -63,7 +63,17 @@ impl<F: PrimeField32> MachineAir<F> for SyscallInstrsChip {
 
                     if idx < input.syscall_events.len() {
                         let event = &input.syscall_events[idx];
-                        self.event_to_row(event, cols, &mut blu);
+                        self.event_to_row(
+                            event,
+                            cols,
+                            &mut blu,
+                            &input.program,
+                        );
+                    } else {
+                        // Padding rows carry no instruction: neutralise the
+                        // frame or its register-access multiplicities break the
+                        // Memory bus.
+                        cols.frame.populate_dependency();
                     }
                 });
                 blu
@@ -91,7 +101,17 @@ impl SyscallInstrsChip {
         event: &SyscallEvent,
         cols: &mut SyscallInstrColumns<F>,
         _blu: &mut impl ByteRecord,
+        program: &zkm_core_executor::Program,
     ) {
+        let is_instruction = event.is_instruction != 0;
+        cols.is_instruction = F::from_bool(is_instruction);
+        cols.is_dep = F::from_bool(!is_instruction);
+        if is_instruction {
+            cols.frame.populate_from_syscall(event, program, _blu);
+        } else {
+            cols.frame.populate_dependency();
+        }
+
         cols.is_real = F::ONE;
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);

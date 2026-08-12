@@ -20,6 +20,7 @@
 
 use p3_air::AirBuilder;
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use zkm_core_executor::events::SyscallEvent;
 use zkm_core_executor::events::{
     AluEvent, BranchEvent, ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition,
     JumpEvent, MemInstrEvent, MemoryRecordEnum, MiscEvent, MovCondEvent,
@@ -499,6 +500,42 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         if matches!(event.opcode, Op::SB | Op::SH | Op::SW | Op::SWL | Op::SWR) {
             self.op_a_immutable = F::ONE;
         }
+    }
+
+    /// `SyscallEvent` variant of [`Self::populate_from_alu`].  A syscall
+    /// reads-and-writes op_a (the id comes in, the result goes out), so
+    /// `is_rw_a = 1` and `hi_or_prev_a` is the op_a PREVIOUS value — read back
+    /// from the populated access, since the event carries the write record.
+    /// `num_extra_cycles` is byte 3 of the incoming syscall code, exactly as
+    /// `cpu/trace.rs` derived it.
+    pub fn populate_from_syscall(
+        &mut self,
+        event: &SyscallEvent,
+        program: &Program,
+        blu: &mut impl ByteRecord,
+    ) {
+        let a_record: zkm_core_executor::events::OptionMemoryRecordEnum = if event.a_record_is_real {
+            Some(MemoryRecordEnum::Write(event.a_record)).into()
+        } else {
+            None.into()
+        };
+        self.populate_raw(
+            event.clk,
+            event.pc,
+            event.recv_next_pc,
+            event.a_record.value,
+            event.arg1,
+            event.arg2,
+            a_record,
+            event.b_record,
+            event.c_record,
+            program,
+            event.shard,
+            blu,
+        );
+        self.is_rw_a = F::ONE;
+        self.hi_or_prev_a = self.op_a_access.prev_value;
+        self.num_extra_cycles = self.op_a_access.prev_value[3];
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

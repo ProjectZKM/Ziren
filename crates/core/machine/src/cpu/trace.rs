@@ -329,6 +329,7 @@ fn cpu_owned_events(input: &ExecutionRecord) -> Vec<&CpuEvent> {
                     | Opcode::LWR
                     | Opcode::SWL
                     | Opcode::SWR
+                    | Opcode::SYSCALL
             ))
         .collect()
 }
