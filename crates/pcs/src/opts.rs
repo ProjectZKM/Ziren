@@ -19,9 +19,16 @@ const MAX_SHARD_BATCH_SIZE: usize = 8;
 /// byte-identical throughout.  Raising this default is therefore NOT a
 /// throughput change on that workload and is left alone.
 ///
-/// ⚠ What is still UNMEASURED is the shipped default PAIR (one worker AND a
-/// one-deep record/trace channel).  Every perf harness on the box overrides
-/// both to 8, so no published Ziren number was taken at these values.
+/// MEASURED Aug12: the one-deep record/trace channel WAS costing throughput.
+/// Isolating the capacity at a FIXED one worker, paired concurrent reth core:
+/// capacity 1 = 1866 kHz / 225.058 s, capacity 8 = 1991 kHz / 210.978 s
+/// (**+6.7%**), core proof `7a2135bb7205ca8d` on both arms.  The mechanism is
+/// visible in the spans: `dispatch_recv_records` falls from 14.90 s to nil while
+/// `open_s4_jagged_pcs` is unchanged (94.45 s vs 94.50 s) — no work is removed,
+/// device trace generation simply gets to run AHEAD of the prover instead of
+/// blocking it.  14.9 s of 225 s is 6.6%, which is the whole measured delta.
+/// Hence the channel is deepened here and `TRACE_GEN_WORKERS` is NOT: one
+/// worker already saturates the deeper channel.
 ///
 /// ⚠ `DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY` looks overridden by the harnesses
 /// (`DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY=512`) but is NOT: the parse arm below
@@ -29,7 +36,7 @@ const MAX_SHARD_BATCH_SIZE: usize = 8;
 /// and every measured run used this 128.
 const DEFAULT_TRACE_GEN_WORKERS: usize = 1;
 const DEFAULT_CHECKPOINTS_CHANNEL_CAPACITY: usize = 128;
-const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 1;
+const DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY: usize = 8;
 
 /// The threshold for splitting deferred events.
 pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;

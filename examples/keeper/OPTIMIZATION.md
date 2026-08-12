@@ -1313,6 +1313,13 @@ the launch pattern is.
   8/8 and there is nothing to overlap). The unspanned `CORE_PROVE` block must
   be attributed INSIDE `prove_one_core_shard`, not at the channel.
 
+  **Read that literally — it is conditioned on the harness's 8/8.** The SHIPPED
+  default was `RECORDS_AND_TRACES_CHANNEL_CAPACITY = 1`, which no harness ever
+  exercised, and at 1 the producer very much IS the limiter: `+7.2%` on reth
+  core with `dispatch_recv_records` going 14.90 s -> nil. See the Aug 12 entry
+  at the end of this file. This section's conclusion holds ABOVE capacity 1;
+  it is not a statement that the knob is inert in general.
+
 - **Also a siting lesson.** The same instrumentation placed in the host repo's
   `crates/core/machine/src/utils/prove.rs` loop produced a binary with the
   probe **stripped by the linker** — that loop is the CPU prover's and is dead
@@ -5985,3 +5992,146 @@ tendermint core `0257016181d4fa2b…`, keccak-sponge core `26b32ea05890c83b…`.
 
 Switches: none. The formula is unconditional and shared by prover, verifier,
 the recursion circuit's dummy shape and the shape enumeration.
+
+## Aug 12 — reth core leaves the GPU idle half the wall, and the one-deep record/trace channel was part of why
+
+### The census that motivated both fixes
+
+`nsys --trace=cuda`, reth core, an 89.6 s steady-state window (delay 45 s), taken
+with the harness-standard `TRACE_GEN_WORKERS=8
+RECORDS_AND_TRACES_CHANNEL_CAPACITY=8` already exported — so none of what follows
+is an artifact of a shallow pipeline.
+
+**Kernels occupy 43.7 s of the 89.6 s window. The GPU is idle 45.8 s (51.2 %).**
+`nvidia-smi dmon` over a full gate run agrees: mean util 6-7 %.
+
+Two corrections to earlier readings of this workload, both from computing the
+interval UNION rather than the sum:
+
+- **Launch overhead is not the lever.** 444,689 gaps of 1-10 us total **1.16 s**,
+  2.5 % of all idle. 39,922 sub-microsecond gaps total 0.036 s. This is the third
+  independent measurement pointing the same way (the Aug 11 sync-removal 0.999
+  and launch-batching 0.993 ratios were the first two).
+- **H2D is not the lever either, and the "many tiny transfers" reading was
+  wrong.** The 267,143 sub-4 MB copies cost **0.42 s**, not seconds. The cost is
+  1,745 bulk (>= 4 MB) copies: 40.5 GB in 5.51 s. Regular sizes move fine
+  (56 MB @ 21.5 GB/s, 64 MB @ 27.2 GB/s); ~1,017 one-off irregular sizes crawl at
+  0.1-2.6 GB/s for 4.3 s. A separate 123-copy population runs at **50.5 GB/s**.
+  But only **2.7 s of bulk H2D is exposed** (overlapping no kernel), so the whole
+  PCIe story is worth at most ~3 % here.
+
+Where the idle actually is: **433 gaps >= 10 ms total 31.8 s — 69 % of all idle
+and 35 % of wall.** 87 of them are 0.1-1 s (19.8 s alone; largest 819 / 775 /
+754 / 739 ms). Bracketing each gap by the kernels around it:
+
+| count | secs | last kernel before gap | first kernel after |
+|---|---|---|---|
+| 145 | 18.75 | `lagrangeFold` (shard N jagged sumcheck) | `_GS_NTT` (shard N+1 commit) |
+| 15 | 6.48 | `gatherLeafRows` (Merkle) | `_GS_NTT` |
+
+~25.2 s (28 % of wall) sits at the **inter-shard boundary**, 129 ms per shard.
+The prover's own span tree agrees independently: `dispatch_recv_records` +
+`dispatch_recv_commit_wait` = 39.5 s over 281 shards = **141 ms/shard**.
+
+Kernel time by phase (same window), which is the map for future work:
+
+| group | secs | launches |
+|---|---|---|
+| jagged/basefold | 11.85 | 239,780 |
+| tracegen | 8.06 | 2,970 |
+| zerocheck | 7.91 | 71,632 |
+| ntt | 5.30 | 173,050 |
+| logup_gkr | 4.02 | 57,823 |
+| merkle | 3.86 | 50,428 |
+
+### The fix
+
+`DEFAULT_RECORDS_AND_TRACES_CHANNEL_CAPACITY` 1 -> 8.
+
+The doc comment above it already recorded that `TRACE_GEN_WORKERS` measured inert
+*at capacity 8*, and flagged that the shipped default PAIR (one worker AND a
+one-deep channel) had never been measured, because every perf harness on the box
+overrides both. That gap is now closed, and the untested half was the expensive
+one.
+
+Isolating the capacity at a FIXED one worker (one variable), paired concurrent
+reth core, same binary in both arms:
+
+| run | capacity 1 | capacity 8 | delta |
+|---|---|---|---|
+| r1 | 1866 kHz / 225.058 s | 1991 kHz / 210.978 s | +6.7 % |
+| r2 | 1848 kHz / 227.302 s | 1983 kHz / 211.824 s | +7.3 % |
+| r3 | 1867 kHz / 224.998 s | 2007 kHz / 209.291 s | +7.5 % |
+
+Mean **+7.2 %**. `core.proof` = `7a2135bb7205ca8d`, 281 shards, `CORE VERIFY OK`
+on all six arms. Note the capacity-1 arm reproduces tightly (1866 / 1848 / 1867)
+while absolute kHz across differently-paired sessions does not — only the paired
+ratio is quotable.
+
+The mechanism is visible in the span tree and is *not* "less work":
+
+- `dispatch_recv_records` 14.90 s -> falls out of the top-200 entirely
+- `generate trace on device` 82.87 s -> 133.22 s (device trace generation now runs
+  AHEAD of the prover instead of blocking it, so its span covers more wall)
+- `open_s4_jagged_pcs` 94.45 s -> 94.50 s, `dispatch_recv_commit_wait` 24.02 s ->
+  23.59 s — both unchanged, the control that shows nothing was removed
+
+14.9 s of 225 s is 6.6 %, which is the whole measured delta.
+
+`TRACE_GEN_WORKERS` is deliberately left at 1: one worker already saturates the
+deeper channel, and the earlier sweep found 1 vs 8 flat inside run-to-run spread.
+
+COST: host RSS rises from ~12.5 GB to ~15.6 GB peak (sampled, reth core) — about
++3 GB for the extra buffered batches. Negligible on a 925 GB box; worth knowing
+for smaller deployments. The env override remains, so it can be dialled back.
+
+The remaining `dispatch_recv_commit_wait` (85 ms/shard) is NOT a pipelining bug:
+it was already cut from 296.9 ms/shard by the depth-1 submit-ahead, and going
+deeper (`ZKM_GPU_CORE_MAX_TASKS_PER_DEVICE=2`) measured -3.5 %. What is left is
+bounded by commit+open GPU throughput.
+
+Switches: none added. `RECORDS_AND_TRACES_CHANNEL_CAPACITY` still overrides.
+
+## Aug 12 — the weierstrass tracegen inverted by Fermat exponentiation over a bit-serial divmod (ziren-gpu)
+
+`fieldop_den` and the `op == 3` Div arm computed `den^(p-2) mod p` via
+`bn_modpow`. `bn_modpow` runs ~1.5 `bn_divmod` per exponent bit, and `bn_divmod`
+is **bit-serial long division** (`n_num * 8` iterations, each O(nout) bytes). So
+one 256-bit inverse cost **~38 M byte operations** — every one of them against a
+dynamically indexed array, which in CUDA means local memory (DRAM), not
+registers.
+
+Why that was so expensive here: these kernels launch **one thread per trace row**
+(`<<<(height-1)/64 + 1, 64>>>`), so a 16 k-row shard runs ~16 k threads — about 3
+warps per SM across 170 SMs. There is no occupancy to hide local-memory latency,
+so the spilled bignum traffic is fully exposed.
+`core_weierstrass_double_generate_trace_kernel` took **672 ms in 7 launches** and
+`..._add_...` **944 ms in 3** — together **17 % of all GPU kernel time**, and 93 %
+of the entire device-tracegen budget (7.54 s of 8.06 s).
+
+Only the inverse VALUE reaches the trace — the carry and witness columns are
+recomputed from it either way — so the algorithm is a free choice. Replaced with
+`bn_modinv`, a binary extended Euclidean inverse: ~2*bits passes of
+shift/compare/add/sub over `n_mod` bytes. Work width is `W = n_mod + 1` (it must
+hold `x + p`), which for bls12-381 is exactly 49 = `FIELDOP_MAX_LIMBS`, the tight
+case.
+
+The two surviving `bn_modpow` calls are square roots (`exp_sqrt`), not inverses,
+and correctly keep the exponentiation.
+
+### Measured
+
+- Bit-identical to `bn_modpow` on 800 host vectors across secp256k1, bn254,
+  secp256r1 and bls12-381 (a = 0, a = 1, a = p-1, and randoms), plus an
+  `a * a^-1 == 1` check. **235x** faster on the host.
+- reth core, paired concurrent A/B: baseline 1821 kHz / 230.560 s vs
+  1854 kHz / 226.577 s = **+1.8 %**. `core.proof` `7a2135bb7205ca8d` on both
+  arms, 281 shards, `CORE VERIFY OK`.
+
+The gain is only +1.8 % because reth core is host-bound half the wall (see the
+census above) — removing GPU kernel time does not convert 1:1 into wall time.
+
+NEXT in the same file: `bn_divmod` is still bit-serial and is now the dominant
+term in every remaining field op (~11 per weierstrass row).
+
+Switches: none. The inverse is unconditional.
