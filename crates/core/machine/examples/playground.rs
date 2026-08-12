@@ -232,8 +232,75 @@ fn main() {
             eprintln!("cpu_events (one per executed instruction) = {cpu}");
             eprintln!("shards = {}", rt.records.len());
         }
+        "all" => {
+            // Prove + verify EVERY test-artifact guest.  This is the gate an
+            // architecture-level change must pass before anything downstream
+            // (goldens, vk generation): the four ad-hoc fixtures cover the
+            // integer core, but only the full set exercises every precompile
+            // chip, every syscall path, and the panic/unconstrained edges.
+            let artifacts: &[(&str, &[u8])] = &[
+                ("sha2-rust", test_artifacts::SHA2_RUST_ELF),
+                ("fibonacci", test_artifacts::FIBONACCI_ELF),
+                ("hello-world", test_artifacts::HELLO_WORLD_ELF),
+                ("poseidon2-permute", test_artifacts::POSEIDON2_PERMUTE_ELF),
+                ("sha2", test_artifacts::SHA2_ELF),
+                ("sha-extend", test_artifacts::SHA_EXTEND_ELF),
+                ("sha-compress", test_artifacts::SHA_COMPRESS_ELF),
+                ("keccak-sponge", test_artifacts::KECCAK_SPONGE_ELF),
+                ("ed25519", test_artifacts::ED25519_ELF),
+                ("cycle-tracker", test_artifacts::CYCLE_TRACKER_ELF),
+                ("ed-add", test_artifacts::ED_ADD_ELF),
+                ("ed-decompress", test_artifacts::ED_DECOMPRESS_ELF),
+                ("secp256k1-add", test_artifacts::SECP256K1_ADD_ELF),
+                ("secp256k1-decompress", test_artifacts::SECP256K1_DECOMPRESS_ELF),
+                ("secp256k1-double", test_artifacts::SECP256K1_DOUBLE_ELF),
+                ("secp256r1-add", test_artifacts::SECP256R1_ADD_ELF),
+                ("secp256r1-decompress", test_artifacts::SECP256R1_DECOMPRESS_ELF),
+                ("secp256r1-double", test_artifacts::SECP256R1_DOUBLE_ELF),
+                ("bn254-add", test_artifacts::BN254_ADD_ELF),
+                ("bn254-double", test_artifacts::BN254_DOUBLE_ELF),
+                ("bn254-mul", test_artifacts::BN254_MUL_ELF),
+                ("secp256k1-mul", test_artifacts::SECP256K1_MUL_ELF),
+                ("bls12381-add", test_artifacts::BLS12381_ADD_ELF),
+                ("bls12381-double", test_artifacts::BLS12381_DOUBLE_ELF),
+                ("bls12381-mul", test_artifacts::BLS12381_MUL_ELF),
+                ("uint256-mul", test_artifacts::UINT256_MUL_ELF),
+                ("bls12381-decompress", test_artifacts::BLS12381_DECOMPRESS_ELF),
+                ("bls12381-fp", test_artifacts::BLS12381_FP_ELF),
+                ("bls12381-fp2-mul", test_artifacts::BLS12381_FP2_MUL_ELF),
+                ("bls12381-fp2-addsub", test_artifacts::BLS12381_FP2_ADDSUB_ELF),
+                ("bn254-fp", test_artifacts::BN254_FP_ELF),
+                ("bn254-fp2-addsub", test_artifacts::BN254_FP2_ADDSUB_ELF),
+                ("bn254-fp2-mul", test_artifacts::BN254_FP2_MUL_ELF),
+                ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
+                ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
+            ];
+            let mut failed: Vec<&str> = vec![];
+            for (name, elf) in artifacts {
+                eprint!("{name:<24} ");
+                let program = Program::from(elf).expect("artifact must parse");
+                match std::panic::catch_unwind(|| run_test::<CpuProver<_, _>>(program)) {
+                    Ok(Ok(_)) => eprintln!("PASS"),
+                    Ok(Err(e)) => {
+                        eprintln!("FAIL: {e:?}");
+                        failed.push(name);
+                    }
+                    Err(_) => {
+                        eprintln!("PANIC");
+                        failed.push(name);
+                    }
+                }
+            }
+            if failed.is_empty() {
+                eprintln!("ALL {} ARTIFACTS PASS", artifacts.len());
+            } else {
+                panic!("{} artifacts FAILED: {failed:?}", failed.len());
+            }
+        }
         other => {
-            panic!("unknown command {other:?}; expected execute | buses | prove | widths | rows")
+            panic!(
+                "unknown command {other:?}; expected execute | buses | prove | widths | rows | all"
+            )
         }
     }
 }

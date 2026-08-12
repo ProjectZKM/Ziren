@@ -156,6 +156,11 @@ mod tests {
             syscall_id: syscall_code.syscall_id(),
             arg1: a_ptr,
             arg2: b_ptr,
+            // Test fixture: a dependency-shaped event, no frame.
+            is_instruction: 0,
+            recv_next_pc: 0,
+            b_record: None.into(),
+            c_record: None.into(),
         };
 
         execution_record.precompile_events.add_event(syscall_code, syscall_event, event);
