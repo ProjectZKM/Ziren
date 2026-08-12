@@ -1152,7 +1152,12 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     }
 
     fn estimate_lde_size(&self, shape: &Shape<MipsAirId>) -> usize {
-        shape.iter().map(|(air, height)| self.costs[air] * (1 << height)).sum()
+        // `MipsAirId::Cpu` is the VIRTUAL cycles axis: no chip, no cost —
+        // the regenerated costs table has no entry for it.
+        shape
+            .iter()
+            .map(|(air, height)| self.costs.get(air).copied().unwrap_or(0) * (1 << height))
+            .sum()
     }
 
 }

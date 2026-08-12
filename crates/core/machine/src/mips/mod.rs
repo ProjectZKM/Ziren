@@ -518,6 +518,10 @@ impl<F: PrimeField32> MipsAir<F> {
             (MipsAirId::Branch, record.branch_events.len()),
             (MipsAirId::Jump, record.jump_events.len()),
             (MipsAirId::MovCond, record.movcond_events.len()),
+            // The VIRTUAL cycles axis: no Cpu chip exists, but the shape
+            // system (shard-size banding, cluster fitting, the vk
+            // enumeration) keys the shard's cycle count under this id.
+            (MipsAirId::Cpu, record.cpu_events.len()),
             (MipsAirId::MiscInstrs, record.misc_events.len()),
             (MipsAirId::LoadNarrow, record.memory_load_narrow_events.len()),
             (MipsAirId::LoadWord, record.memory_load_word_events.len()),

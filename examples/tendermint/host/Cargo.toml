@@ -12,6 +12,7 @@ tendermint-light-client-verifier = { version = "0.40.3", default-features = fals
   "rust-crypto",
 ] }
 serde_cbor = "0.11.2"
+bincode = "1.3.3"
 
 [build-dependencies]
 zkm-build = { workspace = true }

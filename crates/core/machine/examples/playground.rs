@@ -102,8 +102,9 @@ fn main() {
     let cmd = args.next().unwrap_or_else(|| "buses".into());
     let name = args.next().unwrap_or_else(|| "fibonacci".into());
     banner(&cmd, &name);
-    // `all` takes an optional subset list, not a fixture/ELF — resolve lazily.
-    let program = if cmd == "all" { None } else { Some(resolve(&name)) };
+    // `all` (optional subset list) and `dump` (output dir) don't take a
+    // fixture/ELF — resolve lazily.
+    let program = if cmd == "all" || cmd == "dump" { None } else { Some(resolve(&name)) };
     let program = move || program.expect("mode needs a fixture");
 
     match cmd.as_str() {
@@ -235,6 +236,89 @@ fn main() {
                 if alu == 0 { 0.0 } else { 100.0 * tot_dep as f64 / alu as f64 });
             eprintln!("cpu_events (one per executed instruction) = {cpu}");
             eprintln!("shards = {}", rt.records.len());
+        }
+        "dump" => {
+            // Write <out>/<name>/{program.bin,stdin.bin} for every test
+            // artifact, in the format `find_maximal_shapes --list` consumes —
+            // the shape-artifact regeneration sweep runs the SAME corpus the
+            // all-mode proves.
+            let out = std::env::args().nth(2).expect("dump needs an output dir");
+            let artifacts: &[(&str, &[u8])] = &[
+                ("sha2-rust", test_artifacts::SHA2_RUST_ELF),
+                ("fibonacci", test_artifacts::FIBONACCI_ELF),
+                ("hello-world", test_artifacts::HELLO_WORLD_ELF),
+                ("poseidon2-permute", test_artifacts::POSEIDON2_PERMUTE_ELF),
+                ("sha2", test_artifacts::SHA2_ELF),
+                ("sha-extend", test_artifacts::SHA_EXTEND_ELF),
+                ("sha-compress", test_artifacts::SHA_COMPRESS_ELF),
+                ("keccak-sponge", test_artifacts::KECCAK_SPONGE_ELF),
+                ("ed25519", test_artifacts::ED25519_ELF),
+                ("cycle-tracker", test_artifacts::CYCLE_TRACKER_ELF),
+                ("ed-add", test_artifacts::ED_ADD_ELF),
+                ("ed-decompress", test_artifacts::ED_DECOMPRESS_ELF),
+                ("secp256k1-add", test_artifacts::SECP256K1_ADD_ELF),
+                ("secp256k1-decompress", test_artifacts::SECP256K1_DECOMPRESS_ELF),
+                ("secp256k1-double", test_artifacts::SECP256K1_DOUBLE_ELF),
+                ("secp256r1-add", test_artifacts::SECP256R1_ADD_ELF),
+                ("secp256r1-decompress", test_artifacts::SECP256R1_DECOMPRESS_ELF),
+                ("secp256r1-double", test_artifacts::SECP256R1_DOUBLE_ELF),
+                ("bn254-add", test_artifacts::BN254_ADD_ELF),
+                ("bn254-double", test_artifacts::BN254_DOUBLE_ELF),
+                ("bn254-mul", test_artifacts::BN254_MUL_ELF),
+                ("secp256k1-mul", test_artifacts::SECP256K1_MUL_ELF),
+                ("bls12381-add", test_artifacts::BLS12381_ADD_ELF),
+                ("bls12381-double", test_artifacts::BLS12381_DOUBLE_ELF),
+                ("bls12381-mul", test_artifacts::BLS12381_MUL_ELF),
+                ("uint256-mul", test_artifacts::UINT256_MUL_ELF),
+                ("bls12381-decompress", test_artifacts::BLS12381_DECOMPRESS_ELF),
+                ("bls12381-fp", test_artifacts::BLS12381_FP_ELF),
+                ("bls12381-fp2-mul", test_artifacts::BLS12381_FP2_MUL_ELF),
+                ("bls12381-fp2-addsub", test_artifacts::BLS12381_FP2_ADDSUB_ELF),
+                ("bn254-fp", test_artifacts::BN254_FP_ELF),
+                ("bn254-fp2-addsub", test_artifacts::BN254_FP2_ADDSUB_ELF),
+                ("bn254-fp2-mul", test_artifacts::BN254_FP2_MUL_ELF),
+                ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
+                ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
+            ];
+            fn hexb2(s: &str) -> Vec<u8> {
+                (0..s.len())
+                    .step_by(2)
+                    .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                    .collect()
+            }
+            for (name, elf) in artifacts {
+                let dir = std::path::Path::new(&out).join(name);
+                std::fs::create_dir_all(&dir).unwrap();
+                std::fs::write(dir.join("program.bin"), elf).unwrap();
+                let stdin = match *name {
+                    "sha2-rust" => {
+                        let input = b"hello world".to_vec();
+                        let expected = hexb2(
+                            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
+                        );
+                        let mut s = ZKMStdin::new();
+                        s.write(&expected);
+                        s.write(&input);
+                        s
+                    }
+                    "secp256k1-decompress" => ZKMStdin::from(
+                        hexb2("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+                            .as_slice(),
+                    ),
+                    "secp256r1-decompress" => ZKMStdin::from(
+                        hexb2("036b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
+                            .as_slice(),
+                    ),
+                    "bls12381-decompress" => ZKMStdin::from(
+                        hexb2("97f1d3a73197d7942695638c4fa9ac0fc3688c4f9774b905a14e3a3f171bac586c55e83ff97a1aeffb3af00adb22c6bb")
+                            .as_slice(),
+                    ),
+                    _ => ZKMStdin::new(),
+                };
+                std::fs::write(dir.join("stdin.bin"), bincode::serialize(&stdin).unwrap())
+                    .unwrap();
+                eprintln!("dumped {name}");
+            }
         }
         "all" => {
             // Prove + verify EVERY test-artifact guest.  This is the gate an
