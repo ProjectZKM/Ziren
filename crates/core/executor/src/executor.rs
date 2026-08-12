@@ -1409,7 +1409,18 @@ impl<'a> Executor<'a> {
         );
 
         if instruction.is_alu_instruction() {
-            self.emit_alu_event(clk, instruction.opcode, hi_or_prev_a, a, b, c, record.hi);
+            self.emit_alu_event(
+                clk,
+                instruction.opcode,
+                hi_or_prev_a,
+                a,
+                b,
+                c,
+                record.hi,
+                next_next_pc,
+                recv_next_pc,
+                &record,
+            );
         } else if instruction.is_memory_load_instruction()
             || instruction.is_memory_store_instruction()
         {
@@ -1481,6 +1492,7 @@ impl<'a> Executor<'a> {
     /// AluEvent, hi_record branching); inlining bloats execute_alu's
     /// icache budget. LLVM's default heuristic is correct here.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn emit_alu_event(
         &mut self,
         clk: u32,
@@ -1490,7 +1502,14 @@ impl<'a> Executor<'a> {
         b: u32,
         c: u32,
         hi_record: Option<MemoryRecordEnum>,
+        next_next_pc: u32,
+        recv_next_pc: u32,
+        record: &MemoryAccessRecord,
     ) {
+        // A REAL instruction: carry the frame so the chip can eventually own
+        // its program fetch / state chaining / register access instead of
+        // receiving a decoded instruction from CpuChip.  The synthetic
+        // dependency rows in dependencies.rs keep `is_instruction: 0`.
         let event = AluEvent {
             pc: self.state.pc,
             next_pc: self.state.next_pc,
@@ -1499,7 +1518,16 @@ impl<'a> Executor<'a> {
             a,
             b,
             c,
-            ..Default::default()
+            is_instruction: 1,
+            clk,
+            next_next_pc,
+            recv_next_pc,
+            a_record: record.a.into(),
+            // `OptionMemoryReadRecord` is the narrow read-only mirror and
+            // converts straight from `Option<MemoryRecordEnum>`, matching how
+            // `CpuEventFfi` handles op_b / op_c.
+            b_record: record.b.into(),
+            c_record: record.c.into(),
         };
 
         let (hi_access, hi_record_is_real) = match hi_record {
