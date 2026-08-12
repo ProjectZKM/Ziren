@@ -622,13 +622,20 @@ where
                                         .map(|shape| {
                                             shape
                                                 .iter()
-                                                .map(|(air, _log_h)| {
+                                                .filter_map(|(air, _log_h)| {
+                                                    // The shape still carries a `Cpu`
+                                                    // AXIS (the shard's cycle band),
+                                                    // but there is no Cpu CHIP —
+                                                    // injecting a non-machine name
+                                                    // would shift the alphabetical
+                                                    // chips⇄traces zip downstream.
+                                                    // Only real machine chips are
+                                                    // injectable.
                                                     let name = air.to_string();
                                                     let width = cluster_chip_widths
                                                         .get(&name)
-                                                        .copied()
-                                                        .unwrap_or(1);
-                                                    (name, width)
+                                                        .copied()?;
+                                                    Some((name, width))
                                                 })
                                                 .collect()
                                         });

@@ -18,5 +18,4 @@
 #include "shift_right.hpp"
 #include "syscall.hpp"
 #include "syscall_instrs.hpp"
-#include "cpu.hpp"
 #include "zkm-core-machine-sys-cbindgen.hpp"

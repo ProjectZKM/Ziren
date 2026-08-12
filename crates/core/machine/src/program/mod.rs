@@ -17,7 +17,7 @@ use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
 use zkm_pcs::air::{MachineAir, ZKMAirBuilder};
 
-use crate::cpu::columns::InstructionCols;
+use crate::instruction::InstructionCols;
 
 /// The number of preprocessed program columns.
 pub const NUM_PROGRAM_PREPROCESSED_COLS: usize = size_of::<ProgramPreprocessedCols<u8>>();

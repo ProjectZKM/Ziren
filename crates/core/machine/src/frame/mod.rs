@@ -32,7 +32,7 @@ use zkm_pcs::{air::ZKMAirBuilder, Word};
 
 use crate::{
     air::{MemoryAirBuilder, WordAirBuilder, ZKMCoreAirBuilder},
-    cpu::columns::InstructionCols,
+    instruction::InstructionCols,
     memory::{RegisterCols, RegisterReadCols, RegisterReadWriteCols},
 };
 

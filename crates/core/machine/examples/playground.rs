@@ -102,17 +102,20 @@ fn main() {
     let cmd = args.next().unwrap_or_else(|| "buses".into());
     let name = args.next().unwrap_or_else(|| "fibonacci".into());
     banner(&cmd, &name);
-    let program = resolve(&name);
+    // `all` takes an optional subset list, not a fixture/ELF — resolve lazily.
+    let program = if cmd == "all" { None } else { Some(resolve(&name)) };
+    let program = move || program.expect("mode needs a fixture");
 
     match cmd.as_str() {
         "execute" => {
-            let mut rt = Executor::new(program, ZKMCoreOpts::default());
+            let mut rt = Executor::new(program(), ZKMCoreOpts::default());
             rt.run().expect("execution failed");
             eprintln!("shards       = {}", rt.records.len());
             eprintln!("global_clk   = {}", rt.state.global_clk);
             eprintln!("exited       = {}", rt.state.exited);
         }
         "buses" => {
+            let program = program();
             let program_clone = program.clone();
             let mut rt = Executor::new(program, ZKMCoreOpts::default());
             rt.run().expect("execution failed");
@@ -145,7 +148,7 @@ fn main() {
             }
         }
         "prove" => {
-            run_test::<CpuProver<_, _>>(program).expect("prove + verify failed");
+            run_test::<CpuProver<_, _>>(program()).expect("prove + verify failed");
             eprintln!("prove + verify OK");
         }
         "widths" => {
@@ -193,7 +196,7 @@ fn main() {
             // registers.  Gating the frame leaves those columns dead on every
             // dependency row, so a high dependency share erodes (or reverses)
             // the area win, and argues for splitting the chip instead.
-            let mut rt = Executor::new(program, ZKMCoreOpts::default());
+            let mut rt = Executor::new(program(), ZKMCoreOpts::default());
             rt.run().expect("execution failed");
             let mut cpu = 0usize;
             let mut tot_real = 0usize;

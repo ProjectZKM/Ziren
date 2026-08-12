@@ -19,9 +19,9 @@ pub fn estimate_mips_lde_size(
     // Compute the program chip contribution.
     cells += MAX_PROGRAM_SIZE * costs_per_air[&MipsAirId::Program];
 
-    // Compute the cpu chip contribution.
-    cells +=
-        (num_events_per_air[MipsAirId::Cpu]).next_power_of_two() * costs_per_air[&MipsAirId::Cpu];
+    // There is no Cpu chip any more (every instruction chip carries its own
+    // frame); `MipsAirId::Cpu` survives only as the VIRTUAL cycles axis for
+    // shard splitting and shape banding, and contributes no area.
 
     // Compute the addsub chip contribution.
     cells += (num_events_per_air[MipsAirId::AddSub]).next_power_of_two()
@@ -376,8 +376,12 @@ impl ShardSplitAccumulator {
 
     /// Whether this shard has reached its trace-area budget / its per-chip height cap.
     ///
-    /// `cpu_cycles` is the `Cpu` chip's row count (`clk / 5`); see the type-level note on why
+    /// `cpu_cycles` is the executed-cycle count (`clk / 5`); see the type-level note on why
     /// it is passed in rather than accumulated. This is SP1's `check_shard_limit`.
+    /// With the Cpu chip gone its width is absent from `costs` (EnumMap defaults it
+    /// to 0), so the `cpu_cycles` term contributes NO area; it still participates in
+    /// the HEIGHT cap, which also bounds the 24-bit clk decomposition every frame
+    /// range-checks.
     #[inline]
     #[must_use]
     pub fn check_shard_limit(&self, cpu_cycles: u64) -> (bool, bool) {
@@ -541,13 +545,16 @@ mod tests {
     #[test]
     fn check_shard_limit_fires_on_either_budget() {
         let costs = costs();
-        let cpu_width = costs[&MipsAirId::Cpu];
+        let add_sub_width = costs[&MipsAirId::AddSub];
         // A fresh shard is not empty: it already carries the unconditional `MemoryBump` seed.
         let seed_area = ShardSplitAccumulator::new(&costs, u64::MAX, u64::MAX).trace_area(0);
 
-        // Area budget sized so the second Cpu row is exactly what crosses it.
-        let acc = ShardSplitAccumulator::new(&costs, seed_area + cpu_width * 2, u64::MAX);
+        // Area budget sized so the second AddSub row is exactly what crosses it
+        // (the Cpu chip is gone: cycles contribute no area, only height).
+        let mut acc = ShardSplitAccumulator::new(&costs, seed_area + add_sub_width * 2, u64::MAX);
+        acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(1), (false, false));
+        acc.add_opcode(Opcode::ADD, 1);
         assert_eq!(acc.check_shard_limit(2), (true, false));
 
         // Height budget, independent of area. `NUM_REGISTERS` seeded rows sit below it.

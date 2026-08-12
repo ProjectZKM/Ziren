@@ -6,7 +6,7 @@ use zkm_pcs::{
     LookupKind,
 };
 
-use crate::cpu::columns::InstructionCols;
+use crate::instruction::InstructionCols;
 
 /// A trait which contains methods related to program lookups in an AIR.
 pub trait ProgramAirBuilder: BaseAirBuilder {

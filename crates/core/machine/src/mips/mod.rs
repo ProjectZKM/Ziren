@@ -34,7 +34,6 @@ pub(crate) mod mips_chips {
         },
         bytes::ByteChip,
         control_flow::{BranchChip, JumpChip},
-        cpu::CpuChip,
         memory::{
             LoadNarrowChip, LoadWordChip, MemoryGlobalChip, MemoryUnalignedChip, StoreNarrowChip,
             StoreWordChip,
@@ -85,8 +84,6 @@ pub const MAX_NUMBER_OF_SHARDS: usize = 1 << MAX_LOG_NUMBER_OF_SHARDS;
 pub enum MipsAir<F: PrimeField32> {
     /// An AIR that contains a preprocessed program table and a lookup for the instructions.
     Program(ProgramChip),
-    /// An AIR for the MIPS CPU. Each row represents a cpu cycle.
-    Cpu(CpuChip),
     /// An AIR for the MIPS Add and SUB instruction.
     Add(AddSubChip),
     /// An AIR for MIPS Bitwise instructions.
@@ -235,10 +232,6 @@ impl<F: PrimeField32> MipsAir<F> {
 
         // The order of the chips is used to determine the order of trace generation.
         let mut chips = vec![];
-        let cpu = Chip::new(MipsAir::Cpu(CpuChip::default()));
-        costs.insert(cpu.name(), cpu.cost());
-        chips.push(cpu);
-
         let program = Chip::new(MipsAir::Program(ProgramChip::default()));
         costs.insert(program.name(), program.cost());
         chips.push(program);
@@ -522,7 +515,6 @@ impl<F: PrimeField32> MipsAir<F> {
     /// Get the heights of the chips for a given execution record.
     pub fn core_heights(record: &ExecutionRecord) -> Vec<(MipsAirId, usize)> {
         vec![
-            (MipsAirId::Cpu, record.cpu_events.len()),
             (MipsAirId::Branch, record.branch_events.len()),
             (MipsAirId::Jump, record.jump_events.len()),
             (MipsAirId::MovCond, record.movcond_events.len()),
@@ -599,7 +591,6 @@ impl<F: PrimeField32> MipsAir<F> {
 
     pub(crate) fn get_all_core_airs() -> Vec<Self> {
         vec![
-            MipsAir::Cpu(CpuChip::default()),
             MipsAir::Add(AddSubChip::default()),
             MipsAir::Bitwise(BitwiseChip::default()),
             MipsAir::Mul(MulChip::default()),
@@ -809,7 +800,6 @@ impl<F: PrimeField32> MipsAir<F> {
             Self::Add(_) => unreachable!("Invalid for core chip"),
             Self::Bitwise(_) => unreachable!("Invalid for core chip"),
             Self::DivRem(_) => unreachable!("Invalid for core chip"),
-            Self::Cpu(_) => unreachable!("Invalid for core chip"),
             Self::MemoryGlobalInit(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryGlobalFinal(_) => unreachable!("Invalid for memory init/final"),
             Self::MemoryLocal(_) => unreachable!("Invalid for memory local"),

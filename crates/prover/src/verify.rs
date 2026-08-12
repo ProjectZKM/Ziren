@@ -5,7 +5,6 @@ use num_bigint::BigUint;
 use p3_field::{PrimeCharacteristicRing, PrimeField};
 use p3_koala_bear::KoalaBear;
 use zkm_core_executor::{subproof::SubproofVerifier, ZKMReduceProof};
-use zkm_core_machine::cpu::MAX_CPU_LOG_DEGREE;
 use zkm_primitives::{consts::WORD_SIZE, io::ZKMPublicValues};
 
 use thiserror::Error;
@@ -68,24 +67,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         // First shard has a "CPU" constraint.
         //
-        // Check that the first shard has a "CPU".
-        let first_shard = proof.0.first().unwrap();
-        if !first_shard.contains_cpu() {
-            return Err(MachineVerificationError::MissingCpuInFirstShard);
-        }
-
-        // CPU log degree bound constraints.
-        //
-        // Check that the CPU log degree does not exceed `MAX_CPU_LOG_DEGREE`. This is to ensure
-        // that the lookup argument's multiplicities do not overflow.
-        for shard_proof in proof.0.iter() {
-            if shard_proof.contains_cpu() {
-                let log_degree_cpu = shard_proof.log_degree_cpu();
-                if log_degree_cpu > MAX_CPU_LOG_DEGREE {
-                    return Err(MachineVerificationError::CpuLogDegreeTooLarge(log_degree_cpu));
-                }
-            }
-        }
+        // (SP1 parity) There is no Cpu chip any more — every instruction chip
+        // carries its own frame, so the old "first shard has a CPU" and
+        // per-shard CPU log-degree checks are gone.  Multiplicity overflow is
+        // bounded by the shard size cap exactly as in SP1.
 
         // Shard constraints.
         //
