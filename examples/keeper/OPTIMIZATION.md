@@ -6519,3 +6519,39 @@ Two named residuals:
    537k copies — the `CpuEventFfi` pinned staging pool died with the Cpu chip
    and was never generalised to the 18 per-chip event vectors.  The same
    produce-into-pinned pattern that paid +5.6 % on cpu events applies.
+
+## The Instruction bus is deleted — every chip proves its sub-operations in-row (Aug 13)
+
+The endgame of the dependency-inlining arc.  After Branch/Jump, the last
+three requesters were inlined with three new embeddable gadgets extracted
+from their chips' cores:
+
+- `MulOperation` (Mul chip core): DivRem's `c * quotient` and the
+  MADD/MSUB family's `op_b * op_c`.
+- `ShiftRightOperation` (ShiftRight core): CloClz's witness shift and
+  INS's ROR/SRL chain; `ShiftLeftOperation` (ShiftLeft core): EXT/INS SLLs.
+- DivRem also inlines its two negation ADDs and the SLTU remainder check
+  with the existing `AddOperation`/`LtOperation`.
+
+With no senders left, `receive_instruction` died on ALL 18 chips, along
+with the `is_instruction`/`is_dep` columns, `send_alu*`, `UNUSED_PC`, the
+executor's `dependencies.rs`, and the splitter's dependency modeling.
+Each chip row sheds one 17-field bus interaction — the interaction-bloat
+lever the Aug-12 census named.  `mips_costs.json`: workhorse chips got
+cheaper (AddSub 72→69, Lt 84→82, Branch 134→132, memory −2 each); the
+rare-opcode chips absorbed their gadgets (DivRem 159→199, CloClz 69→120,
+MiscInstrs 125→464 — INS carries 4 shift gadgets; MADD/EXT/INS are rare,
+and the gadget columns are dedicated, NOT in the union, because union
+aliasing would evaluate one variant's constraints on another's data).
+
+**Soundness fix shipped in the same pass**: since the Cpu chip's deletion
+the bus receive had multiplicity 0 on instruction rows, leaving every
+chip's local operand columns (a, b, c) UNBOUND to the frame's register
+accesses.  Every chip now ties `a == frame.op_a_value`,
+`b == frame.op_b_val()`, `c == frame.op_c_val()` (degree-1 word ties).
+
+Validation: host FFI parity 7/7 (3 programs × 18 chips byte-identical),
+device parity 18/18 on fibonacci (one cloclz padding fix on the GPU
+side), fib + tendermint GPU gates VERIFY OK, all e2e fixture proves green
+(MADD/EXT/INS, MovCond, INS width=32).  Tendermint — pure instruction
+chips, zero precompiles — jumped to **4395 kHz** (36 shards).
