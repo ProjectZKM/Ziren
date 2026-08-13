@@ -6751,10 +6751,16 @@ Two hard-won geometry/scheduling rules from the GPU side:
 2. **Gate the retained set by shard SIZE, not free VRAM**: the retained
    ~2.2 GiB must coexist with the NEXT shard's GKR peak, and free VRAM
    sampled at commit time cannot predict that peak (margins from 9 to
-   14 GiB all OOMed reth); the shard's own cell count can.
-   `ZIREN_GPU_COMMIT_BUILD_MAX_CELLS` (default 150M) keeps small/medium
-   shards on the commit-time path and lets oversized shards fall back to
-   the open-path build, byte-identically.
+   14 GiB all OOMed reth); the shard's own cell count can.  A 150M-cell
+   ceiling keeps small/medium shards on the commit-time path and lets
+   oversized shards fall back to the open-path build, byte-identically.
+   The ceiling is a hardcoded constant, not an env flag: a 150M-vs-200M
+   probe measured 200M-cell commit builds OOMing the reth GKR peak
+   (rc=134), so 150M is the validated value, and the temporary
+   `ZIREN_GPU_COMMIT_BUILD_MAX_CELLS` knob was deleted after the A/B
+   below per the SP1-parity rule (no Ziren-specific gate flags SP1
+   lacks).  Raising the ceiling is whole-shard-concurrency work (it
+   re-bounds VRAM admission), not a tuning knob.
 
 Measured cost — initially read as −4.6 % (2708/2722 vs the 2849 ATH)
 and accepted for parity, then RETRACTED by a proper within-binary A/B:
