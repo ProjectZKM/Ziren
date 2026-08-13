@@ -143,6 +143,31 @@ where
     /// the same commit serves every shard.
     pub preprocessed_commit_data:
         &'a crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::BfMmcs>,
+    /// SP1-bridge: the commit-time jagged commitment retained by `commit()`
+    /// — SP1's `commit_traces` → `prove_trusted_evaluations` prover-data
+    /// flow (`hypercube/src/prover/shard.rs:678`).  `Some` => the driver
+    /// CONSUMES it (digest observed, precompute opened) instead of the
+    /// legacy late-binding build; `None` => that legacy build (byte-identical
+    /// value, computed inside the prove pass).
+    pub commit_data: Option<RetainedJaggedCommit<SC>>,
+}
+
+/// SP1-bridge: what `commit()` retains for the shard prove — the jagged
+/// hash-bind digest (the transcript's `main_commitment`) and the precomputed
+/// BaseFold commit (codewords + tree + packing).  Mirrors SP1's
+/// `JaggedProverData` half of `commit_multilinears`'s return.
+pub struct RetainedJaggedCommit<SC>
+where
+    SC: StarkGenericConfig + crate::BasefoldRing,
+{
+    /// The jagged hash-bind digest the Stage-1 prologue observes.
+    pub main_commitment: [Val<SC>; 8],
+    /// The precomputed BaseFold commit consumed by the jagged open.
+    pub precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<SC::BfMmcs>,
+    /// GPU-only: the device dense-Q channel threaded to
+    /// `prove_trusted_evaluations_gpu` (type-erased so the host crate needs
+    /// no device types; `None` on the CPU prover).
+    pub device_dense_q: Option<Box<dyn core::any::Any + Send + Sync>>,
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -486,6 +511,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             preprocessed_commit_data,
             main_traces,
             public_values,
+            commit_data,
         } = data;
         // SP1-parity: source the three former carrier params from `self`/traces
         // (byte-identical to the values the driver used to thread in).
@@ -567,6 +593,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
             // commit during this prove pass (for BOTH the inner and the
             // OUTER/wrap ring).
             self,
+            // SP1-bridge: the commit-time retained commitment, when the
+            // prover's `commit()` produced one (consume-don't-rebuild).
+            commit_data,
         )
     }
 
@@ -1424,6 +1453,9 @@ where
             // SP1-parity: `max_log_row_count` / `orientation` (Msb) / `dense_rev`
             // and the recursion AREA PIN are sourced inside
             // `prove_shard_to_basefold` from the traces + self, not threaded here.
+            // SP1-bridge: the CPU commit does not retain yet (next step of the
+            // bridge) — the driver's None arm is the legacy inline build.
+            commit_data: None,
         },
         &mut shard_challenger,
     );

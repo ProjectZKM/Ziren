@@ -275,6 +275,10 @@ pub fn prove_shard_with_data<SC, A, P>(
     // `commit_multilinears` / `prove_trusted_evaluations` are the two overridable
     // points, so a `StarkGpuProver` is picked up here with no extra indirection.
     prover: &P,
+    // SP1-bridge: the commit-time jagged commitment retained by `commit()`
+    // (SP1's `commit_traces` → prover-data flow).  `Some` => consume; `None`
+    // => the legacy in-pass build below (byte-identical value).
+    commit_data: Option<crate::prover::RetainedJaggedCommit<SC>>,
 ) -> BasefoldShardProof<Val<SC>, Challenge<SC>>
 where
     SC: StarkGenericConfig + crate::BasefoldRing,
@@ -362,14 +366,26 @@ where
         shared_trace_mles.to_vec();
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> =
         chips.iter().map(|_| None).collect();
-    let (commit_traces, main_commitment, precomputed_commit) =
-        maybe_auto_precompute_basefold::<SC, A, P>(
+    let (commit_traces, main_commitment, precomputed_commit) = match commit_data {
+        // SP1-bridge: `commit()` already built and retained the jagged
+        // commitment (SP1's `commit_traces` → `prove_trusted_evaluations`
+        // prover-data flow) — consume it.  The views pass through untouched,
+        // exactly as `maybe_auto_precompute_basefold` returns them unchanged;
+        // the digest and precompute are the identical values that build would
+        // have produced (same seam, same inputs, one shard-phase earlier).
+        Some(retained) => (
+            commit_traces,
+            retained.main_commitment,
+            retained.precomputed,
+        ),
+        None => maybe_auto_precompute_basefold::<SC, A, P>(
             prover,
             chips,
             commit_traces,
             dense_rev,
             recursion_area_pin,
-        );
+        ),
+    };
     // `commit_traces` is kept OWNED (no reborrow): the dims sites below borrow
     // it, and the jagged open (`produce`) at Stage 4 MOVES it in so its per-chip
     // cells become the open's `chip_traces` with NO clone (retires copy-SITE 2).
