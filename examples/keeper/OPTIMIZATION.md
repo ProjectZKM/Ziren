@@ -6486,3 +6486,36 @@ genuinely packs 2.5e8.  A single probe at `ELEMENT_THRESHOLD=2.9e8` gives
 ABBA is queued.  Also visible in the first post-inline nsys census: pinned
 H2D collapsed from 44.8 GB to 2 GB (the `CpuEventFfi` upload died with the
 Cpu chip) leaving 138 GB of PAGEABLE event uploads — the next H2D lever.
+
+### The threshold probe was neutral, and the clean census names the real residuals
+
+`ELEMENT_THRESHOLD=2.9e8` (284 shards ≈ baseline's 281) vs the default
+2.5165e8 (318 shards), 4-run ABBA each, slots swapped, all verified:
+**+2.0 % mean with MIXED per-slot signs** (GPU7 −0.9 %, GPU6 +4.9 %) — inside
+noise.  Fewer-but-bigger shards is NOT where the remaining −15.7 % lives.
+Default kept (no VRAM-margin risk for a coin-flip).
+
+The clean nsys census (reth core, 284 shards, 2608 kHz under the profiler)
+vs the Aug-12 pre-frame census:
+
+| metric | pre-frame | frame+inlined |
+|---|---|---|
+| GPU kernel busy | 51.9 s | **86.6 s** |
+| GPU idle | 37.2 s (41 %) | 82.0 s (46 %) |
+| H2D pageable | 61.1 GB | **131.4 GB** |
+| H2D pinned | 44.8 GB | 1.8 GB |
+| `cudaMemcpyAsync` host | 74.9 s | **142.4 s** |
+
+Two named residuals:
+
+1. **Interaction bloat**: the frame moved the register-access / program /
+   State interactions from ONE Cpu table onto EVERY instruction chip's rows.
+   LogUp/GKR input scales with rows × interactions-per-chip, so GPU busy grew
+   +67 % while main-trace area stayed ~flat.  Thinning frame interactions
+   (and eventually deleting the Instruction bus receive that every chip still
+   carries at multiplicity 0) is the structural fix.
+2. **The event uploads lost the pinned path and doubled in bytes**: the
+   frame-carrying events (records embedded) upload 131 GB PAGEABLE across
+   537k copies — the `CpuEventFfi` pinned staging pool died with the Cpu chip
+   and was never generalised to the 18 per-chip event vectors.  The same
+   produce-into-pinned pattern that paid +5.6 % on cpu events applies.
