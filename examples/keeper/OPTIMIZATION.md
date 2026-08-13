@@ -6597,3 +6597,14 @@ committed-area estimate of frame rows), and re-profiling the post-pinned
 idle structure.  Validation on the final tree: ALL 35 artifacts pass
 (host CpuProver, box), FFI + device parity green, fib/TM/reth gates
 verified.
+
+### ELEMENT_THRESHOLD 251,658,240 → 290,000,000 (post-pinning re-probe)
+
+The pre-pinning probe of this threshold was a coin flip (+2.0 %, mixed
+per-slot signs — not landed).  With the uploads pinned the balance
+changed: T=2.9e8 gives **279 shards** and 2717/2671/2718/2765 vs the
+312-shard default's 2575/2642/2610/2656 — **+3.7 %, 4/4 positive on
+matched slots**, all verified.  Fewer shards now win because the
+per-shard fixed serial cost is what remains after pinning.  reth core is
+at **2718 kHz mean, −7.0 % vs the Cpu-chip baseline** (279 vs 281
+shards).

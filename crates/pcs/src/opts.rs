@@ -121,8 +121,15 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// `2^28 - 2^24` and built a "just under a power of two" rule on it, which
 /// measurement refuted twice. The value has no demonstrated power-of-two
 /// structure.
+///
+/// Raised 251,658,240 → 290,000,000 after the Instruction-bus deletion +
+/// pinned-upload staging (Aug 13): with the per-upload cost pinned away, the
+/// per-shard fixed serial cost dominates, and fewer/bigger shards won a
+/// 4/4-positive +3.7% on reth core (279 shards, means 2718 vs 2621; before
+/// pinning the same probe was noise).  All runs verified on 32 GB parts; the
+/// env override remains for smaller cards.
 
-pub const ELEMENT_THRESHOLD: usize = 251_658_240;
+pub const ELEMENT_THRESHOLD: usize = 290_000_000;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
