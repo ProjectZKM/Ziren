@@ -678,11 +678,18 @@ where
                                     #[cfg(debug_assertions)]
                                     {
                                         if let Some(ref shape) = record.shape {
+                                            // The fitted shape carries the VIRTUAL
+                                            // Cpu axis (the cycles axis used for
+                                            // splitting/banding); no chip backs it,
+                                            // so the proof legitimately lacks it.
                                             assert_eq!(
                                                 proof.shape(),
                                                 shape
                                                     .clone()
                                                     .into_iter()
+                                                    .filter(|(k, _)| {
+                                                        k != &zkm_core_executor::MipsAirId::Cpu
+                                                    })
                                                     .map(|(k, v)| (k.to_string(), v as usize))
                                                     .collect(),
                                             );
