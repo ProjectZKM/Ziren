@@ -1387,7 +1387,7 @@ pub mod tests {
 
         // Try to commit the traces.  No recursion AREA PIN
         // (CORE shape-probe → NATURAL own-area).
-        let main_data = prover.commit(&record, main_traces, None, None);
+        let main_data = prover.commit(&record, main_traces, None);
 
         let mut challenger = prover.machine().config().challenger();
 

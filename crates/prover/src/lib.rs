@@ -1453,7 +1453,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                     // recursion (compress): own-chip-set commit (no
                                     // canonical-cluster missing-chip injection);
                                     // recursion AREA PIN threaded explicitly.
-                                    self.compress_prover.commit(&record, traces, None, recursion_area_pin)
+                                    self.compress_prover.commit(&record, traces, None)
                                 });
 
                                 // Generate the proof.

@@ -657,7 +657,7 @@ where
                                     // compress-only geometry) → `None` (NATURAL own-area
                                     // commit, byte-identical).
                                     let main_data =
-                                        prover.commit(&record, main_traces, cluster_widths, None);
+                                        prover.commit(&record, main_traces, cluster_widths);
                                     let commit_ms = t_commit.elapsed().as_millis();
 
                                     let opening_span = tracing::debug_span!("opening").entered();

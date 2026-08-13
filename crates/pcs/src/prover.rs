@@ -253,10 +253,6 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         record: &A::Record,
         traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-        // The recursion-layer AREA PIN.  `Some(RECURSION_LOG_TRACE_AREA)`
-        // on the RECURSION (compress) commit; `None` on CORE / shrink / wrap
-        // (byte-identical).
-        recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData>;
 
     /// Attach the BaseFold shard side-channel (`ShardProof::basefold_shard_proof`)
@@ -727,10 +723,6 @@ where
         record: &A::Record,
         mut named_traces: Vec<(String, RowMajorMatrix<Val<SC>>)>,
         cluster_widths: Option<std::collections::BTreeMap<String, usize>>,
-        // UNUSED here: the prove path sources the recursion AREA PIN from
-        // `self.machine().pins_recursion_area()`.  Present only to satisfy
-        // the `MachineProver::commit` signature.
-        _recursion_area_pin: Option<usize>,
     ) -> ShardMainData<SC, Self::DeviceMatrix, Self::DeviceProverData> {
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
@@ -778,7 +770,10 @@ where
         // populated (no verifier, recursion circuit or Groth16 consumer reads
         // it — the BaseFold verifier reads
         // `basefold_shard_proof.main_commitment`).
-        let main_commit = crate::config::ZeroCommitment::<SC>::zero_commitment(pcs);
+        let main_commit = {
+            use crate::config::ZeroCommitment;
+            pcs.zero_commitment()
+        };
 
         // Get the chip ordering (name-order, matching the commit + the recursion
         // `opened_values.chips` BTreeMap order).
@@ -1194,7 +1189,7 @@ where
                     // canonical-cluster missing-chip injection).  The wrap
                     // STARK proves via this default `prove` → NATURAL own-area
                     // commit (recursion_area_pin = None).
-                    let shard_data = self.commit(&record, named_traces, None, None);
+                    let shard_data = self.commit(&record, named_traces, None);
                     let commit_ms = t1.elapsed().as_millis();
 
                     let t2 = std::time::Instant::now();
