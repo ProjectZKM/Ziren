@@ -6683,3 +6683,43 @@ per-chip `generate trace on device` spans sum to 410 ms/shard of
 thread-time against a 379 ms wall — the 16-way par_iter achieves ~1.08×
 effective parallelism: the fan-out serializes on the device path, not
 on rayon.
+
+### Precompute offload to the pool worker: NET NEGATIVE, reverted (Aug 13)
+
+The census suggested moving `open_precompute_commit` (~56 ms/shard of
+NTT/bitrev/merkle) off the coordinator into the pool worker's commit turn.
+Implemented end-to-end (prefix bundle through the snapshot, provider
+shipped with it), made CORRECT after finding two real bugs, and measured
+VERIFY-clean at four thresholds — then reverted on the numbers: 2644 kHz
+at T=260M vs the 2849 baseline, monotonically worse at lower thresholds
+(2592/2578/2516 at 240/220/200M).  The worker was already the
+rate-limiting chain (537 ms latency vs the coordinator's 426 ms), so
+adding GPU work to it lengthens the critical path — coordinator relief
+does not survive single-GPU contention.  The experiment lives on
+`exp/precompute-offload-neg` (ziren-gpu).
+
+What the experiment paid for anyway:
+
+1. **A latent soundness-class bug, now fixed on the experiment branch and
+   understood for any future cross-thread work**: `commit_dense_stash` is
+   a process-global MOST-RECENT-FIRST list and the zerocheck's name-keyed
+   pack lookup assumes packs are published in open order.  Any
+   out-of-order publisher makes same-name+same-dims chips resolve to the
+   WRONG SHARD's slab (item-12 zerocheck RLC failure).  Rule: before
+   moving any stage across threads, grep every touched crate for
+   `static`/`OnceLock`/`stash`/`REGISTRY`.
+2. **cudaMallocAsync trim-on-OOM rescue (LANDED, ebe0113)**: cached pool
+   blocks do not coalesce for larger requests — a 4.6 GiB alloc failed
+   with 4.2 GiB sitting cached.  On OOM: trim → retry → device-sync +
+   trim → retry → only then fail.  Zero steady-state cost.
+3. **Loud device-commit decline retry (LANDED, ebe0113)**: the commit
+   hook's ~20 silent `None` paths turned transient VRAM pressure into a
+   dead prover via `.expect`; now sync+trim+one-retry, loud both times.
+4. The watermark lesson: pool-aware free is threshold-INSENSITIVE (the
+   mempool caches what shards free), so shrinking shards cannot buy
+   overlap headroom — ~35% of shards skipped at every T from 200M to
+   260M.
+
+The remaining structural levers stay as ranked by the census: async GKR
+layer chaining (the ~224 challenger round-trips/shard), then concurrent
+per-shard BaseFold reduces.
