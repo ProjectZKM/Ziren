@@ -6608,3 +6608,34 @@ matched slots**, all verified.  Fewer shards now win because the
 per-shard fixed serial cost is what remains after pinning.  reth core is
 at **2718 kHz mean, −7.0 % vs the Cpu-chip baseline** (279 vs 281
 shards).
+
+## Frame slimming: 12 columns off every instruction row (Aug 13, second pass)
+
+`InstructionFrameCols` carried redundancy the register accesses already
+witness: `op_a_value` duplicated `op_a_access.value` (differing only on
+discarded register-0 writes) and `hi_or_prev_a` was a pure middleman for
+`op_a_access.prev_value`; `state_recv_next_pc` / `num_extra_cycles` /
+`is_rw_a` / `op_a_immutable` were per-row columns for what are
+per-CHIP-constant facts.  Now: chips bind operands directly to the
+access (writes gated by `op_a_0`, immutable reads enforce
+`value == prev_value` in the three chips that have them), the State
+receive value and extra-cycle count are eval parameters (the syscall
+chip keeps one chip-local recv column — interaction values must be
+degree-1), and `is_rw_a` had no remaining constraint role.  AddSub
+69→57, Lt 82→70, Branch 132→120, memory −12 each.
+
+Measured (all verified): tendermint **5011 kHz / 27 shards** (from
+4621/36); reth core **2815/2838/2758/2755 @ 275 shards** at the
+re-derived T=260M — mean **2792, −4.5% vs the Cpu-chip baseline** (from
+−7.0%).  ELEMENT_THRESHOLD is a CELL budget, so it must rescale with
+per-cycle area: 290M packed +10% cycles/shard on the slimmed tree and
+OOM'd the GKR at 32 GB.
+
+Debug lessons that cost hours: (1) a verify failure of
+`zerocheck rlc_eval != point_and_eval.1` right after a column-layout
+change means STALE `zkm-gpu-core-*` CUDA objects (their rebuild triggers
+only watch `../cuda`, not the regenerated cbindgen headers) — purge both
+build-out dirs; an all-chips bytecode-vs-host oracle test now exists in
+ziren-gpu.  (2) The Misc `prev_a` binding must gate on the MADD/INS rw
+group: SEXT/EXT/TEQ pin the column to zero while the register's old
+value is arbitrary.
