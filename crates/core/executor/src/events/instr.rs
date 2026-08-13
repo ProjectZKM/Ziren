@@ -22,7 +22,7 @@ pub struct AluEvent {
     /// `Instruction` bus.  See `zkm_core_machine::frame`.
     ///
     /// ★ The ALU event vectors ALSO carry SYNTHETIC dependency rows that
-    /// `dependencies.rs` pushes at `pc: UNUSED_PC`, so DivRem and friends can
+    /// the deleted `dependencies.rs` used to push, so DivRem and friends could
     /// outsource sub-computations.  Those rows have no instruction at their pc,
     /// no clk and no registers: `is_instruction == 0` and every field below is
     /// meaningless.  ANY frame constraint in an AIR must be gated on it.

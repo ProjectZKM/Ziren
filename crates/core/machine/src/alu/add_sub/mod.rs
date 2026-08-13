@@ -20,6 +20,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    air::WordAirBuilder,
     frame::{eval_instruction_frame, InstructionFrameCols},
     operations::AddOperation,
     utils::{next_multiple_of_32, zeroed_f_vec},
@@ -64,26 +65,9 @@ pub struct AddSubCols<T> {
     #[picus(selector)]
     pub is_sub: T,
 
-    /// Whether this row is a REAL instruction, rather than one of the synthetic
-    /// dependency rows `dependencies.rs` pushes at `pc: UNUSED_PC` so DivRem and
-    /// friends can outsource sub-computations.  An instruction row owns its
-    /// frame; a dependency row has no instruction at its pc, no clk and no
-    /// registers, so it keeps receiving on the `Instruction` bus from whichever
-    /// chip requested the arithmetic and every frame constraint is gated off.
-    #[picus(selector)]
-    pub is_instruction: T,
-
-    /// `is_add` / `is_sub` restricted to DEPENDENCY rows.  Their own columns so
-    /// the bus multiplicity stays degree 1 — writing
-    /// `is_add * (1 - is_instruction)` inline trips "degree multiple is too
-    /// high".
-    #[picus(selector)]
-    pub is_add_dep: T,
-    #[picus(selector)]
-    pub is_sub_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every AddSub row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 }
 
@@ -208,21 +192,11 @@ impl AddSubChip {
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
 
-        // A REAL instruction owns its frame — program fetch, register access,
-        // `(clk, pc)` chaining.  A synthetic dependency row (pushed by
-        // `dependencies.rs` at `pc: UNUSED_PC`) keeps receiving on the
-        // Instruction bus from whichever chip requested the arithmetic.
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every AddSub row is a real instruction owning its frame — program
+        // fetch, register access, `(clk, pc)` chaining.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         cols.is_add = F::from_bool(event.opcode == Opcode::ADD);
-        cols.is_add_dep = F::from_bool(event.opcode == Opcode::ADD && !is_instruction);
-        cols.is_sub_dep = F::from_bool(event.opcode == Opcode::SUB && !is_instruction);
         cols.is_sub = F::from_bool(event.opcode == Opcode::SUB);
 
         let is_add = event.opcode == Opcode::ADD;
@@ -259,75 +233,42 @@ where
             local.is_add + local.is_sub,
         );
 
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            Opcode::ADD.as_field::<AB::F>(),
-            local.add_operation.value,
-            local.operand_1,
-            local.operand_2,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            local.is_add_dep,
-        );
-
-        // For sub, `operand_1` is `a`, `add_operation.value` is `b`, and `operand_2` is `c`.
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            Opcode::SUB.as_field::<AB::F>(),
-            local.operand_1,
-            local.add_operation.value,
-            local.operand_2,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            local.is_sub_dep,
-        );
-
         let is_real = local.is_add + local.is_sub;
         builder.assert_bool(local.is_add);
         builder.assert_bool(local.is_sub);
         builder.assert_bool(is_real.clone());
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_add_dep);
-        builder.assert_bool(local.is_sub_dep);
-        // Only a real row can be an instruction row.
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-        // Tie the dependency selectors to their opcode flag and `is_instruction`.
-        builder.assert_zero(local.is_add_dep - (local.is_add - local.is_add * local.is_instruction));
-        builder.assert_zero(local.is_sub_dep - (local.is_sub - local.is_sub * local.is_instruction));
 
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  ADD/SUB are sequential, so `next_next_pc` is
-        // `next_pc + 4` — the value this chip already puts on the bus.
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).  For
+        // ADD `a = operand_1 + operand_2`; for SUB the roles of `a` and `b`
+        // swap (`operand_1 = a`, `add_operation.value = b`).
+        builder
+            .when(local.is_add)
+            .assert_word_eq(local.add_operation.value, local.frame.op_a_value);
+        builder.when(local.is_add).assert_word_eq(local.operand_1, local.frame.op_b_val());
+        builder.when(local.is_sub).assert_word_eq(local.operand_1, local.frame.op_a_value);
+        builder
+            .when(local.is_sub)
+            .assert_word_eq(local.add_operation.value, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.operand_2, local.frame.op_c_val());
+
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  ADD/SUB are sequential, so
+        // `next_next_pc` is `next_pc + 4`.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         // ADD/SUB can never halt, so the received continuation is always the
         // real `next_pc` (the halt exemption lives in the syscall chip).
         builder
-            .when(local.is_instruction)
+            .when(is_real)
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
@@ -346,20 +287,21 @@ mod tests {
     #[cfg(feature = "sys")]
     use p3_maybe_rayon::prelude::ParallelIterator;
     use rand::{thread_rng, Rng};
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
     use super::AddSubChip;
+    use crate::programs::tests::{alu_op, run_instructions};
     #[cfg(feature = "sys")]
     use super::{AddSubCols, NUM_ADD_SUB_COLS};
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.add_sub_events = vec![AluEvent::new(0, Opcode::ADD, 14, 8, 6)];
+        let shard = run_instructions(alu_op(Opcode::ADD, 8, 6));
+        assert!(!shard.add_sub_events.is_empty());
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -379,31 +321,18 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shard = ExecutionRecord::default();
-        for i in 0..255 {
+        let mut instructions = Vec::new();
+        for _ in 0..255 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
-            let result = operand_1.wrapping_add(operand_2);
-            shard.add_sub_events.push(AluEvent::new(
-                i << 2,
-                Opcode::ADD,
-                result,
-                operand_1,
-                operand_2,
-            ));
+            instructions.extend(alu_op(Opcode::ADD, operand_1, operand_2));
         }
-        for i in 0..255 {
+        for _ in 0..255 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
-            let result = operand_1.wrapping_sub(operand_2);
-            shard.add_sub_events.push(AluEvent::new(
-                i << 2,
-                Opcode::SUB,
-                result,
-                operand_1,
-                operand_2,
-            ));
+            instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
         }
+        let shard = run_instructions(instructions);
 
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -415,30 +344,17 @@ mod tests {
     }
 
     /// Lazily initialized record for use across multiple tests.
-    /// Consists of random `ADD` and `SUB` instructions.
+    /// Consists of executor-driven `ADD` and `SUB` instructions.
     #[cfg(feature = "sys")]
     static SHARD: LazyLock<ExecutionRecord> = LazyLock::new(|| {
-        let add_sub_events = (0..1)
-            .flat_map(|i| {
-                [{
-                    let operand_1 = 1u32;
-                    let operand_2 = 2u32;
-                    let result = operand_1.wrapping_add(operand_2);
-                    AluEvent::new(i % 2, Opcode::ADD, result, operand_1, operand_2)
-                }]
-            })
-            .collect::<Vec<_>>();
-        let _sub_events = (0..255)
-            .flat_map(|i| {
-                [{
-                    let operand_1 = thread_rng().gen_range(0..u32::MAX);
-                    let operand_2 = thread_rng().gen_range(0..u32::MAX);
-                    let result = operand_1.wrapping_sub(operand_2);
-                    AluEvent::new(i % 2, Opcode::SUB, result, operand_1, operand_2)
-                }]
-            })
-            .collect::<Vec<_>>();
-        ExecutionRecord { add_sub_events, ..Default::default() }
+        let mut instructions = Vec::new();
+        instructions.extend(alu_op(Opcode::ADD, 1, 2));
+        for _ in 0..255 {
+            let operand_1 = thread_rng().gen_range(0..u32::MAX);
+            let operand_2 = thread_rng().gen_range(0..u32::MAX);
+            instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
+        }
+        run_instructions(instructions)
     });
 
     #[cfg(feature = "sys")]
@@ -473,17 +389,11 @@ mod tests {
                     .map(|event| {
                         let mut row = [F::ZERO; NUM_ADD_SUB_COLS];
                         let cols: &mut AddSubCols<F> = row.as_mut_slice().borrow_mut();
-                        // A dependency event never reads the instruction; a
-                        // real one is fetched from the program by pc, exactly
-                        // as the Rust `event_to_row` does.
+                        // Every event is a real instruction, fetched from the
+                        // program by pc exactly as the Rust `event_to_row`
+                        // does.
                         let instruction: zkm_core_executor::InstructionFfi =
-                            if event.is_instruction != 0 {
-                                input.program.fetch(event.pc).into()
-                            } else {
-                                zkm_core_executor::Instruction::new(
-                                    Opcode::ADD, 0, 0, 0, true, true,
-                                ).into()
-                            };
+                            input.program.fetch(event.pc).into();
                         unsafe {
                             crate::sys::add_sub_event_to_row_koalabear(
                                 event,

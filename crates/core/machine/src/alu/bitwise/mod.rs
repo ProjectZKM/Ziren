@@ -20,6 +20,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    air::WordAirBuilder,
     frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
@@ -65,20 +66,9 @@ pub struct BitwiseCols<T> {
     #[picus(selector)]
     pub is_and: T,
 
-    /// Whether this row is a REAL instruction rather than a synthetic
-    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).  An instruction row
-    /// owns its frame; a dependency row keeps receiving on the Instruction bus
-    /// from whichever chip requested the arithmetic.
-    #[picus(selector)]
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — its own column so the
-    /// Instruction-bus multiplicity stays degree 1.
-    #[picus(selector)]
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Bitwise row is an instruction — the Instruction bus
+    /// and its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 }
 
@@ -199,14 +189,8 @@ impl BitwiseChip {
         program: &Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Bitwise row is a real instruction owning its frame.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
@@ -263,61 +247,34 @@ where
             builder.send_byte(opcode.clone(), a, b, c, mult.clone());
         }
 
-        // Get the cpu opcode, which corresponds to the opcode being sent in the CPU table.
-        let cpu_opcode = local.is_xor * Opcode::XOR.as_field::<AB::F>()
-            + local.is_or * Opcode::OR.as_field::<AB::F>()
-            + local.is_and * Opcode::AND.as_field::<AB::F>()
-            + local.is_nor * Opcode::NOR.as_field::<AB::F>();
-
-        // Receive the instruction.
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            cpu_opcode,
-            local.a,
-            local.b,
-            local.c,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep,
-        );
-
         let is_real = local.is_xor + local.is_or + local.is_and + local.is_nor;
         builder.assert_bool(local.is_xor);
         builder.assert_bool(local.is_or);
         builder.assert_bool(local.is_and);
         builder.assert_bool(local.is_nor);
         builder.assert_bool(is_real.clone());
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        // Only a real row can be an instruction row, and `is_dep` is exactly
-        // the real non-instruction rows (degree-1 bus multiplicity).
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-        builder.assert_zero(
-            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
-        );
 
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  Bitwise ops are sequential and can never halt.
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(is_real.clone()).assert_word_eq(local.a, local.frame.op_a_value);
+        builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
+
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  Bitwise ops are sequential and can
+        // never halt.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         builder
-            .when(local.is_instruction)
+            .when(is_real)
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
@@ -326,7 +283,7 @@ where
 mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
@@ -334,16 +291,20 @@ mod tests {
     use crate::utils::{uni_stark_prove, uni_stark_verify};
 
     use super::BitwiseChip;
+    use crate::programs::tests::{alu_op, run_instructions};
+
+    fn bitwise_record() -> ExecutionRecord {
+        let mut instructions = Vec::new();
+        for opcode in [Opcode::XOR, Opcode::OR, Opcode::AND, Opcode::NOR] {
+            instructions.extend(alu_op(opcode, 10, 19));
+        }
+        run_instructions(instructions)
+    }
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.bitwise_events = vec![
-            AluEvent::new(0, Opcode::XOR, 25, 10, 19),
-            AluEvent::new(0, Opcode::OR, 27, 10, 19),
-            AluEvent::new(0, Opcode::AND, 2, 10, 19),
-            AluEvent::new(0, Opcode::NOR, 228, 10, 19),
-        ];
+        let shard = bitwise_record();
+        assert!(!shard.bitwise_events.is_empty());
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -355,19 +316,17 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shard = ExecutionRecord::default();
-        shard.bitwise_events = [
-            AluEvent::new(0, Opcode::XOR, 25, 10, 19),
-            AluEvent::new(0, Opcode::OR, 27, 10, 19),
-            AluEvent::new(0, Opcode::AND, 2, 10, 19),
-            AluEvent::new(0, Opcode::NOR, 228, 10, 19),
-        ]
-        // 4 events x 1024 = 4096 rows.  `p3_uni_stark::prove` requires a
-        // power-of-two height, but `generate_trace` pads to
-        // `next_multiple_of_32`, so a non-power-of-two count (this was 1000 ->
-        // 4000 rows) reaches the prover unpadded and trips
-        // `log2_strict_usize`.  Keep the event count a power of two.
-        .repeat(1024);
+        // `p3_uni_stark::prove` requires a power-of-two height;
+        // `generate_trace` pads to `next_multiple_of_32` only, so keep the
+        // bitwise event count a power of two: 4 ops x 256 reps = 1024 rows.
+        let mut instructions = Vec::new();
+        for _ in 0..256 {
+            for opcode in [Opcode::XOR, Opcode::OR, Opcode::AND, Opcode::NOR] {
+                instructions.extend(alu_op(opcode, 10, 19));
+            }
+        }
+        let shard = run_instructions(instructions);
+        assert_eq!(shard.bitwise_events.len(), 1024);
         let chip = BitwiseChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

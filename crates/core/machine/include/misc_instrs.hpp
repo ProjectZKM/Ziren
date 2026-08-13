@@ -1,8 +1,12 @@
 #pragma once
 
 #include <bit>
+#include "add_sub.hpp"
 #include "frame.hpp"
+#include "mul_operation.hpp"
 #include "prelude.hpp"
+#include "shift_left_operation.hpp"
+#include "shift_right_operation.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
 #include "memory.hpp"
@@ -47,10 +51,8 @@ namespace zkm_core_machine_sys::misc_instrs {
         } else {
             multiply = (uint64_t)event.b * (uint64_t)event.c;
         }
-        uint32_t mul_hi = (uint32_t)(multiply >> 32);
-        uint32_t mul_lo = (uint32_t)multiply;
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.maddsub.mul_hi, mul_hi);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.maddsub.mul_lo, mul_lo);
+        // The inlined multiplication (the MULT/MULTU request row).
+        mul_operation::populate<F>(cols.maddsub_mul, event.b, event.c, is_sign);
 
         bool is_add = event.opcode == Opcode::MADDU || event.opcode == Opcode::MADD;
         uint32_t src2_lo = is_add ? event.prev_a : event.a;
@@ -85,6 +87,9 @@ namespace zkm_core_machine_sys::misc_instrs {
         uint32_t lsb = event.c & 0x1f;
         uint32_t msbd = event.c >> 5;
         uint32_t shift_left = event.b << (31 - lsb - msbd);
+        // The inlined shifts (the SLL and SRL request rows).
+        shift_left_operation::populate<F>(cols.ext_sll, event.b, 31 - lsb - msbd);
+        shift_right_operation::populate<F>(cols.ext_srl, Opcode::SRL, shift_left, 31 - msbd);
         cols.misc_specific_columns.ext.lsb = F::from_canonical_u32(lsb);
         cols.misc_specific_columns.ext.msbd = F::from_canonical_u32(msbd);
         write_word_from_u32_v2<F>(cols.misc_specific_columns.ext.sll_val, shift_left);
@@ -102,13 +107,16 @@ namespace zkm_core_machine_sys::misc_instrs {
         uint32_t srl_val = srl1_val >> (msb - lsb);
         uint32_t sll_val = event.b << (31 - msb + lsb);
         uint32_t add_val = srl_val + sll_val;
+        // The inlined sub-operations (the 6 request rows).
+        shift_right_operation::populate<F>(cols.ins_ror, Opcode::ROR, event.prev_a, lsb);
+        shift_right_operation::populate<F>(cols.ins_srl1, Opcode::SRL, ror_val, 1);
+        shift_right_operation::populate<F>(cols.ins_srl, Opcode::SRL, srl1_val, msb - lsb);
+        shift_left_operation::populate<F>(cols.ins_sll, event.b, 31 - msb + lsb);
+        add_sub::populate<F>(cols.ins_add, srl_val, sll_val);
+        shift_right_operation::populate<F>(cols.ins_ror2, Opcode::ROR, add_val, 31 - msb);
         cols.misc_specific_columns.ins.lsb = F::from_canonical_u32(lsb);
         cols.misc_specific_columns.ins.msb = F::from_canonical_u32(msb);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.ror_val, ror_val);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.srl1_val, srl1_val);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.srl_val, srl_val);
         write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.sll_val, sll_val);
-        write_word_from_u32_v2<F>(cols.misc_specific_columns.ins.add_val, add_val);
     }
 
     template<class F>
@@ -118,17 +126,8 @@ namespace zkm_core_machine_sys::misc_instrs {
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
-    const bool is_instruction = event.is_instruction != 0;
-    cols.is_instruction = F::from_bool(is_instruction);
-    const bool is_cm = event.opcode == Opcode::MADDU || event.opcode == Opcode::MSUBU
-        || event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
-    cols.is_cm_dep = F::from_bool(is_cm && !is_instruction);
-    cols.is_other_dep = F::from_bool(!is_cm && !is_instruction);
-    if (is_instruction) {
-        frame::populate_from_misc<F>(cols.frame, event, instruction, shard);
-    } else {
-        frame::populate_dependency<F>(cols.frame);
-    }
+    // Every Misc row is a real instruction owning its frame.
+    frame::populate_from_misc<F>(cols.frame, event, instruction, shard);
 
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);

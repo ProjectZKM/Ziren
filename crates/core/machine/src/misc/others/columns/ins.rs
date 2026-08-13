@@ -12,15 +12,14 @@ pub struct InsCols<T> {
     pub lsb: T,
     pub msb: T,
 
-    /// Result value of intermediate operations.
+    /// The SLL intermediate `op_b << (31 - msb + lsb)`, materialised because
+    /// the left-shift gadget constrains an expected-result word rather than
+    /// exposing one.  The other intermediates live in the shift/add gadgets'
+    /// own output columns (`MiscInstrColumns::ins_*`).
     ///
-    /// The INS decomposition extracts the upper bits of prev_a via a right shift
-    /// by `width = msb - lsb + 1`. Since the ShiftRight chip only supports shift
-    /// amounts 0-31, we split this into two steps: `>> 1` then `>> (msb - lsb)`,
-    /// each of which is always in range [0, 31].
-    pub ror_val: Word<T>,
-    pub srl1_val: Word<T>,
-    pub srl_val: Word<T>,
+    /// The INS decomposition extracts the upper bits of prev_a via a right
+    /// shift by `width = msb - lsb + 1`. Since the shift logic only supports
+    /// shift amounts 0-31, this is split into two steps: `>> 1` then
+    /// `>> (msb - lsb)`, each of which is always in range [0, 31].
     pub sll_val: Word<T>,
-    pub add_val: Word<T>,
 }

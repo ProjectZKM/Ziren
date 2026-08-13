@@ -42,7 +42,7 @@ use p3_matrix::dense::RowMajorMatrix;
 use p3_maybe_rayon::prelude::{ParallelBridge, ParallelIterator, ParallelSlice};
 use zkm_core_executor::{
     events::{ByteLookupEvent, ByteRecord, CompAluEvent, MemoryAccessPosition, MemoryRecordEnum},
-    ByteOpcode, ExecutionRecord, Opcode, Program, UNUSED_PC,
+    ByteOpcode, ExecutionRecord, Opcode, Program,
 };
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_primitives::consts::WORD_SIZE;
@@ -133,15 +133,9 @@ pub struct MulCols<T> {
     /// Flag indicating whether the hi_access record is real.
     pub hi_record_is_real: T,
 
-    /// Whether this row is a REAL instruction rather than a synthetic
-    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Mul row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 
     /// The shard number.
@@ -266,14 +260,8 @@ impl MulChip {
         program: &Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_comp_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Mul row is a real instruction owning its frame.
+        cols.frame.populate_from_comp_alu(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
@@ -509,55 +497,37 @@ where
             builder.slice_range_check_u8(&local.product, local.is_real);
         }
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            local.shard,
-            local.clk,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            opcode,
-            local.a,
-            local.b,
-            local.c,
-            local.hi,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.hi_record_is_real,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep,
-        );
+        let _ = opcode;
 
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
-        builder.assert_zero(
-            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
-        );
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(local.is_real).assert_word_eq(local.a, local.frame.op_a_value);
+        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
+        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  MUL/MULT/MULTU are sequential and never halt.
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining.  MUL/MULT/MULTU are
+        // sequential and never halt.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            local.is_real.into(),
         );
         builder
-            .when(local.is_instruction)
+            .when(local.is_real)
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
         // Mul keeps its own shard/clk columns for the HI-register write below,
         // and populates them ONLY on hi-writing rows (MULT/MULTU; plain MUL has
         // no HI write and leaves them zero).  Tie them to the frame exactly
         // there, so the memory access cannot decouple from the state chain.
-        let hi_and_instr = local.hi_record_is_real * local.is_instruction;
-        builder.when(hi_and_instr.clone()).assert_eq(local.shard, local.frame.shard);
-        builder.when(hi_and_instr).assert_eq(
+        builder
+            .when(local.hi_record_is_real)
+            .assert_eq(local.shard, local.frame.shard);
+        builder.when(local.hi_record_is_real).assert_eq(
             local.clk,
             AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
                 + local.frame.clk_16bit_limb,
@@ -577,12 +547,11 @@ where
         // if hi_record_is_real = 0, both clk and shard should be zero.
         builder.when_not(local.is_real).assert_zero(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_one(local.is_mult + local.is_multu);
-        // Hardware MULT/MULTU rows must write HI. Dependency-only multiply
-        // rows use UNUSED_PC and keep hi_record_is_real = 0.
-        builder.when(local.is_mult + local.is_multu).assert_zero(
-            (local.pc - AB::Expr::from_u32(UNUSED_PC))
-                * (AB::Expr::one() - local.hi_record_is_real),
-        );
+        // Every MULT/MULTU row writes HI (there are no dependency-only
+        // multiply rows any more).
+        builder
+            .when(local.is_mult + local.is_multu)
+            .assert_one(local.hi_record_is_real);
         builder.when(local.hi_record_is_real).assert_word_eq(local.hi, *local.op_hi_access.value());
         builder.when_not(local.hi_record_is_real).assert_zero(local.clk);
         builder.when_not(local.hi_record_is_real).assert_zero(local.shard);
@@ -595,23 +564,22 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
     use super::MulChip;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace_mul() {
-        let mut shard = ExecutionRecord::default();
-
-        // Fill mul_events with 10 MUL events.
-        let mut mul_events: Vec<CompAluEvent> = Vec::new();
+        let mut instructions = Vec::new();
         for _ in 0..10 {
-            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 0x80004000, 0x80000000, 0xffff8000));
+            instructions.extend(alu_op(Opcode::MUL, 0x80000000, 0xffff8000));
         }
-        shard.mul_events = mul_events;
+        let shard = run_instructions(instructions);
+        assert!(!shard.mul_events.is_empty());
         let chip = MulChip::default();
         let _trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -620,36 +588,10 @@ mod tests {
     #[cfg(feature = "sys")]
     #[test]
     fn test_mul_generate_trace_ffi_eq_rust() {
-        use zkm_core_executor::events::MemoryWriteRecord;
-
-        let mut shard = ExecutionRecord::default();
-        shard.mul_events = vec![CompAluEvent {
-            shard: 5,
-            clk: 790405,
-            pc: 1017624,
-            next_pc: 1017628,
-            opcode: Opcode::MULT,
-            hi: 241306,
-            a: 1298966409,
-            b: 274417,
-            c: 3776743705,
-            hi_record: MemoryWriteRecord {
-                value: 241306,
-                shard: 5,
-                timestamp: 790409,
-                prev_value: 3431,
-                prev_shard: 5,
-                prev_timestamp: 790387,
-            },
-            hi_record_is_real: true,
-            // Dependency shape: no frame.
-            is_instruction: 0,
-            next_next_pc: 0,
-            recv_next_pc: 0,
-            a_record: None.into(),
-            b_record: None.into(),
-            c_record: None.into(),
-        }];
+        // Every Mul row carries an instruction frame, so drive the record
+        // through the executor.
+        let shard = run_instructions(alu_op(Opcode::MULT, 274417, 3776743705));
+        assert!(!shard.mul_events.is_empty());
 
         let chip = MulChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
@@ -684,13 +626,7 @@ mod tests {
                     if idx < nb_rows {
                         let event = &input.mul_events[idx];
                         let instruction: zkm_core_executor::InstructionFfi =
-                            if event.is_instruction != 0 {
-                                input.program.fetch(event.pc).into()
-                            } else {
-                                zkm_core_executor::Instruction::new(
-                                    Opcode::ADD, 0, 0, 0, true, true,
-                                ).into()
-                            };
+                            input.program.fetch(event.pc).into();
                         unsafe {
                             crate::sys::mul_event_to_row_koalabear(
                                 event,
@@ -716,35 +652,35 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shard = ExecutionRecord::default();
-        let mut mul_events: Vec<CompAluEvent> = Vec::new();
-
-        let mul_instructions: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::MUL, 0x00001200, 0x00007e00, 0xb6db6db7),
-            (Opcode::MUL, 0x00001240, 0x00007fc0, 0xb6db6db7),
-            (Opcode::MUL, 0x00000000, 0x00000000, 0x00000000),
-            (Opcode::MUL, 0x00000001, 0x00000001, 0x00000001),
-            (Opcode::MUL, 0x00000015, 0x00000003, 0x00000007),
-            (Opcode::MUL, 0x00000000, 0x00000000, 0xffff8000),
-            (Opcode::MUL, 0x00000000, 0x80000000, 0x00000000),
-            (Opcode::MUL, 0x00000000, 0x80000000, 0xffff8000),
-            (Opcode::MUL, 0x0000ff7f, 0xaaaaaaab, 0x0002fe7d),
-            (Opcode::MUL, 0x0000ff7f, 0x0002fe7d, 0xaaaaaaab),
-            (Opcode::MUL, 0x00000000, 0xff000000, 0xff000000),
-            (Opcode::MUL, 0x00000001, 0xffffffff, 0xffffffff),
-            (Opcode::MUL, 0xffffffff, 0xffffffff, 0x00000001),
-            (Opcode::MUL, 0xffffffff, 0x00000001, 0xffffffff),
+        let mul_instructions: Vec<(Opcode, u32, u32)> = vec![
+            (Opcode::MUL, 0x00007e00, 0xb6db6db7),
+            (Opcode::MUL, 0x00007fc0, 0xb6db6db7),
+            (Opcode::MUL, 0x00000000, 0x00000000),
+            (Opcode::MUL, 0x00000001, 0x00000001),
+            (Opcode::MUL, 0x00000003, 0x00000007),
+            (Opcode::MUL, 0x00000000, 0xffff8000),
+            (Opcode::MUL, 0x80000000, 0x00000000),
+            (Opcode::MUL, 0x80000000, 0xffff8000),
+            (Opcode::MUL, 0xaaaaaaab, 0x0002fe7d),
+            (Opcode::MUL, 0x0002fe7d, 0xaaaaaaab),
+            (Opcode::MUL, 0xff000000, 0xff000000),
+            (Opcode::MUL, 0xffffffff, 0xffffffff),
+            (Opcode::MUL, 0xffffffff, 0x00000001),
+            (Opcode::MUL, 0x00000001, 0xffffffff),
+            (Opcode::MULT, 0x00000001, 0xffffffff),
+            (Opcode::MULTU, 0xffffffff, 0xffffffff),
         ];
-        for t in mul_instructions.iter() {
-            mul_events.push(CompAluEvent::new(0, t.0, t.1, t.2, t.3));
+        let mut instructions = Vec::new();
+        for &(opcode, b, c) in mul_instructions.iter() {
+            instructions.extend(alu_op(opcode, b, c));
         }
 
-        // Append more events until we have 1000 tests.
+        // Append more events until we have ~1000 mul rows.
         for _ in 0..(1000 - mul_instructions.len()) {
-            mul_events.push(CompAluEvent::new(0, Opcode::MUL, 1, 1, 1));
+            instructions.extend(alu_op(Opcode::MUL, 1, 1));
         }
 
-        shard.mul_events = mul_events;
+        let shard = run_instructions(instructions);
         let chip = MulChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

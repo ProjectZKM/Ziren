@@ -43,14 +43,8 @@ pub const NUM_MEMORY_INSTR_COMMON_COLS: usize = size_of::<MemoryInstrCommonCols<
 #[derive(AlignedBorrow, PicusAnnotations, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MemoryInstrCommonCols<T> {
-    /// Whether this row is a REAL instruction (all memory rows are today).
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every memory-instruction row is an instruction).
     pub frame: crate::frame::InstructionFrameCols<T>,
 
     /// The current/next program counter of the instruction.
@@ -189,7 +183,9 @@ pub fn eval_memory_common<AB: ZKMCoreAirBuilder>(
     addr_aligned
 }
 
-/// Receives the instruction from the CPU chip on the instruction bus.
+/// The shared instruction plumbing for the memory chips (the Instruction-bus
+/// receive is gone: every row is a real instruction serving itself via the
+/// frame).
 ///
 /// Every memory chip supplies the same constants: `next_next_pc = next_pc + 4`,
 /// `num_extra_cycles = 0`, `is_rw_a = 1`, `is_check_memory = 1`, `is_halt = 0`,
@@ -201,33 +197,7 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
     op_a_immutable: AB::Expr,
     is_real: AB::Expr,
 ) {
-    builder.receive_instruction(
-        cols.shard,
-        cols.clk,
-        cols.pc,
-        cols.next_pc,
-        cols.next_pc + AB::Expr::from_u32(4),
-        AB::Expr::ZERO,
-        opcode,
-        cols.op_a_value,
-        cols.op_b_value,
-        cols.op_c_value,
-        cols.prev_a_val,
-        op_a_immutable.clone(),
-        AB::Expr::ONE,
-        AB::Expr::ONE,
-        AB::Expr::ZERO,
-        AB::Expr::ONE,
-        // Dependency rows only: an instruction row serves itself via the frame.
-        cols.is_dep.into(),
-    );
-
-    builder.assert_bool(cols.is_instruction);
-    builder.assert_bool(cols.is_dep);
-    builder.when(cols.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-    builder.assert_zero(
-        cols.is_dep - (is_real.clone() - is_real.clone() * cols.is_instruction),
-    );
+    let _ = opcode;
 
     // A real instruction carries its own program fetch, register access and
     // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
@@ -237,22 +207,28 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
         cols.pc.into(),
         cols.next_pc.into(),
         cols.next_pc + AB::Expr::from_u32(4),
-        cols.is_instruction.into(),
+        is_real.clone(),
     );
     builder
-        .when(cols.is_instruction)
+        .when(is_real.clone())
         .assert_eq(cols.frame.state_recv_next_pc, cols.next_pc);
     // Every memory instruction reads-and-writes op_a; the plain stores read it
     // immutably (the per-chip `op_a_immutable` expr, NOT including SC).
-    builder.assert_eq(cols.frame.is_rw_a, cols.is_instruction);
-    builder.assert_eq(cols.frame.op_a_immutable, op_a_immutable * cols.is_instruction);
+    builder.assert_eq(cols.frame.is_rw_a, is_real.clone());
+    builder.assert_eq(cols.frame.op_a_immutable, op_a_immutable * is_real.clone());
     builder
-        .when(cols.is_instruction)
+        .when(is_real.clone())
         .assert_word_eq(cols.frame.hi_or_prev_a, cols.prev_a_val);
+    // Bind this chip's operand columns to the frame's register-file view:
+    // the chip must compute on exactly the values the register accesses
+    // commit (the Instruction bus that used to carry them is gone).
+    builder.when(is_real.clone()).assert_word_eq(cols.op_a_value, cols.frame.op_a_value);
+    builder.when(is_real.clone()).assert_word_eq(cols.op_b_value, cols.frame.op_b_val());
+    builder.when(is_real.clone()).assert_word_eq(cols.op_c_value, cols.frame.op_c_val());
     // The chips keep private shard/clk columns for the Memory-position access:
     // tie them to the frame (the Mul coupling).
-    builder.when(cols.is_instruction).assert_eq(cols.shard, cols.frame.shard);
-    builder.when(cols.is_instruction).assert_eq(
+    builder.when(is_real.clone()).assert_eq(cols.shard, cols.frame.shard);
+    builder.when(is_real).assert_eq(
         cols.clk,
         AB::Expr::from_u32(1u32 << 16) * cols.frame.clk_8bit_limb + cols.frame.clk_16bit_limb,
     );
@@ -281,14 +257,8 @@ impl<F: PrimeField32> MemoryInstrCommonCols<F> {
         blu: &mut impl ByteRecord,
         program: &zkm_core_executor::Program,
     ) -> u8 {
-        let is_instruction = event.is_instruction != 0;
-        self.is_instruction = F::from_bool(is_instruction);
-        self.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            self.frame.populate_from_mem(event, program, blu);
-        } else {
-            self.frame.populate_dependency();
-        }
+        // Every memory-instruction row is a real instruction owning its frame.
+        self.frame.populate_from_mem(event, program, blu);
 
         self.shard = F::from_u32(event.shard);
         debug_assert!(self.shard != F::ZERO);

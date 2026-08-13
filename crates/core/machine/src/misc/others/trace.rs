@@ -108,19 +108,9 @@ impl MiscInstrsChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        let is_cm = matches!(
-            event.opcode,
-            Opcode::MADDU | Opcode::MSUBU | Opcode::MADD | Opcode::MSUB
-        );
-        cols.is_cm_dep = F::from_bool(is_cm && !is_instruction);
-        cols.is_other_dep = F::from_bool(!is_cm && !is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_misc(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Misc row is a real instruction (no chip outsources to Misc,
+        // and its sub-operations are inlined).
+        cols.frame.populate_from_misc(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
@@ -191,16 +181,14 @@ impl MiscInstrsChip {
         }
 
         let is_sign = event.opcode == Opcode::MADD || event.opcode == Opcode::MSUB;
+        // The inlined multiplication (the MULT/MULTU request row).
+        cols.maddsub_mul.populate(blu, event.b, event.c, is_sign);
         let maddsub_cols = cols.misc_specific_columns.maddsub_mut();
         let multiply = if is_sign {
             ((event.b as i32 as i64) * (event.c as i32 as i64)) as u64
         } else {
             event.b as u64 * event.c as u64
         };
-        let mul_hi = (multiply >> 32) as u32;
-        let mul_lo = multiply as u32;
-        maddsub_cols.mul_hi = Word::from(mul_hi);
-        maddsub_cols.mul_lo = Word::from(mul_lo);
 
         let is_add = event.opcode == Opcode::MADDU || event.opcode == Opcode::MADD;
         let src2_lo = if is_add { event.prev_a } else { event.a };
@@ -228,10 +216,13 @@ impl MiscInstrsChip {
         if !matches!(event.opcode, Opcode::EXT) {
             return;
         }
-        let ext_cols = cols.misc_specific_columns.ext_mut();
         let lsb = event.c & 0x1f;
         let msbd = event.c >> 5;
         let shift_left = event.b << (31 - lsb - msbd);
+        // The inlined shifts (the SLL and SRL request rows).
+        cols.ext_sll.populate(blu, event.b, 31 - lsb - msbd);
+        cols.ext_srl.populate(blu, Opcode::SRL, shift_left, 31 - msbd);
+        let ext_cols = cols.misc_specific_columns.ext_mut();
         ext_cols.lsb = F::from_u32(lsb);
         ext_cols.msbd = F::from_u32(msbd);
         ext_cols.sll_val = Word::from(shift_left);
@@ -260,21 +251,24 @@ impl MiscInstrsChip {
         if !matches!(event.opcode, Opcode::INS) {
             return;
         }
-        let ins_cols = cols.misc_specific_columns.ins_mut();
         let lsb = event.c & 0x1f;
         let msb = event.c >> 5;
         let ror_val = event.prev_a.rotate_right(lsb);
         let srl1_val = ror_val >> 1;
         let srl_val = srl1_val >> (msb - lsb);
         let sll_val = event.b << (31 - msb + lsb);
-        let add_val = srl_val + sll_val;
+        let add_val = srl_val.wrapping_add(sll_val);
+        // The inlined sub-operations (the 6 request rows).
+        cols.ins_ror.populate(blu, Opcode::ROR, event.prev_a, lsb);
+        cols.ins_srl1.populate(blu, Opcode::SRL, ror_val, 1);
+        cols.ins_srl.populate(blu, Opcode::SRL, srl1_val, msb - lsb);
+        cols.ins_sll.populate(blu, event.b, 31 - msb + lsb);
+        cols.ins_add.populate(blu, srl_val, sll_val);
+        cols.ins_ror2.populate(blu, Opcode::ROR, add_val, 31 - msb);
+        let ins_cols = cols.misc_specific_columns.ins_mut();
         ins_cols.lsb = F::from_u32(lsb);
         ins_cols.msb = F::from_u32(msb);
-        ins_cols.ror_val = Word::from(ror_val);
-        ins_cols.srl1_val = Word::from(srl1_val);
-        ins_cols.srl_val = Word::from(srl_val);
         ins_cols.sll_val = Word::from(sll_val);
-        ins_cols.add_val = Word::from(add_val);
         blu.add_byte_lookup_event(ByteLookupEvent {
             opcode: ByteOpcode::U8Range,
             a1: 0,

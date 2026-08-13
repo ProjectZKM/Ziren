@@ -342,9 +342,8 @@ mod parity_tests {
             clo_clz_event_to_row_koalabear,
             |row: &mut [F]| {
                 let cols: &mut CloClzCols<F> = row.borrow_mut();
-                // Mirrors clo_clz's padded_row_template.
-                cols.a = zkm_pcs::Word::from(32);
-                cols.is_bb_zero = p3_field::PrimeCharacteristicRing::ONE;
+                // Mirrors clo_clz's padding: only the frame is neutralised
+                // (the inlined shift is gated on `is_real - is_bb_zero`).
                 cols.frame.populate_dependency();
             }
         );

@@ -25,15 +25,6 @@ where
         let local = main.current_slice();
         let local: &MiscInstrColumns<AB::Var> = (*local).borrow();
 
-        let cpu_opcode = local.is_sext * Opcode::SEXT.as_field::<AB::F>()
-            + local.is_ins * Opcode::INS.as_field::<AB::F>()
-            + local.is_ext * Opcode::EXT.as_field::<AB::F>()
-            + local.is_maddu * Opcode::MADDU.as_field::<AB::F>()
-            + local.is_msubu * Opcode::MSUBU.as_field::<AB::F>()
-            + local.is_madd * Opcode::MADD.as_field::<AB::F>()
-            + local.is_msub * Opcode::MSUB.as_field::<AB::F>()
-            + local.is_teq * Opcode::TEQ.as_field::<AB::F>();
-
         let is_real = local.is_sext
             + local.is_ins
             + local.is_ext
@@ -53,88 +44,21 @@ where
         builder.assert_bool(local.is_teq);
         builder.assert_bool(is_real.clone());
 
-        let is_rw_a =
-            local.is_maddu + local.is_msubu + local.is_madd + local.is_msub + local.is_ins;
-
         let is_check_memory = local.is_maddu + local.is_msubu + local.is_madd + local.is_msub;
 
-        builder.receive_instruction(
-            local.shard,
-            local.clk,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::zero(),
-            cpu_opcode.clone(),
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            local.prev_a_value,
-            local.is_teq,
-            is_rw_a.clone(),
-            is_check_memory.clone(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_cm_dep.into(),
-        );
-
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::zero(),
-            cpu_opcode,
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            local.prev_a_value,
-            local.is_teq,
-            is_rw_a,
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            // Dependency rows only.
-            local.is_other_dep.into(),
-        );
-
-        let is_real_all = local.is_maddu
-            + local.is_msubu
-            + local.is_madd
-            + local.is_msub
-            + local.is_sext
-            + local.is_teq
-            + local.is_ext
-            + local.is_ins;
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_cm_dep);
-        builder.assert_bool(local.is_other_dep);
-        builder
-            .when(local.is_instruction)
-            .assert_zero(AB::Expr::one() - is_real_all.clone());
-        builder.assert_zero(
-            local.is_cm_dep
-                - (is_check_memory.clone() - is_check_memory.clone() * local.is_instruction),
-        );
-        let others = local.is_sext + local.is_teq + local.is_ext + local.is_ins;
-        builder.assert_zero(
-            local.is_other_dep - (others.clone() - others * local.is_instruction),
-        );
-
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  Misc instructions are sequential, never halt.
+        // The Instruction-bus receives are gone: every row is a real
+        // instruction serving itself via the frame.  Misc instructions are
+        // sequential, never halt.
         crate::frame::eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
         // MADDU/MSUBU/MADD/MSUB/INS read-and-write op_a; TEQ reads it
         // immutably; both flags bind the frame rules.
@@ -143,17 +67,23 @@ where
             + local.is_madd
             + local.is_msub
             + local.is_ins;
-        builder.assert_eq(local.frame.is_rw_a, is_rw_a_tie * local.is_instruction);
+        builder.assert_eq(local.frame.is_rw_a, is_rw_a_tie);
+        builder.assert_eq(local.frame.op_a_immutable, local.is_teq);
         builder
-            .assert_eq(local.frame.op_a_immutable, local.is_teq * local.is_instruction);
-        builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         // The HI-writing group keeps private shard/clk columns for its memory
         // access (the Mul coupling): tie them to the frame exactly there.
-        let cm_and_instr = is_check_memory * local.is_instruction;
-        builder.when(cm_and_instr.clone()).assert_eq(local.shard, local.frame.shard);
-        builder.when(cm_and_instr).assert_eq(
+        builder
+            .when(is_check_memory.clone())
+            .assert_eq(local.shard, local.frame.shard);
+        builder.when(is_check_memory).assert_eq(
             local.clk,
             AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
                 + local.frame.clk_16bit_limb,
@@ -259,17 +189,17 @@ impl MiscInstrsChip {
         let is_add = local.is_maddu + local.is_madd;
         let is_sub = local.is_msubu + local.is_msub;
 
-        let opcode = is_sign * Opcode::MULT.as_field::<AB::F>()
-            + is_unsign * Opcode::MULTU.as_field::<AB::F>();
-
-        builder.send_alu_with_hi(
-            opcode,
-            maddsub_cols.mul_lo,
+        // Prove op_b * op_c IN-ROW (the MULT/MULTU request row is gone).
+        crate::operations::MulOperation::<AB::F>::eval(
+            builder,
             local.op_b_value,
             local.op_c_value,
-            maddsub_cols.mul_hi,
-            is_real.clone(),
+            &local.maddsub_mul,
+            is_sign,
+            is_unsign,
         );
+        let mul_lo = local.maddsub_mul.lo();
+        let mul_hi = local.maddsub_mul.hi();
 
         for i in 0..WORD_SIZE {
             builder.when(is_real.clone()).assert_eq(
@@ -285,8 +215,8 @@ impl MiscInstrsChip {
 
         AddDoubleOperation::<AB::F>::eval(
             builder,
-            maddsub_cols.mul_lo,
-            maddsub_cols.mul_hi,
+            mul_lo,
+            mul_hi,
             maddsub_cols.src2_lo,
             maddsub_cols.src2_hi,
             maddsub_cols.add_operation,
@@ -327,7 +257,8 @@ impl MiscInstrsChip {
     ) {
         let ins_cols = local.misc_specific_columns.ins();
 
-        // Ins is decomposed into 6 ALU sub-operations:
+        // Ins is decomposed into 6 sub-operations, each proven IN-ROW by a
+        // dedicated gadget (the Instruction-bus request rows are gone):
         //    ror_val  = rotate_right(prev_a, lsb)            [shift: lsb ∈ 0..31]
         //    srl1_val = ror_val >> 1                          [shift: 1]
         //    srl_val  = srl1_val >> (msb - lsb)               [shift: msb-lsb ∈ 0..31]
@@ -337,78 +268,74 @@ impl MiscInstrsChip {
         //
         // The original single SRL by `width = msb - lsb + 1` is split into two
         // steps (`>> 1` then `>> (msb - lsb)`) so that each shift amount is
-        // always in [0, 31], avoiding the ShiftRight chip's range limitation
-        // when width = 32. All multiplicities remain degree 1.
+        // always in [0, 31], staying inside the shift logic's range when
+        // width = 32.
         {
-            builder.send_alu(
-                Opcode::ROR.as_field::<AB::F>(),
-                ins_cols.ror_val,
-                local.prev_a_value,
-                Word([
-                    AB::Expr::from_u32(0) + ins_cols.lsb,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
-                local.is_ins,
+            use crate::operations::{AddOperation, ShiftLeftOperation, ShiftRightOperation};
+            let zero = || AB::Expr::zero();
+            let shift_word = |amount: AB::Expr| Word([amount, zero(), zero(), zero()]);
+
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                local.prev_a_value.map(|x| x.into()),
+                shift_word(ins_cols.lsb.into()),
+                &local.ins_ror,
+                zero(),
+                zero(),
+                local.is_ins.into(),
             );
 
             // SRL step 1: shift right by 1 (always in range).
-            builder.send_alu(
-                Opcode::SRL.as_field::<AB::F>(),
-                ins_cols.srl1_val,
-                ins_cols.ror_val,
-                Word([AB::Expr::one(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-                local.is_ins,
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                local.ins_ror.value().map(|x| x.into()),
+                shift_word(AB::Expr::one()),
+                &local.ins_srl1,
+                local.is_ins.into(),
+                zero(),
+                zero(),
             );
 
             // SRL step 2: shift right by msb - lsb (range [0, 31]).
-            builder.send_alu(
-                Opcode::SRL.as_field::<AB::F>(),
-                ins_cols.srl_val,
-                ins_cols.srl1_val,
-                Word([
-                    AB::Expr::from_u32(0) + ins_cols.msb - ins_cols.lsb,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
-                local.is_ins,
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                local.ins_srl1.value().map(|x| x.into()),
+                shift_word(ins_cols.msb - ins_cols.lsb),
+                &local.ins_srl,
+                local.is_ins.into(),
+                zero(),
+                zero(),
             );
 
-            builder.send_alu(
-                Opcode::SLL.as_field::<AB::F>(),
+            ShiftLeftOperation::<AB::F>::eval(
+                builder,
+                ins_cols.sll_val.map(|x| x.into()),
+                local.op_b_value.map(|x| x.into()),
+                shift_word(AB::Expr::from_u32(31) - ins_cols.msb + ins_cols.lsb),
+                &local.ins_sll,
+                local.is_ins.into(),
+            );
+
+            AddOperation::<AB::F>::eval(
+                builder,
+                local.ins_srl.value(),
                 ins_cols.sll_val,
-                local.op_b_value,
-                Word([
-                    AB::Expr::from_u32(31) - ins_cols.msb + ins_cols.lsb,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
-                local.is_ins,
+                local.ins_add,
+                local.is_ins.into(),
             );
 
-            builder.send_alu(
-                Opcode::ADD.as_field::<AB::F>(),
-                ins_cols.add_val,
-                ins_cols.srl_val,
-                ins_cols.sll_val,
-                local.is_ins,
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                local.ins_add.value.map(|x| x.into()),
+                shift_word(AB::Expr::from_u32(31) - ins_cols.msb),
+                &local.ins_ror2,
+                zero(),
+                zero(),
+                local.is_ins.into(),
             );
-
-            builder.send_alu(
-                Opcode::ROR.as_field::<AB::F>(),
-                local.op_a_value,
-                ins_cols.add_val,
-                Word([
-                    AB::Expr::from_u32(31) - ins_cols.msb,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
-                local.is_ins,
-            );
+            builder
+                .when(local.is_ins)
+                .assert_word_eq(local.op_a_value, local.ins_ror2.value());
         }
         // op_c = (msb << 5) + lsb
         builder.when(local.is_ins).assert_eq(
@@ -449,35 +376,40 @@ impl MiscInstrsChip {
     ) {
         let ext_cols = local.misc_specific_columns.ext();
 
-        // Ext can be divided into 2 operations:
+        // Ext can be divided into 2 operations, each proven IN-ROW by a
+        // dedicated gadget (the Instruction-bus request rows are gone):
         //    sll_val = op_b << (31 - lsb - msbd)
         //    result = sll_val >> (31 - msbd)
         {
-            builder.send_alu(
-                Opcode::SLL.as_field::<AB::F>(),
-                ext_cols.sll_val,
-                local.op_b_value,
+            use crate::operations::{ShiftLeftOperation, ShiftRightOperation};
+            let zero = || AB::Expr::zero();
+
+            ShiftLeftOperation::<AB::F>::eval(
+                builder,
+                ext_cols.sll_val.map(|x| x.into()),
+                local.op_b_value.map(|x| x.into()),
                 Word([
                     AB::Expr::from_u32(31) - ext_cols.lsb - ext_cols.msbd,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
+                    zero(),
+                    zero(),
+                    zero(),
                 ]),
-                local.is_ext,
+                &local.ext_sll,
+                local.is_ext.into(),
             );
 
-            builder.send_alu(
-                Opcode::SRL.as_field::<AB::F>(),
-                local.op_a_value,
-                ext_cols.sll_val,
-                Word([
-                    AB::Expr::from_u32(31) - ext_cols.msbd,
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                    AB::Expr::zero(),
-                ]),
-                local.is_ext,
+            ShiftRightOperation::<AB::F>::eval(
+                builder,
+                ext_cols.sll_val.map(|x| x.into()),
+                Word([AB::Expr::from_u32(31) - ext_cols.msbd, zero(), zero(), zero()]),
+                &local.ext_srl,
+                local.is_ext.into(),
+                zero(),
+                zero(),
             );
+            builder
+                .when(local.is_ext)
+                .assert_word_eq(local.op_a_value, local.ext_srl.value());
         }
 
         // op_c = (msbd << 5) + lsb

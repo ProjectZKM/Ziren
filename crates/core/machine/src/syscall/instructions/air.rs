@@ -51,35 +51,6 @@ where
         // `num_extra_cycles` is checked to be equal to the return value of `get_num_extra_syscall_cycles`, in `eval`.
         // `op_a_val` is constrained in `eval_syscall`.
         // `is_halt` is checked to be correct in `eval_is_halt_syscall`.
-        let is_sequential = AB::Expr::ONE - local.is_halt;
-        builder.receive_instruction(
-            local.shard,
-            local.clk,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            local.num_extra_cycles,
-            Opcode::SYSCALL.as_field::<AB::F>(),
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            local.prev_a_value,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            AB::Expr::ONE,
-            local.is_halt,
-            is_sequential,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep.into(),
-        );
-
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
-        builder.assert_zero(
-            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
-        );
-
         // A real instruction carries its own program fetch, register access and
         // `(clk, pc)` chaining.  On the halt row `next_pc` is the exit signal 0
         // and the sent lookahead 0 + 4 = 4, exactly the tuple the legacy Cpu row
@@ -90,12 +61,18 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            local.is_real.into(),
         );
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(local.is_real).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        builder.when(local.is_real).assert_word_eq(local.op_b_value, local.frame.op_b_val());
+        builder.when(local.is_real).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         // THE HALT EXEMPTION: the received continuation equals `next_pc` on
         // every row except the halt, where the predecessor sent `pc + 4` (its
         // lookahead) while this row's own `next_pc` is overridden to 0.
-        builder.when(local.is_instruction).assert_zero(
+        builder.when(local.is_real).assert_zero(
             local.frame.state_recv_next_pc
                 - local.next_pc
                 - local.is_halt * (local.pc + AB::Expr::from_u32(4) - local.next_pc),
@@ -103,17 +80,17 @@ where
         // A syscall reads-and-writes op_a; the frame rule binds hi_or_prev_a to
         // the record's previous value, which is also where the syscall id and
         // the extra-cycle count come from.
-        builder.assert_eq(local.frame.is_rw_a, local.is_instruction);
+        builder.assert_eq(local.frame.is_rw_a, local.is_real);
         builder
-            .when(local.is_instruction)
+            .when(local.is_real)
             .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
         builder
-            .when(local.is_instruction)
+            .when(local.is_real)
             .assert_eq(local.frame.num_extra_cycles, local.num_extra_cycles);
         // Private shard/clk columns feed the syscall table send: tie them to
         // the frame (the Mul coupling).
-        builder.when(local.is_instruction).assert_eq(local.shard, local.frame.shard);
-        builder.when(local.is_instruction).assert_eq(
+        builder.when(local.is_real).assert_eq(local.shard, local.frame.shard);
+        builder.when(local.is_real).assert_eq(
             local.clk,
             AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
                 + local.frame.clk_16bit_limb,

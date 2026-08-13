@@ -3,6 +3,7 @@
 #include <cassert>
 #include "frame.hpp"
 #include "prelude.hpp"
+#include "shift_right_operation.hpp"
 #include "utils.hpp"
 
 namespace zkm_core_machine_sys::clo_clz {
@@ -13,14 +14,8 @@ __ZKM_HOSTDEV__ void event_to_row(
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
-    const bool is_instruction = event.is_instruction != 0;
-    cols.is_instruction = F::from_bool(is_instruction);
-    cols.is_dep = F::from_bool(!is_instruction);
-    if (is_instruction) {
-        frame::populate_from_alu<AluEvent, F>(cols.frame, event, instruction, shard);
-    } else {
-        frame::populate_dependency<F>(cols.frame);
-    }
+    // Every row is a real instruction owning its frame.
+    frame::populate_from_alu<AluEvent, F>(cols.frame, event, instruction, shard);
 
     cols.pc = F::from_canonical_u32(event.pc);
     cols.next_pc = F::from_canonical_u32(event.next_pc);
@@ -39,5 +34,10 @@ __ZKM_HOSTDEV__ void event_to_row(
 
     // if bb == 0, then result is 32.
     cols.is_bb_zero = F::from_bool(bb == 0);
+
+    // The inlined shift (the SRL request row): bb >> (31 - a) == 1.
+    if (bb != 0) {
+        shift_right_operation::populate<F>(cols.srl, Opcode::SRL, bb, 31 - event.a);
+    }
 }
 }  // namespace zkm::clo_clz

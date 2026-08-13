@@ -86,7 +86,9 @@ use crate::{
     air::{WordAirBuilder, ZKMCoreAirBuilder},
     frame::{eval_instruction_frame, InstructionFrameCols},
     memory::MemoryCols,
-    operations::{IsEqualWordOperation, IsZeroWordOperation},
+    operations::{
+        AddOperation, IsEqualWordOperation, IsZeroWordOperation, LtOperation, MulOperation,
+    },
     utils::{next_multiple_of_32, pad_rows_mult32},
 };
 
@@ -132,8 +134,20 @@ pub struct DivRemCols<T> {
     /// `max(abs(c), 1)`, used to check `abs(remainder) < abs(c)`.
     pub max_abs_c_or_1: Word<T>,
 
-    /// The result of `c * quotient`.
-    pub c_times_quotient: [T; LONG_WORD_SIZE],
+    /// The inlined multiplication proving `c * quotient` — its 64-bit
+    /// `product` is what the MULT/MULTU request row used to certify.
+    pub mul: MulOperation<T>,
+
+    /// The inlined addition proving `c + abs_c = 0` when `c` is negative.
+    pub neg_c_add: AddOperation<T>,
+
+    /// The inlined addition proving `remainder + abs_remainder = 0` when the
+    /// remainder is negative.
+    pub neg_rem_add: AddOperation<T>,
+
+    /// The inlined UNSIGNED comparison proving
+    /// `abs(remainder) < max(abs(c), 1)`, replacing the SLTU request row.
+    pub remainder_check: LtOperation<T>,
 
     /// Carry propagated when adding `remainder` by `c * quotient`.
     pub carry: [T; LONG_WORD_SIZE],
@@ -157,17 +171,8 @@ pub struct DivRemCols<T> {
     #[picus(selector)]
     pub is_modu: T,
 
-    /// Whether this row is a REAL instruction (all divrem events are today —
-    /// no chip outsources to DivRem — but the gate keeps the invariant local).
-    pub is_instruction: T,
-
-    /// Dependency-row multiplicities for the two Instruction-bus receives,
-    /// materialised so they stay degree 1.
-    pub is_dd_dep: T,
-    pub is_mm_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every DivRem row is an instruction).
     pub frame: InstructionFrameCols<T>,
 
     /// Flag to indicate whether the division operation overflows.
@@ -270,22 +275,14 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.is_mod = F::from_bool(event.opcode == Opcode::MOD);
                 cols.is_c_0.populate(event.c);
 
-                let is_instruction = event.is_instruction != 0;
-                cols.is_instruction = F::from_bool(is_instruction);
-                let is_dd =
-                    event.opcode == Opcode::DIV || event.opcode == Opcode::DIVU;
-                cols.is_dd_dep = F::from_bool(is_dd && !is_instruction);
-                cols.is_mm_dep = F::from_bool(!is_dd && !is_instruction);
-                if is_instruction {
-                    cols.frame.populate_from_comp_alu(
-                        event,
-                        &input.program,
-                        input.public_values.execution_shard,
-                        output,
-                    );
-                } else {
-                    cols.frame.populate_dependency();
-                }
+                // Every DivRem row is a real instruction (no chip outsources
+                // to DivRem, and DivRem's own sub-operations are inlined).
+                cols.frame.populate_from_comp_alu(
+                    event,
+                    &input.program,
+                    input.public_values.execution_shard,
+                    output,
+                );
 
                 if event.opcode == Opcode::DIVU || event.opcode == Opcode::DIV {
                     // DivRem Chip is only used for DIV and DIVU instruction currently.
@@ -309,23 +306,37 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                 cols.c_msb = F::from_u8(get_msb(event.c));
                 cols.is_overflow_b.populate(event.b, i32::MIN as u32);
                 cols.is_overflow_c.populate(event.c, -1i32 as u32);
+                let (abs_remainder, abs_c) = if is_signed_operation(event.opcode) {
+                    ((remainder as i32).unsigned_abs(), (event.c as i32).unsigned_abs())
+                } else {
+                    (remainder, event.c)
+                };
+                let max_abs_c_or_1 = u32::max(1, abs_c);
                 if is_signed_operation(event.opcode) {
-                    let abs_remainder = (remainder as i32).unsigned_abs();
-                    let abs_c = (event.c as i32).unsigned_abs();
-
                     cols.rem_neg = cols.rem_msb;
                     cols.b_neg = cols.b_msb;
                     cols.c_neg = cols.c_msb;
                     cols.is_overflow =
                         F::from_bool(event.b as i32 == i32::MIN && event.c as i32 == -1);
-                    cols.abs_remainder = Word::from(abs_remainder);
-                    cols.abs_c = Word::from(abs_c);
-                    cols.max_abs_c_or_1 = Word::from(u32::max(1, abs_c));
-                } else {
-                    cols.abs_remainder = cols.remainder;
-                    cols.abs_c = cols.c;
-                    cols.max_abs_c_or_1 = Word::from(u32::max(1, event.c));
                 }
+                cols.abs_remainder = Word::from(abs_remainder);
+                cols.abs_c = Word::from(abs_c);
+                cols.max_abs_c_or_1 = Word::from(max_abs_c_or_1);
+
+                // The inlined negation checks: `c + abs_c = 0` when `c < 0`,
+                // `remainder + abs_remainder = 0` when `remainder < 0` (the
+                // two ADD request rows the chip used to push onto AddSub).
+                if cols.c_neg == F::ONE {
+                    cols.neg_c_add.populate(output, event.c, abs_c);
+                }
+                if cols.rem_neg == F::ONE {
+                    cols.neg_rem_add.populate(output, remainder, abs_remainder);
+                }
+
+                // The inlined `abs(remainder) < max(abs(c), 1)` (the SLTU
+                // request row).  Division by zero traps in the executor, so
+                // the multiplicity is 1 on every real row.
+                cols.remainder_check.populate(output, abs_remainder, max_abs_c_or_1, false);
 
                 // Insert the MSB lookup events.
                 {
@@ -359,7 +370,14 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                         ((quotient as u64) * (event.c as u64)).to_le_bytes()
                     }
                 };
-                cols.c_times_quotient = c_times_quotient.map(F::from_u8);
+                // The inlined multiplication (the MULT/MULTU request row):
+                // its 64-bit product equals `c_times_quotient` byte for byte.
+                cols.mul.populate(
+                    output,
+                    quotient,
+                    event.c,
+                    is_signed_operation(event.opcode),
+                );
 
                 let remainder_bytes = {
                     if is_signed_operation(event.opcode) {
@@ -381,11 +399,11 @@ impl<F: PrimeField32> MachineAir<F> for DivRemChip {
                     cols.carry[i] = F::from_u32(carry[i]);
                 }
 
-                // Range check.
+                // Range check (the product bytes are range-checked inside the
+                // mul gadget).
                 {
                     output.add_u8_range_checks(&quotient.to_le_bytes());
                     output.add_u8_range_checks(&remainder.to_le_bytes());
-                    output.add_u8_range_checks(&c_times_quotient);
                 }
             }
 
@@ -455,39 +473,18 @@ where
             }
         }
 
-        // Use the mult or multu table to compute c * quotient and compare it to local.c_times_quotient.
-        {
-            let lower_half: [AB::Expr; 4] = [
-                local.c_times_quotient[0].into(),
-                local.c_times_quotient[1].into(),
-                local.c_times_quotient[2].into(),
-                local.c_times_quotient[3].into(),
-            ];
-
-            let upper_half: [AB::Expr; 4] = [
-                local.c_times_quotient[4].into(),
-                local.c_times_quotient[5].into(),
-                local.c_times_quotient[6].into(),
-                local.c_times_quotient[7].into(),
-            ];
-
-            let opcode = {
-                let mult = AB::Expr::from_u32(Opcode::MULT as u32);
-                let multu = AB::Expr::from_u32(Opcode::MULTU as u32);
-                (local.is_div + local.is_mod) * mult + (local.is_divu + local.is_modu) * multu
-            };
-
-            // The lower 4 bytes of c_times_quotient must match the LO in (c * quotient).
-            // The upper 4 bytes of c_times_quotient must match the HI in (c * quotient).
-            builder.send_alu_with_hi(
-                opcode,
-                Word(lower_half),
-                local.quotient,
-                local.c,
-                Word(upper_half),
-                is_real.clone(),
-            );
-        }
+        // Prove c * quotient IN-ROW (the MULT/MULTU request row is gone): the
+        // gadget's 64-bit product is `c_times_quotient`.  DIV/MOD are the
+        // signed multiplies, DIVU/MODU the unsigned ones — exactly the opcode
+        // the chip used to request.
+        MulOperation::<AB::F>::eval(
+            builder,
+            local.quotient,
+            local.c,
+            &local.mul,
+            local.is_div + local.is_mod,
+            local.is_divu + local.is_modu,
+        );
 
         // Calculate is_overflow. is_overflow = is_equal(b, -2^{31}) * is_equal(c, -1) * is_signed
         {
@@ -523,7 +520,7 @@ where
 
             // Add remainder to c_times_quotient and propagate carry.
             for i in 0..LONG_WORD_SIZE {
-                c_times_quotient_plus_remainder[i] = local.c_times_quotient[i].into();
+                c_times_quotient_plus_remainder[i] = local.mul.product[i].into();
 
                 // Add remainder.
                 if i < WORD_SIZE {
@@ -627,22 +624,25 @@ where
                     .when_not(local.rem_neg)
                     .assert_eq(local.remainder[i], local.abs_remainder[i]);
             }
-            // In the case that `c` or `rem` is negative, instead check that their sum is zero by
-            // sending an AddEvent.
-            builder.send_alu(
-                AB::Expr::from_u32(Opcode::ADD as u32),
-                Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
+            // In the case that `c` or `rem` is negative, instead check that
+            // their sum is zero, proven IN-ROW (the ADD request rows are
+            // gone).
+            AddOperation::<AB::F>::eval(
+                builder,
                 local.c,
                 local.abs_c,
-                local.c_neg,
+                local.neg_c_add,
+                local.c_neg.into(),
             );
-            builder.send_alu(
-                AB::Expr::from_u32(Opcode::ADD as u32),
-                Word([zero.clone(), zero.clone(), zero.clone(), zero.clone()]),
+            builder.when(local.c_neg).assert_word_zero(local.neg_c_add.value);
+            AddOperation::<AB::F>::eval(
+                builder,
                 local.remainder,
                 local.abs_remainder,
-                local.rem_neg,
+                local.neg_rem_add,
+                local.rem_neg.into(),
             );
+            builder.when(local.rem_neg).assert_word_zero(local.neg_rem_add.value);
 
             // max(abs(c), 1) = abs(c) * (1 - is_c_0) + 1 * is_c_0
             let max_abs_c_or_1: Word<AB::Expr> = {
@@ -673,15 +673,20 @@ where
                 local.remainder_check_multiplicity,
             );
 
-            // Dispatch abs(remainder) < max(abs(c), 1), this is equivalent to abs(remainder) <
-            // abs(c) if not division by 0.
-            builder.send_alu(
-                AB::Expr::from_u32(Opcode::SLTU as u32),
-                Word([one.clone(), zero.clone(), zero.clone(), zero.clone()]),
+            // Check abs(remainder) < max(abs(c), 1) IN-ROW (the SLTU request
+            // row is gone); this is equivalent to abs(remainder) < abs(c)
+            // when not division by 0.
+            LtOperation::<AB::F>::eval(
+                builder,
                 local.abs_remainder,
                 local.max_abs_c_or_1,
-                local.remainder_check_multiplicity,
+                &local.remainder_check,
+                AB::Expr::ZERO,
+                local.remainder_check_multiplicity.into(),
             );
+            builder
+                .when(local.remainder_check_multiplicity)
+                .assert_one(local.remainder_check.lt);
         }
 
         // Check that the MSBs are correct.
@@ -707,8 +712,6 @@ where
             local.carry.iter().for_each(|carry| {
                 builder.assert_bool(*carry);
             });
-
-            builder.slice_range_check_u8(&local.c_times_quotient, is_real.clone());
         }
 
         // Check that the flags are boolean.
@@ -732,7 +735,8 @@ where
             }
         }
 
-        // Receive the arguments.
+        // Instruction plumbing (the Instruction-bus receives are gone: every
+        // row is a real instruction serving itself via the frame).
         {
             // Exactly one of the opcode flags must be on.
             builder.when(is_real.clone()).assert_eq(
@@ -740,75 +744,18 @@ where
                 local.is_divu + local.is_div + local.is_mod + local.is_modu,
             );
 
-            let opcode = {
-                let divu: AB::Expr = AB::F::from_u32(Opcode::DIVU as u32).into();
-                let div: AB::Expr = AB::F::from_u32(Opcode::DIV as u32).into();
-                let modi: AB::Expr = AB::F::from_u32(Opcode::MOD as u32).into();
-                let modu: AB::Expr = AB::F::from_u32(Opcode::MODU as u32).into();
-
-                local.is_divu * divu
-                    + local.is_div * div
-                    + local.is_mod * modi
-                    + local.is_modu * modu
-            };
-
-            // DivRem Chip is only used for DIV and DIVU instruction currently. So is_write_hi will always be true.
-            builder.receive_instruction(
-                local.shard,
-                local.clk,
-                local.pc,
-                local.next_pc,
-                local.next_pc + AB::Expr::from_u32(4),
-                AB::Expr::ZERO,
-                opcode.clone(),
-                local.quotient,
-                local.b,
-                local.c,
-                local.remainder,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ONE,
-                AB::Expr::ZERO,
-                AB::Expr::ONE,
-                // Dependency rows only: an instruction row serves itself.
-                local.is_dd_dep,
-            );
-
-            builder.receive_instruction(
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                local.pc,
-                local.next_pc,
-                local.next_pc + AB::Expr::from_u32(4),
-                AB::Expr::ZERO,
-                opcode,
-                local.remainder,
-                local.b,
-                local.c,
-                Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ZERO,
-                AB::Expr::ONE,
-                // Dependency rows only: an instruction row serves itself.
-                local.is_mm_dep,
-            );
-
-            builder.assert_bool(local.is_instruction);
-            builder.assert_bool(local.is_dd_dep);
-            builder.assert_bool(local.is_mm_dep);
-            let dd = local.is_div + local.is_divu;
-            let mm = local.is_mod + local.is_modu;
+            // Bind this chip's operand columns to the frame's register-file
+            // view: the chip must compute on exactly the values the register
+            // accesses commit.  DIV/DIVU write the quotient to op_a, MOD/MODU
+            // the remainder.
             builder
-                .when(local.is_instruction)
-                .assert_zero(AB::Expr::ONE - (dd.clone() + mm.clone()));
-            builder.assert_zero(
-                local.is_dd_dep - (dd.clone() - dd.clone() * local.is_instruction),
-            );
-            builder.assert_zero(
-                local.is_mm_dep - (mm.clone() - mm * local.is_instruction),
-            );
+                .when(local.is_div + local.is_divu)
+                .assert_word_eq(local.quotient, local.frame.op_a_value);
+            builder
+                .when(local.is_mod + local.is_modu)
+                .assert_word_eq(local.remainder, local.frame.op_a_value);
+            builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
+            builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
             // A real instruction carries its own program fetch, register access
             // and `(clk, pc)` chaining.  DIV/MOD are sequential, never halt.
@@ -818,16 +765,16 @@ where
                 local.pc.into(),
                 local.next_pc.into(),
                 local.next_pc + AB::Expr::from_u32(4),
-                local.is_instruction.into(),
+                is_real.clone(),
             );
             builder
-                .when(local.is_instruction)
+                .when(is_real.clone())
                 .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
             // shard/clk are populated only on DIV/DIVU rows (they write HI —
             // same coupling as Mul): tie them to the frame exactly there.
-            let dd_and_instr = dd * local.is_instruction;
-            builder.when(dd_and_instr.clone()).assert_eq(local.shard, local.frame.shard);
-            builder.when(dd_and_instr).assert_eq(
+            let dd = local.is_div + local.is_divu;
+            builder.when(dd.clone()).assert_eq(local.shard, local.frame.shard);
+            builder.when(dd).assert_eq(
                 local.clk,
                 AB::Expr::from_u32(1u32 << 16) * local.frame.clk_8bit_limb
                     + local.frame.clk_16bit_limb,
@@ -852,15 +799,29 @@ where
 mod tests {
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::CompAluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Executor, Instruction, Opcode, Program};
 
     use super::DivRemChip;
-    use zkm_pcs::MachineAir;
+    use zkm_pcs::{MachineAir, ZKMCoreOpts};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.divrem_events = vec![CompAluEvent::new(0, Opcode::DIVU, 2, 17, 3)];
+        // Real DivRem rows carry an instruction frame (program fetch +
+        // register records), so the test executes a small program instead of
+        // hand-writing events.
+        let instructions = vec![
+            Instruction::new(Opcode::ADD, 29, 0, 17, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, 3, false, true),
+            Instruction::new(Opcode::DIVU, 31, 29, 30, false, false),
+            Instruction::new(Opcode::DIV, 28, 29, 30, false, false),
+            Instruction::new(Opcode::MODU, 27, 29, 30, false, false),
+            Instruction::new(Opcode::MOD, 26, 29, 30, false, false),
+        ];
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        let shard = runtime.records[0].clone();
+        assert!(!shard.divrem_events.is_empty());
         let chip = DivRemChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

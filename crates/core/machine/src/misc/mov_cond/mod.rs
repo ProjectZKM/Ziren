@@ -63,14 +63,8 @@ pub struct MovCondCols<T> {
     #[picus(selector)]
     pub is_wsbh: T,
 
-    /// Whether this row is a REAL instruction (all movcond rows are today).
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every MovCond row is an instruction).
     pub frame: crate::frame::InstructionFrameCols<T>,
 }
 
@@ -163,14 +157,8 @@ impl MovCondChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_movcond(event, program, shard, _blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every MovCond row is a real instruction owning its frame.
+        cols.frame.populate_from_movcond(event, program, shard, _blu);
 
         cols.pc = F::from_u32(event.pc);
         cols.next_pc = F::from_u32(event.next_pc);
@@ -204,38 +192,6 @@ where
         let local: &MovCondCols<AB::Var> = (*local).borrow();
         let is_real = local.is_mne + local.is_meq + local.is_wsbh;
 
-        let cpu_opcode = local.is_wsbh * Opcode::WSBH.as_field::<AB::F>()
-            + local.is_meq * Opcode::MEQ.as_field::<AB::F>()
-            + local.is_mne * Opcode::MNE.as_field::<AB::F>();
-
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            cpu_opcode.clone(),
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            local.prev_a_value,
-            AB::Expr::ZERO,
-            local.is_mne + local.is_meq,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep.into(),
-        );
-
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-        builder.assert_zero(
-            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
-        );
-
         // A real instruction carries its own program fetch, register access and
         // `(clk, pc)` chaining.  MNE/MEQ/WSBH are sequential and never halt.
         crate::frame::eval_instruction_frame(
@@ -244,20 +200,24 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
         // MNE/MEQ read-and-write op_a (the frame's is_rw_a rule binds
         // hi_or_prev_a to the record's prev value); WSBH is a plain write.
-        builder.assert_eq(
-            local.frame.is_rw_a,
-            (local.is_mne + local.is_meq) * local.is_instruction,
-        );
+        builder.assert_eq(local.frame.is_rw_a, local.is_mne + local.is_meq);
         builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 
         IsZeroWordOperation::<AB::F>::eval(
             builder,

@@ -103,14 +103,8 @@ impl SyscallInstrsChip {
         _blu: &mut impl ByteRecord,
         program: &zkm_core_executor::Program,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_syscall(event, program, _blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Syscall row is a real instruction owning its frame.
+        cols.frame.populate_from_syscall(event, program, _blu);
 
         cols.is_real = F::ONE;
         cols.pc = F::from_u32(event.pc);

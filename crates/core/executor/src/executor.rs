@@ -13,9 +13,6 @@ use zkm_pcs::ZKMCoreOpts;
 
 use crate::{
     context::ZKMContext,
-    dependencies::{
-        emit_cloclz_dependencies, emit_divrem_dependencies, emit_misc_dependencies,
-    },
     estimate_mips_lde_size,
     events::{
         AluEvent, BranchEvent, CompAluEvent, CpuEvent, JumpEvent, MemInstrEvent,
@@ -1615,11 +1612,9 @@ impl<'a> Executor<'a> {
             }
             Opcode::DIV | Opcode::DIVU | Opcode::MOD | Opcode::MODU => {
                 self.record.divrem_events.push(event_comp);
-                emit_divrem_dependencies(self, event);
             }
             Opcode::CLZ | Opcode::CLO => {
                 self.record.cloclz_events.push(event);
-                emit_cloclz_dependencies(self, event);
             }
             _ => {}
         }
@@ -1786,7 +1781,6 @@ impl<'a> Executor<'a> {
             event.b_record = record.b.into();
             event.c_record = record.c.into();
             self.record.misc_events.push(event);
-            emit_misc_dependencies(self, event);
         }
     }
 

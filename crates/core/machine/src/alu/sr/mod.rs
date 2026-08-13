@@ -62,7 +62,7 @@ use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
-    air::ZKMCoreAirBuilder,
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     frame::{eval_instruction_frame, InstructionFrameCols},
     alu::sr::utils::{nb_bits_to_shift, nb_bytes_to_shift},
     bytes::utils::shr_carry,
@@ -136,15 +136,9 @@ pub struct ShiftRightCols<T> {
     /// Selector to know whether this row is enabled.
     pub is_real: T,
 
-    /// Whether this row is a REAL instruction rather than a synthetic
-    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every ShiftRight row is an instruction — the Instruction bus
+    /// and its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 }
 
@@ -265,14 +259,8 @@ impl ShiftRightChip {
         program: &Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every ShiftRight row is a real instruction owning its frame.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         // Initialize cols with basic operands and flags derived from the current event.
         {
@@ -559,48 +547,27 @@ where
             local.bit_shift_result[2],
             local.bit_shift_result[3],
         ]);
-        builder.receive_instruction(
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::zero(),
-            local.is_srl * AB::F::from_u32(Opcode::SRL as u32)
-                + local.is_sra * AB::F::from_u32(Opcode::SRA as u32)
-                + local.is_ror * AB::F::from_u32(Opcode::ROR as u32),
-            a_word,
-            local.b,
-            local.c,
-            Word([AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero(), AB::Expr::zero()]),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::zero(),
-            AB::Expr::one(),
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep,
-        );
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(local.is_real).assert_word_eq(a_word, local.frame.op_a_value);
+        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
+        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
-        builder.assert_zero(
-            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
-        );
-
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  SRL/SRA/ROR are sequential and can never halt.
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  SRL/SRA/ROR are sequential and can
+        // never halt.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            local.is_real.into(),
         );
         builder
-            .when(local.is_instruction)
+            .when(local.is_real)
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
@@ -610,17 +577,18 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
     use super::ShiftRightChip;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.shift_right_events = vec![AluEvent::new(0, Opcode::SRL, 6, 12, 1)];
+        let shard = run_instructions(alu_op(Opcode::SRL, 12, 1));
+        assert!(!shard.shift_right_events.is_empty());
         let chip = ShiftRightChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -632,49 +600,49 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let shifts = vec![
-            (Opcode::SRL, 0xffff8000, 0xffff8000, 0),
-            (Opcode::SRL, 0x7fffc000, 0xffff8000, 1),
-            (Opcode::SRL, 0x01ffff00, 0xffff8000, 7),
-            (Opcode::SRL, 0x0003fffe, 0xffff8000, 14),
-            (Opcode::SRL, 0x0001ffff, 0xffff8001, 15),
-            (Opcode::SRL, 0xffffffff, 0xffffffff, 0),
-            (Opcode::SRL, 0x7fffffff, 0xffffffff, 1),
-            (Opcode::SRL, 0x01ffffff, 0xffffffff, 7),
-            (Opcode::SRL, 0x0003ffff, 0xffffffff, 14),
-            (Opcode::SRL, 0x00000001, 0xffffffff, 31),
-            (Opcode::SRL, 0x21212121, 0x21212121, 0),
-            (Opcode::SRL, 0x10909090, 0x21212121, 1),
-            (Opcode::SRL, 0x00424242, 0x21212121, 7),
-            (Opcode::SRL, 0x00008484, 0x21212121, 14),
-            (Opcode::SRL, 0x00000000, 0x21212121, 31),
-            (Opcode::SRL, 0x21212121, 0x21212121, 0xffffffe0),
-            (Opcode::SRL, 0x10909090, 0x21212121, 0xffffffe1),
-            (Opcode::SRL, 0x00424242, 0x21212121, 0xffffffe7),
-            (Opcode::SRL, 0x00008484, 0x21212121, 0xffffffee),
-            (Opcode::SRL, 0x00000000, 0x21212121, 0xffffffff),
-            (Opcode::SRA, 0x00000000, 0x00000000, 0),
-            (Opcode::SRA, 0xc0000000, 0x80000000, 1),
-            (Opcode::SRA, 0xff000000, 0x80000000, 7),
-            (Opcode::SRA, 0xfffe0000, 0x80000000, 14),
-            (Opcode::SRA, 0xffffffff, 0x80000001, 31),
-            (Opcode::SRA, 0x7fffffff, 0x7fffffff, 0),
-            (Opcode::SRA, 0x3fffffff, 0x7fffffff, 1),
-            (Opcode::SRA, 0x00ffffff, 0x7fffffff, 7),
-            (Opcode::SRA, 0x0001ffff, 0x7fffffff, 14),
-            (Opcode::SRA, 0x00000000, 0x7fffffff, 31),
-            (Opcode::SRA, 0x81818181, 0x81818181, 0),
-            (Opcode::SRA, 0xc0c0c0c0, 0x81818181, 1),
-            (Opcode::SRA, 0xff030303, 0x81818181, 7),
-            (Opcode::SRA, 0xfffe0606, 0x81818181, 14),
-            (Opcode::SRA, 0xffffffff, 0x81818181, 31),
+        let shifts: Vec<(Opcode, u32, u32)> = vec![
+            (Opcode::SRL, 0xffff8000, 0),
+            (Opcode::SRL, 0xffff8000, 1),
+            (Opcode::SRL, 0xffff8000, 7),
+            (Opcode::SRL, 0xffff8000, 14),
+            (Opcode::SRL, 0xffff8001, 15),
+            (Opcode::SRL, 0xffffffff, 0),
+            (Opcode::SRL, 0xffffffff, 1),
+            (Opcode::SRL, 0xffffffff, 7),
+            (Opcode::SRL, 0xffffffff, 14),
+            (Opcode::SRL, 0xffffffff, 31),
+            (Opcode::SRL, 0x21212121, 0),
+            (Opcode::SRL, 0x21212121, 1),
+            (Opcode::SRL, 0x21212121, 7),
+            (Opcode::SRL, 0x21212121, 14),
+            (Opcode::SRL, 0x21212121, 31),
+            (Opcode::SRL, 0x21212121, 0xffffffe0),
+            (Opcode::SRL, 0x21212121, 0xffffffe1),
+            (Opcode::SRL, 0x21212121, 0xffffffe7),
+            (Opcode::SRL, 0x21212121, 0xffffffee),
+            (Opcode::SRL, 0x21212121, 0xffffffff),
+            (Opcode::SRA, 0x00000000, 0),
+            (Opcode::SRA, 0x80000000, 1),
+            (Opcode::SRA, 0x80000000, 7),
+            (Opcode::SRA, 0x80000000, 14),
+            (Opcode::SRA, 0x80000001, 31),
+            (Opcode::SRA, 0x7fffffff, 0),
+            (Opcode::SRA, 0x7fffffff, 1),
+            (Opcode::SRA, 0x7fffffff, 7),
+            (Opcode::SRA, 0x7fffffff, 14),
+            (Opcode::SRA, 0x7fffffff, 31),
+            (Opcode::SRA, 0x81818181, 0),
+            (Opcode::SRA, 0x81818181, 1),
+            (Opcode::SRA, 0x81818181, 7),
+            (Opcode::SRA, 0x81818181, 14),
+            (Opcode::SRA, 0x81818181, 31),
         ];
-        let mut shift_events: Vec<AluEvent> = Vec::new();
-        for t in shifts.iter() {
-            shift_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3));
+        let mut instructions = Vec::new();
+        for &(opcode, b, c) in shifts.iter() {
+            instructions.extend(alu_op(opcode, b, c));
         }
-        let mut shard = ExecutionRecord::default();
-        shard.shift_right_events = shift_events;
+        let shard = run_instructions(instructions);
+        assert!(!shard.shift_right_events.is_empty());
         let chip = ShiftRightChip::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

@@ -185,52 +185,6 @@ pub trait ByteAirBuilder: BaseAirBuilder {
 
 /// A trait which contains methods related to ALU lookups in an AIR.
 pub trait InstructionAirBuilder: BaseAirBuilder {
-    /// Sends a MIPS instruction to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn send_instruction(
-        &mut self,
-        shard: impl Into<Self::Expr> + Clone,
-        clk: impl Into<Self::Expr> + Clone,
-        pc: impl Into<Self::Expr>,
-        next_pc: impl Into<Self::Expr>,
-        next_next_pc: impl Into<Self::Expr>,
-        num_extra_cycles: impl Into<Self::Expr>,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        hi: Word<impl Into<Self::Expr>>,
-        op_a_immutable: impl Into<Self::Expr>,
-        is_rw_a: impl Into<Self::Expr>,
-        is_check_memory: impl Into<Self::Expr>,
-        is_halt: impl Into<Self::Expr>,
-        is_sequential: impl Into<Self::Expr>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        let values = once(shard.into())
-            .chain(once(clk.into()))
-            .chain(once(pc.into()))
-            .chain(once(next_pc.into()))
-            .chain(once(next_next_pc.into()))
-            .chain(once(num_extra_cycles.into()))
-            .chain(once(opcode.into()))
-            .chain(a.0.into_iter().map(Into::into))
-            .chain(b.0.into_iter().map(Into::into))
-            .chain(c.0.into_iter().map(Into::into))
-            .chain(hi.0.into_iter().map(Into::into))
-            .chain(once(op_a_immutable.into()))
-            .chain(once(is_rw_a.into()))
-            .chain(once(is_check_memory.into()))
-            .chain(once(is_halt.into()))
-            .chain(once(is_sequential.into()))
-            .collect();
-
-        self.send(
-            AirLookup::new(values, multiplicity.into(), LookupKind::Instruction),
-            LookupScope::Local,
-        );
-    }
-
     /// Sends the next CPU state `(shard, clk, pc, next_pc)` on the
     /// [`LookupKind::State`] bus.  Local-only replacement for the legacy
     /// `when_transition` pc/clk/shard chaining: each instruction row
@@ -272,96 +226,7 @@ pub trait InstructionAirBuilder: BaseAirBuilder {
         );
     }
 
-    /// Receives an ALU operation to be processed.
-    #[allow(clippy::too_many_arguments)]
-    fn receive_instruction(
-        &mut self,
-        shard: impl Into<Self::Expr> + Clone,
-        clk: impl Into<Self::Expr> + Clone,
-        pc: impl Into<Self::Expr>,
-        next_pc: impl Into<Self::Expr>,
-        next_next_pc: impl Into<Self::Expr>,
-        num_extra_cycles: impl Into<Self::Expr>,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        hi: Word<impl Into<Self::Expr>>,
-        op_a_immutable: impl Into<Self::Expr>,
-        is_rw_a: impl Into<Self::Expr>,
-        is_check_memory: impl Into<Self::Expr>,
-        is_halt: impl Into<Self::Expr>,
-        is_sequential: impl Into<Self::Expr>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        let values = once(shard.into())
-            .chain(once(clk.into()))
-            .chain(once(pc.into()))
-            .chain(once(next_pc.into()))
-            .chain(once(next_next_pc.into()))
-            .chain(once(num_extra_cycles.into()))
-            .chain(once(opcode.into()))
-            .chain(a.0.into_iter().map(Into::into))
-            .chain(b.0.into_iter().map(Into::into))
-            .chain(c.0.into_iter().map(Into::into))
-            .chain(hi.0.into_iter().map(Into::into))
-            .chain(once(op_a_immutable.into()))
-            .chain(once(is_rw_a.into()))
-            .chain(once(is_check_memory.into()))
-            .chain(once(is_halt.into()))
-            .chain(once(is_sequential.into()))
-            .collect();
 
-        self.receive(
-            AirLookup::new(values, multiplicity.into(), LookupKind::Instruction),
-            LookupScope::Local,
-        );
-    }
-    /// Sends an ALU operation to be processed. This will be received by receive_instruction of ALU chip.
-    #[allow(clippy::too_many_arguments)]
-    fn send_alu(
-        &mut self,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        self.send_alu_with_hi(opcode, a, b, c, Word([Self::F::ZERO; 4]), multiplicity);
-    }
-
-    /// Sends an ALU operation with HI to be processed. This will be received by receive_instruction of ALU chip.
-    #[allow(clippy::too_many_arguments)]
-    fn send_alu_with_hi(
-        &mut self,
-        opcode: impl Into<Self::Expr>,
-        a: Word<impl Into<Self::Expr>>,
-        b: Word<impl Into<Self::Expr>>,
-        c: Word<impl Into<Self::Expr>>,
-        // HI register is MULT MULTU DIV DIVU
-        hi: Word<impl Into<Self::Expr>>,
-        multiplicity: impl Into<Self::Expr>,
-    ) {
-        self.send_instruction(
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::from_u32(UNUSED_PC),
-            Self::Expr::from_u32(UNUSED_PC + DEFAULT_PC_INC),
-            Self::Expr::from_u32(UNUSED_PC + DEFAULT_PC_INC + DEFAULT_PC_INC),
-            Self::Expr::ZERO,
-            opcode,
-            a,
-            b,
-            c,
-            hi,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ZERO,
-            Self::Expr::ONE,
-            multiplicity,
-        )
-    }
 
     /// Sends a syscall operation to be processed (with "ECALL" opcode).
     #[allow(clippy::too_many_arguments)]

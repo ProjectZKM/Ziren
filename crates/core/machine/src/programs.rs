@@ -20,6 +20,30 @@ pub mod tests {
         Program::new(instructions, 0, 0)
     }
 
+    /// Execute a hand-built instruction list and return the first shard's
+    /// record.  Chip unit tests use this instead of hand-writing events:
+    /// every real row carries an instruction frame (program fetch + register
+    /// records), which only the executor can populate consistently.
+    #[must_use]
+    pub fn run_instructions(instructions: Vec<Instruction>) -> zkm_core_executor::ExecutionRecord {
+        let program = Program::new(instructions, 0, 0);
+        let mut runtime =
+            zkm_core_executor::Executor::new(program, zkm_pcs::ZKMCoreOpts::default());
+        runtime.run().unwrap();
+        runtime.records[0].clone()
+    }
+
+    /// Build the canonical `rd = op(rs=b, rt=c)` triple — two immediate loads
+    /// and the operation itself — for [`run_instructions`].
+    #[must_use]
+    pub fn alu_op(opcode: Opcode, b: u32, c: u32) -> Vec<Instruction> {
+        vec![
+            Instruction::new(Opcode::ADD, 29, 0, b, false, true),
+            Instruction::new(Opcode::ADD, 30, 0, c, false, true),
+            Instruction::new(opcode, 31, 29, 30, false, false),
+        ]
+    }
+
     /// Get the fibonacci program.
     ///
     /// # Panics

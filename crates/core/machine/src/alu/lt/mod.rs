@@ -20,6 +20,7 @@ use zkm_pcs::{
 };
 
 use crate::{
+    air::WordAirBuilder,
     frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
@@ -48,18 +49,9 @@ pub struct LtCols<T> {
     #[picus(selector)]
     pub is_sltu: T,
 
-    /// Whether this row is a REAL instruction rather than a synthetic
-    /// dependency row — Lt is the chip DivRem outsources comparisons to, so
-    /// 73-87% of its rows are dependencies (`playground rows`).
-    #[picus(selector)]
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    #[picus(selector)]
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every Lt row is an instruction — DivRem's comparison is
+    /// inlined and the Instruction bus is gone).
     pub frame: InstructionFrameCols<T>,
 
     /// The output operand.
@@ -216,14 +208,8 @@ impl LtChip {
         program: &Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Lt row is a real instruction owning its frame.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
@@ -486,48 +472,27 @@ where
         // but this is included here to make sure the condition is met.
         builder.assert_bool(local.is_slt + local.is_sltu);
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            local.is_slt * AB::F::from_u32(Opcode::SLT as u32)
-                + local.is_sltu * AB::F::from_u32(Opcode::SLTU as u32),
-            local.a,
-            local.b,
-            local.c,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep,
-        );
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(is_real.clone()).assert_word_eq(local.a, local.frame.op_a_value);
+        builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-        builder.assert_zero(
-            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
-        );
-
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  SLT/SLTU are sequential and can never halt.
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  SLT/SLTU are sequential and can
+        // never halt.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
@@ -538,24 +503,25 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
     use super::LtChip;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.lt_events = vec![AluEvent::new(0, Opcode::SLT, 0, 3, 2)];
+        let shard = run_instructions(alu_op(Opcode::SLT, 3, 2));
+        assert!(!shard.lt_events.is_empty());
         let chip = LtChip::default();
         let generate_trace = chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
         let trace: RowMajorMatrix<KoalaBear> = generate_trace;
         println!("{:?}", trace.values)
     }
 
-    fn prove_koalabear_template(shard: &mut ExecutionRecord) {
+    fn prove_koalabear_template(shard: &ExecutionRecord) {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
@@ -570,52 +536,30 @@ mod tests {
 
     #[test]
     fn prove_koalabear_slt() {
-        let mut shard = ExecutionRecord::default();
-
         const NEG_3: u32 = 0b11111111111111111111111111111101;
         const NEG_4: u32 = 0b11111111111111111111111111111100;
-        shard.lt_events = vec![
-            // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLT, 0, 3, 2),
-            // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLT, 1, 2, 3),
-            // 0 == 5 < -3
-            AluEvent::new(0, Opcode::SLT, 0, 5, NEG_3),
-            // 1 == -3 < 5
-            AluEvent::new(0, Opcode::SLT, 1, NEG_3, 5),
-            // 0 == -3 < -4
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_4),
-            // 1 == -4 < -3
-            AluEvent::new(0, Opcode::SLT, 1, NEG_4, NEG_3),
-            // 0 == 3 < 3
-            AluEvent::new(0, Opcode::SLT, 0, 3, 3),
-            // 0 == -3 < -3
-            AluEvent::new(0, Opcode::SLT, 0, NEG_3, NEG_3),
-        ];
+        let mut instructions = Vec::new();
+        for (b, c) in
+            [(3, 2), (2, 3), (5, NEG_3), (NEG_3, 5), (NEG_3, NEG_4), (NEG_4, NEG_3), (3, 3), (NEG_3, NEG_3)]
+        {
+            instructions.extend(alu_op(Opcode::SLT, b, c));
+        }
+        let shard = run_instructions(instructions);
+        assert!(!shard.lt_events.is_empty());
 
-        prove_koalabear_template(&mut shard);
+        prove_koalabear_template(&shard);
     }
 
     #[test]
     fn prove_koalabear_sltu() {
-        let mut shard = ExecutionRecord::default();
-
         const LARGE: u32 = 0b11111111111111111111111111111101;
-        shard.lt_events = vec![
-            // 0 == 3 < 2
-            AluEvent::new(0, Opcode::SLTU, 0, 3, 2),
-            // 1 == 2 < 3
-            AluEvent::new(0, Opcode::SLTU, 1, 2, 3),
-            // 0 == LARGE < 5
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, 5),
-            // 1 == 5 < LARGE
-            AluEvent::new(0, Opcode::SLTU, 1, 5, LARGE),
-            // 0 == 0 < 0
-            AluEvent::new(0, Opcode::SLTU, 0, 0, 0),
-            // 0 == LARGE < LARGE
-            AluEvent::new(0, Opcode::SLTU, 0, LARGE, LARGE),
-        ];
+        let mut instructions = Vec::new();
+        for (b, c) in [(3, 2), (2, 3), (LARGE, 5), (5, LARGE), (0, 0), (LARGE, LARGE)] {
+            instructions.extend(alu_op(Opcode::SLTU, b, c));
+        }
+        let shard = run_instructions(instructions);
+        assert!(!shard.lt_events.is_empty());
 
-        prove_koalabear_template(&mut shard);
+        prove_koalabear_template(&shard);
     }
 }

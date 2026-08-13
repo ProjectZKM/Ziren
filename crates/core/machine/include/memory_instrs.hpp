@@ -32,14 +32,8 @@ populate_common(
     const MemInstrEvent& event,
     const InstructionFfi& instruction
 ) {
-    const bool is_instruction = event.is_instruction != 0;
-    cols.is_instruction = F::from_bool(is_instruction);
-    cols.is_dep = F::from_bool(!is_instruction);
-    if (is_instruction) {
-        frame::populate_from_mem<F>(cols.frame, event, instruction);
-    } else {
-        frame::populate_dependency<F>(cols.frame);
-    }
+    // Every row is a real instruction owning its frame.
+    frame::populate_from_mem<F>(cols.frame, event, instruction);
 
     cols.shard = F::from_canonical_u32(event.shard);
     assert(cols.shard != F::zero());

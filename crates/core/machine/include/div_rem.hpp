@@ -2,7 +2,10 @@
 
 #include <cstdint>
 #include <climits>
+#include "add_sub.hpp"
 #include "frame.hpp"
+#include "lt_operation.hpp"
+#include "mul_operation.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 #include "kb31_septic_extension_t.hpp"
@@ -16,16 +19,8 @@ namespace zkm_core_machine_sys::div_rem {
     const InstructionFfi& instruction,
     const uint32_t shard
 ) {
-    const bool is_instruction = event.is_instruction != 0;
-    cols.is_instruction = F::from_bool(is_instruction);
-    const bool is_dd = event.opcode == Opcode::DIV || event.opcode == Opcode::DIVU;
-    cols.is_dd_dep = F::from_bool(is_dd && !is_instruction);
-    cols.is_mm_dep = F::from_bool(!is_dd && !is_instruction);
-    if (is_instruction) {
-        frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
-    } else {
-        frame::populate_dependency<F>(cols.frame);
-    }
+    // Every DivRem row is a real instruction owning its frame.
+    frame::populate_from_alu<CompAluEvent, F>(cols.frame, event, instruction, shard);
 
         assert(
             event.opcode == Opcode::DIVU
@@ -75,23 +70,35 @@ namespace zkm_core_machine_sys::div_rem {
             populate_is_equal_word_operaion(cols.is_overflow_b, event.b, INT32_MIN);
             populate_is_equal_word_operaion(cols.is_overflow_c, event.c, (uint32_t)((int32_t)-1));
 
+            uint32_t abs_remainder = remainder;
+            uint32_t abs_c = event.c;
             if (is_signed_operation(event.opcode)) {
-                uint32_t abs_remainder = unsigned_abs((int32_t)remainder);
-                uint32_t abs_c = unsigned_abs((int32_t)event.c);
+                abs_remainder = unsigned_abs((int32_t)remainder);
+                abs_c = unsigned_abs((int32_t)event.c);
 
                 cols.rem_neg = cols.rem_msb;
                 cols.b_neg = cols.b_msb;
                 cols.c_neg = cols.c_msb;
                 cols.is_overflow =
                     F::from_bool((int32_t)event.b == INT32_MIN && (int32_t)event.c == -1);
-                write_word_from_u32_v2<F>(cols.abs_remainder, abs_remainder);
-                write_word_from_u32_v2<F>(cols.abs_c, std::max(1u, abs_c));
-                write_word_from_u32_v2<F>(cols.max_abs_c_or_1, std::max(1u, abs_c));
-            } else {
-                cols.abs_remainder = cols.remainder;
-                cols.abs_c = cols.c;
-                write_word_from_u32_v2<F>(cols.max_abs_c_or_1, std::max(1u, event.c));
             }
+            const uint32_t max_abs_c_or_1 = std::max(1u, abs_c);
+            write_word_from_u32_v2<F>(cols.abs_remainder, abs_remainder);
+            write_word_from_u32_v2<F>(cols.abs_c, abs_c);
+            write_word_from_u32_v2<F>(cols.max_abs_c_or_1, max_abs_c_or_1);
+
+            // The inlined negation checks (the two ADD request rows).
+            const bool signed_op = is_signed_operation(event.opcode);
+            if (signed_op && get_msb_v2(event.c) == 1) {
+                add_sub::populate<F>(cols.neg_c_add, event.c, abs_c);
+            }
+            if (signed_op && get_msb_v2(remainder) == 1) {
+                add_sub::populate<F>(cols.neg_rem_add, remainder, abs_remainder);
+            }
+
+            // The inlined abs(remainder) < max(abs(c), 1) (the SLTU request
+            // row).
+            lt_operation::populate<F>(cols.remainder_check, abs_remainder, max_abs_c_or_1, false);
         }
     
         // Calculate the modified multiplicity
@@ -107,7 +114,9 @@ namespace zkm_core_machine_sys::div_rem {
             } else {
                 c_times_quotient = u64_to_le_bytes(((uint64_t)quotient) * ((uint64_t)event.c));
             }
-            write_long_word_from_le_bytes_v2(cols.c_times_quotient, c_times_quotient.data());
+            // The inlined multiplication (the MULT/MULTU request row): its
+            // 64-bit product equals `c_times_quotient` byte for byte.
+            mul_operation::populate<F>(cols.mul, quotient, event.c, is_signed_operation(event.opcode));
 
             array_t<uint8_t, 8> remainder_bytes = {0};
             if (is_signed_operation(event.opcode)) {

@@ -50,7 +50,7 @@ use zkm_primitives::consts::WORD_SIZE;
 use zkm_pcs::{air::MachineAir, PicusInfo, Word};
 
 use crate::{
-    air::ZKMCoreAirBuilder,
+    air::{WordAirBuilder, ZKMCoreAirBuilder},
     frame::{eval_instruction_frame, InstructionFrameCols},
     utils::{next_multiple_of_32, pad_rows_mult32},
     CoreChipError,
@@ -103,15 +103,9 @@ pub struct ShiftLeftCols<T> {
 
     pub is_real: T,
 
-    /// Whether this row is a REAL instruction rather than a synthetic
-    /// dependency row (`dependencies.rs`, `pc: UNUSED_PC`).
-    pub is_instruction: T,
-
-    /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
-    pub is_dep: T,
-
-    /// Program fetch, register access and `(clk, pc)` chaining; live only when
-    /// `is_instruction`.
+    /// Program fetch, register access and `(clk, pc)` chaining; live on every
+    /// real row (every SLL row is an instruction — the Instruction bus and
+    /// its dependency rows are gone).
     pub frame: InstructionFrameCols<T>,
 }
 
@@ -247,14 +241,8 @@ impl ShiftLeft {
         program: &Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_alu(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every SLL row is a real instruction owning its frame.
+        cols.frame.populate_from_alu(event, program, shard, blu);
 
         let a = event.a.to_le_bytes();
         let b = event.b.to_le_bytes();
@@ -436,47 +424,27 @@ where
 
         builder.assert_bool(local.is_real);
 
-        // Receive the arguments.
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc,
-            local.next_pc + AB::Expr::from_u32(4),
-            AB::Expr::ZERO,
-            AB::F::from_u32(Opcode::SLL as u32),
-            local.a,
-            local.b,
-            local.c,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ONE,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep,
-        );
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(local.is_real).assert_word_eq(local.a, local.frame.op_a_value);
+        builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
+        builder.when(local.is_real).assert_word_eq(local.c, local.frame.op_c_val());
 
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - local.is_real);
-        builder.assert_zero(
-            local.is_dep - (local.is_real - local.is_real * local.is_instruction),
-        );
-
-        // A real instruction carries its own program fetch, register access and
-        // `(clk, pc)` chaining.  SLL is sequential and can never halt.
+        // Every real row is an instruction carrying its own program fetch,
+        // register access and `(clk, pc)` chaining (the Instruction bus and
+        // its dependency rows are gone).  SLL is sequential and can never
+        // halt.
         eval_instruction_frame(
             builder,
             &local.frame,
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            local.is_instruction.into(),
+            local.is_real.into(),
         );
         builder
-            .when(local.is_instruction)
+            .when(local.is_real)
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
@@ -487,17 +455,18 @@ mod tests {
     use crate::utils::{uni_stark_prove as prove, uni_stark_verify as verify};
     use p3_koala_bear::KoalaBear;
     use p3_matrix::dense::RowMajorMatrix;
-    use zkm_core_executor::{events::AluEvent, ExecutionRecord, Opcode};
+    use zkm_core_executor::{ExecutionRecord, Opcode};
     use zkm_pcs::{
         air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig,
     };
 
     use super::ShiftLeft;
+    use crate::programs::tests::{alu_op, run_instructions};
 
     #[test]
     fn generate_trace() {
-        let mut shard = ExecutionRecord::default();
-        shard.shift_left_events = vec![AluEvent::new(0, Opcode::SLL, 16, 8, 1)];
+        let shard = run_instructions(alu_op(Opcode::SLL, 8, 1));
+        assert!(!shard.shift_left_events.is_empty());
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();
@@ -509,39 +478,38 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
-        let mut shift_events: Vec<AluEvent> = Vec::new();
-        let shift_instructions: Vec<(Opcode, u32, u32, u32)> = vec![
-            (Opcode::SLL, 0x00000002, 0x00000001, 1),
-            (Opcode::SLL, 0x00000080, 0x00000001, 7),
-            (Opcode::SLL, 0x00004000, 0x00000001, 14),
-            (Opcode::SLL, 0x80000000, 0x00000001, 31),
-            (Opcode::SLL, 0xffffffff, 0xffffffff, 0),
-            (Opcode::SLL, 0xfffffffe, 0xffffffff, 1),
-            (Opcode::SLL, 0xffffff80, 0xffffffff, 7),
-            (Opcode::SLL, 0xffffc000, 0xffffffff, 14),
-            (Opcode::SLL, 0x80000000, 0xffffffff, 31),
-            (Opcode::SLL, 0x21212121, 0x21212121, 0),
-            (Opcode::SLL, 0x42424242, 0x21212121, 1),
-            (Opcode::SLL, 0x90909080, 0x21212121, 7),
-            (Opcode::SLL, 0x48484000, 0x21212121, 14),
-            (Opcode::SLL, 0x80000000, 0x21212121, 31),
-            (Opcode::SLL, 0x21212121, 0x21212121, 0xffffffe0),
-            (Opcode::SLL, 0x42424242, 0x21212121, 0xffffffe1),
-            (Opcode::SLL, 0x90909080, 0x21212121, 0xffffffe7),
-            (Opcode::SLL, 0x48484000, 0x21212121, 0xffffffee),
-            (Opcode::SLL, 0x00000000, 0x21212120, 0xffffffff),
+        let shift_instructions: Vec<(u32, u32)> = vec![
+            (0x00000001, 1),
+            (0x00000001, 7),
+            (0x00000001, 14),
+            (0x00000001, 31),
+            (0xffffffff, 0),
+            (0xffffffff, 1),
+            (0xffffffff, 7),
+            (0xffffffff, 14),
+            (0xffffffff, 31),
+            (0x21212121, 0),
+            (0x21212121, 1),
+            (0x21212121, 7),
+            (0x21212121, 14),
+            (0x21212121, 31),
+            (0x21212121, 0xffffffe0),
+            (0x21212121, 0xffffffe1),
+            (0x21212121, 0xffffffe7),
+            (0x21212121, 0xffffffee),
+            (0x21212120, 0xffffffff),
         ];
-        for t in shift_instructions.iter() {
-            shift_events.push(AluEvent::new(0, t.0, t.1, t.2, t.3));
+        let mut instructions = Vec::new();
+        for &(b, c) in shift_instructions.iter() {
+            instructions.extend(alu_op(Opcode::SLL, b, c));
         }
-
-        // Append more events until we have 1000 tests.
+        // Append more until we have 1000 shift events.
         for _ in 0..(1000 - shift_instructions.len()) {
-            shift_events.push(AluEvent::new(0, Opcode::SLL, 1, 1, 0));
+            instructions.extend(alu_op(Opcode::SLL, 1, 0));
         }
 
-        let mut shard = ExecutionRecord::default();
-        shard.shift_left_events = shift_events;
+        let shard = run_instructions(instructions);
+        assert!(shard.shift_left_events.len() >= 1000);
         let chip = ShiftLeft::default();
         let trace: RowMajorMatrix<KoalaBear> =
             chip.generate_trace(&shard, &mut ExecutionRecord::default()).unwrap();

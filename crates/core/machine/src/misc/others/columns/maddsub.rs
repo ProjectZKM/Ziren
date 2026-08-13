@@ -10,11 +10,8 @@ pub const NUM_MADDSUB_COLS: usize = size_of::<MaddsubCols<u8>>();
 #[derive(AlignedBorrow, Default, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct MaddsubCols<T> {
-    /// Result value of intermediate mul operation.
-    pub mul_lo: Word<T>,
-    pub mul_hi: Word<T>,
-
-    /// Add operations of low/high word.
+    /// Add operations of low/high word.  The `op_b * op_c` product feeding
+    /// them lives in the dedicated `MiscInstrColumns::maddsub_mul` gadget.
     pub add_operation: AddDoubleOperation<T>,
     /// Add or Sub source value
     pub src2_hi: Word<T>,

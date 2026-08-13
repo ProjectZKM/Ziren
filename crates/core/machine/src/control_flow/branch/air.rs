@@ -59,41 +59,7 @@ where
             + local.is_blez * Opcode::BLEZ.as_field::<AB::F>()
             + local.is_bgtz * Opcode::BGTZ.as_field::<AB::F>();
 
-        // SAFETY: This checks the following.
-        // - `num_extra_cycles = 0`
-        // - `op_a_val` will be constrained in the BranchChip as `op_a_immutable = 1`
-        // - `op_a_immutable = 1`, as this is a branch instruction
-        // - `is_rw_a = 0`
-        // - `is_syscall = 0`
-        // - `is_halt = 0`
-        // `next_pc` still has to be constrained, and this is done below.
-        builder.receive_instruction(
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            local.pc,
-            local.next_pc.reduce::<AB>(),
-            local.next_next_pc.reduce::<AB>(),
-            AB::Expr::ZERO,
-            opcode,
-            local.op_a_value,
-            local.op_b_value,
-            local.op_c_value,
-            Word([AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO, AB::Expr::ZERO]),
-            AB::Expr::ONE,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            AB::Expr::ZERO,
-            // Dependency rows only: an instruction row serves itself via the frame.
-            local.is_dep.into(),
-        );
-
-        builder.assert_bool(local.is_instruction);
-        builder.assert_bool(local.is_dep);
-        builder.when(local.is_instruction).assert_zero(AB::Expr::ONE - is_real.clone());
-        builder.assert_zero(
-            local.is_dep - (is_real.clone() - is_real.clone() * local.is_instruction),
-        );
+        let _ = opcode;
 
         // A real instruction carries its own program fetch, register access and
         // `(clk, pc)` chaining.  A branch's next_next_pc is the TARGET (or the
@@ -104,14 +70,21 @@ where
             local.pc.into(),
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),
-            local.is_instruction.into(),
+            is_real.clone(),
         );
         builder
-            .when(local.is_instruction)
+            .when(is_real.clone())
             .assert_eq(local.frame.state_recv_next_pc, local.next_pc.reduce::<AB>());
         // A branch READS op_a; the frame rule needs the flag high exactly on
-        // instruction rows.
-        builder.assert_eq(local.frame.op_a_immutable, local.is_instruction);
+        // real rows.
+        builder.assert_eq(local.frame.op_a_immutable, is_real.clone());
+
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit (the Instruction bus that used to carry them is gone).
+        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
+        builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 
         // Evaluate program counter constraints.
         {

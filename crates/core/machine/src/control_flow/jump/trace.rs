@@ -107,14 +107,8 @@ impl JumpChip {
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
-        let is_instruction = event.is_instruction != 0;
-        cols.is_instruction = F::from_bool(is_instruction);
-        cols.is_dep = F::from_bool(!is_instruction);
-        if is_instruction {
-            cols.frame.populate_from_jump(event, program, shard, blu);
-        } else {
-            cols.frame.populate_dependency();
-        }
+        // Every Jump row is a real instruction owning its frame.
+        cols.frame.populate_from_jump(event, program, shard, blu);
 
         cols.pc = F::from_u32(event.pc);
         cols.is_jump = F::from_bool(matches!(event.opcode, Opcode::Jump));
