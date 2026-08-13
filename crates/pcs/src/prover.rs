@@ -832,6 +832,83 @@ where
                     precomputed,
                     device_dense_q: None,
                 })
+            } else if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
+                // OUTER/wrap ring (BN254 BfMmcs): build the ring-native
+                // precompute inline — the identical construction the
+                // open-path fallback performed one phase later.  The wrap
+                // is one small shard, so cloning the traces into the
+                // padded store is cheap.  The store uses the same cube
+                // formula and the same name-sorted order the open-path
+                // wrap builds, so the packing is byte-identical.
+                let max_log_row_count = {
+                    let base_cube =
+                        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+                            .max_log_row_count;
+                    let mut cube = base_cube;
+                    for (_, t) in named_traces.iter() {
+                        let w = t.width;
+                        if w == 0 {
+                            continue;
+                        }
+                        let h = t.values.len() / w;
+                        if h == 0 {
+                            continue;
+                        }
+                        let log_h = (h as u64).trailing_zeros() as usize;
+                        if log_h > cube {
+                            cube = log_h;
+                        }
+                    }
+                    cube
+                };
+                let store = named_padded_traces(
+                    named_traces.iter().map(|(name, _)| name.clone()),
+                    named_traces.iter().map(|(_, mat)| mat.clone()),
+                    max_log_row_count as u32,
+                    |_| None,
+                );
+                let views: Vec<crate::jagged_pcs::jagged::ChipTraceView> = store
+                    .into_iter()
+                    .map(|(name, pm)| {
+                        // SAFETY: `Val<SC> == InnerVal` under the gate —
+                        // a no-op relabel of the same type.
+                        let pm_inner: crate::multilinear::PaddedMle<crate::InnerVal> = unsafe {
+                            core::mem::transmute_copy::<
+                                crate::multilinear::PaddedMle<Val<SC>>,
+                                crate::multilinear::PaddedMle<crate::InnerVal>,
+                            >(&core::mem::ManuallyDrop::new(pm))
+                        };
+                        (name, pm_inner)
+                    })
+                    .collect();
+                let recursion_area_pin = if self.machine().pins_recursion_area() {
+                    Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
+                } else {
+                    None
+                };
+                let precomputed = <SC as BasefoldRing>::precompute_jagged_inline(
+                    &views,
+                    self.machine().core_rev(),
+                    recursion_area_pin,
+                );
+                // Ring-generic digest: NO jagged hash-bind on the outer ring
+                // (the BN254 wrap re-binds in its registered hook).
+                let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
+                    <SC as BasefoldRing>::digest_felts(
+                        &precomputed.commit.original_commitment,
+                    );
+                // SAFETY: [JaggedVal; 8] == [Val<SC>; 8] under the gate.
+                let main_commitment: [Val<SC>; 8] = unsafe {
+                    core::mem::transmute_copy::<
+                        [crate::jagged_pcs::JaggedVal; 8],
+                        [Val<SC>; 8],
+                    >(&digest_jv)
+                };
+                Some(RetainedJaggedCommit {
+                    main_commitment,
+                    precomputed,
+                    device_dense_q: None,
+                })
             } else {
                 None
             }
