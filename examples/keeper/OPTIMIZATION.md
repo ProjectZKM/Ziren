@@ -6756,9 +6756,17 @@ Two hard-won geometry/scheduling rules from the GPU side:
    shards on the commit-time path and lets oversized shards fall back to
    the open-path build, byte-identically.
 
-Measured cost, accepted for architectural parity: reth core 2708/2722
-kHz solo (275 shards, VERIFY OK, GPUs 7/6) vs the 2849 ATH = −4.6 %.
-The commit-time build runs on the pool worker — the known rate-limiting
-chain — which is exactly the reverted offload experiment's position; the
-recovery is whole-shard concurrency (N shards in flight, SP1's actual
-overlap model), which dissolves the coordinator/worker split entirely.
+Measured cost — initially read as −4.6 % (2708/2722 vs the 2849 ATH)
+and accepted for parity, then RETRACTED by a proper within-binary A/B:
+8-run ABBA on GPUs 7/6 (`ZIREN_GPU_COMMIT_BUILD_MAX_CELLS` default vs
+`=0`, all solo, all VERIFY OK) measured the commit-time position at
+**+1.4 % over the open-path position on the same binary** (A 2822 kHz
+mean, best 2869 > the old ATH; B 2783), consistent on both GPUs.  The
+retained commit (and the zerocheck pack it carries) saves more at open
+than the build costs on the worker chain.  The earlier −4.6 % was
+cross-binary comparison plus run-to-run spread (single runs ranged
+2731–2869 = ±2.5 % in this same session) — the canonical-perf rule
+(anchor claims on within-session A/B, never a historical mean) caught
+it.  The whole-shard-concurrency lever stands on its own census
+numbers (GPU 53 % busy, coordinator 69.7 s sync-blocked), not on a
+regression to recover.
