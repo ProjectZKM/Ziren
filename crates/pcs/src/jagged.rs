@@ -2,20 +2,11 @@
 //!
 //! Packs variable-height chip traces into a single dense multilinear
 //! polynomial, enabling a single BaseFold commit/open/verify cycle for all
-//! chips in a shard.
+//! chips in a shard (Jagged Polynomial Commitments, ePrint 2025/917).
 //!
-//! # Protocol (Jagged Polynomial Commitments, ePrint 2025/917)
-//!
-//! ## Problem
-//!
-//! In a decomposed zkVM, each chip produces a trace of different height:
-//!   T_0: h_0 × w_0,  T_1: h_1 × w_1,  ...,  T_N: h_N × w_N
-//!
-//! Committing each separately requires N Merkle trees (expensive).
-//!
-//! ## Jagged packing
-//!
-//! Concatenate all columns sequentially into a dense vector q:
+//! Each chip produces a trace of a different height (T_k: h_k × w_k);
+//! committing each separately would cost one Merkle tree per chip.  Instead
+//! all columns are concatenated sequentially into a dense vector q:
 //!   q = [T_0[:,0] | T_0[:,1] | ... | T_N[:,w_N]]
 //!
 //! with cumulative offsets t_k tracking column boundaries:
@@ -27,39 +18,16 @@
 //!   col(j) = min_k {t_k > j}
 //!   row(j) = j - t_{col(j)-1}
 //!
-//! ## Verification
+//! A sumcheck argument proves the jagged-to-dense mapping is correct; the
+//! verifier checks that the per-chip evaluations are consistent with the
+//! dense polynomial commitment.
 //!
-//! A sumcheck argument proves the jagged-to-dense mapping is correct.
-//! The verifier checks that the per-chip evaluations are consistent
-//! with the dense polynomial commitment.
-//!
-//! ## Security requirements
+//! # Security requirements
 //!
 //! - Chip metadata (row_count, column_count) MUST be hashed into the
 //!   Fiat-Shamir transcript (see `hash_chip_infos`).
 //! - Padding zeros MUST be validated against `total_values`.
 //! - Column identity MUST be preserved between commit and verify.
-//!
-//! # Background
-//!
-//! In Ziren's decomposed architecture, each chip produces a trace of
-//! different height (e.g., CPU: 2^17, AddSub: 2^15, DivRem: 2^10).
-//! Without Jagged, each trace requires a separate PCS commitment —
-//! multiplying Merkle tree costs by the number of chips.
-//!
-//! Jagged packs all traces into one dense vector:
-//! ```text
-//!   [chip_0 col_0 | chip_0 col_1 | ... | chip_N col_M]
-//!    ← l_0 vals → ← l_1 vals →        ← l_K vals →
-//! ```
-//! with cumulative offsets `t_k = sum(l_0..l_k)` tracking boundaries.
-//!
-//! The verifier recovers per-chip evaluations via a sumcheck argument
-//! that validates the jagged-to-dense mapping.
-//!
-//! # Reference
-//!
-//! Jagged Polynomial Commitments (ePrint 2025/917)
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -72,8 +40,7 @@ use crate::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT;
 
 /// A chip's real (unpadded) row-major cells and row width, projected out of the
 /// shared `PaddedMle` store.  A device-resident / unexercised chip has no real
-/// cells and projects to `(&[], 0)` — zero area, matching the width-0 view this
-/// replaced.
+/// cells and projects to `(&[], 0)` — zero area.
 #[inline]
 pub fn real_cells<F: Field>(pm: &crate::multilinear::PaddedMle<F>) -> (&[F], usize) {
     match pm.real_trace_ref() {
@@ -107,16 +74,12 @@ pub struct JaggedPacking<F> {
     /// Per-chip metadata (row count, column count).
     pub chip_infos: Vec<JaggedChipInfo>,
     /// Cumulative offsets: `offsets[k]` is the starting index of the
-    /// k-th column in `dense_values`.  For SP1 parity:
-    /// the slice carries `total_cols + 1` entries with
-    /// the final sentinel `offsets[total_cols] = total_values`,
-    /// matching SP1's `JaggedLittlePolynomialProverParams::col_prefix_sums_usize`
-    /// (slop/crates/jagged/src/poly.rs:236-254).  The recursion lift
-    /// (`shard_level_witness.rs:lift_jagged_basefold_bundle`) emits
-    /// `col_prefix_sums.len() = num_cols + 1` regardless; the sentinel
-    /// closes the host/recursion length gap and unblocks wiring
-    /// `prove_jagged_evaluation` (which expects
-    /// `num_chips = prefix_sums.len() - 1`) into the production path.
+    /// k-th column in `dense_values`.  The slice carries `total_cols + 1`
+    /// entries with the final sentinel `offsets[total_cols] = total_values`.
+    /// The recursion lift (`shard_level_witness.rs:lift_jagged_basefold_bundle`)
+    /// emits `col_prefix_sums.len() = num_cols + 1`, and
+    /// `prove_jagged_evaluation` expects `num_chips = prefix_sums.len() - 1`;
+    /// the sentinel keeps the host and recursion lengths in agreement.
     pub offsets: Vec<usize>,
     /// Total number of values in the dense vector.
     pub total_values: usize,
@@ -131,25 +94,21 @@ pub struct JaggedPacking<F> {
 
 /// The dense length a round's commitment covers, given its real cell count.
 ///
-/// SP1 rounds a round's committed area out to whole stacking blocks and
-/// nothing more (`hypercube/src/prover/simple.rs:33`:
-/// `.next_multiple_of(1 << log_stacking_height)`).  Rounding up to a power of
-/// two instead — which Ziren used to do — wastes up to half the area, and with
-/// preprocessed opening in its own round the waste is paid twice and lands in
-/// the middle of the concatenated dense, where no implicit-tail optimization
-/// can reach it.
+/// A round's committed area is rounded out to whole stacking blocks
+/// (`.next_multiple_of(1 << log_stacking_height)`) and nothing more.
+/// Rounding up to a power of two instead would waste up to half the area,
+/// and with preprocessed opening in its own round the waste lands in the
+/// middle of the concatenated dense, where no implicit-tail optimization can
+/// reach it.
 ///
-/// The one deviation from SP1: ziren-gpu's streaming Merkle first-digest layer
-/// requires every stripe's width to be a multiple of the Poseidon2 rate
-/// (`core/src/merkle_tree/mod.rs:179`), and a stripe is `DEFAULT_BATCH_SIZE`
-/// stacking blocks wide, so the commit is rate-safe exactly when the block
-/// count is a multiple of 8.  Commits of four blocks or fewer take the
-/// accumulate-all path, which has no rate constraint and cannot run out of
-/// memory at that size; anything larger has to stay on the streaming path, so
-/// its block count is rounded out to a multiple of 8.  Under the old
-/// power-of-two area the same split held by construction (a power-of-two block
-/// count is either <= 4 or a multiple of 8), so this preserves exactly which
-/// commits take which path.
+/// One extra constraint: ziren-gpu's streaming Merkle first-digest layer
+/// requires every stripe's width to be a multiple of the Poseidon2 rate, and
+/// a stripe is `DEFAULT_BATCH_SIZE` stacking blocks wide, so the commit is
+/// rate-safe exactly when the block count is a multiple of 8.  Commits of
+/// four blocks or fewer take the accumulate-all path, which has no rate
+/// constraint and cannot run out of memory at that size; anything larger has
+/// to stay on the streaming path, so its block count is rounded out to a
+/// multiple of 8.
 pub fn committed_dense_len(total_values: usize, log_stacking_height: usize) -> usize {
     if total_values == 0 {
         return 0;
@@ -181,9 +140,8 @@ impl<F> JaggedPacking<F> {
 /// [`materialize_dense_jagged`] when the dense `Vec<F>` is actually
 /// needed (e.g. for the BaseFold commit).
 ///
-/// This is the SP1-style late-materialization pattern: most
-/// downstream code (sumcheck reduction, verifier weight tables) only
-/// needs the metadata, not the dense values.
+/// Most downstream code (sumcheck reduction, verifier weight tables)
+/// only needs the metadata, not the dense values.
 pub fn compute_jagged_metadata<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
 ) -> JaggedPacking<F> {
@@ -196,7 +154,7 @@ pub fn compute_jagged_metadata<F: Field>(
         .iter()
         .map(|(name, pm)| {
             // A device-resident / unexercised chip carries no real cells; it
-            // packs as zero-area, exactly as the width-0 view it replaces did.
+            // packs as zero-area.
             let (h, w) = pm
                 .real_trace_ref()
                 .map(|t| (if t.width == 0 { 0 } else { t.values.len() / t.width }, t.width))
@@ -235,14 +193,10 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
             total_values += height;
         }
     }
-    // For SP1 parity: append final sentinel
-    // `offsets[total_cols] = total_values`.  Mirrors SP1
-    // `JaggedLittlePolynomialProverParams::new`
-    // (slop/crates/jagged/src/poly.rs:236-254) which closes
-    // `col_prefix_sums_usize` with `prefix_sums.last() + row_counts.last()`.
+    // Append the final sentinel `offsets[total_cols] = total_values`.
     // Without it `prove_jagged_evaluation` would compute
     // `num_chips = offsets.len() - 1 = total_cols - 1`, off by one
-    // versus the recursion verifier which sees
+    // versus the recursion verifier, which expects
     // `col_prefix_sums.len() == total_cols + 1` (see
     // `recursion/circuit/src/recursive_jagged_pcs.rs:178`).
     offsets.push(total_values);
@@ -266,39 +220,44 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
     dense_len: usize,
+    use_rev: bool,
+) -> Vec<F> {
+    // Delegate to the cells-based core — `real_cells` is the only thing this
+    // function reads off a view, so the delegation is byte-identical.
+    let cells: Vec<(&[F], usize)> = traces.iter().map(|(_, pm)| real_cells(pm)).collect();
+    materialize_dense_jagged_from_cells(&cells, dense_len, use_rev)
+}
+
+/// Cells-based twin of [`materialize_dense_jagged`] — identical packing over
+/// explicit per-chip `(cells, width)` borrows.  Lets `commit()` build the
+/// dense polynomial straight over its just-sorted `RowMajorMatrix`es without
+/// moving them into view types.
+pub fn materialize_dense_jagged_from_cells<F: Field>(
+    chip_cells: &[(&[F], usize)],
+    dense_len: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
     // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
-    // LEGACY bit-reversed (byte-identical to the recursion / shrink / wrap
-    // stages).
+    // bit-reversed (byte-identical to the recursion / shrink / wrap stages).
     use_rev: bool,
 ) -> Vec<F> {
-    // Performance optimization: pre-allocate the full output
-    // and write into per-chip slices in parallel. The serial
-    // implementation pushed 134M elements one-at-a-time (called twice
-    // per shard for commit + reduction), totaling ~150ms × 2 calls.
-    // The parallel version writes in independent column slots.
+    // Pre-allocate the full output and write into per-chip slices in
+    // parallel; each chip/column writes an independent slot.
     let padded_size = dense_len;
 
     // Pre-compute per-chip offset = sum of (height × width) for prior chips.
-    let mut chip_offsets: Vec<usize> = Vec::with_capacity(traces.len());
+    let mut chip_offsets: Vec<usize> = Vec::with_capacity(chip_cells.len());
     let mut total: usize = 0;
-    for (_name, pm) in traces {
-        let (vals, w) = real_cells(pm);
-        let h = if w == 0 { 0 } else { vals.len() / w };
+    for (vals, w) in chip_cells {
+        let h = if *w == 0 { 0 } else { vals.len() / *w };
         chip_offsets.push(total);
-        total += h * w;
+        total += h * *w;
     }
     debug_assert!(total <= padded_size);
 
-    // Allocator opt: only the `[total..padded_size]` padding tail
-    // needs zero-init.  The `[0..total]` active portion is fully
-    // overwritten by the per-chip parallel scatter below.  For 134M
-    // total cells with negligible padding this saves ~500 MiB of
-    // redundant writes per call (and this is called twice per shard:
-    // once for commit, once for reduction).
-    // FLAKE FIX: KoalaBear u32 serde rejects out-of-range values
-    // from uninit memory; switch to safe vec! init.
+    // KoalaBear u32 serde rejects out-of-range values from uninit memory, so
+    // the buffer must be safely zero-initialized (vec!); the `[0..total]`
+    // active portion is then fully overwritten by the parallel scatter below.
     let mut dense_values: Vec<F> = vec![F::ZERO; total];
 
     if total > 0 {
@@ -308,7 +267,7 @@ pub fn materialize_dense_jagged<F: Field>(
         // contiguous chunk of `active`.  Inside each chip, columns
         // are written column-major (chip's row-major data is
         // transposed to column-major in the output).
-        let chip_chunks = traces
+        let chip_chunks = chip_cells
             .iter()
             .zip(chip_offsets.iter())
             .collect::<Vec<_>>();
@@ -317,31 +276,29 @@ pub fn materialize_dense_jagged<F: Field>(
         let mut slot_starts: Vec<usize> = chip_offsets.clone();
         slot_starts.push(total);
         let mut remaining: &mut [F] = active;
-        let mut chip_slots: Vec<&mut [F]> = Vec::with_capacity(traces.len());
-        for i in 0..traces.len() {
+        let mut chip_slots: Vec<&mut [F]> = Vec::with_capacity(chip_cells.len());
+        for i in 0..chip_cells.len() {
             let len = slot_starts[i + 1] - slot_starts[i];
             let (head, tail) = remaining.split_at_mut(len);
             chip_slots.push(head);
             remaining = tail;
         }
 
-        // The per-shard rev(zeta) orientation, threaded EXPLICITLY as the
-        // `use_rev` parameter from the per-stage source of truth
-        // (`StarkMachine::core_rev()`).  `true` => commit the dense column in
-        // NATURAL row order
-        // (matching the rev(zeta) zerocheck residual + the natural-indexed
-        // `build_weight_table`), so the jagged round-0 identity `Σ z_col·y ==
-        // Σ_b q·w` holds.  `false` (every non-core path) => keep the LEGACY
-        // bit-reversed layout exactly (byte-identical).  Only the host (width>0)
-        // chips are materialized here; device chips are skipped (their cells come
-        // from the GPU dense hook), which reproduces the same `use_rev` layout on
-        // device.
+        // The per-shard rev(zeta) orientation (`use_rev`, from
+        // `StarkMachine::core_rev()`).  `true` => commit the dense column in
+        // NATURAL row order (matching the rev(zeta) zerocheck residual + the
+        // natural-indexed `build_weight_table`), so the jagged round-0
+        // identity `Σ z_col·y == Σ_b q·w` holds.  `false` (every non-core
+        // path) => keep the bit-reversed layout exactly (byte-identical).
+        // Only the host (width>0) chips are materialized here; device chips
+        // are skipped (their cells come from the GPU dense hook), which
+        // reproduces the same `use_rev` layout on device.
         let use_rev_commit = use_rev;
         chip_slots
             .into_par_iter()
             .zip(chip_chunks.into_par_iter())
-            .for_each(|(slot, ((_name, pm), _))| {
-                let (trace_values, width) = real_cells(pm);
+            .for_each(|(slot, ((trace_values, width), _))| {
+                let (trace_values, width) = (*trace_values, *width);
                 let height = if width == 0 { 0 } else { trace_values.len() / width };
                 if width == 0 || height == 0 {
                     return;
@@ -356,8 +313,8 @@ pub fn materialize_dense_jagged<F: Field>(
                 let log_h = if is_pow2 { (height as u32).trailing_zeros() } else { 0 };
                 slot.par_chunks_exact_mut(height).enumerate().for_each(|(col, dst)| {
                     // Own-height packing.  Under rev(zeta) NATURAL row
-                    // order (`dst[row] = trace[row]`); else LEGACY
-                    // bit-reversed (byte-identical).
+                    // order (`dst[row] = trace[row]`); else bit-reversed
+                    // (byte-identical).
                     for row in 0..height {
                         let src = if use_rev_commit {
                             row
@@ -388,12 +345,12 @@ pub fn materialize_dense_jagged<F: Field>(
 ///   ...
 /// ```
 ///
-/// The result is padded with zeros to the next power of two.
+/// The result is zero-padded out to the committed dense length (whole
+/// stacking blocks — see [`committed_dense_len`]).
 ///
-/// **Note (Tier 3):** prefer [`compute_jagged_metadata`] +
-/// [`materialize_dense_jagged`] for new code — that pair lets the
-/// dense vector exist only for the brief window when the BaseFold commit
-/// needs it.
+/// Prefer [`compute_jagged_metadata`] + [`materialize_dense_jagged`] for new
+/// code — that pair lets the dense vector exist only for the brief window
+/// when the BaseFold commit needs it.
 pub fn pack_traces_jagged<F: Field>(
     traces: &[(String, RowMajorMatrix<F>)],
 ) -> JaggedPacking<F> {
@@ -421,8 +378,8 @@ pub fn pack_traces_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
-    // For SP1 parity: final sentinel — see
-    // `compute_jagged_metadata` for the rationale.
+    // Final sentinel — see `compute_jagged_metadata_from_dims` for the
+    // rationale.
     offsets.push(total_values);
 
     let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
@@ -455,28 +412,26 @@ pub fn cumulative_offsets(chip_infos: &[JaggedChipInfo]) -> Vec<usize> {
 /// Derive the witnessed per-chip **row counts** (column heights) and the
 /// **padding-column count** from a single round's jagged packing.
 ///
-/// Height-agnostic jagged-verifier support: SP1 witnesses
-/// `(row_count, column_count)` pairs plus a `padding_column_count` per round in
-/// the proof; Ziren derives the same quantities from `offsets` /
-/// `column_counts` / `total_values` at lift time.  This helper hoists that
-/// derivation into one place so the real prover, the dummy, and the recursion
-/// lift all agree on the numbers (dummy == real on the new fields by
-/// construction).  PURE DATA -- nothing reads these in the verifier yet.
+/// The proof witnesses `(row_count, column_count)` pairs plus a
+/// `padding_column_count` per round; the same quantities are derived from
+/// `offsets` / `column_counts` / `total_values` at lift time.  This helper
+/// hoists that derivation into one place so the real prover, the dummy, and
+/// the recursion lift all agree on the numbers (dummy == real by
+/// construction).
 ///
-/// * `column_counts[i]` = number of columns chip `i` contributes (already on
-///   the wire as `PackingMeta::column_counts`).
+/// * `column_counts[i]` = number of columns chip `i` contributes (on the
+///   wire as `PackingMeta::column_counts`).
 /// * `offsets` = per-column cumulative start offset in the dense vector, with a
 ///   final sentinel `offsets.last() == total_values` (see
 ///   [`compute_jagged_metadata_from_dims`]).
 /// * returns `row_counts[i]` = chip `i`'s column height (real rows), recovered
 ///   by the offsets sentinel-walk (identical to the lift's `packing_row_counts`
 ///   in `recursion/circuit/src/shard_level_witness.rs`).
-/// * returns `padding_column_count` = how many artificial columns the BaseFold
-///   stacking quantization rounds the real total column count up to the next
-///   power of two (`padded_cols - total_real_cols`), mirroring the lift's
-///   `padded_cols = total_cols_before_pad.next_power_of_two()`.
+/// * returns `padding_column_count` = the number of artificial columns the
+///   BaseFold stacking quantization adds to round the real total column count
+///   up to the next power of two (`padded_cols - total_real_cols`).
 ///
-/// For Ziren's single-stacked main commit there is exactly **one round**, so
+/// For a single-stacked main commit there is exactly **one round**, so
 /// callers wrap the row-count result in a one-element outer `Vec` and the
 /// padding count in a one-element `Vec`.
 pub fn derive_row_and_padding_counts(
@@ -665,8 +620,8 @@ pub fn pack_folded_tables_jagged<F: Field>(
     }
 
     let total_values = dense_values.len();
-    // For SP1 parity: final sentinel — see
-    // `compute_jagged_metadata` for the rationale.
+    // Final sentinel — see `compute_jagged_metadata_from_dims` for the
+    // rationale.
     offsets.push(total_values);
     let dense_len = committed_dense_len(total_values, DEFAULT_LOG_STACKING_HEIGHT as usize);
     dense_values.resize(dense_len, F::ZERO);
@@ -701,20 +656,17 @@ pub fn hierarchical_jagged_pack<F: Field>(
 // ────────────────────────────────────────────────────────────────────────
 // <2^30 jagged round-split — shared integer-only partition.
 //
-// SP1 reference: slop/crates/jagged/src/verifier.rs — the jagged verifier
-// asserts each round's `area < 1<<30` (verifier.rs:236-240), `log_m < 30`
-// (:281-283), and per-count BaseFieldOverflow (:200-204).  A round is ONE
-// stacked-PCS commit; SP1 uses 2 rounds (prep + main) and never sub-splits a
-// single round, because no single SP1 chip is ≥ 2^30.  Ziren has no prep/main
-// split at recursion, so the FIX-off compress dense trace (Σ all chips) can
-// itself exceed 2^30 (band-5 ≈ 1.31e9 = 2^30.29 → log_m = 31 → the in-circuit
-// prefix-sum bit-decomposition `bits_per_entry = jagged_eval_point_len/2 =
-// log_m+1 = 32` hits the KoalaBear 31-bit num2bits wall — bug #7).  We split
-// the chips into G groups, each with total area < 2^30, so every per-round
-// prefix-sum stays ≤ 31 bits.
+// The jagged verifier asserts each round's `area < 1<<30`, `log_m < 30`, and
+// per-count base-field bounds.  A round is ONE stacked-PCS commit and is
+// never sub-split.  With no prep/main split at recursion, the compress dense
+// trace (Σ all chips) can itself exceed 2^30, in which case the in-circuit
+// prefix-sum bit-decomposition (`bits_per_entry = jagged_eval_point_len/2 =
+// log_m+1`) hits the KoalaBear 31-bit num2bits wall.  Splitting the chips
+// into G groups, each with total area < 2^30, keeps every per-round
+// prefix-sum ≤ 31 bits.
 // ────────────────────────────────────────────────────────────────────────
 
-/// SP1's `1 << 30` per-round area ceiling (the jagged verifier's
+/// The `1 << 30` per-round area ceiling (the jagged verifier's
 /// `AreaOutOfBounds` / `log_m < 30` bound).  A round must hold a STRICTLY
 /// smaller dense area so its prefix-sum bit-width (`log_m + 1`) stays ≤ 31.
 pub const MAX_ROUND_LOG_AREA: u32 = 30;
@@ -723,12 +675,11 @@ pub const MAX_ROUND_LOG_AREA: u32 = 30;
 /// both the prover's packing and the verifier's `chip_infos` carry).
 ///
 /// A group is one INDEPENDENT jagged instance — its own reduction, jagged-eval
-/// and BaseFold open.  SP1 has exactly one, even with several committed rounds:
-/// it batches every round into a single proof
-/// (`slop/crates/jagged/src/prover.rs:236-320`) and only the COMMITMENTS are
-/// per round.  So the cover is always the identity, and a
-/// `[preprocessed | main]` column layout does NOT split it — those regions live
-/// in one jagged instance whose columns run end to end.
+/// and BaseFold open.  Even with several committed rounds, every round is
+/// batched into a single proof and only the COMMITMENTS are per round.  So
+/// the cover is always the identity, and a `[preprocessed | main]` column
+/// layout does NOT split it — those regions live in one jagged instance whose
+/// columns run end to end.
 ///
 /// Both the prover and the verifier call this, and the verifier compares the
 /// proof's group map against its own run of it, so the two must agree.

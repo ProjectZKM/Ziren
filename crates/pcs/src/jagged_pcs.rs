@@ -1,19 +1,11 @@
 //! Per-chip BaseFold jagged-PCS adapter.
 //!
-//! The BaseFold replacement for the (now-removed) WHIR late-binding
-//! commit for the OOM-blocker chip-trace commit step.  The structural win:
-//! each chip trace becomes one MLE that goes through
+//! Each chip trace becomes one MLE that goes through
 //! [`crate::basefold::StackedPcsProver`], so the BaseFold encoder
 //! materializes one stripe at a time (`1 << log_stacking_height`
 //! rows × `batch_size` polys) instead of one giant dense LDE.  No
 //! `Vec<F>` of size `2^(num_vars + log_blowup)` is ever held in
-//! memory at once — that's the structural cure for tendermint /
-//! large-sum's 100+ GB peak RSS that shard-splitting only
-//! palliated.
-//!
-//! Phase-C scope (this file): commit + open + verify with a fixed
-//! evaluation point, no jagged sumcheck reduction yet.  Wiring into
-//! [`crate::jagged`]'s sumcheck flow is C2/C3.
+//! memory at once.
 
 
 use alloc::sync::Arc;
@@ -39,22 +31,21 @@ pub type JaggedChallenger = InnerChallenger;
 /// One committed batch of chip traces, plus the per-chip metadata
 /// needed to recompute evaluation points on the verifier side.
 ///
-/// BaseFold-over-BN254 port — generic over the MMCS `MT` so
-/// the inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254)
-/// commit paths share one struct.  `Val`/`Challenge` stay KoalaBear /
-/// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear,KoalaBear⁴>`); only
-/// the commitment hash varies.  The concrete [`JaggedCommit`]
-/// alias below pins `MT = JaggedMmcs` so every existing caller (incl.
-/// serde wire-format + the ziren-gpu hooks) compiles unchanged.
+/// Generic over the MMCS `MT` so the inner (Poseidon2-KoalaBear) and the
+/// wrap (OuterSC, Poseidon2-BN254) commit paths share one struct.
+/// `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both; only the
+/// commitment hash varies.  The concrete [`JaggedCommit`] alias below pins
+/// `MT = JaggedMmcs` so every existing caller (incl. serde wire-format + the
+/// ziren-gpu hooks) compiles unchanged.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 #[serde(bound(
     serialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Serialize",
     deserialize = "<MT as p3_commit::Mmcs<JaggedVal>>::Commitment: serde::Deserialize<'de>"
 ))]
 pub struct JaggedCommitGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
-    /// SP1 names this `original_commitment`. The `#[serde(rename = "commitment")]`
-    /// pins the *serialized* field name to the historical `commitment` so the
-    /// (positional) proof wire format is byte-identical across the rename.
+    /// The `#[serde(rename = "commitment")]` pins the *serialized* field name
+    /// to the historical `commitment` so the (positional) proof wire format
+    /// stays byte-identical.
     #[serde(rename = "commitment")]
     pub original_commitment: <MT as p3_commit::Mmcs<JaggedVal>>::Commitment,
     /// Per-chip `(width, log_height_padded)` so the verifier can
@@ -83,27 +74,22 @@ pub struct JaggedProverDataGeneric<MT: p3_commit::Mmcs<JaggedVal>> {
 /// Concrete inner prover-data alias (`MT = JaggedMmcs`).
 pub type JaggedProverData = JaggedProverDataGeneric<JaggedMmcs>;
 
-/// Defaults chosen to match the perf-results sweet spot:
-/// `log_stacking_height=14` → 16K rows per stripe, well below the
-/// 131K shard-split cliff that worked for tendermint at 51.7 GB.
-/// Small commits (under 16K total entries) clamp this down so the
-/// stacked PCS doesn't end up over-padding past the actual data.
+/// Stacking height of the stacked PCS: `2^21` rows per stripe.  Never
+/// clamped down for small commits (see [`pick_log_stacking_height`]).
 pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 
 /// RECURSION-LAYER trace-area pin.
 ///
-/// SP1's `crates/prover/src/components.rs` pins `RECURSION_LOG_TRACE_AREA = 27`
-/// for the compress/recursion machine: every recursion proof (normalize AND
-/// compose) commits its jagged dense at a FIXED area `2^27`, so the committed
-/// codeword always has `num_stripes = 2^(27 - log_stacking_height) = 2^(27-21)
-/// = 64` columns BY CONSTRUCTION.  With the per-child stripe shape fixed, every
-/// compose child-bundle read is constant-length, so the compose VK collapses to
-/// `f(chip-set, arity)` (the precondition for an enumerable FIX-off recursion
+/// Every recursion proof (normalize AND compose) commits its jagged dense at
+/// a FIXED area `2^27`, so the committed codeword always has
+/// `num_stripes = 2^(27 - log_stacking_height) = 2^(27-21) = 64` columns BY
+/// CONSTRUCTION.  With the per-child stripe shape fixed, every compose
+/// child-bundle read is constant-length, so the compose VK collapses to
+/// `f(chip-set, arity)` (the precondition for an enumerable recursion
 /// vk_map).
 ///
-/// The CORE (`RiscvAir`) commit is NOT pinned — it stays NATURAL (the FIX-off
-/// perf win is a core-trace property).  The pin is keyed by which machine is
-/// proving: the recursion (`compress`) prover passes
+/// The CORE (`RiscvAir`) commit is NOT pinned — it stays NATURAL.  The pin is
+/// keyed by which machine is proving: the recursion (`compress`) prover passes
 /// `Some(RECURSION_LOG_TRACE_AREA)` as the `recursion_area_pin` param of
 /// `MachineProver::commit`, so
 /// [`precompute_jagged_basefold_commit_generic`] /
@@ -114,12 +100,8 @@ pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 pub const RECURSION_LOG_TRACE_AREA: usize = 27;
 
 /// Interleave batch size for the stacked PCS: number of MLE-column
-/// streams packed into each stripe.  **`32`** matches SP1's
-/// `slop_jagged::basefold::DEFAULT_INTERLEAVE_BATCH_SIZE`
-/// (raised from `16`).  Halves the number of stripes per BaseFold
-/// commit, which directly halves the Merkle-commit count and the
-/// per-stripe DFT count without increasing per-stripe LDE memory.
-/// SP1-parity; no soundness implication (purely a packing constant).
+/// streams packed into each stripe.  Purely a packing constant — no
+/// soundness implication.
 pub const DEFAULT_BATCH_SIZE: usize = 32;
 
 /// FIXED stacking height: ALWAYS `DEFAULT_LOG_STACKING_HEIGHT`
@@ -130,17 +112,15 @@ pub const DEFAULT_BATCH_SIZE: usize = 32;
 /// recursion normalize/compress program is rebuilt per-proof from
 /// `bundle.commit.log_stacking_height` (the value the prover used), that
 /// clamp would make the program — hence its VK — CLAMP-DEPENDENT (the VK
-/// varying with chip heights), which is exactly what forces FIX_CORE_SHAPES
-/// + a height-quantized vk_map.
+/// varying with chip heights).
 ///
-/// SP1's `JaggedPcsProver::commit_multilinears` instead FIXES the stacking
-/// height and rounds the trace AREA up to a multiple of `2^21` (each call
-/// site does `area = total_entries.next_multiple_of(1 << 21)`), so every
-/// commit is honestly 21-round → the per-proof verifier rebuild
-/// constant-folds to `num_variables = 21` → clamp-INDEPENDENCE, with no
-/// transcript masking and no Fiat-Shamir risk (the unsound verifier-side
-/// alternative).  The normalize VK then depends on the chip-SET only — the
-/// precondition for retiring FIX_CORE_SHAPES while keeping VERIFY_VK=true.
+/// Instead the stacking height is FIXED and each call site rounds the trace
+/// AREA up to a multiple of `2^21`
+/// (`area = total_entries.next_multiple_of(1 << 21)`), so every commit is
+/// honestly 21-round → the per-proof verifier rebuild constant-folds to
+/// `num_variables = 21` → clamp-INDEPENDENCE, with no transcript masking and
+/// no Fiat-Shamir risk (the unsound verifier-side alternative).  The
+/// normalize VK then depends on the chip-SET only.
 ///
 /// `total_entries` is retained for call-site/API symmetry but does not
 /// affect the height (the call-site area padding absorbs it).
@@ -165,8 +145,7 @@ pub fn chips_to_mles_owned(
         // Round out to whole stacking blocks, NOT to a power of two.  The only
         // caller hands over the single width-1 jagged dense, and the interleave
         // below re-stripes it at exactly this granularity, so a power-of-two
-        // round-up buys nothing and costs up to half the committed area — the
-        // waste SP1 does not pay (`hypercube/src/prover/simple.rs:33`).
+        // round-up buys nothing and costs up to half the committed area.
         let padded_height = raw_height.next_multiple_of(1usize << DEFAULT_LOG_STACKING_HEIGHT);
         // `log_h` is the dims' height slot and stays a LOG, so for a
         // non-power-of-two block count it is the enclosing hypercube, an upper
@@ -189,23 +168,20 @@ pub fn chips_to_mles_owned(
 
 /// Commit a batch of chip traces (consumes ownership — saves the
 /// `trace.values.clone()` round-trip in `chips_to_mles_owned`).
-/// Returns a public commitment (observed by the challenger as a
-/// side effect) and prover-side state for later opening.
+/// Returns a public commitment and prover-side state for later opening.
 ///
 /// The shard commit runs the host BaseFold + Plonky3 MMCS commit.  The GPU
 /// prover does NOT reach this free-fn — its device dense-pack + BaseFold commit
 /// is the `StarkGpuProver` override of `MachineProver::commit_multilinears`
-/// (SP1-parity: unconditional device commit, no host fallback).  This free-fn is
+/// (unconditional device commit, no host fallback).  This free-fn is
 /// the CPU-prover / unit-test path.
 ///
-/// Does NOT observe the commitment.  Like SP1's
-/// `JaggedProver::commit_multilinears` (slop/crates/jagged/src/prover.rs:106)
-/// this takes no challenger; the CALLER owns the transcript write and must
-/// observe `commit.original_commitment` at the same position as the verifier.
-/// On the single-main-commit flow that write is the shard-level Phase 1
-/// prologue's 8-felt `main_commitment` observe — observing here as well would
-/// desync the prover against the verifier.  The verifier counterpart is
-/// [`jagged::verify_jagged_basefold_no_observe`].
+/// Does NOT observe the commitment — it takes no challenger; the CALLER owns
+/// the transcript write and must observe `commit.original_commitment` at the
+/// same position as the verifier.  On the single-main-commit flow that write
+/// is the shard-level Phase 1 prologue's 8-felt `main_commitment` observe —
+/// observing here as well would desync the prover against the verifier.  The
+/// verifier counterpart is [`jagged::verify_jagged_basefold_no_observe`].
 pub fn commit_jagged_pcs(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
 ) -> (JaggedCommit, JaggedProverData) {
@@ -223,13 +199,12 @@ pub fn commit_jagged_pcs(
     )
 }
 
-/// BaseFold-over-BN254 port: GC-generic commit core.  Does not touch the
-/// transcript: like SP1's `JaggedProver::commit_multilinears`
-/// (slop/crates/jagged/src/prover.rs:106) it takes no challenger, and the
-/// caller owns the `observe` of the returned commitment.  Parameterized over the MMCS `MT` + DFT `D`; the caller
-/// supplies the concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear)
-/// and the wrap (OuterSC, Poseidon2-BN254) paths share one body.
-/// `Val`/`Challenge` stay KoalaBear / KoalaBear⁴ for both.
+/// GC-generic commit core.  Does not touch the transcript: it takes no
+/// challenger, and the caller owns the `observe` of the returned commitment.
+/// Parameterized over the MMCS `MT` + DFT `D`; the caller supplies the
+/// concrete `mmcs`/`dft` so the inner (Poseidon2-KoalaBear) and the wrap
+/// (OuterSC, Poseidon2-BN254) paths share one body.  `Val`/`Challenge` stay
+/// KoalaBear / KoalaBear⁴ for both.
 #[allow(clippy::type_complexity)]
 pub fn commit_jagged_pcs_generic<MT, D>(
     chip_traces: Vec<(String, RowMajorMatrix<JaggedVal>)>,
@@ -249,9 +224,7 @@ where
     let log_stacking_height = pick_log_stacking_height(total_entries);
     let area = total_entries.next_multiple_of(1usize << log_stacking_height);
 
-    // Build only the prover: SP1 constructs the stacked PCS at the call site and
-    // never pairs it with a verifier it does not use
-    // (slop/crates/stacked, crates/recursion/circuit/src/basefold/stacked.rs:129).
+    // Build only the prover: the commit never uses a paired verifier.
     let prover = StackedPcsProver::new(
         BasefoldProver::<JaggedVal, JaggedChallenge, MT, D>::new(fri, dft, mmcs, 1),
         log_stacking_height,
@@ -306,30 +279,24 @@ pub fn basefold_commit_digest(commit: &JaggedCommit) -> [JaggedVal; 8] {
 // ─────────────────────────────────────────────────────────────────────
 // Jagged "hash-bind" (the count ↔ commitment tie).
 //
-// Ziren historically returned the RAW BaseFold root as the observed
-// commitment, with NO cryptographic binding of the per-chip
-// (row_count, column_count) geometry to that root.  That left the jagged
-// geometry prover-supplied and (under the height-agnostic recursion)
-// forgeable: a prover could witness a different geometry than was actually
-// committed and still pass the prefix-sum / area consistency checks (which
-// only tie the geometry to itself).
+// Observing only the RAW BaseFold root would leave the per-chip
+// (row_count, column_count) geometry prover-supplied and (under the
+// height-agnostic recursion) forgeable: a prover could witness a different
+// geometry than was actually committed and still pass the prefix-sum / area
+// consistency checks (which only tie the geometry to itself).
 //
-// SP1 closes this by hashing the geometry and folding it into the observed
-// commitment (slop/crates/jagged/src/prover.rs:141-149):
+// The geometry is therefore hashed and folded into the observed commitment:
 //
 //     hash = hash_iter( once(len) ++ row_counts ++ column_counts )
 //     modified = compress([raw_root, hash])
 //
-// and re-checking it in `verify_trusted_evaluations`
-// (slop/crates/jagged/src/verifier.rs:206-217).  The observed (Fiat-Shamir)
-// commitment becomes `modified`; the BaseFold opening still binds against
-// `raw_root` (carried as `original_commitment`).
+// and re-checked at verify time.  The observed (Fiat-Shamir) commitment is
+// `modified`; the BaseFold opening still binds against `raw_root` (carried
+// as `original_commitment`).
 //
 // CONVENTION LOCK (host == circuit must be byte-identical):
-//   * `len` is `column_counts.len()` (== `row_counts.len()`; SP1 prover
-//     uses `row_counts.len()`, the in-circuit verifier uses
-//     `column_counts.len()` — they are equal, we pick `column_counts.len()`
-//     and use it IDENTICALLY in both places to avoid any FS desync).
+//   * `len` is `column_counts.len()` (== `row_counts.len()`), used
+//     IDENTICALLY in both places to avoid any FS desync.
 //   * the geometry is the PER-CHIP `(row_count, column_count)` derived from
 //     the SAME `packing.offsets` / `packing.column_counts` the recursion
 //     lift reconstructs (`shard_level_witness.rs` `packing_row_counts`),
@@ -471,10 +438,10 @@ pub fn jagged_hash_bind_from_jagged_packing(
     jagged_hash_bind_modified(raw_root, &row_counts, &column_counts)
 }
 
-/// Host-side mirror of the in-circuit re-bind (SP1
-/// `verify_trusted_evaluations`): recompute `compress([raw, hash(counts)])`
-/// and check it equals the observed `modified` digest.  Used by the G-host
-/// round-trip gate to LOCK the convention before the circuit consumes it.
+/// Host-side mirror of the in-circuit re-bind: recompute
+/// `compress([raw, hash(counts)])` and check it equals the observed
+/// `modified` digest.  Used by the host round-trip test to LOCK the
+/// convention the circuit consumes.
 #[must_use]
 pub fn jagged_hash_bind_verify(
     raw_root: [JaggedVal; 8],
@@ -502,10 +469,6 @@ pub fn lb_fri_config() -> FriConfig<JaggedVal> {
 // (`JaggedReductionProof<InnerChallenge>`).  Wired from
 // `prove_jagged_basefold_with_y_per_chip` step (4) when the GPU
 // jagged-reduction hook is registered (GPU prover only).
-//
-// Per-shard wall: 2.41–2.76s × 25 shards ≈ 62s of the 144s tendermint
-// compress wall (measured) — the largest remaining
-// per-shard host bottleneck after the BaseFold commit moved to GPU.
 // ─────────────────────────────────────────────────────────────────────
 
 /// Borrowed-cells view of an EF row-GKR layer suitable for the GPU
@@ -530,8 +493,7 @@ pub struct HostLayerView<'a> {
 /// through every device-layer init / transition / pull hook
 /// invocation.  The GPU side keys its registry by
 /// `(device_id, circuit_id)` so concurrent shards on the same GPU are
-/// fully isolated — fixes multi-GPU panics caused by a shared
-/// `next_handle` counter being stepped on across shards.
+/// fully isolated.
 // Backing storage uses AtomicUsize, not AtomicU64, so the file
 // compiles on the zkvm-elf target (mipsel — no
 // `target_has_atomic="64"`).  The GPU registry never executes on the
@@ -558,19 +520,14 @@ pub fn allocate_gpu_layer_circuit_id() -> u64 {
     NEXT_GPU_LAYER_CIRCUIT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed) as u64
 }
 
-/// Pure host-side implementation of the jagged-PCS open —
-/// extracted so the GPU dispatch hook can fall back to it on
-/// shape-unsupported / runtime errors without re-entering the env-flag
-/// dispatch loop.  Always runs the CPU StackedPcsProver
-/// `prove_trusted_evaluation` body.
 /// Batched multi-ROUND open: one BaseFold proof covering every round's
-/// committed data.
+/// committed data — NOT one proof per round.  Every round's stripes are
+/// `log_stacking_height` tall, so `BasefoldProver::batch` folds them into one
+/// codeword regardless of how many stripes each round contributes.
 ///
-/// SP1 opens all rounds in a single `prove_untrusted_evaluation` over
-/// `stacked_prover_data: Rounds<_>` (`slop/crates/jagged/src/prover.rs:300`) —
-/// NOT one proof per round.  Every round's stripes are `log_stacking_height`
-/// tall, so `BasefoldProver::batch` folds them into one codeword regardless of
-/// how many stripes each round contributes.
+/// Pure host-side implementation — always runs the CPU StackedPcsProver
+/// `prove_trusted_evaluation` body; the GPU dispatch hook falls back to it on
+/// shape-unsupported / runtime errors.
 pub fn open_jagged_pcs_rounds(
     rounds: &[&JaggedProverData],
     eval_point: Vec<JaggedChallenge>,
@@ -680,22 +637,20 @@ where
 }
 
 // ─────────────────────────────────────────────────────────────────────
-// GPU BaseFold open
-// dispatch fn.
+// GPU BaseFold open dispatch.
 //
-// Mirror of the GPU commit override — provided
-// statically by the prover (`MachineProver::gpu_basefold_open_hook`) and
-// threaded down to the `open_jagged_pcs_generic` dispatch, not via a registry.
-// The hook receives the same inputs as `open_jagged_pcs_generic` and
-// returns a byte-identical `StackedBasefoldProof` — the device side is
-// responsible for:
+// Mirror of the GPU commit override — provided statically by the prover
+// (`MachineProver::gpu_basefold_open_hook`) and threaded down to the
+// `open_jagged_pcs_generic` dispatch, not via a registry.  The hook receives
+// the same inputs as `open_jagged_pcs_generic` and returns a byte-identical
+// `StackedBasefoldProof` — the device side is responsible for:
 //
 //   * routing the per-stripe MLEs / codewords held in
 //     `prover_data.stacked_data.pcs_batch_data` to GPU memory (or
 //     reading from a device-resident cache if the commit hook installed
 //     one),
-//   * running `FriCudaProver::prove` (the existing 1349 LOC device
-//     prove driver in `ziren-gpu/basefold/src/fri.rs`),
+//   * running `FriCudaProver::prove` (the device prove driver in
+//     `ziren-gpu/basefold/src/fri.rs`),
 //   * observing the per-round univariate-poly evals + Merkle commits +
 //     PoW witness into the supplied `JaggedChallenger` so the transcript
 //     stays in lock-step with the host path,
@@ -708,27 +663,19 @@ where
 // on error (mirrors the `commit_jagged_pcs` hook contract).
 // ─────────────────────────────────────────────────────────────────────
 
-// `GpuBasefoldOpenFn` (the device open fn-ptr type) was removed in the
-// SP1-parity static-dispatch collapse — the device open now lives in the
-// `JaggedOpener` impl `DeviceJaggedOpener` (zkm-gpu-basefold), which calls
-// `FriCudaProver::prove` and falls back to `open_jagged_pcs` on `Err`
-// (returning `(prover_data, eval_point)` ownership so nothing is lost).
-
-// The GPU BaseFold open fn is provided STATICALLY (threaded from
-// the prover down to the `open_jagged_pcs_generic` dispatch), not via a global
-// registry.  The former `GPU_BASEFOLD_OPEN_HOOK` OnceLock + `register_/get_`
-// accessors were removed; the `prover` crate passes `Some(device_fn)` into
-// the `prove_shard_to_basefold` free-fn (which threads it through the
-// jagged-eval producer + `prove_trusted_evaluations` down to
+// The device open lives in the `JaggedOpener` impl `DeviceJaggedOpener`
+// (zkm-gpu-basefold), which calls `FriCudaProver::prove` and falls back to
+// `open_jagged_pcs` on `Err` (returning `(prover_data, eval_point)`
+// ownership so nothing is lost).  The open fn is threaded from the `prover`
+// crate into the `prove_shard_to_basefold` free-fn (through the jagged-eval
+// producer + `prove_trusted_evaluations` down to
 // `prove_jagged_basefold_single_round`'s open closure).
 
 /// Verify the proof against a previously observed commitment.
 /// Multi-ROUND verify: one BaseFold proof covering every round's commitment.
 ///
-/// SP1's verifier builds the commitment list itself —
-/// `vec![vk.preprocessed_commit, *main_commitment]`
-/// (`hypercube/src/verifier/shard.rs:638`) — so a round whose commitment lives
-/// in the verifying key is never taken from the proof.
+/// The verifier builds the commitment list itself, so a round whose
+/// commitment lives in the verifying key is never taken from the proof.
 pub fn verify_jagged_pcs_rounds(
     commitments: &[<JaggedMmcs as p3_commit::Mmcs<JaggedVal>>::Commitment],
     areas: &[usize],
@@ -870,13 +817,9 @@ where
 
 // ─── Jagged-sumcheck integration ──────────
 //
-// Mirrors the (now-removed) WHIR jagged late-binding prover but
-// commits via BaseFold instead of WHIR.  The dense polynomial is still
-// materialized for the sumcheck reduction (the OOM win is in the
-// commit phase: BaseFold streams stripes through dft_batch instead of
-// blowing up the whole dense vector by 16×).  Per-chip BaseFold
-// commit (which would skip even the brief dense materialization) is
-// the next-stage refactor.
+// The dense polynomial is still materialized for the sumcheck reduction (the
+// memory win is in the commit phase: BaseFold streams stripes through
+// dft_batch instead of blowing up the whole dense vector by 16×).
 //
 // Built on `jagged.rs` (data structures) and `jagged_sumcheck.rs`
 // (PCS-agnostic reduction math).
@@ -893,8 +836,7 @@ pub mod jagged {
     use crate::jagged_sumcheck::{JaggedReductionProof, verify_jagged_reduction};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
-    /// A named per-chip trace in the form the jagged commit and open consume:
-    /// the same `(name, PaddedMle)` pairing SP1 keys its `Traces` map by.
+    /// A named per-chip trace in the form the jagged commit and open consume.
     /// Padding is virtual, so cloning one is an `Arc` bump rather than a
     /// matrix copy, and the Val<->InnerVal relabel stays a zero-copy slice
     /// reinterpret under the caller's TypeId gate.
@@ -911,11 +853,9 @@ pub mod jagged {
     };
 
     // ── Test-only verify-progress tracker ─────────────────────────────────
-    // Records how FAR the host verifier got, so CP-A validation can assert
-    // the per-round restructure is transcript-faithful (coverage + every
-    // group's reduction pass) even when the BaseFold OPEN fails for a reason
-    // ORTHOGONAL to the split (e.g. an in-progress jagged-eval/div-fix bug
-    // shared by the G==1 path on this WIP branch).
+    // Records how FAR the host verifier got, so tests can assert WHERE a
+    // verification failed (coverage / reduction / open) rather than only
+    // whether it failed.
     #[cfg(test)]
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     pub enum VerifyStage {
@@ -955,8 +895,7 @@ pub mod jagged {
     /// the prover from `compute_jagged_metadata`.  The verifier reads
     /// this instead of `BaseAir::width(chip)` so the prover can send
     /// `trace.width` (the truly-populated columns) without any
-    /// chip.width() pad (~24x reduction in jagged-PCS data on
-    /// workloads with sparse-column chips).
+    /// chip.width() pad.
     /// Empty vec on the wire = legacy bundle → caller falls back to
     /// `BaseAir::width(chip)` for backward compat.
     #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -967,9 +906,7 @@ pub mod jagged {
         #[serde(default)]
         pub column_counts: Vec<usize>,
         /// Per-ROUND `(row_count, column_count)` for the REAL chips of each
-        /// committed round, in round order — SP1's
-        /// `row_counts_and_column_counts: Rounds<Vec<(usize, usize)>>`
-        /// (`slop/crates/jagged/src/prover.rs:312`).
+        /// committed round, in round order.
         ///
         /// The fields above flatten every round into ONE column space, and that
         /// space also carries the stacking padding between rounds, so a round's
@@ -985,8 +922,7 @@ pub mod jagged {
         /// Each round's stacking-padding column heights, in round order — the
         /// gap between the round's real cells and the area the stacked
         /// commitment actually covers, split into columns no taller than the
-        /// row cube (a taller column has no eq table to be weighed against, so
-        /// SP1 carries a padding column COUNT for the same reason).
+        /// row cube (a taller column has no eq table to be weighed against).
         ///
         /// It is NOT derivable from `round_counts`: a round whose cells already
         /// fill a whole number of stripes still gets a full extra stripe, so
@@ -1011,19 +947,18 @@ pub mod jagged {
         deserialize = "<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment: serde::Deserialize<'de>, <MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Proof: serde::Deserialize<'de>"
     ))]
     pub struct JaggedBasefoldBundleGeneric<MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
-        /// Group-0 jagged-sumcheck reduction proof.  On the default (FIX-on /
-        /// core, G==1) path this is the WHOLE proof and `extra_*` below are
-        /// empty — byte-identical to the pre-split bundle.  On the per-round
-        /// split (G≥2) path this is the FIRST group and the remaining G-1
-        /// groups live in the `extra_*` Vecs (see [`Self::reduction_g`]).
+        /// Group-0 jagged-sumcheck reduction proof.  On the default (G==1)
+        /// path this is the WHOLE proof and `extra_*` below are empty —
+        /// byte-identical to the pre-split bundle.  On the per-round split
+        /// (G≥2) path this is the FIRST group and the remaining G-1 groups
+        /// live in the `extra_*` Vecs (see [`Self::reduction_g`]).
         ///
-        /// Rationale for "scalar group-0 + extra Vecs" rather than a single
-        /// `Vec<G>`: it keeps the recursion lift + in-circuit verifier
+        /// "Scalar group-0 + extra Vecs" rather than a single `Vec<G>` keeps
+        /// the recursion lift + in-circuit verifier
         /// (`shard_level_witness.rs`, `recursive_jagged_pcs.rs`) — which read
-        /// these scalar fields and are NOT touched in CP-A (host-only) —
-        /// compiling unchanged, AND keeps the G==1 wire format byte-identical
-        /// (the `extra_*` / `groups` fields are `serde(default)` empty so they
-        /// serialize away).  CP-C folds these into the in-circuit G-loop.
+        /// these scalar fields — compiling unchanged, AND keeps the G==1 wire
+        /// format byte-identical (the `extra_*` / `groups` fields are
+        /// `serde(default)` empty so they serialize away).
         pub reduction: JaggedReductionProof<InnerChallenge>,
         /// Group-0 BaseFold open proof.
         pub basefold_proof: StackedBasefoldProof<
@@ -1046,19 +981,18 @@ pub mod jagged {
         pub jagged_eval: crate::jagged_eval_sumcheck::JaggedSumcheckEvalProof<InnerChallenge>,
 
         /// The RAW BaseFold roots of the opening rounds BEFORE the last, in
-        /// round order — SP1's `original_commitments`.
+        /// round order.
         ///
         /// A round's commitment as the VERIFYING KEY holds it is the HASH-BOUND
         /// digest `compress([raw, hash(geometry)])`, but the BaseFold open
         /// Merkle-verifies its leaves against the RAW root.  So the proof
         /// carries the raw root and the verifier re-derives the bound form to
-        /// check it against the key — which is what pins that round's geometry
-        /// (SP1 `slop/crates/jagged/src/verifier.rs:206`).  Empty on a
-        /// single-round proof.
+        /// check it against the key — which is what pins that round's
+        /// geometry.  Empty on a single-round proof.
         #[serde(default)]
         pub preceding_commits: Vec<<MT as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment>,
 
-        // ── Per-round split (Architecture A) extra groups (G≥2 only) ──────
+        // ── Per-round split extra groups (G≥2 only) ───────────────────────
         // All `serde(default)` empty so a G==1 bundle is byte-identical to the
         // pre-split wire format.  Indexed g-1 for group g≥1.
         /// Reductions for groups 1..G.
@@ -1200,27 +1134,22 @@ pub mod jagged {
     // ─────────────────────────────────────────────────────────────────
     // Single shard-wide commit buffer — GPU precompute-commit hook.
     //
-    // Replaces the HOST body of `precompute_jagged_basefold_commit`
-    // (host dense pack + host stripe interleave + H2D re-upload) with a
-    // device-side build: resident chips are packed D2D from the
-    // per-shard provider, host chips H2D once, the stripes/encode/
-    // Merkle all run on device, and the dense buffer is retained
-    // device-side (registered handle) for the step-4 jagged reduction.
-    // Output MUST be byte-identical to the host precompute (commit
-    // digest, prover_data shapes, interleaved MLE bytes) — the commit
-    // is transcript-critical.
+    // Device-side build of the precompute commit: resident chips are
+    // packed D2D from the per-shard provider, host chips H2D once, the
+    // stripes/encode/Merkle all run on device, and the dense buffer is
+    // retained device-side (registered handle) for the step-4 jagged
+    // reduction.  Output MUST be byte-identical to the host precompute
+    // (commit digest, prover_data shapes, interleaved MLE bytes) — the
+    // commit is transcript-critical.
     // ─────────────────────────────────────────────────────────────────
 
-    // Phase-1 static dispatch (SP1-parity): the former
-    // `GpuJaggedPrecomputeCommitFn` `fn`-ptr type (signature of the GPU jagged
-    // precompute-commit hook) was RETIRED.  The device dense-pack + BaseFold
-    // commit is now the `StarkGpuProver` OVERRIDE of
-    // `MachineProver::commit_multilinears`, consumed by
+    // The device dense-pack + BaseFold commit is the `StarkGpuProver`
+    // OVERRIDE of `MachineProver::commit_multilinears`, consumed by
     // `maybe_auto_precompute_basefold` through the `JaggedEvalProducer` COMMIT
-    // seam — so no `Option<fn>` crosses this boundary.  The device hook body
-    // still lives in ziren-gpu `commit_dense::gpu_jagged_precompute_commit_hook`
+    // seam — no `Option<fn>` crosses this boundary.  The device hook body
+    // lives in ziren-gpu `commit_dense::gpu_jagged_precompute_commit_hook`
     // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read
-    // rev(zeta) semantics are unchanged (byte-identical).
+    // rev(zeta) semantics match the host path byte-identically.
 
     /// Run steps (1) + (2) of `prove_jagged_basefold_with_y_per_chip`
     /// up-front, WITHOUT observing the commitment into a challenger.
@@ -1233,6 +1162,67 @@ pub mod jagged {
     /// to the verifier (via the shard-level proof's
     /// `main_commitment` field) at the same transcript position the
     /// verifier observes it.
+    ///
+    /// Cells-based twin of [`precompute_jagged_basefold_commit`] — the
+    /// commit-time build over explicit per-chip `(name, cells, width)`
+    /// borrows (zero moves; `commit()` keeps its matrices for `open()`).
+    /// Byte-identical: the dims derive exactly as `compute_jagged_metadata`
+    /// derives them from views (a width-0 or 0-row chip packs `width`
+    /// zero-height metadata columns), and the dense materialize delegates to
+    /// the same cells core the view path uses.
+    pub fn precompute_jagged_basefold_commit_from_cells(
+        chip_cells: &[(alloc::string::String, &[InnerVal], usize)],
+        use_rev: bool,
+        recursion_area_pin: Option<usize>,
+    ) -> PrecomputedJaggedCommit {
+        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+        let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+        let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+        let mmcs = crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0);
+        let fri = FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default();
+
+        use crate::jagged::{compute_jagged_metadata_from_dims, materialize_dense_jagged_from_cells};
+        let dims: Vec<(alloc::string::String, usize, usize)> = chip_cells
+            .iter()
+            .map(|(name, vals, w)| {
+                (name.clone(), if *w == 0 { 0 } else { vals.len() / *w }, *w)
+            })
+            .collect();
+        let mut packing = compute_jagged_metadata_from_dims::<InnerVal>(&dims);
+        if let Some(target) = recursion_area_pin {
+            packing.dense_len = packing.dense_len.max(1usize << target);
+        }
+        if packing.dense_len == 0 {
+            packing.dense_len = 1;
+        }
+        let (commit, prover_data) = {
+            let cells: Vec<(&[InnerVal], usize)> =
+                chip_cells.iter().map(|(_, v, w)| (*v, *w)).collect();
+            let dense_q = materialize_dense_jagged_from_cells::<InnerVal>(
+                &cells,
+                packing.dense_len,
+                use_rev,
+            );
+            debug_assert_eq!(dense_q.len(), packing.dense_len);
+            let dense_traces = vec![(
+                alloc::string::String::from("<jagged-dense>"),
+                RowMajorMatrix::new(dense_q, 1),
+            )];
+            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+            crate::jagged_pcs::commit_jagged_pcs_generic::<
+                crate::jagged_pcs::JaggedMmcs,
+                crate::jagged_pcs::JaggedDft,
+            >(dense_traces, mmcs, dft, fri)
+        };
+        PrecomputedJaggedCommitGeneric {
+            packing,
+            commit,
+            prover_data,
+            rev: use_rev,
+            recursion_area_pin,
+        }
+    }
+
     pub fn precompute_jagged_basefold_commit(
         chip_traces: &[ChipTraceView],
         // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
@@ -1347,25 +1337,10 @@ pub mod jagged {
         )
     }
 
-    /// Provider-aware reduction prove: same as
-    /// [`prove_jagged_basefold_with_precomputed_provider`] but additionally accepts
-    /// the per-shard `DeviceTraceProvider`.  The provider is used ONLY on
-    /// the slow GPU-reduction fallback edge: when the device handle / V2
-    /// hook declines and the host body must run, any chip whose
-    /// `chip_traces` entry is empty (width 0 — its real cells live
-    /// device-side) is re-materialized from the provider so the host
-    /// `materialize_dense_jagged` rebuilds a correct dense_q.  On the
-    /// happy path (V2 hook consumes the registered device dense handle)
-    /// the provider is never touched, so passing `Some` is behaviour- and
-    /// byte-neutral — it only ARMS the fallback against empty device-chip
-    /// traces, removing the silent invalid-proof edge that an unconditional
-    /// `commit_traces` D2H skip would otherwise leave.
     /// One commitment ROUND's inputs to the jagged open.
     ///
-    /// SP1 passes `prover_data: Rounds<JaggedProverData>` and
-    /// `evaluation_claims: Rounds<Evaluations>` as parallel per-round
-    /// collections (`slop/crates/jagged/src/prover.rs:162`); this is the same
-    /// thing with the parallel arms collapsed into one record, so a round's
+    /// The per-round prover data and evaluation claims are collapsed into one
+    /// record (rather than parallel per-round collections), so a round's
     /// commit can never be paired with another round's claims.
     ///
     /// `precomputed` is BORROWED: the preprocessed round opens the proving
@@ -1373,7 +1348,7 @@ pub mod jagged {
     pub struct JaggedOpenRound<'a, MT: p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>> {
         pub chip_traces: &'a [ChipTraceView],
         pub r_row_per_chip: &'a [Vec<InnerChallenge>],
-        /// This round's per-chip column claims (SP1's `Evaluations`).
+        /// This round's per-chip column claims.
         pub claims: Vec<Vec<InnerChallenge>>,
         pub precomputed: &'a PrecomputedJaggedCommitGeneric<MT>,
     }
@@ -1402,14 +1377,11 @@ pub mod jagged {
     /// triple-nested per-column reduction — is skipped entirely.
     /// Output bytes are identical to the host path.
     ///
-    /// Self-contained legacy flow (host synthetic / unit tests + the
-    /// runtime-dead `prove_trusted_evaluations` no-precompute fallthrough):
-    /// precompute the single-main dense commit on host, observe its
-    /// commitment in-band (mirroring `commit_jagged_pcs`'s observe so the
-    /// `verify_jagged_basefold` transcript aligns), then run steps
-    /// (3)+(4)+(5) through the precomputed fast path.  Byte-identical to the
-    /// former inline in-band-commit body (host commit, legacy `rev = false`,
-    /// no area pin, no provider).
+    /// Self-contained flow (host synthetic / unit tests): precompute the
+    /// single-main dense commit on host, observe its commitment in-band (so
+    /// the `verify_jagged_basefold` transcript aligns), then run steps
+    /// (3)+(4)+(5) through the precomputed fast path (host commit,
+    /// `rev = false`, no area pin, no provider).
     pub fn prove_jagged_basefold_with_y_per_chip(
         chip_traces: &[ChipTraceView],
         r_row_per_chip: &[Vec<InnerChallenge>],
@@ -1422,15 +1394,11 @@ pub mod jagged {
             false, // legacy bitrev orientation
             None,  // no recursion area pin
         );
-        // In-band commit observe (the precomputed prove skips it, expecting
+        // In-band commit observe: the precomputed prove skips it, expecting
         // the orchestrator prologue to have observed the digest; here there
-        // is none, so observe it now to match `verify_jagged_basefold`).  This
-        // observe stays on THIS (legacy/synthetic) arm and precedes the spine
-        // call — the precomputed arms omit it. Then route through the shared
-        // `prove_jagged_basefold_with_precomputed_provider` spine (provider
-        // `None`) instead of calling `_inner` directly, so `_inner` has a
-        // single caller. Byte-identical: the spine is a pure pass-through to
-        // `_inner` with these exact args, and the observe order is unchanged.
+        // is none, so observe it now to match `verify_jagged_basefold`.  This
+        // observe stays on THIS (self-contained) arm and precedes the spine
+        // call — the precomputed arms omit it.
         challenger.observe(precomputed.commit.original_commitment.clone());
         prove_jagged_basefold_with_precomputed_provider(
             chip_traces,
@@ -1453,10 +1421,10 @@ pub mod jagged {
         owned
             .iter()
             .map(|(name, m)| {
-                // The jagged path now carries `PaddedMle`, so the rematerialized
-                // side-storage is wrapped rather than borrowed.  `num_variables`
-                // is the chip's own log-height: the packer reads dims and cells
-                // back off the real trace, and never consults the padding.
+                // The rematerialized side-storage is wrapped in a `PaddedMle`.
+                // `num_variables` is the chip's own log-height: the packer
+                // reads dims and cells back off the real trace, and never
+                // consults the padding.
                 let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
                 let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
                 let mle = alloc::sync::Arc::new(crate::basefold::Mle::from_row_major(
@@ -1467,16 +1435,11 @@ pub mod jagged {
             .collect()
     }
 
-    /// **Shared linear core** — the SP1-shaped, path-INDEPENDENT
-    /// challenger sequence at the heart of every jagged-BaseFold prove.
-    ///
-    /// Mirrors SP1 `JaggedProver::prove_trusted_evaluations`
-    /// (`slop/crates/jagged/src/prover.rs`): sample `z_col` at the
+    /// **Shared linear core** — the path-INDEPENDENT challenger sequence at
+    /// the heart of every jagged-BaseFold prove: sample `z_col` at the
     /// verifier-matching transcript position → jagged-sumcheck reduction →
-    /// jagged-eval sub-protocol → open.  The ONE Ziren-specific deviation is
-    /// the point-extension after the reduction (SP1 opens at
-    /// `final_eval_point` directly; Ziren extends `log_dense → log2(area)`
-    /// via extra Fiat-Shamir coords — preserved here exactly).
+    /// jagged-eval sub-protocol → point-extension `log_dense → log2(area)`
+    /// via extra Fiat-Shamir coords → open.
     ///
     /// The `reduce` and `open` closures are the ONLY per-path variation
     /// (host-owned vs device-hook reduction; concrete vs BN254 open; the
@@ -1507,11 +1470,11 @@ pub mod jagged {
     where
         Ch: FieldChallenger<InnerVal>,
     {
-        // (4) SP1-aligned: sample `z_col` (one challenge per column variable)
-        // at the verifier-matching transcript position — after the commit
-        // observe, immediately before the jagged sumcheck reduction.  Used
-        // both to weight the column mix in the reduction and as the column
-        // point for the branching-program jagged-eval sub-protocol.
+        // (4) Sample `z_col` (one challenge per column variable) at the
+        // verifier-matching transcript position — after the commit observe,
+        // immediately before the jagged sumcheck reduction.  Used both to
+        // weight the column mix in the reduction and as the column point for
+        // the branching-program jagged-eval sub-protocol.
         let num_cols = offsets.len().saturating_sub(1);
         let num_col_vars = num_cols.next_power_of_two().trailing_zeros() as usize;
         let z_col: Vec<InnerChallenge> = (0..num_col_vars)
@@ -1540,11 +1503,11 @@ pub mod jagged {
             recursion_area_pin,
         );
 
-        // (5) Ziren point-extend (SP1 opens at `final_eval_point` directly):
-        // the BaseFold commit covers `area` cells (num_stripes × batch_size ×
-        // stack_height), which can exceed 2^log_dense_size, so extend z* to
-        // log2(area) with extra Fiat-Shamir coords (the verifier samples the
-        // matching coords in the same transcript order), then open at z*.
+        // (5) Point-extend: the BaseFold commit covers `area` cells
+        // (num_stripes × batch_size × stack_height), which can exceed
+        // 2^log_dense_size, so extend z* to log2(area) with extra Fiat-Shamir
+        // coords (the verifier samples the matching coords in the same
+        // transcript order), then open at z*.
         let target_dim = area.trailing_zeros() as usize;
         let mut extended_eval_point = reduction.eval_point.clone();
         while extended_eval_point.len() < target_dim {
@@ -1556,19 +1519,12 @@ pub mod jagged {
         (reduction, jagged_eval, proof)
     }
 
-    /// Body shared by [`prove_jagged_basefold_with_y_per_chip`] (legacy
-    /// self-contained flow, which now precomputes + observes the commit in its
-    /// wrapper) and [`prove_jagged_basefold_with_precomputed_provider`] (the
-    /// single-commit flow).  `precomputed` is always supplied: steps (1) + (2)
-    /// were run up-front and the in-band commit observe is suppressed (the
-    /// caller already observed the digest — the orchestrator at the Phase 1
-    /// prologue position, or the wrapper just above).
     /// One group's share of a jagged-BaseFold proof: everything
     /// [`JaggedBasefoldBundleGeneric`] stores per group, before the groups are
     /// assembled into a bundle.
     ///
     /// A single-round proof has exactly one of these (it becomes the bundle's
-    /// scalar group-0 fields); SP1's two-round shape has two — preprocessed then
+    /// scalar group-0 fields); a two-round proof has two — preprocessed then
     /// main — and the second lands in the `extra_*` vecs.
     pub struct JaggedGroupProof {
         pub reduction: JaggedReductionProof<InnerChallenge>,
@@ -1621,10 +1577,6 @@ pub mod jagged {
         // commit observe is therefore skipped to keep transcripts aligned with
         // the verifier (which uses `verify_jagged_basefold_no_observe`).
         //
-        // `host_dense_q` is `Some` ONLY on the device-commit DECLINE path (the
-        // provider-aware host fallback body captured the correct dense_q while
-        // the provider was live).  It carries the dense_q forward so the
-        // reduction below does not re-materialize from the (drained) provider.
         // `recursion_area_pin` carries the recursion AREA PIN
         // forward so the step-4 jagged-eval half is pin-consistent with the
         // (pinned) commit — read off the committed data.
@@ -1644,11 +1596,8 @@ pub mod jagged {
 
         // (3) Compute per-chip per-column row-MLE values y_{c,j}.
         //
-        // Parallelize across chips AND across columns within each chip.
-        // The triple-nested loop
-        // (chip × col × row) is O(N_chips · max_w · max_h) which for
-        // a 22-chip MIPS shard padded to 2^19 rows hits ~10M+ EF
-        // multiply-adds. Each chip × column reduction is independent.
+        // Parallelize across chips AND across columns within each chip —
+        // each chip × column reduction is independent.
         let _t_yvals = std::time::Instant::now();
         let _yvals_span = tracing::info_span!("jagged_y_per_chip").entered();
         use p3_maybe_rayon::prelude::*;
@@ -1660,22 +1609,18 @@ pub mod jagged {
                 chip_traces.len(),
                 "pre_y_per_chip length must match chip_traces length",
             );
-            //  empty-chip skip: for empty-trace chips
+            // Empty-chip skip: for empty-trace chips
             // (height==0 || width==0) the GPU dispatch supplies
-            // `Vec::new()`; the host fallback (else branch) below
-            // would have asserted on `h_padded.trailing_zeros() ==
-            // r_row_c.len()` (h_padded=1, trailing_zeros=0 vs
-            // r_row_c.len()=max_log_row_count).  Just accept the
-            // empty per-chip y slot — y_{c,j} is the empty product
-            // for an empty column set, so the downstream sumcheck
-            // reduction skips it naturally.
+            // `Vec::new()`.  Accept the empty per-chip y slot —
+            // y_{c,j} is the empty product for an empty column set,
+            // so the downstream sumcheck reduction skips it naturally
+            // (the else-branch assert on `h_padded.trailing_zeros()
+            // == r_row_c.len()` does not apply).
             pre
         } else {
             // The host triple-loop reads chip cells directly from the host
-            // `chip_traces` views.  (Stage 5: the device-resident re-materialize
-            // fallback is gone — dead from the GPU prover, which runs its own
-            // device-native copy, and inert on the CPU prover, which owns real
-            // host traces.)
+            // `chip_traces` views (the GPU prover runs its own device-native
+            // copy; the CPU prover owns real host traces).
             // The rev(zeta) orientation, read off the committed data
             // (`dense_rev`, from `PrecomputedJaggedCommit.rev`), captured by
             // value into the per-chip / per-column rayon closures below.
@@ -1758,60 +1703,37 @@ pub mod jagged {
         );
 
         // (4) Rebuild dense_q for the sumcheck reduction from the STRIPES the
-        // commit retained, then drop it immediately after.  Uses the `_owned`
-        // reduction entry point so the inner loop can drop dense_q after round
-        // 0 (releasing the 4N base-field buffer before the EF tables for rounds
-        // 1..n are built) — saves one full N-element clone vs the `&[InnerVal]`
-        // entry point.
-        // ── The jagged reduction packaged as the `reduce` closure threaded through
-        // the shared `prove_jagged_basefold_linear_core`.  The core samples
-        // `z_col` at the SP1 transcript position (after the commit observe,
-        // immediately before the reduction) and passes it in.  This closure
-        // runs NO challenger op outside the reduction itself, so `z_col`'s
-        // transcript position is identical to the generic / per-group paths —
-        // the whole point of the de-dup.  Non-`move`: every capture (packing /
-        // y_per_chip / chip_traces / provider / r_row_per_chip / z_row /
-        // n_chips) is read by reference.
-        // SP1 parity (`slop/crates/jagged/src/prover.rs`): take a CHEAP
-        // `Arc`-clone handle on the stripes the commit already produced, use it
-        // for the sumcheck, then move the same `prover_data` into the open.
-        // `Vec<Arc<Mle>>` clone == SP1's `Message<Mle>` clone: pointer-only.
+        // commit retained, then drop it immediately after.
+        // The jagged reduction is packaged as the `reduce` closure threaded
+        // through the shared `prove_jagged_basefold_linear_core`.  The core
+        // samples `z_col` (after the commit observe, immediately before the
+        // reduction) and passes it in.  This closure runs NO challenger op
+        // outside the reduction itself, so `z_col`'s transcript position is
+        // identical to the generic / per-group paths — the whole point of the
+        // de-dup.  Non-`move`: every capture (packing / y_per_chip /
+        // chip_traces / r_row_per_chip / z_row / n_chips) is read by
+        // reference.
+        // Take a CHEAP `Arc`-clone handle on the stripes the commit already
+        // produced, use it for the sumcheck, then move the same `prover_data`
+        // into the open.  The `Vec<Arc<Mle>>` clone is pointer-only.
         let interleaved = prover_data.stacked_data.interleaved_mles.clone();
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut crate::jagged_pcs::JaggedChallenger|
               -> crate::jagged_sumcheck::JaggedReductionProof<InnerChallenge> {
-        // The pre-reduce device-trace `release_all` (SP1 drop_ldes
-        // analog) is gone — dead from the GPU prover (its own device-native
-        // copy owns the free) and inert on the CPU prover (no provider).
-
         let _t_red = std::time::Instant::now();
         let _red_span = tracing::info_span!("jagged_sumcheck_reduce").entered();
         let reduction = {
-            // Host reduction — the former `HostJaggedReducer::reduce_jagged`
-            // body inlined (SP1 shape: reduce is type-dispatched, no trait).
-            // The CPU prover is the ONLY caller of this host inner; the GPU
-            // prover runs its own device-native copy
+            // Host reduction — the CPU prover is the ONLY caller of this host
+            // inner; the GPU prover runs its own device-native copy
             // (`prove_jagged_basefold_inner_gpu`) calling the device
-            // reduce/open kernels directly.  Byte-identical to the former
-            // `is_device()==false` host arm (device carrier / decline
-            // fallback scaffolding was dead on the CPU prover).
-            // SP1 shape: the dense representation is built ONCE per round, at
-            // commit time, and the SAME data feeds both the jagged sumcheck and
-            // the open — `prove_trusted_evaluations` takes
-            // `pcs_prover_data.interleaved_mles()` for the sumcheck poly and
-            // then moves the same `pcs_prover_data` into
-            // `prove_untrusted_evaluation`.  Ziren used to re-derive `dense_q`
-            // from `chip_traces` here, a SECOND full pass over the same cells
-            // (measured 0.70 s/shard at `log_dense_size = 28`, i.e. 2^28 cells
-            // = 1 GiB, on 16 threads).  Rebuild it from the stripes the commit
-            // already retained instead; `dense_from_interleaved_mles` is the
-            // exact inverse of the width-1 interleave, so this is byte-identical
-            // — and it drops the reduction's last dependency on `chip_traces`.
-            // SP1 shape: the reduction runs on `HadamardProduct` over the
-            // committed stripes themselves — no dense rebuild at all.  The
-            // stripes ARE `Message<Mle>`, which is what `LongMle` carries, so
-            // `jagged_hadamard_poly` restacks them into the single component the
-            // sumcheck needs and pairs them with the weight table.
+            // reduce/open kernels directly.
+            // The dense representation is built ONCE per round, at commit
+            // time, and the SAME data feeds both the jagged sumcheck and the
+            // open: dense_q is rebuilt from the stripes the commit retained
+            // (`dense_from_interleaved_mles` is the exact inverse of the
+            // width-1 interleave, so this is byte-identical to re-deriving it
+            // from `chip_traces` — and it drops the reduction's last
+            // dependency on them).
             let weights = crate::jagged_sumcheck::build_weight_table_from_z_col(
                 &packing,
                 r_row_per_chip,
@@ -1820,9 +1742,7 @@ pub mod jagged {
             );
             // The jagged dense area is a PREFIX of the committed stripes (which
             // also carry the stacking padding), so it is extracted rather than
-            // handed over whole.  SP1's jagged sumcheck is dense on both sides
-            // too (`partial_jagged_little_polynomial_evaluation` builds a dense
-            // `2^log_total_area` MLE), so this matches its shape.
+            // handed over whole.
             let mut dense_q = crate::basefold::stacked::dense_from_interleaved_mles::<InnerVal>(
                 &interleaved,
                 packing.dense_len,
@@ -1858,10 +1778,6 @@ pub mod jagged {
             "jagged sub-phase done"
         );
 
-        // The pre-open device-trace `release_all` (PIECE2) is gone —
-        // dead from the GPU prover (its own device-native copy owns the
-        // pre-open free) and inert on the CPU prover (no provider).
-
             reduction
         };
 
@@ -1874,9 +1790,7 @@ pub mod jagged {
         // cells) but the BaseFold commit covers `prover_data.area` cells
         // (num_stripes × batch_size × stack_height), which can exceed
         // 2^log_dense_size; the core extends z* to log2(area) with extra
-        // Fiat-Shamir coords (SP1's `prove_trusted_evaluation` opens at
-        // `final_eval_point` directly — Ziren's one deviation) before this
-        // open runs.
+        // Fiat-Shamir coords before this open runs.
         let area = prover_data.area;
         let open = move |extended_eval_point: Vec<InnerChallenge>,
                          challenger: &mut crate::jagged_pcs::JaggedChallenger| {
@@ -1895,7 +1809,7 @@ pub mod jagged {
         };
 
         // Shared linear core: z_col sample → reduce → jagged-eval →
-        // point-extend → open (SP1 `prove_trusted_evaluations` shape).
+        // point-extend → open.
         let (reduction, jagged_eval, proof) = prove_jagged_basefold_linear_core(
             &packing.offsets,
             z_row,
@@ -1910,7 +1824,7 @@ pub mod jagged {
             offsets: packing.offsets.clone(),
             total_values: packing.total_values,
             log_dense_size: packing.log_dense_size(),
-            // fix: per-chip *actual* column count, so verifier
+            // Per-chip *actual* column count, so the verifier
             // does not need to consult `BaseAir::width(chip)`.
             column_counts: packing
                 .chip_infos
@@ -1937,15 +1851,11 @@ pub mod jagged {
         }
     }
 
-    /// SP1's multi-ROUND prove: ONE jagged proof spanning every committed
-    /// round.
-    ///
-    /// This is the shape SP1 uses (`slop/crates/jagged/src/prover.rs:236-320`):
-    /// one jagged sumcheck over every round's stripes, ONE jagged-eval, and ONE
-    /// batched BaseFold open over `stacked_prover_data: Rounds<_>` — only the
-    /// commitments are per round.  Proving each round as its own jagged group
-    /// instead costs a reduction, an eval and an open PER ROUND; measured on
-    /// reth that was 2.87x the wall time and 1.77x the proof size.
+    /// Multi-ROUND prove: ONE jagged proof spanning every committed round —
+    /// one jagged sumcheck over every round's stripes, ONE jagged-eval, and
+    /// ONE batched BaseFold open; only the commitments are per round.
+    /// Proving each round as its own jagged group instead would cost a
+    /// reduction, an eval and an open PER ROUND.
     ///
     /// The rounds are concatenated into ONE column space: round r's offsets are
     /// shifted by the total cell count of the rounds before it, so the packing
@@ -2028,29 +1938,24 @@ pub mod jagged {
             // a round FOLLOWED BY ANOTHER has a gap of real committed space in
             // the middle of the column layout, and the offsets can only stay a
             // prefix sum if a column covers it — a DUMMY column of zeros with a
-            // ZERO claim.  SP1 does the same, adding `padding_column_count` zero
-            // claims per round ("Add in the dummy padding columns added during
-            // the stacked PCS commitment", slop/crates/jagged/src/prover.rs:190).
+            // ZERO claim.
             //
             // EVERY round pads, the last one included.  Its gap looks like it
             // could be left to the hypercube padding the point extension covers
             // — but `total_values` is what makes the reduction's hypercube equal
             // the committed area, and dropping the last round's fill shrinks it
             // below `effective_area`, so the stacked claim no longer equals the
-            // interpolated batch evaluations (MEASURED: StackingMismatch on the
-            // ~10 s CPU harness).  The column layout has to cover every
-            // committed cell.
+            // interpolated batch evaluations (StackingMismatch).  The column
+            // layout has to cover every committed cell.
             let area = r.precomputed.prover_data.area;
             let pad = area.saturating_sub(pk.total_values);
             {
                 // Split the gap into whole COLUMNS bounded by the row cube —
-                // which is why SP1 carries a padding_column_COUNT rather than a
-                // single wide column.  A column taller than `2^z_row.len()` has
-                // no eq table to be weighed against.
+                // a column taller than `2^z_row.len()` has no eq table to be
+                // weighed against.
                 //
                 // ALWAYS at least one, even when the round happens to land on a
-                // stripe boundary — SP1's `.max(1)`
-                // (slop/crates/jagged/src/prover.rs:135).  A zero-height column
+                // stripe boundary.  A zero-height column
                 // costs nothing and is what keeps the column COUNT a function of
                 // the machine rather than of how full this particular shard is,
                 // which is what lets the recursion circuit carry a fixed layout.
@@ -2177,9 +2082,7 @@ pub mod jagged {
         // The bundle carries the LAST round's commit — the main one, which the
         // hash-bind ties to `main_commitment`.  An earlier round's commitment as
         // the KEY holds it is the hash-bound digest, so the proof carries only
-        // its RAW root and the verifier re-derives the bound form to check it
-        // (SP1 `verifier/shard.rs:638` builds
-        // `vec![vk.preprocessed_commit, *main_commitment]`).
+        // its RAW root and the verifier re-derives the bound form to check it.
         let main = rounds.last().expect("non-empty");
         let preceding_commits: Vec<_> = rounds[..rounds.len() - 1]
             .iter()
@@ -2315,7 +2218,7 @@ pub mod jagged {
                     }
                     let h_padded = h.next_power_of_two();
                     assert_eq!(h_padded.trailing_zeros() as usize, r_row_c.len());
-                    let _ = r_row_c; // SP1 convention uses the full z_row row_eq
+                    let _ = r_row_c; // the full z_row row_eq is used instead
                     // Column claim: full row_eq over z_row indexed
                     // by the NATURAL row (eq(z_row, r)), no Pi_high embedding.
                     // Build over reversed z_row so eq_c[r] = eq(z_row, r) (undo
@@ -2355,9 +2258,10 @@ pub mod jagged {
         // ── The HOST reduction (no device hooks on the BN254 wrap
         // path) + the BN254 BaseFold open as the `reduce` / `open` closures
         // threaded through the shared `prove_jagged_basefold_linear_core`.
-        // The core samples `z_col` at the SP1 transcript position and runs the
-        // jagged-eval + point-extend — so this path lands its challenger ops in
-        // the IDENTICAL order to the concrete single-group + per-group paths.
+        // The core samples `z_col` at the verifier-matching transcript
+        // position and runs the jagged-eval + point-extend — so this path
+        // lands its challenger ops in the IDENTICAL order to the concrete
+        // single-group + per-group paths.
         let reduce = |z_col: &[InnerChallenge],
                       challenger: &mut Challenger|
               -> JaggedReductionProof<InnerChallenge> {
@@ -2457,7 +2361,7 @@ pub mod jagged {
         )
     }
 
-    /// Option B variant: verifier counterpart of
+    /// Single-main-commit variant: verifier counterpart of
     /// [`prove_jagged_basefold_with_precomputed_provider`].  Skips the in-band
     /// `challenger.observe(commitment)` because the orchestrator's
     /// Phase 1 prologue already observed the BaseFold commit's 8-felt
@@ -2477,9 +2381,9 @@ pub mod jagged {
         )],
 
         // Number of leading PREPROCESSED entries in `chip_infos` — 0 for a
-        // main-only proof, otherwise SP1's two-round split.  Read off the
-        // VERIFYING KEY, never off the proof: it is what the coverage check
-        // measures the proof's group map against.
+        // main-only proof, otherwise the two-round (preprocessed + main)
+        // split.  Read off the VERIFYING KEY, never off the proof: it is what
+        // the coverage check measures the proof's group map against.
         n_prep: usize,
         bundle: &JaggedBasefoldBundle,
         // Cross-bind: per-chip `opened_values.chips[].main.local` (index-
@@ -2555,9 +2459,8 @@ pub mod jagged {
         }
 
         // STEP 1 (transcript): observe ALL G commits up-front in partition
-        // order — unless the Option B single-main-commit flow already
-        // observed them at the Phase 1 prologue.  (G==1 single-commit is the
-        // current Option B path; multi-commit Option B is CP-B/CP-C.)
+        // order — unless the single-main-commit flow already observed them at
+        // the Phase 1 prologue.
         if !skip_commit_observe {
             for g in 0..g_count {
                 challenger.observe(bundle.commit_g(g).original_commitment.clone());
@@ -2643,7 +2546,7 @@ pub mod jagged {
         )],
         g: usize,
     ) -> bool {
-        // SP1-aligned: sample z_col at the matching transcript position
+        // Sample z_col at the matching transcript position
         // (after the commit observe, before the reduction), mirroring
         // the prover.
         let num_cols = packing.offsets.len().saturating_sub(1);
@@ -2749,7 +2652,7 @@ pub mod jagged {
             challenger,
         );
 
-        // SP1-port: extend z_star from log_dense_size to log2(area)
+        // Extend z_star from log_dense_size to log2(area)
         // by sampling additional Fiat-Shamir coords, mirroring the
         // prover's extension in `prove_jagged_basefold` step (5).
         // Both sides sample from the same transcript state at the same
@@ -2777,19 +2680,18 @@ pub mod jagged {
             extended_z_star.push(r);
         }
 
-        // FIX-off sub-stripe commits (host analog of the in-circuit
-        // `claim_adj`, recursive_stacked_pcs.rs): when the reduced point is
-        // SHORTER than the commit's log_stacking_height, the FS-extension
-        // coords falling in the STACK portion `[z_star_orig_len, stack_dim)`
-        // correspond to the ZERO high-half padding of the stripe (the dense
-        // poly of `z_star_orig_len` vars is zero-padded up to `2^stack_dim`).
-        // By the MLE zero-padding identity the committed stripe's eval at
+        // Sub-stripe commits (host analog of the in-circuit `claim_adj`,
+        // recursive_stacked_pcs.rs): when the reduced point is SHORTER than
+        // the commit's log_stacking_height, the FS-extension coords falling
+        // in the STACK portion `[z_star_orig_len, stack_dim)` correspond to
+        // the ZERO high-half padding of the stripe (the dense poly of
+        // `z_star_orig_len` vars is zero-padded up to `2^stack_dim`).  By the
+        // MLE zero-padding identity the committed stripe's eval at
         // `stack_point` carries a Π(1 - r_k) factor over those coords that the
         // reduced-point claim lacks, so the stacked reconstruction equals
         // Π(1 - r_k) · q_at_z.  Multiply the claim to match.  NO-OP when
-        // z_star_orig_len >= stack_dim (all FIX-on and large FIX-off commits)
-        // ⇒ byte-identical there.  Each group is verified through this
-        // function, so this covers every group (CP-A round-split included).
+        // z_star_orig_len >= stack_dim ⇒ byte-identical there.  Each group is
+        // verified through this function, so this covers every group.
         let stack_dim = commit.log_stacking_height as usize;
         let mut q_at_z_adj = q_at_z;
         if z_star_orig_len < stack_dim {
@@ -2978,7 +2880,7 @@ pub mod jagged {
             let r: InnerChallenge = challenger.sample_algebra_element();
             extended_z_star.push(r);
         }
-        // FIX-off sub-stripe commits: host analog of the in-circuit
+        // Sub-stripe commits: host analog of the in-circuit
         // `claim_adj` (recursive_stacked_pcs.rs).  Multiply q_at_z by the
         // Π(1-r) factor over the stack-portion extension coords when the
         // reduced point is shorter than log_stacking_height.  NO-OP (byte
@@ -3370,7 +3272,7 @@ mod test {
 
 
     // ════════════════════════════════════════════════════════════════
-    // CP-A: per-round jagged split (Architecture A) host validation.
+    // Per-round jagged split — host validation.
     // ════════════════════════════════════════════════════════════════
 
     use crate::jagged_pcs::jagged::{
@@ -3479,11 +3381,9 @@ mod test {
         assert_eq!(bytes, bytes2, "G==1 bundle bytes must round-trip identically");
 
         // Honest verify: coverage passes (identity cover) and the verifier
-        // reaches at least the per-group reduction.  On a fully-green branch
-        // it ACCEPTS; on this WIP branch the BaseFold open can fail for a
-        // reason ORTHOGONAL to CP-A (a pre-existing jagged-eval/div-fix bug
-        // shared by today's single-group path — see report).  Either way the
-        // failure must NOT be at coverage (the CP-A guard).
+        // reaches at least the per-group reduction.  A BaseFold-open failure
+        // orthogonal to the split is tolerated; either way the failure must
+        // NOT be at coverage.
         let chip_infos =
             crate::jagged::compute_jagged_metadata::<JaggedVal>(&views).chip_infos;
         let (ok, stage) = verify_with_stage(&chip_infos, &r_row, &z_row, &bundle);
@@ -3521,7 +3421,8 @@ mod test {
         // chip widths:    2,      1,           3,        0
         let column_counts: Vec<usize> = vec![2, 1, 3, 0];
         // offsets: column-major prefix sums. col widths sum = 6 columns.
-        //  chip0 cols 0,1 (h=3) -> 0,3 ; chip1 col2 (h=5) -> 6 ; chip2 cols 3,4,5 (h=2) -> 11,13,15 ; sentinel 17
+        //  chip0 cols 0,1 (h=3) -> 0,3 ; chip1 col2 (h=5) -> 6 ;
+        //  chip2 cols 3,4,5 (h=2) -> 11,13,15 ; sentinel 17
         let offsets: Vec<usize> = vec![0, 3, 6, 11, 13, 15, 17];
         let total_values = 17usize;
         let packing = PackingMeta {
@@ -3564,7 +3465,7 @@ mod test {
         // explicit path.
         assert_eq!(modified, modified_from_packing, "from_packing must match explicit");
 
-        // The host re-bind check (mirror of SP1 verify_trusted_evaluations)
+        // The host re-bind check (mirror of the in-circuit re-bind)
         // must ACCEPT the honest modified digest.
         assert!(
             jagged_hash_bind_verify(raw_root, modified, &packing),
