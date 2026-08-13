@@ -124,14 +124,18 @@ where
             .when(local.is_jump + local.is_jumpi)
             .assert_word_eq(local.next_next_pc, local.op_b_value);
 
-        // Verify that the next_next_pc is calculated correctly for BAL instructions.
+        // Verify that the next_next_pc is calculated correctly for BAL
+        // instructions, IN-ROW (the AddSub request row is gone).
         // SAFETY: `is_jumpdirect` is boolean, and zero for padding rows.
-        builder.send_alu(
-            AB::Expr::from_u32(Opcode::ADD as u32),
-            local.next_next_pc,
+        crate::operations::AddOperation::<AB::F>::eval(
+            builder,
             local.next_pc,
             local.op_b_value,
-            local.is_jumpdirect,
+            local.target_add,
+            local.is_jumpdirect.into(),
         );
+        builder
+            .when(local.is_jumpdirect)
+            .assert_word_eq(local.target_add.value, local.next_next_pc);
     }
 }

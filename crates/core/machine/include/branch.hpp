@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include "add_sub.hpp"
 #include "frame.hpp"
+#include "lt_operation.hpp"
 #include "prelude.hpp"
 #include "utils.hpp"
 
@@ -67,11 +69,16 @@ __ZKM_HOSTDEV__ void event_to_row(
     }
     cols.is_branching = F::from_bool(branching);
 
-    uint32_t target_pc = event.next_pc + event.c;
     write_word_from_u32_v2<F>(cols.next_pc, event.next_pc);
-    write_word_from_u32_v2<F>(cols.target_pc, target_pc);
     write_word_from_u32_v2<F>(cols.next_next_pc, event.next_next_pc);
     populate_range_checker(cols.next_pc_range_checker, event.next_pc);
     populate_range_checker(cols.next_next_pc_range_checker, event.next_next_pc);
+
+    // The inlined SIGNED comparison and (when taken) target addition —
+    // mirrors control_flow/branch/trace.rs.
+    lt_operation::populate<F>(cols.compare, event.a, event.b, true);
+    if (branching) {
+        add_sub::populate<F>(cols.target_add, event.next_pc, event.c);
+    }
 }
 }  // namespace zkm::branch

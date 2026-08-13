@@ -2,7 +2,7 @@ use std::mem::size_of;
 use zkm_derive::{AlignedBorrow, PicusAnnotations};
 use zkm_pcs::{PicusInfo, Word};
 
-use crate::operations::KoalaBearWordRangeChecker;
+use crate::operations::{AddOperation, KoalaBearWordRangeChecker};
 
 pub const NUM_JUMP_COLS: usize = size_of::<JumpColumns<u8>>();
 
@@ -14,6 +14,10 @@ pub struct JumpColumns<T> {
 
     /// `is_real` restricted to dependency rows — degree-1 bus multiplicity.
     pub is_dep: T,
+
+    /// The inlined BAL target addition: `next_next_pc = next_pc + op_b`,
+    /// proven in-row instead of via an AddSub request row.
+    pub target_add: AddOperation<T>,
 
     /// Program fetch, register access and `(clk, pc)` chaining; live only when
     /// `is_instruction`.

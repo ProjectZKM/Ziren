@@ -14,8 +14,7 @@ use zkm_pcs::ZKMCoreOpts;
 use crate::{
     context::ZKMContext,
     dependencies::{
-        emit_branch_dependencies, emit_cloclz_dependencies, emit_divrem_dependencies,
-        emit_jump_dependencies, emit_misc_dependencies,
+        emit_cloclz_dependencies, emit_divrem_dependencies, emit_misc_dependencies,
     },
     estimate_mips_lde_size,
     events::{
@@ -1705,7 +1704,8 @@ impl<'a> Executor<'a> {
             c_record: record.c.into(),
         };
         self.record.branch_events.push(event);
-        emit_branch_dependencies(self, event);
+        // Branch proves its own comparison and target addition in-row now —
+        // no dependency rows are emitted.
     }
 
     /// Emit a jump event.
@@ -1732,7 +1732,7 @@ impl<'a> Executor<'a> {
         event.b_record = record.b.into();
         event.c_record = record.c.into();
         self.record.jump_events.push(event);
-        emit_jump_dependencies(self, event);
+        // Jump proves its BAL target addition in-row now — no dependency rows.
     }
 
     /// Emit a misc event.

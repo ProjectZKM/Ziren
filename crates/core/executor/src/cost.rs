@@ -209,11 +209,8 @@ pub fn estimate_mips_event_counts(
     events_counts[MipsAirId::AddSub] += 2 * events_counts[MipsAirId::DivRem];
     events_counts[MipsAirId::Mul] += events_counts[MipsAirId::DivRem];
     events_counts[MipsAirId::Lt] += events_counts[MipsAirId::DivRem];
-    // emit_branch_dependencies: 2 SLT always, 1 ADD when branching.
-    events_counts[MipsAirId::Lt] += 2 * events_counts[MipsAirId::Branch];
-    events_counts[MipsAirId::AddSub] += events_counts[MipsAirId::Branch];
-    // emit_jump_dependencies: JumpDirect pushes 1 ADD.
-    events_counts[MipsAirId::AddSub] += opcode_counts[Opcode::JumpDirect];
+    // Branch inlines its comparison and target addition — no request rows.
+    // Jump inlines its BAL target addition — no request rows.
     // emit_cloclz_dependencies: 1 SRL.
     events_counts[MipsAirId::ShiftRight] += events_counts[MipsAirId::CloClz];
     // emit_misc_dependencies: MADDU/MSUBU/MADD/MSUB -> 1 MULT[U];
@@ -390,15 +387,6 @@ impl ShardSplitAccumulator {
                 self.bump(MipsAirId::AddSub, 2 * count);
                 self.bump(MipsAirId::Mul, count);
                 self.bump(MipsAirId::Lt, count);
-            }
-            // emit_branch_dependencies: 2 SLT always, 1 ADD when branching.
-            Op::BEQ | Op::BNE | Op::BLTZ | Op::BLEZ | Op::BGTZ | Op::BGEZ => {
-                self.bump(MipsAirId::Lt, 2 * count);
-                self.bump(MipsAirId::AddSub, count);
-            }
-            // emit_jump_dependencies: JumpDirect pushes 1 ADD.
-            Op::JumpDirect => {
-                self.bump(MipsAirId::AddSub, count);
             }
             // emit_cloclz_dependencies: 1 SRL.
             Op::CLZ | Op::CLO => {

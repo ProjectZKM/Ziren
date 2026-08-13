@@ -103,7 +103,7 @@ impl JumpChip {
         &self,
         event: &JumpEvent,
         cols: &mut JumpColumns<F>,
-        _blu: &mut HashMap<ByteLookupEvent, usize>,
+        blu: &mut HashMap<ByteLookupEvent, usize>,
         program: &zkm_core_executor::Program,
         shard: u32,
     ) {
@@ -111,7 +111,7 @@ impl JumpChip {
         cols.is_instruction = F::from_bool(is_instruction);
         cols.is_dep = F::from_bool(!is_instruction);
         if is_instruction {
-            cols.frame.populate_from_jump(event, program, shard, _blu);
+            cols.frame.populate_from_jump(event, program, shard, blu);
         } else {
             cols.frame.populate_dependency();
         }
@@ -129,5 +129,9 @@ impl JumpChip {
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_next_pc_range_checker.populate(event.next_next_pc);
+        // The inlined BAL target addition and its byte events.
+        if matches!(event.opcode, Opcode::JumpDirect) {
+            cols.target_add.populate(blu, event.next_pc, event.b);
+        }
     }
 }

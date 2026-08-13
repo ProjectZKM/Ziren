@@ -8,7 +8,10 @@ use zkm_pcs::{
     Word,
 };
 
-use crate::{air::WordAirBuilder, operations::KoalaBearWordRangeChecker};
+use crate::{
+    air::WordAirBuilder,
+    operations::{AddOperation, KoalaBearWordRangeChecker, LtOperation},
+};
 
 use super::{BranchChip, BranchColumns};
 
@@ -131,13 +134,15 @@ where
                 is_real.clone(),
             );
 
-            // When we are branching, assert that local.target_pc <==> local.next_pc + c.
-            builder.send_alu(
-                Opcode::ADD.as_field::<AB::F>(),
-                local.target_pc,
+            // When we are branching, prove target = next_pc + c IN-ROW (the
+            // AddSub request row is gone; the memory chips' inlined address
+            // add set the precedent).
+            AddOperation::<AB::F>::eval(
+                builder,
                 local.next_pc,
                 local.op_c_value,
-                local.is_branching,
+                local.target_add,
+                local.is_branching.into(),
             );
 
             // When we are not branching, assert that local.next_pc + 4 <==> next.next_next_pc.
@@ -152,11 +157,11 @@ where
             builder
                 .slice_range_check_u8(&local.next_next_pc.0, is_real.clone() - local.is_branching);
 
-            // When we are branching, assert that local.next_next_pc <==> next.target_pc.
+            // When we are branching, assert that next_next_pc is the target.
             builder
                 .when(is_real.clone())
                 .when(local.is_branching)
-                .assert_word_eq(local.target_pc, local.next_next_pc);
+                .assert_word_eq(local.target_add.value, local.next_next_pc);
 
             // To prevent the ALU send above to be non-zero when the row is a padding row.
             builder.when_not(is_real.clone()).assert_zero(local.is_branching);
@@ -214,23 +219,26 @@ where
             builder.when(local.is_bgez).when_not(local.is_branching).assert_one(local.a_lt_b);
         }
 
-        // Calculate a_lt_b <==> a < b (using appropriate signedness).
-        // SAFETY: `use_signed_comparison` is boolean, since at most one selector is turned on.
-        builder.send_alu(
-            Opcode::SLT.as_field::<AB::F>(),
-            Word::extend_var::<AB>(local.a_lt_b),
+        // The SIGNED comparison of op_a and op_b, proven IN-ROW — one gadget
+        // yields lt / eq / gt by trichotomy, replacing the two SLT request
+        // rows the chip used to push onto the `Lt` chip.  MIPS semantics are
+        // untouched: `a_lt_b = (a as i32) < (b as i32)` exactly as before.
+        LtOperation::<AB::F>::eval(
+            builder,
             local.op_a_value,
             local.op_b_value,
+            &local.compare,
             is_real.clone(),
+            AB::Expr::ZERO,
         );
-
-        // Calculate a_gt_b <==> a > b (using appropriate signedness).
-        builder.send_alu(
-            Opcode::SLT.as_field::<AB::F>(),
-            Word::extend_var::<AB>(local.a_gt_b),
-            local.op_b_value,
-            local.op_a_value,
-            is_real.clone(),
+        builder.assert_eq(local.a_lt_b, local.compare.lt);
+        // gt = 1 − lt − eq (true 32-bit equality: masked bytes AND sign bits
+        // agree), on real rows.
+        builder.when(is_real.clone()).assert_eq(
+            local.a_gt_b,
+            AB::Expr::ONE
+                - local.compare.lt
+                - local.compare.is_comp_eq * local.compare.is_sign_eq,
         );
     }
 }

@@ -132,79 +132,7 @@ pub fn emit_cloclz_dependencies(executor: &mut Executor, event: AluEvent) {
     }
 }
 
-/// Emit the dependencies for branch instructions.
-pub fn emit_branch_dependencies(executor: &mut Executor, event: BranchEvent) {
-    let a_eq_b = event.a == event.b;
-    let a_lt_b = (event.a as i32) < (event.b as i32);
-    let a_gt_b = (event.a as i32) > (event.b as i32);
 
-    let lt_comp_event = AluEvent {
-        pc: UNUSED_PC,
-        next_pc: UNUSED_PC + DEFAULT_PC_INC,
-        opcode: Opcode::SLT,
-        hi: 0,
-        a: a_lt_b as u32,
-        b: event.a,
-        c: event.b,
-            ..Default::default()
-        };
-    let gt_comp_event = AluEvent {
-        pc: UNUSED_PC,
-        next_pc: UNUSED_PC + DEFAULT_PC_INC,
-        opcode: Opcode::SLT,
-        hi: 0,
-        a: a_gt_b as u32,
-        b: event.b,
-        c: event.a,
-            ..Default::default()
-        };
-    executor.record.lt_events.push(lt_comp_event);
-    executor.record.lt_events.push(gt_comp_event);
-    let branching = match event.opcode {
-        Opcode::BEQ => a_eq_b,
-        Opcode::BNE => !a_eq_b,
-        Opcode::BLTZ => a_lt_b,
-        Opcode::BLEZ => a_lt_b || a_eq_b,
-        Opcode::BGTZ => a_gt_b,
-        Opcode::BGEZ => a_eq_b || a_gt_b,
-        _ => unreachable!(),
-    };
-    if branching {
-        let add_event = AluEvent {
-            pc: UNUSED_PC,
-            next_pc: UNUSED_PC + DEFAULT_PC_INC,
-            opcode: Opcode::ADD,
-            hi: 0,
-            a: event.next_next_pc,
-            b: event.next_pc,
-            c: event.c,
-            ..Default::default()
-        };
-        executor.record.add_sub_events.push(add_event);
-    }
-}
-
-/// Emit the dependencies for jump instructions.
-pub fn emit_jump_dependencies(executor: &mut Executor, event: JumpEvent) {
-    match event.opcode {
-        Opcode::JumpDirect => {
-            let target_pc = event.next_pc.wrapping_add(event.b);
-            let add_event = AluEvent {
-                pc: UNUSED_PC,
-                next_pc: UNUSED_PC + DEFAULT_PC_INC,
-                opcode: Opcode::ADD,
-                hi: 0,
-                a: target_pc,
-                b: event.next_pc,
-                c: event.b,
-            ..Default::default()
-        };
-            executor.record.add_sub_events.push(add_event);
-        }
-        Opcode::Jump | Opcode::Jumpi => {}
-        _ => unreachable!(),
-    }
-}
 
 /// Emit the dependencies for misc instructions.
 pub fn emit_misc_dependencies(executor: &mut Executor, event: MiscEvent) {

@@ -146,14 +146,17 @@ impl BranchChip {
             _ => panic!("Invalid opcode: {}", event.opcode),
         };
 
-        let target_pc = event.next_pc.wrapping_add(event.c);
         cols.next_pc = Word::from(event.next_pc);
-        cols.target_pc = Word::from(target_pc);
         cols.next_next_pc = Word::from(event.next_next_pc);
         cols.next_pc_range_checker.populate(event.next_pc);
         cols.next_next_pc_range_checker.populate(event.next_next_pc);
         cols.is_branching = F::from_bool(branching);
-        if !branching {
+        // The inlined comparison and (when taken) target addition, with their
+        // byte events.
+        cols.compare.populate(blu, event.a, event.b, true);
+        if branching {
+            cols.target_add.populate(blu, event.next_pc, event.c);
+        } else {
             blu.add_u8_range_checks(&event.next_pc.to_le_bytes());
             blu.add_u8_range_checks(&event.next_next_pc.to_le_bytes());
         }
