@@ -6555,3 +6555,23 @@ device parity 18/18 on fibonacci (one cloclz padding fix on the GPU
 side), fib + tendermint GPU gates VERIFY OK, all e2e fixture proves green
 (MADD/EXT/INS, MovCond, INS width=32).  Tendermint — pure instruction
 chips, zero precompiles — jumped to **4395 kHz** (36 shards).
+
+### Bus-deletion measurements (reth core, 8-run slot-swapped ABBA, all verified)
+
+| arm | kHz (GPU7, GPU6) | mean | shards |
+|---|---|---|---|
+| no-bus tree | 2515, 2514, 2550, 2589 | **2542** | 312 |
+| 60e45272 baseline | 2953, 2943, 2939, 2859 | **2924** | 281 |
+
+−13.0 % vs the Cpu-chip baseline (from −15.7 % before the deletion), and
+tendermint — pure instruction chips — at **4395 kHz**.  The clean census
+explains the rest of the reth gap:
+
+- Per-shard GPU kernel work fell 7 % (0.305 → 0.283 s/shard): the
+  17-field bus interaction is genuinely gone from the GKR input.
+- `cudaMemcpyAsync` HOST time is now 207 s over 903k calls, with
+  **138.8 GB of H2D still pageable** (pinned: 1.9 GB) — the per-chip
+  event uploads never got the pinned staging the deleted `CpuEventFfi`
+  path had.  This is the next lever (the same pattern paid +5.6 % once).
+- 312 vs 281 shards (+11 %): the splitter's committed-area estimate of
+  the frame-carrying rows; second lever.
