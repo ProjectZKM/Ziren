@@ -264,6 +264,11 @@ fn main() {
                 ("bn254-fp2-mul", test_artifacts::BN254_FP2_MUL_ELF),
                 ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
                 ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
+                // sha3-chain exercises KeccakSponge at a chained density no
+                // other artifact reaches (test_sha3_chain_prove_simple was
+                // shape-stale before it joined the corpus).  No stdin: the
+                // guest hardcodes its input.
+                ("sha3-chain", test_artifacts::SHA3_CHAIN_ELF),
             ];
             fn hexb2(s: &str) -> Vec<u8> {
                 (0..s.len())
@@ -347,6 +352,7 @@ fn main() {
                 ("bn254-fp2-mul", test_artifacts::BN254_FP2_MUL_ELF),
                 ("u256xu2048-mul", test_artifacts::U256XU2048_MUL_ELF),
                 ("unconstrained", test_artifacts::UNCONSTRAINED_ELF),
+                ("sha3-chain", test_artifacts::SHA3_CHAIN_ELF),
             ];
             // Fixtures that READ STDIN get their canonical inputs; an empty
             // stream hits the executor's "insufficient input data" error.
