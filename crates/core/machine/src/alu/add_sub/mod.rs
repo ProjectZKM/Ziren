@@ -325,18 +325,25 @@ mod tests {
         let config = KoalaBearPoseidon2::new();
         let mut challenger = config.challenger();
 
+        // `p3_uni_stark::prove` needs a power-of-two height and
+        // `generate_trace` pads to next_multiple_of_32 only, so make the
+        // event count exactly 2048: 341 + 341 alu_op triples (3 add_sub
+        // events each) plus two bare register-register ADDs.
         let mut instructions = Vec::new();
-        for _ in 0..255 {
+        for _ in 0..341 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             instructions.extend(alu_op(Opcode::ADD, operand_1, operand_2));
         }
-        for _ in 0..255 {
+        for _ in 0..341 {
             let operand_1 = thread_rng().gen_range(0..u32::MAX);
             let operand_2 = thread_rng().gen_range(0..u32::MAX);
             instructions.extend(alu_op(Opcode::SUB, operand_1, operand_2));
         }
+        instructions.push(zkm_core_executor::Instruction::new(Opcode::ADD, 28, 29, 30, false, false));
+        instructions.push(zkm_core_executor::Instruction::new(Opcode::ADD, 27, 29, 30, false, false));
         let shard = run_instructions(instructions);
+        assert_eq!(shard.add_sub_events.len(), 2048);
 
         let chip = AddSubChip::default();
         let trace: RowMajorMatrix<KoalaBear> =

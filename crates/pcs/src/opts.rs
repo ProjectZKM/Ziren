@@ -125,11 +125,15 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// Raised 251,658,240 → 290,000,000 after the Instruction-bus deletion +
 /// pinned-upload staging (Aug 13): with the per-upload cost pinned away, the
 /// per-shard fixed serial cost dominates, and fewer/bigger shards won a
-/// 4/4-positive +3.7% on reth core (279 shards, means 2718 vs 2621; before
-/// pinning the same probe was noise).  All runs verified on 32 GB parts; the
-/// env override remains for smaller cards.
+/// 4/4-positive +3.7% on reth core.  Then re-derived to 260,000,000 after the
+/// frame slimming: the threshold is a CELL budget, and cutting ~10% of the
+/// cells per cycle packs ~10% more CYCLES per shard at fixed T — 290M then
+/// blows the GKR VRAM margin on 32 GB parts (measured OOM at jagged round 0),
+/// while 260M preserves the tuned cycles-per-shard and measured 2815/2838
+/// vs 2812/2792 at the old default (275 shards, all verified).  If per-cycle
+/// area changes again, rescale T with it.  The env override remains.
 
-pub const ELEMENT_THRESHOLD: usize = 290_000_000;
+pub const ELEMENT_THRESHOLD: usize = 260_000_000;
 
 /// Options to configure the Ziren prover for core and recursive proofs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
