@@ -6575,3 +6575,25 @@ explains the rest of the reth gap:
   path had.  This is the next lever (the same pattern paid +5.6 % once).
 - 312 vs 281 shards (+11 %): the splitter's committed-area estimate of
   the frame-carrying rows; second lever.
+
+### Every tracegen upload staged through the pinned-pages pool (ziren-gpu 3ba2f6e)
+
+The census's 207 s of host `cudaMemcpyAsync` (138.8 GB pageable H2D) was
+the per-chip event vectors and precompile record arrays — they never got
+the pinned path the deleted `CpuEventFfi` staging had.  New
+`stage_upload_pinned`: check a staging Vec out of the global pinned pool,
+parallel-copy in, async-DMA, sync the fresh per-chip stream, return the
+stage to the pool.  171 upload sites converted; device parity green
+(transport-only).
+
+reth core, paired same-slot runs vs the nobus tree: 2575/2642 (GPU7),
+2610/2656 (GPU6) vs 2515/2514/2550/2589 → **+3.1% mean, 4/4 positive**,
+all verified.  Tendermint: **4621 kHz** (from 4395).
+
+Trajectory (within-session, slot-swapped): baseline-with-Cpu-chip 2924 →
+frame+inlined 2493 → bus deleted 2542 → pinned uploads **2621** (−10.4%
+vs baseline).  Next levers: the +31 shard gap (312 vs 281 — splitter's
+committed-area estimate of frame rows), and re-profiling the post-pinned
+idle structure.  Validation on the final tree: ALL 35 artifacts pass
+(host CpuProver, box), FFI + device parity green, fib/TM/reth gates
+verified.
