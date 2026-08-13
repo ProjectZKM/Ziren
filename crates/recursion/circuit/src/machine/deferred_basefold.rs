@@ -491,9 +491,8 @@ pub fn verify_deferred_basefold<C, SC, A>(
 
 impl ZKMDeferredBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy deferred witness for a given deferred shape.
-    /// Mirror of [`super::deferred::ZKMDeferredWitnessValues::dummy`]
-    /// for the basefold pipeline. Wraps a basefold compress dummy +
-    /// the existing legacy `ZKMMerkleProofWitnessValues::dummy`.
+    /// Wraps a basefold compress dummy +
+    /// the existing `ZKMMerkleProofWitnessValues::dummy`.
     pub fn dummy<A>(
         machine: &zkm_pcs::StarkMachine<
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,

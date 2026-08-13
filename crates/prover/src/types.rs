@@ -4,15 +4,12 @@ use anyhow::Result;
 use clap::ValueEnum;
 use p3_bn254_fr::Bn254;
 use p3_commit::Pcs;
-use p3_field::{PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{PrimeField, PrimeField32};
 use p3_koala_bear::KoalaBear;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use zkm_core_machine::{io::ZKMStdin, reduce::ZKMReduceProof};
 use zkm_primitives::{io::ZKMPublicValues, poseidon2_hash};
 
-use zkm_recursion_circuit::machine::{
-    ZKMCompressWitnessValues, ZKMDeferredWitnessValues, ZKMRecursionWitnessValues,
-};
 use zkm_recursion_circuit::machine::core_basefold::ZKMCoreBasefoldWitnessValues;
 use zkm_recursion_circuit::machine::compress_basefold::ZKMCompressBasefoldWitnessValues;
 use zkm_recursion_circuit::machine::deferred_basefold::ZKMDeferredBasefoldWitnessValues;
@@ -239,9 +236,6 @@ pub enum ZKMRecursionProverError {
 
 #[allow(clippy::large_enum_variant)]
 pub enum ZKMCircuitWitness {
-    Core(ZKMRecursionWitnessValues<CoreSC>),
-    Deferred(ZKMDeferredWitnessValues<InnerSC>),
-    Compress(ZKMCompressWitnessValues<InnerSC>),
     /// Basefold-shape normalize input — consumes `BasefoldShardProof`s from
     /// the core prover (carried on `ShardProof.basefold_shard_proof`).
     /// Dispatches to `build_normalize_basefold_program` during compress.

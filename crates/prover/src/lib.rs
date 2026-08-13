@@ -54,9 +54,7 @@ use zkm_recursion_circuit::{
         deferred_basefold::ZKMDeferredBasefoldWitnessValues,
         wrap_basefold::ZKMWrapBasefoldWitnessValues,
         PublicValuesOutputDigest, ZKMCompressShape,
-        ZKMCompressWithVKeyWitnessValues, ZKMCompressWithVkeyShape,
-        ZKMCompressWitnessValues, ZKMDeferredWitnessValues,
-        ZKMMerkleProofWitnessValues, ZKMRecursionWitnessValues,
+        ZKMCompressWithVkeyShape, ZKMMerkleProofWitnessValues,
     },
     merkle_tree::MerkleTree,
     witness::Witnessable,
@@ -934,39 +932,14 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    pub fn get_recursion_core_inputs(
-        &self,
-        vk: &StarkVerifyingKey<CoreSC>,
-        shard_proofs: &[ShardProof<CoreSC>],
-        batch_size: usize,
-        is_complete: bool,
-    ) -> Vec<ZKMRecursionWitnessValues<CoreSC>> {
-        let mut core_inputs = Vec::new();
-
-        // Prepare the inputs for the recursion programs.
-        for (batch_idx, batch) in shard_proofs.chunks(batch_size).enumerate() {
-            let proofs = batch.to_vec();
-
-            core_inputs.push(ZKMRecursionWitnessValues {
-                vk: vk.clone(),
-                shard_proofs: proofs.clone(),
-                is_complete,
-                is_first_shard: batch_idx == 0,
-                vk_root: self.recursion_vk_root,
-            });
-        }
-
-        core_inputs
-    }
-
     /// Extract `BasefoldShardProof`s from a batch of legacy `ShardProof`s
     /// (via the side-channel `basefold_shard_proof` field populated by
     /// `StarkMachine::open` for KoalaBear MIPS shards) and wrap each batch
     /// into a `ZKMCoreBasefoldWitnessValues`.
     ///
     /// Returns `None` if any proof in the batch lacks the basefold side
-    /// channel (e.g. a non-KoalaBear config) — caller falls back to
-    /// legacy `get_recursion_core_inputs`.
+    /// channel — every live producer populates it, so the caller treats
+    /// `None` as a hard error.
     pub fn get_recursion_core_inputs_basefold(
         &self,
         vk: &StarkVerifyingKey<CoreSC>,
@@ -1018,11 +991,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Some(core_inputs)
     }
 
-    /// Basefold companion to [`Self::get_recursion_deferred_inputs`].
     /// Constructs `ZKMDeferredBasefoldWitnessValues` from each batch
     /// by extracting the `basefold_shard_proof` side channel from
     /// each input proof. Returns `None` when any deferred proof is
-    /// missing the side channel (caller falls back to the legacy path).
+    /// missing the side channel (the caller treats that as a hard error).
     ///
     /// Mirrors the layout of
     /// `get_recursion_core_inputs_basefold` — same `if all_have_bf
@@ -1050,22 +1022,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 })
                 .collect();
 
-            // Reuse legacy make_merkle_proofs for the vk-merkle witness —
-            // basefold pipeline uses the SAME vk-merkle indirection here
-            // (unlike shrink, where ZKMWrapBasefoldWitnessValues has no
-            // merkle field).  The merkle witness only depends on vks, not
-            // the proof body, so we synthesize a compress-witness with the
-            // legacy proof shape (carrying the basefold side channel) just
-            // to drive make_merkle_proofs.
-            let legacy_input = ZKMCompressWitnessValues {
-                vks_and_proofs: batch
-                    .iter()
-                    .cloned()
-                    .map(|p| (p.vk, p.proof))
-                    .collect(),
-                is_complete: true,
-            };
-            let merkle = self.make_merkle_proofs(legacy_input).merkle_val;
+            // The merkle witness only depends on vks, not the proof body —
+            // the basefold pipeline uses the SAME vk-merkle indirection
+            // here (unlike shrink, where ZKMWrapBasefoldWitnessValues has
+            // no merkle field).
+            let vks: Vec<StarkVerifyingKey<InnerSC>> =
+                vks_and_proofs.iter().map(|(vk, _)| vk.clone()).collect();
+            let merkle = self.make_basefold_merkle_proofs(&vks);
 
             deferred_inputs.push(ZKMDeferredBasefoldWitnessValues {
                 vks_and_proofs,
@@ -1086,53 +1049,13 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Some(deferred_inputs)
     }
 
-    pub fn get_recursion_deferred_inputs<'a>(
-        &'a self,
-        vk: &'a StarkVerifyingKey<CoreSC>,
-        last_proof_pv: &PublicValues<Word<KoalaBear>, KoalaBear>,
-        deferred_proofs: &[ZKMReduceProof<InnerSC>],
-        batch_size: usize,
-    ) -> Vec<ZKMDeferredWitnessValues<InnerSC>> {
-        // Prepare the inputs for the deferred proofs recursive verification.
-        let mut deferred_digest = [Val::<InnerSC>::ZERO; DIGEST_SIZE];
-        let mut deferred_inputs = Vec::new();
-
-        for batch in deferred_proofs.chunks(batch_size) {
-            let vks_and_proofs =
-                batch.iter().cloned().map(|proof| (proof.vk, proof.proof)).collect::<Vec<_>>();
-
-            let input = ZKMCompressWitnessValues { vks_and_proofs, is_complete: true };
-            let input = self.make_merkle_proofs(input);
-            let ZKMCompressWithVKeyWitnessValues { compress_val, merkle_val } = input;
-
-            deferred_inputs.push(ZKMDeferredWitnessValues {
-                vks_and_proofs: compress_val.vks_and_proofs,
-                vk_merkle_data: merkle_val,
-                start_reconstruct_deferred_digest: deferred_digest,
-                is_complete: false,
-                zkm_vk_digest: vk.hash_koalabear(),
-                end_pc: Val::<InnerSC>::ZERO,
-                end_shard: last_proof_pv.shard + KoalaBear::ONE,
-                end_execution_shard: last_proof_pv.execution_shard,
-                init_addr_bits: last_proof_pv.last_init_addr_bits,
-                finalize_addr_bits: last_proof_pv.last_finalize_addr_bits,
-                committed_value_digest: last_proof_pv.committed_value_digest,
-                deferred_proofs_digest: last_proof_pv.deferred_proofs_digest,
-            });
-
-            deferred_digest = Self::hash_deferred_proofs(deferred_digest, batch);
-        }
-        deferred_inputs
-    }
-
     /// Generate the inputs for the first layer of recursive proofs.
     ///
     /// Every shard carries a `basefold_shard_proof` side channel, so this
     /// emits `ZKMCircuitWitness::CoreBasefold` witnesses that dispatch to
-    /// the cluster-parametrized basefold Normalize program. When the
-    /// side-channel is unexpectedly missing (e.g. a non-KoalaBear config),
-    /// falls back to the legacy per-chip `ZKMCircuitWitness::Core` path.
-    /// Deferred proofs follow the same dispatch.
+    /// the cluster-parametrized basefold Normalize program. Deferred
+    /// proofs follow the same dispatch. A missing side channel is a
+    /// producer bug and panics.
     #[allow(clippy::type_complexity)]
     pub fn get_first_layer_inputs<'a>(
         &'a self,
@@ -1145,38 +1068,22 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         let mut inputs = Vec::new();
 
-        if let Some(bf_inputs) = self.get_recursion_core_inputs_basefold(
-            &vk.vk,
-            shard_proofs,
-            batch_size,
-            is_complete,
-        ) {
-            tracing::debug!("emitting {} CoreBasefold witness(es)", bf_inputs.len());
-            inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
-        } else {
-            tracing::warn!("basefold side-channel missing; falling back to legacy Core");
-            let core_inputs =
-                self.get_recursion_core_inputs(&vk.vk, shard_proofs, batch_size, is_complete);
-            inputs.extend(core_inputs.into_iter().map(ZKMCircuitWitness::Core));
-        }
+        let bf_inputs = self
+            .get_recursion_core_inputs_basefold(&vk.vk, shard_proofs, batch_size, is_complete)
+            .expect("core shard proof missing basefold_shard_proof side channel");
+        tracing::debug!("emitting {} CoreBasefold witness(es)", bf_inputs.len());
+        inputs.extend(bf_inputs.into_iter().map(ZKMCircuitWitness::CoreBasefold));
 
         let last_proof_pv = shard_proofs.last().unwrap().public_values.as_slice().borrow();
-        // when all deferred proofs carry a basefold
-        // side channel, emit DeferredBasefold witnesses; otherwise fall
-        // back to legacy Deferred.
-        if let Some(bf_deferred) = self.get_recursion_deferred_inputs_basefold(
-            &vk.vk,
-            last_proof_pv,
-            deferred_proofs,
-            batch_size,
-        ) {
-            inputs.extend(bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold));
-            return inputs;
-        }
-        // Fall through to legacy deferred path when side channel missing.
-        let deferred_inputs =
-            self.get_recursion_deferred_inputs(&vk.vk, last_proof_pv, deferred_proofs, batch_size);
-        inputs.extend(deferred_inputs.into_iter().map(ZKMCircuitWitness::Deferred));
+        let bf_deferred = self
+            .get_recursion_deferred_inputs_basefold(
+                &vk.vk,
+                last_proof_pv,
+                deferred_proofs,
+                batch_size,
+            )
+            .expect("deferred proof missing basefold_shard_proof side channel");
+        inputs.extend(bf_deferred.into_iter().map(ZKMCircuitWitness::DeferredBasefold));
         inputs
     }
 
@@ -1271,14 +1178,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                                 "get program and witness stream"
                             )
                             .in_scope(|| match input {
-                                ZKMCircuitWitness::Core(_)
-                                | ZKMCircuitWitness::Deferred(_)
-                                | ZKMCircuitWitness::Compress(_) => {
-                                    panic!(
-                                        "legacy FRI witness variant reached trace-gen worker; \
-                                         basefold side-channel must be populated for every shard"
-                                    );
-                                }
                                 ZKMCircuitWitness::CoreBasefold(input) => {
                                     let mut witness_stream = Vec::new();
                                     Witnessable::<InnerConfig>::write(&input, &mut witness_stream);
@@ -1414,22 +1313,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                         let received = { record_and_trace_rx.lock().unwrap().recv() };
                         if let Ok((index, height, program, record, traces)) = received {
                             tracing::debug_span!("batch").in_scope(|| {
-                                // RECURSION-LAYER AREA PIN (always
-                                // on — no env flag): threaded EXPLICITLY as the
-                                // `commit()` `recursion_area_pin` param.  Pins
-                                // this recursion proof's (normalize
-                                // AND compose) jagged dense commit to a FIXED area
-                                // 2^RECURSION_LOG_TRACE_AREA so every recursion
-                                // child commits at a uniform num_stripes =
-                                // 2^(27-21) = 64 → the compose VK collapses to
-                                // f(chip-set, arity).  Recorded on
-                                // `PrecomputedJaggedCommit.recursion_area_pin` at
-                                // commit time and read back at open (the SAME
-                                // worker thread runs commit + open here), so it
-                                // covers both.  CORE (RiscvAir) passes `None` →
-                                // core commit stays NATURAL.
-                                let recursion_area_pin =
-                                    Some(zkm_pcs::jagged_pcs::RECURSION_LOG_TRACE_AREA);
+                                // The recursion-layer area pin is sourced from
+                                // `machine().pins_recursion_area()` inside
+                                // `commit()` — nothing to thread here.
 
                                 // Get the keys.
                                 let (pk, vk) = tracing::debug_span!("Setup compress program")
@@ -1971,11 +1857,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         digest
     }
 
-    /// Build a merkle witness for a slice of VKs without
-    /// going through the legacy `ZKMCompressWitnessValues` shape.
-    /// Used by basefold compose/wrap to bundle vk_merkle_data into the
-    /// witness that the recursion program reads.  Mirror of the inner
-    /// half of [`Self::make_merkle_proofs`].
+    /// Build a merkle witness for a slice of VKs.
+    /// Used by basefold compose/wrap/deferred to bundle vk_merkle_data
+    /// into the witness that the recursion program reads.
     pub fn make_basefold_merkle_proofs(
         &self,
         vks: &[StarkVerifyingKey<InnerSC>],
@@ -2026,58 +1910,6 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             values,
             vk_merkle_proofs: proofs,
         }
-    }
-
-    pub fn make_merkle_proofs(
-        &self,
-        input: ZKMCompressWitnessValues<CoreSC>,
-    ) -> ZKMCompressWithVKeyWitnessValues<CoreSC> {
-        let num_vks = self.recursion_vk_map.len();
-        let vk_indices: Vec<usize> = if self.vk_verification {
-            input
-                .vks_and_proofs
-                .iter()
-                .map(|(vk, _)| {
-                    let vk_digest = vk.hash_koalabear();
-                    *self.recursion_vk_map.get(&vk_digest).unwrap_or_else(|| {
-                        panic!(
-                            "vk not allowed: {:?} (map_size={})",
-                            vk_digest.map(|x| {
-                                use p3_field::PrimeField32;
-                                x.as_canonical_u32()
-                            }),
-                            self.recursion_vk_map.len()
-                        )
-                    })
-                })
-                .collect()
-        } else {
-            input
-                .vks_and_proofs
-                .iter()
-                .map(|(vk, _)| {
-                    let vk_digest = vk.hash_koalabear();
-                    (vk_digest[0].as_canonical_u32() as usize) % num_vks
-                })
-                .collect()
-        };
-
-        // VK-binding soundness: witness the ACTUAL opened leaf (see
-        // make_basefold_merkle_proofs for the full rationale) — the
-        // in-circuit merkle walk is unconditional, so a fabricated
-        // `[index; 8]` value is honestly unsatisfiable.
-        let (values, proofs): (Vec<_>, Vec<_>) = vk_indices
-            .iter()
-            .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
-            .unzip();
-
-        let merkle_val = ZKMMerkleProofWitnessValues {
-            root: self.recursion_vk_root,
-            values,
-            vk_merkle_proofs: proofs,
-        };
-
-        ZKMCompressWithVKeyWitnessValues { compress_val: input, merkle_val }
     }
 
     fn check_for_high_cycles(cycles: u64) {

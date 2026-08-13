@@ -4,10 +4,9 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use hashbrown::HashMap;
-use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
-use super::{Challenge, Com, StarkGenericConfig, Val};
+use super::{Challenge, StarkGenericConfig, Val};
 use crate::septic_digest::SepticDigest;
 use crate::shape::OrderedShape;
 
@@ -25,13 +24,10 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 /// hold refcounted handles to the same allocation.
 pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
     pub traces: Vec<Arc<M>>,
-    pub main_commit: Com<SC>,
-    /// Backend-owned prover data for the main-trace commit.  The host
-    /// `CpuProver` sets this to `()`: on the BaseFold path the one real
-    /// main-trace commitment is the jagged-PCS commit built inside
-    /// `prove_shard_to_basefold`, and there is no second, univariate
-    /// commitment for the host to carry.  Device backends use the slot
-    /// for their own resident commit state.
+    /// Backend-owned prover data for the main-trace commit: the retained
+    /// jagged/BaseFold commitment built at `commit()` time, which
+    /// `open()` consumes so nothing is rebuilt late.  Device backends use
+    /// the slot for their own resident commit state.
     pub main_data: P,
     pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<SC::Val>,
@@ -47,14 +43,12 @@ pub struct ShardMainData<SC: StarkGenericConfig, M, P> {
 impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
     pub fn new(
         traces: Vec<Arc<M>>,
-        main_commit: Com<SC>,
         main_data: P,
         chip_ordering: HashMap<String, usize>,
         public_values: Vec<Val<SC>>,
     ) -> Self {
         Self {
             traces,
-            main_commit,
             main_data,
             chip_ordering,
             public_values,
@@ -63,23 +57,6 @@ impl<SC: StarkGenericConfig, M, P> ShardMainData<SC, M, P> {
             rev: false,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShardCommitment<C> {
-    pub main_commit: C,
-    /// Auxiliary commitments emitted alongside the main trace
-    /// commit.  Empty in the BaseFold pipeline (no permutation
-    /// trace, no quotient commitment — the soundness work moved
-    /// into a sumcheck-based binding + folded FRI commit).  In the
-    /// legacy 4-batch FRI pipeline this holds two entries in
-    /// strict `[permutation, quotient]` order.
-    pub auxiliary_commits: Vec<C>,
-}
-
-impl<C: Clone> ShardCommitment<C> {
-
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -117,25 +94,14 @@ pub const PROOF_MAX_NUM_PVS: usize = 231;
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(bound = "")]
 pub struct ShardProof<SC: StarkGenericConfig> {
-    pub commitment: ShardCommitment<Com<SC>>,
-    pub opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    pub chip_ordering: HashMap<String, usize>,
     pub public_values: Vec<Val<SC>>,
-    /// Shard-level BaseFold proof (always-on for KoalaBear MIPS shards).
-    ///
-    /// When `Some`, the shard was produced via
-    /// `crate::shard_level::prove_shard_to_basefold` — one LogUp-GKR
-    /// + one zerocheck per shard instead of one per chip.
-    /// `Verifier::verify_shard` dispatches to
-    /// `BasefoldShardVerifier::verify_shard` when this field is
-    /// populated.  `None` for compress / non-KoalaBear shard proofs,
-    /// which take the legacy STARK code path inside
-    /// `Verifier::verify_shard`.
+    /// The shard-level BaseFold proof: one LogUp-GKR + one zerocheck +
+    /// one jagged-PCS opening per shard.  Every prover stage (core,
+    /// compress, shrink, wrap) emits it; a proof without one is
+    /// malformed and the verifier rejects it.
     ///
     /// `Box` keeps the ShardProof size footprint flat — the
-    /// BasefoldShardProof is ~KB of nested structs.  Feature-gated
-    /// behind `shard-level-proof` so serde wire format stays stable
-    /// for consumers built without the feature.
+    /// BasefoldShardProof is ~KB of nested structs.
     #[serde(default)]
     pub basefold_shard_proof: Option<
         Box<
@@ -178,12 +144,19 @@ pub const EXECUTION_CHIP_NAMES: &[&str] = &[
 ];
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
-    pub fn local_cumulative_sum(&self) -> Challenge<SC> {
-        self.opened_values.chips.iter().map(|c| c.local_cumulative_sum).sum()
+    /// The shard-level BaseFold payload.  Every live producer emits it;
+    /// a proof without one is malformed (the verifier hard-errors on the
+    /// same condition).
+    pub fn basefold(
+        &self,
+    ) -> &crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, Challenge<SC>> {
+        self.basefold_shard_proof.as_ref().expect("shard proof missing basefold payload")
     }
 
+    /// Sum of the per-chip global cumulative sums, read from the
+    /// transcript-bound `chip_cumulative_sums` of the BaseFold payload.
     pub fn global_cumulative_sum(&self) -> SepticDigest<Val<SC>> {
-        self.opened_values.chips.iter().map(|c| c.global_cumulative_sum).sum()
+        self.basefold().chip_cumulative_sums.values().map(|s| s.global).sum()
     }
 
     /// Whether this shard proof carries any INSTRUCTION chip — the
@@ -192,15 +165,16 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// is answered by the instruction-chip set instead: a memory-global or
     /// precompile shard contains none of these.
     pub fn contains_execution(&self) -> bool {
-        EXECUTION_CHIP_NAMES.iter().any(|n| self.chip_ordering.contains_key(*n))
+        let heights = &self.basefold().chip_log_heights;
+        EXECUTION_CHIP_NAMES.iter().any(|n| heights.contains_key(*n))
     }
 
     pub fn contains_global_memory_init(&self) -> bool {
-        self.chip_ordering.contains_key("MemoryGlobalInit")
+        self.basefold().chip_log_heights.contains_key("MemoryGlobalInit")
     }
 
     pub fn contains_global_memory_finalize(&self) -> bool {
-        self.chip_ordering.contains_key("MemoryGlobalFinalize")
+        self.basefold().chip_log_heights.contains_key("MemoryGlobalFinalize")
     }
 }
 
@@ -243,14 +217,16 @@ impl From<[u32; 8]> for DeferredDigest {
 }
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
+    /// The shard's chip shape, from the BaseFold payload's per-chip log
+    /// heights (a name-sorted `BTreeMap`, which is exactly the shard's
+    /// chip order).
     pub fn shape(&self) -> OrderedShape {
         OrderedShape {
             inner: self
-                .chip_ordering
+                .basefold()
+                .chip_log_heights
                 .iter()
-                .sorted_by_key(|(_, idx)| *idx)
-                .zip(self.opened_values.chips.iter())
-                .map(|((name, _), values)| (name.to_owned(), values.log_degree))
+                .map(|(name, log_height)| (name.clone(), *log_height as usize))
                 .collect(),
         }
     }

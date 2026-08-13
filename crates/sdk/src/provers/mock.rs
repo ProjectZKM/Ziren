@@ -2,7 +2,7 @@
 use hashbrown::HashMap;
 use zkm_core_executor::{ZKMContext, ZKMReduceProof};
 use zkm_core_machine::io::ZKMStdin;
-use zkm_pcs::{ShardCommitment, ShardOpenedValues, ShardProof, StarkVerifyingKey};
+use zkm_pcs::{ShardProof, StarkVerifyingKey};
 
 use crate::{
     Prover, ZKMProof, ZKMProofKind, ZKMProofWithPublicValues, ZKMProvingKey, ZKMVerificationError,
@@ -73,15 +73,6 @@ impl Prover<DefaultProverComponents> for MockProver {
                 let (public_values, _) = self.prover.execute(&pk.elf, &stdin, context)?;
 
                 let shard_proof = ShardProof {
-                    commitment: ShardCommitment {
-                        main_commit: vec![[KoalaBear::ZERO; 8]].into(),
-                        auxiliary_commits: vec![
-                            vec![[KoalaBear::ZERO; 8]].into(),
-                            vec![[KoalaBear::ZERO; 8]].into(),
-                        ],
-                    },
-                    opened_values: ShardOpenedValues { chips: vec![] },
-                    chip_ordering: HashMap::new(),
                     public_values: vec![],
                     basefold_shard_proof: None,
                 };

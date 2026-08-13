@@ -64,8 +64,8 @@ use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 /// proof shape — host-side input the prover packages and the
 /// recursion harness threads through the witness layer.
 ///
-/// Layout mirror of [`super::compress::ZKMCompressWitnessValues`]
-/// but with `ShardProof<SC>` swapped for `BasefoldShardProof`.
+/// Per-input `(vk, proof)` pairs plus the vk-merkle witness,
+/// with each proof carried as a `BasefoldShardProof`.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "StarkVerifyingKey<SC>: Serialize, ZKMMerkleProofWitnessValues<SC>: Serialize",
@@ -1167,15 +1167,13 @@ where
 
 impl ZKMCompressBasefoldWitnessValues<zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2> {
     /// Construct a dummy compress witness for a given compress shape.
-    /// Counterpart to [`super::compress::ZKMCompressWitnessValues::dummy`]
-    /// for the basefold pipeline. Drives the multi-chip basefold dummy
+    /// Drives the multi-chip basefold dummy
     /// helper for each input proof shape.
     ///
     /// Used by `program_from_shape` to build basefold compress
     /// programs from cached shapes.  Takes the full `ZKMCompressWithVkeyShape`
-    /// so the embedded `merkle_tree_height` sizes the vk-merkle witness —
-    /// mirrors `ZKMCompressWithVKeyWitnessValues::dummy` (vk-root from
-    /// witness, not a baked constant).
+    /// so the embedded `merkle_tree_height` sizes the vk-merkle witness
+    /// (vk-root from witness, not a baked constant).
     pub fn dummy<A>(
         machine: &zkm_pcs::StarkMachine<
             zkm_pcs::koala_bear_poseidon2::KoalaBearPoseidon2,

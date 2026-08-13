@@ -1,6 +1,4 @@
-//! VK-merkle-proof verifier + compress-with-vkey **data-type carriers**.
-//!
-//! ## FRI compose-with-vkey body deletion (May 19 2026)
+//! VK-merkle-proof verifier + vkey **data-type carriers**.
 //!
 //! The legacy `ZKMCompressWithVKeyVerifier::verify` body (which performed
 //! the VK merkle check and then re-entered the FRI compose verifier) has
@@ -17,32 +15,23 @@
 //!   the witness carriers for the merkle proof, consumed by
 //!   `compress_basefold::ZKMCompressBasefoldWitnessValues::vk_merkle_data`
 //!   and the deferred/wrap basefold variants.
-//! - [`ZKMCompressWithVKeyWitnessValues`] / [`ZKMCompressWithVkeyShape`] /
-//!   [`ZKMCompressWithVKeyWitnessVariable`] — data-type carriers used by
-//!   the prover (`crates/prover/src/lib.rs:1582-1620`) when assembling the
-//!   pre-compose witness payload.
-//! - `ZKMCompressWithVKeyWitnessValues::dummy` — used by the shape
-//!   enumerator pipeline.
+//! - [`ZKMCompressWithVkeyShape`] — the shape-enumeration carrier consumed
+//!   by the prover's shape/vk-map tooling and the basefold dummies.
 
 use std::marker::PhantomData;
 
 use p3_koala_bear::KoalaBear;
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::Builder;
-use zkm_pcs::{
-    air::MachineAir, koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, OpeningProof,
-    StarkGenericConfig, StarkMachine,
-};
 
 use crate::{
     hash::{FieldHasher, FieldHasherVariable},
     merkle_tree::{verify, MerkleProof},
     stark::MerkleProofVariable,
-    witness::{WitnessWriter, Witnessable},
-    CircuitConfig, FriProofVariable, KoalaBearFriParameters, KoalaBearFriParametersVariable,
+    CircuitConfig, KoalaBearFriParametersVariable,
 };
 
-use super::{ZKMCompressShape, ZKMCompressWitnessValues, ZKMCompressWitnessVariable};
+use super::ZKMCompressShape;
 
 /// A program to verify a batch of recursive proofs and aggregate their public values.
 #[derive(Debug, Clone, Copy)]
@@ -107,28 +96,6 @@ where
     }
 }
 
-/// Witness layout for the verifier of the proof shape phase of the compress stage.
-pub struct ZKMCompressWithVKeyWitnessVariable<
-    C: CircuitConfig<F = KoalaBear>,
-    SC: KoalaBearFriParametersVariable<C>,
-> {
-    pub compress_var: ZKMCompressWitnessVariable<C, SC>,
-    pub merkle_var: ZKMMerkleProofWitnessVariable<C, SC>,
-}
-
-/// An input layout for the verifier of the proof shape phase of the compress stage.
-pub struct ZKMCompressWithVKeyWitnessValues<SC: StarkGenericConfig + FieldHasher<KoalaBear>> {
-    pub compress_val: ZKMCompressWitnessValues<SC>,
-    pub merkle_val: ZKMMerkleProofWitnessValues<SC>,
-}
-
-impl<SC: KoalaBearFriParameters + FieldHasher<KoalaBear>> ZKMCompressWithVKeyWitnessValues<SC> {
-    pub fn shape(&self) -> ZKMCompressWithVkeyShape {
-        let merkle_tree_height = self.merkle_val.vk_merkle_proofs.first().unwrap().path.len();
-        ZKMCompressWithVkeyShape { compress_shape: self.compress_val.shape(), merkle_tree_height }
-    }
-}
-
 impl<SC: FieldHasher<KoalaBear>> ZKMMerkleProofWitnessValues<SC>
 where
     SC::Digest: Copy + Default,
@@ -148,51 +115,3 @@ where
     }
 }
 
-impl ZKMCompressWithVKeyWitnessValues<KoalaBearPoseidon2> {
-    /// The bound widening (May 19 2026) matches the
-    /// `ZKMCompressWitnessValues::dummy` delegate below — propagates
-    /// the `Air<VerifierConstraintFolder>` bound required by the
-    /// basefold-shaped dummy under
-    /// forcing BaseFold for recursion.
-    pub fn dummy<A>(
-        machine: &StarkMachine<KoalaBearPoseidon2, A>,
-        shape: &ZKMCompressWithVkeyShape,
-    ) -> Self
-    where
-        A: MachineAir<KoalaBear>
-            + for<'b> p3_air::Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
-    {
-        let compress_val =
-            ZKMCompressWitnessValues::<KoalaBearPoseidon2>::dummy(machine, &shape.compress_shape);
-        let num_proofs = compress_val.vks_and_proofs.len();
-        let merkle_val = ZKMMerkleProofWitnessValues::<KoalaBearPoseidon2>::dummy(
-            num_proofs,
-            shape.merkle_tree_height,
-        );
-        Self { compress_val, merkle_val }
-    }
-}
-
-impl<C: CircuitConfig<F = KoalaBear, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
-    Witnessable<C> for ZKMCompressWithVKeyWitnessValues<SC>
-where
-    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    // This trait bound is redundant, but Rust-Analyzer is not able to infer it.
-    SC: FieldHasher<KoalaBear>,
-    <SC as FieldHasher<KoalaBear>>::Digest: Witnessable<C, WitnessVariable = SC::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
-{
-    type WitnessVariable = ZKMCompressWithVKeyWitnessVariable<C, SC>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        ZKMCompressWithVKeyWitnessVariable {
-            compress_var: self.compress_val.read(builder),
-            merkle_var: self.merkle_val.read(builder),
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.compress_val.write(witness);
-        self.merkle_val.write(witness);
-    }
-}

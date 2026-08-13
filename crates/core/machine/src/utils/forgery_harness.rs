@@ -148,9 +148,9 @@ fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) 
     let mut fallback: Option<(usize, usize, String, usize)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let Some(bf) = sp.basefold_shard_proof.as_ref() else { continue };
-        // Name-sorted chip names (the order `opened_values.chips` uses).
-        let mut sorted_names: Vec<String> = sp.chip_ordering.keys().cloned().collect();
-        sorted_names.sort();
+        // Name-sorted chip names (the order `opened_values.chips` uses) —
+        // `chip_log_heights` is a name-sorted BTreeMap over the same set.
+        let sorted_names: Vec<String> = bf.chip_log_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             if !opening.quotient.first().map(|q| !q.is_empty()).unwrap_or(false) {
                 continue;
@@ -761,9 +761,9 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
     let mut first: Option<(usize, usize, String)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let Some(bf) = sp.basefold_shard_proof.as_ref() else { continue };
-        // Name-sorted chip names (the order `opened_values.chips` uses).
-        let mut sorted_names: Vec<String> = sp.chip_ordering.keys().cloned().collect();
-        sorted_names.sort();
+        // Name-sorted chip names (the order `opened_values.chips` uses) —
+        // `chip_log_heights` is a name-sorted BTreeMap over the same set.
+        let sorted_names: Vec<String> = bf.chip_log_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             let Some(degree) = opening.quotient.first() else { continue };
             if degree.is_empty() {

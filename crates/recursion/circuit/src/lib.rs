@@ -19,7 +19,6 @@ use zkm_recursion_compiler::{
 mod types;
 
 pub mod challenger;
-pub mod constraints;
 pub mod domain;
 pub mod fri;
 pub mod hash;

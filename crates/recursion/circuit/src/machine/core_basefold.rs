@@ -46,8 +46,8 @@ use crate::{
 
 /// Witness values — host-side input the Normalize program consumes.
 ///
-/// Mirrors [`super::core::ZKMRecursionWitnessValues`] with `ShardProof<SC>`
-/// swapped for [`BasefoldShardProof`].
+/// Carries the core vk + per-shard [`BasefoldShardProof`]s and the
+/// completeness/first-shard flags the Normalize program reads.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound(
     serialize = "StarkVerifyingKey<SC>: Serialize",

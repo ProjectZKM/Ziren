@@ -1,19 +1,14 @@
-use crate::septic_curve::SepticCurve;
 use crate::septic_digest::SepticDigest;
-use crate::septic_extension::SepticExtension;
 use core::fmt::Display;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{cmp::Reverse, error::Error, time::Instant};
 
-use crate::{air::LookupScope, AirOpenedValues, ChipOpenedValues, ShardOpenedValues};
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_commit::Pcs;
-use p3_field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
-use p3_util::log2_strict_usize;
 
 use super::{
     Com, OpeningProof, StarkGenericConfig, StarkMachine, StarkProvingKey, Val,
@@ -21,8 +16,8 @@ use super::{
 };
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PackedChallenge, PcsProverData,
-    ProverConstraintFolder, ShardCommitment, ShardMainData, ShardProof, StarkVerifyingKey,
+    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, PcsProverData,
+    ProverConstraintFolder, ShardMainData, ShardProof, StarkVerifyingKey,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
@@ -760,21 +755,6 @@ where
         // order.
         named_traces.sort_by(|(a, _), (b, _)| a.cmp(b));
 
-        let pcs = self.config().pcs();
-
-        // Single commit: the ONE real main-trace commitment is the BaseFold
-        // jagged-PCS commit, whose 8-felt digest is observed as
-        // `main_commitment` inside `BasefoldShardProof`.  Nothing here commits
-        // anything: `main_commit` is the config's constant zero commitment,
-        // carried only so the legacy `ShardProof.commitment` envelope stays
-        // populated (no verifier, recursion circuit or Groth16 consumer reads
-        // it — the BaseFold verifier reads
-        // `basefold_shard_proof.main_commitment`).
-        let main_commit = {
-            use crate::config::ZeroCommitment;
-            pcs.zero_commitment()
-        };
-
         // Get the chip ordering (name-order, matching the commit + the recursion
         // `opened_values.chips` BTreeMap order).
         let chip_ordering: hashbrown::HashMap<String, usize> = named_traces
@@ -864,7 +844,6 @@ where
 
         ShardMainData {
             traces,
-            main_commit,
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
@@ -888,63 +867,7 @@ where
         let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
         let traces = data.traces;
 
-        let config = self.machine().config();
-
-        let degrees = traces.iter().map(|trace| trace.height()).collect::<Vec<_>>();
-
-        // A genuinely-missing canonical-cluster chip is committed as a 0-row
-        // matrix (height 0, not a power of two), so `log2_strict_usize` would
-        // panic.  This legacy `log_degree` field feeds ONLY the envelope
-        // `ShardProof.opened_values` (built below at the `log_degrees.iter()`
-        // zip) which the BaseFold verifier IGNORES entirely (it reads opening
-        // evidence from `basefold_shard_proof`); a 0-height chip maps to
-        // log_degree 0.
-        // ALL-STAGE SOUNDNESS: a height-0 chip only ever exists on the CORE
-        // FIX-off path (the only path that passes `Some(cluster_widths)` to
-        // `commit` and hence injects 0-row missing chips);
-        // compress/shrink/wrap never produce a height-0 trace, so this guard
-        // is a strict no-op there.
-        // A non-power-of-two height (`next_multiple_of_32` core padding) would
-        // ALSO panic here, so use the CEIL log — the same formula
-        // `build_chip_log_heights` / the GKR `log_degree` extract use.
-        let log_degrees = degrees
-            .iter()
-            .map(|degree| {
-                if *degree == 0 {
-                    0
-                } else if degree.is_power_of_two() {
-                    log2_strict_usize(*degree)
-                } else {
-                    (usize::BITS - degree.leading_zeros()) as usize
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let _log_quotient_degrees =
-            chips.iter().map(|chip| chip.log_quotient_degree()).collect::<Vec<_>>();
-
-        let pcs = config.pcs();
-        // `natural_domain_for_degree(0)` would panic (not-a-power-of-two).
-        // `trace_domains` is legacy-FRI scaffolding that is NEVER read after
-        // this point on the BaseFold path, so a 0-height chip maps to the
-        // degree-1 domain — a discarded placeholder purely to avoid the panic.
-        // Same all-stage no-op guarantee as `log_degrees` above.
-        // A non-power-of-two height (`next_multiple_of_32` core padding) ALSO
-        // panics inside `natural_domain_for_degree` (`log2_strict_usize`), so
-        // round up to the next power of two — this value is a discarded
-        // placeholder either way.
-        let _trace_domains = degrees
-            .iter()
-            .map(|degree| {
-                pcs.natural_domain_for_degree(if *degree == 0 {
-                    1
-                } else {
-                    degree.next_power_of_two()
-                })
-            })
-            .collect::<Vec<_>>();
-
-        // Observe the public values and the main commitment.
+        // Observe the public values.
         challenger.observe_slice(&data.public_values[0..self.num_pv_elts()]);
 
         // Snapshot the challenger at the state the BaseFold verifier will
@@ -955,33 +878,7 @@ where
         // ops on the challenger.  Capture that state here so the
         // shard-level prover's prologue sees an aligned transcript
         // (otherwise round 0's claimed_sum check desyncs).
-        //
-        // The snapshot is consumed only by the basefold branch but must
-        // be captured here, before the main_commit observe + perm
-        // challenge sampling that follow — those operations diverge the
-        // challenger state from what the basefold verifier expects.
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
-
-        challenger.observe(data.main_commit.clone());
-
-        // Obtain the challenges used for the local permutation argument.
-        let mut local_permutation_challenges: Vec<SC::Challenge> = Vec::new();
-        for _ in 0..2 {
-            // UFCS-disambiguate `F = Val<SC>` — the impl also
-            // carries `SC::Challenger: FieldChallenger<JaggedVal>` (threaded to
-            // the static outer BaseFold open), so bare `sample_algebra_element`
-            // is ambiguous. `Val<SC>` preserves the original resolution exactly.
-            local_permutation_challenges.push(
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                ),
-            );
-        }
-
-        let _packed_perm_challenges = local_permutation_challenges
-            .iter()
-            .map(|c| PackedChallenge::<SC>::from(*c))
-            .collect::<Vec<_>>();
 
         // === BaseFold fast path (KoalaBear/JaggedChallenger default) ===
         // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the default proof
@@ -1006,119 +903,9 @@ where
         // BN254/MultiField32) opens via the shard-level BaseFold jagged-PCS;
         // the two-adic-quotient FRI open path is not used.
         {
-            let t_basefold_path = std::time::Instant::now();
-
-            // Skip permutation traces and quotient evaluation entirely.
-            // NOTE: public_values + main_commit are already observed above,
-            // and the perm challenges already sampled.  Do NOT re-observe or
-            // re-sample — that corrupts the Fiat-Shamir transcript.
-
-            // No permutation commit to observe (skipped).
-            // But cumulative sums are always observed (verifier does this unconditionally).
-            for i in 0..chips.len() {
-                let local_sum = SC::Challenge::ZERO;
-                // A 0-row missing chip has
-                // no last row to read the septic digest from — it contributes the
-                // ZERO digest (no events, no cumulative-sum contribution).  Guard
-                // on `values.len() < 14` (NOT just `height() == 0`) so the guard is
-                // the EXACT mirror of `chip_global_cumulative_sum` (which returns
-                // zero for `sz < 14`): identical for every present global-scope
-                // chip (their traces are always >= 14 values wide), strictly safer
-                // than the raw `values[len-14..]` slice for any under-14 trace, and
-                // drift-free against the shard-level cumulative-sum path.
-                let global_sum = if chips[i].commit_scope() == LookupScope::Local
-                    || traces[i].values.len() < 14
-                {
-                    SepticDigest::<Val<SC>>::zero()
-                } else {
-                    let main_trace = &traces[i];
-                    let main_trace_size = main_trace.height() * main_trace.width();
-                    let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                    SepticDigest(SepticCurve {
-                        x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j]),
-                        y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j + 7]),
-                    })
-                };
-                challenger.observe_slice(local_sum.as_basis_coefficients_slice());
-                challenger.observe_slice(&global_sum.0.x.0);
-                challenger.observe_slice(&global_sum.0.y.0);
-            }
-
-            // Sample alpha (constraint mixing challenge).
-            // UFCS-disambiguate `F = Val<SC>` (see the perm-challenge
-            // sample above) — preserves the original resolution byte-for-byte.
-            let _alpha: SC::Challenge =
-                <SC::Challenger as p3_challenger::FieldChallenger<Val<SC>>>::sample_algebra_element(
-                    challenger,
-                );
-
-            // No quotient commit to observe (skipped), and no `zeta` to
-            // sample: the BaseFold path opens nothing here.  The proof carries
-            // exactly one PCS proof field — the real jagged evaluation proof —
-            // and no legacy univariate opening slot, so there is nothing for a
-            // placeholder `pcs.open` to populate.
-
-            let basefold_path_ms = t_basefold_path.elapsed().as_millis();
-
-            // Log timing.
-            {
-                use std::io::Write;
-                if let Ok(mut f) = std::fs::OpenOptions::new()
-                    .create(true).append(true).open("/tmp/ziren_open_breakdown.txt")
-                {
-                    let _ = writeln!(
-                        f,
-                        "BASEFOLD_PATH total={}ms (single-main-commit)",
-                        basefold_path_ms,
-                    );
-                }
-            }
-
-            // Build empty per-chip opened values — the basefold
-            // verifier reads opening evidence from `basefold_shard_proof`
-            // instead of these legacy fields.
-            let opened_values = chips
-                .iter()
-                .zip(log_degrees.iter())
-                .enumerate()
-                .map(|(i, (chip, log_degree))| {
-                    // Extract cumulative sums matching what was observed into the transcript.
-                    // 0-row missing chip =>
-                    // ZERO digest.  `values.len() < 14` is the EXACT mirror of
-                    // `chip_global_cumulative_sum` (`sz < 14 => zero`) — byte-identical
-                    // for present global chips, panic-safe for any under-14 trace.
-                    let global_cumulative_sum = if chip.commit_scope() == LookupScope::Local
-                        || traces[i].values.len() < 14
-                    {
-                        SepticDigest::<Val<SC>>::zero()
-                    } else {
-                        let main_trace = &traces[i];
-                        let main_trace_size = main_trace.height() * main_trace.width();
-                        let last_row = &main_trace.values[main_trace_size - 14..main_trace_size];
-                        SepticDigest(SepticCurve {
-                            x: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j]),
-                            y: SepticExtension::<Val<SC>>::from_basis_coefficients_fn(|j| last_row[j + 7]),
-                        })
-                    };
-
-                    ChipOpenedValues {
-                        preprocessed: AirOpenedValues { local: vec![], next: vec![] },
-                        main: AirOpenedValues { local: vec![], next: vec![] },
-                        permutation: AirOpenedValues { local: vec![], next: vec![] },
-                        quotient: vec![],
-                        global_cumulative_sum,
-                        local_cumulative_sum: SC::Challenge::ZERO,
-                        log_degree: *log_degree,
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            // Populate the shard-level BaseFold proof.  The helper has
-            // the same KoalaBear/JaggedChallenger TypeId guard as the outer
-            // branch, then drives LogUp-GKR, zerocheck, and jagged PCS.
-            // The legacy prep/main opening fields above remain in the
-            // envelope, but `Verifier::verify_shard` dispatches to
-            // `BasefoldShardVerifier` whenever this field is `Some(_)`.
+            // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
+            // and the jagged-PCS opening, driven from the challenger
+            // snapshot above.
             //
             // Pass `self` so the basefold producer routes through the
             // trait-method seam (`self.prove_shard_to_basefold` ->
@@ -1138,12 +925,6 @@ where
             );
 
             return Ok(ShardProof::<SC> {
-                commitment: ShardCommitment {
-                    main_commit: data.main_commit.clone(),
-                    auxiliary_commits: Vec::new(),
-                },
-                opened_values: ShardOpenedValues { chips: opened_values },
-                chip_ordering: data.chip_ordering,
                 public_values: data.public_values,
                 basefold_shard_proof,
             });

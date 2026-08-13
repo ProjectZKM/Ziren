@@ -22,11 +22,7 @@ use crate::{
     CircuitConfig, FriProofVariable, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
-use super::{
-    ZKMCompressWitnessValues, ZKMCompressWitnessVariable, ZKMDeferredWitnessValues,
-    ZKMDeferredWitnessVariable, ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable,
-    ZKMRecursionWitnessValues, ZKMRecursionWitnessVariable,
-};
+use super::{ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable};
 
 impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Word<T> {
     type WitnessVariable = Word<T::WitnessVariable>;
@@ -149,104 +145,6 @@ where
             zkm_primitives::prep_chip_name_digest(name).write(witness);
             InnerVal::from_usize(dims.0).write(witness);
         }
-    }
-}
-
-impl<C> Witnessable<C> for ZKMRecursionWitnessValues<KoalaBearPoseidon2>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
-{
-    type WitnessVariable = ZKMRecursionWitnessVariable<C, KoalaBearPoseidon2>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vk = self.vk.read(builder);
-        let shard_proofs = self.shard_proofs.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-        let is_first_shard = InnerVal::from_bool(self.is_first_shard).read(builder);
-        let vk_root = self.vk_root.read(builder);
-        ZKMRecursionWitnessVariable { vk, shard_proofs, is_complete, is_first_shard, vk_root }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vk.write(witness);
-        self.shard_proofs.write(witness);
-        self.is_complete.write(witness);
-        self.is_first_shard.write(witness);
-        self.vk_root.write(witness);
-    }
-}
-
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
-    Witnessable<C> for ZKMCompressWitnessValues<SC>
-where
-    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
-{
-    type WitnessVariable = ZKMCompressWitnessVariable<C, SC>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-
-        ZKMCompressWitnessVariable { vks_and_proofs, is_complete }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        InnerVal::from_bool(self.is_complete).write(witness);
-    }
-}
-
-impl<C> Witnessable<C> for ZKMDeferredWitnessValues<KoalaBearPoseidon2>
-where
-    C: CircuitConfig<F = InnerVal, EF = InnerChallenge, Bit = Felt<InnerVal>>,
-{
-    type WitnessVariable = ZKMDeferredWitnessVariable<C, KoalaBearPoseidon2>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let vks_and_proofs = self.vks_and_proofs.read(builder);
-        let vk_merkle_data = self.vk_merkle_data.read(builder);
-        let start_reconstruct_deferred_digest =
-            self.start_reconstruct_deferred_digest.read(builder);
-        let zkm_vk_digest = self.zkm_vk_digest.read(builder);
-        let committed_value_digest = self.committed_value_digest.read(builder);
-        let deferred_proofs_digest = self.deferred_proofs_digest.read(builder);
-        let end_pc = self.end_pc.read(builder);
-        let end_shard = self.end_shard.read(builder);
-        let end_execution_shard = self.end_execution_shard.read(builder);
-        let init_addr_bits = self.init_addr_bits.read(builder);
-        let finalize_addr_bits = self.finalize_addr_bits.read(builder);
-        let is_complete = InnerVal::from_bool(self.is_complete).read(builder);
-
-        ZKMDeferredWitnessVariable {
-            vks_and_proofs,
-            vk_merkle_data,
-            start_reconstruct_deferred_digest,
-            zkm_vk_digest,
-            committed_value_digest,
-            deferred_proofs_digest,
-            end_pc,
-            end_shard,
-            end_execution_shard,
-            init_addr_bits,
-            finalize_addr_bits,
-            is_complete,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.vks_and_proofs.write(witness);
-        self.vk_merkle_data.write(witness);
-        self.start_reconstruct_deferred_digest.write(witness);
-        self.zkm_vk_digest.write(witness);
-        self.committed_value_digest.write(witness);
-        self.deferred_proofs_digest.write(witness);
-        self.end_pc.write(witness);
-        self.end_shard.write(witness);
-        self.end_execution_shard.write(witness);
-        self.init_addr_bits.write(witness);
-        self.finalize_addr_bits.write(witness);
-        self.is_complete.write(witness);
     }
 }
 

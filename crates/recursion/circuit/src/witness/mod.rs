@@ -7,14 +7,10 @@ pub use outer::*;
 pub use stark::*;
 use zkm_pcs::{
     septic_curve::SepticCurve, septic_digest::SepticDigest, septic_extension::SepticExtension,
-    ChipOpenedValues, Com, InnerChallenge, InnerVal, OpeningProof, ShardCommitment,
-    ShardOpenedValues, ShardProof,
+    InnerChallenge, InnerVal,
 };
 
-use crate::{
-    hash::FieldHasherVariable, stark::ShardProofVariable, CircuitConfig, FriProofVariable,
-    KoalaBearFriParametersVariable,
-};
+use crate::CircuitConfig;
 
 pub trait WitnessWriter<C: CircuitConfig>: Sized {
     fn write_bit(&mut self, value: bool);
@@ -130,83 +126,6 @@ impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for Vec<T> {
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>, SC: KoalaBearFriParametersVariable<C>>
-    Witnessable<C> for ShardProof<SC>
-where
-    Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-{
-    type WitnessVariable = ShardProofVariable<C, SC>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let commitment = self.commitment.read(builder);
-        let opened_values = self.opened_values.read(builder);
-        let public_values = self.public_values.read(builder);
-        let chip_ordering = self.chip_ordering.clone();
-
-        // Jagged fingerprint read disabled — reading it emits
-        // ImmF/ImmE ops that perturb the recursion-AIR's compiled
-        // chip lookup accounting, breaking local_cumulative_sum == 0
-        // on aggregation proofs.  Field gets a builder-allocated
-        // zero value to satisfy the type signature without consuming
-        // witness bytes.
-        let basefold_jagged_fingerprint: [Felt<C::F>; 8] =
-            std::array::from_fn(|_| builder.constant(<C::F as p3_field::PrimeCharacteristicRing>::ZERO));
-
-        ShardProofVariable {
-            commitment,
-            opened_values,
-            public_values,
-            chip_ordering,
-            basefold_jagged_fingerprint,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.commitment.write(witness);
-        self.opened_values.write(witness);
-        self.public_values.write(witness);
-        // BaseFold-pipeline writes disabled to match the disabled
-        // reads above.  Re-enable when the SP1-style parallel
-        // BasefoldShardVerifier-based recursion machine lands.
-    }
-}
-
-impl<C: CircuitConfig, T: Witnessable<C>> Witnessable<C> for ShardCommitment<T>
-where
-    T::WitnessVariable: Clone,
-{
-    type WitnessVariable = ShardCommitment<T::WitnessVariable>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let main_commit = self.main_commit.read(builder);
-        let auxiliary_commits =
-            self.auxiliary_commits.iter().map(|c| c.read(builder)).collect();
-        Self::WitnessVariable { main_commit, auxiliary_commits }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.main_commit.write(witness);
-        for c in self.auxiliary_commits.iter() {
-            c.write(witness);
-        }
-    }
-}
-
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
-    for ShardOpenedValues<InnerVal, InnerChallenge>
-{
-    type WitnessVariable = ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let chips = self.chips.read(builder);
-        Self::WitnessVariable { chips }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.chips.write(witness);
-    }
-}
-
 impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     for SepticDigest<InnerVal>
 {
@@ -224,36 +143,3 @@ impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
     }
 }
 
-impl<C: CircuitConfig<F = InnerVal, EF = InnerChallenge>> Witnessable<C>
-    for ChipOpenedValues<InnerVal, InnerChallenge>
-{
-    type WitnessVariable = ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>;
-
-    fn read(&self, builder: &mut Builder<C>) -> Self::WitnessVariable {
-        let preprocessed = self.preprocessed.read(builder);
-        let main = self.main.read(builder);
-        let permutation = self.permutation.read(builder);
-        let quotient = self.quotient.read(builder);
-        let global_cumulative_sum = self.global_cumulative_sum.read(builder);
-        let local_cumulative_sum = self.local_cumulative_sum.read(builder);
-        let log_degree = self.log_degree;
-        Self::WitnessVariable {
-            preprocessed,
-            main,
-            permutation,
-            quotient,
-            global_cumulative_sum,
-            local_cumulative_sum,
-            log_degree,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<C>) {
-        self.preprocessed.write(witness);
-        self.main.write(witness);
-        self.permutation.write(witness);
-        self.quotient.write(witness);
-        self.global_cumulative_sum.write(witness);
-        self.local_cumulative_sum.write(witness);
-    }
-}

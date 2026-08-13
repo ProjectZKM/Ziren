@@ -383,6 +383,23 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> StarkMachine<SC, A> {
             .sorted_by_key(|chip| chip_ordering.get(&chip.name()))
     }
 
+    /// Returns the machine chips present in a shard, keyed by the proof's
+    /// per-chip log-height map, in the shard's chip order.  Shard chip
+    /// order IS name order (`commit()` sorts the shard's traces by chip
+    /// name), so the name-sorted `BTreeMap` keys reproduce it exactly.
+    pub fn shard_chips_named<'a, 'b, V>(
+        &'a self,
+        chip_heights: &'b std::collections::BTreeMap<String, V>,
+    ) -> impl Iterator<Item = &'b MachineChip<SC, A>>
+    where
+        'a: 'b,
+    {
+        self.chips
+            .iter()
+            .filter(|chip| chip_heights.contains_key(&chip.name()))
+            .sorted_by_key(|chip| chip.name())
+    }
+
     /// Returns the config of the machine.
     pub const fn config(&self) -> &SC {
         &self.config
@@ -961,8 +978,9 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         let failed_shard = tracing::debug_span!("verify shard proofs").in_scope(|| {
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
-                    let chips =
-                        self.shard_chips_ordered(&shard_proof.chip_ordering).collect::<Vec<_>>();
+                    let chips = self
+                        .shard_chips_named(&shard_proof.basefold().chip_log_heights)
+                        .collect::<Vec<_>>();
                     let mut shard_challenger = base_challenger.clone();
                     shard_challenger.observe_slice(&shard_proof.public_values[0..self.num_pv_elts()]);
                     Verifier::verify_shard(

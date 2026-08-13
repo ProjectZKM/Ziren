@@ -1,181 +1,16 @@
 use hashbrown::HashMap;
-use itertools::Itertools;
 
-use num_traits::cast::ToPrimitive;
-
-use p3_air::{WindowAccess, Air, BaseAir};
-use p3_commit::{Mmcs, Pcs, PolynomialSpace};
-use p3_field::{Field, PrimeCharacteristicRing, TwoAdicField};
+use p3_air::Air;
+use p3_field::PrimeCharacteristicRing;
 use p3_koala_bear::KoalaBear;
 
-use zkm_recursion_compiler::{
-    circuit::CircuitV2Builder,
-    ir::{Config, Ext, ExtConst},
-    prelude::Felt,
-};
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_pcs::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape,
-    AirOpenedValues, Challenger, Chip, ChipOpenedValues, InnerChallenge,
-    ShardCommitment, ShardOpenedValues, ShardProof, PROOF_MAX_NUM_PVS,
+    koala_bear_poseidon2::KoalaBearPoseidon2, shape::OrderedShape, Chip, InnerChallenge,
 };
-use zkm_pcs::{air::MachineAir, StarkGenericConfig, StarkMachine, StarkVerifyingKey};
+use zkm_pcs::{air::MachineAir, StarkMachine, StarkVerifyingKey};
 
-use crate::{
-    challenger::CanObserveVariable,
-    fri::dummy_commit,
-    hash::FieldHasherVariable,
-    CircuitConfig, KoalaBearFriParameters,
-};
-
-use crate::{
-    challenger::FieldChallengerVariable,
-    domain::PolynomialSpaceVariable, KoalaBearFriParametersVariable,
-};
-
-/// Reference: [zkm_core::stark::ShardProof]
-#[derive(Clone)]
-pub struct ShardProofVariable<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> {
-    pub commitment: ShardCommitment<SC::DigestVariable>,
-    #[allow(clippy::type_complexity)]
-    pub opened_values: ShardOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
-    pub chip_ordering: HashMap<String, usize>,
-    pub public_values: Vec<Felt<C::F>>,
-    /// Fixed-size fingerprint of the jagged-PCS opening proof
-    /// bytes (XOR-fold of the Vec<u8> into 8 Felts).  Always
-    /// `[Felt; 8]` — unconditional presence simplifies witness
-    /// synchronisation: real proofs contribute the fold of
-    /// `late_binding_jagged_proof.unwrap_or(&[])` while legacy
-    /// proofs contribute the all-zero fingerprint.
-    ///
-    /// Observed into the challenger transcript inside
-    /// `verify_shard` so the prover can't equivocate on the bytes
-    /// content.  Full BaseFold-PCS in-circuit verification of the
-    /// bytes (deserialize → run sumcheck + FRI) is a separate
-    /// task; this fingerprint binding is the prerequisite.
-    pub basefold_jagged_fingerprint: [Felt<C::F>; 8],
-}
-
-/// Get a dummy duplex challenger for use in dummy proofs.
-pub fn dummy_challenger(config: &KoalaBearPoseidon2) -> Challenger<KoalaBearPoseidon2> {
-    let mut challenger = config.challenger();
-    challenger.input_buffer = vec![];
-    challenger.output_buffer = vec![KoalaBear::ZERO; challenger.sponge_state.len()];
-    challenger
-}
-
-/// Builds a basefold-shaped recursion shard dummy (May 19 2026).
-///
-/// Produces a `(StarkVerifyingKey, ShardProof)` pair whose
-/// `ShardProof` carries:
-///   - `commitment.auxiliary_commits = vec![]` (no perm + quotient commits)
-///   - `opened_values` with empty `permutation`/`quotient` fields
-///   - `basefold_shard_proof: Some(_)` populated with the dummy
-///     basefold shard proof from `dummy_basefold_vk_and_shard_proof`.
-///
-/// This mirrors the real prover output shape at
-/// `crates/pcs/src/prover.rs` (the BaseFold prove path
-/// return branch).  RecursionAir-parameterised because the inner
-/// `dummy_basefold_vk_and_shard_proof` already drives the
-/// `prove_shard_to_basefold` host path with the chip set from
-/// `machine`, so passing in a `StarkMachine<KBP2, RecursionAir<_,_>>`
-/// produces a basefold proof shaped for recursion chips
-/// (BaseAlu/ExtAlu/Poseidon2/FriFold/etc.) instead of MIPS chips.
-///
-/// # Status (scaffold)
-///
-/// The `opened_values` FRI placeholders are minimal (empty
-/// perm/quotient), mirroring the prover branch.  Cryptographic
-/// soundness of the
-/// dummy isn't required — consumers (`program_from_shape`) only
-/// care about the witness-stream shape, which is driven by
-/// chip_ordering + chip_cumulative_sums in the basefold sub-proof.
-///
-/// Wraps the inner `BasefoldShardProof` in a `Box` per the
-/// `ShardProof::basefold_shard_proof: Option<Box<_>>` definition.
-///
-/// # Trait bounds
-///
-/// Same `A: MachineAir + Air<VerifierConstraintFolder>` bounds as
-/// `dummy_basefold_vk_and_shard_proof` — both `MipsAir` and
-/// `RecursionAir<F, DEGREE>` satisfy these via the standard derive
-/// macro at `crates/derive/src/lib.rs:218,321`.
-pub fn dummy_recursion_basefold_vk_and_shard_proof<A>(
-    machine: &StarkMachine<KoalaBearPoseidon2, A>,
-    shape: &OrderedShape,
-) -> (StarkVerifyingKey<KoalaBearPoseidon2>, ShardProof<KoalaBearPoseidon2>)
-where
-    A: MachineAir<KoalaBear>
-        + for<'b> Air<zkm_pcs::folder::VerifierConstraintFolder<'b, KoalaBearPoseidon2>>,
-{
-    // Produce the basefold shard proof + matching VK using the
-    // existing infrastructure.  The chip set and per-chip shapes
-    // come from the machine + shape pair.  This legacy (FRI-compose) path
-    // is never a recursion-pinned commit, so pass `None` for the recursion
-    // AREA PIN to preserve byte-behaviour.
-    let (vk, basefold_proof) = dummy_basefold_vk_and_shard_proof::<A>(machine, shape, None);
-
-    // Build the empty FRI placeholder fields matching the real
-    // basefold-path prover output at `prover.rs:600-610`.  Empty
-    // auxiliary_commits + empty perm/quotient opened values.  The
-    // chip_ordering carries the name → index map needed by
-    // recursion-side Witnessable::read to fix the witness-stream
-    // order.
-    let chip_ordering = shape
-        .inner
-        .iter()
-        .enumerate()
-        .map(|(i, (name, _))| (name.clone(), i))
-        .collect::<HashMap<_, _>>();
-
-    // Per-chip ChipOpenedValues with empty permutation / quotient
-    // arrays — matching the prover's basefold-path emission at
-    // `prover.rs:559-568`.  Preprocessed + main keep their real
-    // widths so the witness reader still walks the right number
-    // of felts; perm + quotient are empty because the basefold
-    // pipeline doesn't commit them.
-    let shard_chips = machine.shard_chips_ordered(&chip_ordering).collect::<Vec<_>>();
-    let opened_values = ShardOpenedValues {
-        chips: shard_chips
-            .iter()
-            .zip_eq(shape.inner.iter())
-            .map(|(chip, (_, log_degree))| {
-                let preprocessed_width = chip.preprocessed_width();
-                let main_width = chip.width();
-                ChipOpenedValues {
-                    preprocessed: AirOpenedValues {
-                        local: vec![InnerChallenge::ZERO; preprocessed_width],
-                        next: vec![InnerChallenge::ZERO; preprocessed_width],
-                    },
-                    main: AirOpenedValues {
-                        local: vec![InnerChallenge::ZERO; main_width],
-                        next: vec![InnerChallenge::ZERO; main_width],
-                    },
-                    permutation: AirOpenedValues { local: vec![], next: vec![] },
-                    quotient: vec![],
-                    global_cumulative_sum: SepticDigest::<KoalaBear>::zero(),
-                    local_cumulative_sum: InnerChallenge::ZERO,
-                    log_degree: *log_degree,
-                }
-            })
-            .collect(),
-    };
-
-    let public_values = (0..PROOF_MAX_NUM_PVS).map(|_| KoalaBear::ZERO).collect::<Vec<_>>();
-
-    let shard_proof = ShardProof {
-        commitment: ShardCommitment {
-            main_commit: dummy_commit(),
-            auxiliary_commits: Vec::new(),
-        },
-        opened_values,
-        chip_ordering,
-        public_values,
-        basefold_shard_proof: Some(Box::new(basefold_proof)),
-    };
-
-    (vk, shard_proof)
-}
+use crate::{fri::dummy_commit, hash::FieldHasherVariable, CircuitConfig};
 
 /// Make a dummy basefold-pipeline shard proof for a given proof shape.
 ///
@@ -364,36 +199,6 @@ where
 pub struct MerkleProofVariable<C: CircuitConfig, HV: FieldHasherVariable<C>> {
     pub index: Vec<C::Bit>,
     pub path: Vec<HV::DigestVariable>,
-}
-
-pub const EMPTY: usize = 0x_1111_1111;
-
-#[derive(Debug, Clone, Copy)]
-pub struct StarkVerifier<C: Config, SC: StarkGenericConfig, A> {
-    _phantom: std::marker::PhantomData<(C, SC, A)>,
-}
-
-pub struct VerifyingKeyHint<'a, SC: StarkGenericConfig, A> {
-    pub machine: &'a StarkMachine<SC, A>,
-    pub vk: &'a StarkVerifyingKey<SC>,
-}
-
-impl<'a, SC: StarkGenericConfig, A: MachineAir<SC::Val>> VerifyingKeyHint<'a, SC, A> {
-    pub const fn new(machine: &'a StarkMachine<SC, A>, vk: &'a StarkVerifyingKey<SC>) -> Self {
-        Self { machine, vk }
-    }
-}
-
-
-impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>> ShardProofVariable<C, SC> {
-
-    pub fn contains_memory_init(&self) -> bool {
-        self.chip_ordering.contains_key("MemoryGlobalInit")
-    }
-
-    pub fn contains_memory_finalize(&self) -> bool {
-        self.chip_ordering.contains_key("MemoryGlobalFinalize")
-    }
 }
 
 #[allow(unused_imports)]
