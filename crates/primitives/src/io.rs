@@ -3,6 +3,20 @@ use num_bigint::BigUint;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+/// Returns true if either the `ZKM_IMM_WRAP_VK` environment variable is set or the `imm-wrap-vk`
+/// feature is enabled.
+/// By default, the variable is disabled.
+pub fn zkm_imm_wrap_vk_mode() -> bool {
+    let value = std::env::var("ZKM_IMM_WRAP_VK").unwrap_or_else(|_| "false".to_string());
+    let enabled = value == "1" || value.to_lowercase() == "true" || cfg!(feature = "imm-wrap-vk");
+    if enabled {
+        tracing::warn!(
+            "`ZKM_IMM_WRAP_VK` environment variable or `imm-wrap-vk` feature is enabled."
+        );
+    }
+    enabled
+}
+
 /// Public values for the prover.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ZKMPublicValues {
@@ -53,10 +67,16 @@ impl ZKMPublicValues {
     }
 
     /// Hash the public values.
-    pub fn hash(&self) -> Vec<u8> {
-        let mut hasher = Sha256::new();
-        hasher.update(self.buffer.data.as_slice());
-        hasher.finalize().to_vec()
+    ///
+    /// Uses BLAKE3 in `imm-wrap-vk` mode, SHA256 otherwise (see [`zkm_imm_wrap_vk_mode`]).
+    pub fn hash(&self) -> [u8; 32] {
+        if zkm_imm_wrap_vk_mode() {
+            *blake3::hash(self.buffer.data.as_slice()).as_bytes()
+        } else {
+            let mut hasher = Sha256::new();
+            hasher.update(self.buffer.data.as_slice());
+            hasher.finalize().into()
+        }
     }
 
     /// Hash the public values, mask the top 3 bits and return a BigUint. Matches the implementation
@@ -67,10 +87,7 @@ impl ZKMPublicValues {
     /// ```
     pub fn hash_bn254(&self) -> BigUint {
         // Hash the public values.
-        let mut hasher = Sha256::new();
-        hasher.update(self.buffer.data.as_slice());
-        let hash_result = hasher.finalize();
-        let mut hash = hash_result.to_vec();
+        let mut hash = self.hash();
 
         // Mask the top 3 bits.
         hash[0] &= 0b00011111;
@@ -89,8 +106,13 @@ impl AsRef<[u8]> for ZKMPublicValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    // `zkm_imm_wrap_vk_mode()` reads a process-wide env var, so any test that touches it is
+    // `#[serial]` to avoid racing with the others in this module.
 
     #[test]
+    #[serial]
     fn test_hash_public_values() {
         let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
         let test_bytes = hex::decode(test_hex).unwrap();
@@ -103,5 +125,28 @@ mod tests {
         let expected_hash_biguint = BigUint::from_bytes_be(&hex::decode(expected_hash).unwrap());
 
         assert_eq!(hash, expected_hash_biguint);
+    }
+
+    #[test]
+    #[serial]
+    fn test_hash_public_values_imm_wrap_vk() {
+        std::env::set_var("ZKM_IMM_WRAP_VK", "1");
+
+        let test_hex = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let test_bytes = hex::decode(test_hex).unwrap();
+
+        let mut public_values = ZKMPublicValues::new();
+        public_values.write_slice(&test_bytes);
+
+        let hash = public_values.hash();
+        let expected_hash = *blake3::hash(&test_bytes).as_bytes();
+        assert_eq!(hash, expected_hash);
+
+        let hash_bn254 = public_values.hash_bn254();
+        let mut expected_masked = expected_hash;
+        expected_masked[0] &= 0b00011111;
+        assert_eq!(hash_bn254, BigUint::from_bytes_be(&expected_masked));
+
+        std::env::remove_var("ZKM_IMM_WRAP_VK");
     }
 }

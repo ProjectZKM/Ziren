@@ -48,7 +48,6 @@ zkm-primitives = { workspace = true }
 zkm-cuda = { workspace = true }
 itertools = { workspace = true }
 tonic = { version = "0.8.1", features = ["tls", "tls-roots", "transport"]}
-alloy-signer = { version = "1.0" }
 alloy-primitives = { version = "1.0", optional = true }
 num-bigint = "0.4.6"
 serde_json = "1.0.140"

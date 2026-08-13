@@ -1,4 +1,5 @@
 use anyhow::Result;
+use p3_field::PrimeField;
 use std::fs;
 use std::path::PathBuf;
 use tonic::async_trait;
@@ -77,6 +78,22 @@ impl CudaProver {
         // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(compress_proof)?;
 
+        // Check that the guest's committed-values digest was hashed with whichever algorithm this
+        // process currently expects (see `zkm_imm_wrap_vk_mode`), before spending time on the
+        // (potentially expensive) Plonk/Groth16/DvSnark proving below. A mismatch here means the
+        // guest ELF was built in a different mode than this prover currently believes.
+        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
+            .as_canonical_biguint();
+        let expected_digest = public_values.hash_bn254();
+        if actual_digest != expected_digest {
+            anyhow::bail!(
+                "guest committed-values digest doesn't match the hash algorithm this prover \
+                 currently expects (ZKM_IMM_WRAP_VK={}); the guest ELF may have been built in a \
+                 different mode",
+                zkm_prover::build::zkm_imm_wrap_vk_mode()
+            );
+        }
+
         if kind == ZKMProofKind::Plonk {
             let plonk_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
                 zkm_prover::build::try_build_plonk_bn254_artifacts_dev(
@@ -140,7 +157,8 @@ impl CudaProver {
 
     fn compress_to_groth16(&self, mut stdin: ZKMStdin) -> Result<ZKMProofWithPublicValues> {
         assert_eq!(stdin.buffer.len(), 1);
-        let public_values = bincode::deserialize(stdin.buffer.last().unwrap())?;
+        let public_values: crate::ZKMPublicValues =
+            bincode::deserialize(stdin.buffer.last().unwrap())?;
 
         assert_eq!(stdin.proofs.len(), 1);
         let (proof, _) = stdin.proofs.pop().unwrap();
@@ -150,6 +168,19 @@ impl CudaProver {
 
         // Generate the wrap proof.
         let outer_proof = self.cuda_prover.wrap_bn254(shrink_proof)?;
+
+        // See the equivalent check in `prove_with_cycles` for why this is here.
+        let actual_digest = zkm_prover::utils::zkm_committed_values_digest_bn254(&outer_proof)
+            .as_canonical_biguint();
+        let expected_digest = public_values.hash_bn254();
+        if actual_digest != expected_digest {
+            anyhow::bail!(
+                "guest committed-values digest doesn't match the hash algorithm this prover \
+                 currently expects (ZKM_IMM_WRAP_VK={}); the guest ELF may have been built in a \
+                 different mode",
+                zkm_prover::build::zkm_imm_wrap_vk_mode()
+            );
+        }
 
         let groth16_bn254_artifacts = if zkm_prover::build::zkm_dev_mode() {
             zkm_prover::build::try_build_groth16_bn254_artifacts_dev(

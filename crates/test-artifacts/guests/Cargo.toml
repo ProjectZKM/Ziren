@@ -27,6 +27,7 @@ members = [
     "ed25519",
     "fibonacci",
     "hello-world",
+    "hello-world-imm-wrap-vk",
     "hint-io",
     "poseidon2-permute",
     "secp256k1-add",
