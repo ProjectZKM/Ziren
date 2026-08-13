@@ -19,6 +19,12 @@ pub struct SyscallInstrColumns<T> {
     pub clk: T,
     pub num_extra_cycles: T,
 
+    /// The `next_pc` RECEIVED on the `State` bus — a COLUMN because interaction
+    /// values must be linear.  Equals `next_pc` on a normal row but `pc + 4` on
+    /// a halt row (the predecessor's lookahead), so the chain telescopes into
+    /// the halt.  Every other chip passes `next_pc` directly.
+    pub state_recv_next_pc: T,
+
     /// Whether the current instruction is a halt instruction.
     pub is_halt: T,
 

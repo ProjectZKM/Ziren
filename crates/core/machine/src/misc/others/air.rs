@@ -1,3 +1,5 @@
+use crate::memory::RegisterCols;
+use zkm_pcs::air::BaseAirBuilder;
 use std::borrow::Borrow;
 
 use crate::{memory::MemoryCols, operations::IsEqualWordOperation};
@@ -55,27 +57,35 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
             is_real.clone(),
         );
+        // TEQ reads op_a immutably: the register write carries the previous
+        // value through unchanged.
+        builder.when(local.is_teq).assert_word_eq(
+            *local.frame.op_a_access.value(),
+            local.frame.op_a_access.prev_value,
+        );
+        // Bind `prev_a_value` to the access's previous value EXACTLY on the
+        // rows that use it (the read-write group: MADD family + INS).  SEXT /
+        // EXT / TEQ pin the column to zero below while the register's actual
+        // old value is arbitrary — binding them would be unsatisfiable.
         builder
-            .when(is_real.clone())
-            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
-        // MADDU/MSUBU/MADD/MSUB/INS read-and-write op_a; TEQ reads it
-        // immutably; both flags bind the frame rules.
-        let is_rw_a_tie = local.is_maddu
-            + local.is_msubu
-            + local.is_madd
-            + local.is_msub
-            + local.is_ins;
-        builder.assert_eq(local.frame.is_rw_a, is_rw_a_tie);
-        builder.assert_eq(local.frame.op_a_immutable, local.is_teq);
-        builder
-            .when(is_real.clone())
-            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+            .when(is_check_memory.clone() + local.is_ins)
+            .assert_word_eq(local.prev_a_value, local.frame.op_a_access.prev_value);
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        // commit.  Writes are gated by op_a_0 (discarded); a TEQ READ of
+        // register 0 must see 0.
+        builder
+            .when(is_real.clone())
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
+        builder
+            .when(local.is_teq)
+            .when(local.frame.instruction.op_a_0)
+            .assert_word_zero(local.op_a_value);
         builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
         builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         // The HI-writing group keeps private shard/clk columns for its memory

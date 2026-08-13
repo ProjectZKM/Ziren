@@ -34,9 +34,8 @@ __ZKM_HOSTDEV__ void populate_raw(
     frame.clk_8bit_limb = F::from_canonical_u8((uint8_t)(clk >> 16 & 0xff));
 
     cpu::populate_instruction<F>(frame.instruction, instruction);
-    frame.state_recv_next_pc = F::from_canonical_u32(recv_next_pc);
+    (void)recv_next_pc;
 
-    write_word_from_u32_v2<F>(frame.op_a_value, a);
     write_word_from_u32_v2<F>(frame.op_a_access.access.value, a);
     write_word_from_u32_v2<F>(frame.op_b_access.access.value, b);
     write_word_from_u32_v2<F>(frame.op_c_access.access.value, c);
@@ -78,7 +77,6 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_branch(
     populate_raw<F>(
         frame, event.clk, event.recv_next_pc, event.a, event.b, event.c,
         event.a_record, event.b_record, event.c_record, instruction, shard);
-    frame.op_a_immutable = F::one();
 }
 
 // `InstructionFrameCols::populate_from_jump` — a jump WRITES op_a (the link
@@ -108,9 +106,7 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_movcond(
     populate_raw<F>(
         frame, event.clk, event.recv_next_pc, event.a, event.b, event.c,
         event.a_record, event.b_record, event.c_record, instruction, shard);
-    write_word_from_u32_v2<F>(frame.hi_or_prev_a, event.prev_a);
     if (event.opcode != Opcode::WSBH) {
-        frame.is_rw_a = F::one();
     }
 }
 
@@ -126,21 +122,6 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_misc(
     populate_raw<F>(
         frame, event.clk, event.recv_next_pc, event.a, event.b, event.c,
         event.a_record, event.b_record, event.c_record, instruction, shard);
-    write_word_from_u32_v2<F>(frame.hi_or_prev_a, event.prev_a);
-    switch (event.opcode) {
-        case Opcode::MADDU:
-        case Opcode::MSUBU:
-        case Opcode::MADD:
-        case Opcode::MSUB:
-        case Opcode::INS:
-            frame.is_rw_a = F::one();
-            break;
-        case Opcode::TEQ:
-            frame.op_a_immutable = F::one();
-            break;
-        default:
-            break;
-    }
 }
 
 // `InstructionFrameCols::populate_from_mem` — every memory instruction
@@ -154,19 +135,6 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_mem(
     populate_raw<F>(
         frame, event.clk, event.recv_next_pc, event.a, event.b, event.c,
         event.a_record, event.b_record, event.c_record, instruction, event.shard);
-    write_word_from_u32_v2<F>(frame.hi_or_prev_a, event.prev_a_val);
-    frame.is_rw_a = F::one();
-    switch (event.opcode) {
-        case Opcode::SB:
-        case Opcode::SH:
-        case Opcode::SW:
-        case Opcode::SWL:
-        case Opcode::SWR:
-            frame.op_a_immutable = F::one();
-            break;
-        default:
-            break;
-    }
 }
 
 // `InstructionFrameCols::populate_from_syscall` — the id comes in through
@@ -189,9 +157,6 @@ __ZKM_HOSTDEV__ __ZKM_INLINE__ void populate_from_syscall(
         frame, event.clk, event.recv_next_pc, event.a_record.value, event.arg1,
         event.arg2, a_record, event.b_record, event.c_record, instruction,
         event.shard);
-    frame.is_rw_a = F::one();
-    frame.hi_or_prev_a = frame.op_a_access.prev_value;
-    frame.num_extra_cycles = frame.op_a_access.prev_value._0[3];
 }
 
 // `InstructionFrameCols::populate_dependency` — neutralise the frame on a row

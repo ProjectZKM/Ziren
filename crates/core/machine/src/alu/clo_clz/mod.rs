@@ -10,6 +10,8 @@
 //! Second, we prove the CLO.
 //! we use clo(b) = clz(0xffffffff - b)
 
+use zkm_pcs::air::BaseAirBuilder;
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
@@ -241,7 +243,10 @@ where
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
         // commit (the Instruction bus that used to carry them is gone).
-        builder.when(local.is_real).assert_word_eq(local.a, local.frame.op_a_value);
+        builder
+            .when(local.is_real)
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.a, *local.frame.op_a_access.value());
         builder.when(local.is_real).assert_word_eq(local.b, local.frame.op_b_val());
 
         eval_instruction_frame(
@@ -250,11 +255,10 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
             local.is_real.into(),
         );
-        builder
-            .when(local.is_real)
-            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
 
         // if is_bb_zero == 1, bb == 0, and result is 32
         {

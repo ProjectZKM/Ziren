@@ -1,3 +1,4 @@
+use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, AirBuilder};
@@ -70,19 +71,24 @@ where
             local.pc.into(),
             local.next_pc.reduce::<AB>(),
             local.next_next_pc.reduce::<AB>(),
+            local.next_pc.reduce::<AB>(),
+            AB::Expr::ZERO,
             is_real.clone(),
         );
-        builder
-            .when(is_real.clone())
-            .assert_eq(local.frame.state_recv_next_pc, local.next_pc.reduce::<AB>());
-        // A branch READS op_a; the frame rule needs the flag high exactly on
-        // real rows.
-        builder.assert_eq(local.frame.op_a_immutable, is_real.clone());
+        // A branch READS op_a immutably: the register write carries the
+        // previous value through unchanged.
+        builder.when(is_real.clone()).assert_word_eq(
+            *local.frame.op_a_access.value(),
+            local.frame.op_a_access.prev_value,
+        );
 
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        // commit.  UNGATED by op_a_0: a read of register 0 must see 0, which
+        // is exactly what the access value is forced to.
+        builder
+            .when(is_real.clone())
+            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
         builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
         builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 

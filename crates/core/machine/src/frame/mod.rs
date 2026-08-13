@@ -58,21 +58,6 @@ pub struct InstructionFrameCols<T> {
     pub op_b_access: RegisterReadCols<T>,
     pub op_c_access: RegisterReadCols<T>,
 
-    /// The logical value written to `op_a` (may differ from the register write
-    /// when `op_a` is register 0).
-    pub op_a_value: Word<T>,
-    /// `hi` result, or the previous value of `op_a`, per opcode.
-    pub hi_or_prev_a: Word<T>,
-
-    /// Extra cycles this instruction adds to `clk` (syscalls).
-    pub num_extra_cycles: T,
-    /// Whether the instruction both reads and writes `op_a`.
-    pub is_rw_a: T,
-    /// Whether `op_a` is an immutable read.
-    pub op_a_immutable: T,
-    /// The `next_pc` RECEIVED on the `State` bus.  Equals `next_pc` on a normal
-    /// row but `pc + 4` on a halt row, so the chain telescopes into the halt.
-    pub state_recv_next_pc: T,
 }
 
 impl<T: Copy> InstructionFrameCols<T> {
@@ -92,6 +77,7 @@ impl<T: Copy> InstructionFrameCols<T> {
 /// This is the union of what `CpuChip::eval` does today minus the
 /// `send_instruction` dispatch, which disappears entirely once every chip owns
 /// its frame.  `is_real` must already be constrained boolean by the caller.
+#[allow(clippy::too_many_arguments)]
 pub fn eval_instruction_frame<AB>(
     builder: &mut AB,
     frame: &InstructionFrameCols<AB::Var>,
@@ -100,6 +86,12 @@ pub fn eval_instruction_frame<AB>(
     pc: AB::Expr,
     next_pc: AB::Expr,
     next_next_pc: AB::Expr,
+    // What the `State` receive carries.  Equal to `next_pc` everywhere except
+    // the syscall chip's halt row, which receives its predecessor's `pc + 4`
+    // lookahead while its own `next_pc` is the exit signal 0.
+    recv_next_pc: AB::Expr,
+    // Extra cycles this instruction adds to `clk` — ZERO except syscalls.
+    num_extra_cycles: AB::Expr,
     is_real: AB::Expr,
 ) where
     AB: ZKMCoreAirBuilder,
@@ -165,15 +157,10 @@ pub fn eval_instruction_frame<AB>(
 
     // Writes to register 0 are discarded.
     builder.when(frame.instruction.op_a_0).assert_word_zero(*frame.op_a_access.value());
-    builder
-        .when_not(frame.instruction.op_a_0)
-        .assert_word_eq(frame.op_a_value, *frame.op_a_access.value());
-    builder
-        .when(frame.instruction.op_a_0 * frame.op_a_immutable)
-        .assert_word_zero(frame.op_a_value);
-    builder
-        .when(frame.is_rw_a)
-        .assert_word_eq(frame.hi_or_prev_a, frame.op_a_access.prev_value);
+    // The immutable-read rule (`op_a_access.value == prev_value`) lives in the
+    // chips that read op_a immutably (Branch, TEQ, the plain stores) — NOT
+    // here with a ZERO guard: a zero-guarded constraint still consumes an RLC
+    // slot on the verifier while the device bytecode optimizer may elide it.
 
     builder.eval_register_access(
         frame.shard,
@@ -187,19 +174,13 @@ pub fn eval_instruction_frame<AB>(
     // `CpuChip::eval_registers` (JUMP instructions may witness an invalid word).
     builder.slice_range_check_u8(&frame.op_a_access.access.value.0, is_real.clone());
 
-    // If `op_a` is immutable (stores/branches/teq), the logical value is the
-    // PREVIOUS register value.  Trivial for chips that never set the flag.
-    builder
-        .when(frame.op_a_immutable)
-        .assert_word_eq(frame.op_a_value, frame.op_a_access.prev_value);
-
     // `(clk, pc)` chaining.  The LogUp multiset balance forces row i+1's
     // `(pc, next_pc)` to equal row i's `(next_pc, next_next_pc)`; the boundary
     // endpoints are emitted by the public-values AIR.
-    builder.receive_state(frame.shard, clk.clone(), pc, frame.state_recv_next_pc, is_real.clone());
+    builder.receive_state(frame.shard, clk.clone(), pc, recv_next_pc, is_real.clone());
     builder.send_state(
         frame.shard,
-        clk + AB::Expr::from_u32(5) + frame.num_extra_cycles,
+        clk + AB::Expr::from_u32(5) + num_extra_cycles,
         next_pc,
         next_next_pc,
         is_real,
@@ -271,9 +252,8 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
         blu.add_byte_lookup_event(ByteLookupEvent::new(ByteOpcode::U8Range, 0, 0, 0, clk_8));
 
         self.instruction.populate(&program.fetch(pc));
-        self.state_recv_next_pc = F::from_u32(recv_next_pc);
+        let _ = recv_next_pc;
 
-        self.op_a_value = a.into();
         *self.op_a_access.value_mut() = a.into();
         *self.op_b_access.value_mut() = b.into();
         *self.op_c_access.value_mut() = c.into();
@@ -373,7 +353,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             shard,
             blu,
         );
-        self.op_a_immutable = F::ONE;
     }
 
     /// `JumpEvent` variant of [`Self::populate_from_alu`].  Unlike a branch, a
@@ -429,10 +408,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             shard,
             blu,
         );
-        self.hi_or_prev_a = event.prev_a.into();
-        if !matches!(event.opcode, zkm_core_executor::Opcode::WSBH) {
-            self.is_rw_a = F::ONE;
-        }
     }
 
     /// `MiscEvent` variant of [`Self::populate_from_alu`].
@@ -459,14 +434,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             shard,
             blu,
         );
-        self.hi_or_prev_a = event.prev_a.into();
-        use zkm_core_executor::Opcode as Op;
-        if matches!(event.opcode, Op::MADDU | Op::MSUBU | Op::MADD | Op::MSUB | Op::INS) {
-            self.is_rw_a = F::ONE;
-        }
-        if matches!(event.opcode, Op::TEQ) {
-            self.op_a_immutable = F::ONE;
-        }
     }
 
     /// `MemInstrEvent` variant of [`Self::populate_from_alu`].  Every memory
@@ -494,12 +461,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             event.shard,
             blu,
         );
-        self.hi_or_prev_a = event.prev_a_val.into();
-        self.is_rw_a = F::ONE;
-        use zkm_core_executor::Opcode as Op;
-        if matches!(event.opcode, Op::SB | Op::SH | Op::SW | Op::SWL | Op::SWR) {
-            self.op_a_immutable = F::ONE;
-        }
     }
 
     /// `SyscallEvent` variant of [`Self::populate_from_alu`].  A syscall
@@ -533,9 +494,6 @@ impl<F: PrimeField32> InstructionFrameCols<F> {
             event.shard,
             blu,
         );
-        self.is_rw_a = F::ONE;
-        self.hi_or_prev_a = self.op_a_access.prev_value;
-        self.num_extra_cycles = self.op_a_access.prev_value[3];
     }
 
     /// Neutralise the frame on a row that carries no instruction — dependency

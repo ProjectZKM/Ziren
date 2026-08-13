@@ -1,3 +1,4 @@
+use crate::memory::RegisterCols;
 use std::borrow::Borrow;
 
 use p3_air::{WindowAccess, Air, AirBuilder};
@@ -61,32 +62,33 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
+            // THE HALT EXEMPTION (the column is constrained below).
+            local.state_recv_next_pc.into(),
+            local.num_extra_cycles.into(),
             local.is_real.into(),
         );
-        // Bind this chip's operand columns to the frame's register-file view:
-        // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder.when(local.is_real).assert_word_eq(local.op_a_value, local.frame.op_a_value);
-        builder.when(local.is_real).assert_word_eq(local.op_b_value, local.frame.op_b_val());
-        builder.when(local.is_real).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         // THE HALT EXEMPTION: the received continuation equals `next_pc` on
         // every row except the halt, where the predecessor sent `pc + 4` (its
         // lookahead) while this row's own `next_pc` is overridden to 0.
         builder.when(local.is_real).assert_zero(
-            local.frame.state_recv_next_pc
+            local.state_recv_next_pc
                 - local.next_pc
                 - local.is_halt * (local.pc + AB::Expr::from_u32(4) - local.next_pc),
         );
-        // A syscall reads-and-writes op_a; the frame rule binds hi_or_prev_a to
-        // the record's previous value, which is also where the syscall id and
-        // the extra-cycle count come from.
-        builder.assert_eq(local.frame.is_rw_a, local.is_real);
+        // Bind this chip's operand columns to the frame's register-file view:
+        // the chip must compute on exactly the values the register accesses
+        // commit.  The result write is gated by op_a_0 (a discarded write);
+        // the syscall id and extra-cycle count come from the access's
+        // PREVIOUS value.
         builder
             .when(local.is_real)
-            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
+        builder.when(local.is_real).assert_word_eq(local.op_b_value, local.frame.op_b_val());
+        builder.when(local.is_real).assert_word_eq(local.op_c_value, local.frame.op_c_val());
         builder
             .when(local.is_real)
-            .assert_eq(local.frame.num_extra_cycles, local.num_extra_cycles);
+            .assert_word_eq(local.prev_a_value, local.frame.op_a_access.prev_value);
         // Private shard/clk columns feed the syscall table send: tie them to
         // the frame (the Mul coupling).
         builder.when(local.is_real).assert_eq(local.shard, local.frame.shard);

@@ -1,3 +1,5 @@
+use zkm_pcs::air::BaseAirBuilder;
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
@@ -245,9 +247,13 @@ where
         // swap (`operand_1 = a`, `add_operation.value = b`).
         builder
             .when(local.is_add)
-            .assert_word_eq(local.add_operation.value, local.frame.op_a_value);
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.add_operation.value, *local.frame.op_a_access.value());
         builder.when(local.is_add).assert_word_eq(local.operand_1, local.frame.op_b_val());
-        builder.when(local.is_sub).assert_word_eq(local.operand_1, local.frame.op_a_value);
+        builder
+            .when(local.is_sub)
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.operand_1, *local.frame.op_a_access.value());
         builder
             .when(local.is_sub)
             .assert_word_eq(local.add_operation.value, local.frame.op_b_val());
@@ -263,13 +269,11 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
-            is_real.clone(),
+            // ADD/SUB can never halt: the received continuation is `next_pc`.
+            local.next_pc.into(),
+            AB::Expr::ZERO,
+            is_real,
         );
-        // ADD/SUB can never halt, so the received continuation is always the
-        // real `next_pc` (the halt exemption lives in the syscall chip).
-        builder
-            .when(is_real)
-            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
     }
 }
 

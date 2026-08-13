@@ -20,6 +20,7 @@ namespace zkm_core_machine_sys::syscall_instrs {
         cols.is_real = F::one();
         cols.pc = F::from_canonical_u32(event.pc);
         cols.next_pc = F::from_canonical_u32(event.next_pc);
+        cols.state_recv_next_pc = F::from_canonical_u32(event.recv_next_pc);
         cols.shard = F::from_canonical_u32(event.shard);
         cols.clk = F::from_canonical_u32(event.clk);
 

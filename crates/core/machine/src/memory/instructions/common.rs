@@ -12,6 +12,8 @@
 //! carries) instead of being delegated to the `AddSub` chip over the ALU bus,
 //! which removes one 19-cell `AddSub` dependency row per memory instruction.
 
+use zkm_pcs::air::BaseAirBuilder;
+use crate::memory::RegisterCols;
 use std::mem::size_of;
 
 use hashbrown::HashMap;
@@ -201,28 +203,39 @@ pub fn receive_memory_instruction<AB: ZKMCoreAirBuilder>(
 
     // A real instruction carries its own program fetch, register access and
     // `(clk, pc)` chaining.  Memory instructions are sequential, never halt.
+    // The plain stores read op_a immutably (the per-chip `op_a_immutable`
+    // expr, NOT including SC).
     crate::frame::eval_instruction_frame(
         builder,
         &cols.frame,
         cols.pc.into(),
         cols.next_pc.into(),
         cols.next_pc + AB::Expr::from_u32(4),
+        cols.next_pc.into(),
+        AB::Expr::ZERO,
         is_real.clone(),
+    );
+    // The plain stores read op_a immutably: the register write carries the
+    // previous value through unchanged.
+    builder.when(op_a_immutable.clone() * is_real.clone()).assert_word_eq(
+        *cols.frame.op_a_access.value(),
+        cols.frame.op_a_access.prev_value,
     );
     builder
         .when(is_real.clone())
-        .assert_eq(cols.frame.state_recv_next_pc, cols.next_pc);
-    // Every memory instruction reads-and-writes op_a; the plain stores read it
-    // immutably (the per-chip `op_a_immutable` expr, NOT including SC).
-    builder.assert_eq(cols.frame.is_rw_a, is_real.clone());
-    builder.assert_eq(cols.frame.op_a_immutable, op_a_immutable * is_real.clone());
-    builder
-        .when(is_real.clone())
-        .assert_word_eq(cols.frame.hi_or_prev_a, cols.prev_a_val);
+        .assert_word_eq(cols.prev_a_val, cols.frame.op_a_access.prev_value);
     // Bind this chip's operand columns to the frame's register-file view:
     // the chip must compute on exactly the values the register accesses
-    // commit (the Instruction bus that used to carry them is gone).
-    builder.when(is_real.clone()).assert_word_eq(cols.op_a_value, cols.frame.op_a_value);
+    // commit.  The load write is gated by op_a_0 (discarded); a STORE's
+    // immutable READ of register 0 must see 0.
+    builder
+        .when(is_real.clone())
+        .when_not(cols.frame.instruction.op_a_0)
+        .assert_word_eq(cols.op_a_value, *cols.frame.op_a_access.value());
+    builder
+        .when(op_a_immutable)
+        .when(cols.frame.instruction.op_a_0)
+        .assert_word_zero(cols.op_a_value);
     builder.when(is_real.clone()).assert_word_eq(cols.op_b_value, cols.frame.op_b_val());
     builder.when(is_real.clone()).assert_word_eq(cols.op_c_value, cols.frame.op_c_val());
     // The chips keep private shard/clk columns for the Memory-position access:

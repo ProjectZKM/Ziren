@@ -1,3 +1,4 @@
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
@@ -200,22 +201,24 @@ where
             local.pc.into(),
             local.next_pc.into(),
             local.next_pc + AB::Expr::from_u32(4),
+            local.next_pc.into(),
+            AB::Expr::ZERO,
             is_real.clone(),
         );
+        // Bind `prev_a_value` to the access's previous value EXACTLY on the
+        // rows that use it (MNE/MEQ keep the old value on a failed condition);
+        // WSBH is a plain write whose prev column is unused.
         builder
-            .when(is_real.clone())
-            .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
-        // MNE/MEQ read-and-write op_a (the frame's is_rw_a rule binds
-        // hi_or_prev_a to the record's prev value); WSBH is a plain write.
-        builder.assert_eq(local.frame.is_rw_a, local.is_mne + local.is_meq);
-        builder
-            .when(is_real.clone())
-            .assert_word_eq(local.frame.hi_or_prev_a, local.prev_a_value);
+            .when(local.is_mne + local.is_meq)
+            .assert_word_eq(local.prev_a_value, local.frame.op_a_access.prev_value);
 
         // Bind this chip's operand columns to the frame's register-file view:
         // the chip must compute on exactly the values the register accesses
-        // commit (the Instruction bus that used to carry them is gone).
-        builder.when(is_real.clone()).assert_word_eq(local.op_a_value, local.frame.op_a_value);
+        // commit; the op_a write is gated by op_a_0 (discarded).
+        builder
+            .when(is_real.clone())
+            .when_not(local.frame.instruction.op_a_0)
+            .assert_word_eq(local.op_a_value, *local.frame.op_a_access.value());
         builder.when(is_real.clone()).assert_word_eq(local.op_b_value, local.frame.op_b_val());
         builder.when(is_real.clone()).assert_word_eq(local.op_c_value, local.frame.op_c_val());
 

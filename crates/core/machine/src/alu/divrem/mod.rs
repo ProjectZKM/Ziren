@@ -60,6 +60,8 @@
 //! # the same to stay in agreement with the executor.
 //! assert not is_c_0   # i.e. c != 0 on every real row
 
+use zkm_pcs::air::BaseAirBuilder;
+use crate::memory::RegisterCols;
 use core::{
     borrow::{Borrow, BorrowMut},
     mem::size_of,
@@ -750,10 +752,12 @@ where
             // the remainder.
             builder
                 .when(local.is_div + local.is_divu)
-                .assert_word_eq(local.quotient, local.frame.op_a_value);
+                .when_not(local.frame.instruction.op_a_0)
+                .assert_word_eq(local.quotient, *local.frame.op_a_access.value());
             builder
                 .when(local.is_mod + local.is_modu)
-                .assert_word_eq(local.remainder, local.frame.op_a_value);
+                .when_not(local.frame.instruction.op_a_0)
+                .assert_word_eq(local.remainder, *local.frame.op_a_access.value());
             builder.when(is_real.clone()).assert_word_eq(local.b, local.frame.op_b_val());
             builder.when(is_real.clone()).assert_word_eq(local.c, local.frame.op_c_val());
 
@@ -765,11 +769,10 @@ where
                 local.pc.into(),
                 local.next_pc.into(),
                 local.next_pc + AB::Expr::from_u32(4),
+                local.next_pc.into(),
+                AB::Expr::ZERO,
                 is_real.clone(),
             );
-            builder
-                .when(is_real.clone())
-                .assert_eq(local.frame.state_recv_next_pc, local.next_pc);
             // shard/clk are populated only on DIV/DIVU rows (they write HI —
             // same coupling as Mul): tie them to the frame exactly there.
             let dd = local.is_div + local.is_divu;
