@@ -6723,3 +6723,42 @@ What the experiment paid for anyway:
 The remaining structural levers stay as ranked by the census: async GKR
 layer chaining (the ~224 challenger round-trips/shard), then concurrent
 per-shard BaseFold reduces.
+
+### SP1 commit/open shape: build the jagged commitment at commit(), retain to open() (Aug 13)
+
+SP1 commits the main trace ONCE inside `commit_traces` (dense jagged pack
++ BaseFold encode + merkle), observes the digest, and threads the
+retained prover data straight into `prove_trusted_evaluations`; nothing
+is rebuilt at open time.  Ziren's `maybe_auto_precompute_basefold` was
+the divergence: `commit()` was a stub (zero commitment, no data) and the
+real commitment was late-bound inside open.  Both provers now build at
+commit and retain: the CPU producer (host `fa5bfc15`, consumption seam
+`29e89a06`) packs borrowed per-chip cells and commits without moving the
+traces; the GPU producer (ziren-gpu `e49af93`) runs the dims-explicit
+precompute hook over the freshly committed device traces and carries
+{digest, precomputed, dense_q, zerocheck pack} through the snapshot into
+`ShardProveData.commit_data`.
+
+Two hard-won geometry/scheduling rules from the GPU side:
+
+1. **Height-0 injected chips are packing metadata**: cluster-injected
+   chips with zero rows still contribute `(width, 0)` columns to the
+   jagged packing — omitting them shifts every later column offset and
+   the verifier fails with "index 2048 == len 2048" at
+   `jagged_sumcheck`.  The commit-time build captures explicit per-chip
+   dims from the trace jobs (before the fan-out) instead of inferring
+   them from resident matrices.
+2. **Gate the retained set by shard SIZE, not free VRAM**: the retained
+   ~2.2 GiB must coexist with the NEXT shard's GKR peak, and free VRAM
+   sampled at commit time cannot predict that peak (margins from 9 to
+   14 GiB all OOMed reth); the shard's own cell count can.
+   `ZIREN_GPU_COMMIT_BUILD_MAX_CELLS` (default 150M) keeps small/medium
+   shards on the commit-time path and lets oversized shards fall back to
+   the open-path build, byte-identically.
+
+Measured cost, accepted for architectural parity: reth core 2708/2722
+kHz solo (275 shards, VERIFY OK, GPUs 7/6) vs the 2849 ATH = −4.6 %.
+The commit-time build runs on the pool worker — the known rate-limiting
+chain — which is exactly the reverted offload experiment's position; the
+recovery is whole-shard concurrency (N shards in flight, SP1's actual
+overlap model), which dissolves the coordinator/worker split entirely.
