@@ -6639,3 +6639,47 @@ build-out dirs; an all-chips bytecode-vs-host oracle test now exists in
 ziren-gpu.  (2) The Misc `prev_a` binding must gate on the MADD/INS rw
 group: SEXT/EXT/TEQ pin the column to zero while the register's old
 value is arbitrary.
+
+## Residual-gap attribution: the two balanced chains (Aug 13)
+
+Two cheap levers measured NEUTRAL first (both reverted / left at
+defaults): raising the GKR fold kernel's MAX_GRID_SIZE 1024→4096 (the
+kernel is not occupancy-limited by grid), and deepening the phase-2
+pipeline (TRACE_GEN_WORKERS=14 / channel cap 16 vs 8/8: 2710/2826 vs
+2855/2776 — noise).
+
+The span attribution that explains both: running one reth with
+`RUST_LOG=info` (the flat logger prints `time.busy`/`time.idle` per span
+close; core_khz 2797 under logging — unperturbed) shows
+`dispatch_recv_records` ≈ 0 — the coordinator is NEVER starved of
+checkpoints, killing the checkpoint-starvation theory.  The single-GPU
+inline path is two balanced ~113 s serial chains at a 545 ms/shard
+cycle: the COORDINATOR runs the whole BaseFold prove inline
+(`gpu_shard_open` nested in `dispatch_inline_basefold`: GKR 51 s — of
+which layer transitions 38 s — zerocheck 24 s, jagged 22 s, precompute
+commit 15 s) then blocks 125 ms/shard in `dispatch_recv_commit_wait`;
+the POOL WORKER runs commit + the legacy open at ~537 ms/shard,
+unspanned, and is the rate limiter.  `worker_commit` / `worker_open` /
+`worker_snapshot` spans now exist for the split.
+
+### GKR fold kernel: the 128-register occupancy cliff (Aug 13, ziren-gpu 30a2350)
+
+The run-dominant kernel (`foldAndSumCircuitLayerJaggedMsbInPlace`, 21.6 s
+of 88.5 s total GPU) compiled to 136 registers — just past the 128
+boundary — so at 256 threads/block ONE block fit per SM: 16.7 %
+occupancy, ~25 % of DRAM peak, and grid-size changes could not matter.
+`__launch_bounds__(256, 2)` caps it at REG:128/STACK:32 (2 blocks/SM);
+register allocation cannot change results.  reth core slot-swapped:
+2868/2830 (GPU7) + 2870/2829 (GPU6) vs 2815/2758/2838/2755 → **+2.1 %,
+4/4 positive**, all verified.  reth = **2849 kHz mean, −2.6 % vs the
+Cpu-chip baseline**.  Rule: check any hot kernel with
+`cuobjdump --dump-resource-usage <binary>` — at 256 threads/block,
+129–136 registers HALVES residency vs ≤128.
+
+The worker-chain split (new spans): `worker_commit` = 379 ms/shard is
+the entire rate-limiting chain (`worker_open` 0.4 ms — the legacy open
+is just the envelope; `worker_snapshot` 9 ms).  Inside commit the
+per-chip `generate trace on device` spans sum to 410 ms/shard of
+thread-time against a 379 ms wall — the 16-way par_iter achieves ~1.08×
+effective parallelism: the fan-out serializes on the device path, not
+on rayon.
