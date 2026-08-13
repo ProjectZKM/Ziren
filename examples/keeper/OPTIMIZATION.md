@@ -6451,3 +6451,38 @@ Cost of the sound splitter on reth core (single verified solo run):
 353 shards / 2056 kHz, vs 314 / 2452 unmodelled, vs 281 / 2954 pre-frame.
 All of this is the same story: dependency rows are pure overhead the SP1
 architecture does not have, and inlining them is the recovery path.
+
+## Aug 13 — Branch and Jump prove their own arithmetic: the dependency-row recovery, first half
+
+The frame arc's −30 % on reth decomposed entirely into Instruction-bus
+dependency rows (+52 dead frame columns each, honestly counted by the new
+splitter).  The two high-frequency emitters are now gone:
+
+- `operations/lt.rs`: the `Lt` chip's signed/unsigned compare extracted as an
+  embeddable `LtOperation` (masked-MSB SLT per Jolt 5.3, byte flags, LTU
+  lookup), plus TRUE equality (`is_comp_eq · is_sign_eq`) so ONE instance
+  yields lt / eq / gt by trichotomy — SP1's `LtOperationSigned` shape.  MIPS
+  semantics untouched.
+- Branch embeds one `LtOperation` + an `AddOperation` for the taken target
+  (2 SLT rows + 1 ADD row per branch, gone).  Jump embeds an `AddOperation`
+  for the BAL target (1 ADD row per call, gone).
+
+keccak-sponge ALU dependency rows: **34.7 % → 1.8 %** (13,366 → 451; the
+tail is DivRem/CloClz/Misc — rare opcodes, deferred).
+
+### Measured (reth core, 4-run ABBA per slot, slots swapped, all verified)
+
+| tree | mean kHz | shards |
+|---|---|---|
+| pre-frame baseline (60e45272) | 2957 (2886–3025) | 281 |
+| frame + honest splitter, pre-inline | 2056 | 353 |
+| **frame + Branch/Jump inlined** | **2493 (2465–2533)** | 318 |
+
+−30 % → **−15.7 %** vs baseline.  Tendermint core: 4341 kHz.  The residual
+is ~all shard count: the OLD splitter never saw dep rows, so its 2.5165e8
+`ELEMENT_THRESHOLD` really packed ~2.9e8 cells/shard; the honest estimator
+genuinely packs 2.5e8.  A single probe at `ELEMENT_THRESHOLD=2.9e8` gives
+**284 shards** (≈ the baseline 281) and verifies — the calibrated-threshold
+ABBA is queued.  Also visible in the first post-inline nsys census: pinned
+H2D collapsed from 44.8 GB to 2 GB (the `CpuEventFfi` upload died with the
+Cpu chip) leaving 138 GB of PAGEABLE event uploads — the next H2D lever.
