@@ -761,8 +761,7 @@ mod basefold_over_bn254_roundtrip_test {
                     (0..w)
                         .map(|col| {
                             (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
-                                let src =
-                                    ((row as u32).reverse_bits() >> (32 - log_h)) as usize;
+                                let src = ((row as u32).reverse_bits() >> (32 - log_h)) as usize;
                                 acc + eq_c[row] * JaggedChallenge::from(t.values[src * w + col])
                             })
                         })
@@ -779,15 +778,14 @@ mod basefold_over_bn254_roundtrip_test {
             claims,
             precomputed: &precompute,
         }];
-        let bundle =
-            prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
-                &rounds,
-                &z_row,
-                &mut p_chal,
-                mmcs.clone(),
-                dft,
-                fri.clone(),
-            );
+        let bundle = prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+            &rounds,
+            &z_row,
+            &mut p_chal,
+            mmcs.clone(),
+            dft,
+            fri.clone(),
+        );
 
         // Verifier inputs rebuilt from the bundle's packing — chip_infos
         // carrying the EXPLICIT stacking-padding columns, exactly as the outer

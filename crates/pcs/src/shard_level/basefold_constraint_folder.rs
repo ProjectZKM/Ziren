@@ -309,11 +309,9 @@ pub trait ShardProvableAir<SC: crate::StarkGenericConfig>:
     + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
     + for<'b> p3_air::Air<
         BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Challenge<SC>, crate::Challenge<SC>>,
-    >
-    + for<'b> p3_air::Air<
+    > + for<'b> p3_air::Air<
         BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
-    >
-    + Sync
+    > + Sync
 {
 }
 
@@ -327,10 +325,8 @@ impl<SC: crate::StarkGenericConfig, A> ShardProvableAir<SC> for A where
                 crate::Challenge<SC>,
                 crate::Challenge<SC>,
             >,
-        >
-        + for<'b> p3_air::Air<
+        > + for<'b> p3_air::Air<
             BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
-        >
-        + Sync
+        > + Sync
 {
 }

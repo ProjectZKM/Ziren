@@ -329,7 +329,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use p3_field::PrimeCharacteristicRing;

@@ -189,12 +189,10 @@ fn eval_symbolic_to_virtual_pair<F: Field>(
 
 #[cfg(test)]
 mod tests {
-    
 
     use p3_air::{Air, BaseAir, BaseEntry, WindowAccess};
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::KoalaBear;
-    
 
     use super::*;
     use crate::{air::ZKMAirBuilder, lookup::LookupKind};

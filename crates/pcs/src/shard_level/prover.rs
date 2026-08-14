@@ -951,7 +951,6 @@ where
                 >>::Commitment,
             >,
 {
-    
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
     use core::any::TypeId;
 

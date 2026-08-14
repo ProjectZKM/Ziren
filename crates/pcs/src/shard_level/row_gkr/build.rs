@@ -120,9 +120,9 @@ where
             LayerState::Host(GkrCircuitLayer::FirstLayer(_)) => unreachable!(
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
-            LayerState::Device { .. } => unreachable!(
-                "the host build_gkr_circuit never constructs LayerState::Device"
-            ),
+            LayerState::Device { .. } => {
+                unreachable!("the host build_gkr_circuit never constructs LayerState::Device")
+            }
         }
     };
     (output, LogupGkrCpuCircuit::new(layers))

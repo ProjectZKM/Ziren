@@ -356,7 +356,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 #[cfg(test)]
 mod phase1_acceptance_gate {
     use super::*;
-    
+
     use crate::jagged_branching_program::full_jagged_evaluation;
     use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
     use p3_challenger::FieldChallenger;

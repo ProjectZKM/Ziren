@@ -2042,13 +2042,12 @@ pub mod jagged {
         }
         res.is_ok()
     }
-
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    
+
     use p3_field::BasedVectorSpace;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
@@ -2523,7 +2522,6 @@ mod test {
             "deserialized G==1 bundle must verify identically"
         );
     }
-
 
     // ───────────────────────────────────────────────────────────────────
     // G-host: LOCK THE HASH-BIND CONVENTION (jagged geometry
