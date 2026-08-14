@@ -1,19 +1,17 @@
 #![allow(missing_docs)]
 
-use crate::{Com, StarkGenericConfig, ZeroCommitment};
 use p3_challenger::DuplexChallenger;
 use p3_commit::BatchOpening;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::{
     extension::{BinomialExtensionField, QuinticTrinomialExtensionField},
-    Field, PrimeCharacteristicRing,
+    Field,
 };
 use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
-use serde::{Deserialize, Serialize};
 use zkm_primitives::poseidon2_init;
 
 pub const DIGEST_SIZE: usize = 8;

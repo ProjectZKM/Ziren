@@ -685,7 +685,7 @@ where
 
     // ALWAYS at least one padding column per round, even on a round that lands
     // exactly on a stripe boundary.  Mirrors the prover.
-    let mut push_padding = |infos: &mut Vec<JaggedChipInfo>, pad: usize| {
+    let push_padding = |infos: &mut Vec<JaggedChipInfo>, pad: usize| {
         let mut done = 0usize;
         loop {
             let h = core::cmp::min(cube, pad - done);

@@ -4,7 +4,6 @@
 use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, PrimeField};
-use p3_matrix::dense::RowMajorMatrix;
 
 use super::extract::{extract_outputs, LogUpGkrOutput};
 use super::first_layer::generate_first_layer;
@@ -174,8 +173,7 @@ mod tests {
     use crate::lookup::{Lookup, LookupKind};
     use crate::Challenge;
 
-    type SC = crate::koala_bear_poseidon2::KoalaBearPoseidon2;
-    type EF = Challenge<SC>;
+    type EF = Challenge<crate::koala_bear_poseidon2::KoalaBearPoseidon2>;
 
     /// Build a one-chip shard with a single send-interaction whose
     /// trace and lookup are deterministic.  Used to drive end-to-end

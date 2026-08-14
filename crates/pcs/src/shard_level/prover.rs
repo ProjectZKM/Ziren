@@ -1,16 +1,12 @@
 //! Shard-level prover assembly: transcript prologue → LogUp-GKR →
 //! zerocheck → bridge observe → jagged-PCS → assemble.
 
-use p3_air::Air;
 use p3_challenger::CanObserve;
 use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
-use super::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use super::shard_proof::{BasefoldShardProof, FoldOrientation};
-use super::zerocheck_prover::prove_shard_zerocheck;
 use crate::air::MachineAir;
-use crate::folder::VerifierConstraintFolder;
 use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 
 /// Build the shard's BaseFold jagged-PCS commit during the prove pass.
@@ -942,7 +938,7 @@ where
                 >>::Commitment,
             >,
 {
-    use crate::shard_level::shard_proof::EvaluationProof;
+    
     use crate::{BasefoldRing, InnerChallenge, InnerVal};
     use core::any::TypeId;
 

@@ -21,11 +21,9 @@ use std::collections::BTreeMap;
 
 use super::types::PartialSumcheckProof;
 use crate::air::MachineAir;
-use crate::folder::VerifierConstraintFolder;
 use crate::{Challenge, Chip, StarkGenericConfig, Val};
-use p3_air::Air;
 use p3_challenger::FieldChallenger;
-use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
+use p3_field::{BasedVectorSpace, Field, PrimeField};
 use p3_matrix::dense::RowMajorMatrix;
 
 /// Shard-level zerocheck prover.

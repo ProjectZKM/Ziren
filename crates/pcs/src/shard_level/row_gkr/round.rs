@@ -1924,7 +1924,7 @@ mod tests {
     #[test]
     fn prove_gkr_round_sumcheck_identity_holds() {
         // 2-chip, 2-var layer for a meatier test.
-        let mut make_table = |cells: &[u32]| -> RowMajorTable<EF> {
+        let make_table = |cells: &[u32]| -> RowMajorTable<EF> {
             let values: Vec<EF> = cells.iter().map(|&x| EF::from_u32(x)).collect();
             RowMajorTable {
                 cells: values,

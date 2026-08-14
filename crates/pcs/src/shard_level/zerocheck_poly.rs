@@ -43,7 +43,7 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_field::{BasedVectorSpace, ExtensionField, Field};
+use p3_field::{ExtensionField, Field};
 use rayon::prelude::*;
 
 use crate::air::MachineAir;

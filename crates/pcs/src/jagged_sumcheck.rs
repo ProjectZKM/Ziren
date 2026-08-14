@@ -8,7 +8,6 @@
 use alloc::vec::Vec;
 
 use p3_field::{Field, PrimeCharacteristicRing};
-use p3_maybe_rayon::prelude::*;
 
 use crate::jagged::JaggedPacking;
 use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
@@ -357,7 +356,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 #[cfg(test)]
 mod phase1_acceptance_gate {
     use super::*;
-    use crate::jagged::{JaggedChipInfo, JaggedPacking};
+    
     use crate::jagged_branching_program::full_jagged_evaluation;
     use crate::kb31_poseidon2::{InnerChallenge, InnerChallenger, InnerVal};
     use p3_challenger::FieldChallenger;

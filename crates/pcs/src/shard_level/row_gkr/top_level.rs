@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 
 use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
-use p3_matrix::dense::RowMajorMatrix;
 
 use super::build::build_gkr_circuit;
 use super::round::prove_gkr_round;

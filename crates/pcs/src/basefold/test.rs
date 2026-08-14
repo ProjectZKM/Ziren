@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 
 use p3_challenger::CanObserve;
 use p3_dft::Radix2DitParallel;
-use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing};
+use p3_field::{BasedVectorSpace, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};

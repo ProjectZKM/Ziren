@@ -827,7 +827,7 @@ pub mod jagged {
     /// the caller re-wraps.
     pub type ChipTraceView = (alloc::string::String, crate::multilinear::PaddedMle<InnerVal>);
 
-    use super::{open_jagged_pcs, verify_jagged_pcs, FriConfig};
+    use super::{open_jagged_pcs, FriConfig};
 
     // ── Test-only verify-progress tracker ─────────────────────────────────
     // Records how FAR the host verifier got, so tests can assert WHERE a
@@ -2331,7 +2331,7 @@ pub mod jagged {
         chip_infos: &[JaggedChipInfo],
         r_row_per_chip: &[Vec<InnerChallenge>],
         z_row: &[InnerChallenge], // full z* for embedding factor
-        n_prep: usize,
+        _n_prep: usize,
         // Rounds committed BEFORE the proof's own, whose commitments come from
         // the VERIFYING KEY (the preprocessed round), as (commitment, area).
         preceding_rounds: &[(
@@ -2968,7 +2968,7 @@ pub mod jagged {
 #[cfg(test)]
 mod test {
     use super::*;
-    use p3_challenger::FieldChallenger;
+    
     use p3_field::BasedVectorSpace;
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};

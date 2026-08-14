@@ -5,7 +5,7 @@ use std::{cmp::Reverse, error::Error, time::Instant};
 
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField, PrimeField32};
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
@@ -24,7 +24,7 @@ use crate::shard_level::zerocheck_prover::prove_shard_zerocheck;
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
     Challenge, Challenger, DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData,
-    PcsProverData, ProverConstraintFolder, ShardOpenedValues, ShardProof, StarkVerifyingKey,
+    PcsProverData, ProverConstraintFolder, ShardProof, StarkVerifyingKey,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store

@@ -10,7 +10,6 @@ use p3_field::{PrimeCharacteristicRing, PrimeField64};
 use p3_fri::FriParameters;
 use p3_keccak::Keccak256Hash;
 use p3_matrix::dense::RowMajorMatrix;
-use p3_matrix::Matrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_mersenne_31::Mersenne31;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
