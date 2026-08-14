@@ -992,8 +992,9 @@ where
 ///       = Σ_{bit b}  (bit >= threshold at big-endian comparison)
 /// ```
 ///
-/// via the same recurrence as the in-circuit [`crate::zerocheck::full_geq`]
-/// but on concrete extension-field values.
+/// via the same recurrence as the in-circuit
+/// `zkm_recursion_circuit::zerocheck::full_geq` but on concrete
+/// extension-field values.
 #[allow(dead_code)] // kept for unit tests
 fn full_geq_host<EF: Field + Copy>(threshold: &[EF], eval_point: &[EF]) -> EF {
     debug_assert_eq!(
@@ -1405,7 +1406,7 @@ where
 ///
 ///   eq(a, b) = Π_k ((1 - a_k)(1 - b_k) + a_k · b_k)
 ///
-/// Mirrors [`crate::zerocheck::eq_eval`] but for concrete
+/// Mirrors `zkm_recursion_circuit::zerocheck::eq_eval` but for concrete
 /// `Challenge<SC>` values instead of symbolic circuit exprs.
 fn eq_eval_host<EF: Field + Copy>(a: &[EF], b: &[EF]) -> EF {
     debug_assert_eq!(a.len(), b.len(), "eq_eval_host: dimension mismatch");

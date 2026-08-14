@@ -39,7 +39,6 @@ pub mod tensor;
 mod types;
 mod verifier;
 mod word;
-pub mod zerocheck;
 pub mod zerocheck_prover;
 
 pub use air::*;

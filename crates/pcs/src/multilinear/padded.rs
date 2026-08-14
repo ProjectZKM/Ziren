@@ -407,7 +407,7 @@ fn from_usize_msb<EF: Field>(num: usize, dimension: usize) -> Vec<EF> {
 /// Analytic "greater-or-equal" indicator: `Σ_{row ≥ threshold}
 /// eq(point)[row]` for an MSB-first `threshold` (as 0/1 field bits) and
 /// MSB-first `point`.  Same recurrence as the in-circuit
-/// `crate::zerocheck::full_geq` and the host mirror
+/// `zkm_recursion_circuit::zerocheck::full_geq` and the host mirror
 /// `crate::shard_level::verifier::full_geq_host`.
 fn full_geq<EF: Field>(threshold: &[EF], point: &[EF]) -> EF {
     debug_assert_eq!(threshold.len(), point.len());

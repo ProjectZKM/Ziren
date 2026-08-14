@@ -321,7 +321,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 
     // `full_jagged_evaluation` consumes `z_index` in the branching program's
     // big-endian order, which is `rev(z_star)` — the same pairing the
-    // acceptance gate asserts against `MultilinearExt::evaluate(&z_star)`.
+    // acceptance gate asserts against the dense weight MLE at `z_star`.
     let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
     let w_at_z = crate::jagged_branching_program::full_jagged_evaluation(
         &packing.offsets,
@@ -856,7 +856,7 @@ mod phase1_acceptance_gate {
 /// The verifier's closing weight comes from the branching-program closed
 /// form (`full_jagged_evaluation`, 38 ms, no transient) rather than
 /// materializing the `2^log_dense_size` weight MLE (`build_weight_table` +
-/// `MultilinearExt::evaluate` — 4.0 GiB and 14.7 s on a core reth shard).
+/// a dense fold — 4.0 GiB and 14.7 s on a core reth shard).
 /// These tests pin the two
 /// to be BIT-IDENTICAL across randomized and degenerate packing geometry, so
 /// the closed form cannot silently change any verdict.
@@ -923,9 +923,19 @@ mod closed_form_weight_equivalence {
         let r_row_per_chip: Vec<Vec<InnerChallenge>> =
             packing.chip_infos.iter().map(|_| z_row.clone()).collect();
 
-        // Old path: materialize the dense weight MLE and fold it.
+        // Old path: materialize the dense weight MLE and evaluate it at
+        // `z_star` as `Σ_b w[b]·eq(z_star, b)`.  `eq_mle_table` maps index
+        // bit `i` to `z_star[i]`, so this is the LSB-first variable order
+        // the dense table is indexed in.
         let w_table = build_weight_table_from_z_col(&packing, &r_row_per_chip, &z_col, &z_row);
-        let table_form = crate::zerocheck_prover::MultilinearExt::new(w_table).evaluate(&z_star);
+        assert_eq!(
+            w_table.len(),
+            1usize << z_star.len(),
+            "weight table must be the dense MLE over z_star"
+        );
+        let eq_star = crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_star);
+        let table_form: InnerChallenge =
+            w_table.iter().zip(eq_star.iter()).map(|(&w, &e)| w * e).sum();
 
         // New path: branching-program closed form.
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
