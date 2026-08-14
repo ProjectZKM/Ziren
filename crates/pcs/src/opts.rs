@@ -361,7 +361,7 @@ impl Default for ZKMCoreOpts {
             // default is pinned to 2^24. The memory heuristic still governs
             // shard_batch_size + the split divisor below.
             //
-            // MEASURED (see examples/keeper/OPTIMIZATION.md, "Shard size"):
+            // MEASURED ("Shard size" sweep, Aug 2026):
             // this value is INERT for any `SHARD_SIZE >= 2^22`. The executor
             // stores it as `cycles * 4` and exits on `clk >= 4 * SHARD_SIZE`,
             // but a second, FIXED exit fires at `clk >= 2^24`
