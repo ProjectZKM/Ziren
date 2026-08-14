@@ -246,26 +246,12 @@ pub fn dummy_proof() -> (StarkVerifyingKey<OuterSC>, ShardProof<OuterSC>) {
 
 fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -> Vec<Constraint> {
     let wrap_machine = WrapAir::wrap_machine(OuterSC::default());
-    // PER-STAGE cube: the outer (gnark/BN254) circuit verifies the WRAP
-    // proof; the verifier asserts `zerocheck_proof.point.dim ==
-    // pcs_max_log_row_count`, so build with the input proof's zerocheck dim
-    // (floored at BASE=22).  NO-OP for FIX-on (input dim ≤ 22).  The proof
-    // type is `BasefoldShardProof<InnerVal, InnerChallenge>` for both rings.
-    let base = zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
-        .max_log_row_count;
-    let in_dim = template_input
-        .vks_and_proofs
-        .iter()
-        .map(|(_vk, proof)| proof.zerocheck_proof.point_and_eval.0.len())
-        .max()
-        .unwrap_or(0);
-    let max_log_row_count = base.max(in_dim);
-    if max_log_row_count != base {
-        eprintln!(
-            "PERSTAGE-CUBE build[outer_bn254]: base={base} input_zc_dim={in_dim} \
-             -> cube={max_log_row_count} (FIX-off input proof above base)"
-        );
-    }
+    // The outer (gnark/BN254) circuit verifies the WRAP proof at the fixed
+    // cube; the verifier asserts `zerocheck_proof.point.dim ==
+    // pcs_max_log_row_count`, rejecting an input proof at any other cube.
+    let max_log_row_count =
+        zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
 
     let wrap_span = tracing::debug_span!("build wrap circuit").entered();
     let mut builder = Builder::<OuterConfig>::default();

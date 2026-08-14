@@ -558,86 +558,20 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         })
     }
 
-    /// PER-STAGE zerocheck-cube floor (= `BasefoldShardVerifier`
-    /// production default `max_log_row_count`, 22).
-    fn perstage_base_cube() -> usize {
+    /// The FIXED zerocheck cube (= `BasefoldShardVerifier`
+    /// production default `max_log_row_count`, 22).  EVERY stage builds,
+    /// proves, and verifies at this one constant; nothing floats it up
+    /// from an input proof's zerocheck dim.  The in-circuit checks bind
+    /// the cube against the input proof (`verify_zerocheck` `point.dim ==
+    /// pcs_max_log_row_count`; `verify_logup_gkr`
+    /// `round_proofs.len()+1 == max_log_row_count`), so a proof produced
+    /// at any other cube fails to verify.  Over-tall chip heights cannot
+    /// occur: the core executor's `height_split` closes a shard before
+    /// any chip reaches `2^cube` rows, and every recursion band is
+    /// asserted `<= cube` at shape construction.
+    fn pcs_max_log_row_count() -> usize {
         zkm_pcs::shard_level::verifier::BasefoldShardVerifier::production_default()
             .max_log_row_count
-    }
-
-    /// PER-STAGE zerocheck cube for a recursion verifier-circuit.
-    ///
-    /// The cube is PINNED to the FIXED base (22, the core cap) for EVERY
-    /// stage — it is NOT floated up to a FIX-off input proof's zerocheck dim.
-    /// The recursion program's cube axis is HEIGHT-INDEPENDENT: the same
-    /// cube=BASE program is reused for FIX-on and FIX-off alike, so it stays
-    /// BYTE-IDENTICAL and preserves the production vk_map invariant.
-    ///
-    /// The in-circuit checks still assert the cube against the input proof's
-    /// zerocheck dim and LogUp-GKR round count (`verify_zerocheck`
-    /// zerocheck.rs:523 `point.dim == pcs_max_log_row_count`;
-    /// `verify_logup_gkr` logup_gkr.rs:354 `round_proofs.len()+1 ==
-    /// max_log_row_count`).  FIX-off over-tall heights do NOT violate this:
-    /// each prover proves its proof AT the fixed cube; over-tall chip heights
-    /// are WITNESSED under the full_geq degree mask (logup_gkr.rs:637) and
-    /// carried by the degree bit-length at fixed-cube+1
-    /// (shard_proof_variable_lift.rs:328/393/461-468) — they are witnessed,
-    /// NOT grown into the circuit.
-    ///
-    /// If an input proof's dim genuinely EXCEEDS the fixed cube, that is a
-    /// real over-cap chip (height-threshold shard-splitting territory) —
-    /// the function WARNs (it does NOT grow the circuit), so a real failing
-    /// prove surfaces it precisely.
-    ///
-    /// `stage` labels the diagnostic eprintln.
-    fn perstage_cube_from_input_proofs<'a, I>(proofs: I, base: usize, stage: &str) -> usize
-    where
-        I: IntoIterator<
-            Item = &'a zkm_pcs::shard_level::shard_proof::BasefoldShardProof<
-                zkm_pcs::InnerVal,
-                zkm_pcs::InnerChallenge,
-            >,
-        >,
-    {
-        let in_dim =
-            proofs.into_iter().map(|p| p.zerocheck_proof.point_and_eval.0.len()).max().unwrap_or(0);
-        // PIN the recursion cube to the FIXED base (22, the core cap).  The
-        // cube is NOT floated up to a FIX-off input proof's zerocheck dim — the
-        // recursion program's cube axis is HEIGHT-INDEPENDENT.  An over-tall
-        // FIX-off chip is WITNESSED under the full_geq degree mask
-        // (logup_gkr.rs:637), carried by the degree bit-length at fixed-cube+1
-        // (shard_proof_variable_lift.rs:328/393/461-468) — NOT grown into the
-        // circuit.  This preserves the cube=BASE program (byte-identical,
-        // vk_map-stable) for ALL stages.
-        //
-        // The diagnostic is a WARN: if an input proof's dim exceeds the fixed
-        // cube, that surfaces a genuine over-cap chip (height-threshold
-        // shard-splitting territory) — it must be reported, not silently
-        // absorbed by growing the circuit.
-        if in_dim > base {
-            eprintln!(
-                "PERSTAGE-CUBE build[{stage}]: WARN base={base} input_zc_dim={in_dim} \
-                 (input proof zerocheck dim EXCEEDS the pinned cube; cube stays \
-                 pinned at {base} — over-tall heights are witnessed under the \
-                 full_geq mask, NOT grown into the circuit)"
-            );
-        }
-        base
-    }
-
-    /// PER-STAGE zerocheck cube for the *terminal* (shrink / wrap_bn254)
-    /// stages — convenience wrapper over [`Self::perstage_cube_from_input_proofs`]
-    /// for the `(vk, proof)`-shaped wrap witness.
-    fn perstage_cube_from_wrap_input(
-        input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
-        base: usize,
-        stage: &str,
-    ) -> usize {
-        Self::perstage_cube_from_input_proofs(
-            input.vks_and_proofs.iter().map(|(_vk, p)| p),
-            base,
-            stage,
-        )
     }
 
     /// Snap a basefold recursion program onto one of the allowed recursion
@@ -671,13 +605,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCoreBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // PER-STAGE cube PINNED to the fixed base — the normalize circuit
-        // verifies its input core-shard proofs at this fixed
-        // `max_log_row_count`.  FIX-off over-tall core heights are witnessed
-        // under the full_geq mask, not floated into the cube.
-        let base = Self::perstage_base_cube();
-        let max_log_row_count =
-            Self::perstage_cube_from_input_proofs(input.shard_proofs.iter(), base, "normalize");
+        // The normalize circuit verifies its input core-shard proofs at the
+        // fixed `max_log_row_count`.
+        let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program =
             build_normalize_basefold_program(self.core_prover.machine(), input, max_log_row_count);
         self.fix_recursion_shape(&mut program);
@@ -755,14 +685,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMCompressBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // PER-STAGE cube from the INPUT (normalize/compose) proofs' zerocheck
-        // dims — the compose circuit verifies these at `max_log_row_count`.
-        let base = Self::perstage_base_cube();
-        let max_log_row_count = Self::perstage_cube_from_input_proofs(
-            input.vks_and_proofs.iter().map(|(_vk, p)| p),
-            base,
-            "compose",
-        );
+        let max_log_row_count = Self::pcs_max_log_row_count();
         // The `_recursion` variant is the sole production path for
         // basefold-for-recursion.
         let mut program = build_compose_basefold_recursion_program(
@@ -782,13 +705,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMDeferredBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // PER-STAGE cube from the INPUT (deferred/compress) proofs' dims.
-        let base = Self::perstage_base_cube();
-        let max_log_row_count = Self::perstage_cube_from_input_proofs(
-            input.vks_and_proofs.iter().map(|(_vk, p)| p),
-            base,
-            "deferred",
-        );
+        let max_log_row_count = Self::pcs_max_log_row_count();
         // basefold-for-recursion, mirroring
         // `build_compose_program_basefold_uncached`.
         let mut program = build_deferred_basefold_recursion_program(
@@ -809,11 +726,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         &self,
         input: &ZKMWrapBasefoldWitnessValues<InnerSC>,
     ) -> Arc<RecursionProgram<KoalaBear>> {
-        // PER-STAGE cube from the INPUT (compose) proof's zerocheck dim —
-        // shrink does not fix_shape its own program, so the band-max source
-        // is unavailable; use the dim the verifier circuit asserts against.
-        let max_log_row_count =
-            Self::perstage_cube_from_wrap_input(input, Self::perstage_base_cube(), "shrink");
+        let max_log_row_count = Self::pcs_max_log_row_count();
         let mut program = build_wrap_basefold_program(
             self.compress_prover.machine(),
             input,
@@ -852,10 +765,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Arc<RecursionProgram<KoalaBear>> {
         use zkm_recursion_circuit::machine::wrap_basefold::verify_wrap_basefold;
 
-        // PER-STAGE cube from the INPUT (shrink) proof's zerocheck dim — same
-        // reasoning as `shrink_program_basefold`.
-        let max_log_row_count =
-            Self::perstage_cube_from_wrap_input(input, Self::perstage_base_cube(), "wrap_bn254");
+        let max_log_row_count = Self::pcs_max_log_row_count();
 
         let builder_span = tracing::debug_span!("build wrap-bn254-basefold program").entered();
         let mut builder = Builder::<WrapConfig>::default();
@@ -3517,7 +3427,7 @@ pub mod tests {
         // the child's MAIN band heights, which is a different number whenever a
         // chip's preprocessed height differs from its main height.
         let packing = &pk.preprocessed_data().packing;
-        let cube = 1usize << ZKMProver::<DefaultProverComponents>::perstage_base_cube();
+        let cube = 1usize << ZKMProver::<DefaultProverComponents>::pcs_max_log_row_count();
         let real_cells = packing.total_values;
         let real_area = packing.dense_len;
         let real_pads = real_area.saturating_sub(real_cells).div_ceil(cube).max(1);

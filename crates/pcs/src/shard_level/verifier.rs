@@ -95,13 +95,16 @@ impl BasefoldShardVerifier {
     /// at exactly 24).
     #[must_use]
     pub const fn production_default() -> Self {
-        // BASE floor (22).  The prover and each recursion program-build site
-        // override the cube PER PROOF: `cube = 22.max(tallest chip
-        // log-height)`.  Proofs whose tallest chip is ≤ 2^22 stay at cube=22;
-        // only band-5 proofs (ext_alu 2^24 / base_alu 2^23) get cube=24.
+        // FIXED cube: every stage proves and verifies at exactly this
+        // constant — never floated per proof.  Coverage invariant: the core
+        // executor's `height_split` closes a shard before any chip reaches
+        // `2^CORE_MAX_LOG_ROW_COUNT` rows (`CORE_SHARD_HEIGHT_THRESHOLD`,
+        // measured peaks ~2.5M vs the 4.1M fence), and every recursion band
+        // is asserted `<=` this cube at shape construction
+        // (recursion/core shape.rs).
         // Two-adic-safe: the BaseFold codeword bound is over
         // log_stacking_height (fixed 21), NOT max_log_row_count.
-        Self { max_log_row_count: 22 }
+        Self { max_log_row_count: crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT }
     }
 
     /// Construct with explicit parameters.  Use when writing tests
@@ -257,26 +260,23 @@ impl BasefoldShardVerifier {
             })
         });
 
-        // ── PER-STAGE CUBE ──────────────────────────────
+        // ── FIXED CUBE ──────────────────────────────────
         //
-        // `self.max_log_row_count` is only the BASE floor (22).  The prover
-        // sizes the zerocheck cube PER PROOF (`cube = base.max(tallest
-        // band-padded chip log-height)`); band-5 shards (ext_alu 2^24) need
-        // cube 24 (24 GKR rounds, a 24-dim zerocheck point), which a fixed 22
-        // rejects at the round-count / point-dim checks.  Derive the effective
-        // cube from the proof as `base.max(proof_cube)` — the same rule the
-        // recursion program builds use — so the host verifier agrees with the
-        // in-circuit verifier program (the VK).  See
-        // `derive_effective_max_log_row_count` for the soundness rationale.
-        let proof_cube = proof.logup_gkr_proof.round_proofs.len() + 1;
-        let effective_max_log_row_count =
-            derive_effective_max_log_row_count(self.max_log_row_count, proof_cube)?;
+        // `self.max_log_row_count` is the fixed config cube — never floated
+        // up from the proof.  The GKR round-count check
+        // (`round_proofs.len() + 1 == max_log_row_count`) and the zerocheck
+        // point-dim check both bind the proof to this constant, so a proof
+        // produced at any other cube is rejected outright.  Every reachable
+        // proof IS at this cube: the core executor's `height_split` caps
+        // chip heights below `2^22` and the recursion bands are asserted
+        // `<=` the cube at shape construction.
+        let max_log_row_count = self.max_log_row_count;
 
         verify_logup_gkr_host::<SC, A>(
             &proof.logup_gkr_proof,
             chips,
             &proof.opened_values,
-            effective_max_log_row_count,
+            max_log_row_count,
             beta_seed_dim,
             proof.fold_orientation,
             &proof.public_values,
@@ -297,7 +297,7 @@ impl BasefoldShardVerifier {
             &proof.zerocheck_proof,
             &proof.logup_gkr_proof.logup_evaluations,
             &proof.public_values,
-            effective_max_log_row_count,
+            max_log_row_count,
             core_rev,
             challenger,
             // Discriminator: opened_values carries the trace@z*
@@ -422,58 +422,6 @@ impl BasefoldShardVerifier {
 
         Ok(())
     }
-}
-
-/// PER-STAGE cube ceiling: the tallest reachable FIX-off recursion
-/// band (band-5: `ext_alu 2^24`) at the KoalaBear two-adicity (24).  A
-/// proof claiming a larger cube cannot correspond to any admitted recursion
-/// shape and is rejected outright.  See `BasefoldShardVerifier::production_default`
-/// and `crates/recursion/core/src/shape.rs:262`.
-pub(crate) const MAX_PERSTAGE_CUBE: usize = 24;
-
-/// Derive the per-shard effective `max_log_row_count`.
-///
-/// `base` (`production_default().max_log_row_count`, 22) is only the FLOOR.
-/// The prover sizes the zerocheck cube PER PROOF —
-/// `cube = base.max(tallest band-padded chip log-height)` — so band-5 shards
-/// (`ext_alu 2^24`) record cube 24 (24 GKR rounds, a 24-dim zerocheck point).
-/// The recursion program builds use the same
-/// `effective = base.max(proof_cube)` rule, so the host verifier agrees with
-/// the in-circuit verifier program (the VK).
-///
-/// `proof_cube` is sourced by the caller from the LogUp-GKR round count
-/// (`round_proofs.len() + 1`); for any well-formed proof this equals the
-/// zerocheck point dim (`point_and_eval.0.len()`), and deriving the cube from
-/// the GKR round count keeps the zerocheck point-dim check
-/// `point_dim == effective` a REAL check rather than a tautology.
-///
-/// Sound: the round-count and zerocheck-dim checks both bind against this
-/// single derived value (a dropped GKR round shrinks `effective`, which then
-/// fails the zerocheck point-dim check); the cube is clamped at
-/// [`MAX_PERSTAGE_CUBE`] so an untrusted proof cannot inflate it beyond the
-/// largest admitted band.  Returns `base` unchanged when
-/// `proof_cube <= base`.
-fn derive_effective_max_log_row_count(
-    base: usize,
-    proof_cube: usize,
-) -> Result<usize, BasefoldVerifyError> {
-    if proof_cube > MAX_PERSTAGE_CUBE {
-        return Err(BasefoldVerifyError::LogupGkr(format!(
-            "derived per-stage cube {proof_cube} (GKR round count + 1) exceeds the \
-             ceiling {MAX_PERSTAGE_CUBE} (band-5 ext_alu 2^24 / KoalaBear two-adicity)"
-        )));
-    }
-    let effective = base.max(proof_cube);
-    if effective != base {
-        tracing::debug!(
-            base,
-            proof_cube,
-            effective,
-            "PERSTAGE-CUBE verify[shard]: FIX-off proof above base \
-             (cube derived from GKR round count)"
-        );
-    }
-    Ok(effective)
 }
 
 /// Host-side jagged-PCS opening verification (Stage 4).
@@ -1919,12 +1867,11 @@ where
     let (interaction_point, trace_point) = eval_point.split_at(log_num_interactions);
 
     // (2) The trace point must equal the claimed opening point, and its
-    // dimension must equal the per-stage cube (NOT the base 22) — the
-    // effective `max_log_row_count` threaded in from `verify_shard`.
+    // dimension must equal the FIXED cube threaded in from `verify_shard`.
     let logup_evaluations = &proof.logup_evaluations;
     if trace_point.len() != max_log_row_count {
         return Err(BasefoldVerifyError::LogupGkr(format!(
-            "reconstruction: trace_point dim {} != effective max_log_row_count {}",
+            "reconstruction: trace_point dim {} != max_log_row_count {}",
             trace_point.len(),
             max_log_row_count
         )));
@@ -2155,33 +2102,17 @@ mod tests {
         assert_eq!(v.max_log_row_count, 3);
     }
 
-    /// Per-stage cube derivation. At the production base (22):
-    ///   * cube-22 proofs (round_proofs.len()+1 == 22) are a NO-OP → 22
-    ///     (BYTE-IDENTICAL verify path for core / FIX-on / single-shard);
-    ///   * a cube-24 proof (the FIX-off band-5 multi-shard case, 23
-    ///     round_proofs) lifts the effective cube to 24 so the round-count
-    ///     and zerocheck point-dim checks are run AT 24 (no more
-    ///     "round count 23+1 != max_log_row_count 22");
-    ///   * a proof claiming a cube beyond the ceiling (24) is rejected.
+    /// `production_default` carries the one config constant
+    /// (`consts::CORE_MAX_LOG_ROW_COUNT`, 22), and the verifier binds
+    /// every proof to it exactly — the GKR round-count check
+    /// (`round_proofs.len() + 1 == max_log_row_count`) rejects a proof
+    /// produced at any other cube; nothing floats the cube up from the
+    /// proof.
     #[test]
-    fn derive_effective_max_log_row_count_perstage_cube() {
+    fn fixed_cube_sourced_from_the_core_constant() {
         let base = BasefoldShardVerifier::production_default().max_log_row_count;
+        assert_eq!(base, crate::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT);
         assert_eq!(base, 22);
-
-        // No-op: cube <= base stays at base (byte-identical path).
-        assert_eq!(derive_effective_max_log_row_count(base, 21).unwrap(), base);
-        assert_eq!(derive_effective_max_log_row_count(base, 22).unwrap(), base);
-
-        // FIX-off band-5 multi-shard: 23 round_proofs => proof_cube 24 => 24.
-        let cube24 = 23 + 1;
-        assert_eq!(derive_effective_max_log_row_count(base, cube24).unwrap(), 24);
-
-        // Ceiling: cube 24 is the max admitted band; 25 is rejected.
-        assert_eq!(
-            derive_effective_max_log_row_count(base, MAX_PERSTAGE_CUBE).unwrap(),
-            MAX_PERSTAGE_CUBE
-        );
-        assert!(derive_effective_max_log_row_count(base, MAX_PERSTAGE_CUBE + 1).is_err());
     }
 
     /// The three-variant error Display ends with the exact phase hint

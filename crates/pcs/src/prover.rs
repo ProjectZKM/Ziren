@@ -457,10 +457,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         //     supplies its own orientation.
         //   * `dense_rev` — the per-shard rev(zeta) orientation, from the
         //     per-stage source of truth `StarkMachine::core_rev()`.
-        //   * `max_log_row_count` — the PER-STAGE cube `max(BASE, max over chips
-        //     of log2(resolved height))`, read back off the traces: the
-        //     construction site padded every entry to that cube, so
-        //     `num_variables()` IS the cube.
+        //   * `max_log_row_count` — the FIXED config cube.  The
+        //     construction site padded every entry to it, so
+        //     `num_variables()` on any entry must agree — asserted below.
         let orientation = crate::shard_level::shard_proof::FoldOrientation::Msb;
         let dense_rev = self.machine().core_rev();
         // The recursion-layer AREA PIN, from the per-stage machine
@@ -473,17 +472,18 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         } else {
             None
         };
-        // Every `PaddedMle` in the map carries the SAME cube (both the
-        // `padded_with_zeros` host chips and the `dummy` width-0 chips are built
-        // with it), so any entry reports it.  An empty chip set never reaches a
-        // shard proof; fall back to the BASE floor for totality.
+        // The FIXED config cube.  Every `PaddedMle` in the map was built AT
+        // this constant (both the `padded_with_zeros` host chips and the
+        // `dummy` width-0 chips), so each entry must report it — asserted in
+        // debug builds.
         let max_log_row_count =
-            main_traces.values().next().map(|pm| pm.num_variables() as usize).unwrap_or_else(
-                || {
-                    crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-                        .max_log_row_count
-                },
-            );
+            crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+                .max_log_row_count;
+        debug_assert!(
+            main_traces.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
+            "prove_shard_with_data: main_traces padded to a cube != the fixed \
+             max_log_row_count {max_log_row_count}",
+        );
         // The shared analytic trace-MLE store — the SINGLE authoritative host
         // main-trace store — is built ONCE at the construction site and handed
         // over ready-made on `data.main_traces`.
@@ -1040,29 +1040,16 @@ where
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
             if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                // The per-stage zerocheck cube: `max(BASE, tallest chip)`.
-                // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
-                let max_log_row_count = {
-                    let base_cube =
-                        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-                            .max_log_row_count;
-                    let mut cube = base_cube;
-                    for (_, t) in named_traces.iter() {
-                        let w = t.width;
-                        if w == 0 {
-                            continue;
-                        }
-                        let h = t.values.len() / w;
-                        if h == 0 {
-                            continue;
-                        }
-                        let log_h = (h as u64).trailing_zeros() as usize;
-                        if log_h > cube {
-                            cube = log_h;
-                        }
-                    }
-                    cube
-                };
+                // The FIXED zerocheck cube — never floated up to a tall
+                // chip.  Coverage is enforced UPSTREAM: the core executor's
+                // `height_split` closes a shard before any chip reaches
+                // `2^cube` rows, and every recursion band is asserted
+                // `<= cube` at shape construction; `PaddedMle::padded`
+                // hard-asserts it again per chip below, so an over-tall
+                // trace fails loudly here rather than growing the cube.
+                let max_log_row_count =
+                    crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+                        .max_log_row_count;
                 let names: Vec<String> =
                     named_traces.iter().map(|(name, _)| name.clone()).collect();
                 let main_store = named_padded_traces(
@@ -1363,18 +1350,21 @@ where
     //
     // The name-keyed trace-MLE store was built ONCE at `commit()` (the
     // matrices moved into their `Arc<Mle>`s there) and rides the retained
-    // commit data; the cube is read back off any entry
-    // (`PaddedMle::num_variables`) — every entry was padded to it.
+    // commit data; every entry was padded to the FIXED config cube —
+    // asserted in debug builds.
     let mut commit_data = commit_data;
     let main_traces_named = commit_data
         .as_mut()
         .and_then(|retained| retained.main_store.take())
         .expect("CpuProver::commit retains the main-trace store");
-    let max_log_row_count = main_traces_named
-        .values()
-        .next()
-        .map(|pm| pm.num_variables() as usize)
-        .expect("shard has at least one chip");
+    let max_log_row_count =
+        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
+            .max_log_row_count;
+    debug_assert!(
+        main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
+        "retained main store padded to a cube != the fixed max_log_row_count \
+         {max_log_row_count}",
+    );
     // Preprocessed traces in prove-path form: the per-key
     // `Arc<Mle>`s are built once by `preprocessed_mles()` and shared by every
     // shard; only the cube-dependent `PaddedMle` wrapper is per shard, and

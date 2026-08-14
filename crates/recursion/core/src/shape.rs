@@ -293,7 +293,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
-            // FIXED `max_log_row_count` (22 — `ZKMProver::perstage_base_cube`),
+            // FIXED `max_log_row_count` (22 — `ZKMProver::pcs_max_log_row_count`),
             // and a chip's trace is wrapped as `PaddedMle::padded(inner, cube,
             // ..)`, which asserts the padded rows fit `2^cube`.  A band taller
             // than the cube therefore cannot be padded TO: measured, tendermint
