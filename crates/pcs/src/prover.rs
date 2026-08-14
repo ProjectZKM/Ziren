@@ -5,7 +5,7 @@ use std::{cmp::Reverse, error::Error, time::Instant};
 
 use p3_air::Air;
 use p3_challenger::CanObserve;
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
+use p3_field::{BasedVectorSpace, ExtensionField, PrimeCharacteristicRing, PrimeField, PrimeField32};
 use p3_matrix::{dense::RowMajorMatrix, Matrix};
 use p3_maybe_rayon::prelude::*;
 use p3_uni_stark::SymbolicAirBuilder;
@@ -14,10 +14,17 @@ use super::{
     Com, OpeningProof, StarkGenericConfig, StarkMachine, StarkProvingKey, Val,
     VerifierConstraintFolder,
 };
+use crate::shard_level::prover::{
+    assemble_basefold_shard_proof, build_chip_cumulative_sums, build_chip_log_heights,
+    build_opened_values, commit_traces, compute_residual_y_openings,
+    observe_transcript_prologue, observe_zerocheck_openings_from_residual,
+};
+use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows;
+use crate::shard_level::zerocheck_prover::prove_shard_zerocheck;
 use crate::{
     air::MachineAir, lookup::LookupBuilder, opts::ZKMCoreOpts, record::MachineRecord, BasefoldRing,
-    Challenger, DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData, PcsProverData,
-    ProverConstraintFolder, ShardProof, StarkVerifyingKey,
+    Challenge, Challenger, DebugConstraintBuilder, MachineChip, MachineProof, MainTraceData,
+    PcsProverData, ProverConstraintFolder, ShardOpenedValues, ShardProof, StarkVerifyingKey,
 };
 
 /// Wrap raw per-chip main traces into the name-keyed `PaddedMle` store
@@ -275,35 +282,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         opts: &<A::Record as MachineRecord>::Config,
     ) where
         SC: BasefoldRing,
-        A: for<'b> Air<VerifierConstraintFolder<'b, SC>>
-            + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    crate::Challenge<SC>,
-                    crate::Challenge<SC>,
-                >,
-            >
-            + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    Val<SC>,
-                    crate::Challenge<SC>,
-                >,
-            > + Sync,
-        Val<SC>: p3_field::PrimeField + 'static,
-        crate::Challenge<SC>: p3_field::ExtensionField<Val<SC>>
-            + p3_field::BasedVectorSpace<Val<SC>>
-            + 'static,
-        SC::Challenger: 'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+        A: crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
+        SC::Challenger: p3_challenger::CanObserve<
+            <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
         Self: Sized,
     {
     }
@@ -449,36 +433,12 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     ) -> crate::shard_level::shard_proof::BasefoldShardProof<Val<SC>, crate::Challenge<SC>>
     where
         SC: BasefoldRing,
-        A: for<'b> Air<VerifierConstraintFolder<'b, SC>>
-            + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    crate::Challenge<SC>,
-                    crate::Challenge<SC>,
-                >,
-            >
-    // The K = F (base-field first round) folder instance.
-            + for<'b> Air<
-                crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                    'b,
-                    Val<SC>,
-                    Val<SC>,
-                    crate::Challenge<SC>,
-                >,
-            > + Sync,
-        Val<SC>: p3_field::PrimeField + 'static,
-        crate::Challenge<SC>: p3_field::ExtensionField<Val<SC>>
-            + p3_field::BasedVectorSpace<Val<SC>>
-            + 'static,
-        SC::Challenger: 'static
-            + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-            + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
-            + p3_challenger::CanObserve<
-                <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
-                    crate::jagged_pcs::JaggedVal,
-                >>::Commitment,
-            >,
+        A: crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
+        SC::Challenger: p3_challenger::CanObserve<
+            <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
+                crate::jagged_pcs::JaggedVal,
+            >>::Commitment,
+        >,
         Self: Sized,
     {
         let ShardData {
@@ -533,7 +493,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // from the name-order-sorted commit — so this lookup is
         // order-preserving.  Cloning a `PaddedMle` clones an `Arc<Mle>` + a
         // small `Padding`, so the trace cells are never deep-copied.
-        let shared_trace_mles: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
+        let shared_trace_mles_vec: Vec<crate::multilinear::PaddedMle<Val<SC>>> = chips
             .iter()
             .map(|chip| {
                 let name = chip.name();
@@ -543,26 +503,327 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 }
             })
             .collect();
-        crate::shard_level::prover::prove_shard_stages::<SC, A, _>(
+        let shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>] =
+            shared_trace_mles_vec.as_slice();
+        // ── The shard body, single-body form (the stage helpers live in
+        // shard_level).
+    debug_assert_eq!(
+        chips.len(),
+        shared_trace_mles.len(),
+        "chips and shared_trace_mles must be parallel arrays",
+    );
+
+    // `shared_trace_mles` is the single authoritative host main-trace store
+    // (all chips, chip-index order); every stage below reads it directly, so
+    // handing the slice down costs a refcount, not a copy.
+    //
+    // Commit: consume-or-build.  This body is the host CpuProver path ONLY —
+    // the GPU pipeline assembles the shard stages device-natively in
+    // ziren-gpu and overrides this method.  When `commit_data` is `None`,
+    // `commit_traces` builds the BaseFold commit here and the jagged open
+    // consumes it with the in-band commit observe SKIPPED.  That skip is
+    // load-bearing: the verifier always uses
+    // `verify_jagged_basefold_no_observe`, so an in-band observe on the
+    // prover side would be a transcript desync.
+    //
+    // Every chip is host-resident here, so the device-residency parameters
+    // the shared helpers accept are inert (`chip_cum_tails` all-`None` —
+    // cumulative sums read raw host cells); the live device-remat logic
+    // lives in ziren-gpu's `shard_helpers` feeding these same helpers.
+    //
+    // HEIGHT-AGNOSTIC RECURSION: present chips commit at their NATURAL raw
+    // height, so packing offsets == degree heights == the in-circuit raw
+    // col_prefix_sums reconstruction; missing (injected) chips pack at band
+    // height (see the injection in `CpuProver::commit`) to preserve the
+    // chip-SET and hence the vk.
+    let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
+    let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
+    let (trace_views, main_commitment, precomputed_commit) = match commit_data {
+        // `commit()` already built and retained the jagged commitment —
+        // consume it.  The views pass through untouched, exactly as
+        // `commit_traces` returns them unchanged; the digest
+        // and precompute are the identical values that build would have
+        // produced (same seam, same inputs, one shard-phase earlier).
+        Some(retained) => (trace_views, retained.main_commitment, retained.precomputed),
+        None => {
+            commit_traces::<SC, A, _>(self, chips, trace_views, dense_rev, recursion_area_pin)
+        }
+    };
+    // `trace_views` is kept OWNED (no reborrow): the dims sites below
+    // borrow it, and the jagged open at Stage 4 MOVES it in so its per-chip
+    // cells become the open's `chip_traces` with NO clone.
+
+    let n_chips = chips.len();
+    let _shard_span = tracing::info_span!("prove_shard_stages", chips = n_chips).entered();
+
+    // Stage 1 — transcript prologue. Chip metadata observe (count +
+    // per-chip log-height + name length + name bytes) binds post-
+    // commit challenges to the shard's chip-set identity AND each
+    // chip's row count.
+    //
+    // The per-chip height felt is `log_height` — the value the recursion
+    // verifier binds in this slot via the `chip_height_bits` Horner
+    // recompose.  The host verifier mirror in
+    // `shard_level::verifier::verify_shard_basefold` observes the same value
+    // sourced from `proof.chip_log_heights`.
+    //
+    // Observe order (the verifiers replay it exactly):
+    //   public_values → main_commitment → num_chips →
+    //   per-chip { height_felt, name_len, name_bytes }
+    let _t_phase1 = std::time::Instant::now();
+    {
+        let _span = tracing::info_span!("phase_transcript_prologue").entered();
+        // The Stage-1 prologue observes live in a pub helper so the
+        // device-native drivers reproduce the EXACT Fiat-Shamir prologue
+        // (order unchanged).
+        observe_transcript_prologue::<SC, A>(
+            challenger,
+            &public_values,
+            &main_commitment,
+            chips,
+            shared_trace_mles,
+        );
+    }
+    tracing::info!(
+        elapsed_ms = _t_phase1.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "transcript",
+        "shard phase done"
+    );
+
+    // Stage 2 — LogUp-GKR.
+    let _t_phase2 = std::time::Instant::now();
+    let logup_gkr_proof = {
+        let _span = tracing::info_span!("phase_logup_gkr").entered();
+        prove_shard_logup_gkr_rows::<Val<SC>, Challenge<SC>, A, SC::Challenger>(
             chips,
             preprocessed_traces,
-            preprocessed_commit_data,
-            &shared_trace_mles,
-            public_values,
             max_log_row_count,
             challenger,
-            orientation,
-            dense_rev,
-            // Sourced from `pins_recursion_area()` above.
-            recursion_area_pin,
-            // INLINE-commit: `commit_traces` builds the jagged
-            // commit during this prove pass (for BOTH the inner and the
-            // OUTER/wrap ring).
-            self,
-            // The commit-time retained commitment, when the prover's
-            // `commit()` produced one (consume, don't rebuild).
-            commit_data,
+            // The shared per-chip trace-MLE built once above (covers ALL
+            // chips) — the SOLE host main-trace source for this stage.
+            shared_trace_mles,
         )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase2.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "logup_gkr",
+        "shard phase done"
+    );
+
+    // Stage 3 — per-chip zerocheck.  Takes the LogUp-GKR
+    // evaluations so each chip's sumcheck claim chains to its GKR
+    // openings (`claimed_sum = λ-RLC(Σ openings·β^k)`), eq-anchored at
+    // the shared GKR point.
+    let _t_phase3 = std::time::Instant::now();
+    let (zerocheck_proof, trace_at_z) = {
+        let _span = tracing::info_span!("phase_zerocheck").entered();
+        prove_shard_zerocheck::<SC, A>(
+            chips,
+            preprocessed_traces,
+            &public_values,
+            &logup_gkr_proof.logup_evaluations,
+            max_log_row_count,
+            challenger,
+            // The shared per-chip trace-MLE built once above (covers ALL
+            // chips) — the SOLE host main-trace source for this stage.
+            shared_trace_mles,
+            // The per-shard rev(zeta) orientation.
+            dense_rev,
+        )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase3.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "zerocheck",
+        "shard phase done"
+    );
+
+    // Observe slot 2 — the zerocheck openings (trace@z*), observed after the
+    // zerocheck sumcheck and BEFORE the jagged phase.  Slot 1 (the GKR
+    // openings, trace@ζ) is emitted at the end of the GKR phase
+    // (`row_gkr::top_level::prove_shard_logup_gkr_rows`); see
+    // `observe_logup_gkr_openings` for why the ordering is load-bearing.
+    //
+    // `num_chips` felt, then per chip the length-prefixed
+    // preprocessed-then-main openings in chip-NAME order — the order the
+    // recursion verifier and the host verifier replay.
+    let _t_phase35 = std::time::Instant::now();
+    {
+        let _span = tracing::info_span!("phase_bridge_3_4").entered();
+        observe_zerocheck_openings_from_residual::<SC, A>(challenger, chips, &trace_at_z);
+    }
+    tracing::info!(
+        elapsed_ms = _t_phase35.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "bridge_3_4",
+        "shard phase done"
+    );
+
+    // ── Openings-for-free: reuse the zerocheck residual as the
+    // jagged step-3 y_per_chip ────────────────────────────────────────────
+    // `trace_at_z[name]` is the zerocheck reduction's component_poly_evals
+    // (prep-then-main per chip, = padded-MLE_BE(bitrev(trace)) @ z) — exactly
+    // the per-column values jagged step (3) would recompute from the trace.
+    // Passing the main slice as pre_y_per_chip skips the host triple-nested
+    // step-3 reduction; the proof bytes are unchanged (identical values, and
+    // step 3 is transcript-silent).
+    // Per-chip metadata HEIGHT for the two jagged-open sites that branch on an
+    // EMPTY commit trace (`compute_residual_y_openings` + the jagged-eval
+    // producer) and so cannot reach `shared_trace_mles` directly.  A
+    // device-resident chip (dummy, `inner` None) carries its baked height
+    // here; a host chip maps to `None` (its height comes from the non-empty
+    // trace, so this slot is never read).
+    let open_heights: Vec<Option<usize>> = shared_trace_mles
+        .iter()
+        .map(|pm| if pm.inner().is_none() { pm.metadata_height() } else { None })
+        .collect();
+
+    // ── The PREPROCESSED round (the first opening round) ──────────────────
+    //
+    // Its chip set, ORDER and dims come from the commit itself
+    // (`packing.chip_infos`), which is authoritative: `setup` sorted the
+    // preprocessed traces by NAME and committed them in that
+    // order.  Reading the order off
+    // the commit means the round can never disagree with what was committed.
+    //
+    // A machine with no preprocessed traces yields an empty round set and a
+    // single (main-only) round downstream.
+    let prep_chip_infos = &preprocessed_commit_data.packing.chip_infos;
+    let mut preprocessed_named: Vec<(String, crate::multilinear::PaddedMle<Val<SC>>)> =
+        Vec::with_capacity(prep_chip_infos.len());
+    let mut preprocessed_claims: Vec<Vec<Challenge<SC>>> =
+        Vec::with_capacity(prep_chip_infos.len());
+    for info in prep_chip_infos.iter() {
+        let idx = chips
+            .iter()
+            .position(|c| MachineAir::<Val<SC>>::name(*c) == info.name)
+            .unwrap_or_else(|| {
+                panic!(
+                    "preprocessed round: committed chip {} is absent from the shard's \
+                     chip set — the proving key and the shard disagree",
+                    info.name,
+                )
+            });
+        preprocessed_named.push((info.name.clone(), preprocessed_traces[idx].clone()));
+        // This chip's PREPROCESSED columns at z are the PREFIX of its zerocheck
+        // residual (`preprocessed.local ++ main.local`, split by
+        // `preprocessed_width` — see the opened-values builder).  They are
+        // already computed; the round proves them against the vk's commitment.
+        let evals = trace_at_z.get(&info.name).unwrap_or_else(|| {
+            panic!("preprocessed round: chip {} has no zerocheck residual", info.name)
+        });
+        assert!(
+            evals.len() >= info.column_count,
+            "preprocessed round: chip {} residual is {} wide but the commit has {} \
+             preprocessed columns",
+            info.name,
+            evals.len(),
+            info.column_count,
+        );
+        preprocessed_claims.push(evals[..info.column_count].to_vec());
+    }
+
+    let residual_y: Vec<Vec<Challenge<SC>>> = compute_residual_y_openings::<SC, A>(
+        chips,
+        &trace_views,
+        preprocessed_traces,
+        &trace_at_z,
+        &logup_gkr_proof.logup_evaluations,
+        &open_heights,
+        dense_rev,
+    );
+
+    // Stage 4 — jagged-PCS opening. Per-chip `r_row` is the trailing
+    // log(chip_height) coords of the LogUp-GKR final eval_point.
+    let _t_phase4 = std::time::Instant::now();
+    let evaluation_proof = {
+        let _span = tracing::info_span!("phase_jagged_pcs").entered();
+        // Dispatch the jagged open through the trait seam (the CpuProver
+        // default == `FreeFnJaggedEval` → byte-identical; a device prover
+        // routes through its own `prove_trusted_evaluations`).
+        self.prove_trusted_evaluations(
+            chips,
+            // The PREPROCESSED round: its traces (in the order `setup`
+            // committed them), its claims, and the proving key's commit.
+            &preprocessed_named,
+            preprocessed_claims,
+            preprocessed_commit_data,
+            // Commit-coverage trace set (BORROWED views over the shared
+            // `Arc<Mle>` store) — MUST be the same traces the precompute
+            // committed, or the openings won't bind.
+            &trace_views,
+            // Open jagged at the zerocheck-reduced z*.
+            &zerocheck_proof.point_and_eval.0,
+            challenger,
+            precomputed_commit,
+            residual_y,
+        )
+    };
+    tracing::info!(
+        elapsed_ms = _t_phase4.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "jagged_pcs",
+        "shard phase done"
+    );
+
+    // Stage 5 — assembly.
+    let _t_phase5 = std::time::Instant::now();
+    let _phase5_span = tracing::info_span!("phase_assembly").entered();
+
+    // Per-chip log-height (u8) + REAL-height (usize) maps, device-residency
+    // aware.  The log-height map is stored on the proof; the REAL-height map
+    // feeds the `opened_values` degree-bit decomposition below.
+    // MUST agree with the Phase-1 prologue observe + the verifier.
+    let (chip_log_heights, chip_heights) =
+        build_chip_log_heights::<SC, A>(chips, shared_trace_mles);
+
+    // Populate `opened_values` with the per-chip trace@z openings from the
+    // zerocheck reduction (the values the recursion zerocheck verifier
+    // batches/constrains at the reduced point z and asserts equal
+    // `point_and_eval.1`).  `trace_at_z` is keyed by chip name and is
+    // prep-then-main per chip; split at the chip's `preprocessed_width` to
+    // recover `preprocessed.local` / `main.local`.  Chips are emitted in NAME
+    // order to match the recursion `opened_values.chips` BTreeMap key-order
+    // iteration.  The REAL-height big-endian degree bits ride in the
+    // `quotient` slot.
+    let opened_values = build_opened_values::<SC, A>(
+        chips,
+        trace_at_z,
+        &chip_log_heights,
+        &chip_heights,
+        max_log_row_count,
+    );
+
+    // Per-chip (local, global) cumulative sums.  `local` is ZERO (the
+    // basefold path doesn't materialize the permutation trace); `global`
+    // reads the RAW per-chip cells (device chips use the early TAIL).
+    let chip_cumulative_sums =
+        build_chip_cumulative_sums::<SC, A>(chips, shared_trace_mles, &chip_cum_tails);
+
+    // The final `BasefoldShardProof` construction — including the witnessed
+    // row/padding-column counts + the raw BaseFold root
+    // (`jagged_original_commitment`), both derived from `evaluation_proof`.
+    let proof = assemble_basefold_shard_proof::<SC>(
+        public_values,
+        main_commitment,
+        logup_gkr_proof,
+        zerocheck_proof,
+        opened_values,
+        chip_log_heights,
+        chip_cumulative_sums,
+        evaluation_proof,
+        orientation,
+    );
+    drop(_phase5_span);
+    tracing::info!(
+        elapsed_ms = _t_phase5.elapsed().as_millis() as u64,
+        chips = n_chips,
+        phase = "assembly",
+        "shard phase done"
+    );
+    proof
     }
 
     /// Generate a proof for the given records.
@@ -1064,33 +1325,8 @@ where
     SC: StarkGenericConfig + BasefoldRing,
     P: MachineProver<SC, A>,
     A: MachineAir<Val<SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        >
-// The K = F (base-field first round) folder instance.
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        > + Sync,
-    Val<SC>: PrimeField32,
-    SC::Challenger: Clone + 'static,
-    Val<SC>: 'static,
-    <SC as StarkGenericConfig>::Challenge:
-        p3_field::BasedVectorSpace<Val<SC>> + 'static,
-// Threaded through to `prove_trusted_evaluations`'s static
-// OUTER generic BaseFold open (see its where-clause).
-    SC::Challenger: p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + crate::shard_level::basefold_constraint_folder::ShardProvableAir<SC>,
+    SC::Challenger: Clone
         + p3_challenger::CanObserve<
             <<SC as BasefoldRing>::BfMmcs as p3_commit::Mmcs<
                 crate::jagged_pcs::JaggedVal,

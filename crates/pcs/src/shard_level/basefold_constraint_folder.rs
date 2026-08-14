@@ -299,3 +299,38 @@ mod tests {
         assert_eq!(folder.accumulator, EF::from_u64(124));
     }
 }
+
+/// Everything the shard prove requires of an AIR: the machine-air surface,
+/// the host verifier folder, and both constraint-folder field instances
+/// (`K = EF` for rounds >= 1, and the base-field first round `K = F`).
+/// Blanket-implemented, so `A: ShardProvableAir<SC>` is the whole bound.
+pub trait ShardProvableAir<SC: crate::StarkGenericConfig>:
+    crate::air::MachineAir<SC::Val>
+    + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
+    + for<'b> p3_air::Air<
+        BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Challenge<SC>, crate::Challenge<SC>>,
+    >
+    + for<'b> p3_air::Air<
+        BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
+    >
+    + Sync
+{
+}
+
+impl<SC: crate::StarkGenericConfig, A> ShardProvableAir<SC> for A where
+    A: crate::air::MachineAir<SC::Val>
+        + for<'b> p3_air::Air<crate::folder::VerifierConstraintFolder<'b, SC>>
+        + for<'b> p3_air::Air<
+            BasefoldConstraintFolder<
+                'b,
+                crate::Val<SC>,
+                crate::Challenge<SC>,
+                crate::Challenge<SC>,
+            >,
+        >
+        + for<'b> p3_air::Air<
+            BasefoldConstraintFolder<'b, crate::Val<SC>, crate::Val<SC>, crate::Challenge<SC>>,
+        >
+        + Sync
+{
+}

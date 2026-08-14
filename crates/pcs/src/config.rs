@@ -49,7 +49,7 @@ pub type PackedChallenge<SC> =
     <<SC as StarkGenericConfig>::Challenge as ExtensionField<Val<SC>>>::ExtensionPacking;
 
 pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwned + Clone {
-    type Val: PrimeField + p3_field::TwoAdicField;
+    type Val: PrimeField + p3_field::PrimeField32 + p3_field::TwoAdicField + 'static;
     type Domain: PolynomialSpace<Val = Self::Val> + Sync;
 
     /// The PCS used to commit to trace polynomials.
@@ -58,12 +58,21 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
         + ZeroCommitment<Self>;
 
     /// The field from which most random challenges are drawn.
-    type Challenge: ExtensionField<Self::Val>;
+    type Challenge: ExtensionField<Self::Val> + p3_field::BasedVectorSpace<Self::Val> + 'static;
 
     /// The challenger (Fiat-Shamir) implementation used.
+    ///
+    /// The declaration-position bounds elaborate at every `SC:
+    /// StarkGenericConfig` site (the reference keeps its capability floor on
+    /// the config trait's associated types the same way), so shard-prover
+    /// signatures don't repeat them.  Every config is KoalaBear-based, so the
+    /// jagged-field capabilities hold for all of them.
     type Challenger: FieldChallenger<Val<Self>>
         + CanObserve<<Self::Pcs as Pcs<Self::Challenge, Self::Challenger>>::Commitment>
-        + CanSample<Self::Challenge>;
+        + CanSample<Self::Challenge>
+        + FieldChallenger<crate::jagged_pcs::JaggedVal>
+        + p3_challenger::GrindingChallenger<Witness = crate::jagged_pcs::JaggedVal>
+        + 'static;
 
     /// Get the PCS used by this configuration.
     fn pcs(&self) -> &Self::Pcs;

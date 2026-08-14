@@ -64,31 +64,7 @@ pub fn prove_shard_zerocheck<SC, A>(
 ) -> (PartialSumcheckProof<Challenge<SC>>, std::collections::BTreeMap<String, Vec<Challenge<SC>>>)
 where
     SC: StarkGenericConfig,
-    A: MachineAir<Val<SC>>
-        + for<'b> Air<VerifierConstraintFolder<'b, SC>>
-        // K = EF instance: rounds ≥ 1 (and the device-resident / GPU-hook
-        // first round) evaluate the AIR at `EF` cells.
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Challenge<SC>,
-                Challenge<SC>,
-            >,
-        >
-        // K = F instance: the pure-host base-field first round
-        // evaluates the AIR at base-field cells (no up-front `EF` lift of the
-        // widest round).
-        + for<'b> Air<
-            crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Val<SC>,
-                Challenge<SC>,
-            >,
-        >,
-    Val<SC>: PrimeField,
-    Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
+    A: super::basefold_constraint_folder::ShardProvableAir<SC>,
 {
     let n_chips = chips.len();
 
