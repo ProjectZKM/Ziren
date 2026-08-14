@@ -150,6 +150,14 @@ where
     /// `prove_trusted_evaluations_gpu` (type-erased so the host crate needs
     /// no device types; `None` on the CPU prover).
     pub device_dense_q: Option<Box<dyn core::any::Any + Send + Sync>>,
+    /// CPU-only: the shard's name-keyed trace-MLE store, built once at
+    /// `commit()` (the matrices move in via the zero-copy
+    /// `Mle::from_row_major`) and consumed by `open()` — the commit and
+    /// the prove read the same cells.  `None` on device provers (their
+    /// traces are device-resident).
+    pub main_store: Option<
+        std::collections::BTreeMap<String, crate::multilinear::PaddedMle<Val<SC>>>,
+    >,
 }
 
 /// An algorithmic & hardware independent prover implementation for any [`MachineAir`].
@@ -763,83 +771,19 @@ where
             .map(|(i, (name, _))| (name.to_owned(), i))
             .collect();
 
-        // Build the jagged/BaseFold main-trace commitment HERE and retain it
-        // for `open()`.  Inner ring only (the wrap ring builds inside the
-        // prove pass).  The cells are BORROWED from the just-sorted
-        // `named_traces` — zero moves; `open()` receives the same matrices.
-        // The digest and precompute are the identical values
-        // `maybe_auto_precompute_basefold` would otherwise produce one phase
-        // later.
+        // Build the shard's name-keyed trace-MLE store ONCE — the matrices
+        // MOVE into their `Arc<Mle>`s via the zero-copy
+        // `Mle::from_row_major` — then commit through the ring-dispatched
+        // builder (`maybe_auto_precompute_basefold`: the inner ring routes
+        // through `self.commit_multilinears`, the wrap ring through
+        // `BasefoldRing::precompute_jagged_inline`) and RETAIN
+        // {digest, precompute, store} for `open()`.  One build, one store:
+        // the commit and the prove read the same cells.
         let retained: Option<RetainedJaggedCommit<SC>> = {
             use core::any::TypeId;
-            let inner_ring = TypeId::of::<Val<SC>>()
-                == TypeId::of::<crate::InnerVal>()
-                && TypeId::of::<<SC as BasefoldRing>::BfMmcs>()
-                    == TypeId::of::<crate::jagged_pcs::JaggedMmcs>();
-            if inner_ring {
-                let cells: Vec<(String, &[crate::jagged_pcs::JaggedVal], usize)> =
-                    named_traces
-                        .iter()
-                        .map(|(name, mat)| {
-                            // SAFETY: Val<SC> == InnerVal == JaggedVal under
-                            // the gate (identical layout; zero-copy relabel).
-                            let v: &[crate::jagged_pcs::JaggedVal] = unsafe {
-                                core::slice::from_raw_parts(
-                                    mat.values.as_ptr()
-                                        as *const crate::jagged_pcs::JaggedVal,
-                                    mat.values.len(),
-                                )
-                            };
-                            (name.clone(), v, mat.width)
-                        })
-                        .collect();
-                let recursion_area_pin = if self.machine().pins_recursion_area() {
-                    Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
-                } else {
-                    None
-                };
-                let pre =
-                    crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_from_cells(
-                        &cells,
-                        self.machine().core_rev(),
-                        recursion_area_pin,
-                    );
-                let raw_root: [crate::InnerVal; 8] =
-                    crate::jagged_pcs::basefold_commit_digest(&pre.commit);
-                let digest: [crate::InnerVal; 8] =
-                    crate::jagged_pcs::jagged_hash_bind_from_jagged_packing(
-                        raw_root,
-                        &pre.packing,
-                    );
-                // SAFETY: [InnerVal; 8] == [Val<SC>; 8] under the gate.
-                let main_commitment: [Val<SC>; 8] =
-                    unsafe { core::mem::transmute_copy(&digest) };
-                // The inner concrete precompute IS the `SC::BfMmcs` generic
-                // under the gate (the established Any-downcast).
-                let precomputed: crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<
-                    <SC as BasefoldRing>::BfMmcs,
-                > = {
-                    let any: Box<dyn core::any::Any> = Box::new(pre);
-                    *any.downcast().unwrap_or_else(|_| {
-                        panic!(
-                            "inner ring: PrecomputedJaggedCommit must equal \
-                             Generic<SC::BfMmcs>"
-                        )
-                    })
-                };
-                Some(RetainedJaggedCommit {
-                    main_commitment,
-                    precomputed,
-                    device_dense_q: None,
-                })
-            } else if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
-                // OUTER/wrap ring (BN254 BfMmcs): build the ring-native
-                // precompute inline — the identical construction the
-                // open-path fallback performed one phase later.  The wrap
-                // is one small shard, so cloning the traces into the
-                // padded store is cheap.  The store uses the same cube
-                // formula and the same name-sorted order the open-path
-                // wrap builds, so the packing is byte-identical.
+            if TypeId::of::<Val<SC>>() == TypeId::of::<crate::InnerVal>() {
+                // The per-stage zerocheck cube: `max(BASE, tallest chip)`.
+                // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
                 let max_log_row_count = {
                     let base_cube =
                         crate::shard_level::verifier::BasefoldShardVerifier::production_default()
@@ -861,66 +805,56 @@ where
                     }
                     cube
                 };
-                let store = named_padded_traces(
-                    named_traces.iter().map(|(name, _)| name.clone()),
-                    named_traces.iter().map(|(_, mat)| mat.clone()),
+                let names: Vec<String> =
+                    named_traces.iter().map(|(name, _)| name.clone()).collect();
+                let main_store = named_padded_traces(
+                    names,
+                    named_traces.into_iter().map(|(_, mat)| mat),
                     max_log_row_count as u32,
+                    // Host prover: no device traces, no baked heights.
                     |_| None,
                 );
-                let views: Vec<crate::jagged_pcs::jagged::ChipTraceView> = store
-                    .into_iter()
-                    .map(|(name, pm)| {
-                        // SAFETY: `Val<SC> == InnerVal` under the gate —
-                        // a no-op relabel of the same type.
-                        let pm_inner: crate::multilinear::PaddedMle<crate::InnerVal> = unsafe {
-                            core::mem::transmute_copy::<
-                                crate::multilinear::PaddedMle<Val<SC>>,
-                                crate::multilinear::PaddedMle<crate::InnerVal>,
-                            >(&core::mem::ManuallyDrop::new(pm))
-                        };
-                        (name, pm_inner)
-                    })
-                    .collect();
+                let chips: Vec<&MachineChip<SC, A>> =
+                    self.machine().shard_chips_ordered(&chip_ordering).collect();
+                debug_assert_eq!(
+                    chips.len(),
+                    main_store.len(),
+                    "chip names must be unique for the store to stay parallel to `chips`",
+                );
+                // Store order (name-sorted BTreeMap) == chips order.
+                let views: Vec<crate::multilinear::PaddedMle<Val<SC>>> =
+                    main_store.values().cloned().collect();
                 let recursion_area_pin = if self.machine().pins_recursion_area() {
                     Some(crate::jagged_pcs::RECURSION_LOG_TRACE_AREA)
                 } else {
                     None
                 };
-                let precomputed = <SC as BasefoldRing>::precompute_jagged_inline(
-                    &views,
-                    self.machine().core_rev(),
-                    recursion_area_pin,
-                );
-                // Ring-generic digest: NO jagged hash-bind on the outer ring
-                // (the BN254 wrap re-binds in its registered hook).
-                let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
-                    <SC as BasefoldRing>::digest_felts(
-                        &precomputed.commit.original_commitment,
+                let (_views, main_commitment, precomputed) =
+                    crate::shard_level::prover::maybe_auto_precompute_basefold::<SC, A, _>(
+                        self,
+                        &chips,
+                        views,
+                        self.machine().core_rev(),
+                        recursion_area_pin,
                     );
-                // SAFETY: [JaggedVal; 8] == [Val<SC>; 8] under the gate.
-                let main_commitment: [Val<SC>; 8] = unsafe {
-                    core::mem::transmute_copy::<
-                        [crate::jagged_pcs::JaggedVal; 8],
-                        [Val<SC>; 8],
-                    >(&digest_jv)
-                };
                 Some(RetainedJaggedCommit {
                     main_commitment,
                     precomputed,
                     device_dense_q: None,
+                    main_store: Some(main_store),
                 })
             } else {
+                // Non-KoalaBear config: nothing provable downstream (the
+                // shard-level prover hard-asserts the ring); retain nothing.
                 None
             }
         };
 
-        // Wrap each trace in `Arc::new` so the post-`open()` consumers hold
-        // refcounted handles (Self::DeviceMatrix == RowMajorMatrix<Val<SC>>).
-        let traces: Vec<std::sync::Arc<Self::DeviceMatrix>> =
-            named_traces.into_iter().map(|(_, trace)| std::sync::Arc::new(trace)).collect();
-
         ShardMainData {
-            traces,
+            // The host store lives on `main_data`; there are no raw
+            // matrices to carry (device provers use this slot for their
+            // resident trace Arcs).
+            traces: Vec::new(),
             main_data: retained,
             chip_ordering,
             public_values: record.public_values(),
@@ -942,7 +876,6 @@ where
         challenger: &mut <SC as StarkGenericConfig>::Challenger,
     ) -> Result<ShardProof<SC>, Self::Error> {
         let chips = self.machine().shard_chips_ordered(&data.chip_ordering).collect::<Vec<_>>();
-        let traces = data.traces;
 
         // Observe the public values.
         challenger.observe_slice(&data.public_values[0..self.num_pv_elts()]);
@@ -993,7 +926,6 @@ where
                 pk.preprocessed_mles(),
                 <SC as crate::BasefoldRing>::prep_open_data(pk.preprocessed_jagged()),
                 &pk.chip_ordering,
-                traces,
                 data.public_values.clone(),
                 &basefold_challenger_snapshot,
                 // The commit-time retained jagged commitment (`None` on the
@@ -1139,7 +1071,6 @@ fn try_prove_shard_to_basefold_boxed<SC, A, P>(
         SC::BfMmcs,
     >,
     pk_chip_ordering: &hashbrown::HashMap<String, usize>,
-    main_traces: Vec<std::sync::Arc<RowMajorMatrix<Val<SC>>>>,
     public_values: Vec<Val<SC>>,
     challenger: &SC::Challenger,
     // The commit-time retained jagged commitment, threaded into
@@ -1224,38 +1155,20 @@ where
     // directly, with no panic-catch / legacy fallback.  A panic here is a
     // genuine bug to surface.
     //
-    // The PER-STAGE zerocheck cube (`max_log_row_count`) is `max(BASE, max
-    // over chips of log2(resolved height))`.  The wrap below pads every trace
-    // to it, so `prove_shard_to_basefold` reads it back off the traces
-    // (`PaddedMle::num_variables`) instead of recomputing.
-    //
-    // The cube MUST be resolved here (not in the consumer) because it is the
-    // padding width the wrap itself needs.  This site's consumer is always the
-    // DEFAULT `prove_shard_to_basefold` — `StarkGpuProver` overrides `open()`,
-    // whose default body is this function's only caller, so the GPU override
-    // (which pins the BASE constant) is never reached from here and its
-    // convention is untouched.
-    let max_log_row_count = {
-        let base_cube = crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-            .max_log_row_count;
-        let mut cube = base_cube;
-        for t in main_traces.iter() {
-            let w = t.width;
-            if w == 0 {
-                continue;
-            }
-            let h = t.values.len() / w;
-            if h == 0 {
-                continue;
-            }
-            // Post-fix_shape heights are power-of-2; log2 = trailing_zeros.
-            let log_h = (h as u64).trailing_zeros() as usize;
-            if log_h > cube {
-                cube = log_h;
-            }
-        }
-        cube
-    };
+    // The name-keyed trace-MLE store was built ONCE at `commit()` (the
+    // matrices moved into their `Arc<Mle>`s there) and rides the retained
+    // commit data; the cube is read back off any entry
+    // (`PaddedMle::num_variables`) — every entry was padded to it.
+    let mut commit_data = commit_data;
+    let main_traces_named = commit_data
+        .as_mut()
+        .and_then(|retained| retained.main_store.take())
+        .expect("CpuProver::commit retains the main-trace store");
+    let max_log_row_count = main_traces_named
+        .values()
+        .next()
+        .map(|pm| pm.num_variables() as usize)
+        .expect("shard has at least one chip");
     // Preprocessed traces in prove-path form: the per-key
     // `Arc<Mle>`s are built once by `preprocessed_mles()` and shared by every
     // shard; only the cube-dependent `PaddedMle` wrapper is per shard, and
@@ -1276,22 +1189,6 @@ where
             }
         })
         .collect();
-
-    // Build the shared name-keyed trace-MLE store HERE, once — the SINGLE
-    // authoritative host main-trace store.  `commit()` is the sole producer of
-    // these `Arc`s and `open()` hands us the only `Vec`, so `try_unwrap` MOVES
-    // each backing buffer straight through into its `Arc<Mle>` with no copy;
-    // the `clone` arm is a correctness fallback for any future extra holder.
-    let main_traces_named = named_padded_traces(
-        chips.iter().map(|chip| chip.name()),
-        main_traces
-            .into_iter()
-            .map(|arc| std::sync::Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone())),
-        max_log_row_count as u32,
-        // CPU prover path: no device traces, so no per-chip device height to
-        // bake — every width-0 chip stays a plain `dummy`.
-        |_| None,
-    );
     debug_assert_eq!(
         main_traces_named.len(),
         chips.len(),
