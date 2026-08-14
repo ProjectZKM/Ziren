@@ -113,8 +113,6 @@ pub enum VerificationError<SC: StarkGenericConfig> {
     OodEvaluationMismatch(String),
     /// The shape of the opening arguments is invalid.
     OpeningShapeError(String, OpeningShapeError),
-    /// The cpu chip is missing.
-    MissingCpuChip,
     /// The length of the chip opening does not match the expected length.
     ChipOpeningLengthMismatch,
     /// Cumulative sums error
@@ -176,9 +174,6 @@ impl<SC: StarkGenericConfig> Debug for VerificationError<SC> {
             VerificationError::OpeningShapeError(chip, e) => {
                 write!(f, "Invalid opening shape for chip {}: {:?}", chip, e)
             }
-            VerificationError::MissingCpuChip => {
-                write!(f, "Missing CPU chip")
-            }
             VerificationError::ChipOpeningLengthMismatch => {
                 write!(f, "Chip opening length mismatch")
             }
@@ -212,9 +207,6 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
             }
             VerificationError::OpeningShapeError(chip, e) => {
                 write!(f, "Invalid opening shape for chip {}: {}", chip, e)
-            }
-            VerificationError::MissingCpuChip => {
-                write!(f, "Missing CPU chip in shard")
             }
             VerificationError::ChipOpeningLengthMismatch => {
                 write!(f, "Chip opening length mismatch")

@@ -1262,11 +1262,6 @@ pub struct LogupRoundPolynomial<EF> {
     /// Original (= layer-global) `num_interaction_variables` — needed
     /// at the chip→packed transition to size the packed MLE.
     layer_int_vars: usize,
-    /// Cached round-0 poly from GPU (when the fused first-round hook is live
-    /// fires successfully).  Consumed on first sum_as_poly_in_last_variable
-    /// call.  Cleared by fix_last_variable so subsequent rounds use the
-    /// normal host path.
-    gpu_cached_first_poly: Option<UnivariatePolynomial<EF>>,
 }
 
 /// Two-mode storage backing for `LogupRoundPolynomial.state`
@@ -1276,25 +1271,6 @@ enum PolynomialLayer<EF> {
     Chip(ChipLayerState<EF>),
     /// Interaction-binding mode — single flat `Vec<EF>` per quadrant.
     Packed { n0: Vec<EF>, d0: Vec<EF>, n1: Vec<EF>, d1: Vec<EF> },
-    /// GPU pre-folded round 0: a round-0 fix-and-sum pass already done
-    /// with the round-0 univariate polynomial cached in
-    /// `cached_round_poly`.
-    ///
-    /// NEVER CONSTRUCTED on the current host path (`new` always seeds
-    /// `Chip`); the variant and its fold/sum arms are retained for a
-    /// later dedicated retirement.  Its state-machine contract, should
-    /// a producer return: `sum_as_poly_in_last_t_variables` first
-    /// (returns the cached poly verbatim), then `fix_t_variables`
-    /// (transitions to `Chip(post_fix_state)`, or `Packed` if the row
-    /// vars hit zero); any other call order panics.
-    #[allow(dead_code)]
-    GpuPrefolded {
-        /// Round-0 univariate polynomial (pre-computed by GPU).
-        cached_round_poly: UnivariatePolynomial<EF>,
-        /// Post-fix layer-1 data, ready to seed the next round's
-        /// Chip / Packed state.
-        post_fix_state: Box<ChipLayerState<EF>>,
-    },
 }
 
 impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
@@ -1349,9 +1325,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
 
         // The layer always takes the per-chip round-0 path; the
         // round-0 univariate poly is computed lazily by the first
-        // `sum_as_poly_in_last_variable` (`GpuPrefolded` is never seeded).
         let initial_state = PolynomialLayer::Chip(chip_state);
-        let gpu_cached_first_poly: Option<UnivariatePolynomial<EF>> = None;
 
         let mut me = Self {
             state: initial_state,
@@ -1366,7 +1340,6 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
             remaining_int_vars: num_interaction_variables,
             remaining_row_vars: num_row_variables,
             layer_int_vars: num_interaction_variables,
-            gpu_cached_first_poly,
         };
 
         // Edge case: zero row variables — chip tables are already 1-row.
@@ -1442,59 +1415,14 @@ impl<EF: Field + Send + Sync> ComponentPoly<EF> for LogupRoundPolynomial<EF> {
             PolynomialLayer::Chip(_) => {
                 panic!("get_component_poly_evals called before all rounds completed")
             }
-            PolynomialLayer::GpuPrefolded { .. } => {
-                panic!(
-                    "get_component_poly_evals called on GpuPrefolded state — \
-                     state-machine invariant violation: round 0 must complete \
-                     (sum_as_poly + fix_t_variables) before component evals"
-                )
-            }
         }
     }
 }
 
 impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
     fn fix_last_variable(mut self, alpha: EF) -> Self {
-        // Clear GPU first-round cache once round 0 is bound.
-        self.gpu_cached_first_poly = None;
         // Fold n/d data based on current mode.
         match &mut self.state {
-            PolynomialLayer::GpuPrefolded { post_fix_state, .. } => {
-                // Unreachable on the current host path (`GpuPrefolded` is
-                // never constructed).  Contract if a producer returns: round 0
-                // was pre-computed by GPU with THIS round's alpha already
-                // bound (`post_fix_state` has `chip_rows = N/2`, one row-fold
-                // done), so install the post-fix chip state WITHOUT folding
-                // by alpha again.
-                let chip = std::mem::replace(post_fix_state.as_mut(),
-                    ChipLayerState {
-                        n0: Vec::new(), d0: Vec::new(),
-                        n1: Vec::new(), d1: Vec::new(),
-                        chip_offsets: Vec::new(), chip_cols: Vec::new(),
-                        num_real_rows: Vec::new(), chip_rows: 1,
-                    });
-                // Don't fold by alpha — GPU already did the round-0
-                // binding when it produced post_fix_state.  Just
-                // install the post-fix chip state.
-                self.state = PolynomialLayer::Chip(chip);
-                self.remaining_row_vars =
-                    self.remaining_row_vars.saturating_sub(1);
-                if let PolynomialLayer::Chip(s) = &self.state {
-                    if s.chip_rows == 1 && self.remaining_row_vars == 0 {
-                        self.transition_to_packed();
-                    }
-                }
-                // Fold the eq factor (matches the existing
-                // PolynomialLayer::Chip arm semantics).
-                if self.eq_row.len() > 1 {
-                    self.eq_row = fold_eq(&self.eq_row, alpha);
-                } else {
-                    self.eq_int = fold_eq(&self.eq_int, alpha);
-                    self.recompute_pad_eq_int_sum();
-                }
-                self.current_claim = None;
-                return self;
-            }
             PolynomialLayer::Chip(state) => {
                 fold_chip_state_row(state, alpha);
                 self.remaining_row_vars -= 1;
@@ -1579,20 +1507,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
     }
 
     fn sum_as_poly_in_last_variable(&self, claim: Option<EF>) -> UnivariatePolynomial<EF> {
-        // GPU first-round cache: always `None` on the current host path
-        // (never populated); when set, returns the cached poly and skips the
-        // heavy round_poly_evaluations work.  Cleared on
-        // fix_last_variable so subsequent rounds use the host path.
-        if let Some(cached) = &self.gpu_cached_first_poly {
-            return cached.clone();
-        }
-        // GpuPrefolded short-circuit (same never-constructed status).  When
-        // round 0 was pre-computed by GPU, return the cached
-        // univariate polynomial verbatim.  fix_last_variable will
-        // then transition the state out of GpuPrefolded.
-        if let PolynomialLayer::GpuPrefolded { cached_round_poly, .. } = &self.state {
-            return cached_round_poly.clone();
-        }
         let claim_v = claim.expect("sum_as_poly_in_last_variable: claim required");
         // Coordinate `c` bound this round, for the eq-root HALF trick.
         // MSB-first cadence binds row variables first (while `eq_row.len() > 1`),
@@ -1632,15 +1546,6 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
                     round_coord,
                 )
             },
-            PolynomialLayer::GpuPrefolded { .. } => {
-                // Unreachable: the early-return at the top of this
-                // function consumes GpuPrefolded.  Keep this arm for
-                // exhaustiveness.
-                unreachable!(
-                    "GpuPrefolded should have been short-circuited at \
-                     sum_as_poly_in_last_variable entry"
-                )
-            }
         };
         let coeffs = poly_coefficients_from_evals(evals);
         UnivariatePolynomial::new(coeffs.to_vec())
