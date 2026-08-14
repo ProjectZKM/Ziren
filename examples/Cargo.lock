@@ -131,21 +131,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "alloy-signer"
-version = "1.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43f447aefab0f1c0649f71edc33f590992d4e122bc35fb9cdbbf67d4421ace85"
-dependencies = [
- "alloy-primitives",
- "async-trait",
- "auto_impl",
- "either",
- "elliptic-curve",
- "k256",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "android_system_properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -688,7 +673,7 @@ dependencies = [
  "bitflags 2.11.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease 0.2.37",
  "proc-macro2",
@@ -842,6 +827,20 @@ dependencies = [
  "arrayref",
  "arrayvec 0.7.6",
  "constant_time_eq 0.4.2",
+]
+
+[[package]]
+name = "blake3"
+version = "1.8.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0aa83c34e62843d924f905e0f5c866eb1dd6545fc4d719e803d9ba6030371fce"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.6",
+ "cc",
+ "cfg-if",
+ "constant_time_eq 0.4.2",
+ "cpufeatures 0.3.0",
 ]
 
 [[package]]
@@ -1463,7 +1462,7 @@ dependencies = [
  "rustc_version 0.4.1",
  "subtle",
  "zeroize",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -3444,6 +3443,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "imm-wrap-vk-add"
+version = "1.1.0"
+dependencies = [
+ "zkm-zkvm",
+]
+
+[[package]]
+name = "imm-wrap-vk-add-host"
+version = "1.1.0"
+dependencies = [
+ "blake3",
+ "num-bigint 0.4.6",
+ "sha2 0.10.8",
+ "zkm-build",
+ "zkm-sdk",
+]
+
+[[package]]
 name = "impl-codec"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3736,7 +3753,7 @@ dependencies = [
 [[package]]
 name = "k256"
 version = "0.13.4"
-source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-k256-0.13.4#8266b228a39402a0ba68d644b7f26b85b5112fe3"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-k256-0.13.4#6ad84b9b604911c6f5dd353b88c04927d2739a32"
 dependencies = [
  "cfg-if",
  "ecdsa",
@@ -3745,7 +3762,7 @@ dependencies = [
  "once_cell",
  "sha2 0.10.8",
  "signature",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7)",
 ]
 
 [[package]]
@@ -4446,14 +4463,14 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "p256"
 version = "0.13.2"
-source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#a6f1a1fb07020d00f627725a20dc336983be3946"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#88d42225abcb639b9bd3a930ac5a14f2262541c8"
 dependencies = [
  "ecdsa",
  "elliptic-curve",
  "hex",
  "primeorder",
  "sha2 0.10.8",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7)",
 ]
 
 [[package]]
@@ -5205,7 +5222,7 @@ dependencies = [
 [[package]]
 name = "primeorder"
 version = "0.13.1"
-source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#a6f1a1fb07020d00f627725a20dc336983be3946"
+source = "git+https://github.com/ziren-patches/elliptic-curves?branch=patch-p256-0.13.2#88d42225abcb639b9bd3a930ac5a14f2262541c8"
 dependencies = [
  "elliptic-curve",
 ]
@@ -5861,7 +5878,7 @@ dependencies = [
  "spki 0.7.3",
  "subtle",
  "zeroize",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7 (git+https://github.com/ProjectZKM/Ziren)",
 ]
 
 [[package]]
@@ -6750,7 +6767,7 @@ dependencies = [
 [[package]]
 name = "substrate-bn"
 version = "0.6.0"
-source = "git+https://github.com/ziren-patches/bn?branch=patch-0.6.0#aba71380457d798039111e6cc0fdf2e0718c6766"
+source = "git+https://github.com/ziren-patches/bn?branch=patch-0.6.0#0dfeeb1b7bfc21941b6e4964d678abd094a54a6f"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -6760,7 +6777,7 @@ dependencies = [
  "num-bigint 0.4.6",
  "rand 0.8.5",
  "rustc-hex",
- "zkm-lib 1.2.4",
+ "zkm-lib 1.2.7 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7)",
 ]
 
 [[package]]
@@ -8730,19 +8747,6 @@ dependencies = [
 
 [[package]]
 name = "zkm-lib"
-version = "1.2.4"
-source = "git+https://github.com/ProjectZKM/Ziren#1d43121312d4b93c0989984bf0c7ab77d9a0ce04"
-dependencies = [
- "bincode",
- "cfg-if",
- "elliptic-curve",
- "serde",
- "sha2 0.10.8",
- "zkm-primitives 1.2.4",
-]
-
-[[package]]
-name = "zkm-lib"
 version = "1.2.7"
 dependencies = [
  "bincode",
@@ -8754,9 +8758,54 @@ dependencies = [
 ]
 
 [[package]]
+name = "zkm-lib"
+version = "1.2.7"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7#e6945a76b084e87570b7be55e4479ce98603f43a"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2 0.10.8",
+ "zkm-primitives 1.2.7 (git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7)",
+]
+
+[[package]]
+name = "zkm-lib"
+version = "1.2.7"
+source = "git+https://github.com/ProjectZKM/Ziren#e6945a76b084e87570b7be55e4479ce98603f43a"
+dependencies = [
+ "bincode",
+ "cfg-if",
+ "elliptic-curve",
+ "serde",
+ "sha2 0.10.8",
+ "zkm-primitives 1.2.7 (git+https://github.com/ProjectZKM/Ziren)",
+]
+
+[[package]]
 name = "zkm-primitives"
-version = "1.2.4"
-source = "git+https://github.com/ProjectZKM/Ziren#1d43121312d4b93c0989984bf0c7ab77d9a0ce04"
+version = "1.2.7"
+dependencies = [
+ "bincode",
+ "blake3",
+ "hex",
+ "lazy_static",
+ "num-bigint 0.4.6",
+ "p3-field",
+ "p3-koala-bear",
+ "p3-monty-31",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "serde",
+ "sha2 0.10.8",
+ "tracing",
+]
+
+[[package]]
+name = "zkm-primitives"
+version = "1.2.7"
+source = "git+https://github.com/ProjectZKM/Ziren.git?tag=v1.2.7#e6945a76b084e87570b7be55e4479ce98603f43a"
 dependencies = [
  "bincode",
  "hex",
@@ -8774,6 +8823,7 @@ dependencies = [
 [[package]]
 name = "zkm-primitives"
 version = "1.2.7"
+source = "git+https://github.com/ProjectZKM/Ziren#e6945a76b084e87570b7be55e4479ce98603f43a"
 dependencies = [
  "bincode",
  "hex",
@@ -8948,7 +8998,6 @@ name = "zkm-sdk"
 version = "1.2.7"
 dependencies = [
  "alloy-primitives",
- "alloy-signer",
  "anyhow",
  "async-trait",
  "bincode",
@@ -9064,6 +9113,7 @@ name = "zkm-zkvm"
 version = "1.2.7"
 dependencies = [
  "bincode",
+ "blake3",
  "cfg-if",
  "critical-section",
  "embedded-alloc",

@@ -81,6 +81,11 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     // Activate the build command if the dependencies change.
     cargo_rerun_if_changed(&metadata, program_dir);
 
+    // Also rebuild if `ZKM_IMM_WRAP_VK` changes, since it decides whether the guest is built with
+    // the `imm-wrap-vk` feature. Cargo only tracks what's declared here, so without this the guest
+    // would stay stale (built in the old mode) whenever the env var changes but no source changes.
+    println!("cargo:rerun-if-env-changed=ZKM_IMM_WRAP_VK");
+
     // Check if RUSTC_WORKSPACE_WRAPPER is set to clippy-driver (i.e. if `cargo clippy` is the
     // current compiler). If so, don't execute `cargo ziren build` because it breaks
     // rust-analyzer's `cargo clippy` feature.
@@ -99,16 +104,27 @@ pub(crate) fn build_program_internal(path: &str, args: Option<BuildArgs>) {
     }
 
     // Build the program with the given arguments.
-    let path_output = if let Some(args) = args {
-        execute_build_program(&args, Some(program_dir.to_path_buf()))
-    } else {
-        execute_build_program(&BuildArgs::default(), Some(program_dir.to_path_buf()))
-    };
+    let mut args = args.unwrap_or_default();
+    if imm_wrap_vk_mode() {
+        args.features.push("imm-wrap-vk".to_string());
+    }
+    let path_output = execute_build_program(&args, Some(program_dir.to_path_buf()));
     if let Err(err) = path_output {
         panic!("Failed to build Ziren program: {err}.");
     }
 
     println!("cargo:warning={} built at {}", root_package_name, current_datetime());
+}
+
+/// Returns true if the `ZKM_IMM_WRAP_VK` environment variable is enabled, mirroring
+/// `zkm_recursion_core::stark::zkm_imm_wrap_vk_mode`'s environment check. When enabled, the guest
+/// program is built with the `imm-wrap-vk` feature, which the guest program's `Cargo.toml` is
+/// expected to forward to `zkm-zkvm/imm-wrap-vk` so it hashes public values with BLAKE3 instead of
+/// SHA256, matching the Groth16 wrap circuit's immutable-vk mode.
+fn imm_wrap_vk_mode() -> bool {
+    std::env::var("ZKM_IMM_WRAP_VK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
 }
 
 /// Collects the list of targets that would be built and their output ELF file paths.

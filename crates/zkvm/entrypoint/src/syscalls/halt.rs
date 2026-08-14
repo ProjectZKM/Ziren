@@ -1,11 +1,14 @@
 cfg_if::cfg_if! {
     if #[cfg(target_os = "zkvm")] {
         use core::arch::asm;
-        use sha2::Digest;
         use crate::zkvm;
         use crate::{PV_DIGEST_NUM_WORDS, POSEIDON_NUM_WORDS};
     }
 }
+
+// `blake3::Hasher::finalize` is an inherent method; `Sha256`'s comes from this trait.
+#[cfg(all(target_os = "zkvm", not(feature = "imm-wrap-vk")))]
+use sha2::Digest;
 
 cfg_if::cfg_if! {
     if #[cfg(all(target_os = "zkvm", feature = "verify"))] {
@@ -23,10 +26,15 @@ pub extern "C" fn syscall_halt(exit_code: u8) -> ! {
     unsafe {
         // When we halt, we retrieve the public values finalized digest.  This is the hash of all
         // the bytes written to the public values fd.
-        let pv_digest_bytes =
-            core::mem::take(&mut *core::ptr::addr_of_mut!(zkvm::PUBLIC_VALUES_HASHER))
-                .unwrap()
-                .finalize();
+        let hasher =
+            core::mem::take(&mut *core::ptr::addr_of_mut!(zkvm::PUBLIC_VALUES_HASHER)).unwrap();
+        cfg_if::cfg_if! {
+            if #[cfg(feature = "imm-wrap-vk")] {
+                let pv_digest_bytes: [u8; 32] = *hasher.finalize().as_bytes();
+            } else {
+                let pv_digest_bytes = hasher.finalize();
+            }
+        }
 
         // For each digest word, call COMMIT ecall.  In the runtime, this will store the digest
         // words into the runtime's execution record's public values digest.  In the AIR, it
