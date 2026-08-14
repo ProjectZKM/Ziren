@@ -1,6 +1,6 @@
 //! BaseFold proof verifier for the recursion circuit (host-shape + emit hooks).
 //!
-//! Verifies BaseFold-based shard proofs emitted by `prove_jagged_basefold`.
+//! Verifies BaseFold-based shard proofs emitted by `prove_jagged_basefold_rounds`.
 //!
 //! This module holds:
 //!   - host-shape verification logic (real Rust math) so the

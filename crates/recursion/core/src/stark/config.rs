@@ -582,12 +582,40 @@ mod basefold_over_bn254_roundtrip_test {
             JaggedChallenge,
         };
 
+        // Committed the way PRODUCTION commits: as ONE width-1 jagged dense
+        // (`materialize_dense_jagged` over `committed_dense_len` cells — the
+        // precompute call shape).  Committing the raw per-chip matrices
+        // instead would round EACH chip's height up to whole 2^21 stacking
+        // blocks (28 stripes for this toy, vs the dense's single stripe).
+        let trace_views: Vec<zkm_pcs::jagged_pcs::jagged::ChipTraceView> = traces
+            .iter()
+            .map(|(name, m)| {
+                (name.clone(), {
+                    let h = if m.width == 0 { 0 } else { m.values.len() / m.width };
+                    let log_h = if h <= 1 { 0 } else { h.next_power_of_two().ilog2() };
+                    zkm_pcs::multilinear::PaddedMle::padded_with_zeros(
+                        std::sync::Arc::new(zkm_pcs::basefold::Mle::from_row_major(
+                            p3_matrix::dense::RowMajorMatrix::new(m.values.clone(), m.width),
+                        )),
+                        log_h,
+                    )
+                })
+            })
+            .collect();
+        let packing = zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views);
+        let dense = zkm_pcs::jagged::materialize_dense_jagged::<JaggedVal>(
+            &trace_views,
+            packing.dense_len,
+            false,
+        );
+        let dense_traces = vec![("<jagged-dense>".to_string(), RowMajorMatrix::new(dense, 1))];
+
         // Self-consistency roundtrip: commit/open/verify must agree on ONE config;
         // env-default rate keeps prover == verifier (any rate works here).
         let rt_fri = FriConfig::<JaggedVal>::from_env_or_default();
         let mut p_chal = make_challenger();
         let (commit, prover_data) = commit_jagged_pcs_generic::<OuterValMmcs, OuterDft>(
-            traces,
+            dense_traces,
             mmcs.clone(),
             dft.clone(),
             rt_fri.clone(),
@@ -614,12 +642,15 @@ mod basefold_over_bn254_roundtrip_test {
             .iter()
             .flat_map(|m| m.eval_at::<JaggedChallenge>(&stack_point))
             .collect();
+        // The verifier's `eval_multilinear_padded` (zkm-pcs basefold/stacked.rs)
+        // walks the point coords FORWARD (LSB-first, `point[0]` binds var 0), so
+        // this hand-rolled fold must too.
         let batch_point = &eval_point[stack_dim..];
         let evaluation_claim = {
             let target = 1usize << batch_point.len();
             let mut current: Vec<JaggedChallenge> = batch_evals_flat.clone();
             current.resize(target, JaggedChallenge::ZERO);
-            for &r in batch_point.iter().rev() {
+            for &r in batch_point.iter() {
                 let half = current.len() / 2;
                 for i in 0..half {
                     let lo = current[2 * i];
@@ -659,13 +690,16 @@ mod basefold_over_bn254_roundtrip_test {
     // Full jagged-basefold BUNDLE pipeline (jagged sumcheck reduction +
     // jagged-eval + BaseFold open/verify) over the BN254 outer ring — one layer
     // above the PCS roundtrip; this is what the wrap shard's open/verify hooks
-    // drive.
+    // drive: `prove_jagged_basefold_rounds_generic` with the single MAIN round
+    // and the `build_jagged_verify_inputs` +
+    // `verify_jagged_basefold_inner_generic` mirror.
     #[test]
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
-            precompute_jagged_basefold_commit_generic, prove_jagged_basefold_single_round_generic,
-            verify_jagged_basefold_inner_generic,
+            build_jagged_verify_inputs, precompute_jagged_basefold_commit_generic,
+            prove_jagged_basefold_rounds_generic, verify_jagged_basefold_inner_generic,
+            JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -685,19 +719,24 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
 
-        // r_row / z_row sampled deterministically from a fresh challenger;
-        // shared by prover and verifier.
+        // z_row sampled deterministically from a fresh challenger, shared by
+        // prover and verifier — the production shape: ONE shared eval point of
+        // `DEFAULT_LOG_STACKING_HEIGHT` coords (the zerocheck z*), from which
+        // each chip's `r_row` is the trailing `log2(height)` slice
+        // (shard_level/prover.rs).
         let mut pt = make_challenger();
+        let z_row: Vec<JaggedChallenge> = (0..zkm_pcs::jagged_pcs::DEFAULT_LOG_STACKING_HEIGHT
+            as usize)
+            .map(|_| pt.sample_algebra_element())
+            .collect();
         let r_row_per_chip: Vec<Vec<JaggedChallenge>> = traces
             .iter()
             .map(|(_, t)| {
                 let h = t.values.len() / t.width.max(1);
                 let log_h = h.next_power_of_two().trailing_zeros() as usize;
-                (0..log_h).map(|_| pt.sample_algebra_element()).collect()
+                z_row[z_row.len() - log_h..].to_vec()
             })
             .collect();
-        let z_row: Vec<JaggedChallenge> =
-            r_row_per_chip.iter().max_by_key(|v| v.len()).cloned().unwrap_or_default();
 
         // The jagged entry points take `(name, PaddedMle)` pairs, not owned
         // matrices; build them once and reuse.
@@ -729,27 +768,62 @@ mod basefold_over_bn254_roundtrip_test {
         );
         let commitment = precompute.commit.original_commitment.clone();
 
+        // Honest step-3 column claims — the values the production prover reads
+        // off the zerocheck residual: the full row_eq over z_row indexed by the
+        // BIT-REVERSED trace row (legacy orientation, in lockstep with the
+        // `use_rev = false` commit above).
+        let claims: Vec<Vec<JaggedChallenge>> = {
+            let z_row_rev: Vec<JaggedChallenge> = z_row.iter().rev().copied().collect();
+            let eq_c = zkm_pcs::zerocheck_prover::eq_mle_table::<JaggedChallenge>(&z_row_rev);
+            traces
+                .iter()
+                .map(|(_, t)| {
+                    let w = t.width;
+                    let h = t.values.len() / w;
+                    let log_h = (h as u32).trailing_zeros();
+                    (0..w)
+                        .map(|col| {
+                            (0..h).fold(JaggedChallenge::ZERO, |acc, row| {
+                                let src =
+                                    ((row as u32).reverse_bits() >> (32 - log_h)) as usize;
+                                acc + eq_c[row] * JaggedChallenge::from(t.values[src * w + col])
+                            })
+                        })
+                        .collect()
+                })
+                .collect()
+        };
+
         let mut p_chal = make_challenger();
         p_chal.observe(commitment.clone());
-        let bundle = prove_jagged_basefold_single_round_generic::<OuterChallenger, OuterValMmcs>(
-            &trace_views,
-            &r_row_per_chip,
-            &z_row,
-            None,
-            &precompute,
-            &mut p_chal,
-            mmcs.clone(),
-            fri.clone(),
-        );
+        let rounds = [JaggedOpenRound {
+            chip_traces: &trace_views,
+            r_row_per_chip: &r_row_per_chip,
+            claims,
+            precomputed: &precompute,
+        }];
+        let bundle =
+            prove_jagged_basefold_rounds_generic::<OuterChallenger, OuterValMmcs, OuterDft>(
+                &rounds,
+                &z_row,
+                &mut p_chal,
+                mmcs.clone(),
+                dft,
+                fri.clone(),
+            );
 
-        let chip_infos =
-            zkm_pcs::jagged::compute_jagged_metadata::<JaggedVal>(&trace_views).chip_infos;
+        // Verifier inputs rebuilt from the bundle's packing — chip_infos
+        // carrying the EXPLICIT stacking-padding columns, exactly as the outer
+        // shard verifier rebuilds them (shard_level/verifier.rs).
+        let chip_widths: Vec<usize> = traces.iter().map(|(_, t)| t.width).collect();
+        let (chip_infos, r_row_v, z_row_v) =
+            build_jagged_verify_inputs(&bundle.packing, &chip_widths, &z_row);
         let mut v_chal = make_challenger();
         v_chal.observe(commitment);
         let ok = verify_jagged_basefold_inner_generic::<OuterChallenger, OuterValMmcs>(
             &chip_infos,
-            &r_row_per_chip,
-            &z_row,
+            &r_row_v,
+            &z_row_v,
             &bundle,
             &mut v_chal,
             mmcs,

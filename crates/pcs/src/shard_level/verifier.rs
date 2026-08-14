@@ -402,7 +402,7 @@ impl BasefoldShardVerifier {
         // ── Stage 4 — Jagged-PCS opening verification ────────────
         //
         // Delegate to the existing host-side verifier at
-        // crate::jagged_pcs::jagged::verify_jagged_basefold
+        // crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe
         // after deserialising the bundle bytes.  See detailed rationale
         // in verify_jagged_pcs_host.
         verify_jagged_pcs_host::<SC, A>(
@@ -478,7 +478,7 @@ fn derive_effective_max_log_row_count(
 /// Host-side jagged-PCS opening verification (Stage 4).
 ///
 /// Deserialises the bundle bytes and delegates to the host-side verifier at
-/// [`crate::jagged_pcs::jagged::verify_jagged_basefold`].
+/// [`crate::jagged_pcs::jagged::verify_jagged_basefold_no_observe`].
 ///
 /// The TypeId gate mirrors prove_trusted_evaluations — returns `Ok(())`
 /// for non-KoalaBear configs (nothing to verify in that path).

@@ -925,7 +925,7 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + 'static,
     // `SC::Challenger` drives the generic jagged BaseFold prover
     // directly on the OUTER (wrap) branch — the capability bounds
-    // `prove_jagged_basefold_single_round_generic` requires. Both rings satisfy them
+    // `prove_jagged_basefold_rounds_generic` requires. Both rings satisfy them
     // (inner `JaggedChallenger`, wrap `OuterChallenger`); NOT expressible as a
     // `BasefoldRing` implied bound, so threaded down the call chain.
     SC::Challenger:

@@ -318,7 +318,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// jagged-PCS, returning the precomputed commit — the COMMIT
     /// static-dispatch OVERRIDE point (one trait method).  The DEFAULT body
     /// is the host commit
-    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit`]).
+    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
+    /// over the inner `JaggedMmcs` ring).
     /// A `StarkGpuProver` OVERRIDES this with the device dense-pack + BaseFold
     /// commit body — UNCONDITIONALLY on device, no host fallback.
     /// Consumed by `commit_traces` through the
@@ -333,8 +334,15 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit(
+        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
+        let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
+        let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
+        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
+            crate::jagged_pcs::JaggedMmcs,
+        >(
             named_inner,
+            crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0),
+            crate::basefold::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default(),
             use_rev,
             recursion_area_pin,
         )

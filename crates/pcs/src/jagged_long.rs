@@ -539,13 +539,23 @@ mod tests {
             let hp = jagged_hadamard_poly(msg, lsh, vec![InnerChallenge::ZERO; natural.len()]);
             let inter = hp.base.first_component().guts().as_slice();
 
+            // `dense_len` is now a whole number of 2^21 stacking blocks
+            // (`committed_dense_len`), so the materialized dense runs far past
+            // the real cells while the Hadamard side stays at the toy's own
+            // 2^lsh stacking.  The layout identity lives on the REAL prefix;
+            // the committed tail must be all zeros.
             assert_eq!(
-                &natural[..],
+                &natural[..inter.len()],
                 inter,
                 "widths={widths:?}: interleaved base must equal the NATURAL-order dense layout",
             );
+            assert!(
+                natural[inter.len()..].iter().all(|v| *v == InnerVal::ZERO),
+                "widths={widths:?}: the dense past the real cells is stacking padding \
+                 and must be zero",
+            );
             assert_ne!(
-                &legacy[..],
+                &legacy[..inter.len()],
                 inter,
                 "widths={widths:?}: legacy bitrev is the one real difference — if this stops \
                  holding the orientation flag has changed meaning",

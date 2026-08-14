@@ -445,8 +445,8 @@ mod phase1_acceptance_gate {
             .collect();
 
         // y_per_chip = host column claims.  MUST mirror the PRODUCTION
-        // column-claim formula (jagged_pcs.rs `prove_jagged_basefold_single_round`,
-        // sub_phase "y_per_chip"): the full row_eq over z_row indexed by the
+        // column-claim formula (the step-3 claims fed to
+        // `prove_jagged_basefold_rounds`): the full row_eq over z_row indexed by the
         // BIT-REVERSED trace row, because `materialize_dense_jagged` writes the
         // dense column in bit-reversed row order (`y_per_chip == opened_values
         // == MLE of bitrev(trace)`), and `build_weight_table` weights that same

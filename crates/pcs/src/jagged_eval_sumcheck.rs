@@ -190,7 +190,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// 5. Wrap the PartialSumcheckProof in JaggedSumcheckEvalProof.
 ///
 /// The prover is callable from
-/// [`crate::jagged_pcs::jagged::prove_jagged_basefold`]
+/// [`crate::jagged_pcs::jagged::prove_jagged_basefold_rounds`]
 /// alongside the outer jagged-reduction sumcheck.
 /// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
 /// hypercube indexing (used by partial_lagrange) with the MSB-first
@@ -894,7 +894,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
 
 /// Replay the Fiat-Shamir transcript that [`prove_jagged_evaluation`]
 /// writes, without re-deriving the polynomial.  Host verifiers (e.g.
-/// `verify_jagged_basefold`) call this to keep the challenger in sync
+/// `verify_jagged_basefold_no_observe`) call this to keep the challenger in sync
 /// past the jagged-eval sub-protocol before the PCS open.  The full
 /// branching-program soundness check is performed by the recursion
 /// verifier (`real_jagged_evaluator_fn`); the host self-check needs
