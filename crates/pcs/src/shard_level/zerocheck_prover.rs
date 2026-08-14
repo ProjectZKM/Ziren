@@ -451,7 +451,7 @@ where
     // `component_poly_evals` are the per-chip trace openings at the reduced
     // point z (padded-MLE@z, prep-then-main, name order).
     let (sp1_proof, component_poly_evals) =
-        crate::shard_level::zerocheck_poly::reduce_sumcheck_serial::<
+        crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation::<
             Val<SC>,
             Challenge<SC>,
             _,

@@ -52,12 +52,12 @@
 use std::marker::PhantomData;
 
 use p3_air::Air;
-use p3_challenger::{CanObserve, FieldChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field};
 use rayon::prelude::*;
 
 use crate::air::MachineAir;
 use crate::folder::PairWindow;
+use crate::shard_level::types::UnivariatePolynomial;
 use crate::septic_curve::SepticCurve;
 use crate::septic_digest::SepticDigest;
 use crate::septic_extension::SepticExtension;
@@ -65,191 +65,17 @@ use crate::shard_level::basefold_constraint_folder::BasefoldConstraintFolder;
 use crate::shard_level::sumcheck_poly::{
     ComponentPoly, SumcheckPoly, SumcheckPolyBase, SumcheckPolyFirstRound,
 };
-use crate::shard_level::types::{PartialSumcheckProof, UnivariatePolynomial};
 use crate::Chip;
 
-// ───────────────────────── serial sumcheck driver ────────────────────────
-//
-// A reduction over `ZeroCheckPoly`s that maps the CHIP axis serially.  This
-// is a faithful copy of `sumcheck_poly::reduce_sumcheck_to_evaluation`'s body
-// — same `point.insert(0, alpha)` front-build, same per-coefficient
-// base-field observation, same `claimed_sum = λ-RLC(claims)` — so the proof
-// it emits is replayed identically by `verify_sumcheck_host`.  The rayon
-// parallelism lives INSIDE each poly: `sum_as_poly`'s per-pair
-// `(0..num_pairs).into_par_iter()` and `fold_cells`'s `par_chunks_mut`.
-// That is SP1's shape too — `slop` `reduce_sumcheck_to_evaluation`
-// (`slop/crates/sumcheck/src/prover.rs`) maps its chip axis serially and puts
-// all of its parallelism inside the poly (`mle.rs` `par_iter().step_by(2)`,
-// `hypercube::prover::zerocheck::sum_as_poly` `par_bridge` over pair chunks).
-//
-// This comment used to say the serial map was FORCED, because the poly
-// "borrows the chip and so is not `Sync` without an `A: Sync` bound that
-// would cascade through the whole prover trait stack".  That is FALSE and
-// should not be repeated: `MachineAir<F>: BaseAir<F> + 'static + Send + Sync`
-// (`air/machine.rs`), so `Chip<F, A>` — `{air: A, sends/receives:
-// Vec<Lookup<F>>, usize}` — is already `Sync` under the `A: MachineAir<F>`
-// bound this poly has always carried, and every other `ZeroCheckPoly` field
-// is a `Vec`, a `&[F]` or a scalar.  Adding
-// `P: SumcheckPolyFirstRound<EF> + Send + Sync` plus
-// `P::NextRoundPoly: Send + Sync` below compiles with ZERO new bounds
-// anywhere else (verified); SP1 declares exactly that bound on its own
-// driver.  The map is serial because parallelising it does not pay, not
-// because it cannot be parallelised — MEASURED on the GPU twin of this
-// function (ziren-gpu `reduce_gpu_zerocheck_serial`), where the chip-axis
-// `into_par_iter()` engaged 100% and cost 12% of reth core throughput: the
-// per-chip fold is ~20 µs, far below rayon's profitable task granularity, so
-// dispatch latency swamped it and the injected tasks displaced the trace
-// generation sharing the pool.
-
-#[inline]
-fn observe_ext<F, EF, Challenger>(challenger: &mut Challenger, v: EF)
-where
-    F: Field,
-    EF: BasedVectorSpace<F>,
-    Challenger: CanObserve<F>,
-{
-    for c in v.as_basis_coefficients_slice() {
-        challenger.observe(*c);
-    }
-}
-
-#[inline]
-fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
-    let mut acc = EF::ZERO;
-    for c in coeffs.iter().rev() {
-        acc = acc * x + *c;
-    }
-    acc
-}
-
-/// `result = polys[0]·λ^{n-1} + … + polys[n-1]` (coefficient-wise).
-fn rlc_univariate_polynomials<EF: Field>(
-    polys: &[UnivariatePolynomial<EF>],
-    lambda: EF,
-) -> UnivariatePolynomial<EF> {
-    if polys.is_empty() {
-        return UnivariatePolynomial { coefficients: Vec::new() };
-    }
-    if polys.len() == 1 {
-        return polys[0].clone();
-    }
-    let max_deg = polys.iter().map(|p| p.coefficients.len()).max().unwrap();
-    let mut acc = vec![EF::ZERO; max_deg];
-    for p in polys {
-        for slot in acc.iter_mut() {
-            *slot = *slot * lambda;
-        }
-        for (i, c) in p.coefficients.iter().enumerate() {
-            acc[i] = acc[i] + *c;
-        }
-    }
-    UnivariatePolynomial { coefficients: acc }
-}
-
-/// `result = vals[0]·λ^{n-1} + … + vals[n-1]`.
-fn rlc_eval<EF: Field>(vals: &[EF], lambda: EF) -> EF {
-    let mut acc = EF::ZERO;
-    for &v in vals {
-        acc = acc * lambda + v;
-    }
-    acc
-}
-
-/// Sequential `reduce_sumcheck_to_evaluation` (no `Send + Sync` bound on
-/// the poly).  Returns only the `PartialSumcheckProof`; the per-chip
-/// component openings are not needed by the zerocheck consumers.
-/// Returns the proof plus per-poly `component_poly_evals` — each poly's
-/// preprocessed-then-main column openings at the reduced point `z` (i.e.
-/// trace@z), in the SAME order as the input `polys`.  These are the
-/// trace evaluations the jagged PCS must open at `z` (see SP1
-/// shard.rs:613-643).
-pub(crate) fn reduce_sumcheck_serial<F, EF, P, Challenger>(
-    polys: Vec<P>,
-    challenger: &mut Challenger,
-    claims: Vec<EF>,
-    t: usize,
-    lambda: EF,
-) -> (PartialSumcheckProof<EF>, Vec<Vec<EF>>)
-where
-    F: Field,
-    EF: ExtensionField<F> + BasedVectorSpace<F>,
-    P: SumcheckPolyFirstRound<EF>,
-    Challenger: FieldChallenger<F>,
-{
-    assert!(!polys.is_empty(), "reduce_sumcheck_serial: empty input");
-    let num_variables = polys[0].num_variables();
-    assert!(
-        polys.iter().all(|poly| poly.num_variables() == num_variables),
-        "reduce_sumcheck_serial: polys disagree on num_variables"
-    );
-    assert!(num_variables as usize >= t, "reduce_sumcheck_serial: t > num_variables");
-    assert!(num_variables > 0, "reduce_sumcheck_serial: zero-variable poly");
-    assert_eq!(claims.len(), polys.len());
-
-    let mut point: Vec<EF> = Vec::with_capacity(num_variables as usize);
-    let mut univariate_poly_msgs: Vec<UnivariatePolynomial<EF>> =
-        Vec::with_capacity(num_variables as usize);
-
-    // Round 0.
-    let round0_claims: Vec<Option<EF>> = claims.iter().map(|c| Some(*c)).collect();
-    let mut uni_polys: Vec<UnivariatePolynomial<EF>> =
-        P::batched_sum_as_poly_in_last_t_variables(&polys, &round0_claims, t);
-    let mut rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
-    for c in &rlc_uni_poly.coefficients {
-        observe_ext::<F, EF, _>(challenger, *c);
-    }
-    univariate_poly_msgs.push(rlc_uni_poly.clone());
-
-    let mut alpha: EF = challenger.sample_algebra_element::<EF>();
-    point.insert(0, alpha);
-
-    let mut polys_cursor: Vec<P::NextRoundPoly> =
-        polys.into_iter().map(|poly| poly.fix_t_variables(alpha, t)).collect();
-
-    for _ in t..num_variables as usize {
-        let alpha_prev = *point.first().unwrap();
-        let round_claims: Vec<EF> =
-            uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_prev)).collect();
-
-        let round_claims_opt: Vec<Option<EF>> =
-            round_claims.iter().map(|c| Some(*c)).collect();
-        uni_polys = P::NextRoundPoly::batched_sum_as_poly_in_last_variable(
-            &polys_cursor,
-            &round_claims_opt,
-        );
-        rlc_uni_poly = rlc_univariate_polynomials(&uni_polys, lambda);
-        for c in &rlc_uni_poly.coefficients {
-            observe_ext::<F, EF, _>(challenger, *c);
-        }
-        univariate_poly_msgs.push(rlc_uni_poly.clone());
-
-        alpha = challenger.sample_algebra_element::<EF>();
-        point.insert(0, alpha);
-
-        polys_cursor =
-            polys_cursor.into_iter().map(|poly| poly.fix_last_variable(alpha)).collect();
-    }
-
-    let alpha_last = *point.first().unwrap();
-    let evals: Vec<EF> =
-        uni_polys.iter().map(|poly| poly_eval(&poly.coefficients, alpha_last)).collect();
-
-    let claimed_sum = rlc_eval(&claims, lambda);
-    let final_eval = rlc_eval(&evals, lambda);
-
-    // Per-poly component openings (prep-then-main) at the reduced point.
-    let component_poly_evals: Vec<Vec<EF>> =
-        polys_cursor.iter().map(|poly| poly.get_component_poly_evals()).collect();
-
-    (
-        PartialSumcheckProof {
-            univariate_polys: univariate_poly_msgs,
-            claimed_sum,
-            point_and_eval: (point, final_eval),
-        },
-        component_poly_evals,
-    )
-}
+// The zerocheck sumcheck reduction is `sumcheck_poly::
+// reduce_sumcheck_to_evaluation` — ONE driver for the zerocheck and the
+// GKR rounds (this file used to carry a chip-serial copy).  The host
+// driver maps the chip axis with rayon (measured win: with it serial, a
+// shard's many short chips leave the calling thread doing nearly all
+// the work); the GPU twin (`ziren-gpu reduce_gpu_zerocheck_serial`)
+// stays chip-SERIAL by measurement — its per-chip folds are ~20 µs
+// device dispatches, below rayon's profitable granularity, and the
+// injected tasks displaced trace generation (−12 % reth).
 
 // ───────────────────────────── ported primitives ─────────────────────────
 
