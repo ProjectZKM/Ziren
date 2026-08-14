@@ -57,8 +57,9 @@ pub fn words_to_bytes<T: Copy>(words: &[Word<T>]) -> Vec<T> {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use zkm_core_machine::utils::{run_test_machine_with_prover, setup_logger};
+    use zkm_core_machine::utils::setup_logger;
     use zkm_recursion_compiler::{circuit::AsmCompiler, circuit::AsmConfig, ir::DslIr};
+    use zkm_test_fixtures::run_test_machine_with_prover;
 
     use zkm_pcs::{
         koala_bear_poseidon2::KoalaBearPoseidon2, CpuProver, InnerChallenge, InnerVal,

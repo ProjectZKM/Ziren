@@ -334,8 +334,8 @@ pub mod tests {
     };
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
     use rand::prelude::*;
-    use zkm_core_machine::utils::run_test_machine;
     use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
+    use zkm_test_fixtures::run_test_machine;
 
     use crate::{
         runtime::{

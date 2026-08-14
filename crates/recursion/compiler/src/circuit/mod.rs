@@ -13,9 +13,9 @@ mod tests {
     use p3_field::PrimeCharacteristicRing;
     use p3_koala_bear::Poseidon2InternalLayerKoalaBear;
 
-    use zkm_core_machine::utils::run_test_machine;
     use zkm_pcs::{koala_bear_poseidon2::KoalaBearPoseidon2, StarkGenericConfig};
     use zkm_recursion_core::{machine::RecursionAir, Runtime, RuntimeError};
+    use zkm_test_fixtures::run_test_machine;
 
     use crate::{
         circuit::{AsmBuilder, AsmCompiler, CircuitV2Builder},

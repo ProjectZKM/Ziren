@@ -1,7 +1,5 @@
 use crate::mips::MipsAir;
 use p3_maybe_rayon::prelude::*;
-use p3_uni_stark::SymbolicAirBuilder;
-use serde::{de::DeserializeOwned, Serialize};
 use std::thread::ScopedJoinHandle;
 use std::{
     io,
@@ -9,12 +7,10 @@ use std::{
 };
 use thiserror::Error;
 use web_time::Instant;
-use zkm_pcs::{
-    koala_bear_poseidon2::KoalaBearPoseidon2, MachineProvingKey, MachineVerificationError,
-};
+use zkm_pcs::MachineProvingKey;
 
 use p3_field::PrimeField32;
-use p3_koala_bear::KoalaBear;
+use p3_matrix::dense::RowMajorMatrix;
 
 use crate::shape::CoreShapeConfig;
 use crate::{
@@ -27,14 +23,11 @@ use zkm_core_executor::{
     ExecutionError, ExecutionRecord, ExecutionReport, ExecutionState, Executor, Program,
     ZKMContext,
 };
-use zkm_primitives::io::ZKMPublicValues;
 
 use zkm_pcs::{
     air::{MachineAir, PublicValues},
-    Com, CpuProver, DebugConstraintBuilder, LookupBuilder, MachineProof, MachineProver,
-    MachineRecord, OpeningProof, PcsProverData, ProverConstraintFolder, StarkGenericConfig,
-    StarkMachine, StarkProvingKey, StarkVerifyingKey, UniConfig, Val, VerifierConstraintFolder,
-    ZKMCoreOpts,
+    Com, MachineProof, MachineProver, MachineRecord, OpeningProof, PcsProverData,
+    StarkGenericConfig, Val, ZKMCoreOpts,
 };
 
 #[derive(Error, Debug)]
@@ -771,180 +764,6 @@ where
     })
 }
 
-/// Runs a program and returns the public values stream.
-pub fn run_test_io<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    mut program: Program,
-    inputs: ZKMStdin,
-) -> Result<ZKMPublicValues, MachineVerificationError<KoalaBearPoseidon2>> {
-    let shape_config = CoreShapeConfig::<KoalaBear>::default();
-    shape_config.fix_preprocessed_shape(&mut program).unwrap();
-    let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
-        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.write_vecs(&inputs.buffer);
-        runtime.run().unwrap();
-        runtime
-    });
-    let public_values = ZKMPublicValues::from(&runtime.state.public_values_stream);
-
-    let _ = run_test_core::<P>(runtime, inputs, Some(&shape_config))?;
-    Ok(public_values)
-}
-
-pub fn run_test<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    mut program: Program,
-) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
-    let shape_config = CoreShapeConfig::default();
-    shape_config.fix_preprocessed_shape(&mut program).unwrap();
-    let runtime = tracing::debug_span!("runtime.run(...)").in_scope(|| {
-        let mut runtime = Executor::new(program, ZKMCoreOpts::default());
-        runtime.run().unwrap();
-        runtime
-    });
-    run_test_core::<P>(runtime, ZKMStdin::new(), Some(&shape_config))
-}
-
-#[allow(unused_variables)]
-pub fn run_test_core<P: MachineProver<KoalaBearPoseidon2, MipsAir<KoalaBear>>>(
-    runtime: Executor,
-    inputs: ZKMStdin,
-    shape_config: Option<&CoreShapeConfig<KoalaBear>>,
-) -> Result<MachineProof<KoalaBearPoseidon2>, MachineVerificationError<KoalaBearPoseidon2>> {
-    let config = KoalaBearPoseidon2::new();
-    let machine = MipsAir::machine(config);
-    let prover = P::new(machine);
-
-    let (pk, _) = prover.setup(runtime.program.as_ref());
-    let (proof, output, _) = prove_with_context(
-        &prover,
-        &pk,
-        Program::clone(&runtime.program),
-        &inputs,
-        ZKMCoreOpts::default(),
-        ZKMContext::default(),
-        shape_config,
-    )
-    .unwrap();
-
-    let config = KoalaBearPoseidon2::new();
-    let machine = MipsAir::machine(config);
-    let (pk, vk) = machine.setup(runtime.program.as_ref());
-    let mut challenger = machine.config().challenger();
-    machine.verify(&vk, &proof, &mut challenger).unwrap();
-
-    Ok(proof)
-}
-
-#[allow(unused_variables)]
-pub fn run_test_machine_with_prover<SC, A, P: MachineProver<SC, A>>(
-    prover: &P,
-    records: Vec<A::Record>,
-    pk: P::DeviceProvingKey,
-    vk: StarkVerifyingKey<SC>,
-) -> Result<MachineProof<SC>, MachineVerificationError<SC>>
-where
-    A: MachineAir<SC::Val>
-        + Air<LookupBuilder<Val<SC>>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        >
-        // The K = F (base-field first round) folder instance.
-        + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        > + Air<SymbolicAirBuilder<SC::Val>>,
-    A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + zkm_pcs::BasefoldRing,
-    SC::Val: p3_field::PrimeField32,
-    SC::Challenger: Clone + Sync,
-    SC: Sync,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Serialize + DeserializeOwned,
-    OpeningProof<SC>: Send + Sync,
-    zkm_pcs::ShardProof<SC>: Sync,
-    // Required by `StarkMachine::verify` (its static OUTER BaseFold
-    // verify threads these challenger capability bounds). Both rings satisfy it.
-    SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
-{
-    let mut challenger = prover.config().challenger();
-    let prove_span = tracing::debug_span!("prove").entered();
-
-    #[cfg(feature = "debug")]
-    prover.machine().debug_constraints(
-        &prover.pk_to_host(&pk),
-        records.clone(),
-        &mut challenger.clone(),
-    );
-
-    let proof = prover.prove(&pk, records, &mut challenger, ZKMCoreOpts::default()).unwrap();
-    prove_span.exit();
-    let nb_bytes = bincode::serialize(&proof).unwrap().len();
-
-    let mut challenger = prover.config().challenger();
-    prover.machine().verify(&vk, &proof, &mut challenger)?;
-
-    Ok(proof)
-}
-
-#[allow(unused_variables)]
-pub fn run_test_machine<SC, A>(
-    records: Vec<A::Record>,
-    machine: StarkMachine<SC, A>,
-    pk: StarkProvingKey<SC>,
-    vk: StarkVerifyingKey<SC>,
-) -> Result<MachineProof<SC>, MachineVerificationError<SC>>
-where
-    A: MachineAir<SC::Val>
-        + for<'a> Air<ProverConstraintFolder<'a, SC>>
-        + Air<LookupBuilder<Val<SC>>>
-        + for<'a> Air<VerifierConstraintFolder<'a, SC>>
-        + for<'a> Air<DebugConstraintBuilder<'a, Val<SC>, SC::Challenge>>
-        + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        >
-        // The K = F (base-field first round) folder instance.
-        + for<'b> Air<
-            zkm_pcs::shard_level::basefold_constraint_folder::BasefoldConstraintFolder<
-                'b,
-                Val<SC>,
-                Val<SC>,
-                <SC as StarkGenericConfig>::Challenge,
-            >,
-        > + Air<SymbolicAirBuilder<SC::Val>>,
-    A::Record: MachineRecord<Config = ZKMCoreOpts>,
-    SC: StarkGenericConfig + zkm_pcs::BasefoldRing,
-    SC::Val: p3_field::PrimeField32,
-    SC::Challenger: Clone,
-    Com<SC>: Send + Sync,
-    PcsProverData<SC>: Send + Sync + Clone + Serialize + DeserializeOwned,
-    OpeningProof<SC>: Send + Sync,
-    // Required by `CpuProver: MachineProver` (the impl threads the
-    // static outer BaseFold open bound). Both rings satisfy it.
-    SC::Challenger: p3_challenger::FieldChallenger<zkm_pcs::jagged_pcs::JaggedVal>
-        + p3_challenger::GrindingChallenger<Witness = zkm_pcs::jagged_pcs::JaggedVal>
-        + p3_challenger::CanObserve<zkm_pcs::BfCommitment<SC>>,
-{
-    let prover = CpuProver::new(machine);
-    run_test_machine_with_prover::<SC, A, CpuProver<_, _>>(&prover, records, pk, vk)
-}
-
 /// `trace_checkpoint`, driven to COMPLETION.
 ///
 /// `trace_checkpoint` calls `Executor::execute_record` exactly ONCE, and
@@ -1030,71 +849,3 @@ where
 
     (records, runtime.report)
 }
-
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
-pub fn uni_stark_prove<SC, A>(
-    config: &SC,
-    air: &A,
-    _challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
-{
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
-}
-
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_prove<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    trace: RowMajorMatrix<SC::Val>,
-) -> Proof<UniConfig<SC>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::ProverConstraintFolder<'a, UniConfig<SC>>>,
-{
-    p3_uni_stark::prove(&UniConfig(config.clone()), air, trace, &vec![])
-}
-
-#[cfg(debug_assertions)]
-#[cfg(not(doctest))]
-pub fn uni_stark_verify<SC, A>(
-    config: &SC,
-    air: &A,
-    _challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>
-        + for<'a> Air<p3_air::DebugConstraintBuilder<'a, SC::Val>>,
-{
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
-}
-
-#[cfg(not(debug_assertions))]
-pub fn uni_stark_verify<SC, A>(
-    config: &SC,
-    air: &A,
-    challenger: &mut SC::Challenger,
-    proof: &Proof<UniConfig<SC>>,
-) -> Result<(), p3_uni_stark::VerificationError<p3_uni_stark::PcsError<UniConfig<SC>>>>
-where
-    SC: StarkGenericConfig,
-    A: Air<p3_uni_stark::SymbolicAirBuilder<SC::Val>>
-        + for<'a> Air<p3_uni_stark::VerifierConstraintFolder<'a, UniConfig<SC>>>,
-{
-    p3_uni_stark::verify(&UniConfig(config.clone()), air, proof, &vec![])
-}
-
-use p3_air::Air;
-use p3_matrix::dense::RowMajorMatrix;
-use p3_uni_stark::Proof;

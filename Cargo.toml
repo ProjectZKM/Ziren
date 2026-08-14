@@ -30,6 +30,7 @@ members = [
     "crates/sdk",
     "crates/pcs",
     "crates/test-artifacts",
+    "crates/test-fixtures",
     "crates/verifier",
     "crates/zkvm/*",
 ]
@@ -130,6 +131,7 @@ zkm-curves = { path = "crates/curves" }
 
 # For testing.
 test-artifacts = { path = "crates/test-artifacts" }
+zkm-test-fixtures = { path = "crates/test-fixtures" }
 
 # misc
 hashbrown = "0.14.5"

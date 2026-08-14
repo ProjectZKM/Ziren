@@ -4,12 +4,14 @@ mod forgery_harness;
 mod logger;
 mod prove;
 mod span;
+mod test_harness;
 mod tracer;
 
 pub use logger::*;
 use p3_field::Field;
 pub use prove::*;
 pub use span::*;
+pub use test_harness::*;
 use zkm_curves::params::Limbs;
 
 use crate::{memory::MemoryCols, CoreChipError};
@@ -28,15 +30,6 @@ pub const fn indices_arr<const N: usize>() -> [usize; N] {
         i += 1;
     }
     indices_arr
-}
-
-pub fn pad_to_power_of_two<const N: usize, T: Clone + Default>(values: &mut Vec<T>) {
-    debug_assert!(values.len().is_multiple_of(N));
-    let mut n_real_rows = values.len() / N;
-    if n_real_rows < 16 {
-        n_real_rows = 16;
-    }
-    values.resize(n_real_rows.next_power_of_two() * N, T::default());
 }
 
 pub fn limbs_from_prev_access<T: Copy, N: ArrayLength, M: MemoryCols<T>>(

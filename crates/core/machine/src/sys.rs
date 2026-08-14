@@ -146,10 +146,13 @@ extern "C-unwind" {
         shard: u32,
     );
 
-    pub fn test_mul();
-    pub fn test_inv();
-    pub fn test_sqrt();
-    pub fn test_curve_formula();
+    // Septic-extension self-checks inside the C++ library. Only this module's
+    // own test suite calls them, so they stay private to `sys` instead of
+    // sitting in the crate's public API.
+    fn test_mul();
+    fn test_inv();
+    fn test_sqrt();
+    fn test_curve_formula();
 }
 
 #[cfg(test)]

@@ -944,11 +944,12 @@ mod tests {
         std::iter::from_fn(move || Some(core::array::from_fn(|_| F::from_u64(rng.gen::<u64>()))))
     }
 
-    use zkm_core_machine::utils::{run_test_machine, setup_logger};
+    use zkm_core_machine::utils::setup_logger;
     use zkm_pcs::{
         inner_perm, koala_bear_poseidon2::KoalaBearPoseidon2, InnerHash, StarkGenericConfig,
     };
     use zkm_recursion_core::{machine::RecursionAir, RecursionProgram, Runtime};
+    use zkm_test_fixtures::run_test_machine;
 
     use crate::circuit::{AsmBuilder, AsmConfig, CircuitV2Builder};
 

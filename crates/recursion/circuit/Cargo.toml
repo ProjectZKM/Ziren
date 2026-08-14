@@ -48,8 +48,8 @@ num-traits = "0.2.19"
 rayon = "1.10.0"
 
 [dev-dependencies]
-#zkm-core-executor = { workspace = true, features = ["programs"] }
 zkm-core-executor = { workspace = true }
+zkm-test-fixtures = { workspace = true }
 ff = { version = "0.13", features = ["derive", "derive_bits"] }
 p3-challenger = { workspace = true }
 p3-symmetric = { workspace = true }
@@ -63,4 +63,4 @@ test-artifacts = { workspace = true }
 [features]
 default = ["native-gnark"]
 native-gnark = ["zkm-recursion-gnark-ffi/native"]
-debug = ["zkm-core-machine/debug"]
+debug = ["zkm-core-machine/debug", "zkm-test-fixtures/debug"]

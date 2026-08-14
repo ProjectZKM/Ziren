@@ -1,0 +1,28 @@
+[package]
+name = "zkm-test-fixtures"
+description = "Prove/verify harnesses shared by the recursion crates' tests"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+bincode = "1.3.3"
+serde = { workspace = true, features = ["derive", "rc"] }
+tracing = { workspace = true }
+
+p3-air = { workspace = true }
+p3-challenger = { workspace = true }
+p3-field = { workspace = true }
+p3-uni-stark = { workspace = true }
+
+zkm-pcs = { workspace = true }
+
+[features]
+default = []
+# Mirrors `zkm-core-machine/debug`: run the host constraint checker over the
+# records before proving them.
+debug = []
+
+[lib]
+bench = false
