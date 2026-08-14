@@ -1,8 +1,5 @@
 //! Reed-Solomon encoder for the Basefold protocol.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold-prover/src/encoder.rs`.
-//!
 //! # Encoding choice
 //!
 //! The protocol receives an MLE as `2^n` evaluations on the Boolean
@@ -58,8 +55,7 @@ where
     /// is the structural OOM win over WHIR's dense-vec commit path.
     ///
     /// MLE values are interpreted as the **coefficients** of the
-    /// underlying degree-`(2^k - 1)` polynomial (matches SP1's
-    /// `slop_dft::Dft::dft(data, log_blowup, BitReversed, 0)`).  We
+    /// underlying degree-`(2^k - 1)` polynomial.  We
     /// zero-pad coefficients to length `N << log_blowup`, then DFT
     /// directly — `dft_batch` returns bit-reversed evaluations,
     /// which is exactly what `fold_even_odd_ext` expects.  Using the

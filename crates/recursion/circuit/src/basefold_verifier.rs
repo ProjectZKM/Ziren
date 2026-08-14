@@ -91,7 +91,7 @@ impl BasefoldVerifierParams {
     /// index span is `num_variables + 3` bits — both keyed off `log_blowup`.
     ///
     /// `batch_grinding_bits` stays 16 (the batching-coefficient grind is a
-    /// separate re-randomization defense, unchanged from SP1's split).
+    /// separate re-randomization defense).
     ///
     /// Soundness: `94 · (-log2(0.5 + (1/8)/2)) + 22 ≈ 100` bits (vs ~55 bits
     /// at the inner default).  Two-adicity: `num_variables(≤21) + 3 ≤ 24`.
@@ -174,9 +174,8 @@ pub struct RecursiveBasefoldRound<F, EF, Dig = [F; 8]> {
     /// Merkle root of the folded codeword for this round.  The raw
     /// digest type `Dig` defaults to `[F; 8]` (inner Poseidon2-KoalaBear
     /// digests); the OUTER ring instantiates `Dig = [Bn254; 1]`
-    /// (Poseidon2-BN254).  This mirrors SP1's
-    /// `fri_commitments: Vec<SC::DigestVariable>` by carrying the
-    /// digest's length in the type rather than a const generic.
+    /// (Poseidon2-BN254).  The digest's length is carried in the type
+    /// rather than a const generic.
     pub commitment: Dig,
     /// Phantom to keep `F` used when `Dig` does not mention it.
     pub _phantom_f: core::marker::PhantomData<F>,
@@ -702,8 +701,7 @@ where
 
     for (round, ([eval0, eval1], beta)) in sibling_pairs.iter().zip(betas.iter()).enumerate() {
         // The fold point depends on the query index's per-round bit
-        // (which sibling is at +x vs -x).  Mirror SP1
-        // (crates/recursion/circuit/src/basefold/mod.rs:347-406) and the
+        // (which sibling is at +x vs -x).  Mirror the
         // host (crates/pcs/src/basefold/verifier.rs:378-387):
         //   xs = [x, -x]   if bit == 0   (current at +x)
         //   xs = [-x, x]   if bit == 1   (current at -x)
@@ -1005,8 +1003,8 @@ where
                 // structurally decided at program build.
                 let initial_eval: Ext<C::F, C::EF> = if !proof.component_openings.is_empty() {
                     // Accumulate the step-8 inner product SYMBOLICALLY across the
-                    // whole leaf loop and materialize it ONCE per query (mirrors
-                    // SP1 basefold/mod.rs:250-266: `*batch_eval += coeff*value`
+                    // whole leaf loop and materialize it ONCE per query
+                    // (`acc += coeff*value`,
                     // then a single `builder.eval` per query).  Keeping `acc` a
                     // SymbolicExt and letting the DSL CSE the single downstream
                     // eval avoids an O(queries x rounds x widths) blowup of
@@ -1057,9 +1055,9 @@ where
                                 leaf_digest = HV::compress(builder, pair);
                             }
                             HV::assert_digest_eq(builder, leaf_digest, commitments[round_idx]);
-                            // Round-count binding (2),
-                            // Ziren-faithful — SP1's `index == 0` RESIDUAL
-                            // assert (slop merkle tcs.rs:165): after walking
+                            // Round-count binding (2) —
+                            // the `index == 0` RESIDUAL
+                            // assert: after walking
                             // `path_len` Merkle levels, EVERY remaining (higher)
                             // query-index bit must be ZERO, i.e. the consumed
                             // index `index >> path_len == 0`.  Without it a
@@ -1067,9 +1065,9 @@ where
                             // `merkle_path_digests` (under-claimed tree height)
                             // and silently leave the high query-index bits
                             // unconsumed — a wrong/short path that the
-                            // raw-root compare alone would not catch (Ziren's
-                            // commit is a bare Merkle root, NOT SP1's
-                            // compress([root, hash([h,w])]), so the path
+                            // raw-root compare alone would not catch (the
+                            // commit is a bare Merkle root with no
+                            // height binding, so the path
                             // length is otherwise unbound to the commitment).
                             // The component leaf is a FULL-height tree leaf, so
                             // the honest path consumes ALL `log_codeword_size`
@@ -1101,7 +1099,7 @@ where
 
                 // Pass the per-round query index bits so the fold
                 // reorders (+x, -x) per round (which sibling is current).  Same
-                // bits used for `initial_x` above (SP1 parity: index[round]).
+                // bits used for `initial_x` above (index[round]).
                 let folded = emit_basefold_query_chain::<C>(
                     builder,
                     initial_eval,
@@ -1121,8 +1119,7 @@ where
                 //
                 // Mirrors the HOST commit-phase Merkle verify (p3
                 // MerkleTreeMmcs::verify_batch, crates/pcs/src/basefold/
-                // verifier.rs:389-404) and SP1's recursion `verify`
-                // (basefold/merkle_tree.rs):
+                // verifier.rs:389-404):
                 //   * leaf = H(full row = [eval0(4 KB), eval1(4 KB)] = 8 felts)
                 //     — NOT just eval0; the codeword leaf is the whole
                 //     sibling pair.
@@ -1133,7 +1130,7 @@ where
                 //     (always-left) would compress every right-child step in
                 //     the wrong order and yield the wrong root.
                 //   * p3 MerkleTreeMmcs compares the reconstructed root
-                //     DIRECTLY to the commitment (no SP1-style dims-compress).
+                //     DIRECTLY to the commitment (no dims-compress step).
                 for (round_idx, round_openings) in proof.query_phase_openings.iter().enumerate() {
                     let op = &round_openings[query_idx];
                     if op.merkle_path_digests.is_empty() {
@@ -1159,9 +1156,9 @@ where
                             HV::select_chain_digest(builder, bit, [leaf_digest, sibling_variable]);
                         leaf_digest = HV::compress(builder, pair);
                     }
-                    // Round-count binding (2),
-                    // Ziren-faithful — SP1's `index == 0` RESIDUAL assert
-                    // (slop merkle tcs.rs:165), applied to the commit-phase
+                    // Round-count binding (2) —
+                    // the `index == 0` RESIDUAL assert,
+                    // applied to the commit-phase
                     // codeword walk.  After walking `path_len` levels every
                     // remaining (higher) bit of `path_bits` (= the pair index
                     // `orig_query >> (round_idx+1)` past the consumed levels)
@@ -1173,8 +1170,8 @@ where
                     // BYTE-IDENTICAL (no constraint emitted).  Load-bearing
                     // only if a prover WITNESSES a shorter `merkle_path_digests`
                     // (under-claimed codeword height): the bare-root compare
-                    // alone would accept it (Ziren has no SP1
-                    // compress([root, hash([h,w])]) height binding), but the
+                    // alone would accept it (the bare Merkle-root commitment
+                    // carries no height binding), but the
                     // unconsumed high index bits would be free — this assert
                     // forbids that.
                     for residual_bit in path_bits[path_len..].iter().cloned() {
@@ -1344,8 +1341,7 @@ mod tests {
         run_numvars_bind(32, 4);
     }
 
-    // ── Merkle-walk `index == 0` residual-assert tests
-    //    (Ziren-faithful port of SP1 slop tcs.rs:165) ──
+    // ── Merkle-walk `index == 0` residual-assert tests ──
     //
     // The production residual binding lives inside
     // `verify_untrusted_evaluations` after each in-circuit Merkle walk:

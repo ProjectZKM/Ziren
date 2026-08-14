@@ -41,7 +41,7 @@ use p3_challenger::{FieldChallenger, GrindingChallenger};
 use p3_field::{BasedVectorSpace, ExtensionField, Field, PrimeField};
 
 /// Proof-of-work grinding difficulty (in bits) applied at the start of the
-/// LogUp-GKR argument, matching SP1's `GKR_GRINDING_BITS`. The prover grinds
+/// LogUp-GKR argument. The prover grinds
 /// for a witness that, once absorbed, makes the challenger emit
 /// `GKR_GRINDING_BITS` leading zero bits; the verifier re-checks the witness
 /// before sampling any GKR challenge.
@@ -208,7 +208,6 @@ pub struct LogUpGkrProof<EF, Witness> {
     /// Proof-of-work grinding witness, produced before any GKR challenge is
     /// drawn. The verifier re-checks it via
     /// [`GrindingChallenger::check_witness`] against [`GKR_GRINDING_BITS`].
-    /// Mirrors SP1's `LogupGkrProof::witness`.
     pub witness: Witness,
 }
 
@@ -353,8 +352,8 @@ where
     let tree = build_fraction_tree(leaves);
     let root = tree.last().unwrap()[0];
 
-    // Proof-of-work grinding, before any GKR challenge is drawn (matches
-    // SP1's `prove_logup_gkr`). `grind` absorbs the witness into the
+    // Proof-of-work grinding, before any GKR challenge is drawn.
+    // `grind` absorbs the witness into the
     // transcript, so every subsequent Fiat–Shamir challenge depends on it.
     let witness = challenger.grind(GKR_GRINDING_BITS);
 
@@ -583,7 +582,7 @@ where
     Challenger: FieldChallenger<F> + GrindingChallenger,
 {
     // Re-check the proof-of-work grinding witness before sampling any GKR
-    // challenge, mirroring SP1's `verify_logup_gkr`. `check_witness` absorbs
+    // challenge. `check_witness` absorbs
     // the witness so the transcript matches the prover's.
     if !challenger.check_witness(GKR_GRINDING_BITS, proof.witness) {
         return None;

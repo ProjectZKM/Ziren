@@ -217,17 +217,15 @@ where
     /// NO obligation — every recursion `assert_*` was VACUOUS (a prover
     /// could satisfy the AIR with `in1 = diff ≠ 0`).  `DivFAssert` sets
     /// `is_div_soundness = 1` (alu_base.rs:135) so the identity fires
-    /// unconditionally — restoring SP1's "assert identity always fires"
-    /// semantics (SP1 has no mult-guard at all: its div constraint is
-    /// `when(is_div).assert_eq(in2*out, in1)`).  Computational `DivF`s
-    /// keep the mult=0 dead-branch guard (Select branches) — the only
-    /// place Ziren deliberately diverges from SP1's blanket lowering.
+    /// unconditionally — the assert identity always fires.
+    /// Computational `DivF`s keep the mult=0 dead-branch guard (Select
+    /// branches); assert lowerings must not.
     ///
-    /// History: an earlier comment here justified plain `DivF` as
-    /// "SP1-parity" — that conflated the dead-branch guard (needed for
-    /// computational DivFs only) with assert lowering, and silently
-    /// disabled every structural soundness check in the recursion
-    /// machine.  Do not revert to `DivF` here.
+    /// History: an earlier version lowered asserts to plain `DivF` —
+    /// that conflated the dead-branch guard (needed for computational
+    /// DivFs only) with assert lowering, and silently disabled every
+    /// structural soundness check in the recursion machine.  Do not
+    /// revert to `DivF` here.
     fn base_assert_eq(
         &mut self,
         lhs: impl Reg<C>,
@@ -676,9 +674,6 @@ where
     /// into its own `RawProgram`, and pushes a `SeqBlock::Parallel`.
     /// Cycle-tracker enter/exit ops thread through `span_builder`
     /// as in the legacy compile loop.
-    ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/compiler/src/circuit/compiler.rs::compile_raw_program`
-    /// (lines 639-697).
     fn compile_block<F>(
         &mut self,
         operations: TracedVec<DslIr<C>>,

@@ -85,9 +85,7 @@ pub fn observe_ext_slice<C, FC>(
 /// felt, then the elements.
 ///
 /// In-circuit mirror of the host `zkm_pcs::shard_level::prover::
-/// observe_length_prefixed_ext` and of SP1's
-/// `observe_variable_length_extension_slice`
-/// (`sp1-latest/crates/recursion/circuit/src/challenger.rs:99-110`).  The
+/// observe_length_prefixed_ext`.  The
 /// length is a circuit CONSTANT (opening widths are fixed by the shape/VK), so
 /// this costs one extra observed felt per slice and no witness.
 pub fn observe_length_prefixed_ext_slice<C, FC>(
@@ -299,48 +297,33 @@ pub struct LogupGkrShardChipMetadata {
 /// beta-seed dimension); `eval_public_values_fn` is the same
 /// closure parameter used by [`verify_public_values`].
 ///
-/// # SP1 transcript convention (LSB-fold, push-at-back)
+/// # Transcript convention (LSB-fold, push-at-back)
 ///
-/// This verifier mirrors SP1's LSB-fold transcript convention
-/// byte-for-byte — see the inventory table below.  In particular,
-/// the per-round 4-tuple is observed as `(n0, n1, d0, d1)` and the
+/// The per-round 4-tuple is observed as `(n0, n1, d0, d1)` and the
 /// new `last_coordinate` is appended to the back of `eval_point`
-/// (LSB-first push: `eval_point[len-1] = last_coordinate`).  This
-/// matches SP1's `Point::add_dimension_back` semantics (see
-/// slop/crates/multilinear/src/point.rs::Point::add_dimension_back).
+/// (LSB-first push: `eval_point[len-1] = last_coordinate`).
 ///
 /// Per-round transcript ops (in order — must match the prover):
 ///
-/// | Step | Operation | SP1 line | Ziren line |
-/// |---|---|---|---|
-/// | 1 | sample `lambda` | logup_gkr.rs:143 | logup_gkr.rs:401 |
-/// | 2 | assert `claimed_sum == numerator_eval * lambda + denominator_eval` | logup_gkr.rs:145-146 | logup_gkr.rs:406-407 |
-/// | 3 | `verify_sumcheck` | logup_gkr.rs:149 | logup_gkr.rs:410-414 |
-/// | 4 | assert `final_eval == eq(point,eval_point) * ((n0*d1 + n1*d0)*λ + d0*d1)` | logup_gkr.rs:154-160 | logup_gkr.rs:430-440 |
-/// | 5 | observe `n0` | logup_gkr.rs:163 | logup_gkr.rs:447 |
-/// | 6 | observe `n1` | logup_gkr.rs:164 | logup_gkr.rs:448 |
-/// | 7 | observe `d0` | logup_gkr.rs:165 | logup_gkr.rs:449 |
-/// | 8 | observe `d1` | logup_gkr.rs:166 | logup_gkr.rs:450 |
-/// | 9 | `eval_point = sumcheck_point.clone()` | logup_gkr.rs:169 | logup_gkr.rs:461 |
-/// | 10 | sample `last_coordinate` | logup_gkr.rs:171 | logup_gkr.rs:462 |
-/// | 11 | append `last_coordinate` to back of `eval_point` | logup_gkr.rs:172 (`add_dimension_back`) | logup_gkr.rs:463 (`push`) |
-/// | 12 | fold `num_eval = n0 + (n1 - n0) * last_coord` | logup_gkr.rs:174-175 | logup_gkr.rs:469 |
-/// | 13 | fold `den_eval = d0 + (d1 - d0) * last_coord` | logup_gkr.rs:176-177 | logup_gkr.rs:470 |
+/// | Step | Operation | Line |
+/// |---|---|---|
+/// | 1 | sample `lambda` | logup_gkr.rs:401 |
+/// | 2 | assert `claimed_sum == numerator_eval * lambda + denominator_eval` | logup_gkr.rs:406-407 |
+/// | 3 | `verify_sumcheck` | logup_gkr.rs:410-414 |
+/// | 4 | assert `final_eval == eq(point,eval_point) * ((n0*d1 + n1*d0)*λ + d0*d1)` | logup_gkr.rs:430-440 |
+/// | 5 | observe `n0` | logup_gkr.rs:447 |
+/// | 6 | observe `n1` | logup_gkr.rs:448 |
+/// | 7 | observe `d0` | logup_gkr.rs:449 |
+/// | 8 | observe `d1` | logup_gkr.rs:450 |
+/// | 9 | `eval_point = sumcheck_point.clone()` | logup_gkr.rs:461 |
+/// | 10 | sample `last_coordinate` | logup_gkr.rs:462 |
+/// | 11 | append `last_coordinate` to back of `eval_point` | logup_gkr.rs:463 (`push`) |
+/// | 12 | fold `num_eval = n0 + (n1 - n0) * last_coord` | logup_gkr.rs:469 |
+/// | 13 | fold `den_eval = d0 + (d1 - d0) * last_coord` | logup_gkr.rs:470 |
 ///
-/// # Reference
-///
-/// Mirrors `RecursiveLogUpGkrVerifier::verify_logup_gkr`
-/// (crates/recursion/circuit/src/logup_gkr.rs).
-/// Substitutions:
-///   - `Chip<F, A>` introspection → `LogupGkrShardChipMetadata`
-///     (decouples from a particular Chip type)
-///   - `A::Record::eval_public_values` → closure parameter
-///   - `slop_multilinear::Mle::full_lagrange_eval` →
-///     [`crate::zerocheck::eq_eval`]
-///   - `Point::add_dimension_back` → `Vec::push`
-///   - Trace-evaluation reconstruction from per-chip openings
-///     (SP1 logup_gkr.rs:180-280) is deferred to the zerocheck stage
-///     in Ziren; consumed via `proof.logup_evaluations`.
+/// Trace-evaluation reconstruction from per-chip openings is
+/// deferred to the zerocheck stage; consumed via
+/// `proof.logup_evaluations`.
 #[allow(clippy::too_many_arguments)]
 pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     builder: &mut Builder<C>,
@@ -369,7 +352,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     let crate::logup_proof::LogUpGkrOutput { numerator, denominator } = circuit_output;
 
     // The GKR round count is FIXED — the prover
-    // pads to max_log_row_count-1 rounds and SP1's verifier asserts
+    // pads to max_log_row_count-1 rounds and the verifier asserts
     // `round_proofs.len() + 1 == max_log_row_count`.  The count is
     // STRUCTURAL in the recursion program (the loop below unrolls over
     // the lifted vec), so enforcement happens at program build: refuse
@@ -494,8 +477,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         builder.assert_ext_eq(final_eval, expected_final_eval);
 
         // Observe the prover's 4-tuple message into the transcript.
-        // Order MUST match SP1's `(n0, n1, d0, d1)` sequence
-        // (crates/recursion/circuit/src/logup_gkr.rs)
+        // Order MUST be the `(n0, n1, d0, d1)` sequence
         // — any reorder shifts every subsequent α-sample and
         // produces an OOD mismatch.
         observe_ext_element::<C, FC>(builder, challenger, round_proof.numerator_0);
@@ -506,9 +488,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         // Update eval_point: take the sumcheck-reduced point and
         // append a freshly-sampled last coordinate.
         //
-        // LSB-fold convention (SP1-aligned): `eval_point.push(last)`
-        // = `Point::add_dimension_back(last)` per
-        // slop/crates/multilinear/src/point.rs.
+        // LSB-fold convention: `eval_point.push(last)` —
         // `eval_point` grows on the back, mirroring the prover's
         // packed-layer-then-line-challenge structure where the new
         // coordinate is the high-bit (next layer's MSB).
@@ -527,8 +507,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
     // ── DEGREE-MASKED LAST-LAYER RECONSTRUCTION ──
     //
     // In-circuit mirror of the host `verify_logup_gkr_host` reconstruction
-    // (crates/pcs/src/shard_level/verifier.rs:1628-1881) and SP1's
-    // (/data/felicity/sp1/crates/recursion/circuit/src/logup_gkr.rs:180-281).
+    // (crates/pcs/src/shard_level/verifier.rs:1628-1881).
     //
     // The round walk above reduced the GKR `circuit_output` num/den MLEs to
     // (numerator_eval, denominator_eval) at the fully-reduced `eval_point`
@@ -598,7 +577,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         // (5) Per-chip reconstruction.  `shard_chips`, `opened_values.chips`,
         // and `logup_evaluations.chip_openings.values()` are ALL name-ordered
         // (the call site sorts `shard_chips` by name; both maps are name-keyed),
-        // so they align positionally — matching SP1's `zip_eq` and the host's
+        // so they align positionally — matching the host's
         // name-keyed lookup.  RAW-contiguous packing (Ziren extract.rs), padded
         // to the global interaction axis below.
         assert_eq!(
@@ -681,7 +660,7 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
                     );
 
                 // Degree-masked num/den, then sign for receives (host
-                // verifier.rs:1828-1832 / SP1 :249-253).
+                // verifier.rs:1828-1832).
                 let numerator_eval_i = real_numerator - padding_numerator * geq_eval.clone();
                 let denominator_eval_i =
                     real_denominator + (SymbolicExt::ONE - padding_denominator) * geq_eval.clone();
@@ -713,10 +692,9 @@ pub fn verify_logup_gkr<C, SC, A, FC, EVPV>(
         builder.assert_ext_eq(denominator_eval, expected_denominator);
     }
 
-    // ── SP1 observe slot 1 — the GKR trace openings (trace@ζ) ──────────
+    // ── Observe slot 1 — the GKR trace openings (trace@ζ) ──────────
     //
-    // In-circuit mirror of SP1 `crates/hypercube/src/logup_gkr/prover.rs
-    // :187,204,206`, of the host prover
+    // In-circuit mirror of the host prover
     // (`row_gkr::top_level::prove_shard_logup_gkr_rows`) and of the host
     // verifier (end of `verify_logup_gkr_host`).
     //

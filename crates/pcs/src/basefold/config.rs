@@ -1,11 +1,7 @@
 //! Basefold protocol configuration.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold/src/config.rs`.
-//!
-//! The SP1 source carries a `BasefoldConfigImpl` enum of
-//! Poseidon2{BabyBear,KoalaBear,Bn254Fr} variants; Ziren targets
-//! KoalaBear+Poseidon2 only, so we don't carry the variant at the
+//! Ziren targets
+//! KoalaBear+Poseidon2 only, so no config-variant enum is carried at the
 //! type level.
 
 use core::marker::PhantomData;
@@ -47,10 +43,7 @@ impl<F: Field> FriConfig<F> {
 
     /// Inner-stage (core / compress / shrink) production parameters:
     /// **`(log_blowup=2, num_queries=124, pow_bits=16)`** —
-    /// per-stage soundness (`core_fri_config` / `recursion_fri_config`,
-    /// `crates/primitives/src/fri_params.rs`: `CORE_LOG_BLOWUP = 2`,
-    /// `RECURSION_LOG_BLOWUP = 2`,
-    /// `unique_decoding_queries(2) = 124`, `SP1_PROOF_OF_WORK_BITS = 16`).
+    /// per-stage soundness.
     ///
     /// **Soundness (provable 100-bit inner chain).** The
     /// BaseFold query-phase / unique-decoding soundness is
@@ -62,14 +55,14 @@ impl<F: Field> FriConfig<F> {
     /// **Why the OLD `(1, 94, 16)` was UNSOUND.** At rate `1/2`
     /// (`half_rate_plus_half = 0.75`), 94 queries with `pow_bits = 16`
     /// buys only `94 · (-log2(0.75)) + 16 ≈ 55` bits — the old inner
-    /// default merely copied SP1's literal `94` (which SP1 uses ONLY at
-    /// `blowup=3 / pow=22`) while keeping `blowup=1 / pow=16`.  For
-    /// 100 bits at `blowup=1` the formula demands **203** queries; SP1
-    /// instead raises the rate to `blowup=2` so 124 queries suffice.
+    /// default used a `94` query count that is only sound at
+    /// `blowup=3 / pow=22`, while keeping `blowup=1 / pow=16`.  For
+    /// 100 bits at `blowup=1` the formula demands **203** queries;
+    /// raising the rate to `blowup=2` lets 124 queries suffice.
     ///
-    /// **Shrink note (deviation from SP1, intentional).** SP1 secures
-    /// shrink at `(blowup=3, q=94, pow=22)` (a SIZE optimisation for the
-    /// shrink→wrap hand-off).  Ziren's shrink machine shares the inner
+    /// **Shrink note (intentional).** Shrink COULD run at
+    /// `(blowup=3, q=94, pow=22)` (a SIZE optimisation for the
+    /// shrink→wrap hand-off), but Ziren's shrink machine shares the inner
     /// `KoalaBearPoseidon2` SC TYPE with core/compress AND is verified
     /// in-circuit by the wrap program through the SAME KoalaBear
     /// `production_default` verifier that verifies compress→core and
@@ -79,7 +72,7 @@ impl<F: Field> FriConfig<F> {
     /// at this SAME `(2, 124, 16)` config: still provably 100-bit (100.08),
     /// in fact MORE conservative on query count (124 ≥ 94), at the cost of
     /// a slightly larger shrink proof.  The on-chain WRAP proof (BN254
-    /// OuterSC) keeps SP1's `(3, 94, 22)` via `wrap_fri_config`.
+    /// OuterSC) keeps `(3, 94, 22)` via `wrap_fri_config`.
     ///
     /// **Two-adicity.** Codeword domain = `num_variables + log_blowup`
     /// where `num_variables = log_stacking_height ≤ DEFAULT_LOG_STACKING_HEIGHT
@@ -130,11 +123,8 @@ impl<F: Field> FriConfig<F> {
         Self::new(log_blowup, 100, 16)
     }
 
-    /// **WRAP / SHRINK-grade parameters: `(log_blowup=3, num_queries=94, pow_bits=22)`**
-    /// — matches SP1's `wrap_fri_config` / `shrink_fri_config`
-    /// (`crates/primitives/src/fri_params.rs`: `WRAP_LOG_BLOWUP=3`,
-    /// `SP1_SHRINK_WRAP_POW_BITS=22`,
-    /// `unique_decoding_queries_with_custom_grinding(3, 22) = 94`).
+    /// **WRAP / SHRINK-grade parameters:
+    /// `(log_blowup=3, num_queries=94, pow_bits=22)`.**
     ///
     /// **Soundness.** The query-phase / Johnson-bound soundness of the
     /// BaseFold FRI is `num_queries · (-log2(0.5 + rate/2)) + pow_bits`.
@@ -144,8 +134,8 @@ impl<F: Field> FriConfig<F> {
     ///
     /// **Why the inner default (`(1, 94, 16)`) is NOT used for the wrap.**
     /// At rate `1/2` (`half_rate_plus_half = 0.75`), 94 queries with
-    /// `pow_bits = 16` buys only `94 · (-log2(0.75)) + 16 ≈ 55` bits — the
-    /// inner default merely copied SP1's literal `94` without SP1's
+    /// `pow_bits = 16` buys only `94 · (-log2(0.75)) + 16 ≈ 55` bits — a
+    /// `94` query count is only sound alongside
     /// `blowup=3 / pow=22`.  The wrap proof is the on-chain root, so it
     /// MUST hit the full 100-bit target; this constructor supplies it.
     ///

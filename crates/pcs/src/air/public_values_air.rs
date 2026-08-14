@@ -3,14 +3,12 @@
 //! Ziren historically had no core-machine public-values AIR: cross-row
 //! relations were enforced with `when_transition` constraints and the
 //! global cumulative sum was closed by summing each chip's last-row
-//! digest in the verifier (`machine.rs`).  The local-only / SP1-hypercube
+//! digest in the verifier (`machine.rs`).  The local-only
 //! model instead pushes every cross-row relation onto a multiset-balanced
 //! control-bus interaction whose two boundary endpoints are emitted here,
 //! from the public values, by [`eval_public_values`].
 //!
-//! Mirrors SP1 `crates/core/executor/src/record.rs::eval_public_values`
-//! (+ `eval_global_sum` / `eval_state` / `eval_global_memory_*`).  The
-//! emitters here are evaluated by both the prover (when accumulating the
+//! The emitters here are evaluated by both the prover (when accumulating the
 //! global LogUp sum) and the verifier (when checking the balance), so the
 //! interaction kinds they use are exactly those for which
 //! [`crate::lookup::LookupKind::appears_in_eval_public_values`] is true.
@@ -18,7 +16,7 @@
 //! NOTE (incremental): the `GlobalAccumulation` boundary is wired first
 //! (it directly replaces the per-chip last-row digest sum).  The `State`
 //! boundary (initial/final `(shard, clk, pc, next_pc)` — MIPS carries a
-//! delay-slot `next_pc` lookahead, unlike SP1's `(clk, pc)`) and the
+//! delay-slot `next_pc` lookahead) and the
 //! `MemoryGlobalInit/Finalize` boundaries follow.
 
 use core::borrow::Borrow;

@@ -20,13 +20,6 @@
 //! delegates the BranchingProgram in-circuit eval and the
 //! `prefix_sum_checks` recursion-compiler primitive to caller-
 //! supplied callbacks.
-//!
-//! # Reference
-//!
-//! Mirrors SP1's `RecursiveJaggedEvalConfig` and
-//! `RecursiveTrivialJaggedEvalConfig`
-//! (crates/recursion/circuit/src/jagged/jagged_eval.rs)
-//! shapes from the upstream BaseFold verifier reference.
 
 use std::marker::PhantomData;
 
@@ -117,28 +110,20 @@ impl<C: CircuitConfig> RecursiveJaggedEvalConfig<C, ()> for RecursiveTrivialJagg
 ///
 ///   * `branching_program_eval` — computes the value of the
 ///     branching program `BranchingProgram(z_row, z_trace)` at
-///     `(first_half, second_half)`.  Mirrors
-///     [`slop_jagged::BranchingProgram::eval`].
+///     `(first_half, second_half)`.
 ///   * `prefix_sum_check` — emits the recursion-compiler
 ///     `prefix_sum_checks` op that Horner-reduces a boolean bit
 ///     vector to a Felt and returns the paired full-Lagrange
 ///     evaluation.
 ///
-/// Both closures fire once per jagged-eval call; the composition
-/// around them matches the upstream sumcheck cadence.
-///
-/// # Reference
-///
-/// Mirrors SP1's `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
-/// (crates/recursion/circuit/src/jagged/jagged_eval.rs).
+/// Both closures fire once per jagged-eval call.
 #[derive(Clone, Debug)]
 pub struct RecursiveJaggedEvalSumcheckConfig<SC, BP, PSC> {
     /// Branching-program evaluator closure.
     pub branching_program_eval: BP,
     /// Prefix-sum check closure.
     pub prefix_sum_check: PSC,
-    /// Phantom for the stark-config parameter (carried for
-    /// parity with the SP1 type signature; the body doesn't
+    /// Phantom for the stark-config parameter (the body doesn't
     /// reference SC directly).
     pub _marker: PhantomData<SC>,
 }

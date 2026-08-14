@@ -1,11 +1,8 @@
 //! Reed-Solomon codeword type used throughout the BaseFold protocol.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold/src/code.rs`.
-//!
-//! In the SP1 source this is a `Tensor<F, A>` wrapper.  Ziren uses
-//! `RowMajorMatrix<F>` from `p3_matrix` instead, which has the same
-//! row-major shape semantics that the `commit_phase_round` reshape
+//! Ziren uses
+//! `RowMajorMatrix<F>` from `p3_matrix`, whose
+//! row-major shape semantics the `commit_phase_round` reshape
 //! ("merge even/odd into adjacent columns") relies on.
 
 use p3_field::Field;

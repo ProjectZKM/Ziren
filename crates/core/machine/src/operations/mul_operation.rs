@@ -1,7 +1,7 @@
 //! An embeddable 64-bit multiplication gadget — the `Mul` CHIP's product
 //! logic, extracted so instruction chips can prove their own multiplications
 //! instead of pushing MULT/MULTU request rows onto the `Mul` chip over the
-//! Instruction bus (SP1 has no such bus and no dependency rows at all).
+//! Instruction bus.
 //!
 //! Semantics are EXACTLY the MIPS `MULT`/`MULTU` the `Mul` chip proves: the
 //! operands are extended to 64 bits (sign-extended iff signed), the uncarried

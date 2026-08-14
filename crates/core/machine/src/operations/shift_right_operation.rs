@@ -1,7 +1,7 @@
 //! An embeddable right-shift/rotate gadget — the `ShiftRight` CHIP's shift
 //! logic, extracted so instruction chips can prove their own SRL/SRA/ROR
 //! sub-operations instead of pushing request rows onto the `ShiftRight` chip
-//! over the Instruction bus (SP1 has no such bus and no dependency rows).
+//! over the Instruction bus.
 //!
 //! Semantics are EXACTLY the MIPS shifts the `ShiftRight` chip proves: the
 //! shift amount is `c[0] % 32` (bit shift `c % 8`, byte shift `(c % 32) / 8`),

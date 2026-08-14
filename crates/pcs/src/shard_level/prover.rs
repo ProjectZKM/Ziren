@@ -17,7 +17,7 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// threads it into the jagged-PCS opening.  The opening then skips its own
 /// commit step and the in-band commit observe, matching the verifier
 /// counterpart (`verify_jagged_basefold_no_observe`).  The `main_traces`
-/// views are BORROWED (SP1's `commit_traces(&self, &Traces)` shape) and only
+/// views are BORROWED and only
 /// relabeled to `InnerVal` for the commit build (a zero-copy slice
 /// reinterpret) — no trace data is copied or moved, and no ownership
 /// round-trips through the return.
@@ -207,7 +207,7 @@ where
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Per-chip RAW height for the transcript prologue + the proof's
-/// `chip_heights` map (SP1 parity: the observed felt is the raw
+/// `chip_heights` map (the observed felt is the raw
 /// `num_real_entries`, 0 allowed for an unexercised chip — NOT its
 /// ceil-log2).  Device-residency aware: a device chip's REAL height is
 /// baked into its dummy MLE (`metadata_height()`), floored at 1 — the
@@ -271,7 +271,7 @@ pub fn observe_transcript_prologue<SC, A>(
         "observe_transcript_prologue: chips/shared_trace_mles must be parallel",
     );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Per-chip RAW-height observe (SP1 parity — shard.rs observes
+        // Per-chip RAW-height observe (the observed felt is
         // `num_real_entries` directly, a true 0 for an unexercised chip;
         // the previous ceil-log2 felt with a `.max(1)` floor is retired).
         // Source matches the proof's `chip_heights` map

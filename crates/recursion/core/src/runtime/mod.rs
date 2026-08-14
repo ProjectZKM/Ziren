@@ -78,8 +78,6 @@ pub const D: usize = 4;
 /// reporting); only the root walker's pc/clk feed back to `Runtime`
 /// after `execute_blocks` returns. The `nb_*` counters are summed back
 /// at sub-walker join (single-threaded after `try_for_each` returns).
-///
-/// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:856` (ExecState).
 #[derive(Debug, Clone, Default)]
 pub struct WalkerState<F: Default + Copy> {
     pub pc: F,
@@ -153,7 +151,6 @@ pub struct Runtime<'a, F: PrimeField32, EF: ExtensionField<F>, Diffusion> {
     /// safe variants; once the SeqBlock::Parallel walker arm is ported
     /// to par_iter, the `&self` `mr_unchecked`/`mw_unchecked` can be
     /// used directly for race-free disjoint-address writes.
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:380`.
     pub memory: ParMemVec<F>,
 
     /// The execution record.
@@ -318,7 +315,7 @@ where
         unsafe { self.memory.mw_unchecked(addr, val, mult) }
     }
 
-    /// Record-write helper. Wraps the SP1 raw_get
+    /// Record-write helper. Wraps the raw_get
     /// idiom so the type parameter `T` is inferred from the slot.
     /// Soundness: caller must ensure the slot is written exactly once
     /// across all threads — guaranteed by analyze pass + IR-level
@@ -360,12 +357,10 @@ where
         // dispatches via par_iter, UnsafeRecord's Sync impl
         // and the disjoint-offset invariant from analyze make the
         // swap a one-liner.
-        // SP1 ref: `/tmp/sp1/crates/recursion/executor/src/runtime/mod.rs`
-        // (the Runtime::run loop iterates RawProgram<AnalyzedInstruction>).
         let program_arc = self.program.clone();
         let (analyzed_program, event_counts) = program_arc.seq_blocks.clone().analyze();
         let unsafe_record = UnsafeRecord::<F>::new(event_counts);
-        // Pre-init public_values cell with default via SP1's raw_get
+        // Pre-init public_values cell with default via the raw_get
         // pattern — works through `&UnsafeRecord` so it's compatible
         // with the new `&self` walker. CommitPublicValues overwrites.
         unsafe {
@@ -446,9 +441,6 @@ where
     /// passes `witness=None`/`debug_stdout=None` since parallel sub-programs
     /// in compose are pure compute — verified by `hint_in_par`
     /// counter at commit eace827).
-    ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs:799-834`
-    /// (execute_raw_inner).
     #[allow(clippy::too_many_arguments)]
     fn execute_blocks(
         &self,
@@ -504,8 +496,6 @@ where
     /// - `self.debug_stdout` → `debug_stdout.as_mut().expect(...)`
     /// - `unsafe_record.X[off] = MaybeUninit::new(UnsafeCell::new(ev))`
     ///   → `unsafe { UnsafeCell::raw_get(rec.X[off].as_ptr() as *const UnsafeCell<_>).write(ev) }`
-    ///
-    /// SP1 ref: `/tmp/sp1/crates/recursion/executor/src/lib.rs::execute_one`.
     #[allow(clippy::too_many_arguments)]
     fn execute_one(
         &self,
@@ -619,8 +609,7 @@ where
                     MemAccessKind::Write => drop(self.mw_us(addr, val, mult)),
                 }
                 // mem_const_count is pre-sized by `UnsafeRecord::new`
-                // from the analyzed Mem-instruction count (SP1 ref:
-                // /tmp/sp1/crates/recursion/executor/src/record.rs:111).
+                // from the analyzed Mem-instruction count.
                 // No per-instruction increment needed.
             }
             Instruction::Poseidon2(instr) => {

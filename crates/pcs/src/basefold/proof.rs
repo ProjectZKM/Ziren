@@ -1,10 +1,5 @@
 //! BaseFold proof structure.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold/src/lib.rs`
-//! and the prover construction in
-//! `slop/crates/basefold-prover/src/prover.rs`.
-//!
 //! Per-round shape (much simpler than WHIR):
 //!   * `univariate_messages[i]` holds the two end-point evaluations
 //!     `[g(...,0), g(...,1)]` of the i-th sumcheck round

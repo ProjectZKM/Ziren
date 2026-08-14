@@ -21,11 +21,7 @@
 //!     [`RecursiveBasefoldComponentOpening`] /
 //!     [`RecursiveBasefoldProof`]
 //!
-//! # Reference
-//!
-//! Mirrors `sp1_recursion_circuit::witness`
-//! (crates/recursion/circuit/src/witness.rs) conventions — each impl
-//! reads the type's fields in declaration
+//! Each impl reads the type's fields in declaration
 //! order through the builder's witness stream, and `write` mirrors
 //! that order on the prover side.
 

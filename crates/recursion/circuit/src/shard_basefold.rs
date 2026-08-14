@@ -60,11 +60,6 @@
 //! [`BasefoldShardProofVariable`], supplying the additional inputs
 //! the new verifier takes: per-chip metadata, insertion points,
 //! public-values-constraint + jagged-eval closures.
-//!
-//! # Reference
-//!
-//! Mirrors SP1's crates/recursion/circuit/src/shard.rs
-//! from the upstream BaseFold verifier reference.
 
 use std::marker::PhantomData;
 
@@ -553,7 +548,7 @@ impl<P> BasefoldShardVerifier<P> {
         // The faithful alternative is the deep height-agnostic
         // (hypercube/jagged-native) port — make commit AND zerocheck open at
         // the SAME (variable) height so the recursion never has to reconcile
-        // two bitrev layouts (mirrors SP1's height-agnostic recursion).
+        // two bitrev layouts.
         // Sourcing the raw residual keeps FIX-on byte-identical; FIX-off
         // recursion-verify is gated behind that port plus the chip-set
         // vk_map regen.
@@ -561,7 +556,7 @@ impl<P> BasefoldShardVerifier<P> {
         //   [prep chips | prep pad | main chips | main pad]
         // A padding column is committed zeros, so its claim is ZERO; those
         // claims are spliced in by the jagged verifier from `insertion_points`
-        // (`crates/recursion/circuit/src/recursive_jagged_pcs.rs`), as SP1 does
+        // (`crates/recursion/circuit/src/recursive_jagged_pcs.rs`)
         // -- what this builds is the REAL per-chip claims only.  The
         // preprocessed round's claims are each chip's `preprocessed.local`,
         // taken in the MACHINE's chip-name order, which is the order `setup`
@@ -592,8 +587,7 @@ impl<P> BasefoldShardVerifier<P> {
 
         // ── jagged HASH-BIND re-check (in-circuit) ──────────
         //
-        // Port of SP1 `RecursiveJaggedPcsVerifier::verify_trusted_evaluations`
-        // (crates/recursion/circuit/src/jagged/verifier.rs:96-115): for each
+        // For each
         // round recompute
         //   hash = SC::hash([col_counts.len()] ++ row_counts ++ col_counts)
         //   expected = SC::compress([original_commitment, hash])
@@ -604,7 +598,7 @@ impl<P> BasefoldShardVerifier<P> {
         // the per-chip widths.  `len = column_counts.len()` (== row_counts.len)
         // — IDENTICAL to the host emit convention (jagged_hash_bind_modified).
         //
-        // GUARDS (SP1 verifier.rs:195-238 analog) are enforced inside the host
+        // GUARDS are enforced inside the host
         // counts (counts < F::ORDER is structural — host felts wrap, and the
         // recompute-equality already rejects any inconsistent geometry; the
         // 0 < area < 2^30 bound is enforced by the existing
@@ -716,11 +710,7 @@ impl<P> BasefoldShardVerifier<P> {
 /// [`BasefoldShardVerifier::verify_shard`] flow can be exercised
 /// against without a real prover run.
 ///
-/// # Reference
-///
-/// Mirrors the shape-config inputs to SP1's
-/// `dummy_vk_and_shard_proof` (crates/recursion/circuit/src/dummy.rs)
-/// — but adapted for the BaseFold pipeline's 5-field proof shape
+/// Sized for the BaseFold pipeline's 5-field proof shape
 /// (no permutation/quotient commits; instead an
 /// `evaluation_proof: JaggedPcsProofVariable`).
 #[derive(Clone, Debug)]
@@ -752,8 +742,7 @@ pub struct BasefoldProofShape {
 /// of each MLE) matches a real proof so the recursion compiler's
 /// witness-stream layout work can use this as a placeholder.
 ///
-/// BaseFold-pipeline analog of SP1's FRI-shaped
-/// `dummy_vk_and_shard_proof`. Used by:
+/// Used by:
 ///
 ///   - Recursion-circuit harness tests that compile the verifier
 ///     against a stable proof-shape fixture.

@@ -1,21 +1,18 @@
-//! Program constructors for SP1-style multi-stage basefold recursion.
+//! Program constructors for the multi-stage basefold recursion.
 //!
 //! Each function builds + compiles one of the four recursion programs
-//! (Normalize / Compose / Deferred / Wrap) that consume the SP1-style
+//! (Normalize / Compose / Deferred / Wrap) that consume the
 //! shard-level basefold proof shape.  They mirror the legacy
 //! [`zkm_prover::compress_program_from_input`] pattern: read the
 //! witness, invoke the verifier body, compile the operations into a
 //! [`RecursionProgram`].
 //!
-//!
-//! ## Mapping to SP1's [`SP1RecursionProgramShape`]
-//!
-//! | Ziren constructor                     | SP1 analog                            | Verifier body               |
-//! |---------------------------------------|---------------------------------------|-----------------------------|
-//! | `build_normalize_basefold_program`    | `normalize_program_from_input`        | `verify_core_basefold`      |
-//! | `build_compose_basefold_program`      | `compose_program_from_input`          | `verify_compress_basefold`  |
-//! | `build_deferred_basefold_program`     | `deferred_program_from_input`         | `verify_deferred_basefold`  |
-//! | `build_wrap_basefold_program`         | `shrink_program_from_input` (wrap)    | `verify_wrap_basefold`      |
+//! | Ziren constructor                     | Verifier body               |
+//! |---------------------------------------|-----------------------------|
+//! | `build_normalize_basefold_program`    | `verify_core_basefold`      |
+//! | `build_compose_basefold_program`      | `verify_compress_basefold`  |
+//! | `build_deferred_basefold_program`     | `verify_deferred_basefold`  |
+//! | `build_wrap_basefold_program`         | `verify_wrap_basefold`      |
 
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::air::MachineAir;
@@ -88,13 +85,12 @@ where
 /// proofs (from previous Normalize or Compose outputs) and aggregates
 /// their public values into a single output.
 ///
-/// SP1 pattern: vk_root is sourced from the input witness's
+/// vk_root is sourced from the input witness's
 /// `vk_merkle_data.root`, NOT baked as a compile-time constant.  This
 /// makes the compose program structure independent of the vk_map root,
 /// so the program's VK is stable across vk_map regen.  `value_assertions`
 /// controls whether the merkle membership proofs are enforced (true) or
-/// only witnessed (false) — mirrors SP1's `vk_verification` flag in
-/// crates/recursion/circuit/src/machine/vkey_proof.rs.
+/// only witnessed (false).
 pub fn build_compose_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMCompressBasefoldWitnessValues<KoalaBearPoseidon2>,
@@ -169,8 +165,7 @@ where
 /// outer ring.
 /// Wrap (terminal) takes `value_assertions` like compose to control
 /// whether merkle membership proofs are enforced (true) or only
-/// witnessed (false). Mirrors SP1's
-/// `SP1CompressRootVerifierWithVKey::verify` `value_assertions` flag.
+/// witnessed (false).
 pub fn build_wrap_basefold_program<A>(
     machine: &StarkMachine<KoalaBearPoseidon2, A>,
     input: &ZKMWrapBasefoldWitnessValues<KoalaBearPoseidon2>,
@@ -205,9 +200,8 @@ where
     program
 }
 
-/// Top-level dispatch enum mirroring SP1's `SP1RecursionProgramShape`
-/// (crates/prover/src/shapes.rs).  Select a stage and
-/// the dispatch function builds the corresponding program.
+/// Top-level dispatch enum for the recursion stages.  Select a stage
+/// and the dispatch function builds the corresponding program.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZKMBasefoldRecursionStage {
     /// Verifies one or more leaf core shard proofs.
@@ -221,8 +215,7 @@ pub enum ZKMBasefoldRecursionStage {
 }
 
 impl ZKMBasefoldRecursionStage {
-    /// Human-readable name, matches the SP1 enum variant names for
-    /// logs + VK-map-bin keys.
+    /// Human-readable name, used for logs + VK-map-bin keys.
     pub fn name(&self) -> &'static str {
         match self {
             Self::Normalize => "Normalize",
@@ -412,9 +405,8 @@ mod tests {
     /// SAME 21-round program at every height ⇒ the program — and therefore
     /// the VK — is CLAMP-INDEPENDENT (a function of the chip-SET only).
     /// This test ASSERTS that equality, since the host commit does not
-    /// clamp (`log_stacking_height` fixed at 21,
-    /// — see `jagged/src/prover.rs:commit_multilinears` in
-    /// the SP1 ref, which pads area UP to a FIXED stacking height and
+    /// clamp (`log_stacking_height` fixed at 21 —
+    /// the commit pads area UP to a FIXED stacking height and
     /// never clamps).  The verifier-side masking-to-MAX alternative is
     /// UNSOUND in isolation: the recursion challenger sponge is stateful
     /// at program-build time (each `observe` may trigger a Poseidon2

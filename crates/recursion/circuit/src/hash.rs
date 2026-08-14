@@ -97,8 +97,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// #H (BaseFold-over-BN254 wrap port): the lift paths carry the
     /// host BaseFold bundle's digests as raw field constants (not
     /// witness-stream reads), so this bridges raw -> variable in a
-    /// digest-type-generic way (mirrors SP1's `GC::Digest: Witnessable`
-    /// read but for the const-lift path).
+    /// digest-type-generic way.
     fn const_digest(
         builder: &mut Builder<C>,
         digest: <Self as FieldHasher<C::F>>::Digest,
@@ -183,7 +182,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         jagged_eval: crate::partial_sumcheck::PartialSumcheckProof<Ext<C::F, C::EF>>,
         expected_eval: Ext<C::F, C::EF>,
         commit_root: [Felt<C::F>; 8],
-        // SP1 hash-bind: the MODIFIED (FS-observed) digest = main_commitment.
+        // Hash-bind: the MODIFIED (FS-observed) digest = main_commitment.
         // The inner impl threads it into modified_commitments; the outer impl
         // (dead bundle arm) ignores it.
         modified_commitment: [Felt<C::F>; 8],

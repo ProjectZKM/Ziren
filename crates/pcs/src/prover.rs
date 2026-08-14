@@ -561,8 +561,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         // commit challenges to the shard's chip-set identity AND each
         // chip's row count.
         //
-        // The per-chip height felt is the RAW `num_real_entries` (SP1
-        // parity, 0 allowed) — the value the recursion verifier binds in
+        // The per-chip height felt is the RAW `num_real_entries`
+        // (0 allowed) — the value the recursion verifier binds in
         // this slot via the `chip_height_bits` Horner recompose.  The host
         // verifier mirror in `shard_level::verifier::verify_shard_basefold`
         // observes the same value sourced from `proof.chip_heights`.
@@ -1358,8 +1358,7 @@ where
         .and_then(|retained| retained.main_store.take())
         .expect("CpuProver::commit retains the main-trace store");
     let max_log_row_count =
-        crate::shard_level::verifier::BasefoldShardVerifier::production_default()
-            .max_log_row_count;
+        crate::shard_level::verifier::BasefoldShardVerifier::production_default().max_log_row_count;
     debug_assert!(
         main_traces_named.values().all(|pm| pm.num_variables() as usize == max_log_row_count),
         "retained main store padded to a cube != the fixed max_log_row_count \

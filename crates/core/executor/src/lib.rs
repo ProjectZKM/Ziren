@@ -19,8 +19,8 @@ mod io;
 /// [`Executor::run`].
 pub mod jit_runner;
 pub mod memory;
-/// Minimal-trace skeleton for the SP1 MinimalTrace + TracingVM split
-///. Defines the per-shard checkpoint format the JIT
+/// Minimal-trace skeleton for the MinimalTrace + TracingVM split.
+/// Defines the per-shard checkpoint format the JIT
 /// emits and the TracingVM consumes. See module docs.
 pub mod minimal_trace;
 mod opcode;

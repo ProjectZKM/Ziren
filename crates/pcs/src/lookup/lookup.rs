@@ -53,21 +53,19 @@ pub enum LookupKind {
     /// rows to chain — the local-only replacement for the legacy
     /// `when_transition(local.next_pc == next.pc)` constraints.
     /// Boundary endpoints (initial / final pc, clk) are emitted by the
-    /// public-values AIR.  Mirrors SP1 `InteractionKind::State`.
+    /// public-values AIR.
     State = 9,
 
     /// Running global-digest accumulation chain.  Each `GlobalChip` row
     /// receives `(index, running_digest)` and sends
     /// `(index+1, running_digest + this_point)`; anchored at both ends by
-    /// the public-values AIR.  Mirrors SP1 `InteractionKind::GlobalAccumulation`.
+    /// the public-values AIR.
     GlobalAccumulation = 10,
 
     /// Global-memory-init ordering control bus (index, prev_addr, valid).
-    /// Mirrors SP1 `InteractionKind::MemoryGlobalInitControl`.
     MemoryGlobalInitControl = 11,
 
     /// Global-memory-finalize ordering control bus.
-    /// Mirrors SP1 `InteractionKind::MemoryGlobalFinalizeControl`.
     MemoryGlobalFinalizeControl = 12,
 
     /// Generic per-row state-chaining bus for MULTI-ROW precompiles
@@ -79,9 +77,7 @@ pub enum LookupKind {
     /// machinery (which the single-row BaseFold zerocheck folder cannot
     /// evaluate).  A leading precompile-ID field in the tuple isolates each
     /// precompile's chain (e.g. SHA_COMPRESS sends only balance SHA_COMPRESS
-    /// receives), so a single kind serves all multi-row precompiles.  This
-    /// is the generic analog of SP1's per-precompile `InteractionKind`s
-    /// (`ShaCompress`, `ShaExtend`, …).
+    /// receives), so a single kind serves all multi-row precompiles.
     PrecompileChain = 13,
 }
 
@@ -107,7 +103,7 @@ impl LookupKind {
 
     /// Whether this kind's multiset is closed by endpoints emitted from
     /// the public-values AIR (rather than balancing entirely within the
-    /// trace).  Mirrors SP1 `InteractionKind::appears_in_eval_public_values`.
+    /// trace).
     #[must_use]
     pub fn appears_in_eval_public_values(&self) -> bool {
         matches!(
@@ -140,8 +136,6 @@ impl<F: Field> Lookup<F> {
     /// Evaluate this lookup's `(numerator, denominator)` fraction from a
     /// point-evaluation of the chip's traces.
     ///
-    /// Direct port of SP1's `Interaction::eval`
-    /// (`/data/felicity/sp1/crates/hypercube/src/lookup/interaction.rs:171-207`).
     /// Computes:
     ///
     /// ```text
@@ -151,15 +145,14 @@ impl<F: Field> Lookup<F> {
     ///
     /// The numerator is returned UNSIGNED (the send/receive sign is applied
     /// by the caller — the LogUp last-layer reconstruction in
-    /// `verify_logup_gkr_host` negates it for receives, mirroring SP1's
-    /// `if is_send { num } else { -num }`).  This is the host/circuit-shared
+    /// `verify_logup_gkr_host` negates it for receives).  This is the host/circuit-shared
     /// generic analog of the base-field-only prover helper
     /// `generate_interaction_vals` (`row_gkr/first_layer.rs`), which folds
     /// the sign in eagerly because it only ever serves the prover.
     ///
     /// `betas[0]` is the `argument_index` weight; `betas[1..]` are the
     /// per-value weights (the partial-lagrange table over the beta seed,
-    /// `eq_mle_table` / SP1 `partial_lagrange_blocking`).  `prep`/`main`
+    /// `eq_mle_table`).  `prep`/`main`
     /// are the per-chip preprocessed/main trace evaluations at the
     /// LogUp-GKR opening point (`Var = EF` for the host verifier today,
     /// `Var = Ext<_>` for the recursion circuit in Phase 2).

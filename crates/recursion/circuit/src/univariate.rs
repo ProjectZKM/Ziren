@@ -3,13 +3,6 @@
 //! Used by the recursion-circuit sumcheck, zerocheck, LogUp-GKR,
 //! and jagged-PCS verifiers as the carrier for per-round univariate
 //! polynomials emitted during sumcheck IOPs.
-//!
-//! # Reference
-//!
-//! Mirrors the upstream `UnivariatePolynomial`
-//! (slop/crates/algebra/src/univariate.rs)
-//! implementation by SP1, adapted to use [`p3_field::Field`] in
-//! place of the SP1 algebra abstractions.
 
 use core::ops::{Add, Mul};
 
@@ -129,8 +122,7 @@ pub fn interpolate<K: Field>(xs: &[K], ys: &[K]) -> UnivariatePolynomial<K> {
 /// [`zkm_pcs::jagged_sumcheck::JaggedReductionRound`], where
 /// `p(2)` comes from linear extrapolation `q1.double() - q0`) to the
 /// coefficient-form [`UnivariatePolynomial`] consumed by the
-/// in-circuit jagged-PCS verifier.  Mirrors the SP1 bundle format
-/// where rounds are already coefficient-form on the wire.
+/// in-circuit jagged-PCS verifier.
 ///
 /// Closed-form via Lagrange basis at the integer triple `{0, 1, 2}`:
 ///

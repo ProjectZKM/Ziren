@@ -71,7 +71,7 @@ pub struct BranchColumns<T> {
     pub a_lt_b: T,
 
     /// The inlined SIGNED comparison of `op_a` and `op_b` — one gadget yields
-    /// lt / eq / gt (SP1's `LtOperationSigned` shape), replacing the two SLT
+    /// lt / eq / gt, replacing the two SLT
     /// request rows the chip used to push onto the `Lt` chip.
     pub compare: LtOperation<T>,
 }

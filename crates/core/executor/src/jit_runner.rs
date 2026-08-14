@@ -190,8 +190,7 @@ mod platform {
         ///
         /// The buffer is a MAP_SHARED mapping of an anonymous memfd
         /// so unconstrained-block ENTER can `mmap` a private COW view
-        /// of the same fd (matching SP1's
-        /// `crates/core/jit/src/context.rs::enter_unconstrained`).
+        /// of the same fd.
         /// Writes through MAP_SHARED persist on the fd, so the COW
         /// view starts as a copy of the JIT's current state — not
         /// just the program image — which is what unconstrained
@@ -886,8 +885,7 @@ mod platform {
         //   ENTER: stash JIT register snapshot AND swap ctx.memory to
         //          a private COW view of the bridge fd, so JIT writes
         //          go to a copy-on-write region that's discarded at
-        //          EXIT.  Mirrors SP1's
-        //          `crates/core/jit/src/context.rs::enter_unconstrained`.
+        //          EXIT.
         //   EXIT : restore registers + clk + instr_count from snapshot,
         //          discard the COW (ctx.memory back to primary), and
         //          redirect the JIT to the executor's saved next_pc.
@@ -1516,7 +1514,7 @@ mod tests {
 // JIT-side mem_reads oracle (scaffold)
 // ──────────────────────────────────────────────────────────────────
 //
-// SP1-style two-stage tracing relies on the producer side (which
+// Two-stage tracing relies on the producer side (which
 // today is the interp `Executor::execute_state` pass) emitting a
 // `MinimalTrace` with per-shard `mem_reads` oracle entries. The
 // existing path uses interp + the in-mr/mw `recording_chunk_mem_reads`

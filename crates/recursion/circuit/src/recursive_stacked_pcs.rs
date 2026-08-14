@@ -12,11 +12,6 @@
 //!      `batch_point` and assert it equals the claim
 //!   4. Forward `(batch_evaluations, stack_point, pcs_proof)` to
 //!      the underlying PCS verifier
-//!
-//! # Reference
-//!
-//! Mirrors SP1's crates/recursion/circuit/src/basefold/stacked.rs
-//! from the upstream BaseFold verifier reference.
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
@@ -100,14 +95,9 @@ impl<P> RecursiveStackedPcsVerifier<P> {
     /// stripe (`stack_point`); the remaining coords select which
     /// stripe (`batch_point`).
     ///
-    /// Mirrors `RecursiveStackedPcsVerifier::verify_untrusted_evaluation`
-    /// (crates/recursion/circuit/src/basefold/stacked.rs)
-    /// from the upstream reference.  Substitutions:
-    ///   - `slop_multilinear::Mle` → flat `Vec<Ext>` (the per-stripe
-    ///     evaluations form a 1-poly Mle over `2^batch_dim` rows;
-    ///     evaluate_mle_ext consumes the flat Vec directly)
-    ///   - `slop_commit::Rounds` → `Vec`
-    ///   - `Point<Ext>` → `&[Ext]`
+    /// The per-stripe evaluations form a 1-poly Mle over `2^batch_dim`
+    /// rows, carried as a flat `Vec<Ext>` that `evaluate_mle_ext`
+    /// consumes directly.
     pub fn verify_untrusted_evaluation<C, FC>(
         &self,
         builder: &mut Builder<C>,
@@ -179,11 +169,11 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // `crates/pcs/src/basefold/stacked.rs` uses
         // `eval_point[..stack_dim]` (LSB-first) as stack_point because
         // Ziren's dense_q layout puts row (= stack) bits at the LSBs of
-        // the flat index and column (= batch) bits at the MSBs.  SP1
-        // uses the opposite convention (stack at MSBs).  The prior
-        // `split_at(batch_dim)` was SP1-style and gave stack_point as
-        // the *trailing* coords, mismatching the prover's *leading*
-        // coords for any workload with batch_dim>0 (multi-stripe).
+        // the flat index and column (= batch) bits at the MSBs.  The
+        // prior `split_at(batch_dim)` assumed the opposite convention
+        // (stack at MSBs) and gave stack_point as the *trailing*
+        // coords, mismatching the prover's *leading* coords for any
+        // workload with batch_dim>0 (multi-stripe).
         // Fibonacci has batch_dim==0 so both ranges coincide; tendermint
         // / reth have batch_dim>0 and tripped recursive_stacked_pcs.rs:159.
         let (stack_point, batch_point) = padded_point.split_at(stack_dim);
@@ -197,7 +187,7 @@ impl<P> RecursiveStackedPcsVerifier<P> {
         // as the host verifier's `eval_multilinear_padded` does
         // (`crates/pcs/src/basefold/stacked.rs`).  A proof with several opening
         // rounds makes a non-power-of-two total the norm rather than the
-        // exception: SP1's preprocessed round contributes its own stripes.
+        // exception: the preprocessed round contributes its own stripes.
         let mut batch_evals_flat: Vec<Ext<C::F, C::EF>> =
             proof.batch_evaluations.iter().flatten().copied().collect();
         assert!(

@@ -6,7 +6,7 @@
 //! transparently fall back to the interpreter.
 //!
 //! See [`docs/jit_design.md`](../../../../docs/jit_design.md) for the full
-//! design.  Modeled on SP1's `sp1-jit` crate.
+//! design.
 //!
 //! # Build-time gate
 //!

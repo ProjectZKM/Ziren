@@ -7,21 +7,11 @@
 //!     openings emitted by the logup-gkr verifier as input to its
 //!     own sumcheck reduction).
 //!
-//! # Reference
-//!
-//! Mirrors the upstream `logup_gkr::proof`
-//! (crates/hypercube/src/logup_gkr/proof.rs)
-//! shape so wire-format JaggedPCS proofs serialize identically.
-//!
-//! Ziren-side substitutions:
-//!   - `slop_multilinear::Mle<EF>` → `Vec<EF>` (the in-circuit
-//!     verifier consumes the multilinear extension's evaluation
-//!     vector directly; no MLE-storage abstraction is needed at
-//!     the proof-data layer)
-//!   - `slop_multilinear::MleEval<EF>` → `Vec<EF>`
-//!   - `slop_multilinear::Point<EF>` → `Vec<EF>`
-//!   - `slop_sumcheck::PartialSumcheckProof<EF>` →
-//!     [`crate::partial_sumcheck::PartialSumcheckProof`]
+//! The shape is kept wire-format stable so JaggedPCS proofs
+//! serialize identically.  MLE / evaluation / point positions are
+//! carried as flat `Vec<EF>` — the in-circuit verifier consumes the
+//! multilinear extension's evaluation vector directly; no
+//! MLE-storage abstraction is needed at the proof-data layer.
 
 use std::collections::BTreeMap;
 
@@ -95,7 +85,7 @@ pub struct ChipEvaluation<EF> {
     /// Evaluations of the preprocessed trace at the same point,
     /// or `None` if the chip carries no preprocessed columns.
     pub preprocessed_trace_evaluations: Option<Vec<EF>>,
-    /// SP1-parity FULL-POINT main-trace opening — the chip's main
+    /// FULL-POINT main-trace opening — the chip's main
     /// columns evaluated at the FULL `max_log_row_count`-coord GKR
     /// `trace_point` (LSB-first / natural-row).  Mirrors the host
     /// `zkm_pcs::shard_level::types::ChipEvaluation::main_trace_evaluations_full`.

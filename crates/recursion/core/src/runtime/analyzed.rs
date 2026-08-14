@@ -16,8 +16,6 @@
 //!   3. Switch from `record.foo_events.push(ev)` to offset-based writes
 //!      via `UnsafeCell<MaybeUninit<...>>` cells.
 //!   4. Add `par_iter` dispatch on `SeqBlock::Parallel`.
-//!
-//! SP1 ref: crates/recursion/executor/src/analyzed.rs.
 
 use serde::{Deserialize, Serialize};
 
@@ -28,8 +26,6 @@ use crate::runtime::instruction::{
 use crate::runtime::seq_block::{BasicBlock, RawProgram, SeqBlock};
 
 /// An instruction tagged with its event-write offset.
-///
-/// SP1 ref: crates/recursion/executor/src/analyzed.rs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyzedInstruction<F> {
     pub(crate) inner: Instruction<F>,
@@ -38,8 +34,8 @@ pub struct AnalyzedInstruction<F> {
     ///
     /// All current instructions emit to one chip-event vec — `offset`
     /// is enough.  The slot is retained as `usize::MAX` sentinel for
-    /// "none" so the type stays `Copy`-shaped and serde-stable; the
-    /// SP1 executor port keeps this for future multi-chip instructions.
+    /// "none" so the type stays `Copy`-shaped and serde-stable, and is
+    /// kept for future multi-chip instructions.
     /// `secondary_offset()` returns `Option<usize>` for ergonomics.
     #[serde(default = "default_secondary_offset")]
     pub(crate) secondary_offset: usize,
@@ -108,13 +104,11 @@ impl<F> RawProgram<Instruction<F>> {
     /// Analyze the program: assign each instruction an offset into the
     /// per-chip event vectors, and return the total per-chip event count.
     ///
-    /// **Soundness condition** (matches SP1's invariant): the result is
+    /// **Soundness condition**: the result is
     /// only sound if the IR-level discipline holds — namely, the
     /// compiler emits each `SeqBlock::Parallel` sub-program with
     /// monotonic, non-overlapping address ranges and no cross-block
     /// data dependencies. The runtime relies on this without verifying.
-    ///
-    /// SP1 ref: crates/recursion/executor/src/analyzed.rs::analyze.
     pub fn analyze(self) -> (RawProgram<AnalyzedInstruction<F>>, RecursionAirEventCount) {
         fn instr_offset<T>(instr: &Instruction<T>, counts: &mut RecursionAirEventCount) -> usize {
             fn incr(num: &mut usize, amt: usize) -> usize {

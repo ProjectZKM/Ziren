@@ -205,9 +205,8 @@ pub fn estimate_mips_event_counts(
 /// Maps an opcode to the core AIR that charges it a main-trace row, mirroring the grouping
 /// performed by [`estimate_mips_event_counts`].
 ///
-/// This is the Ziren analogue of SP1's `riscv_air_id_from_opcode`
-/// (sp1 `crates/core/executor/src/vm/shapes.rs`) and is the lookup that turns the periodic
-/// O(chips) re-estimate into SP1's O(1) per-instruction accumulate.
+/// This is the lookup that turns the periodic O(chips) re-estimate into an O(1)
+/// per-instruction accumulate.
 ///
 /// Returns `None` for the opcodes that [`estimate_mips_event_counts`] does not attribute to
 /// any chip: `SYSCALL` (the `SyscallInstrs` chip is never populated by the estimator),
@@ -247,8 +246,7 @@ pub const fn mips_air_id_from_opcode(opcode: Opcode) -> Option<MipsAirId> {
 
 /// Exact, incrementally-maintained per-shard trace area and tallest-chip height.
 ///
-/// This is the port of SP1's `ShapeChecker` (sp1 `crates/core/executor/src/vm/shapes.rs`):
-/// each event bumps the owning chip's height and adds that chip's width to a running area, so
+/// Each event bumps the owning chip's height and adds that chip's width to a running area, so
 /// the shard-split test at [`Self::check_shard_limit`] is a pair of comparisons against live
 /// state rather than a periodic O(chips) re-estimate.
 ///
@@ -368,7 +366,7 @@ impl ShardSplitAccumulator {
     /// Whether this shard has reached its trace-area budget / its per-chip height cap.
     ///
     /// `cpu_cycles` is the executed-cycle count (`clk / 5`); see the type-level note on why
-    /// it is passed in rather than accumulated. This is SP1's `check_shard_limit`.
+    /// it is passed in rather than accumulated.
     /// With the Cpu chip gone its width is absent from `costs` (EnumMap defaults it
     /// to 0), so the `cpu_cycles` term contributes NO area; it still participates in
     /// the HEIGHT cap, which also bounds the 24-bit clk decomposition every frame

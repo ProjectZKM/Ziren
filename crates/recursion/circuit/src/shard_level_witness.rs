@@ -1,4 +1,4 @@
-//! Witnessable impls for the SP1-style shard-level proof types
+//! Witnessable impls for the shard-level proof types
 //! that live in [`zkm_pcs::shard_level`].
 //!
 //! Bridges the host-side types (raw `F`/`EF`) into recursion
@@ -588,10 +588,8 @@ fn basefold_opened_values_from_host(
 // `JaggedBasefoldBundle::Witnessable` can be composed from these
 // primitives.
 //
-// Reference: SP1's [`JaggedSumcheckEvalProof` / `JaggedPcsProof`
-// Witnessable](file:///tmp/sp1/crates/recursion/circuit/src/jagged/witness.rs).
 // The Ziren bundle stores per-round eval-form sumcheck rounds
-// (`JaggedReductionRound { evals: [EF; 3] }`) where SP1 stores
+// (`JaggedReductionRound { evals: [EF; 3] }`) rather than
 // coefficient-form (`UnivariatePolynomial { coefficients }`); the
 // eval→coeff conversion lives at the bundle assembly site,
 // not in these per-piece witness reads.
@@ -1649,14 +1647,14 @@ fn write_sumcheck_to_stream<C>(
 ///   only; verifier samples positions from challenger transcript.
 ///
 /// **STRUCTURAL TODO** (the full call-site swap is blocked on these):
-/// * `jagged_eval_proof` — Ziren's bundle does not carry the SP1
+/// * `jagged_eval_proof` — Ziren's bundle does not carry a
 ///   jagged-eval sub-proof.  The placeholder zero-coefs satisfy the
 ///   `real_jagged_evaluator_fn` closure trivially when ALL adjacent
 ///   fields are also zero (the existing `lift_evaluation_proof_bytes`
 ///   regime) but break under partial-real data (jagged_eval derived
 ///   from zeros vs real expected_eval × real sumcheck.point_and_eval.1
-///   fails the closing identity).  To resolve: either (a) port SP1's
-///   stark-side jagged-eval sub-protocol emission so the bundle
+///   fails the closing identity).  To resolve: either (a) emit the
+///   stark-side jagged-eval sub-protocol so the bundle
 ///   carries it, or (b) wire the verifier-side
 ///   `placeholder_jagged_evaluator_fn` for the basefold path
 ///   (loosens soundness — temporary unblock only).
@@ -1912,9 +1910,8 @@ pub fn lift_jagged_basefold_bundle<C, HV>(
     // modified_commitments[0] (the value the hash-bind assert checks).  On the
     // hash-bind-off path this equals preread_commit_root.
     preread_modified_commitment: [Felt<C::F>; 8],
-    // The commitments of the rounds BEFORE the main one, in round order.  SP1
-    // opens `vec![vk.preprocessed_commit, *main_commitment]`
-    // (hypercube/src/verifier/shard.rs:638): the preprocessed round's commitment
+    // The commitments of the rounds BEFORE the main one, in round order.  The
+    // preprocessed round's commitment
     // is the VERIFYING KEY's, so the verifier supplies it rather than trusting
     // the proof for it.  Empty for a single-round proof.
     preceding_commitments: &[([Felt<C::F>; 8], [Felt<C::F>; 8])],
@@ -2039,7 +2036,7 @@ where
     modified_commitments.push(preread_modified_commitment);
 
     // ── REAL: jagged_eval_proof from bundle.jagged_eval ──
-    // The host prover emits SP1's branching-program jagged-eval
+    // The host prover emits the branching-program jagged-eval
     // sub-protocol (jagged_pcs.rs, between the reduction and
     // the BaseFold open).  Lift its `PartialSumcheckProof` to circuit
     // variables via the same const-promotion path as the outer
@@ -2388,7 +2385,7 @@ pub fn jagged_reduction_to_partial_sumcheck(
     // host's final claim `current_claim = jagged_eval_round_poly(round_{n-1},
     // r_{n-1})`.
     //
-    // The jagged REDUCTION now binds the stride-1 (LSB) variable as SP1 does, so
+    // The jagged REDUCTION now binds the stride-1 (LSB) variable, so
     // its `eval_point` is in SAMPLE order (`verify_jagged_reduction` asserts
     // `sampled[i] == eval_point[i]`): eval_point[0] = r_0,
     // eval_point[last_idx] = r_{n-1}.  Use `eval_point[last_idx]`.

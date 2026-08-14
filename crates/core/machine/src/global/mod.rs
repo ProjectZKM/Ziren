@@ -204,8 +204,7 @@ impl<F: PrimeField32> MachineAir<F> for GlobalChip {
             .scan(|a, b| *a + *b, SepticCurveComplete::Infinity)
             .collect::<Vec<SepticCurveComplete<F>>>();
 
-        // SP1 parity (`sp1` `crates/core/machine/src/global/mod.rs:208`):
-        // publish the digest this scan just produced instead of making
+        // Publish the digest this scan just produced instead of making
         // `public_values()` re-fold every event from scratch.  `points` is the
         // `SepticDigest::zero()` offset followed by one point per event, so the
         // last element of the inclusive scan IS

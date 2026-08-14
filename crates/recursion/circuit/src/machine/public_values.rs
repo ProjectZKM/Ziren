@@ -65,8 +65,7 @@ where
     C: CircuitConfig,
     H: Poseidon2KoalaBearHasherVariable<C>,
 {
-    // Bind the same fields SP1's root digest binds (Ziren's
-    // `RecursionPublicValues` has no `proof_nonce`): zkm_vk_digest,
+    // The root digest binds: zkm_vk_digest,
     // committed_value_digest, exit_code, vk_root. Previously only the first
     // two were bound, leaving `vk_root` / `exit_code` neither bound by the
     // root commitment nor checked by `verify_wrap_bn254` / the BN254 commit.

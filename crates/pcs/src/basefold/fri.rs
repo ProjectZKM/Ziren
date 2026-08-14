@@ -1,8 +1,5 @@
 //! FRI commit-phase machinery for the BaseFold protocol.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold-prover/src/fri.rs`.
-//!
 //! Per round we:
 //!   1. reshape the current codeword so that each Merkle leaf bundles
 //!      a pair of adjacent rows (this is the standard FRI commit

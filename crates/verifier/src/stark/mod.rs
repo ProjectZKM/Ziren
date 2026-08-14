@@ -156,8 +156,8 @@ impl StarkVerifier {
 
 impl HashableKey for StarkVerifyingKey<KoalaBearPoseidon2> {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // SP1's inputs, in SP1's order
-        // (hypercube/src/verifier/hashable_key.rs:107).  Nothing about the
+        // The inputs, in order: the preprocessed commitment, pc_start, and the
+        // initial cumulative sum.  Nothing about the
         // chips: the preprocessed commitment is hash-bound to its geometry, and
         // the chip set is a property of the machine.  MUST stay byte-identical
         // to the prover (prover/src/types.rs) and in-circuit

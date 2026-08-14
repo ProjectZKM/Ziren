@@ -1,7 +1,7 @@
 //! Keccak-f[1600] round constants, for the inlined single-row round AIR in
-//! [`super::air`].  Mirrors SP1's `keccak256/constants.rs` (and the upstream
-//! `p3_keccak_air` round constants), but derives the per-bit value directly from
-//! `RC` instead of hard-coding the unpacked `RC_BITS` table.
+//! [`super::air`].  Matches the upstream `p3_keccak_air` round constants, but
+//! derives the per-bit value directly from `RC` instead of hard-coding the
+//! unpacked `RC_BITS` table.
 
 /// The 24 Keccak-f round constants.
 pub const RC: [u64; 24] = [

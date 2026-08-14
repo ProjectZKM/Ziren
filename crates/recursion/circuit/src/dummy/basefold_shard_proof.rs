@@ -278,7 +278,7 @@ where
         ShardOpenedValues { chips: chips_ov }
     };
 
-    // The proof carries RAW heights (SP1 parity — the felt the prologue
+    // The proof carries RAW heights (the felt the prologue
     // observes); the dummy's chips sit at exactly `2^log_h`, matching the
     // `quotient[0]` degree bits above.
     let chip_heights: BTreeMap<String, usize> = chip_log_heights_pairs

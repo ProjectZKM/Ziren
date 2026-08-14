@@ -283,8 +283,8 @@ impl CircuitConfig for InnerConfig {
         input: Felt<<Self as Config>::F>,
         power_bits: Vec<Felt<<Self as Config>::F>>,
     ) -> Felt<<Self as Config>::F> {
-        // SP1-aligned inline repeated-squaring lowering (identical to
-        // WrapConfig below and to SP1's `InnerConfig::exp_reverse_bits`).
+        // Inline repeated-squaring lowering (identical to
+        // WrapConfig below).
         // Emitting the dedicated `ExpReverseBitsLen` instruction is
         // incompatible with the BaseFold zerocheck: that chip's AIR uses
         // `when_transition` row selectors (the accum-squaring chain at

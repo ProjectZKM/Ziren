@@ -121,8 +121,6 @@ impl<F: Field> ExecutionRecord<F> {
 /// before `into_record()` is called. The analyze pass guarantees one
 /// offset per event-emitting instruction; the runtime walker ensures
 /// each instruction is executed exactly once.
-///
-/// SP1 ref: crates/recursion/executor/src/record.rs::UnsafeRecord.
 #[derive(Debug)]
 pub struct UnsafeRecord<F> {
     pub base_alu_events: Vec<MaybeUninit<UnsafeCell<BaseAluEvent<F>>>>,
@@ -274,7 +272,7 @@ mod unsafe_record_tests {
         ];
         // Initialize each MaybeUninit slot with an UnsafeCell::new wrapping the event.
         // This is the canonical way to populate UnsafeRecord in tests; the runtime
-        // walker will use the SP1 idiom
+        // walker will use
         // `UnsafeCell::raw_get(slot.as_ptr() as *const UnsafeCell<T>).write(ev)`
         // to write through `&UnsafeRecord` from parallel threads.
         for (i, e) in evs.iter().enumerate() {

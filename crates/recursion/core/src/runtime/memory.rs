@@ -22,8 +22,7 @@ pub trait Memory<F> {
     /// `MemoryEntry::mult` on every read. The decrement result was
     /// never read by any consumer (chips read mult from the
     /// instruction-side preprocessed columns, not from `MemoryEntry`),
-    /// so the bookkeeping was dead code. Mirroring SP1's `MemVec`
-    /// (crates/recursion/executor/src/memory.rs), the only read API
+    /// so the bookkeeping was dead code. The only read API
     /// is `mr` — no mult decrement happens at runtime.  This removes
     /// the last barrier to using `ParMemVec` for parallel
     /// `SeqBlock::Parallel` execution: with no shared mult counter to
@@ -106,8 +105,7 @@ impl<F: PrimeField64> Memory<F> for MemVec<F> {
 }
 
 /// `UnsafeCell` made `Sync`. Replicates the still-unstable
-/// `std::cell::SyncUnsafeCell`. SP1 ref:
-/// crates/recursion/executor/src/memory.rs::SyncUnsafeCell.
+/// `std::cell::SyncUnsafeCell`.
 #[derive(Debug, Default)]
 #[repr(transparent)]
 struct SyncUnsafeCell<T: ?Sized>(UnsafeCell<T>);
@@ -123,21 +121,18 @@ unsafe impl<T: ?Sized + Sync> Sync for SyncUnsafeCell<T> {}
 /// caller must invoke under the address-disjointness discipline of
 /// `RawProgram::SeqBlock::Parallel`.
 ///
-/// Additive type, not yet wired into the runtime. SP1 ref:
-/// crates/recursion/executor/src/memory.rs::MemVec.
+/// Additive type, not yet wired into the runtime.
 ///
-/// Differences from SP1's `MemVec`:
-/// - SP1's `MemoryEntry` is `{ val }` only; Ziren's still carries
-///   `mult` for binary compatibility with the existing chip preprocessed
-///   layout. Audit established that `MemoryEntry::mult`
-///   is **never read** at runtime — chips read mult from the
-///   instruction-side preprocessed columns, not from `MemoryEntry`. The
-///   `mr_mult` decrement was therefore dead, and was removed (along with
-///   `mr_mult` from the `Memory` trait). `ParMemVec` consequently needs
-///   no thread-safe mult-update path: with no shared counter to alias,
-///   parallel reads of disjoint addresses are race-free without atomics.
-///   `mr_unchecked` returns `&MemoryEntry<F>` and only `val` is consumed
-///   downstream.
+/// `MemoryEntry` still carries `mult` for binary compatibility with the
+/// existing chip preprocessed layout. Audit established that
+/// `MemoryEntry::mult` is **never read** at runtime — chips read mult
+/// from the instruction-side preprocessed columns, not from
+/// `MemoryEntry`. The `mr_mult` decrement was therefore dead, and was
+/// removed (along with `mr_mult` from the `Memory` trait). `ParMemVec`
+/// consequently needs no thread-safe mult-update path: with no shared
+/// counter to alias, parallel reads of disjoint addresses are race-free
+/// without atomics. `mr_unchecked` returns `&MemoryEntry<F>` and only
+/// `val` is consumed downstream.
 #[derive(Debug, Default)]
 pub struct ParMemVec<F>(Vec<SyncUnsafeCell<MaybeUninit<MemoryEntry<F>>>>);
 
@@ -147,7 +142,6 @@ impl<F: PrimeField64> ParMemVec<F> {
         // which is `repr(transparent)` over its inner type. This makes
         // the layout of `Vec<SyncUnsafeCell<MaybeUninit<E>>>` identical
         // to `Vec<MaybeUninit<E>>`.
-        // SP1 ref: crates/recursion/executor/src/memory.rs::ParMemVec::with_capacity.
         Self(unsafe {
             mem::transmute::<
                 Vec<MaybeUninit<MemoryEntry<F>>>,

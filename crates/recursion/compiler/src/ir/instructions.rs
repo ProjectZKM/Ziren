@@ -338,8 +338,6 @@ pub enum DslIr<C: Config> {
     /// `iter_instructions` traversal (a follow-up will dispatch via
     /// `par_iter` once the memory layer is thread-safe). Emitted by
     /// callers via the `IrIter::ir_par_map_collect` extension trait.
-    ///
-    /// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs.
     Parallel(Vec<DslIrBlock<C>>),
 }
 
@@ -350,8 +348,6 @@ pub enum DslIr<C: Config> {
 /// by the compiler when lowering `DslIr::Parallel`. The
 /// `addrs_written` range is closed at the lower end and open at the
 /// upper, matching the convention of `Builder::variable_count`.
-///
-/// SP1 ref: crates/recursion/compiler/src/ir/instructions.rs::DslIrBlock.
 #[derive(Clone, Debug)]
 pub struct DslIrBlock<C: Config> {
     pub ops: TracedVec<DslIr<C>>,

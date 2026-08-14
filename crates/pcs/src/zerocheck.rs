@@ -33,7 +33,7 @@
 //! NO quotient opening. The constraint polynomial is evaluated directly
 //! on the Boolean hypercube during the sumcheck prover.
 //!
-//! # Protocol (from SP1 Hypercube)
+//! # Protocol
 //!
 //! Given constraint polynomial C: F^m → F (batched with random α):
 //!

@@ -360,7 +360,7 @@ where
 
     // `component_poly_evals` are the per-chip trace openings at the reduced
     // point z (padded-MLE@z, prep-then-main, name order).
-    let (sp1_proof, component_poly_evals) =
+    let (sumcheck_proof, component_poly_evals) =
         crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation::<
             Val<SC>,
             Challenge<SC>,
@@ -373,7 +373,7 @@ where
         let name = chips[chip_idx].name().to_string();
         trace_at_z.insert(name, component_poly_evals[k].clone());
     }
-    (sp1_proof, trace_at_z)
+    (sumcheck_proof, trace_at_z)
 }
 
 /// Derive a chip's global cumulative sum from the last 14 elements of

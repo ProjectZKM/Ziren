@@ -14,13 +14,6 @@
 //! The full `verify_zerocheck` orchestrator composes these helpers
 //! with [`crate::sumcheck::verify_sumcheck`], constraint folding, and
 //! per-chip openings batching.
-//!
-//! # Reference
-//!
-//! Mirrors helper portions of the upstream
-//! crates/recursion/circuit/src/zerocheck.rs
-//! and supporting `slop_multilinear` MLE helpers (`full_geq`,
-//! `Mle::full_lagrange_eval`).
 
 use std::marker::PhantomData;
 
@@ -55,12 +48,9 @@ use crate::{CircuitConfig, KoalaBearFriParametersVariable};
 /// gets multiplied by `geq(degree, sumcheck_point)` to zero it out
 /// for in-range positions.
 ///
-/// # Reference
-///
-/// Mirrors `slop_multilinear::full_geq` (slop/crates/multilinear/src/mle.rs).
-/// Iterates MSB-first (matching the upstream convention) — note
-/// this differs from the LSB-first `partial_lagrange` convention
-/// used elsewhere in Ziren's BaseFold port.
+/// Iterates MSB-first — note this differs from the LSB-first
+/// `partial_lagrange` convention used elsewhere in Ziren's BaseFold
+/// port.
 pub fn full_geq<C: CircuitConfig>(
     threshold: &[SymbolicExt<C::F, C::EF>],
     eval_point: &[SymbolicExt<C::F, C::EF>],
@@ -93,10 +83,6 @@ pub fn full_geq<C: CircuitConfig>(
 ///
 /// Used by the zerocheck verifier to check that the GKR-emitted
 /// evaluation point matches the sumcheck-reduced point.
-///
-/// # Reference
-///
-/// Mirrors [`slop_multilinear::Mle::full_lagrange_eval`].
 pub fn eq_eval<C: CircuitConfig>(
     a: &[SymbolicExt<C::F, C::EF>],
     b: &[SymbolicExt<C::F, C::EF>],
@@ -113,10 +99,6 @@ pub fn eq_eval<C: CircuitConfig>(
 /// [`OpeningShapeError`].  Called by the zerocheck verifier
 /// before evaluating the chip's constraints to catch shape
 /// mismatches early.
-///
-/// # Reference
-///
-/// Mirrors `verify_opening_shape` (crates/recursion/circuit/src/zerocheck.rs).
 pub fn verify_opening_shape<C, SC, A>(
     chip: &MachineChip<SC, A>,
     opening: &ChipOpenedValues<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -214,8 +196,7 @@ where
         let preprocessed =
             PairWindow { local: &opening.preprocessed.local, next: &opening.preprocessed.local };
         let main = PairWindow { local: &opening.main.local, next: &opening.main.local };
-        // SP1's `VerifierConstraintFolder` (verifier/shard.rs:243) carries NO
-        // cumulative sums, and the Ziren host zeroes them in the zerocheck
+        // The Ziren host zeroes the cumulative sums in the zerocheck
         // constraint eval (`eval_air_constraints_at_row`, zerocheck_poly.rs:661
         // — "lookup soundness rides on LogUp-GKR, not this zerocheck"). Feed
         // the same zeros here instead of the witnessed per-chip sums: any AIR
@@ -241,8 +222,7 @@ where
 
     /// Zero `(local_cumulative_sum, global_cumulative_sum)` for the
     /// zerocheck constraint folder, matching the host
-    /// (`eval_air_constraints_at_row`) and SP1's
-    /// `VerifierConstraintFolder` (which omits the sums entirely).
+    /// (`eval_air_constraints_at_row`).
     fn zero_cumulative_sums(
         builder: &mut Builder<C>,
     ) -> (Ext<C::F, C::EF>, SepticDigest<Felt<C::F>>) {
@@ -275,7 +255,7 @@ where
         let preproc_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; preproc_width];
         let main_row: Vec<Ext<C::F, C::EF>> = vec![zero_ext; main_width];
         // Zero cumulative sums — match the host pra (`compute_padded_row_
-        // adjustment` → `eval_air_constraints_at_row`, zero sums) and SP1.
+        // adjustment` → `eval_air_constraints_at_row`, zero sums).
         let (zero_lcs, zero_gcs) = Self::zero_cumulative_sums(builder);
         let mut folder = BasefoldConstraintFolder::<C> {
             preprocessed: PairWindow { local: &preproc_row, next: &preproc_row },
@@ -375,10 +355,9 @@ where
     ///     at the sumcheck-reduced point.
     ///   * `chip_degrees` — per-chip "degree point" (big-endian
     ///     boolean coordinates of the chip's height); used by
-    ///     [`full_geq`] to compute the padded-row mask.  In the
-    ///     SP1 reference these live on `ChipOpenedValues::degree`;
-    ///     in Ziren they're passed separately until a
-    ///     `BasefoldChipOpenedValues` type is introduced.
+    ///     [`full_geq`] to compute the padded-row mask.  Passed
+    ///     separately until a `BasefoldChipOpenedValues` type is
+    ///     introduced.
     ///   * `cumulative_sums` — per-chip local cumulative-sum value
     ///     from the LogUp-GKR sumcheck output (the BaseFold
     ///     pipeline replaced the legacy permutation-column opening
@@ -397,21 +376,6 @@ where
     ///   * `public_values` — shard public values (passed through
     ///     to per-chip constraint folders).
     ///   * `challenger` — in-circuit transcript.
-    ///
-    /// # Reference
-    ///
-    /// Mirrors `StarkVerifier::verify_zerocheck`
-    /// (crates/recursion/circuit/src/zerocheck.rs).
-    /// Substitutions:
-    ///   - `BTreeSet<Chip>` → ordered `&[&MachineChip<SC, A>]`.
-    ///   - `openings.degree` (SP1's per-opening field) →
-    ///     separate `chip_degrees` parameter (Ziren carries this
-    ///     BaseFold-pipeline field on `BasefoldChipOpenedValues`).
-    ///   - `Mle::full_lagrange_eval` → [`eq_eval`].
-    ///   - `Point::add_dimension` → `Vec::push`.
-    ///   - `observe_variable_length_extension_slice` →
-    ///     [`observe_ext_slice`] (Ziren's variable-length
-    ///     observation helper).
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::type_complexity)]
     pub fn verify_zerocheck<'a, FC>(
@@ -525,7 +489,7 @@ where
 
             // (4c) Build the extended sumcheck point (one extra
             // zero coordinate) for the geq comparison.  FRONT-insert
-            // (SP1 `Point::add_dimension` = `values.insert(0, ..)`),
+            // (`values.insert(0, ..)`),
             // NOT back-append: `full_geq` iterates MSB-first and
             // `degree` is big-endian (MSB at index 0), so the extra
             // high coordinate must pair with `degree`'s extra high bit.
@@ -711,25 +675,22 @@ where
         // the GKR-derived modification.
         builder.assert_ext_eq(zerocheck_proof.claimed_sum, zerocheck_sum_modification);
 
-        // Silence the `one_ext` unused-binding lint (kept for
-        // parity with the SP1 reference, which threads it
-        // through future intermediate values).
+        // Silence the `one_ext` unused-binding lint.
         let _ = one_ext;
 
         // (8) Verify the zerocheck sumcheck proof itself.
         verify_sumcheck::<C, FC>(builder, challenger, zerocheck_proof);
 
-        // (9) SP1 observe slot 2 — the ZEROCHECK openings (trace@z*), observed
+        // (9) Observe slot 2 — the ZEROCHECK openings (trace@z*), observed
         // after the zerocheck sumcheck and before the jagged-PCS phase.
         //
-        // In-circuit mirror of SP1 `crates/hypercube/src/prover/shard.rs
-        // :617,625,626` and of the host verifier's step (5).  SP1 observes the
-        // sumcheck's `component_poly_evals` here — the reduction's residual at
-        // z*, which in Ziren is exactly `opened_values.chips[].{preprocessed,
+        // In-circuit mirror of the host verifier's step (5).  The payload is
+        // the reduction's residual at
+        // z*, which is exactly `opened_values.chips[].{preprocessed,
         // main}.local` (the prover's `trace_at_z`, split at each chip's
         // preprocessed width by `build_opened_values`).
         //
-        // This slot USED to carry `gkr_evaluations.chip_openings` — SP1's slot-1
+        // This slot USED to carry `gkr_evaluations.chip_openings` — the slot-1
         // payload in slot 2's position, i.e. observed after the α/γ/λ samples in
         // section (1) above.  The GKR openings now land in
         // `logup_gkr::verify_logup_gkr`, before those samples; this slot carries

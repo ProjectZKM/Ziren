@@ -58,9 +58,6 @@ where
     // zero-fill allocator runs in microseconds because no field
     // arithmetic happens.
     //
-    // Mirrors SP1's `dummy_shard_proof` in
-    // crates/recursion/circuit/src/dummy/shard_proof.rs.
-    //
     // Resolve each chip in the shape to a concrete &Chip from the
     // machine, KEEPING ITS OWN log_height. Skip names that don't
     // exist (the legacy `allowed_shapes` still carry retired chips —

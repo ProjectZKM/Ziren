@@ -8,14 +8,6 @@
 //! Used by the BaseFold-pipeline shard verifier as the soundness
 //! engine for the zerocheck IOP and the LogUp-GKR sumcheck
 //! reductions.
-//!
-//! # Reference
-//!
-//! Mirrors the upstream `verify_sumcheck`
-//! (crates/recursion/circuit/src/sumcheck/mod.rs) function shape.  The Ziren port replaces the upstream's
-//! `SP1FieldConfigVariable<C>` parameter with [`crate::CircuitConfig`]
-//! directly (Ziren's recursion stack is KoalaBear-specialised), and
-//! uses [`Vec<Ext<C::F, C::EF>>`] in place of `slop_multilinear::Point`.
 
 use p3_field::PrimeCharacteristicRing;
 use zkm_recursion_compiler::ir::{Builder, Ext, SymbolicExt};
@@ -52,7 +44,7 @@ use crate::CircuitConfig;
 /// The sumchecks in this circuit disagree, so this is explicit rather than
 /// implied: the LogUp-GKR and jagged-eval sumchecks bind the MSB and record via
 /// `insert(0, alpha)`, while the jagged REDUCTION binds the stride-1 (LSB)
-/// variable, as SP1 does, and records in sample order.
+/// variable and records in sample order.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PointOrder {
     /// Newest challenge at the front (`insert(0, alpha)`) — MSB binding.
@@ -105,7 +97,7 @@ pub fn verify_sumcheck_with_order<C, FC>(
 
     // Rounds 1 .. n-1.
     //
-    // Sumcheck convention (SP1-aligned): the prover runs an MSB fold
+    // Sumcheck convention: the prover runs an MSB fold
     // and `insert(0, α)`s each freshly-sampled challenge at the front
     // of `reduced_point`.  We mirror the prover here so the per-coord
     // equality check below (verifier α[i] == prover point[i]) holds.

@@ -560,7 +560,7 @@ mod phase1_acceptance_gate {
         assert!(
             all_ok,
             "PHASE-1 gate: host reduction w_at_z must equal the branching-program \
-             jagged evaluation for all mixed-height shapes (SP1 closing identity)",
+             jagged evaluation for all mixed-height shapes",
         );
     }
 

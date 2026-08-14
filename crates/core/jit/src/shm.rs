@@ -1,8 +1,7 @@
 //! POSIX shared-memory wrappers (memfd + mmap).
 //!
 //! P1 (skeleton): types only.  Functional impls land in P5 (trace ring)
-//! and P6 (fork-based crash isolation).  Modeled on SP1's
-//! `crates/core/jit/src/shm.rs`.
+//! and P6 (fork-based crash isolation).
 
 #![cfg(all(target_arch = "x86_64", target_os = "linux"))]
 

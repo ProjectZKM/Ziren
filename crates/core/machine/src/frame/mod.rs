@@ -8,9 +8,9 @@
 //! a second full row per executed instruction: `Cpu` is 59 columns wide and has
 //! one row for EVERY instruction, on top of the opcode row that also exists.
 //!
-//! SP1 has no such chip — each instruction chip carries its own frame, with
+//! The hub is unnecessary — each instruction chip can carry its own frame, with
 //! `Program` / `InstructionFetch` / `InstructionDecode` alongside.  This module
-//! is the shared piece that lets Ziren do the same: a chip embeds
+//! is the shared piece that makes that possible: a chip embeds
 //! [`InstructionFrameCols`] and calls [`eval_instruction_frame`], after which it
 //! no longer needs `receive_instruction` and `Cpu` no longer needs a row for it.
 //!

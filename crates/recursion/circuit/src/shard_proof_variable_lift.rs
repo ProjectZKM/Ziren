@@ -7,9 +7,7 @@
 //! own copies (`crate::logup_proof::*`, `crate::partial_sumcheck::*`)
 //! that [`crate::shard_basefold::BasefoldShardProofVariable`] consumes.
 //!
-//! Both sets are structurally identical (the recursion-circuit
-//! types were ported from SP1's hypercube proof types, and the
-//! stark-side types mirror SP1 identically).  The "conversion" is
+//! Both sets are structurally identical.  The "conversion" is
 //! field-by-field copy.
 //!
 
@@ -186,8 +184,7 @@ where
 ///
 /// Wraps a [`crate::basefold_verifier::RecursiveBasefoldVerifier`]
 /// inside a [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier`]
-/// inside the shard verifier — three-layer construction that
-/// matches SP1's `RecursiveShardVerifier` initialization pattern.
+/// inside the shard verifier — a three-layer construction.
 ///
 /// # Inputs
 ///
@@ -411,8 +408,7 @@ where
 /// trace evaluations at the *zerocheck-reduced* point `z` (prep + main
 /// `local`), in chip-NAME order — the values the in-circuit zerocheck
 /// verifier batches/constrains and asserts equal `point_and_eval.1`
-/// (`zerocheck.rs:573`).  Those are exactly the SP1 `shard_open_values`
-/// (`shard.rs:618-643`).  But the host carries placeholder `degree`
+/// (`zerocheck.rs:573`).  But the host carries placeholder `degree`
 /// bits and zero cumulative sums, so this helper rebuilds, per chip
 /// (still name-aligned with `chip_names`):
 ///
@@ -503,7 +499,7 @@ where
 /// slots — exactly the shape the recursion verifier's Horner
 /// accumulation at `shard_basefold.rs:418-422` expects
 /// (`acc = bit + acc * 2`), recomposing to the SAME raw-height felt the
-/// host prologue observes (SP1 parity).
+/// host prologue observes.
 ///
 /// # Soundness
 ///
@@ -590,7 +586,7 @@ where
 /// values), the program becomes chip-set-determined ⇒ one program per
 /// cluster ⇒ the enumerated `vk_map` covers every real workload.
 ///
-/// Encoding (SP1 parity — the prologue felt is the RAW
+/// Encoding (the prologue felt is the RAW
 /// `num_real_entries`, NOT its ceil-log2): `degree` is already the
 /// big-endian (index 0 = MSB) boolean decomposition of the chip's RAW
 /// height, so the bits are Horner-recomposed to the height in the

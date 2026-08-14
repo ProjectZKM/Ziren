@@ -1,7 +1,4 @@
-//! KoalaBear BaseFold prover↔verifier roundtrip test.
-//!
-//! Mirrors the SP1 reference test in
-//! `slop/crates/basefold-prover/src/prover.rs:285`:
+//! KoalaBear BaseFold prover↔verifier roundtrip test:
 //! commit a small batch of MLEs, evaluate at a random point, then
 //! prove + verify using the same challenger seed on both sides.
 

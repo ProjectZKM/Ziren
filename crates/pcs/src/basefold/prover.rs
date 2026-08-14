@@ -1,8 +1,5 @@
 //! BaseFold prover.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold-prover/src/prover.rs`.
-//!
 //! Two entry points:
 //!   * [`BasefoldProver::commit_mles`] — per-round commitment.  For
 //!     each MLE in the batch, RS-encode and commit the codeword to

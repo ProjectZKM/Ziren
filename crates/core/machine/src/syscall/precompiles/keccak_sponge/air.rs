@@ -1,6 +1,6 @@
 //! Keccak-sponge **worker** AIR — one keccak-f round per row.
 //!
-//! This is a direct port of SP1's single-row `keccak256` round AIR: all of the
+//! A single-row round AIR: all of the
 //! keccak-f permutation constraints (θ/ρ/π via `c`/`c'`/`a'`, χ via `a''`, ι via
 //! `a'''[0][0]`) are evaluated **within one row** over the `p3_keccak`
 //! `KeccakCols`, and the round-to-round state hand-off — which `p3_keccak`'s

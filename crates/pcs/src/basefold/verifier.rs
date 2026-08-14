@@ -1,8 +1,5 @@
 //! BaseFold verifier.
 //!
-//! Source-mapped from
-//! `slop/crates/basefold/src/verifier.rs`.
-//!
 //! Mirrors the prover's transcript structure exactly:
 //!   1. PoW grind for batching coefficients
 //!   2. Sample batching point, recompute partial Lagrange weights

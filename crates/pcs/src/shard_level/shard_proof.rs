@@ -87,7 +87,7 @@ pub struct BasefoldShardProof<F, EF> {
     /// Per-chip opened values at the zerocheck-reduced point.
     pub opened_values: ShardOpenedValues<F, EF>,
     /// Per-chip RAW `main_trace.height()` (`num_real_entries`, 0 allowed
-    /// — NOT a log; SP1 parity) keyed by chip name.  The verifier
+    /// — NOT a log) keyed by chip name.  The verifier
     /// re-observes this exact felt in the transcript prologue and it is
     /// the VirtualGeq threshold behind the `opened_values` degree bits;
     /// geometry consumers that need a LOG derive ceil-log2 from it

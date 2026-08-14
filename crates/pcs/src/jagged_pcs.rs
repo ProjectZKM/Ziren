@@ -1110,8 +1110,7 @@ pub mod jagged {
     // rev(zeta) semantics match the host path byte-identically.
 
     // The generic BaseFold precompute body now lives as the DEFAULT
-    // `BasefoldRing::commit_multilinears` trait method (SP1's single
-    // generic `StackedPcsProver::commit_multilinears` shape — no free-fn
+    // `BasefoldRing::commit_multilinears` trait method (no free-fn
     // indirection); each ring commits with its own `bf_mmcs()` /
     // `fri_config()`.
 

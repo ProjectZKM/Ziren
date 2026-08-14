@@ -45,11 +45,8 @@ impl<F: PrimeField32> MachineAir<F> for KeccakSpongeChip {
     /// whole `generate_dependencies` pass.  Keccak-heavy guests (reth) pay it;
     /// keccak-free ones (tendermint) never see it.
     ///
-    /// SP1 does the same thing the same way — it overrides
-    /// `generate_dependencies` per chip to compute ONLY the byte lookups
-    /// (`sp1/crates/core/machine/src/syscall/precompiles/keccak256/trace.rs:29`
-    /// reuses one scratch row and collects `blu` instead of building a trace).
-    /// Ziren's required work here is empty, so the override is empty.
+    /// The override should compute ONLY what the pass actually needs; this
+    /// chip's required dependency work is empty, so the override is empty.
     ///
     /// Byte-neutral: the removed call's only effect was allocating and
     /// dropping a matrix.

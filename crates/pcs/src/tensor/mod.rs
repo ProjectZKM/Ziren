@@ -1,7 +1,6 @@
-//! Backend-generic **tensor** primitives for the Ziren basefold port
-//! now a **full-fidelity port of SP1's `slop-alloc` crate**.
+//! Backend-generic **tensor** primitives for the Ziren basefold stack.
 //!
-//! Layering (mirrors SP1 `slop/crates/alloc/src`):
+//! Layering:
 //!   * [`Allocator`] / [`AllocError`] — the raw allocate/deallocate contract.
 //!   * [`mem`] — [`mem::CopyDirection`] / [`mem::CopyError`] / [`mem::DeviceMemory`],
 //!     the device memcpy/memset contract.

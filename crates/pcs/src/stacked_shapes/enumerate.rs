@@ -193,20 +193,17 @@ pub fn build_mips_machine_shape() -> MachineShape {
     MachineShape::new(clusters)
 }
 
-/// Maximum (preprocessed_multiple, main_multiple) bound — SP1 derives
-/// these dynamically from `MAX_PROGRAM_SIZE × NUM_PREPROCESSED_COLS`
-/// and `PADDED_ELEMENT_THRESHOLD` (potentially hundreds). Ziren caps
+/// Maximum (preprocessed_multiple, main_multiple) bound. A dynamic
+/// derivation from `MAX_PROGRAM_SIZE × NUM_PREPROCESSED_COLS` and
+/// `PADDED_ELEMENT_THRESHOLD` could reach hundreds; Ziren caps
 /// at a tractable value here so the resulting vk_map.bin stays under
-/// ~20K entries (full SP1-style derivation requires a separate regen
-/// budget; current cap covers all real programs observed in the
+/// ~20K entries (the full dynamic derivation requires a separate regen
+/// budget; the current cap covers all real programs observed in the
 /// production test suite).
-///
-/// SP1 reference:
-/// `max_main_multiple_for_preprocessed_multiple`.
 const MAX_AREA_MULTIPLE: usize = 12;
 
-/// Per-preprocessed cap on main_multiple. SP1's formula:
-/// `(PADDED_ELEMENT_THRESHOLD - p * 2^STACK).div_ceil(2^STACK)`. Here
+/// Per-preprocessed cap on main_multiple. Instead of the derived cap
+/// `(PADDED_ELEMENT_THRESHOLD - p * 2^STACK).div_ceil(2^STACK)`, here
 /// we use a flat cap; main_multiple ranges over `1..=MAX_AREA_MULTIPLE`
 /// independent of `p`. This keeps the cartesian bounded but covers
 /// any real program whose `main_area / 2^21 ≤ 32`.
@@ -214,10 +211,9 @@ fn max_main_multiple_for_preprocessed(_p: usize) -> usize {
     MAX_AREA_MULTIPLE
 }
 
-/// Padding column variants. SP1's `max_num_padding_cols` is
-/// `(2^LOG_STACKING_HEIGHT).div_ceil(2^CORE_MAX_LOG_ROW_COUNT)`;
-/// in Ziren both shift by 21 vs 22 → ratio 0.5, ceil = 1.
-/// SP1 enumerates `1..=max_num_padding_cols` (range `[1, 1]`).
+/// Padding column variants. The minimal padding-column count
+/// `(2^LOG_STACKING_HEIGHT).div_ceil(2^CORE_MAX_LOG_ROW_COUNT)`
+/// is 1 in Ziren (shifts 21 vs 22 → ratio 0.5, ceil = 1).
 /// We extend slightly to cover trace-width edge cases observed in
 /// real programs (precompile-heavy clusters can need more paddings).
 pub fn padding_col_variants() -> Vec<usize> {
@@ -244,9 +240,7 @@ pub fn size_class_bands() -> Vec<(usize, usize)> {
 }
 
 /// Produce every `CoreProofShape` — the top-level enumeration entry
-/// point. Now mirrors SP1's
-/// `create_all_input_shapes`
-/// using **consecutive integer** ranges for `preprocessed_multiple`
+/// point. Uses **consecutive integer** ranges for `preprocessed_multiple`
 /// and `main_multiple` instead of Ziren's previous power-of-2-only
 /// `[1, 2, 4, 8, 16, 32]`. The power-of-2 list missed real programs
 /// like hello_world whose actual shape sits between powers (e.g.
@@ -392,7 +386,7 @@ mod tests {
     fn shape_enumeration_count_is_tractable() {
         let ms = build_mips_machine_shape();
         let shapes = create_all_input_shapes(&ms);
-        // SP1-style consecutive-integer enumeration over the 28-cluster
+        // Consecutive-integer enumeration over the 28-cluster
         // model: per cluster the inner loops are
         //   prep_mult(1..=MAX_AREA_MULTIPLE) ×
         //   main_mult(1..=MAX_AREA_MULTIPLE) ×
@@ -419,7 +413,7 @@ mod tests {
     fn size_class_bands_are_monotone_in_main_for_fixed_prep() {
         let bands = size_class_bands();
         // For any fixed prep multiple, main_mult entries should be non-decreasing.
-        // After SP1-style port: prep ranges over [1..=MAX_AREA_MULTIPLE].
+        // prep ranges over [1..=MAX_AREA_MULTIPLE].
         for prep in 1..=MAX_AREA_MULTIPLE {
             let mut mains: Vec<usize> =
                 bands.iter().filter(|(p, _)| *p == prep).map(|(_, m)| *m).collect();
@@ -434,8 +428,7 @@ mod tests {
     /// powers-of-2, so the old `area_multiples = [1,2,4,8,16,32]`
     /// enumeration missed its shape and "Invalid verification key"
     /// fired. Now consecutive integers `1..=MAX_AREA_MULTIPLE` are
-    /// enumerated (matching SP1's
-    /// `create_all_input_shapes`).
+    /// enumerated.
     #[test]
     fn area_multiples_are_consecutive_integers() {
         let ms = area_multiples();

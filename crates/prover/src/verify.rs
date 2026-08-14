@@ -67,10 +67,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         }
         // First shard has a "CPU" constraint.
         //
-        // (SP1 parity) There is no Cpu chip any more — every instruction chip
+        // There is no Cpu chip any more — every instruction chip
         // carries its own frame, so the old "first shard has a CPU" and
         // per-shard CPU log-degree checks are gone.  Multiplicity overflow is
-        // bounded by the shard size cap exactly as in SP1.
+        // bounded by the shard size cap.
 
         // Shard constraints.
         //

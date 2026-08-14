@@ -16,12 +16,6 @@
 //!
 //! The `verify_trusted_evaluations` orchestrator that consumes these
 //! types lives in [`crate::recursive_jagged_pcs`].
-//!
-//! # Reference
-//!
-//! Mirrors SP1's crates/recursion/circuit/src/jagged/verifier.rs
-//! and crates/recursion/circuit/src/jagged/jagged_eval.rs
-//! shapes from the upstream BaseFold verifier reference.
 
 use serde::{Deserialize, Serialize};
 use zkm_recursion_compiler::ir::{Ext, Felt};
@@ -35,8 +29,6 @@ use crate::partial_sumcheck::PartialSumcheckProof;
 /// protocol emits — the sumcheck reduction proves that the
 /// jagged-polynomial evaluation at the verifier-sampled point
 /// matches the value implied by the per-chip prefix-sum metadata.
-///
-/// Mirrors SP1's `JaggedSumcheckEvalProof` in slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs.
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct JaggedSumcheckEvalProof<F> {
     pub partial_sumcheck_proof: PartialSumcheckProof<F>,
@@ -49,8 +41,6 @@ pub struct JaggedSumcheckEvalProof<F> {
 /// `Pcs` is the underlying PCS proof type (typically a
 /// [`crate::basefold_verifier::RecursiveBasefoldProof`]).  `F` is
 /// the base field, `EF` the extension.
-///
-/// Mirrors SP1's `RecursiveStackedPcsProof` in crates/recursion/circuit/src/basefold/stacked.rs.
 pub struct RecursiveStackedPcsProof<Pcs, F, EF> {
     /// Per-round per-stripe evaluations at the stack-portion of
     /// the eval point.  One outer Vec per commit round (typically
@@ -80,8 +70,6 @@ pub struct JaggedDimensionMetadata<F> {
 /// `Pcs` is the underlying stacked-PCS proof type.  `Digest` is
 /// the field-hasher commitment digest type (typically
 /// `[Felt<F>; DIGEST_SIZE]`).
-///
-/// Mirrors SP1's `JaggedPcsProofVariable` in crates/recursion/circuit/src/jagged/verifier.rs.
 pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// Per-chip dimension metadata (col prefix sums) at the
     /// recursion-bit-decomposition layer (Felt-typed).
@@ -109,7 +97,7 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     /// height anchor that makes the recursion VK program-length-dependent
     /// (a numeric pin asserting `row_count_felt == constant(2^log_h)`).
     /// The verifier bounds per-chip heights via witnessed binds
-    /// (`assert_row_count_le_cube` + the SP1 main-padding-column
+    /// (`assert_row_count_le_cube` + the main-padding-column
     /// bit-bound) instead of baking them.
     pub row_counts: Vec<Vec<Felt<F>>>,
     /// Each round's stacking-padding column heights, in round order.
@@ -126,7 +114,7 @@ pub struct JaggedPcsProofVariable<Pcs, Digest, F, EF> {
     pub original_commitments: Vec<Digest>,
     /// Per-round MODIFIED commitment digests — the FS-observed
     /// `compress([original_commitment, hash(once(len) ++ row_counts ++
-    /// column_counts)])` (SP1 hash-bind).  The in-circuit re-bind asserts
+    /// column_counts)])` (hash-bind).  The in-circuit re-bind asserts
     /// `compress([original_commitments[r], hash]) == modified_commitments[r]`,
     /// tying the per-chip geometry to the observed commitment.  On the
     /// hash-bind-off path these equal `original_commitments`.

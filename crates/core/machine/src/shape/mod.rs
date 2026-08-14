@@ -201,7 +201,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
         // records, which leaves the shard committed at its raw sub-family
         // chip-set whose normalize VK is NOT enumerated (the enum emits one
         // cluster per WHOLE family).  Lift it UP to the whole-family cluster
-        // here (same SP1 `smallest_cluster`-superset model the core path uses):
+        // here (same `smallest_cluster`-superset model the core path uses):
         // build the shard's precompile shape, then `canonicalize_shape` injects
         // the missing family chips so the committed chip-SET == the enumerated
         // whole-family cluster == IN-MAP.
@@ -2068,7 +2068,7 @@ pub mod tests {
     }
 
     /// Precompile sub-family coverage is GENERAL across all
-    /// precompile families and across ANY sub-family of a family (the SP1
+    /// precompile families and across ANY sub-family of a family (the
     /// `smallest_cluster`-superset model collapses every sub-family of a family
     /// to the SAME whole-family cluster, so the reachable set is BOUNDED — one
     /// enumerated cluster per family, NOT combinatorial).  Each case here is a
@@ -2133,9 +2133,9 @@ pub mod tests {
 /// Chip sets are event-driven: a guest that never executes (say) a MISC
 /// instruction drops `MiscInstrs` from its execution shards, so the
 /// per-shard chip-set space is combinatorial and can never be fully
-/// pre-enumerated into the vk_map.  SP1 solves this by making core
+/// pre-enumerated into the vk_map.  The fix is to make core
 /// shapes carry the FULL cluster chip set (zero-event chips emit
-/// shape-height padding traces — Ziren tracegen already honors this via
+/// shape-height padding traces — tracegen already honors this via
 /// `fixed_log2_rows`).  This post-pass extends `record.shape` with the
 /// missing cluster chips at log-height 1 so every shard of a given type
 /// presents the canonical chip set to the recursion layer.

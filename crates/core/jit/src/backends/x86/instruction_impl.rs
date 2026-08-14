@@ -67,7 +67,7 @@ impl ComputeInstructions for TranspilerBackend {
 
     fn div(&mut self, rs: MipsRegister, rt: MipsRegister) {
         // Signed 32-bit divide.  MIPS spec: division by zero leaves
-        // HI/LO undefined; we follow SP1's convention of LO=-1, HI=rs.
+        // HI/LO undefined; we use the convention LO=-1, HI=rs.
         self.emit_register_load(rs, dynasmrt::x64::Rq::RAX as u8);
         self.emit_register_load(rt, TEMP_B);
         dynasm!(self.assembler ; .arch x64

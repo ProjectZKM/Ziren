@@ -1,6 +1,5 @@
 //! Branching-program multilinear polynomial for the jagged-eval
-//! sub-protocol (Ziren port of SP1's
-//! `BranchingProgram`).
+//! sub-protocol.
 //!
 //! # Overview
 //!
@@ -115,8 +114,6 @@ pub fn all_bit_states() -> [BitState; 16] {
 /// Transition function — given current memory state and the 4 bits
 /// being read, compute the next state or signal failure.  Reads bits
 /// LSB→MSB.
-///
-/// Mirrors SP1's `transition_function`.
 #[must_use]
 pub fn transition_function(bs: BitState, ms: MemoryState) -> StateOrFail {
     // Comparison logic: if index_bit == next_prefix_sum_bit, defer
@@ -166,8 +163,6 @@ fn partial_lagrange_4<EF: Field>(point: [EF; 4]) -> [EF; 16] {
 
 /// Branching-program multilinear polynomial — fixed by `(z_row, z_index)`
 /// at construction; evaluated at column-prefix-sum points.
-///
-/// Mirrors SP1's `BranchingProgram`.
 #[derive(Clone, Debug)]
 pub struct BranchingProgram<EF: Field> {
     z_row: Vec<EF>,
@@ -183,8 +178,8 @@ impl<EF: Field> BranchingProgram<EF> {
     /// `z_row`: row-direction challenges (typically from outer
     /// LogUp-GKR sumcheck).
     ///
-    /// `z_index`: trace-direction challenges (typically from outer
-    /// jagged reduction's eval_point — what SP1 calls `z_trace`).
+    /// `z_index`: trace-direction challenges (typically from the outer
+    /// jagged reduction's eval_point).
     #[must_use]
     pub fn new(z_row: Vec<EF>, z_index: Vec<EF>) -> Self {
         let num_vars = z_row.len().max(z_index.len());
@@ -205,8 +200,6 @@ impl<EF: Field> BranchingProgram<EF> {
     /// Returns 1 iff the indicator function holds at this point's
     /// hypercube interpretation; returns the multilinear extension's
     /// value otherwise.
-    ///
-    /// Mirrors SP1's `BranchingProgram::eval`.
     pub fn eval(&self, prefix_sum: &[EF], next_prefix_sum: &[EF]) -> EF {
         // DP: state_by_state_results[s.get_index()] holds the value
         // of the rest of the BP starting from state s.
@@ -289,9 +282,6 @@ pub fn bits_big_endian<EF: Field>(value: usize, num_bits: usize) -> Vec<EF> {
 
 /// Closed-form evaluation of the jagged polynomial.
 ///
-/// Mirrors SP1's
-/// `JaggedLittlePolynomialVerifierParams::full_jagged_little_polynomial_evaluation`.
-///
 /// `prefix_sums.len()` = num_chips + 1.  Each entry is a usize cumulative
 /// row count; `log_m` is `log2_ceil(prefix_sums.last())`.
 ///
@@ -308,8 +298,7 @@ pub fn full_jagged_evaluation<EF: Field>(
 ) -> EF {
     // Prefix-sum bit width: the largest prefix sum is
     // `prefix_sums.last()` (= total area), which needs `log2_ceil(total)+1`
-    // bits (matching SP1 into_verifier_params: Point::from_usize(x, log_m+1)
-    // with log_m = log2_ceil(last_prefix_sum)).  Deriving `num_bits` from the
+    // bits (log_m = log2_ceil(last_prefix_sum)).  Deriving `num_bits` from the
     // prefix sums (not `z_index.len()`) avoids the off-by-one that truncated
     // the top prefix-sum bit for single/equal-height packings.
     let last = prefix_sums.last().copied().unwrap_or(0);

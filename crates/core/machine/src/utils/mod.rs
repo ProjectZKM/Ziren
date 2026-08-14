@@ -124,7 +124,7 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
     }
 }
 
-/// SP1-parity padded height: the next multiple of 32 that is `>= n` and
+/// Padded height: the next multiple of 32 that is `>= n` and
 /// `>= 32`.  If `fixed_power` is set, behaves exactly like
 /// [`next_power_of_two`] (a pinned shape height is still `2^power`).
 ///
@@ -133,7 +133,7 @@ pub fn next_power_of_two(n: usize, fixed_power: Option<usize>, chip: &str) -> us
 /// rows beyond the real height as VIRTUAL zero rows (`VirtualGeq` carries the
 /// raw height as an arbitrary integer threshold), so a committed height never
 /// needed to be a power of two.  `next_power_of_two` was therefore charging up
-/// to a 2x area tax on every core chip; SP1 pads to a multiple of 32 instead.
+/// to a 2x area tax on every core chip; padding to a multiple of 32 avoids it.
 pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> usize {
     match fixed_power {
         Some(_) => next_power_of_two(n, fixed_power, chip),
@@ -141,7 +141,7 @@ pub fn next_multiple_of_32(n: usize, fixed_power: Option<usize>, chip: &str) -> 
     }
 }
 
-/// [`pad_rows_fixed`] with the SP1-parity [`next_multiple_of_32`] padding.
+/// [`pad_rows_fixed`] with [`next_multiple_of_32`] padding.
 pub fn pad_rows_mult32<R: Clone>(
     rows: &mut Vec<R>,
     row_fn: impl Fn() -> R,

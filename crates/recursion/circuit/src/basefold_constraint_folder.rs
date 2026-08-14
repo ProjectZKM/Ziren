@@ -21,14 +21,6 @@
 //! evaluated through this folder must already have folded those
 //! selectors into their constraint expressions before reaching the
 //! zerocheck verifier.
-//!
-//! # Reference
-//!
-//! Mirrors `RecursiveVerifierConstraintFolder`
-//! (crates/recursion/circuit/src/zerocheck.rs in SP1) — a type alias to
-//! `GenericVerifierConstraintFolder`).  Specialised to Ziren's
-//! `Felt` / `Ext` / `SymbolicExt` types in place of the upstream's
-//! generic `(F, EF, FeltVar, ExtVar, SymbolicExtVar)` parameters.
 
 use std::marker::PhantomData;
 

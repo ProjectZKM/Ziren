@@ -154,8 +154,8 @@ fn main() {
         }
         "widths" => {
             // Per-chip main-trace WIDTH census.  "Where does the trace area go"
-            // is the recurring question behind every density comparison against
-            // SP1, and answering it otherwise means re-deriving column counts by
+            // is the recurring question behind every density comparison, and
+            // answering it otherwise means re-deriving column counts by
             // hand from the `*Cols` struct definitions.  Width is static, so this
             // needs no execution; multiply by the per-chip row count for area.
             let machine: StarkMachine<KoalaBearPoseidon2, MipsAir<KoalaBear>> =

@@ -50,9 +50,8 @@ pub const MAX_DEFERRED_SPLIT_THRESHOLD: usize = 1 << 15;
 /// limit that closes a core shard in practice — on reth, tendermint and goat,
 /// 100% of splits are area splits.
 ///
-/// NOT SP1's constant. SP1 uses `(1 << 28) + (1 << 27)`, calibrated against
-/// RISC-V trace density and a `Chip::cost()` of `preprocessed + main`. Ziren's
-/// MIPS trace is ~2.2x denser per cycle, so an SP1-sized area does not fit a
+/// Calibrated for MIPS trace density (~2.2x denser per cycle than RISC-V):
+/// a `(1 << 28) + (1 << 27)` area does not fit a
 /// 32 GB device: at that value the resident jagged fold+sum kernel CUDA-OOMs on
 /// both tendermint and goat. This is the largest budget measured to fit both,
 /// and the headroom is thin — goat OOMs at `1 << 28`. Re-measure peak VRAM
@@ -205,25 +204,23 @@ impl ZKMProverOpts {
 
     /// Get the default prover options for a prover on GPU given the amount of CPU and GPU memory.
     ///
-    /// **Small-card adaptation (SP1 `local_gpu_opts` port)**:
+    /// **Small-card adaptation**:
     /// When `gpu_ram_gb <= 30` (e.g. RTX 4090 24 GB or A10 24 GB) we
-    /// halve the per-shard cycle budget (`log2_shard_size -= 1`) as the
-    /// analogue of SP1's `shard_threshold -= (1<<26) + (1<<25)`
-    /// reduction on `opts.sharding_threshold.element_threshold`.  This
+    /// halve the per-shard cycle budget (`log2_shard_size -= 1`).  This
     /// trades per-shard wall for peak-memory headroom on cards where
     /// the GKR layer-transition mempool would otherwise blow past
     /// physical device memory under multi-shard concurrency.
     ///
     /// On 32 GB+ cards (the actual prod 5090 box: 32607 MiB → 36 with
-    /// SP1's `ceil() + 4`) the branch is a no-op — full default
+    /// the `ceil() + 4` sizing) the branch is a no-op — full default
     /// shard_size is used.
     ///
     /// Pair with `ZIREN_GPU_RECOMPUTE_FIRST_LAYER` (AUTO: on for small
     /// cards, off otherwise; `=0`/`=1` force it) on ziren-gpu's
-    /// `layer_transition_dispatch.rs` for the matching
-    /// half of SP1's pattern that drops the first-layer device buffers
-    /// after the second is materialized.  Full first-layer-virtual host
-    /// regen wiring is deferred — see the related design memo.
+    /// `layer_transition_dispatch.rs`, which drops the first-layer
+    /// device buffers after the second is materialized.  Full
+    /// first-layer-virtual host regen wiring is deferred — see the
+    /// related design memo.
     #[must_use]
     pub fn gpu(_cpu_ram_gb: usize, gpu_ram_gb: usize) -> Self {
         let mut opts = ZKMProverOpts::default();
@@ -232,25 +229,20 @@ impl ZKMProverOpts {
         if 24 <= gpu_ram_gb {
             opts.core_opts.shard_batch_size = 1;
 
-            // SP1 `local_gpu_opts` small-card port: on cards
-            // <= 30 GB, halve the default shard cycle budget. This is
-            // the per-cycle analogue of SP1's element-threshold
-            // reduction; matches SP1's "reduce work per shard so
-            // multi-shard concurrency fits in mempool headroom".
+            // Small-card adaptation: on cards <= 30 GB, halve the
+            // default shard cycle budget — reduce work per shard so
+            // multi-shard concurrency fits in mempool headroom.
             //
             // Override with SHARD_SIZE env to force a specific value
             // (default ZKMCoreOpts already honours the env).
-            // Threshold bumped from 30 → 36 to catch 32 GB RTX 5090s
-            // under SP1's `ceil() + 4` formula (32 + 4 = 36).  SP1's
-            // original 30 was tuned for 24 GB 4090s (28) and 80 GB
-            // H100s (84), leaving 32 GB 5090s at 36 falling through
-            // to large-card mode.  Production 5090 box OOMs under
-            // V3 + LT default-on when small-card mode doesn't fire;
-            // catching at ≤36 enables the shard-size halving + the
+            // The `ceil() + 4` sizing maps 24 GB 4090s to 28 and
+            // 32 GB RTX 5090s to 36 (32 + 4).  The production 5090 box
+            // OOMs under V3 + LT default-on when small-card mode doesn't
+            // fire; catching at ≤36 enabled the shard-size halving + the
             // matching mempool/recompute companions on ziren-gpu.
             // User directive: 32 GB prod boxes get the full 2^24 default
-            // (validated single-GPU), so the halving reverts to SP1's
-            // original ≤30 — 24 GB cards (28) still protected, 32 GB (36)
+            // (validated single-GPU), so the halving threshold is ≤30 —
+            // 24 GB cards (28) still protected, 32 GB (36)
             // and up run large-card (un-halved).
             if gpu_ram_gb <= 30 {
                 let shard_size_overridden = std::env::var("SHARD_SIZE").is_ok();
@@ -301,7 +293,7 @@ impl ZKMProverOpts {
         // codeword stack (commit_dispatch.rs, ~4 GiB at log_dense≈29);
         // four of those on one 32 GB card overruns VRAM (observed TM
         // compress-from-dump OOM at recursion.cuh:429 / encode_batch).
-        // On small cards (`gpu_ram_gb <= 36`, the 32 GB 5090 with SP1's
+        // On small cards (`gpu_ram_gb <= 36`, the 32 GB 5090 with the
         // `ceil()+4` pad) cap the *lower* clamp at 2 so a single GPU runs
         // 2 workers (the safe profile) instead of 4 — per-GPU
         // concurrency stays ≤ 2 at every device count
@@ -326,7 +318,7 @@ impl ZKMProverOpts {
 pub struct ZKMCoreOpts {
     /// The size of a shard in terms of cycles.
     pub shard_size: usize,
-    /// The per-shard trace-AREA cap in raw main-trace cells (SP1 `ELEMENT_THRESHOLD`).
+    /// The per-shard trace-AREA cap in raw main-trace cells.
     ///
     /// A shard is closed as soon as its accumulated un-padded main-trace cell count
     /// `Σ_chip event_counts[chip] × costs[chip]` reaches this value (see
@@ -375,9 +367,9 @@ impl Default for ZKMCoreOpts {
             // the shard-size lever is `ELEMENT_THRESHOLD` below.
             shard_size: env::var("SHARD_SIZE")
                 .map_or_else(|_| 1 << 24, |s| s.parse::<usize>().unwrap_or(1 << 24)),
-            // SP1-parity per-shard trace-AREA cap (raw main-trace cells). The
+            // Per-shard trace-AREA cap (raw main-trace cells). The
             // ELEMENT_THRESHOLD env OVERRIDES it (mirrors the SHARD_SIZE pattern above);
-            // only the no-env / unparseable default is pinned to SP1's ELEMENT_THRESHOLD.
+            // only the no-env / unparseable default is pinned to ELEMENT_THRESHOLD.
             element_threshold: env::var("ELEMENT_THRESHOLD").map_or_else(
                 |_| ELEMENT_THRESHOLD,
                 |s| s.parse::<usize>().unwrap_or(ELEMENT_THRESHOLD),

@@ -52,8 +52,7 @@ pub fn root_public_values_digest(
     let hash = InnerHash::new(config.perm.clone());
     // Must match the in-circuit `root_public_values_digest`
     // (recursion/circuit/.../public_values.rs): bind zkm_vk_digest,
-    // committed_value_digest, exit_code, vk_root — the same fields SP1 binds
-    // (minus the `proof_nonce` Ziren's schema lacks).
+    // committed_value_digest, exit_code, vk_root.
     let input = (*public_values.zkm_vk_digest())
         .into_iter()
         .chain(

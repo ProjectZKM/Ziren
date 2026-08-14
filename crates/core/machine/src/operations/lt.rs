@@ -1,8 +1,7 @@
 //! An embeddable signed/unsigned less-than gadget — the `Lt` CHIP's compare
 //! logic, extracted so instruction chips can prove their own comparisons
 //! instead of pushing SLT/SLTU request rows onto the `Lt` chip over the
-//! Instruction bus (SP1's `LtOperationSigned` shape: SP1 has no such bus and
-//! no dependency rows at all).
+//! Instruction bus.
 //!
 //! Semantics are EXACTLY the MIPS `SLT`/`SLTU` the `Lt` chip proves:
 //!

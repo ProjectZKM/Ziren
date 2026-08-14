@@ -58,7 +58,6 @@ pub struct MemoryBumpCols<T> {
 /// Consequently every register access proven anywhere in the machine has `prev_shard == shard`,
 /// which is what lets [`crate::memory::RegisterAccessCols`] be 6 columns instead of 9.
 ///
-/// This is the Ziren analogue of SP1's `MemoryBumpChip`; the only structural difference is that
 /// Ziren's "high limb" of the timestamp is the shard number, which changes once per shard, so the
 /// chip is bounded by `NUM_REGISTERS` rows per shard instead of being driven by a 24-bit epoch.
 #[derive(Default)]

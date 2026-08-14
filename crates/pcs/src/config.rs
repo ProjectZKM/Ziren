@@ -233,8 +233,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 
     /// Ring-native jagged BaseFold commit: build the BaseFold commit over
-    /// this ring's [`Self::BfMmcs`] (SP1's single generic
-    /// `StackedPcsProver::commit_multilinears` — no free-fn indirection).
+    /// this ring's [`Self::BfMmcs`] — no free-fn indirection.
     /// Inner (`KoalaBearPoseidon2`) commits over the Poseidon2-KoalaBear
     /// `JaggedMmcs`; the wrap ring over the Poseidon2-BN254 `OuterValMmcs`
     /// so the commitment is the BN254 root.  The DFT is over KoalaBear for

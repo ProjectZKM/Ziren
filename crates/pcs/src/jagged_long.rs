@@ -1,13 +1,13 @@
 //! `LongMle` — a multilinear held as a LIST of component MLEs instead of one
 //! flat evaluation table.
 //!
-//! This is the shape SP1's jagged sumcheck runs on
-//! (`slop/crates/jagged/src/long.rs`): the components stay separate, and the
-//! "long" polynomial exists only through the way a point is split across them.
+//! This is the shape the jagged sumcheck runs on: the components stay separate,
+//! and the "long" polynomial exists only through the way a point is split across
+//! them.
 //! Ziren's jagged path currently does the opposite — `materialize_dense_jagged`
 //! transposes every chip's row-major trace into one column-major
 //! `Vec<F>` of length `2^log_dense_size`, twice per shard (commit + reduce).
-//! Under SP1's structure that buffer has nowhere to live: the jagged geometry is
+//! Under the list-of-components structure that buffer has nowhere to live: the jagged geometry is
 //! carried by the point decomposition, not by a physically packed vector.
 //!
 //! ## Point convention
@@ -90,7 +90,7 @@ impl<F> LongMle<F> {
 
     /// Total variables of the long polynomial.
     ///
-    /// Mirrors SP1 `long.rs:95`, which takes a plain `ilog2()` — i.e. it ASSUMES
+    /// A plain `ilog2()` here would ASSUME
     /// the components stack EXACTLY into a power of two.  That is not a free
     /// property: it is what `log_stacking_height` and
     /// `interleave_multilinears_with_fixed_rate` exist to arrange.  Asserted
@@ -112,7 +112,7 @@ impl<F: Field> LongMle<F> {
     /// Evaluate the long polynomial at `point` (LSB-first, length
     /// `num_variables()`).
     ///
-    /// See the module note on the point split. Mirrors SP1 `long.rs:39`.
+    /// See the module note on the point split.
     pub fn eval_at<EF>(&self, point: &[EF]) -> EF
     where
         EF: ExtensionField<F> + Send + Sync,
@@ -137,13 +137,12 @@ impl<F: Field> LongMle<F> {
     /// [`Mle::fix_last_variable`] — NOT `Mle::fold`, which is the BaseFold rule
     /// and would silently change the polynomial being proved.
     ///
-    /// Mirrors SP1 `long.rs:62`.  SP1 additionally RE-INTERLEAVES when
-    /// `log_stacking_height <= 2`, restacking the components into one before
-    /// folding.  That only changes anything when there is more than one
-    /// component: for a single component the re-interleave is the identity, and
-    /// the sumcheck always holds a single (already restacked) component.  So the
-    /// multi-component small-stack case is rejected rather than silently taking
-    /// a path with no equivalence coverage.
+    /// A re-interleave at `log_stacking_height <= 2` (restacking the components
+    /// into one before folding) only changes anything when there is more than
+    /// one component: for a single component the re-interleave is the identity,
+    /// and the sumcheck always holds a single (already restacked) component.  So
+    /// the multi-component small-stack case is rejected rather than silently
+    /// taking a path with no equivalence coverage.
     pub fn fix_last_variable<EF>(&self, alpha: EF) -> LongMle<EF>
     where
         EF: ExtensionField<F> + Send + Sync,
@@ -152,7 +151,7 @@ impl<F: Field> LongMle<F> {
         assert!(
             self.log_stacking_height > 2 || self.components.len() == 1,
             "LongMle::fix_last_variable: multi-component fold at log_stacking_height <= 2 needs \
-             SP1's re-interleaving path (long.rs:64-84), which is not ported yet",
+             the re-interleaving path, which is not implemented",
         );
         let components: Vec<Mle<EF, CpuBackend>> =
             self.components.iter().map(|mle| mle.fix_last_variable(alpha)).collect();
@@ -485,11 +484,11 @@ mod tests {
 
     /// ★ THE RECONCILIATION, pinned.
     ///
-    /// `interleave_multilinears_with_fixed_rate` (SP1's restacking) and
+    /// `interleave_multilinears_with_fixed_rate` (the restacking) and
     /// `materialize_dense_jagged` produce the IDENTICAL layout — provided the
     /// dense is built in NATURAL row order (`use_rev = true`).  The only thing
     /// that ever separated them is Ziren's LEGACY BIT-REVERSED row order, which
-    /// `use_rev = false` applies and which SP1 has no equivalent of:
+    /// `use_rev = false` applies:
     ///
     ///     dense(rev=false) = [594,  74, 102, 552, 710, 606,  84, 68, ..]
     ///     dense(rev=true)  = [594, 710, 102,  84,  74, 606, 552, 68, ..]
@@ -564,7 +563,7 @@ mod tests {
     }
 
     /// A non-power-of-two total must be REJECTED, not silently truncated by
-    /// floor-`ilog2` (SP1 `long.rs:95` has no guard; this is the ported check).
+    /// floor-`ilog2`.
     #[test]
     #[should_panic(expected = "stack exactly into a power of two")]
     fn non_power_of_two_total_is_rejected() {
@@ -591,11 +590,11 @@ impl<F> LongMle<F> {
 }
 
 /// The pointwise product of a base-field and an extension-field multilinear —
-/// SP1's jagged sumcheck polynomial (`slop/crates/jagged/src/hadamard.rs`).
+/// the jagged sumcheck polynomial.
 ///
 /// Both sides must be restacked to a SINGLE component before the sumcheck runs;
-/// SP1 arranges that with `interleave_multilinears_with_fixed_rate` in
-/// `jagged_sumcheck_poly`.
+/// `jagged_hadamard_poly` arranges that with
+/// `interleave_multilinears_with_fixed_rate`.
 #[derive(Clone, Debug)]
 pub struct HadamardProduct<F, EF = F> {
     /// The trace side (base field on the first round).
@@ -626,8 +625,8 @@ where
 /// The round polynomial, shared by the first (base x ext) and later
 /// (ext x ext) rounds.
 ///
-/// The product is multi-quadratic, so three evaluations pin it down.  Mirrors
-/// SP1 `hadamard.rs:95`: evaluate at 0 and 1 over the even/odd halves of the
+/// The product is multi-quadratic, so three evaluations pin it down:
+/// evaluate at 0 and 1 over the even/odd halves of the
 /// stride-1 variable, and at 1/2 via `(e0 + e1)(b0 + b1) / 4`.
 fn hadamard_round_poly<F, EF>(
     base: &Mle<F, CpuBackend>,
@@ -721,20 +720,17 @@ where
 }
 
 /// Build the jagged sumcheck polynomial from the per-chip trace MLEs and the
-/// jagged weight table — Ziren's counterpart of SP1's `jagged_sumcheck_poly`
-/// (`slop/crates/jagged/src/sumcheck.rs:13`).
+/// jagged weight table.
 ///
 /// `base` is the trace side: the per-chip component MLEs restacked into the
 /// single component the sumcheck requires, via
-/// [`crate::basefold::stacked::interleave_multilinears_with_fixed_rate`] — the
-/// same helper SP1 uses, already ported and (measured: zero calls on the GPU
-/// prove path) currently never exercised there.
+/// [`crate::basefold::stacked::interleave_multilinears_with_fixed_rate`]
+/// (measured: zero calls on the GPU prove path — currently never exercised
+/// there).
 ///
-/// `ext` is the weight side.  SP1's `partial_jagged_multilinear`
-/// (`populate.rs`) is just `partial_jagged_little_polynomial_evaluation`
-/// wrapped in a one-component `LongMle`, and Ziren's `build_weight_table`
-/// already documents itself as mirroring that same function — so the weights
-/// are wrapped here rather than recomputed.
+/// `ext` is the weight side.  `build_weight_table` already computes the
+/// weight-table evaluations, so the weights are wrapped here (in a
+/// one-component `LongMle`) rather than recomputed.
 ///
 /// NOTE this does not yet replace `prove_jagged_reduction_owned`: that swap
 /// also has to reconcile the binding order (Ziren's jagged reduction folds
@@ -767,8 +763,8 @@ pub fn jagged_hadamard_poly(
     }
 }
 
-/// The jagged reduction sumcheck run on [`HadamardProduct`] — SP1's structure,
-/// with NO dense materialization.
+/// The jagged reduction sumcheck run on [`HadamardProduct`], with NO dense
+/// materialization.
 ///
 /// Differences from [`crate::jagged_sumcheck::prove_jagged_reduction_owned`],
 /// which this is intended to replace:
@@ -776,7 +772,7 @@ pub fn jagged_hadamard_poly(
 ///   * Takes the per-chip trace MLEs, not a flat `dense_q`.  The
 ///     `2^log_dense_size` base-field buffer — built twice per shard, once for
 ///     the commit and again inside the reduce closure — is never allocated.
-///   * Binds the stride-1 (LSB) variable per round, as SP1 does, instead of the
+///   * Binds the stride-1 (LSB) variable per round, instead of the
 ///     MSB pairing `(i, i+half)`.  The recorded `eval_point` is therefore in
 ///     sample order (`push`), not reverse order (`insert(0, ..)`).
 ///

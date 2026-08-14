@@ -1,21 +1,17 @@
-//! PORTED VERBATIM from SP1 `slop/crates/alloc/src/backend/mod.rs` (succinctlabs/sp1) for the
-//! Ziren backend-generic tensor stack — a full SP1-fidelity Buffer port.
-//! Ziren adaptations vs upstream: `crate::` -> `crate::tensor::`; `thiserror` errors
-//! hand-written; `slop_algebra` -> `p3_field`.
+//! Part of the Ziren backend-generic tensor stack.
 //!
 //! `CpuBackend` is the only implementor **in this tree**; `ziren-gpu` implements the
 //! device half as `CudaBackend` (`core/src/device/backend.rs`), a thin wrapper over its
 //! `CudaStream` (`cudaMallocAsync` / `cudaFreeAsync` / `cudaMemcpyAsync` /
-//! `cudaMemsetAsync`), mirroring SP1's `impl Allocator/DeviceMemory for CudaStream`.
+//! `cudaMemsetAsync`).
 //! So `Buffer<T, CudaBackend>` / `Tensor<T, CudaBackend>` are real, device-resident
 //! types over there.
 //!
 //! What that does NOT mean: nothing in either tree currently **consumes** a non-CPU
-//! backend. Every shard-prover use site still pins `CpuBackend`, exactly as upstream SP1
-//! pins it (`MainTraceData<_, _, CpuBackend>`) — SP1 separates CPU from GPU at the
-//! PROVER level, not via this parameter. In particular ziren-gpu's device traces remain
-//! a bespoke COLUMN-major `ColMajorMatrixDevice` over `DeviceBuffer`, whereas `Tensor`
-//! here is ROW-major, so the two stacks are still not interchangeable as they stand.
+//! backend. Every shard-prover use site still pins `CpuBackend` — the CPU/GPU split
+//! lives at the PROVER level, not in this parameter. In particular ziren-gpu's device
+//! traces remain a bespoke COLUMN-major `ColMajorMatrixDevice` over `DeviceBuffer`,
+//! whereas `Tensor` here is ROW-major, so the two stacks are still not interchangeable.
 //! Do not infer from the generics that a device backend is wired into any proving path.
 
 mod cpu;

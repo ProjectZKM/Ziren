@@ -11,9 +11,8 @@
 //! `state @ index + 1`, so the LogUp multiset only balances when the chain
 //! telescopes `0 → 80`, pinning the per-row ordering by multiplicity.
 //!
-//! Mirrors SP1's `ShaCompressControlChip` (`controller.rs`), but on Ziren's
-//! generic `PrecompileChain` kind (isolated by the leading `syscall_id`),
-//! Ziren's scalar `clk/w_ptr/h_ptr`, and `Word<T>` state representation.
+//! Built on Ziren's generic `PrecompileChain` kind (isolated by the leading
+//! `syscall_id`), scalar `clk/w_ptr/h_ptr`, and `Word<T>` state representation.
 
 use core::borrow::{Borrow, BorrowMut};
 use std::mem::size_of;

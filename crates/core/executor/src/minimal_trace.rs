@@ -1,4 +1,4 @@
-//! Minimal-trace skeleton for the SP1-style two-stage tracing split.
+//! Minimal-trace skeleton for the two-stage tracing split.
 //!
 //! Background
 //! ----------
@@ -7,35 +7,32 @@
 //! single `zkm-bf-core-N` thread pegged at 99.9 % CPU for several minutes
 //! while all other prover threads sit idle.
 //!
-//! SP1 fixes this by splitting execution into two stages:
+//! The fix is to split execution into two stages:
 //!
 //! 1. **Stage 1 — fast / sequential**: a JIT (or interpreter-portable runner)
 //!    races through the program producing a very small per-shard
 //!    [`MinimalTrace`]. The MinimalTrace contains only the information needed
 //!    to *re-run* the shard from its start state — start registers, pc/clk
-//!    bounds, and (in SP1) an oracle of memory reads.
+//!    bounds, and an oracle of memory reads.
 //! 2. **Stage 2 — slow / parallel**: a `TracingVM` re-runs each shard from
 //!    its MinimalTrace, this time emitting every `AluEvent`, `BranchEvent`,
 //!    `MemoryRecord`, … needed for proving. Because each shard's start
 //!    state is captured in its MinimalTrace, Stage 2 trivially parallelises
 //!    across shards via rayon.
 //!
-//! This module defines the Ziren equivalent of SP1's
-//! `sp1_jit::MinimalTrace` (see `crates/core/jit/src/risc.rs:401`)
-//! and `TraceChunk` (`risc.rs:316`) — adapted to MIPS register width and the
-//! Ziren executor's state layout.
+//! This module defines [`MinimalTrace`] and [`TraceChunk`], shaped for the
+//! MIPS register width and the Ziren executor's state layout.
 //!
 //! The checkpoint pass runs on the JIT
 //! (`run_fast_capture_whole_program_chunk`) and the consumer reconstructs
 //! full `ExecutionRecord`s byte-identically via `trace_checkpoint`.
 //!
-//! Differences from SP1's TraceChunk:
+//! TraceChunk layout notes:
 //! - MIPS has 32 GPRs plus HI / LO / BRK / HEAP (36 slots in
 //!   `crates/core/executor/src/jit_runner.rs::JitContext::registers`) —
 //!   the snapshot mirrors that layout exactly so a future TracingVM can
 //!   `JitContext::registers = trace.start_registers` directly.
-//! - Ziren uses `u32` for words; SP1 uses `u64` (RISC-V 64). We track
-//!   `u32` so the memory_reads oracle stays compact.
+//! - Ziren uses `u32` for words, so the memory_reads oracle stays compact.
 //! - We carry the `shard_index` explicitly so a parallel collector can sort
 //!   the resulting [`ExecutionRecord`]s back into shard order without a
 //!   side channel.
@@ -44,7 +41,7 @@
 //! - Populate `mem_reads` from JIT memory-read instrumentation. Today this
 //!   field is left empty by the JIT emit path; the TracingVM will fall
 //!   back to re-reading guest memory directly. The oracle becomes load-
-//!   bearing only when we move to the SP1 process-per-shard model where
+//!   bearing only when we move to a process-per-shard model where
 //!   the JIT and TracingVM live in different address spaces.
 
 use serde::{Deserialize, Serialize};
@@ -52,8 +49,7 @@ use std::sync::Arc;
 
 /// One memory-read observation emitted by the Stage-1 fast runner.
 ///
-/// Mirrors `sp1_jit::risc::MemValue` (`crates/core/jit/src/risc.rs:117`)
-/// but uses MIPS-native `u32` words instead of RISC-V64 `u64`.
+/// Uses MIPS-native `u32` words.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(C)]
 pub struct MemValue {
@@ -82,8 +78,7 @@ pub struct MemValue {
 /// `pc_start` / `clk_start` up to `clk_end` and emit a full
 /// `ExecutionRecord`.
 ///
-/// Mirrors `sp1_jit::risc::TraceChunk` (`crates/core/jit/src/risc.rs:316`)
-/// adapted to MIPS register layout and Ziren's existing `JitContext` shape.
+/// Follows the MIPS register layout and Ziren's existing `JitContext` shape.
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraceChunk {
     /// Shard index — preserved so a parallel collector can resort outputs.
@@ -183,11 +178,8 @@ impl TraceChunk {
 /// A whole-program minimal trace: one [`TraceChunk`] per shard plus the
 /// program's syscall log.
 ///
-/// Mirrors the SP1 pattern: `MinimalTrace` is the bridge between
-/// `MinimalExecutorRunner` (Stage 1) and the TracingVM workers (Stage 2).
-/// See `crates/core/runner/src/portable.rs` for the SP1 portable
-/// runner and `crates/core/machine/src/executor.rs:34` for the
-/// Stage 2 entry point.
+/// `MinimalTrace` is the bridge between `MinimalExecutorRunner` (Stage 1)
+/// and the TracingVM workers (Stage 2).
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct MinimalTrace {
     /// One chunk per shard, in execution order.

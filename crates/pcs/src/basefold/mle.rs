@@ -1,12 +1,12 @@
 //! Minimal `Mle<F, A>` (Multilinear Extension) wrapper used throughout
 //! the Ziren basefold port.
 //!
-//! Source-mapped from SP1's `slop_multilinear::Mle`.  Like SP1 this type
+//! This type
 //! is **backend-generic** over a [`Backend`]: it holds a
 //! [`Tensor<F, A>`] rather than a `RowMajorMatrix<F>` directly.  Ziren
 //! has only the CPU backend today, so `A` defaults to
 //! [`CpuBackend`] — which makes every existing `Mle<F>` / `Arc<Mle<F>>`
-//! annotation keep compiling unchanged (SP1's default-type-param trick).
+//! annotation keep compiling unchanged.
 //!
 //! The split is deliberate:
 //!   * `impl<F, A: Backend> Mle<F, A>` — the shape-only accessors, which
@@ -24,7 +24,7 @@
 //!   * **cols** = `num_polynomials` (one column per polynomial in the
 //!     batch)
 //!
-//! This matches SP1's storage convention and lines up with Plonky3's
+//! This lines up with Plonky3's
 //! [`TwoAdicSubgroupDft`] APIs (which DFT each column independently).
 
 use alloc::sync::Arc;
@@ -47,8 +47,7 @@ pub struct Mle<F, A: Backend = CpuBackend> {
 /// paths read instead of owning a separate [`RowMajorMatrix`] — its
 /// layout is **byte-identical** to `RowMajorMatrix { values, width }`
 /// (from which a [`Tensor`]/[`Mle`] is a zero-copy move; see
-/// [`Tensor::as_slice`] / `From<RowMajorMatrix>`), mirroring SP1's
-/// `Message<Arc<Mle>>` shared-view model.
+/// [`Tensor::as_slice`] / `From<RowMajorMatrix>`).
 ///
 /// Additive (the unified main-trace store): the type + accessors exist so
 /// later phases can source commit/open cells from the single shared
@@ -230,13 +229,12 @@ impl<F: Field> Mle<F, CpuBackend> {
     }
 }
 
-/// `Message<T>` mirrors SP1's `slop_commit::Message<T>` — an Arc-
-/// shared sequence of items used in basefold's per-round flows.  We
-/// alias to a plain `Vec<Arc<T>>` since Ziren has no equivalent of
-/// SP1's tensor backend abstraction.
+/// `Message<T>` is an Arc-
+/// shared sequence of items used in basefold's per-round flows,
+/// aliased to a plain `Vec<Arc<T>>`.
 pub type Message<T> = Vec<Arc<T>>;
 
-/// `Rounds<T>` mirrors SP1's `slop_commit::Rounds<T>` — a flat
+/// `Rounds<T>` is a flat
 /// sequence indexed by round number.
 pub type Rounds<T> = Vec<T>;
 
@@ -248,7 +246,7 @@ impl<F: Field> Mle<F, CpuBackend> {
     /// `(1-alpha)·lo + alpha·hi == lo + alpha·(hi - lo)`, per polynomial in the
     /// batch.  Mirrors [`crate::multilinear::PaddedMle::fix_last_variable`]
     /// minus the padding tail (an `Mle`'s hypercube height is a power of two,
-    /// so there is never a missing odd row) and SP1's `mle_fix_last_variable`.
+    /// so there is never a missing odd row).
     ///
     /// NOT the same operation as [`Mle::fold`], which applies the BASEFOLD rule
     /// `lo + beta·hi` on the same variable.  The two differ by the `(1-beta)`

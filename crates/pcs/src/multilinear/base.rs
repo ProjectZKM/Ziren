@@ -1,15 +1,11 @@
-//! Backend-dispatched MLE shape accessors — the Ziren port of SP1's
-//! `slop/crates/multilinear/src/base.rs`.
+//! Backend-dispatched MLE shape accessors.
 //!
 //! # Why this trait exists
 //!
 //! An MLE's storage layout is a property of its BACKEND, not of the MLE. The
 //! host stores a batch row-major as `[num_non_zero_entries, num_polynomials]`;
 //! a device stores it transposed, `[num_polynomials, num_non_zero_entries]`,
-//! because that is the layout its kernels want (the same split SP1 makes —
-//! compare its `CpuBackend` impl with the `TaskScope` one in
-//! `sp1-gpu/crates/cuda/src/mle/eval.rs`, which reads `sizes()[0]` as the
-//! polynomial count where the CPU reads `sizes()[1]`).
+//! because that is the layout its kernels want.
 //!
 //! [`Mle`](crate::basefold::Mle) therefore cannot read its own dimensions
 //! directly. It asks the backend, which is what lets one `Mle<F, A>` describe

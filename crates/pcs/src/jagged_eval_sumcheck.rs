@@ -1,12 +1,9 @@
-//! Jagged-eval sub-protocol prover (Ziren port of SP1 `prove_jagged_evaluation`).
-//!
-//! Source-mapped from
-//! `slop/crates/jagged/src/jagged_eval/sumcheck_eval.rs:182-243`.
+//! Jagged-eval sub-protocol prover.
 //!
 //! # Status
 //!
-//! This file lays the **foundation** for the SP1 jagged-eval port.
-//! [`JaggedSumcheckEvalProof`] mirrors the SP1 wire-format struct;
+//! This file lays the **foundation** for the jagged-eval protocol.
+//! [`JaggedSumcheckEvalProof`] is the wire-format struct;
 //! [`prove_jagged_evaluation`] is a stub that returns a structurally-
 //! valid placeholder.  The sumcheck body is not yet implemented.
 //!
@@ -140,9 +137,6 @@ pub fn install_jagged_eval_device_engine(
 
 /// Jagged-eval sub-protocol proof — wraps a [`PartialSumcheckProof`]
 /// over the polynomial defined in this module's docs.
-///
-/// Mirrors SP1's
-/// `JaggedSumcheckEvalProof`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JaggedSumcheckEvalProof<EF> {
     pub partial_sumcheck_proof: PartialSumcheckProof<EF>,
@@ -182,11 +176,11 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 ///    dimension 2*(log_m+1)).
 /// 2. Compute `z_col_lagrange = Mle::full_lagrange(z_col)` per chip.
 /// 3. Compute `expected_sum` via direct evaluation of the closed-form
-///    polynomial (mirror SP1's `full_jagged_little_polynomial_evaluation`).
+///    polynomial.
 /// 4. Run a standard 2*(log_m+1)-variable sumcheck via Ziren's
 ///    existing sumcheck machinery (the sumcheck poly's degree is 2;
 ///    each round emits a degree-2 univariate via 3 evals at x ∈ {0,
-///    1, 2} or {0, 1/2, 1} as SP1 does).
+///    1, 2} or {0, 1/2, 1}).
 /// 5. Wrap the PartialSumcheckProof in JaggedSumcheckEvalProof.
 ///
 /// The prover is callable from
@@ -194,7 +188,7 @@ impl<EF: p3_field::Field> JaggedSumcheckEvalProof<EF> {
 /// alongside the outer jagged-reduction sumcheck.
 /// Reverse the lowest `n` bits of `v`.  Used to align the LSB-first
 /// hypercube indexing (used by partial_lagrange) with the MSB-first
-/// big-endian Point convention SP1 uses for `merged_prefix_sums`.
+/// big-endian Point convention of `merged_prefix_sums`.
 fn bit_reverse(v: usize, n: usize) -> usize {
     let mut r = 0;
     for j in 0..n {
@@ -214,7 +208,7 @@ fn bit_reverse(v: usize, n: usize) -> usize {
 /// O(num_cols × 2^n).
 ///
 /// Index mapping (per the MSB-first / LSB-first alignment between
-/// SP1's big-endian Point and partial_lagrange's table indexing):
+/// the big-endian Point and partial_lagrange's table indexing):
 ///   `i = (bit_reverse(upper_k, half) << half) | bit_reverse(lower_k, half)`
 fn materialize_f_evals(
     z_col_lagrange: &[InnerChallenge],
@@ -302,7 +296,7 @@ fn univariate_from_three_evals(
 ///
 /// **Complexity**: O(2^n) memory + O(n × 2^n) time.  Only feasible
 /// for small `n` (test fixtures, log_m ≤ ~12).  Production needs
-/// SP1's structural prover (JaggedAssistSumAsPoly).
+/// the structural prover below.
 fn naive_jagged_eval_sumcheck(
     mut f: Vec<InnerChallenge>,
     mut bp: Vec<InnerChallenge>,
@@ -338,8 +332,7 @@ fn naive_jagged_eval_sumcheck(
         let _ = half_inv;
 
         let poly = univariate_from_three_evals(g0, g_half, g1);
-        // Observe coefficients into challenger (matches SP1's
-        // observe_constant_length_extension_slice in eval_sumcheck_prover.rs:237).
+        // Observe coefficients into the challenger.
         for &c in &poly.coefficients {
             challenger.observe_algebra_element(c);
         }
@@ -372,14 +365,12 @@ fn naive_jagged_eval_sumcheck(
 }
 
 /// Naive-sumcheck threshold: above this `n = 2*(log_m+1)`, fall back
-/// to the dummy proof (production needs SP1's structural prover).
+/// to the dummy proof (production needs the structural prover).
 /// Set to `n=24` (log_m=11) → 16M-cell hypercube — fits in ~64MB EF
 /// per side.  log_m=12 (n=26) would need 256MB and gets slow.
 const NAIVE_SUMCHECK_MAX_N: usize = 24;
 
-/// SP1-port structural sumcheck prover for the jagged-eval polynomial.
-///
-/// Mirrors `JaggedAssistSumAsPolyCPUImpl`.
+/// Structural sumcheck prover for the jagged-eval polynomial.
 ///
 /// **Structural trick**: instead of materializing P(x, y) over the
 /// full hypercube of 2^N points, per-round iterates over `num_cols`
@@ -439,7 +430,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     }
 
     /// Evaluate one chip's contribution to the round polynomial at
-    /// `lambda ∈ {0, 1/2}`.  Mirrors SP1's `JaggedAssistSumAsPolyCPUImpl::eval`.
+    /// `lambda ∈ {0, 1/2}`.
     fn eval_chip(
         &self,
         lambda: InnerChallenge,
@@ -517,7 +508,7 @@ impl<'a> StructuralJaggedEvalProver<'a> {
     }
 
     /// Update `intermediate_eq_full_evals` after sampling `alpha` for
-    /// the current round.  Mirrors SP1's `fix_last_variable`.
+    /// the current round.
     fn fold(&mut self, alpha: InnerChallenge) {
         let round_num = self.round_num;
         if self.par {
@@ -542,17 +533,16 @@ impl<'a> StructuralJaggedEvalProver<'a> {
                 self.intermediate_eq_full_evals[k] *= factor;
             }
         }
-        // SP1 parity: rhos accumulate via add_dimension = insert at FRONT
-        // (slop Point::add_dimension = values.insert(0, .)), newest-first.
+        // rhos accumulate at the FRONT (`insert(0, .)`), newest-first.
         // Appending (push, oldest-first) instead would diverge the per-round
-        // full_point + final point_and_eval.0 ordering from SP1's
-        // in-circuit half-split verifier.  Mirror SP1 exactly.
+        // full_point + final point_and_eval.0 ordering from the
+        // in-circuit half-split verifier.
         self.rhos.insert(0, alpha);
         self.round_num += 1;
     }
 }
 
-/// Run SP1's structural sumcheck for the jagged-eval polynomial.
+/// Run the structural sumcheck for the jagged-eval polynomial.
 ///
 /// Same output shape as [`naive_jagged_eval_sumcheck`] but
 /// O(N × num_cols) instead of O(N × 2^N) — feasible for production
@@ -607,7 +597,7 @@ fn structural_jagged_eval_sumcheck<C: p3_challenger::FieldChallenger<InnerVal>>(
         let (y_0, y_half) = prover.compute_round_evals();
         let y_1 = current_claim - y_0;
         // Construct degree-2 univariate poly via interpolation at
-        // xs = {0, 1/2, 1} — same convention as SP1.
+        // xs = {0, 1/2, 1}.
         let poly = univariate_from_three_evals(y_0, y_half, y_1);
 
         // Observe coefficients into challenger.
@@ -673,7 +663,7 @@ fn structural_jagged_eval_sumcheck_with_engine<C: p3_challenger::FieldChallenger
 
     let mut univariate_polys = Vec::with_capacity(n);
     let mut current_claim = claimed_sum;
-    // Accumulated challenges in SP1 prepend order (newest-first) — mirrors the
+    // Accumulated challenges in prepend order (newest-first) — mirrors the
     // host prover's `rhos` and the in-circuit half-split verifier ordering.
     let mut rhos_out: Vec<InnerChallenge> = Vec::with_capacity(n);
 
@@ -738,8 +728,8 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
 ) -> JaggedSumcheckEvalProof<InnerChallenge> {
     // For small workloads: claimed_sum + naive
     // sumcheck via materialization.
-    // Production large workloads still need SP1's structural prover
-    // (JaggedAssistSumAsPoly) — fall back to dummy with real
+    // Production large workloads still need the structural prover —
+    // fall back to dummy with real
     // claimed_sum when n exceeds NAIVE_SUMCHECK_MAX_N.
 
     if prefix_sums.len() < 2 {
@@ -784,7 +774,7 @@ pub fn prove_jagged_evaluation<C: p3_challenger::FieldChallenger<InnerVal>>(
     let num_chips = prefix_sums.len() - 1;
     let z_col_eq_vals: Vec<InnerChallenge> = z_col_lagrange[..num_chips].to_vec();
 
-    // Production path (any size) — SP1's structural prover.
+    // Production path (any size) — the structural prover.
     // O(N × num_cols) per the fold structure; feasible at all scales.
     //
     // ZIREN_GPU_JAGGED_EVAL_DEVICE seam: when `ziren-gpu` has installed a device
@@ -1012,7 +1002,7 @@ mod tests {
                 "round {round_idx}: g(0) + g(1) should equal claim {claim:?}",
             );
             // Next round's claim = poly evaluated at the round's challenge.
-            // SP1 parity: point_and_eval.0 is prepend-order (newest-first), so
+            // point_and_eval.0 is prepend-order (newest-first), so
             // round r's challenge is at index n-1-r.
             claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }
@@ -1022,7 +1012,7 @@ mod tests {
         assert_eq!(claim, psp.point_and_eval.1);
     }
 
-    /// STRUCTURAL: SP1-port structural sumcheck satisfies the
+    /// STRUCTURAL: the structural sumcheck satisfies the
     /// same round-identity properties as the naive prover.  Tests
     /// the same workload (small fixture) but via the O(N×num_cols)
     /// path that scales to production.
@@ -1054,7 +1044,7 @@ mod tests {
             let g0 = poly.eval_at_point(InnerChallenge::ZERO);
             let g1 = poly.eval_at_point(InnerChallenge::ONE);
             assert_eq!(g0 + g1, claim);
-            // SP1 parity: point_and_eval.0 is prepend-order; round r's
+            // point_and_eval.0 is prepend-order; round r's
             // challenge is at index n-1-r.
             claim = poly.eval_at_point(psp.point_and_eval.0[n - 1 - round_idx]);
         }

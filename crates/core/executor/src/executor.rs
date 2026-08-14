@@ -63,9 +63,7 @@ pub const UNUSED_PC: u32 = 1;
 const CORE_MAX_LOG_ROW_COUNT: usize =
     zkm_pcs::stacked_shapes::types::consts::CORE_MAX_LOG_ROW_COUNT;
 
-/// The per-chip height at which the executor forces a new core shard, mirroring SP1's
-/// `HEIGHT_THRESHOLD` (sp1 crates/core/executor/src/opts.rs:14 = `1 << 22`) and its
-/// `ShapeChecker::check_shard_limit` height branch (sp1 crates/core/executor/src/vm/shapes.rs:240).
+/// The per-chip height at which the executor forces a new core shard.
 ///
 /// Tied to the recursion's per-chip cube cap so the two stay consistent: splitting once the
 /// tallest chip reaches this height keeps every chip within `2^CORE_MAX_LOG_ROW_COUNT` rows —
@@ -451,8 +449,7 @@ impl<'a> Executor<'a> {
         let program = Arc::new(program);
 
         // Create a default record with the program. Pre-allocate hot event Vecs
-        // sized at `shard_size / 8` (matches SP1's pattern in
-        // crates/prover/src/worker/prover/core.rs ::new_preallocated), avoiding the
+        // sized at `shard_size / 8`, avoiding the
         // single-thread realloc storm on the trace-emit hot path.
         let event_reservation = (opts.shard_size / 8).max(1);
         let record = ExecutionRecord::new_preallocated(program.clone(), event_reservation);
@@ -476,7 +473,7 @@ impl<'a> Executor<'a> {
             crate::mips_costs().into_iter().map(|(k, v)| (k, v as u64)).collect();
         let split_acct = ShardSplitAccumulator::new(
             &costs,
-            // SP1 ELEMENT_THRESHOLD: raw main-trace cell budget — NOT scaled by 4 (it is
+            // ELEMENT_THRESHOLD is a raw main-trace cell budget — NOT scaled by 4 (it is
             // already a cell count, whereas `shard_size` is a cycle budget × 4 → clk).
             opts.element_threshold as u64,
             CORE_SHARD_HEIGHT_THRESHOLD,
@@ -1945,7 +1942,7 @@ impl<'a> Executor<'a> {
         // re-incremented — they were already computed during the
         // checkpoint-gen pass.
         //
-        // This is SP1's `ShapeChecker::handle_instruction`: the instruction charges a row to
+        // The instruction charges a row to
         // its own chip, plus rows to the chips it induces dependencies on, and the running
         // trace area / tallest-chip height move with it. It is the only place opcode-driven
         // rows are counted, so the accumulator cannot drift from the executor.
@@ -2800,7 +2797,7 @@ impl<'a> Executor<'a> {
         // Only pre-allocate for the Trace mode hot path; Simple/Checkpoint modes
         // never emit per-cycle events so the larger reservation would just waste
         // pages. `shard_size` is stored as `cycles * 4` in the constructor; divide
-        // back out for the event-count hint (then ÷ 8 per the SP1 heuristic).
+        // back out for the event-count hint (then ÷ 8 per the reservation heuristic).
         let event_reservation = if self.executor_mode == ExecutorMode::Trace {
             ((self.shard_size as usize) / 4 / 8).max(1)
         } else {
@@ -3444,8 +3441,7 @@ impl<'a> Executor<'a> {
         // itself — see `ShardSplitAccumulator`.
         let cpu_cycles = (self.state.clk / 5) as u64;
 
-        // SP1-parity shard-limit test (sp1 `ShapeChecker::check_shard_limit`,
-        // crates/core/executor/src/vm/shapes.rs:240): two comparisons against state that every
+        // Shard-limit test: two comparisons against state that every
         // instruction already maintained, evaluated on EVERY cycle.
         //
         //  * `area_split` closes the shard once the accumulated UN-PADDED main-trace cell count

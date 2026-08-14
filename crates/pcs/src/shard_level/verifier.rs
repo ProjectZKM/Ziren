@@ -199,7 +199,7 @@ impl BasefoldShardVerifier {
         for chip in chips.iter() {
             let name = chip.name();
 
-            // Per-chip RAW-height observe (SP1 parity: the raw
+            // Per-chip RAW-height observe (the raw
             // `num_real_entries`, 0 allowed).  Mirrors the prover's
             // `raw_chip_height` derivation via `proof.chip_heights[name]`.
             // Default 0 if absent (matches legacy proof bytes where the

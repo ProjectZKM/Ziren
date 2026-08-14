@@ -28,22 +28,10 @@
 //!      [`crate::recursive_stacked_pcs::RecursiveStackedPcsVerifier::verify_untrusted_evaluation`]
 //!      to close the soundness chain.
 //!
-//! # Reference
-//!
-//! Mirrors `RecursiveJaggedPcsVerifier::verify_trusted_evaluations` (crates/recursion/circuit/src/jagged/verifier.rs)
-//! from the upstream BaseFold verifier reference.
-//! Substitutions:
-//!   - `Point<Ext>` → `&[Ext<C::F, C::EF>]`.
-//!   - `MleEval<Ext>` → `Vec<Ext<C::F, C::EF>>` (flat).
-//!   - `Mle::from(col_claims)` → flat Vec passed to
-//!     [`crate::logup_gkr::evaluate_mle_ext`].
-//!   - `self.jagged_evaluator.jagged_evaluation(...)` → closure
-//!     parameter `jagged_evaluator_fn` (decouples from the
-//!     `RecursiveJaggedEvalSumcheckConfig`).
-//!   - SP1's `SC::hash` / `SC::compress` chip-info mix-in is not
-//!     recomputed here; the main commitment is bound in the shard-level
-//!     prologue, and `commitments` / `original_commitments` carry the
-//!     digest only for the per-round Merkle-binding checks.
+//! No chip-info hash mix-in is recomputed here: the main commitment
+//! is bound in the shard-level prologue, and `commitments` /
+//! `original_commitments` carry the digest only for the per-round
+//! Merkle-binding checks.
 //!
 //! The jagged-eval sub-protocol is abstracted behind the
 //! `jagged_evaluator_fn` closure parameter, decoupling the
@@ -187,7 +175,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             //   * the step-(7) prefix-sum / final-area chain ties the witnessed
             //     `row_counts` to the in-circuit-reconstructed
             //     `col_prefix_sums` (so heights cannot be picked freely); and
-            //   * the SP1 main-padding-column bit-bound below
+            //   * the main-padding-column bit-bound below
             //     (step 6.6) rejects an area-preserving over-claim that inflates
             //     one chip's height past the cube while shrinking another.
             // `..` swallows the remaining `params`/digest bookkeeping fields.
@@ -214,8 +202,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // `crates/pcs/src/jagged_pcs.rs`), which the host weighs into the
         // column claim with `y = 0`.  Those columns carry no chip, so they are
         // absent from `evaluation_claims` and have to be spliced back in at the
-        // round boundaries — exactly SP1's `column_claims.insert` loop
-        // (sp1 crates/recursion/circuit/src/jagged/verifier.rs:88).
+        // round boundaries.
         //
         // With a single round the pad lands past the last real claim, where the
         // power-of-two `resize` below already supplied a zero, so this is a
@@ -251,7 +238,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         builder.assert_ext_eq(sumcheck_claim, sumcheck_proof.claimed_sum);
 
         // (5) Verify the jagged sumcheck.
-        // The jagged REDUCTION binds the stride-1 (LSB) variable, as SP1 does, so
+        // The jagged REDUCTION binds the stride-1 (LSB) variable, so
         // its point is recorded in SAMPLE order.  LogUp-GKR and jagged-eval still
         // bind the MSB and keep `PointOrder::Reversed`.
         crate::sumcheck::verify_sumcheck_with_order::<C, FC>(
@@ -310,9 +297,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
 
         // (6.6) MAIN-PADDING-COLUMN HEIGHT BIT-BOUND.
         //
-        // Ported from SP1's jagged shard verifier
-        // (crates/recursion/circuit/src/shard.rs:363-378):
-        // the "main padding column" is the final jagged column whose height fills
+        // The "main padding column" is the final jagged column whose height fills
         // the last real prefix sum up to the committed total area.  Its height
         // equals the gap between the last two `col_prefix_sums` entries
         // (= `total_values − offset(last real column)`), which is exactly the
@@ -324,7 +309,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // the (self-derived) `col_prefix_sums`, it does NOT bound the per-chip
         // height against the opened cube the trace MLE is evaluated over.
         //
-        // SP1 idiom: `num2bits(height, L+1)` proves `height < 2^{L+1}`; then if
+        // The bound: `num2bits(height, L+1)` proves `height < 2^{L+1}`; then if
         // the top bit is 1 every lower bit must be 0, excluding the open
         // interval `(2^L, 2^{L+1})` ⇒ height ∈ `[0, 2^L]`.  Config-generic (Felt
         // arithmetic works for both the inner KoalaBear and outer BN254 rings);
@@ -333,8 +318,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
         // chip-set.
         //
         // `L = cube_log = z_row.len()` — the SAME bound the step-(6.5)
-        // `assert_row_count_le_cube` uses for every per-chip height (SP1 uses
-        // its `max_log_row_count`, which IS its opened cube).  Using the opened
+        // `assert_row_count_le_cube` uses for every per-chip height.  Using the opened
         // cube here (not the verifier's nominal `max_log_row_count`) keeps the
         // padding bound provably consistent with the per-chip bound that already
         // verifies honest proofs, so this is redundant-on-honest, additive only
@@ -403,8 +387,7 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
             .col_prefix_sums
             .last()
             .expect("jagged-pcs: col_prefix_sums must have at least one entry");
-        // Horner-recompose SYMBOLICALLY (SP1 jagged/verifier.rs:158-162:
-        // final_area = SymbolicFelt::zero(); `*bit + two*final_area` with NO
+        // Horner-recompose SYMBOLICALLY (`*bit + two*final_area` with NO
         // per-bit eval).  Materialization is deferred to the single
         // `assert_felt_eq` below — value-identical, fewer eval ops per area.
         let mut final_area: zkm_recursion_compiler::ir::SymbolicFelt<C::F> =
@@ -479,9 +462,6 @@ impl<P> RecursiveJaggedPcsVerifier<P> {
 /// Convenience wrapper that derives `insertion_points` from a
 /// per-round column-count table before delegating to the base
 /// [`RecursiveJaggedPcsVerifier::verify_trusted_evaluations`].
-///
-/// Mirrors `RecursiveMachineJaggedPcsVerifier`
-/// (crates/recursion/circuit/src/jagged/verifier.rs) from the SP1 reference.
 pub struct RecursiveMachineJaggedPcsVerifier<'a, P> {
     pub jagged_pcs_verifier: &'a RecursiveJaggedPcsVerifier<P>,
     pub column_counts_by_round: Vec<Vec<usize>>,
@@ -521,8 +501,8 @@ impl<'a, P> RecursiveMachineJaggedPcsVerifier<'a, P> {
             &mut FC,
         ) -> (Ext<C::F, C::EF>, Vec<Felt<C::F>>),
     {
-        // Derive insertion points via running sum of per-round
-        // column-count sums (matches the SP1 scan pattern).
+        // Derive insertion points via a running sum of per-round
+        // column-count sums.
         let insertion_points: Vec<usize> = self
             .column_counts_by_round
             .iter()
@@ -643,7 +623,7 @@ mod tests {
     // ── MAIN-PADDING-COLUMN BIT-BOUND tests ──
     //
     // Forgery-rejection at the recursion-circuit level.  The soundness role
-    // of the main (padding) column height bound is carried by the SP1-ported
+    // of the main (padding) column height bound is carried by the
     // bit-bound: decode the padding column height =
     // `recompose(col_prefix_sums.last()) −
     // recompose(col_prefix_sums[last-1])`, bit-decompose to `L+1` bits, and

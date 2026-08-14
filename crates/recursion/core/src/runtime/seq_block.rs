@@ -1,5 +1,4 @@
-//! Sequenced-block program representation, ported from SP1
-//! (crates/recursion/executor/src/program.rs).
+//! Sequenced-block program representation.
 //!
 //! `RawProgram<T>` is a sequence of `SeqBlock<T>`s. A `SeqBlock` is either
 //! a `BasicBlock` (linearly ordered instructions) or a `Parallel` block
@@ -20,8 +19,6 @@ use serde::{Deserialize, Serialize};
 use std::iter::Flatten;
 
 /// A linearly ordered sequence of instructions.
-///
-/// SP1 ref: crates/recursion/executor/src/program.rs::BasicBlock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BasicBlock<T> {
     pub instrs: Vec<T>,
@@ -34,8 +31,6 @@ impl<T> Default for BasicBlock<T> {
 }
 
 /// A segment that may be sequentially composed with other segments.
-///
-/// SP1 ref: crates/recursion/executor/src/program.rs::SeqBlock.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SeqBlock<T> {
     /// One basic block, executed sequentially.
@@ -53,8 +48,6 @@ impl<T> SeqBlock<T> {
 }
 
 /// A program: a sequence of `SeqBlock`s.
-///
-/// SP1 ref: crates/recursion/executor/src/program.rs::RawProgram.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RawProgram<T> {
     pub seq_blocks: Vec<SeqBlock<T>>,
@@ -157,7 +150,6 @@ impl<'a, T> IntoIterator for &'a mut RawProgram<T> {
 }
 
 // SeqBlock iterator boilerplate — recursive into Parallel sub-programs.
-// SP1 ref: `program.rs:307-395`.
 
 #[derive(Debug)]
 pub enum SeqBlockIter<'a, T> {

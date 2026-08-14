@@ -1,8 +1,5 @@
 //! Stacked multilinear PCS — heterogeneous-batch wrapper over BaseFold.
 //!
-//! Source-mapped from
-//! `slop/crates/stacked`.
-//!
 //! Lets us commit a `Message<Mle<F>>` whose elements have *different*
 //! widths and heights, by virtually concatenating their values into a
 //! single stream and slicing that stream into fixed-size
@@ -63,13 +60,9 @@ pub enum StackedVerifierError {
 /// vector from the STRIPED multilinears the commit already retained on
 /// [`StackedBasefoldProverData::interleaved_mles`].
 ///
-/// SP1 parity: `JaggedProver::prove_trusted_evaluations`
-/// (`slop/crates/jagged/src/prover.rs`) feeds its jagged sumcheck the same
-/// `pcs_prover_data.interleaved_mles()` the commit produced and then moves the
-/// same `pcs_prover_data` into the open — the dense representation is built
-/// ONCE per round.  This helper is the Ziren analogue: it lets the step-4
-/// reduction read the committed data instead of re-deriving it from the chip
-/// traces.
+/// The dense representation is built ONCE per round: this helper lets the
+/// step-4 reduction read the committed data instead of re-deriving it from
+/// the chip traces.
 ///
 /// Layout inverted (see `interleave_multilinears_with_fixed_rate`): stripe `s`
 /// is stored `[height = stack_height, width = batch]` row-major, and was built
@@ -147,7 +140,6 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
 /// Layout helper: walk a stream of MLEs and pack their values into
 /// fixed-size `[batch_size, 1 << log_stacking_height]` stripes.
 ///
-/// Source: SP1's `interleave_multilinears_with_fixed_rate`.
 /// Tail is zero-padded to the next multiple of the stacking row-count.
 ///
 /// NOT ON THE GPU PROVE PATH — MEASURED, do not re-derive this.  A full
@@ -183,10 +175,9 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     let mut overflow: Vec<F> = Vec::with_capacity(stripe_capacity);
 
     for mle in multilinears {
-        // SP1 transposes so its column-major Tensor walks
-        // hypercube-major; Ziren stores row-major with rows =
-        // hypercube points and cols = polys, so transposing is the
-        // same conversion: walk `(poly, hypercube)` in raster order.
+        // Ziren stores row-major with rows =
+        // hypercube points and cols = polys, so the transpose
+        // walks `(poly, hypercube)` in raster order.
         //
         // Performance optimization: parallelize the column-major
         // transpose. For a 2^27-cell jagged dense polynomial this
@@ -221,7 +212,7 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         };
         let data: &[F] = if width == 1 { mle_vals } else { &owned };
 
-        // Performance optimization: the SP1-port `data.split_off(needed)`
+        // Performance optimization: the previous `data.split_off(needed)`
         // pattern has O(N²) cost when N = 134M and needed = 16384 (each
         // split_off COPIES the entire remaining suffix, ~134M elements,
         // and we do that 8192 times — measured ~30s on hello_world).
@@ -321,9 +312,8 @@ where
     }
 
     /// Flat per-round evaluation list at the *stack* point: one EF
-    /// per polynomial across every interleaved Mle in the round.
-    /// Mirrors SP1's `Evaluations<GC::EF>` collected via
-    /// `mle.eval_at(stack_point)`.
+    /// per polynomial across every interleaved Mle in the round,
+    /// collected via `mle.eval_at(stack_point)`.
     pub fn round_batch_evaluations(
         &self,
         stack_point: &[EF],

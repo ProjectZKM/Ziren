@@ -78,8 +78,8 @@ where
         std::borrow::Borrow<[[KoalaBear; DIGEST_SIZE]]>,
 {
     fn hash_koalabear(&self) -> [KoalaBear; DIGEST_SIZE] {
-        // SP1's inputs, in SP1's order (hypercube/src/verifier/hashable_key.rs:107):
-        // the preprocessed commitment, pc_start, and the initial cumulative sum.
+        // The inputs, in order: the preprocessed commitment, pc_start, and the
+        // initial cumulative sum.
         //
         // Nothing about the chips is folded in, and nothing needs to be: the
         // preprocessed commitment is the HASH-BOUND digest

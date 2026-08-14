@@ -1,9 +1,7 @@
 //! Host-side public-values constraint folder (Option 2, local-only).
 //!
 //! The concrete-field host counterpart of the recursion circuit's
-//! [`crate::recursion_circuit::public_values_folder::RecursivePublicValuesConstraintFolder`]
-//! (and SP1's `GenericVerifierPublicValuesConstraintFolder`,
-//! `/tmp/sp1/crates/hypercube/src/folder.rs:401`).
+//! [`crate::recursion_circuit::public_values_folder::RecursivePublicValuesConstraintFolder`].
 //!
 //! It is a full [`ZKMAirBuilder`](crate::air::ZKMAirBuilder) (via
 //! [`BaseAirBuilder`](crate::air::BaseAirBuilder)) whose only

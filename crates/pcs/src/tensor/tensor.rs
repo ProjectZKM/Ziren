@@ -30,7 +30,7 @@ pub struct Tensor<T, A: Backend = CpuBackend> {
 impl<T, A: Backend> Tensor<T, A> {
     /// Allocate an `[rows, cols]` tensor in `allocator`'s memory space,
     /// leaving the storage **uninitialized** (`len == 0`, `capacity ==
-    /// rows * cols`) — the SP1 `Tensor::try_with_sizes_in` contract.
+    /// rows * cols`).
     ///
     /// The caller is responsible for filling the storage (e.g. a
     /// [`crate::tensor::mem::DeviceMemory::copy_nonoverlapping`] into

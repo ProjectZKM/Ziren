@@ -1,7 +1,5 @@
 //! Iterator extension for emitting parallel DSL IR blocks.
 //!
-//! Ported from SP1 (`/tmp/sp1/crates/recursion/compiler/src/ir/iter.rs`).
-//!
 //! The trait collects an iterator into N sub-blocks,
 //! each containing the DSL IR ops emitted by a single invocation of the
 //! map closure. The resulting blocks are wrapped in a `DslIr::Parallel`

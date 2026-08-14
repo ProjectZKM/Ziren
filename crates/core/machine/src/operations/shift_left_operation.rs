@@ -1,7 +1,7 @@
 //! An embeddable left-shift gadget — the `ShiftLeft` CHIP's shift logic,
 //! extracted so instruction chips can prove their own SLL sub-operations
 //! instead of pushing request rows onto the `ShiftLeft` chip over the
-//! Instruction bus (SP1 has no such bus and no dependency rows).
+//! Instruction bus.
 //!
 //! Semantics are EXACTLY the MIPS `SLL` the `ShiftLeft` chip proves: the
 //! shift amount is `c[0] % 32`; `b` is first bit-shifted by `c % 8` via a

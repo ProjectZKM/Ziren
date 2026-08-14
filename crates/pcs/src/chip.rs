@@ -152,9 +152,8 @@ where
     /// accumulates as `Σ_chip event_counts[chip] × cost(chip)` and compares
     /// against the size the jagged dense commitment is sized for.
     ///
-    /// It deliberately does NOT include the permutation or quotient widths
-    /// (SP1 parity: `sp1 crates/hypercube/src/chip.rs` `cost()` is likewise
-    /// `preprocessed + main`). Charging `4·perm + 4·quot` on top inflated the
+    /// It deliberately does NOT include the permutation or quotient widths.
+    /// Charging `4·perm + 4·quot` on top inflated the
     /// charge against a dense that only ever holds preprocessed + main: the
     /// measured inflation is ~1.75× for the tendermint and goat chip mixes, so
     /// shards were split ~1.75× earlier than the commitment shape required.

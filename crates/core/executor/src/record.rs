@@ -31,21 +31,17 @@ use crate::{
 
 /// Carrier for the shard's global cumulative-sum digest.
 ///
-/// SP1 parity.  In SP1 the digest is NEVER re-derived at commit time: the field
-/// `global_cumulative_sum: Arc<Mutex<SepticDigest<u32>>>`
-/// (`sp1` `crates/core/executor/src/record.rs:124`) is written by
-/// `GlobalChip::generate_trace` (`sp1` `crates/core/machine/src/global/mod.rs:208`)
+/// The digest is NEVER re-derived at commit time: `GlobalChip::generate_trace`
 /// — which has already scanned every interaction point to fill the
-/// `GlobalAccumulation` column — and `public_values()`
-/// (`sp1` `crates/core/executor/src/record.rs:875`) is a pure
-/// read of it.
+/// `GlobalAccumulation` column — writes it here, and `public_values()` is a
+/// pure read of it.
 ///
-/// Ziren computed the same scan in `GlobalChip`'s trace generation and then
-/// THREW THE RESULT AWAY, so `public_values()` re-folded every
-/// `GlobalLookupEvent` from scratch — a `lift_x` (a square root in the degree-7
-/// extension) plus a curve addition per event, once per shard, on the shard
-/// prover's serial critical path with the GPU idle.  This cell restores the SP1
-/// shape: the trace generator publishes, `public_values()` reads.
+/// Ziren previously computed that scan and then THREW THE RESULT AWAY, so
+/// `public_values()` re-folded every `GlobalLookupEvent` from scratch — a
+/// `lift_x` (a square root in the degree-7 extension) plus a curve addition per
+/// event, once per shard, on the shard prover's serial critical path with the
+/// GPU idle.  This cell restores the publish-once shape: the trace generator
+/// publishes, `public_values()` reads.
 ///
 /// Interior mutability is required because both trace generators take the
 /// record by shared reference (`generate_trace(&self, input: &Self::Record, ..)`).
@@ -174,8 +170,7 @@ impl ExecutionRecord {
     /// When the `pre-alloc` feature is enabled, the legacy fixed-size reservation
     /// (`1 << 22` for cpu/add_sub, `1 << 21` for memory_instr) is kept for backward
     /// compatibility. New code should prefer [`Self::new_preallocated`] which sizes
-    /// every hot event Vec from a single `reservation_size` hint (e.g. `shard_size / 8`),
-    /// mirroring SP1's pattern in `core/executor/src/record.rs::new_preallocated`.
+    /// every hot event Vec from a single `reservation_size` hint (e.g. `shard_size / 8`).
     #[must_use]
     #[cfg(feature = "pre-alloc")]
     pub fn new(program: Arc<Program>) -> Self {
@@ -204,8 +199,7 @@ impl ExecutionRecord {
     ///
     /// `reservation_size` should be a rough upper bound on the count of any *single*
     /// event kind a shard will produce. A good default is `shard_size / 8`: no single
-    /// event kind tends to hit more than ~1/8 of a shard's cycles (mirrors SP1's
-    /// `core/executor/src/record.rs::new_preallocated` and prover/worker/prover/core.rs).
+    /// event kind tends to hit more than ~1/8 of a shard's cycles.
     ///
     /// This avoids the Vec-growth realloc storm seen on the per-shard interpreter hot
     /// loop. When `reservation_size == 0` this degrades cleanly to `new`.
@@ -574,16 +568,16 @@ impl MachineRecord for ExecutionRecord {
         let mut pv = self.public_values;
         // Option 2 (local-only): the global public values are derived from
         // the cross-chip events, which exist only after
-        // `generate_dependencies` — so they are finalised lazily here (the
-        // analogue of SP1 `record.rs:836`), at the point the shard prover
+        // `generate_dependencies` — so they are finalised lazily here,
+        // at the point the shard prover
         // reads the public values to feed the commitment.  The public-values
         // AIR's GlobalAccumulation / MemoryGlobalInit / MemoryGlobalFinalize
         // buses consume these endpoints.
         pv.global_count = self.global_lookup_events.len() as u32;
         pv.global_init_count = self.global_memory_initialize_events.len() as u32;
         pv.global_finalize_count = self.global_memory_finalize_events.len() as u32;
-        // SP1 parity (`sp1` `record.rs:875`): read the digest the `GlobalChip`
-        // trace generator already produced instead of re-folding every event.
+        // Read the digest the `GlobalChip` trace generator already
+        // produced instead of re-folding every event.
         // The fallback keeps every caller that has no `GlobalChip` trace (unit
         // tests, `debug_constraints`, any future prover stage) correct.
         pv.global_cumulative_sum =

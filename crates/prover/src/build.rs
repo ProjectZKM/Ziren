@@ -269,8 +269,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
 
     if !zkm_imm_wrap_vk_mode() {
         // Constrain the witnessed vk to the template (commit + pc_start). This +
-        // the public vkey_hash bind the wrap vk (gnark layer skips the vk-merkle,
-        // mirroring SP1WrapVerifier).
+        // the public vkey_hash bind the wrap vk (gnark layer skips the vk-merkle).
         let vk = &vks_and_proofs.first().unwrap().0;
         let cap: &[_] = template_vk.commit.as_ref();
         let expected_commitment = [builder.eval(cap[0][0])];

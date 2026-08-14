@@ -31,8 +31,6 @@ impl<F> RecursionProgram<F> {
     /// order (the runtime collapses Parallel to sequential today; a
     /// follow-up will dispatch via `par_iter` once the memory layer
     /// is thread-safe).
-    ///
-    /// SP1 ref: crates/recursion/executor/src/program.rs::raw::RawProgram::iter.
     pub fn iter_instructions(&self) -> impl Iterator<Item = &Instruction<F>> {
         self.seq_blocks.iter()
     }

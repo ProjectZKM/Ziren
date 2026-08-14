@@ -211,7 +211,7 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Witnessable impls for SP1-style shard-level basefold recursion stages.
+// Witnessable impls for the shard-level basefold recursion stages.
 // Each one follows the pattern of the legacy equivalent
 // above, with `ShardProof<SC>::read` replaced by `BasefoldShardProof::read`
 // (which produces a 5-tuple variable, see shard_level_witness.rs:198-241).
@@ -451,7 +451,7 @@ mod basefold_witness {
     // outer-config builder (Bit = Var<N>). vk_merkle_data is read for
     // witness-shape symmetry; the gnark wrap verifier skips verifying it
     // (skip_vk_merkle=true) — binding is the build_outer_circuit commit/pc_start
-    // constraint + the public vkey_hash, mirroring SP1WrapVerifier (no merkle).
+    // constraint + the public vkey_hash (no merkle).
     type OuterCfg = zkm_recursion_compiler::config::OuterConfig;
     impl Witnessable<OuterCfg>
         for ZKMWrapBasefoldWitnessValues<zkm_recursion_core::stark::KoalaBearPoseidon2Outer>

@@ -2798,9 +2798,7 @@ pub mod tests {
                 vk_dummy_at_real, vk_real_1,
                 "[ARITY-REPR] the dummy built at the REAL shard's own shape does not reproduce \
                  the real normalize vk — the dummy shard proof is not shape-faithful, and no \
-                 enumeration can close that (SP1 guards the same property in \
-                 `recursion/circuit/src/dummy/jagged.rs`, which asserts the dummy's \
-                 `batch_evaluations.rounds` matches a real proof's)",
+                 enumeration can close that",
             );
 
             // Field-by-field LENGTH diff.  Only lengths reach the compiled

@@ -83,7 +83,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             // `InnerConfig::exp_reverse_bits` (circuit/lib.rs), so it too
             // emits zero events here. Both chips remain in the legacy-FRI
             // `wrap_machine` / `machine_*_with_all_chips`, which use the
-            // row-selector STARK prover. SP1's compress machine has neither.
+            // row-selector STARK prover.
             RecursionAir::Select(SelectChip),
             RecursionAir::PublicValues(PublicValuesChip),
         ]
@@ -100,7 +100,7 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
     pub fn shrink_machine<SC: StarkGenericConfig<Val = F>>(config: SC) -> StarkMachine<SC, Self> {
         // SHRINK reuses compress's selector-free chip set but proves against its
         // OWN natural trace area — it must NOT inherit compress's recursion-area
-        // pin (SP1-parity: only the compress stage pins).  Clearing the flag
+        // pin (only the compress stage pins).  Clearing the flag
         // makes the device override yield `recursion_area_pin = None`, matching
         // the former host free-fn shrink path (which passed `None`).
         Self::compress_machine(config).with_recursion_area_pin(false)

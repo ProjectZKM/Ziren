@@ -19,12 +19,9 @@
 //! (`chip_degrees`, `cumulative_sums`, `global_cumulative_sums`)
 //! the prior wiring threaded through the orchestrator.
 //!
-//! # Reference
-//!
-//! Mirrors SP1's `ChipOpenedValues` (crates/hypercube/src/verifier/proof.rs)
-//! shape for the BaseFold pipeline.  Uses Ziren's recursion-
-//! compiler `Felt`/`Ext` types (the in-circuit variant); the
-//! corresponding host-side variant lives on the prover side.
+//! Uses Ziren's recursion-compiler `Felt`/`Ext` types (the
+//! in-circuit variant); the corresponding host-side variant lives
+//! on the prover side.
 
 use serde::{Deserialize, Serialize};
 use zkm_pcs::septic_digest::SepticDigest;

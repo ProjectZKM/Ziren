@@ -4,14 +4,11 @@
 //! [`Padding<T>`] tag rather than being materialized as zero/constant
 //! rows.
 //!
-//! ## Source
-//!
-//! Ported from SP1's `slop/crates/multilinear/src/padded.rs`
-//! (`PaddedMle<T, A>` / `Padding<F, A>`).  Like SP1, this type is
+//! This type is
 //! **backend-generic** over a [`Backend`], carrying its real rows as an
 //! `Mle<T, A>`.  Ziren has only the CPU backend today, so `A` defaults to
 //! [`CpuBackend`] — which makes every existing `PaddedMle<T>` annotation
-//! keep compiling unchanged (SP1's default-type-param trick).
+//! keep compiling unchanged.
 //!
 //! The impl split mirrors [`crate::basefold::Mle`]'s:
 //!   * `impl<T: Field, A: Backend> PaddedMle<T, A>` — the structural /
@@ -23,18 +20,10 @@
 //!     into the backing cells via CPU-only `Mle<T, CpuBackend>` methods.
 //!     These stay byte-identical to the pre-split code.
 //!
-//! Both SP1 padding shapes are ported:
-//!
-//! | SP1 variant                 | Ziren equivalent               |
-//! |-----------------------------|--------------------------------|
-//! | `Padding::Constant((c, n))` | `Padding::Constant(c, n)`      |
-//! | `Padding::Generic(evals)`   | `Padding::Generic(Arc<Vec<T>>)`|
-//!
-//! Ziren's [`Padding`] needs no backend parameter: SP1's variants carry a
-//! backend handle / device-resident `MleEval<F, A>`, whereas Ziren's are
+//! Ziren's [`Padding`] needs no backend parameter: its variants are
 //! plain host metadata (`Arc<Vec<T>>`).
 //!
-//! This is the single `PaddedMle` in the crate: the SP1-shaped
+//! This is the single `PaddedMle` in the crate: the
 //! *analytic* multilinear (`eval_at` / `fix_last_variable` over an
 //! arbitrary point) used to build the shared trace-MLE once at
 //! trace-gen and thread it to the shard prover.  (The LogUp-GKR layers
@@ -56,8 +45,7 @@
 //! [`crate::zerocheck_prover::eq_mle_table`] (`point[0]` is the least
 //! significant row-index bit), so it matches `evaluate_trace_columns_at_point`
 //! exactly.  `fix_last_variable(alpha)` folds the *stride-1* variable
-//! (the LSB, `point[0]`), pairing adjacent inner rows `(2i, 2i+1)` —
-//! identical to SP1's `mle_fix_last_variable`.  Thus
+//! (the LSB, `point[0]`), pairing adjacent inner rows `(2i, 2i+1)`.  Thus
 //! `mle.fix_last_variable(point[0]).eval_at(&point[1..])
 //!    == mle.eval_at(&point)`.
 
@@ -78,7 +66,7 @@ use crate::tensor::{Backend, CpuBackend};
 /// * `Constant(c, num_polys)` — every padded row is the constant `c` in
 ///   all `num_polys` columns (the LogUp-GKR / zero-pad shape).
 /// * `Generic(vals)` — each of the `vals.len()` columns has its own
-///   constant padding value `vals[col]` (SP1's `Padding::Generic`).
+///   constant padding value `vals[col]`.
 #[derive(Clone, Debug)]
 pub enum Padding<T> {
     Constant(T, usize),
@@ -127,8 +115,7 @@ impl<T: Field> Padding<T> {
 /// `padding.num_polynomials()`.
 ///
 /// `A` defaults to [`CpuBackend`], so a plain `PaddedMle<T>` means
-/// `PaddedMle<T, CpuBackend>` exactly as before.  Mirrors SP1
-/// `PaddedMle<T, A: Backend = CpuBackend>`.
+/// `PaddedMle<T, CpuBackend>` exactly as before.
 #[derive(Clone, Debug)]
 pub struct PaddedMle<T, A: Backend = CpuBackend> {
     inner: Option<Arc<Mle<T, A>>>,
@@ -149,8 +136,7 @@ pub struct PaddedMle<T, A: Backend = CpuBackend> {
 /// shape accessors, never the backing cells.
 impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
     /// Wrap `inner` (its real rows) with a logical `num_variables`
-    /// shape and a `padding` descriptor.  Mirrors SP1
-    /// `PaddedMle::padded`.
+    /// shape and a `padding` descriptor.
     pub fn padded(inner: Arc<Mle<T, A>>, num_variables: u32, padding: Padding<T>) -> Self {
         assert!(
             inner.hypercube_size() <= 1usize << num_variables,
@@ -167,7 +153,7 @@ impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
     }
 
     /// A fully-virtual ("dummy") padded MLE — no real rows, every row is
-    /// the padding value.  Mirrors SP1 `PaddedMle::dummy`.
+    /// the padding value.
     pub fn dummy(num_variables: u32, padding: Padding<T>) -> Self {
         Self { inner: None, padding, num_variables, baked_height: None }
     }
@@ -184,7 +170,7 @@ impl<T: Field, A: crate::multilinear::base::MleBaseBackend<T>> PaddedMle<T, A> {
 
     /// Wrap `inner` with `num_variables` variables, zero-padding the
     /// rows beyond `inner`'s real height.  This is the trace-MLE
-    /// constructor.  Mirrors SP1 `PaddedMle::padded_with_zeros`.
+    /// constructor.
     pub fn padded_with_zeros(inner: Arc<Mle<T, A>>, num_variables: u32) -> Self {
         let num_polys = inner.num_polynomials();
         Self::padded(inner, num_variables, Padding::Constant(T::ZERO, num_polys))
@@ -259,8 +245,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
     /// the real rows fold by adjacent pairs `(2i, 2i+1)` (Lagrange fold
     /// `(1-alpha)·lo + alpha·hi`, with a missing odd tail supplied by
     /// the padding value), and the padding value is invariant under the
-    /// fold (`(1-alpha)·c + alpha·c == c`).  Mirrors SP1
-    /// `PaddedMle::fix_last_variable` + `mle_fix_last_variable`.
+    /// fold (`(1-alpha)·c + alpha·c == c`).
     pub fn fix_last_variable<EF>(&self, alpha: EF) -> PaddedMle<EF, CpuBackend>
     where
         EF: ExtensionField<T>,
@@ -397,7 +382,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
         // where the geq-sum is computed analytically in O(num_variables) via
         // `full_geq`.  Skipped when all-zero (the trace-MLE case).
         if !self.padding.is_all_zero() && num_real < (1usize << self.num_variables) {
-            // `full_geq` (SP1 / `full_geq_host` convention) consumes MSB-first
+            // `full_geq` (the `full_geq_host` convention) consumes MSB-first
             // threshold + point; our `point` is LSB-first, so reverse it and
             // build the threshold MSB-first from `num_real`.  The result then
             // equals `Σ_{row ≥ num_real} eq_mle_table(point)[row]` exactly.
@@ -414,7 +399,7 @@ impl<T: Field> PaddedMle<T, CpuBackend> {
 }
 
 /// MSB-first bit decomposition of `num` into `dimension` bits (index 0
-/// is the most significant).  Mirrors SP1 `Point::from_usize`.
+/// is the most significant).
 fn from_usize_msb<EF: Field>(num: usize, dimension: usize) -> Vec<EF> {
     (0..dimension).rev().map(|i| if (num >> i) & 1 == 1 { EF::ONE } else { EF::ZERO }).collect()
 }

@@ -16,12 +16,8 @@
 //! Used by the recursion-circuit verifiers as the carrier for both
 //! the zerocheck IOP and the LogUp-GKR sumcheck reductions.
 //!
-//! # Reference
-//!
-//! Mirrors the upstream `PartialSumcheckProof`
-//! (slop/crates/sumcheck/src/proof.rs)
-//! shape so jagged-PCS proofs serialize identically across
-//! interoperating implementations.
+//! The proof shape is kept stable so jagged-PCS proofs serialize
+//! identically across interoperating implementations.
 
 use p3_field::Field;
 use serde::{Deserialize, Serialize};

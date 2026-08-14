@@ -1,4 +1,4 @@
-//! TracingVM scaffold for the SP1-style two-stage tracing split.
+//! TracingVM scaffold for the two-stage tracing split.
 //!
 //! This module defines the consumer side of the [`crate::minimal_trace`]
 //! checkpoint format: a per-shard re-executor that, given a `TraceChunk`,
@@ -16,16 +16,15 @@
 //! - [`TracingVM::execute_from_chunk`] currently delegates to a plain
 //!   `Executor` recovered from the chunk's start state (registers + pc)
 //!   via `Executor::recover`, then runs to the chunk's `clk_end` via
-//!   the existing interpreter trace path. The full SP1-style port
-//!   (`crates/core/executor/src/tracing.rs:29`, ~3000 LOC of
-//!   bespoke per-opcode `execute_instruction` lifters) is deferred.
+//!   the existing interpreter trace path. The full rewrite (~3000 LOC
+//!   of bespoke per-opcode `execute_instruction` lifters) is deferred.
 //!   The delegation is correct — Ziren's `Executor` already emits every
 //!   event the prover needs — but yields no speedup on its own; the win
 //!   comes from the *parallel driver* below.
 //! - [`drive_tracing_vm_parallel`] takes a `MinimalTrace` and a program
 //!   and runs every `TraceChunk` through a `TracingVM` on its own rayon
 //!   thread, returning the per-shard records in input order. This is
-//!   the SP1 win — N shards on M cores ≈ M× speedup of the trace-emit
+//!   the win — N shards on M cores ≈ M× speedup of the trace-emit
 //!   stage. The driver is safe to call today; the per-chunk speedup
 //!   only kicks in once `execute_from_chunk` stops needing to rerun
 //!   from scratch (i.e. once the JIT-side `mem_reads` oracle in
@@ -39,12 +38,6 @@
 //! invests in the bespoke per-opcode lifter. It also forces us to nail
 //! down the per-shard `ExecutionState` capture today rather than rework
 //! the API once the lifter lands.
-//!
-//! # Reference
-//!
-//! SP1's analogous file: `crates/core/executor/src/tracing.rs`
-//! (the `TracingVM<'a>` struct on line 29 + `execute_instruction` on
-//! line 68).
 
 use crate::{
     minimal_trace::{MinimalTrace, TraceChunk},
@@ -56,8 +49,7 @@ use zkm_pcs::ZKMCoreOpts;
 /// A per-shard re-executor that consumes a [`TraceChunk`] and produces
 /// the events needed for proving.
 ///
-/// Mirrors SP1's `TracingVM<'a>` (`crates/core/executor/src/tracing.rs:29`).
-/// In  the implementation delegates to a plain `Executor`; a
+/// The implementation currently delegates to a plain `Executor`; a
 /// future port will replace the body with a bespoke per-opcode lifter
 /// to halve the per-shard wall.
 pub struct TracingVM<'a> {
@@ -187,8 +179,7 @@ impl<'a> TracingVM<'a> {
         // cycle-limit feature; setting it = chunk.clk_end makes
         // execute_cycle return `ExceededCycleLimit` the moment we cross
         // the shard boundary. We catch that and treat it as "worker
-        // done with its chunk" — semantically identical to SP1's
-        // `CycleResult::TraceEnd` (see .../tracing.rs:51).
+        // done with its chunk".
         sub.executor_mode = crate::ExecutorMode::Trace;
         sub.max_cycles = Some(chunk.clk_end);
         // skip replay-irrelevant
@@ -318,7 +309,7 @@ impl<'a> TracingVM<'a> {
 /// Drive an entire [`MinimalTrace`] through parallel TracingVM workers
 /// and return one [`ExecutionRecord`] per shard in input order.
 ///
-/// This is the SP1 win path: for an N-shard program on an M-core host,
+/// For an N-shard program on an M-core host,
 /// runtime drops from `sum(per_shard_emit)` to `max(per_shard_emit) +
 /// dispatch_overhead`, i.e. ~M× speedup of the trace-emit stage.
 ///
@@ -335,8 +326,7 @@ impl<'a> TracingVM<'a> {
 /// # Reservation sizing
 ///
 /// Each record is pre-allocated via `ExecutionRecord::new_preallocated`
-/// sized at `chunk.num_cycles() / 8`, matching SP1's
-/// `prover/src/worker/prover/core.rs:276` heuristic.
+/// sized at `chunk.num_cycles() / 8`.
 pub fn drive_tracing_vm_parallel(
     program: Arc<Program>,
     opts: ZKMCoreOpts,

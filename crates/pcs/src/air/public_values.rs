@@ -56,13 +56,12 @@ pub struct PublicValues<W, T> {
     /// The bits of the largest address that is witnessed for finalization in the current shard.
     pub last_finalize_addr_bits: [T; 32],
 
-    // ── Option 2 (local-only / SP1-hypercube) boundary-anchor fields ──
+    // ── Option 2 (local-only) boundary-anchor fields ──
     // These are emitted by the public-values AIR (`eval_public_values`)
     // as the closing endpoints of the new control-bus interactions
     // (State / GlobalAccumulation / MemoryGlobalInit/Finalize) that
     // replace the legacy `when_transition` chaining + the per-chip
-    // last-row cumulative-sum closure.  Mirrors SP1
-    // `hypercube/src/air/public_values.rs`.
+    // last-row cumulative-sum closure.
     /// Initial CPU timestamp (clk) for this shard — the `State`-bus
     /// initial endpoint (`send_state`).
     pub initial_timestamp: T,
@@ -73,7 +72,7 @@ pub struct PublicValues<W, T> {
     /// of the `State`-bus initial endpoint `(shard, clk, start_pc,
     /// start_next_pc)`.  MIPS carries a delay-slot `next_pc` lookahead,
     /// so the shard-boundary CPU state is the 2-pc pair `(pc, next_pc)`,
-    /// not just `pc` (unlike SP1's RISC-V).  For the first shard with no
+    /// not just `pc`.  For the first shard with no
     /// branch in the delay slot this equals `start_pc + 4`.
     pub start_next_pc: T,
     /// The `next_pc` that the *next* shard starts with (i.e. this shard's

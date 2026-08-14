@@ -860,9 +860,9 @@ fn stage1_forge_present_active_claims_missing_rejected() {
 // Ziren commits preprocessed traces INTO EACH SHARD alongside the main
 // traces, and the setup-time `vk.commit` is only OBSERVED into the
 // Fiat-Shamir transcript (`machine.rs`'s `vk.observe_into`) -- it is never
-// compared, and `preprocessed_commit()` has no callers.  SP1 instead
-// commits preprocessed ONCE at setup, keeps `preprocessed_data` in the
-// proving key, and its shard verifier checks openings against
+// compared, and `preprocessed_commit()` has no callers.  The alternative
+// design commits preprocessed ONCE at setup, keeps `preprocessed_data` in
+// the proving key, and has the shard verifier check openings against
 // `vec![vk.preprocessed_commit, *main_commitment]` -- two rounds, so the
 // preprocessed columns are bound to the VK by the opening argument.
 //

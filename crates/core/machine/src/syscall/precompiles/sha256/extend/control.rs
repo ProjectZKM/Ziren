@@ -10,10 +10,9 @@
 //! so the LogUp multiset only balances when the per-syscall chain telescopes
 //! `16 → 64` across exactly 48 worker rows, pinning each row's `i`.
 //!
-//! Mirrors SP1's `ShaExtendControlChip` (`controller.rs`), but on Ziren's
-//! generic `PrecompileChain` kind (isolated by the leading `syscall_id`) and
-//! Ziren's scalar `clk`/`w_ptr`.  Extend carries no `a..h` digest state, so the
-//! bus tuple is just `(pid, shard, clk, w_ptr, i)`.
+//! Built on Ziren's generic `PrecompileChain` kind (isolated by the leading
+//! `syscall_id`) and scalar `clk`/`w_ptr`.  Extend carries no `a..h` digest
+//! state, so the bus tuple is just `(pid, shard, clk, w_ptr, i)`.
 
 use core::borrow::{Borrow, BorrowMut};
 use std::mem::size_of;

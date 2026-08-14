@@ -11,13 +11,6 @@
 //! value via [`Builder::eval`].  This trait is the bridge from
 //! "I have a typed proof field" to "I can put it in an expression
 //! tree."
-//!
-//! # Reference
-//!
-//! Mirrors SP1's crates/recursion/circuit/src/symbolic.rs
-//! from the upstream BaseFold verifier reference.  The Ziren port
-//! drops the slop_tensor / slop_multilinear (Mle, MleEval) impls
-//! since Ziren uses flat `Vec` for these positions.
 
 use zkm_recursion_compiler::ir::{Ext, Felt, SymbolicExt, SymbolicFelt};
 

@@ -4,8 +4,6 @@
 //! build (so dependent code can detect *capability*) and
 //! `cfg(zkm_use_native_executor)` only when JIT use is actually
 //! desired (no `profiling` feature).
-//!
-//! Mirrors SP1's `crates/core/executor/build.rs`.
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");

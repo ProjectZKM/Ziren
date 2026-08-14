@@ -1,8 +1,5 @@
 //! Stacked shape types for Ziren recursion.
 //!
-//! Ports the `CoreProofShape` / `MachineShape` / `SP1RecursionProgramShape`
-//! design into Ziren.
-//!
 //! Tactic chosen (per scoping report at docs/task_22_plan.md): **size-class
 //! quantization**.  Instead of enumerating every per-chip log-height
 //! combination (~1.25M shapes), we enumerate representative shapes
@@ -22,15 +19,6 @@
 //! row-reduction shapes here serve as the VK-indexing key and the upper-
 //! bound contract the recursion circuit verifies against.  No
 //! executor/trace-gen/AIR changes.
-//!
-//! ## Mapping to SP1
-//!
-//! | Ziren (this module)          | the source                                          |
-//! |------------------------------|-----------------------------------------------------|
-//! | [`CoreProofShape`]           | `crates/hypercube/src/prover/shard.rs:798` |
-//! | [`MachineShape`]             | `crates/hypercube/src/machine.rs:10`       |
-//! | [`ZKMRecursionProgramShape`] | `crates/prover/src/shapes.rs:84`           |
-//! | [`ZKMNormalizeInputShape`]   | `crates/prover/src/shapes.rs:76`           |
 
 pub mod enumerate;
 pub mod types;

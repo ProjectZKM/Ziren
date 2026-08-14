@@ -59,8 +59,7 @@ impl<C: CircuitConfig<F = SC::Val>, SC: KoalaBearFriParametersVariable<C>>
     /// Hash the verifying key into a single digest.
     /// poseidon2( commit[0..8] || pc_start || initial_global_cumulative_sum )
     ///
-    /// SP1's inputs, in SP1's order
-    /// (hypercube/src/verifier/hashable_key.rs:107).  Nothing about the chips
+    /// Nothing about the chips
     /// is folded in: the preprocessed commitment is the HASH-BOUND digest
     /// `compress([root, hash(row_counts ++ column_counts)])`, so it already
     /// discriminates the committed geometry, and the chip set and its widths

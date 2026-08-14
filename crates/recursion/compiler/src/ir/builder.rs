@@ -200,7 +200,6 @@ impl<C: Config> Builder<C> {
     ///
     /// Used by `IrIter::ir_par_map_collect` to swap a fresh op buffer
     /// in/out across parallel-block boundaries via `std::mem::take`.
-    /// Mirrors SP1's crates/recursion/compiler/src/ir/builder.rs.
     pub fn get_mut_operations(&mut self) -> &mut TracedVec<DslIr<C>> {
         &mut self.inner.get_mut().operations
     }
