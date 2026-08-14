@@ -60,26 +60,78 @@ pub struct RecursionShapeConfig<F, A> {
 impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
     RecursionShapeConfig<F, RecursionAir<F, DEGREE>>
 {
+    /// Per-chip COMMITTED width: the main trace width plus the preprocessed
+    /// one, because a recursion proof commits both rounds and a band pads
+    /// both to the same per-chip height.  The spread is wide —
+    /// `Poseidon2WideDeg3` is 362 cells/row against `MemoryConst`'s 13 — so a
+    /// band's cost is nothing like its row count, and picking a band by rows
+    /// (or by list position) systematically over-pays on the wide chips.
+    fn committed_widths() -> BTreeMap<String, usize> {
+        [
+            RecursionAir::<F, DEGREE>::MemoryConst(MemoryConstChip::default()),
+            RecursionAir::<F, DEGREE>::MemoryVar(MemoryVarChip::default()),
+            RecursionAir::<F, DEGREE>::BaseAlu(BaseAluChip),
+            RecursionAir::<F, DEGREE>::ExtAlu(ExtAluChip),
+            RecursionAir::<F, DEGREE>::Poseidon2Wide(Poseidon2WideChip::<DEGREE>),
+            RecursionAir::<F, DEGREE>::Select(SelectChip),
+            RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip),
+        ]
+        .into_iter()
+        .map(|air| {
+            let width =
+                p3_air::BaseAir::<F>::width(&air) + MachineAir::<F>::preprocessed_width(&air);
+            (air.name(), width)
+        })
+        .collect()
+    }
+
+    /// The cells a program pays if it is snapped onto `shape`: Σ over chips of
+    /// committed width × padded height.  This is what every device buffer
+    /// downstream is sized from (the jagged commit's dense length, and through
+    /// it the sumcheck tables), so it is the right thing to minimize.
+    fn band_cells(shape: &HashMap<String, usize>, widths: &BTreeMap<String, usize>) -> u128 {
+        shape
+            .iter()
+            .map(|(name, log_height)| {
+                (widths.get(name).copied().unwrap_or(1) as u128) << *log_height
+            })
+            .sum()
+    }
+
     pub fn fix_shape(&self, program: &mut RecursionProgram<F>) {
         let heights = RecursionAir::<F, DEGREE>::heights(program);
+        let widths = Self::committed_widths();
 
-        let mut closest_shape = None;
+        // Snap onto the CHEAPEST band that fits, not the first one listed.
+        //
+        // Bands are per-chip caps and a program's organic heights are wildly
+        // uneven, so the bands do not form a chain: the list holds several
+        // incomparable profiles (ALU-heavy compose levels, Select-heavy
+        // bundle-lift levels) and there is no ordering under which "first that
+        // fits" is also "smallest that fits".  Taking the first match made the
+        // list position load-bearing — every band carried a comment pleading
+        // for it to be placed before or after some other one — and still lost:
+        // a reth compose level whose ExtAlu was 0.5% over 2^21 fell through to
+        // the row-cube band and padded its committed area 2.2×, which is the
+        // whole of that stage's device working set.  Scoring every fitting
+        // band and keeping the cheapest makes list order cosmetic, so a new
+        // tightly-fitting band can only ever help.
+        let mut closest_shape: Option<&HashMap<String, usize>> = None;
+        let mut closest_cells = u128::MAX;
 
         for shape in self.allowed_shapes.iter() {
             // If any of the heights is greater than the shape, continue.
-            let mut valid = true;
-            for (name, height) in heights.iter() {
-                if *height > (1 << shape.get(name).unwrap()) {
-                    valid = false;
-                }
-            }
-
-            if !valid {
+            let fits =
+                heights.iter().all(|(name, height)| *height <= (1 << shape.get(name).unwrap()));
+            if !fits {
                 continue;
             }
 
-            closest_shape = Some(shape.clone());
-            break;
+            let cells = Self::band_cells(shape, &widths);
+            if cells < closest_cells {
+                closest_cells = cells;
+                closest_shape = Some(shape);
+            }
         }
 
         if let Some(shape) = closest_shape {
@@ -90,9 +142,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize>
                 let mut band: Vec<(String, usize)> =
                     shape.iter().map(|(n, h)| (n.clone(), 1usize << h)).collect();
                 band.sort();
-                eprintln!("FIXSHAPE organic={organic:?} -> band={band:?}");
+                eprintln!("FIXSHAPE organic={organic:?} -> band={band:?} cells={closest_cells}");
             }
-            let shape = RecursionShape { inner: shape.into_iter().collect() };
+            let shape = RecursionShape { inner: shape.clone().into_iter().collect() };
             *program.shape_mut() = Some(shape);
         } else {
             panic!("no shape found for heights: {heights:?}");
@@ -150,6 +202,21 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
         let public_values = RecursionAir::<F, DEGREE>::PublicValues(PublicValuesChip).name();
 
         // Specify allowed shapes.
+        //
+        // ORDER IS COSMETIC.  `fix_shape` scores every band a program fits and
+        // keeps the cheapest by committed cells, so a band never has to be
+        // positioned to win or lose a match; the list is kept roughly
+        // ascending only to read well.
+        //
+        // BANDS ARE CHEAP.  A band costs the compress vk enumeration exactly
+        // SIX shapes — `ZKMProofShape::generate` builds compose children by
+        // replicating ONE band across the batch (`vec![band; arity]`), so it
+        // emits arity 1..=`REDUCE_BATCH_SIZE` plus one Deferred and one Shrink
+        // per band, and nothing cartesian.  Measured
+        // (`zkm_prover::tests::enumeration_size_probe`): 2651 shapes against
+        // the `VK_MERKLE_TREE_HEIGHT` capacity of 2^12 = 4096, of which 6×7 =
+        // 42 are the band-derived tail and the other 2609 are the
+        // band-independent normalize shapes.  Room for ~240 bands, not 5.
         let allowed_shapes = [
             // No tiny bands below 2^17 (pre-basefold, ~10s-of-K-instruction
             // programs): every basefold recursion program
@@ -224,52 +291,21 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 19),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // Soundness compose band (TM + goat).  The 100-bit
-            // BaseFold params (inner blowup 1->2, 94->124 queries, +1
-            // Merkle level) grew the compose-tree verify circuit past the
-            // component-opening band: every compose level (height 1..n)
-            // converges to the SAME maxima for both tendermint and goat
-            // (47-shard TM and 10-shard goat produce identical compose
-            // vectors once inputs are fixed-shape).  Observed (max over
-            // all levels, FROM_DUMP probe):
-            //   Select=1091552 (log21 -- THE binding overflow, was capped
-            //   at 20), MemoryVar=689763 (log20), ExtAlu=345152 (log19),
-            //   BaseAlu=344339 (log19), MemoryConst=252755 (log18),
-            //   Poseidon2WideDeg3=158830 (log18).  Only Select overflowed
-            //   the component-opening band; this clone bumps Select 20->21
-            //   (next power of two above 1.09M = 2.10M, ~1.9x headroom)
-            //   and keeps every other chip at the component-opening caps
-            //   (which already cover the observed heights with headroom).
-            // Placed LAST so smaller programs (fib/first-layer/reth/geth
-            // shallow compose) still prefer the smaller bands above and
-            // pay less padding; only Select>2^20 compose programs reach it.
-            // Height-agnostic FIX-off band, a strict superset of the
-            // component-opening band (ExtAlu 24>=21,
-            // Select 21=21, MemoryVar/MemoryConst 22>=20, BaseAlu 23>=20,
-            // Poseidon2WideDeg3 20>=19) so we keep FIVE bands total — adding a
-            // 6th blew the Compress cartesian product (bands^REDUCE_BATCH = 6^4
-            // = 1296) past the VK_MERKLE_TREE_HEIGHT 2^11 pre-flight at
-            // shapes.rs:197 (2762 > 2048); 5 bands -> 5^4 -> 1986 < 2048 fits.
-            // Per-chip maxima of the NATURAL recursion heights measured across
-            // all 1202 FIX-off shapes (`find_recursion_shapes --measure`):
-            // ExtAlu 24, BaseAlu 23, MemoryConst/MemoryVar 22, Select 21,
-            // Poseidon2WideDeg3 20 (BatchFRI/ExpReverseBitsLen measured 0/unused,
-            // kept at 21/18). Capped at ExtAlu 2^24 = KoalaBear
-            // two-adicity. This band is what lets `fix_shape` accept FIX-off
-            // (`FIX_CORE_SHAPES=false`) proofs, whose recursion heights reach
-            // ExtAlu ~2^24 (a max band of ExtAlu 2^21 would reject them at
-            // shape.rs:91 "no shape found").
-            // Soundness compose band.  The comment above describes a band that
-            // bumps Select 20->21 and keeps every other chip at the
-            // component-opening caps — it was never actually added, so the next
-            // thing a deep compose level could snap onto was the row-cube band
-            // below, which over-pads by 8-16x and runs the card out of memory.
+            // SELECT-HEAVY deep compose band (tendermint + goat).  The 100-bit
+            // BaseFold params (inner blowup 1->2, 94->124 queries, +1 Merkle
+            // level) grew the compose-tree verify circuit past the
+            // component-opening band, and every compose level converges to the
+            // same maxima for both programs (47-shard TM and 10-shard goat
+            // produce identical compose vectors once inputs are fixed-shape).
             // Measured maxima over tendermint's whole compose tree
             // (`ZIREN_FIXSHAPE_DIAG=1`): Select 1,182,816 (2^21),
             // MemoryVar 778,723 (2^20), BaseAlu 521,377 (2^20),
             // ExtAlu 448,221 (2^19), MemoryConst 275,464 (2^19),
             // Poseidon2WideDeg3 172,988 (2^18).  Caps sit exactly one power of
             // two above each, so the deepest level pads ~1.9x instead of ~8x.
+            // Select is the dimension that separates this profile from the
+            // ALU-heavy reth ladder below: here it is the TALLEST chip, there
+            // it sits at 2^19 while the ALUs run to 2^22.
             [
                 (mem_var.clone(), 20),
                 (select.clone(), 21),
@@ -279,10 +315,10 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
-            // One step up, for compose trees deeper than tendermint's (reth).
-            // A strict superset of the band above and a strict subset of the
-            // row-cube band below, so a program that overflows the tuned band
-            // pays 2x rather than jumping straight to the cube.
+            // Uniform 2^21, for Select-heavy compose trees deeper than
+            // tendermint's.  A strict superset of the band above and a strict
+            // subset of the row cube, so a program that overflows the tuned
+            // band pays 2x rather than jumping straight to the cube.
             [
                 (mem_var.clone(), 21),
                 (select.clone(), 21),
@@ -290,6 +326,89 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> Default
                 (base_alu.clone(), 21),
                 (ext_alu.clone(), 21),
                 (poseidon2_wide.clone(), 19),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            // ── ALU-HEAVY COMPOSE LADDER (reth) ────────────────────────────
+            //
+            // reth's compose tree has a profile none of the bands above fit
+            // without gross over-pad: BaseAlu/ExtAlu climb from 2^19 to 2^22
+            // while Select stays pinned at 295,616 rows (2^19) and
+            // Poseidon2WideDeg3 never passes 94,556 (2^17).  The bands above
+            // are all Select-heavy — the cheapest of them that fits a level
+            // whose ExtAlu is 2^21 is the uniform 2^21 band, which pads Select
+            // 7.1x and MemoryConst 5.9x, and one level whose ExtAlu overshot
+            // 2^21 by 0.5% had nothing left but the row cube and padded 2.2x
+            // overall.  Committed area is what every device buffer is sized
+            // from, so that over-pad WAS the compress-stage VRAM ceiling: the
+            // jagged sumcheck's two fold tables are `2^log_dense` EF4 each, and
+            // at the cube band a single one asked for 8576 MiB.
+            //
+            // Measured organic heights, one rung per level family
+            // (`ZIREN_FIXSHAPE_DIAG=1` over a 275-shard reth core proof):
+            //   BaseAlu   414,870 / 499,692 /   986,148 / 1,691,933
+            //   ExtAlu    384,077 / 598,386 /   963,739 / 2,106,820
+            //   MemoryVar 275,575 / 294,148 /   420,213 /   674,004
+            //   MemConst  107,246 / 120,672 /   205,098 /   354,448
+            //   Poseidon2  50,464 /  54,182 /    67,531 /    94,556
+            //   Select    295,616 (every level)
+            // The rungs cap MemoryConst/MemoryVar/Select generously — they are
+            // 13, 12 and 13 cells per row, so a spare bit costs almost nothing
+            // — and Poseidon2WideDeg3/ExtAlu tightly, at 362 and 88 cells per
+            // row.  Each rung is scored against every other band by
+            // `fix_shape`, so a level takes one of these only when it is
+            // genuinely cheaper than the Select-heavy profiles.
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 19),
+                (ext_alu.clone(), 19),
+                (poseidon2_wide.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 20),
+                (ext_alu.clone(), 20),
+                (poseidon2_wide.clone(), 17),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 20),
+                (ext_alu.clone(), 20),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (mem_var.clone(), 20),
+                (select.clone(), 20),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 21),
+                (ext_alu.clone(), 21),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (mem_var.clone(), 21),
+                (select.clone(), 20),
+                (mem_const.clone(), 19),
+                (base_alu.clone(), 21),
+                (ext_alu.clone(), 22),
+                (poseidon2_wide.clone(), 18),
+                (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
+            ],
+            [
+                (mem_var.clone(), 21),
+                (select.clone(), 20),
+                (mem_const.clone(), 20),
+                (base_alu.clone(), 22),
+                (ext_alu.clone(), 22),
+                (poseidon2_wide.clone(), 18),
                 (public_values.clone(), PUB_VALUES_LOG_HEIGHT),
             ],
             // CAPPED AT THE ROW CUBE.  Every recursion stage proves at a
