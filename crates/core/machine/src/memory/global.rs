@@ -7,7 +7,7 @@ use std::array;
 use p3_air::{Air, AirBuilder, BaseAir, WindowAccess};
 use p3_field::{PrimeCharacteristicRing, PrimeField32};
 use p3_matrix::dense::RowMajorMatrix;
-use p3_maybe_rayon::prelude::{IntoParallelRefIterator, ParallelIterator};
+use p3_maybe_rayon::prelude::*;
 use zkm_core_executor::events::{GlobalLookupEvent, MemoryInitializeFinalizeEvent};
 use zkm_core_executor::{ExecutionRecord, Program};
 use zkm_derive::AlignedBorrow;
@@ -18,7 +18,7 @@ use zkm_pcs::{
 
 use crate::{
     operations::{AssertLtColsBits, IsZeroOperation, KoalaBearBitDecomposition},
-    utils::next_multiple_of_32,
+    utils::{next_multiple_of_32, zeroed_f_vec},
     CoreChipError,
 };
 
@@ -159,11 +159,17 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
             })
             .collect();
 
-        for i in 0..memory_events.len() {
+        // Row `i` reads only precomputed data (`memory_events[i-1].addr`,
+        // `prev0_addr`, `is_comp_vec[i-1]`) and writes only `rows[i]`, so the
+        // population carries no cross-row dependency.  It dominates this chip's
+        // tracegen — two field inversions per row over up to 2^20 rows — and the
+        // chip is one of only three on a memory-global shard, so the serial form
+        // has nothing to overlap with.
+        rows.par_iter_mut().enumerate().for_each(|(i, row)| {
             let addr = memory_events[i].addr;
             let prev_addr = if i == 0 { prev0_addr } else { memory_events[i - 1].addr };
             let is_comp = is_comp_vec[i];
-            let cols: &mut MemoryInitCols<F> = rows[i].as_mut_slice().borrow_mut();
+            let cols: &mut MemoryInitCols<F> = row.as_mut_slice().borrow_mut();
             cols.index = F::from_u32(i as u32);
             cols.prev_addr = F::from_u32(prev_addr);
             cols.prev_addr_bits.populate(prev_addr);
@@ -180,18 +186,21 @@ impl<F: PrimeField32> MachineAir<F> for MemoryGlobalChip {
                 let prev_addr_bits_arr: [_; 32] = array::from_fn(|k| (prev_addr >> k) & 1);
                 cols.lt_cols.populate(&prev_addr_bits_arr, &addr_bits);
             }
-        }
+        });
 
-        // Pad the trace to a power of two depending on the proof shape in `input`.
-        rows.resize(
-            <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap(),
-            [F::ZERO; NUM_MEMORY_INIT_COLS],
-        );
+        // Flatten into the padded trace buffer.  The padding tail is left zero,
+        // and a shape that pins fewer rows than there are events truncates —
+        // both matching the `resize` this replaces.  Writing into one
+        // preallocated buffer avoids a serial copy of the whole trace.
+        let padded_nb_rows = <MemoryGlobalChip as MachineAir<F>>::num_rows(self, input).unwrap();
+        let mut values = zeroed_f_vec::<F>(padded_nb_rows * NUM_MEMORY_INIT_COLS);
+        let kept_rows = rows.len().min(padded_nb_rows);
+        values[..kept_rows * NUM_MEMORY_INIT_COLS]
+            .par_chunks_mut(NUM_MEMORY_INIT_COLS)
+            .zip(rows[..kept_rows].par_iter())
+            .for_each(|(dst, src)| dst.copy_from_slice(src));
 
-        Ok(RowMajorMatrix::new(
-            rows.into_iter().flatten().collect::<Vec<_>>(),
-            NUM_MEMORY_INIT_COLS,
-        ))
+        Ok(RowMajorMatrix::new(values, NUM_MEMORY_INIT_COLS))
     }
 
     fn included(&self, shard: &Self::Record) -> bool {
