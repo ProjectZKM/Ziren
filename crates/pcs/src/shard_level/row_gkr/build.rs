@@ -15,34 +15,27 @@ use crate::multilinear::PaddedMle;
 use crate::Chip;
 
 /// Build the full GKR circuit (data side) and return the unified
-/// output.
+/// output: `(LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)` — the
+/// caller walks the layer stack bottom-up to drive per-round
+/// sumchecks.
+///
+/// Host-only: the GPU prover has its own device-native builder in
+/// zkm-gpu-basefold; this one never constructs [`LayerState::Device`]
+/// (the variant survives only for enum compatibility).
 ///
 /// **Inputs:**
 /// - `chips`: per-chip lookup specs
 /// - `preprocessed_traces`: per-chip raw preprocessed traces
-/// - `shared_trace_mles`: the shared per-chip analytic main-trace MLE
-///   (chip-index order); a host chip carries a real inner (`guts == the
-///   raw trace`), a device-resident chip is a `dummy`
+/// - `shared_trace_mles`: the shared per-chip main-trace MLE store
+///   (chip-index order); a host chip carries a real inner, a
+///   device-resident chip is a `dummy`
 /// - `alpha`, `betas`: post-commit challenges (`betas[0]` covers the
-///   `argument_index` slot, `betas[1..]` cover per-column values)
-/// - `num_row_variables`: log₂ of padded row count
-///   (must be `>= 1` for the row-reduction to terminate at
-///   `num_row_variables == 1`)
+///   `argument_index` slot, `betas[1..]` per-column values)
+/// - `num_row_variables`: log₂ of the padded row count
 ///
-/// **Output:**
-/// `(LogUpGkrOutput<EF>, LogupGkrCpuCircuit<F, EF>)` — same shape as
-/// the `generate_gkr_circuit` return type, lets the caller
-/// walk the layer stack bottom-up to drive per-round sumchecks.
-///
-/// **Panics** when `num_row_variables == 0` (degenerate empty shard
-/// — handled by the caller, not by this builder).
-// D3c (Option-C divergence): the device seam params (`device_traces` provider,
-// the `gkr_device_hooks` `GkrDeviceProvider` device-fold walk, and the `dev`
-// `ShardDeviceOps` interaction-eval seam) were REMOVED — this shared HOST
-// builder is now CpuProver-only (host fold; no `LayerState::Device` ever
-// constructed).  The GPU prover routes through its own device-native
-// `build_gkr_circuit_native` copy (in `zkm-gpu-basefold`) that calls the
-// ziren-gpu layer-lifecycle + interaction-eval kernels DIRECTLY.
+/// **Panics** when `num_row_variables < 2`: the first layer reduces it
+/// by one, and output extraction needs a terminal EF layer at
+/// `num_row_variables == 1`.
 pub fn build_gkr_circuit<F, EF, A>(
     chips: &[&Chip<F, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<F>],
@@ -56,7 +49,11 @@ where
     EF: ExtensionField<F>,
     A: MachineAir<F>,
 {
-    assert!(num_row_variables >= 1, "build_gkr_circuit requires num_row_variables >= 1");
+    assert!(
+        num_row_variables >= 2,
+        "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
+         num_row_variables=1 produces no terminal EF layer for output extraction"
+    );
 
     let first = generate_first_layer::<F, EF, A>(
         chips,
@@ -67,20 +64,9 @@ where
         num_row_variables,
     );
 
-    // `generate_first_layer` reduces num_row_variables by 1. Three
-    // shapes: N=1 has no terminal (rejected here); N=2 uses the
-    // F→EF-promoted FirstLayer as the terminal; N≥3 finds the
-    // terminal at layers[len-2].
-    assert!(
-        num_row_variables >= 2,
-        "build_gkr_circuit requires num_row_variables >= 2 (got {num_row_variables}); \
-         num_row_variables=1 produces no terminal EF layer for output extraction"
-    );
-
-    // `layers` carries `LayerState<F, EF>` so the GPU dispatch path
-    // can install `LayerState::Device` entries on the way down. The
-    // first EF layer is computed on host so the device hook sees
-    // uniform-EF input.
+    // `generate_first_layer` reduced num_row_variables by 1.  Two
+    // shapes remain: N=2 input uses the F→EF-promoted FirstLayer as the
+    // terminal; N>=3 finds the terminal at layers[len-2].
     let mut layers: Vec<LayerState<F, EF>> = Vec::with_capacity(first.num_row_variables + 1);
 
     // Special case: num_row_variables=2 input → first.num=1 → use
@@ -107,8 +93,7 @@ where
     }
     layers.push(LayerState::Host(GkrCircuitLayer::FirstLayer(first)));
 
-    // D3c: the device-fold path (`try_run_device_path`) was removed from this
-    // shared HOST builder — every subsequent transition stays in EF on host.
+    // Every subsequent transition stays in EF on host.
     while let Some(curr) = last_ef_layer.take() {
         if curr.num_row_variables >= 1 {
             let next = layer_transition::<EF, EF>(&curr);
@@ -137,8 +122,7 @@ where
                 "for num_row_variables >= 3 the second-to-last layer is always an EF Layer"
             ),
             LayerState::Device { .. } => unreachable!(
-                "D3c: the shared host build_gkr_circuit never constructs \
-                 LayerState::Device (device-fold path removed)"
+                "the host build_gkr_circuit never constructs LayerState::Device"
             ),
         }
     };
