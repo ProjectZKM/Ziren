@@ -213,7 +213,7 @@ where
 /// (cumulative sums, batched pre-pass, jagged-PCS clone) reads every chip's
 /// trace, so there is nothing for a borrow-or-materialize seam to decide.
 #[allow(clippy::too_many_arguments)]
-pub fn prove_shard_with_data<SC, A, P>(
+pub fn prove_shard_stages<SC, A, P>(
     chips: &[&Chip<Val<SC>, A>],
     preprocessed_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     // The proving key's PRECOMPUTED preprocessed commit — built once by
@@ -346,7 +346,7 @@ where
     // cells become the open's `chip_traces` with NO clone.
 
     let n_chips = chips.len();
-    let _shard_span = tracing::info_span!("prove_shard_with_data", chips = n_chips).entered();
+    let _shard_span = tracing::info_span!("prove_shard_stages", chips = n_chips).entered();
 
     // Stage 1 — transcript prologue. Chip metadata observe (count +
     // per-chip log-height + name length + name bytes) binds post-

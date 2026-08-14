@@ -543,7 +543,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
                 }
             })
             .collect();
-        crate::shard_level::prover::prove_shard_with_data::<SC, A, _>(
+        crate::shard_level::prover::prove_shard_stages::<SC, A, _>(
             chips,
             preprocessed_traces,
             preprocessed_commit_data,
