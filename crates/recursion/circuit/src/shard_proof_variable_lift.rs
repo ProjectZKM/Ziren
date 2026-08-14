@@ -432,7 +432,7 @@ pub fn finalize_carried_opened_values<C>(
         Ext<C::F, C::EF>,
     >,
     chip_names: &[String],
-    chip_log_heights: &BTreeMap<String, u8>,
+    chip_heights: &BTreeMap<String, usize>,
     chip_cumulative_sums: &BTreeMap<
         String,
         zkm_pcs::shard_level::shard_proof::ChipCumulativeSums<Felt<C::F>, Ext<C::F, C::EF>>,
@@ -456,9 +456,7 @@ where
             // `basefold_opened_values_from_host`.  This is the VirtualGeq
             // threshold (zerocheck_prover.rs:487 `VirtualGeq::new(main_height)`)
             // the recursion `full_geq` (zerocheck.rs:517) compares against.
-            // Recomputing from `log_h` here would be an off-by-encoding
-            // error (bits of the log-height value 17 instead of the real height).
-            let _ = (&chip_log_heights, bit_len);
+            let _ = (&chip_heights, bit_len);
 
             // Real per-chip cumulative sums when present.
             if let Some(n) = name {
@@ -494,18 +492,18 @@ where
         .collect()
 }
 
-/// Real `chip_height_bits` derivation from a per-chip log-height map.
+/// Real `chip_height_bits` derivation from a per-chip RAW-height map.
 ///
-/// For each chip in `chip_names`, looks up its log-height in
-/// `chip_log_heights` (defaults to `0` when missing — matches the
-/// legacy proof-bytes path).  Sorts entries by `(Reverse(log_h),
-/// name)` to match the host prover prologue ordering (chips iterated
-/// by preprocessed trace height descending, ties broken by name).
+/// For each chip in `chip_names`, looks up its RAW height in
+/// `chip_heights` (defaults to `0` when missing — matches the
+/// legacy proof-bytes path).
 ///
 /// Returns a `Vec<(name, bits)>` where `bits` is the big-endian
-/// bit-decomposition of `log_h` into `max_log_row_count + 1` slots —
-/// exactly the shape the recursion verifier's Horner accumulation
-/// at `shard_basefold.rs:418-422` expects (`acc = bit + acc * 2`).
+/// bit-decomposition of the RAW height into `max_log_row_count + 1`
+/// slots — exactly the shape the recursion verifier's Horner
+/// accumulation at `shard_basefold.rs:418-422` expects
+/// (`acc = bit + acc * 2`), recomposing to the SAME raw-height felt the
+/// host prologue observes (SP1 parity).
 ///
 /// # Soundness
 ///
@@ -514,11 +512,11 @@ where
 /// enforces via Horner re-composition; no explicit boolean
 /// assertion is needed because the resulting Horner felt is then
 /// observed into the challenger transcript and the prover-side
-/// log_h observe binds the same value.
-pub fn chip_height_bits_from_log_heights<C>(
+/// raw-height observe binds the same value.
+pub fn chip_height_bits_from_heights<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
-    chip_log_heights: &BTreeMap<String, u8>,
+    chip_heights: &BTreeMap<String, usize>,
     max_log_row_count: usize,
 ) -> Vec<(String, Vec<Felt<C::F>>)>
 where
@@ -526,12 +524,12 @@ where
 {
     use p3_field::PrimeCharacteristicRing;
 
-    // Pair each chip name with its log_h (default 0 when missing).
-    let mut entries: Vec<(String, u8)> = chip_names
+    // Pair each chip name with its raw height (default 0 when missing).
+    let mut entries: Vec<(String, usize)> = chip_names
         .iter()
         .map(|name| {
-            let log_h = chip_log_heights.get(name).copied().unwrap_or(0);
-            (name.clone(), log_h)
+            let height = chip_heights.get(name).copied().unwrap_or(0);
+            (name.clone(), height)
         })
         .collect();
     // Sort by NAME (ascending). The host prologue iterates
@@ -552,17 +550,16 @@ where
     let bit_len = max_log_row_count + 1;
     entries
         .into_iter()
-        .map(|(name, log_h)| {
+        .map(|(name, height)| {
             // Big-endian: MSB at index 0, matches the Horner
             // recomposition `acc = bit + acc * 2` which produces
             // the value bit_0 * 2^(n-1) + bit_1 * 2^(n-2) + ...
-            let log_h_u = log_h as usize;
             let bits: Vec<Felt<C::F>> = (0..bit_len)
                 .map(|i| {
                     // i=0 is the MSB (slot 0 of Horner accumulation).
                     let shift = bit_len - 1 - i;
                     let bit_val =
-                        if shift < usize::BITS as usize { (log_h_u >> shift) & 1 } else { 0 };
+                        if shift < usize::BITS as usize { (height >> shift) & 1 } else { 0 };
                     if bit_val == 1 {
                         builder.constant(C::F::ONE)
                     } else {
@@ -577,37 +574,33 @@ where
 
 /// VALUE-INDEPENDENT `chip_height_bits` derivation.
 ///
-/// [`chip_height_bits_from_log_heights`] BAKES each height bit as a
-/// `builder.constant()` from the COMPILE-TIME `chip_log_heights`, so the
+/// [`chip_height_bits_from_heights`] BAKES each height bit as a
+/// `builder.constant()` from the COMPILE-TIME `chip_heights`, so the
 /// recursion program's bytes depend on the per-chip heights of the proof
 /// being verified — the normalize/wrap program's vk then differs per
 /// workload and is never in the enumerated `vk_map` (root cause of the
 /// VERIFY_VK=true "Invalid verification key" failure).
 ///
-/// This variant instead derives the SAME big-endian `log_h` bits the
+/// This variant instead derives the SAME big-endian RAW-height bits the
 /// prologue observes (Horner-recomposed at `shard_basefold.rs:450-456`)
 /// from the WITNESSED per-chip `degree` (= host `quotient[0]`, the
-/// big-endian boolean coordinates of the chip HEIGHT `2^log_h`, lifted
+/// big-endian boolean coordinates of the chip's RAW HEIGHT, lifted
 /// in [`crate::shard_level_witness::basefold_opened_values_from_host`]).
 /// Because the emitted ops are fixed (independent of the witnessed
 /// values), the program becomes chip-set-determined ⇒ one program per
 /// cluster ⇒ the enumerated `vk_map` covers every real workload.
 ///
-/// Encoding: `degree` is the big-endian (index 0 = MSB) boolean
-/// decomposition of the chip's REAL HEIGHT (`d = degree.len()`), which is
-/// a power of two only under the legacy `next_power_of_two` padding.  We
-/// derive `log_h = ceil(log2(height))` from those bits (see the inline
-/// derivation below — it agrees with the old one-hot `Σ degree[i]*(d-1-i)`
-/// recompose for every power-of-two height), project to the base field
-/// via `ext2felt` (which also
-/// asserts the higher components are zero ⇒ binds `degree[i]` to the
-/// base field), then `num2bits` + reverse to reproduce the exact
-/// big-endian `log_h` decomposition the consumer expects.
-///
-/// The observed value is identical to the baked path for honest proofs
-/// (= `log_h`), so the host transcript is UNCHANGED — only the recursion
-/// program bytes (and thus vk) change; the host proofs do not need
-/// re-proving, only the recursion `vk_map` is regenerated.
+/// Encoding (SP1 parity — the prologue felt is the RAW
+/// `num_real_entries`, NOT its ceil-log2): `degree` is already the
+/// big-endian (index 0 = MSB) boolean decomposition of the chip's RAW
+/// height, so the bits are Horner-recomposed to the height in the
+/// extension field, projected to the base field via `ext2felt` (which
+/// also asserts the higher components are zero ⇒ binds `degree[i]` to
+/// the base field), then `num2bits` + reverse reproduces the exact
+/// big-endian height decomposition the consumer's Horner observe
+/// expects.  The recomposed felt therefore EQUALS the host prologue's
+/// raw-height felt (`raw_chip_height` = the proof's `chip_heights`
+/// value the degree bits encode).
 pub fn chip_height_bits_from_opened_degrees<C>(
     builder: &mut Builder<C>,
     chip_names: &[String],
@@ -633,64 +626,39 @@ where
         .into_iter()
         .enumerate()
         .map(|(idx, name)| {
-            // The witnessed per-chip degree bits (big-endian bits of
-            // 2^log_h).  Fall back to a single zero stub when absent
-            // (empty/legacy proofs) → log_h = 0.
+            // The witnessed per-chip degree bits (big-endian bits of the
+            // RAW height).  Fall back to a single zero stub when absent
+            // (empty/legacy proofs) → height = 0.
             let degree: &[Ext<C::F, C::EF>] =
                 opened_values.chips.get(idx).map(|c| c.degree.as_slice()).unwrap_or(&[]);
             let dlen = degree.len();
 
-            // CEIL log of the witnessed HEIGHT, recomposed in the extension
-            // field then projected to the base field.
-            //
-            // `degree` are the big-endian boolean coordinates of the chip's
-            // REAL height.  Under the legacy `next_power_of_two` padding that
-            // height was always `2^log_h` (exactly one bit set), so the old
-            // `log_h = Σ_i degree[i] * (dlen-1-i)` recompose worked.  The
-            // SP1-parity `next_multiple_of_32` core padding sets SEVERAL bits,
-            // and that sum then returns garbage (e.g. h=3488 -> 11+10+8+7+5
-            // instead of 12) — a SILENT Fiat-Shamir divergence from the host
-            // prologue, which observes the CEIL log
-            // (`shard_level::prover::build_chip_log_heights`).
-            //
-            // Derive the ceil log from the bits directly, with `b[i]` boolean:
-            //   seen[i]  = OR_{j<=i} b[j]                (running "MSB reached")
-            //   Σ seen   = msb_pos + 1  (0 when h == 0)
-            //   extra    = OR_i ( b[i] AND seen[i-1] )   (1 iff h is NOT 2^k)
-            //   log_h    = Σ seen - seen[last] + extra
-            // Checks: h=0 -> 0; h=1 -> 0; h=2^k -> k; 2^k<h<2^(k+1) -> k+1.
-            // Byte-identical to the old recompose for every power-of-two
-            // height, and the emitted op sequence is still value-independent
-            // (fixed length `dlen`), so the program stays chip-set-determined.
-            let _ = dlen;
-            let zero: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
-            let mut seen: Ext<C::F, C::EF> = zero;
-            let mut seen_sum: Ext<C::F, C::EF> = zero;
-            let mut extra: Ext<C::F, C::EF> = zero;
+            // RAW height: Horner-recompose the big-endian degree bits in
+            // the extension field (`acc = acc*2 + bit` — the same
+            // recompose `chip_height_felts_from_opened_degrees` uses for
+            // the jagged geometry), then project to the base field.  The
+            // emitted op sequence is value-independent (fixed length
+            // `dlen`), so the program stays chip-set-determined.
+            let two: Ext<C::F, C::EF> = builder.constant(C::EF::TWO);
+            let mut acc_ext: Ext<C::F, C::EF> = builder.constant(C::EF::ZERO);
             for d in degree.iter() {
-                let seen_prev = seen;
-                // t = b AND seen_prev  (a lower bit set below the MSB)
-                let t: Ext<C::F, C::EF> = builder.eval(*d * seen_prev);
-                // extra = extra OR t
-                extra = builder.eval(extra + t - extra * t);
-                // seen = seen_prev OR b
-                seen = builder.eval(seen_prev + *d - seen_prev * *d);
-                seen_sum = builder.eval(seen_sum + seen);
+                acc_ext = builder.eval(acc_ext * two + *d);
             }
-            let acc_ext: Ext<C::F, C::EF> = builder.eval(seen_sum - seen + extra);
-            let log_h_felt: Felt<C::F> = if dlen == 0 {
+            let height_felt: Felt<C::F> = if dlen == 0 {
                 builder.constant(C::F::ZERO)
             } else {
                 C::ext2felt(builder, acc_ext)[0]
             };
 
-            // Big-endian bit_len-wide decomposition of log_h (MSB first),
-            // matching the Horner consumer's `acc = bit + acc*2`.
+            // Big-endian bit_len-wide decomposition of the height (MSB
+            // first), matching the Horner consumer's `acc = bit + acc*2`
+            // (heights are ≤ 2^max_log_row_count, so bit_len =
+            // max_log_row_count + 1 bits always fit).
             // `num2bits_v2_f` == `C::num2bits` for InnerConfig/WrapConfig
             // (both delegate, lib.rs:293/421) — used directly to avoid the
             // `C::Bit` bound.
             use zkm_recursion_compiler::circuit::CircuitV2Builder;
-            let mut bits: Vec<Felt<C::F>> = builder.num2bits_v2_f(log_h_felt, bit_len);
+            let mut bits: Vec<Felt<C::F>> = builder.num2bits_v2_f(height_felt, bit_len);
             bits.reverse();
             (name, bits)
         })
@@ -1036,22 +1004,23 @@ mod tests {
         assert_eq!(bits[2].0, "M");
     }
 
-    /// chip_height_bits_from_log_heights: sort by NAME (ascending) and
-    /// emit big-endian bit decomposition.  Name-ascending (not
-    /// height-descending) ordering is a transcript-ordering soundness
-    /// requirement — see the doc on `chip_height_bits_from_log_heights`.
+    /// chip_height_bits_from_heights: sort by NAME (ascending) and
+    /// emit big-endian bit decomposition of the RAW height.
+    /// Name-ascending (not height-descending) ordering is a
+    /// transcript-ordering soundness requirement — see the doc on
+    /// `chip_height_bits_from_heights`.
     #[test]
-    fn chip_height_bits_from_log_heights_sort_and_decompose() {
+    fn chip_height_bits_from_heights_sort_and_decompose() {
         use std::collections::BTreeMap;
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let names = vec!["A".to_string(), "B".to_string(), "C".to_string()];
-        let mut map: BTreeMap<String, u8> = BTreeMap::new();
-        map.insert("A".to_string(), 3);
-        map.insert("B".to_string(), 5);
-        map.insert("C".to_string(), 5); // tie broken by name
+        let mut map: BTreeMap<String, usize> = BTreeMap::new();
+        map.insert("A".to_string(), 8);
+        map.insert("B".to_string(), 32);
+        map.insert("C".to_string(), 32); // tie broken by name
         let max_log_row_count = 5; // bit_len = 6
         let result =
-            chip_height_bits_from_log_heights::<C>(&mut builder, &names, &map, max_log_row_count);
+            chip_height_bits_from_heights::<C>(&mut builder, &names, &map, max_log_row_count);
         // Name-ascending sort order: A, B, C (height is NOT a sort key).
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].0, "A");
@@ -1063,17 +1032,17 @@ mod tests {
         assert_eq!(result[2].1.len(), 6);
     }
 
-    /// chip_height_bits_from_log_heights: missing chip defaults to log_h=0.
+    /// chip_height_bits_from_heights: missing chip defaults to height=0.
     #[test]
-    fn chip_height_bits_from_log_heights_missing_chip_defaults_zero() {
+    fn chip_height_bits_from_heights_missing_chip_defaults_zero() {
         use std::collections::BTreeMap;
         let mut builder = AsmBuilder::<InnerVal, InnerChallenge>::default();
         let names = vec!["X".to_string()];
-        let map: BTreeMap<String, u8> = BTreeMap::new();
-        let result = chip_height_bits_from_log_heights::<C>(&mut builder, &names, &map, 4);
+        let map: BTreeMap<String, usize> = BTreeMap::new();
+        let result = chip_height_bits_from_heights::<C>(&mut builder, &names, &map, 4);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].0, "X");
-        // 5 slots, all zero (log_h=0 default).
+        // 5 slots, all zero (height=0 default).
         assert_eq!(result[0].1.len(), 5);
     }
 }

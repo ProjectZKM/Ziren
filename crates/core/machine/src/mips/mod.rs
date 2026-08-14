@@ -1297,7 +1297,7 @@ pub mod tests {
     // The band-cap path pads the PRESENT chips' COMMIT traces up to the cluster
     // band heights (`shard_level::prover.rs` ~431) while the zerocheck /
     // LogUp-GKR / openings stay at the RAW heights (`shard_level::prover.rs`
-    // ~833 sources `chip_log_heights` from `main_traces`).  A band-height jagged
+    // ~833 sources `chip_heights` from `main_traces`).  A band-height jagged
     // reduction over raw-height evaluation claims would mismatch by the
     // embed_factor Π_{log_raw<=k<log_band}(1-z[k]); the prover therefore declines
     // the raw zerocheck residual (`trace_at_z`, embedded at raw log_h) whenever a

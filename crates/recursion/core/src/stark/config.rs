@@ -243,7 +243,7 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // The digest tunnel + the outer jagged open/verify dispatch are wired, so the
 // wrap STARK proves and host-verifies over the BN254 BaseFold jagged-PCS
 // (OuterValMmcs + OuterChallenger): the outer commit builds the BN254 commit
-// via `precompute_jagged_basefold_commit_generic::<OuterValMmcs>`, and
+// via the `BasefoldRing::commit_multilinears` default (over `OuterValMmcs`), and
 // `prove_trusted_evaluations` / `verify_jagged_pcs_host` dispatch statically
 // through this impl.
 impl BasefoldRing for KoalaBearPoseidon2Outer {
@@ -290,23 +290,10 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         out
     }
 
-    fn precompute_jagged_inline(
-        named_inner: &[zkm_pcs::jagged_pcs::jagged::ChipTraceView],
-        use_rev: bool,
-        recursion_area_pin: Option<usize>,
-    ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
-        // The wrap ring's BN254 jagged BaseFold precompute — EXACTLY the commit
-        // the retired outer BaseFold commit path produced for OuterSC (same
-        // OuterValMmcs / wrap FRI config / `use_rev` / `recursion_area_pin`),
-        // now built INLINE during the prove pass.
-        zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
-            named_inner,
-            Self::bf_mmcs(),
-            Self::fri_config(),
-            use_rev,
-            recursion_area_pin,
-        )
-    }
+    // `commit_multilinears` — the wrap ring's BN254 jagged BaseFold
+    // precompute — is the trait DEFAULT (this ring's `bf_mmcs()` /
+    // `fri_config()` are what it reads): EXACTLY the commit the retired
+    // outer BaseFold commit path produced for OuterSC.
 
     fn prove_jagged_open(
         z_row: &[zkm_pcs::InnerChallenge],
@@ -468,8 +455,8 @@ mod basefold_over_bn254_generic_typecheck {
 //
 // `outer_prep_commit` is the wrap ring's `StarkGenericConfig::prep_commit` body.
 // It exists because `StarkMachine::setup` is generic over `SC` and so cannot name
-// `OuterValMmcs`, while `precompute_jagged_basefold_commit_generic` must be told
-// which MMCS to use; the config impl supplies it.  `Val`/`Challenge` are
+// `OuterValMmcs`, while the ring commit (`BasefoldRing::commit_multilinears`)
+// must be dispatched on a concrete ring; the config impl supplies it.  `Val`/`Challenge` are
 // KoalaBear / KoalaBear^4 for both rings, so only the MMCS differs.
 pub mod outer_jagged_hooks {
     use super::{KoalaBearPoseidon2Outer, OuterValMmcs};
@@ -515,24 +502,17 @@ pub mod outer_jagged_hooks {
         chip_traces: &[(String, RowMajorMatrix<JaggedVal>)],
         use_rev: bool,
     ) -> zkm_pcs::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<OuterValMmcs> {
-        use zkm_pcs::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
-
-        let mmcs = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::bf_mmcs();
-        let fri = <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::fri_config();
         // The commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = zkm_pcs::jagged_pcs::jagged::views_over_owned(chip_traces);
-        let pre = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
+        <KoalaBearPoseidon2Outer as zkm_pcs::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
-            mmcs,
-            fri,
             // The machine's orientation (the wrap machine is LEGACY bitrev).
             use_rev,
             // setup/preprocessed commit is never
             // a recursion prove commit → no AREA PIN (`None`), byte-identical.
             None,
-        );
-        pre
+        )
     }
 }
 
@@ -697,9 +677,8 @@ mod basefold_over_bn254_roundtrip_test {
     fn test_jagged_basefold_bundle_roundtrip_bn254() {
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::jagged_pcs::jagged::{
-            build_jagged_verify_inputs, precompute_jagged_basefold_commit_generic,
-            prove_jagged_basefold_rounds_generic, verify_jagged_basefold_inner_generic,
-            JaggedOpenRound,
+            build_jagged_verify_inputs, prove_jagged_basefold_rounds_generic,
+            verify_jagged_basefold_inner_generic, JaggedOpenRound,
         };
         use zkm_pcs::jagged_pcs::JaggedChallenge;
 
@@ -757,10 +736,8 @@ mod basefold_over_bn254_roundtrip_test {
             .collect();
 
         let fri = <KoalaBearPoseidon2Outer as BasefoldRing>::fri_config();
-        let precompute = precompute_jagged_basefold_commit_generic::<OuterValMmcs>(
+        let precompute = <KoalaBearPoseidon2Outer as BasefoldRing>::commit_multilinears(
             &trace_views,
-            mmcs.clone(),
-            fri.clone(),
             // use_rev: false on the wrap/BN254 path.
             false,
             // recursion_area_pin: None => NATURAL own-area packing (this is a wrap-ring test).

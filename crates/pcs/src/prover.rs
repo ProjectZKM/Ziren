@@ -15,9 +15,9 @@ use super::{
     VerifierConstraintFolder,
 };
 use crate::shard_level::prover::{
-    assemble_basefold_shard_proof, build_chip_cumulative_sums, build_chip_log_heights,
-    build_opened_values, commit_traces, compute_residual_y_openings,
-    observe_transcript_prologue, observe_zerocheck_openings_from_residual,
+    assemble_basefold_shard_proof, build_chip_cumulative_sums, build_chip_heights,
+    build_opened_values, commit_traces, compute_residual_y_openings, observe_transcript_prologue,
+    observe_zerocheck_openings_from_residual,
 };
 use crate::shard_level::row_gkr::top_level::prove_shard_logup_gkr_rows;
 use crate::shard_level::zerocheck_prover::prove_shard_zerocheck;
@@ -317,9 +317,9 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     /// Commit the shard's per-chip main multilinears to the BaseFold
     /// jagged-PCS, returning the precomputed commit — the COMMIT
     /// static-dispatch OVERRIDE point (one trait method).  The DEFAULT body
-    /// is the host commit
-    /// ([`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
-    /// over the inner `JaggedMmcs` ring).
+    /// is the host commit ([`crate::BasefoldRing::commit_multilinears`]
+    /// over the inner `KoalaBearPoseidon2` ring, whose `BfMmcs` is the
+    /// inner `JaggedMmcs`).
     /// A `StarkGpuProver` OVERRIDES this with the device dense-pack + BaseFold
     /// commit body — UNCONDITIONALLY on device, no host fallback.
     /// Consumed by `commit_traces` through the
@@ -334,15 +334,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         use_rev: bool,
         recursion_area_pin: Option<usize>,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        let perm: crate::kb31_poseidon2::InnerPerm = zkm_primitives::poseidon2_init();
-        let hash = crate::kb31_poseidon2::InnerHash::new(perm.clone());
-        let compress = crate::kb31_poseidon2::InnerCompress::new(perm);
-        crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<
-            crate::jagged_pcs::JaggedMmcs,
-        >(
+        <crate::koala_bear_poseidon2::KoalaBearPoseidon2 as crate::BasefoldRing>::commit_multilinears(
             named_inner,
-            crate::jagged_pcs::JaggedMmcs::new(hash, compress, 0),
-            crate::basefold::FriConfig::<crate::jagged_pcs::JaggedVal>::from_env_or_default(),
             use_rev,
             recursion_area_pin,
         )
@@ -546,15 +539,14 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     // chip-SET and hence the vk.
     let trace_views: Vec<crate::multilinear::PaddedMle<Val<SC>>> = shared_trace_mles.to_vec();
     let chip_cum_tails: Vec<Option<Vec<Val<SC>>>> = chips.iter().map(|_| None).collect();
-    let (trace_views, main_commitment, precomputed_commit) = match commit_data {
+    let (main_commitment, precomputed_commit) = match commit_data {
         // `commit()` already built and retained the jagged commitment —
-        // consume it.  The views pass through untouched, exactly as
-        // `commit_traces` returns them unchanged; the digest
-        // and precompute are the identical values that build would have
-        // produced (same seam, same inputs, one shard-phase earlier).
-        Some(retained) => (trace_views, retained.main_commitment, retained.precomputed),
+        // consume it.  The digest and precompute are the identical values
+        // that build would have produced (same seam, same inputs, one
+        // shard-phase earlier).
+        Some(retained) => (retained.main_commitment, retained.precomputed),
         None => {
-            commit_traces::<SC, A, _>(self, chips, trace_views, dense_rev, recursion_area_pin)
+            commit_traces::<SC, A, _>(self, chips, &trace_views, dense_rev, recursion_area_pin)
         }
     };
     // `trace_views` is kept OWNED (no reborrow): the dims sites below
@@ -565,15 +557,15 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     let _shard_span = tracing::info_span!("prove_shard_stages", chips = n_chips).entered();
 
     // Stage 1 — transcript prologue. Chip metadata observe (count +
-    // per-chip log-height + name length + name bytes) binds post-
+    // per-chip RAW height + name length + name bytes) binds post-
     // commit challenges to the shard's chip-set identity AND each
     // chip's row count.
     //
-    // The per-chip height felt is `log_height` — the value the recursion
-    // verifier binds in this slot via the `chip_height_bits` Horner
-    // recompose.  The host verifier mirror in
-    // `shard_level::verifier::verify_shard_basefold` observes the same value
-    // sourced from `proof.chip_log_heights`.
+    // The per-chip height felt is the RAW `num_real_entries` (SP1
+    // parity, 0 allowed) — the value the recursion verifier binds in
+    // this slot via the `chip_height_bits` Horner recompose.  The host
+    // verifier mirror in `shard_level::verifier::verify_shard_basefold`
+    // observes the same value sourced from `proof.chip_heights`.
     //
     // Observe order (the verifiers replay it exactly):
     //   public_values → main_commitment → num_chips →
@@ -780,12 +772,11 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     let _t_phase5 = std::time::Instant::now();
     let _phase5_span = tracing::info_span!("phase_assembly").entered();
 
-    // Per-chip log-height (u8) + REAL-height (usize) maps, device-residency
-    // aware.  The log-height map is stored on the proof; the REAL-height map
+    // Per-chip RAW-height map (usize), device-residency aware.  Stored on
+    // the proof as `chip_heights` (the felt the prologue observed) AND
     // feeds the `opened_values` degree-bit decomposition below.
     // MUST agree with the Phase-1 prologue observe + the verifier.
-    let (chip_log_heights, chip_heights) =
-        build_chip_log_heights::<SC, A>(chips, shared_trace_mles);
+    let chip_heights = build_chip_heights::<SC, A>(chips, shared_trace_mles);
 
     // Populate `opened_values` with the per-chip trace@z openings from the
     // zerocheck reduction (the values the recursion zerocheck verifier
@@ -796,13 +787,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
     // order to match the recursion `opened_values.chips` BTreeMap key-order
     // iteration.  The REAL-height big-endian degree bits ride in the
     // `quotient` slot.
-    let opened_values = build_opened_values::<SC, A>(
-        chips,
-        trace_at_z,
-        &chip_log_heights,
-        &chip_heights,
-        max_log_row_count,
-    );
+    let opened_values =
+        build_opened_values::<SC, A>(chips, trace_at_z, &chip_heights, max_log_row_count);
 
     // Per-chip (local, global) cumulative sums.  `local` is ZERO (the
     // basefold path doesn't materialize the permutation trace); `global`
@@ -819,7 +805,7 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
-        chip_log_heights,
+        chip_heights,
         chip_cumulative_sums,
         evaluation_proof,
         orientation,
@@ -1048,7 +1034,7 @@ where
         // `Mle::from_row_major` — then commit through the ring-dispatched
         // builder (`commit_traces`: the inner ring routes
         // through `self.commit_multilinears`, the wrap ring through
-        // `BasefoldRing::precompute_jagged_inline`) and RETAIN
+        // `BasefoldRing::commit_multilinears`) and RETAIN
         // {digest, precompute, store} for `open()`.  One build, one store:
         // the commit and the prove read the same cells.
         let retained: Option<RetainedJaggedCommit<SC>> = {
@@ -1101,11 +1087,11 @@ where
                 } else {
                     None
                 };
-                let (_views, main_commitment, precomputed) =
+                let (main_commitment, precomputed) =
                     crate::shard_level::prover::commit_traces::<SC, A, _>(
                         self,
                         &chips,
-                        views,
+                        &views,
                         self.machine().core_rev(),
                         recursion_area_pin,
                     );

@@ -52,10 +52,10 @@ where
     let builder_span = tracing::debug_span!("build normalize-basefold program").entered();
     let mut builder = Builder::<InnerConfig>::default();
     let input_var = input.read(&mut builder);
-    // Populate per-shard chip_log_heights from each shard's
-    // `BasefoldShardProof.chip_log_heights`.  Fed into
+    // Populate per-shard chip_heights from each shard's
+    // `BasefoldShardProof.chip_heights`.  Fed into
     // `verify_core_basefold` which drives
-    // `chip_height_bits_from_log_heights` at the lift site (real
+    // `chip_height_bits_from_heights` at the lift site (real
     // Horner-recomposed heights — same value the prover prologue
     // observes via host transcript at
     // `crates/pcs/src/shard_level/prover.rs:260-269`).
@@ -65,14 +65,14 @@ where
     // degree bits) — a DIFFERENT consumer.  `chip_height_bits` is
     // the recursion-verifier's transcript prologue input, not the
     // constraint-side degree mask.
-    let chip_log_heights_per_shard: Vec<std::collections::BTreeMap<String, u8>> =
-        input.shard_proofs.iter().map(|sp| sp.chip_log_heights.clone()).collect();
+    let chip_heights_per_shard: Vec<std::collections::BTreeMap<String, usize>> =
+        input.shard_proofs.iter().map(|sp| sp.chip_heights.clone()).collect();
     verify_core_basefold::<InnerConfig, KoalaBearPoseidon2, A>(
         &mut builder,
         input_var,
         machine,
         max_log_row_count,
-        &chip_log_heights_per_shard,
+        &chip_heights_per_shard,
     );
     let operations = builder.into_operations();
     builder_span.exit();
@@ -537,7 +537,7 @@ mod tests {
             super::ZKMCoreBasefoldWitnessValues::<KoalaBearPoseidon2>::dummy(&machine, &shape);
         assert_eq!(witness.shard_proofs.len(), 1);
         assert_eq!(witness.shard_proofs[0].chip_cumulative_sums.len(), 2);
-        assert_eq!(witness.shard_proofs[0].chip_log_heights.len(), 2);
+        assert_eq!(witness.shard_proofs[0].chip_heights.len(), 2);
         assert!(!witness.is_complete);
     }
 

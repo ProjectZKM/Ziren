@@ -200,7 +200,11 @@ pub trait BasefoldRing: StarkGenericConfig {
             ProverData<p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: Send
                                                                                             + Sync
                                                                                             + 'static,
-        > + Clone;
+        > + Clone
+        // `'static` so the DEFAULT `commit_multilinears` body (which hands the
+        // MMCS to the generic BaseFold commit) typechecks at the trait level;
+        // both rings are concrete `'static` types, so this is a no-op.
+        + 'static;
 
     /// Construct the BaseFold MMCS for this config (perm + hash + compress).
     fn bf_mmcs() -> Self::BfMmcs;
@@ -228,25 +232,82 @@ pub trait BasefoldRing: StarkGenericConfig {
         commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 
-    /// Ring-native jagged BaseFold precompute for the inline commit path.
+    /// Ring-native jagged BaseFold commit: build the BaseFold commit over
+    /// this ring's [`Self::BfMmcs`] (SP1's single generic
+    /// `StackedPcsProver::commit_multilinears` — no free-fn indirection).
+    /// Inner (`KoalaBearPoseidon2`) commits over the Poseidon2-KoalaBear
+    /// `JaggedMmcs`; the wrap ring over the Poseidon2-BN254 `OuterValMmcs`
+    /// so the commitment is the BN254 root.  The DFT is over KoalaBear for
+    /// BOTH rings (Val == KoalaBear everywhere).  No challenger observe
+    /// (the caller surfaces the commitment).
     ///
-    /// Used by `commit_traces` on the OUTER/wrap ring (whose
-    /// `BfMmcs = OuterValMmcs` cannot flow through the inner-only
-    /// `commit_multilinears` device seam).  This is a required method — NOT a
-    /// default — so the `Self::BfMmcs: Clone + 'static` bounds that
-    /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
-    /// needs are discharged INSIDE each concrete impl (where `Self::BfMmcs` is a
-    /// concrete `'static` MMCS), rather than propagating up the whole
-    /// shard-prover call chain.  Builds with the ring's own MMCS / FRI config
-    /// and the caller's `use_rev` / `recursion_area_pin`.
-    fn precompute_jagged_inline(
-        named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
+    /// DEFAULT body — every ring commits the same way with its own
+    /// `bf_mmcs()` / `fri_config()`.  `use_rev` is the per-shard rev(zeta)
+    /// orientation, threaded to `materialize_dense_jagged` and recorded on
+    /// the returned commit; `recursion_area_pin` is the recursion-layer
+    /// AREA PIN (`Some(target_log)` on a compress commit pins
+    /// `log_dense_size` to `max(natural, target_log)`; `None` = NATURAL
+    /// own-area packing).
+    fn commit_multilinears(
+        chip_traces: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
         recursion_area_pin: Option<usize>,
-    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs>;
+    ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
+        use p3_matrix::dense::RowMajorMatrix;
+
+        let mut packing = crate::jagged::compute_jagged_metadata::<crate::InnerVal>(chip_traces);
+        // RECURSION-LAYER AREA PIN.  When the
+        // recursion (`compress`) prover passes `Some(target_log)` here, raise
+        // the committed `dense_len` to the pin floor so the dense
+        // materialize + commit run at a FIXED area (`2^pin`) → constant
+        // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
+        // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
+        if let Some(target) = recursion_area_pin {
+            packing.dense_len = packing.dense_len.max(1usize << target);
+        }
+        // A round with NO CELLS still has to produce a well-formed commitment.
+        // `setup` drops every chip that generates no preprocessed trace, so a
+        // machine whose chips all have `preprocessed_width() == 0` reaches here
+        // with an empty trace list and a zero-length dense — and the Merkle
+        // commit cannot commit zero matrices ("all matrices have height 0").
+        // The shard prover already handles the empty round downstream: it reads
+        // the round's chips off `packing.chip_infos`, which stays EMPTY here, so
+        // no preprocessed round is opened and the proof is single-round.  All
+        // that is needed is one cell to hang a commitment on; nothing is ever
+        // opened against it.
+        if packing.dense_len == 0 {
+            packing.dense_len = 1;
+        }
+        let (commit, prover_data) =
+            {
+                let dense_q = crate::jagged::materialize_dense_jagged::<crate::InnerVal>(
+                    chip_traces,
+                    packing.dense_len,
+                    use_rev,
+                );
+                debug_assert_eq!(dense_q.len(), packing.dense_len);
+                let dense_traces = alloc::vec![(
+                    alloc::string::String::from("<jagged-dense>"),
+                    RowMajorMatrix::new(dense_q, 1),
+                )];
+
+                let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
+                crate::jagged_pcs::commit_jagged_pcs_generic::<
+                    Self::BfMmcs,
+                    crate::jagged_pcs::JaggedDft,
+                >(dense_traces, Self::bf_mmcs(), dft, Self::fri_config())
+            };
+        crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric {
+            packing,
+            commit,
+            prover_data,
+            rev: use_rev,
+            recursion_area_pin,
+        }
+    }
 
     /// Ring-native jagged BaseFold OPEN — the prove-side counterpart of
-    /// [`Self::precompute_jagged_inline`], and the reason
+    /// [`Self::commit_multilinears`], and the reason
     /// [`crate::shard_level::prover::prove_trusted_evaluations`] needs no
     /// runtime type test to pick a jagged open.
     ///
@@ -258,7 +319,7 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// OuterValMmcs>`, which has no concrete slot in the enum).  Dispatching
     /// that on `Self` puts the choice where the concrete types are known.
     ///
-    /// Like `precompute_jagged_inline` this is a required method, NOT a
+    /// Unlike `commit_multilinears` this is a required method, NOT a
     /// default, so the `Self::Challenger` capability bounds the generic
     /// BaseFold prover needs (`FieldChallenger` / `GrindingChallenger` /
     /// `CanObserve<BfCommitment<Self>>`) are discharged INSIDE each concrete

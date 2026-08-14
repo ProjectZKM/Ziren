@@ -973,7 +973,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             let verify_one = |i: usize, shard_proof: &ShardProof<SC>| {
                 tracing::debug_span!("verifying shard", shard = i).in_scope(|| {
                     let chips = self
-                        .shard_chips_named(&shard_proof.basefold().chip_log_heights)
+                        .shard_chips_named(&shard_proof.basefold().chip_heights)
                         .collect::<Vec<_>>();
                     let mut shard_challenger = base_challenger.clone();
                     shard_challenger

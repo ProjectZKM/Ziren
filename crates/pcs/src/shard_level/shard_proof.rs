@@ -86,11 +86,15 @@ pub struct BasefoldShardProof<F, EF> {
     pub zerocheck_proof: PartialSumcheckProof<EF>,
     /// Per-chip opened values at the zerocheck-reduced point.
     pub opened_values: ShardOpenedValues<F, EF>,
-    /// Per-chip `log2(main_trace.height())` keyed by chip name; lets
-    /// the verifier compute `degree_bits` without re-deriving from
-    /// the AIR. Empty on older proof bytes (treat as 0 placeholders).
+    /// Per-chip RAW `main_trace.height()` (`num_real_entries`, 0 allowed
+    /// — NOT a log; SP1 parity) keyed by chip name.  The verifier
+    /// re-observes this exact felt in the transcript prologue and it is
+    /// the VirtualGeq threshold behind the `opened_values` degree bits;
+    /// geometry consumers that need a LOG derive ceil-log2 from it
+    /// (`shard_level::prover::ceil_log2`).  Empty on older proof bytes
+    /// (treat as 0 placeholders).
     #[serde(default = "std::collections::BTreeMap::new")]
-    pub chip_log_heights: std::collections::BTreeMap<String, u8>,
+    pub chip_heights: std::collections::BTreeMap<String, usize>,
     /// Per-chip (local, global) cumulative sums; empty on older
     /// proof bytes.
     #[serde(default = "std::collections::BTreeMap::new")]
@@ -173,7 +177,7 @@ where
             logup_gkr_proof: LogupGkrProof::dummy(),
             zerocheck_proof: PartialSumcheckProof::dummy(),
             opened_values: ShardOpenedValues { chips: Default::default() },
-            chip_log_heights: std::collections::BTreeMap::new(),
+            chip_heights: std::collections::BTreeMap::new(),
             chip_cumulative_sums: std::collections::BTreeMap::new(),
             evaluation_proof: EvaluationProof::Empty,
             fold_orientation: FoldOrientation::Msb,

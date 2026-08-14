@@ -81,7 +81,7 @@ pub struct ZKMWrapBasefoldWitnessVariable<
     >,
     /// per-input per-chip log heights (mirrors
     /// `chip_cumulative_sums_per_input`).
-    pub chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
+    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     /// vk-merkle witness — in-circuit cousin of
     /// [`ZKMWrapBasefoldWitnessValues::vk_merkle_data`].
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
@@ -122,7 +122,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     let ZKMWrapBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
-        chip_log_heights_per_input,
+        chip_heights_per_input,
         vk_merkle_data,
     } = input;
 
@@ -137,7 +137,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
         vk_legacy,
         proof_tuple,
         chip_cumulative_sums_per_input,
-        chip_log_heights_per_input,
+        chip_heights_per_input,
         machine,
         max_log_row_count,
         output_digest_kind,
@@ -177,7 +177,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             >,
         >,
     >,
-    chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
+    chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
     output_digest_kind: PublicValuesOutputDigest,
@@ -360,17 +360,16 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         }
     };
     // Under VK enforcement: derive from the WITNESSED opened
-    // `degree` instead of baking from host-side chip_log_heights
-    // (mirrors core/compress/deferred).  chip_log_heights_for_input is
+    // `degree` instead of baking from host-side chip_heights
+    // (mirrors core/compress/deferred).  chip_heights_for_input is
     // still consumed by finalize_carried_opened_values below.
-    let empty_log_heights_wrap = std::collections::BTreeMap::<String, u8>::new();
-    let chip_log_heights_for_input =
-        chip_log_heights_per_input.first().unwrap_or(&empty_log_heights_wrap);
+    let empty_heights_wrap = std::collections::BTreeMap::<String, usize>::new();
+    let chip_heights_for_input = chip_heights_per_input.first().unwrap_or(&empty_heights_wrap);
     let chip_height_bits = <SC as FieldHasherVariable<C>>::chip_height_bits_dispatch(
         builder,
         &chip_names,
         &proof_opened_values,
-        chip_log_heights_for_input,
+        chip_heights_for_input,
         max_log_row_count,
     );
     let chip_metadata = crate::shard_basefold::BasefoldShardVerifier::<
@@ -401,7 +400,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
         builder,
         proof_opened_values,
         &chip_names,
-        chip_log_heights_for_input,
+        chip_heights_for_input,
         cumsums_for_input,
         max_log_row_count,
     );

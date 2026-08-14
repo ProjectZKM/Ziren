@@ -139,8 +139,8 @@ where
                             None
                         },
                         // log_degree placeholder — per-chip
-                        // log_height is carried separately by
-                        // `BasefoldShardProof.chip_log_heights`
+                        // height is carried separately by
+                        // `BasefoldShardProof.chip_heights`
                         // (see [`dummy_basefold_shard_proof`]).
                         log_degree: 0,
                         // FULL-POINT openings.  The
@@ -176,10 +176,10 @@ where
 /// * `chips` — per-chip references resolved from the input shape
 ///   (caller does the shape → machine.chips() join).
 /// * `chip_log_heights_pairs` — per-chip (name, log_height) pairs
-///   matching the shape order.  Used to populate both
-///   `chip_log_heights` and `chip_cumulative_sums` maps with one
-///   entry per chip (the shape-stability invariant the parity
-///   test guards).
+///   matching the shape order (shapes stay LOG-keyed).  Used to
+///   populate both `chip_heights` (raw `2^log` heights) and
+///   `chip_cumulative_sums` maps with one entry per chip (the
+///   shape-stability invariant the parity test guards).
 /// * `max_log_row_count` — shard-level upper bound on per-chip
 ///   log-row-count.  Drives `logup_gkr_proof.round_proofs.len()` and
 ///   `zerocheck_proof.univariate_polys.len()`.
@@ -193,7 +193,7 @@ where
 /// | `logup_gkr_proof`      | [`dummy_logup_gkr_proof`]              |
 /// | `zerocheck_proof`      | `dummy_partial_sumcheck_proof(max_log_row_count, 4)` |
 /// | `opened_values`        | `ShardOpenedValues { chips: Vec::new() }` (matches real prover at `prover.rs:365`) |
-/// | `chip_log_heights`     | one entry per chip from input shape    |
+/// | `chip_heights`         | one entry per chip from input shape (raw `2^log`) |
 /// | `chip_cumulative_sums` | one entry per chip (local=ZERO, global=ZERO) |
 /// | `evaluation_proof`     | `EvaluationProof::Empty` — lift adapter handles the Empty arm |
 pub fn dummy_basefold_shard_proof<F, EF, A>(
@@ -278,8 +278,13 @@ where
         ShardOpenedValues { chips: chips_ov }
     };
 
-    let chip_log_heights: BTreeMap<String, u8> =
-        chip_log_heights_pairs.iter().map(|(name, log_h)| (name.clone(), *log_h)).collect();
+    // The proof carries RAW heights (SP1 parity — the felt the prologue
+    // observes); the dummy's chips sit at exactly `2^log_h`, matching the
+    // `quotient[0]` degree bits above.
+    let chip_heights: BTreeMap<String, usize> = chip_log_heights_pairs
+        .iter()
+        .map(|(name, log_h)| (name.clone(), 1usize << *log_h))
+        .collect();
 
     // Per-chip cumulative-sums map: one entry per chip with
     // both `local` and `global` zeroed.  Real prover at
@@ -429,7 +434,7 @@ where
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
-        chip_log_heights,
+        chip_heights,
         chip_cumulative_sums,
         evaluation_proof,
         // The verifier-simulation dummy emits MSB-folded proofs

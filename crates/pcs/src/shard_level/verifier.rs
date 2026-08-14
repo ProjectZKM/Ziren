@@ -176,12 +176,12 @@ impl BasefoldShardVerifier {
         //   2. main_commitment (8 felts)
         //   3. num_chips (1 felt)
         //   4. for each chip:
-        //        a. log_height (1 felt)
+        //        a. RAW height (1 felt)
         //        b. name_length_felt
         //        c. per-byte felts
         //
-        // The per-chip log_height observe sources from
-        // `proof.chip_log_heights` keyed by chip name — the value
+        // The per-chip height observe sources from
+        // `proof.chip_heights` keyed by chip name — the value
         // already carried in the proof and observed in the recursion
         // verifier via the `chip_height_bits` Horner recompose.
 
@@ -196,12 +196,13 @@ impl BasefoldShardVerifier {
         for chip in chips.iter() {
             let name = chip.name();
 
-            // Per-chip log-height observe. Mirrors the
-            // prover's `trace.height()` derivation via
-            // `proof.chip_log_heights[name]`. Default 0 if absent
-            // (matches legacy proof bytes where the map is empty).
-            let log_h = proof.chip_log_heights.get(name.as_str()).copied().unwrap_or(0);
-            challenger.observe(Val::<SC>::from_u64(log_h as u64));
+            // Per-chip RAW-height observe (SP1 parity: the raw
+            // `num_real_entries`, 0 allowed).  Mirrors the prover's
+            // `raw_chip_height` derivation via `proof.chip_heights[name]`.
+            // Default 0 if absent (matches legacy proof bytes where the
+            // map is empty).
+            let h = proof.chip_heights.get(name.as_str()).copied().unwrap_or(0);
+            challenger.observe(Val::<SC>::from_u64(h as u64));
 
             // Name length + name bytes (unchanged).
             let len_felt = Val::<SC>::from_u64(name.len() as u64);

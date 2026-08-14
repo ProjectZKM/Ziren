@@ -18,11 +18,11 @@
 //! (`vk.hash` still loops the heights) — these tests show the rejection
 //! does NOT come from the hash loop (the host `verify_shard` path does
 //! not even recompute the VK hash; it re-derives the transcript from the
-//! observed `chip_log_heights` and consumes the `degree` bits directly).
+//! observed `chip_heights` and consumes the `degree` bits directly).
 //!
 //! WHERE THE HEIGHT LIVES IN A FIX-off HOST SHARD PROOF
 //! (`BasefoldShardProof<F, EF>`):
-//!   * `chip_log_heights[name]`            — observed into the transcript
+//!   * `chip_heights[name]`            — observed into the transcript
 //!     prologue (shard_level/verifier.rs:199-204).
 //!   * `opened_values.chips[c].quotient[0]`— the per-chip `degree` =
 //!     BIG-ENDIAN (MSB at index 0) boolean decomposition of the REAL
@@ -142,15 +142,15 @@ fn reject_tag(res: &Result<(), MachineVerificationError<SC>>) -> String {
 /// (shard_level/prover.rs:927-931), so the `ci`-th opening corresponds to
 /// the `ci`-th NAME in the name-sorted chip set — NOT the `chip_ordering`
 /// HashMap order.  We recover the name from the sorted `chip_ordering`
-/// keys so the transcript (`chip_log_heights[name]`) and the degree
+/// keys so the transcript (`chip_heights[name]`) and the degree
 /// (`opened_values.chips[ci]`) refer to the SAME chip.
 fn pick_forge_target(proof: &MachineProof<SC>) -> (usize, usize, String, usize) {
     let mut fallback: Option<(usize, usize, String, usize)> = None;
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let Some(bf) = sp.basefold_shard_proof.as_ref() else { continue };
         // Name-sorted chip names (the order `opened_values.chips` uses) —
-        // `chip_log_heights` is a name-sorted BTreeMap over the same set.
-        let sorted_names: Vec<String> = bf.chip_log_heights.keys().cloned().collect();
+        // `chip_heights` is a name-sorted BTreeMap over the same set.
+        let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             if !opening.quotient.first().map(|q| !q.is_empty()).unwrap_or(false) {
                 continue;
@@ -289,7 +289,7 @@ fn run_forgery(
 
 /// OVER-CLAIM the degree bits: set a HIGHER bit (claim a taller chip
 /// than the real trace).  Mutates `quotient[0]`, `log_degree`, and the
-/// transcript `chip_log_heights` consistently so the lie is a coherent
+/// transcript `chip_heights` consistently so the lie is a coherent
 /// "this chip is 2x taller" claim.
 fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
@@ -314,7 +314,7 @@ fn overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
-    bf.chip_log_heights.insert(name.to_string(), new_shift as u8);
+    bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
     eprintln!(
         "[STAGE0][FORGE] OVER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
@@ -344,7 +344,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
     opening.log_degree = new_shift;
-    bf.chip_log_heights.insert(name.to_string(), new_shift as u8);
+    bf.chip_heights.insert(name.to_string(), 1usize << new_shift);
     eprintln!(
         "[STAGE0][FORGE] UNDER-claim chip='{name}': real_height={:?} -> claimed 2^{new_shift}",
         real_h
@@ -352,7 +352,7 @@ fn underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
 }
 
 /// Forge ONLY the `degree` bits (`quotient[0]`) — leave the transcript
-/// `chip_log_heights` and `log_degree` HONEST.  This is the SHARPEST
+/// `chip_heights` and `log_degree` HONEST.  This is the SHARPEST
 /// de-risk probe: it isolates the NON-TRANSCRIPT height-binding
 /// substrate (the `full_geq` padding mask over the degree bits → the
 /// LogUp-GKR reconstruction identity), the exact substrate the
@@ -377,7 +377,7 @@ fn forge_degree_only_overclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) {
     let old_idx = bit_len - 1 - top_shift;
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
-    // NOTE: log_degree and chip_log_heights LEFT HONEST on purpose.
+    // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
     eprintln!(
         "[STAGE0][FORGE] DEGREE-only OVER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
@@ -405,7 +405,7 @@ fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) 
     let new_idx = bit_len - 1 - new_shift;
     degree[old_idx] = Challenge::ZERO;
     degree[new_idx] = Challenge::ONE;
-    // NOTE: log_degree and chip_log_heights LEFT HONEST on purpose.
+    // NOTE: log_degree and chip_heights LEFT HONEST on purpose.
     eprintln!(
         "[STAGE0][FORGE] DEGREE-only UNDER-claim chip='{name}': real_height={:?} -> degree bits claim 2^{new_shift} \
          (transcript log_height LEFT HONEST)",
@@ -413,21 +413,21 @@ fn forge_degree_only_underclaim(sp: &mut ShardProof<SC>, ci: usize, name: &str) 
     );
 }
 
-/// Forge ONLY the transcript `chip_log_heights` (leave the degree bits
+/// Forge ONLY the transcript `chip_heights` (leave the degree bits
 /// honest) — isolates whether the transcript observe alone binds height.
 fn forge_transcript_only(sp: &mut ShardProof<SC>, _ci: usize, name: &str) {
     let bf = sp.basefold_shard_proof.as_mut().expect("basefold proof");
-    let cur = bf.chip_log_heights.get(name).copied().unwrap_or(0);
+    let cur = bf.chip_heights.get(name).copied().unwrap_or(0);
     let lie = cur.wrapping_add(1);
-    bf.chip_log_heights.insert(name.to_string(), lie);
-    eprintln!("[STAGE0][FORGE] TRANSCRIPT-only chip='{name}': log_height {cur} -> {lie}");
+    bf.chip_heights.insert(name.to_string(), lie);
+    eprintln!("[STAGE0][FORGE] TRANSCRIPT-only chip='{name}': height {cur} -> {lie}");
 }
 
 // ─────────────────────────────────────────────────────────────────────
 // fibonacci (height-varied MIPS)
 //
 // Two height-binding mechanisms exist on the host shard-verify path:
-//   (A) TRANSCRIPT — `chip_log_heights` is observed into the Fiat-Shamir
+//   (A) TRANSCRIPT — `chip_heights` is observed into the Fiat-Shamir
 //       prologue.  Any height lie that touches it re-derives different
 //       challenges → grinding / consistency rejects.  Binds REGARDLESS
 //       of the `ZIREN_LOGUP_RECONSTRUCTION` gate.
@@ -721,7 +721,7 @@ fn stage0_forge_count_tamper_row_fibonacci() {
 // live degree-mask substrate cannot be fooled into (a) treating a genuinely
 // missing (height-0) chip as active, nor (b) treating a real present active
 // chip as missing.  Both forge ONLY the `degree` bits (`quotient[0]`) and
-// LEAVE the transcript (`log_degree`, `chip_log_heights`) HONEST, so the
+// LEAVE the transcript (`log_degree`, `chip_heights`) HONEST, so the
 // rejection can only come from the degree-masked substrate (the
 // `LogupGkr`/`Zerocheck` reconstruction), NOT the Fiat-Shamir transcript
 // bind.  Run under the un-gated production default (reconstruction ON).
@@ -741,8 +741,8 @@ fn pick_height0_missing_target(proof: &MachineProof<SC>) -> (usize, usize, Strin
     for (si, sp) in proof.shard_proofs.iter().enumerate() {
         let Some(bf) = sp.basefold_shard_proof.as_ref() else { continue };
         // Name-sorted chip names (the order `opened_values.chips` uses) —
-        // `chip_log_heights` is a name-sorted BTreeMap over the same set.
-        let sorted_names: Vec<String> = bf.chip_log_heights.keys().cloned().collect();
+        // `chip_heights` is a name-sorted BTreeMap over the same set.
+        let sorted_names: Vec<String> = bf.chip_heights.keys().cloned().collect();
         for (ci, opening) in bf.opened_values.chips.iter().enumerate() {
             let Some(degree) = opening.quotient.first() else { continue };
             if degree.is_empty() {

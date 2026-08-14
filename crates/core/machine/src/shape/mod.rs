@@ -441,7 +441,7 @@ impl<F: PrimeField32> CoreShapeConfig<F> {
     /// [`Self::find_canonical_cluster_shape`] for the VK-enumeration side.
     ///
     /// `find_canonical_cluster_shape_from_ordered` reconstructs heights from a
-    /// proof's `chip_log_heights` (= `2^log` POST-padding row counts), which
+    /// proof's `chip_heights` (raw POST-padding row counts), which
     /// ROUNDS UP and so can land a low-count CPU-shard chip (e.g. `MiscInstrs`
     /// with 0 real events shows up as `2^1`) in a DIFFERENT min-area cluster
     /// than the record path picks — producing a divergent canonical shape (the

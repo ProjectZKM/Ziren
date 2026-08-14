@@ -277,7 +277,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
     let ZKMWrapBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
-        chip_log_heights_per_input,
+        chip_heights_per_input,
         vk_merkle_data: _,
     } = input;
 
@@ -300,7 +300,7 @@ fn build_outer_circuit(template_input: &ZKMWrapBasefoldWitnessValues<OuterSC>) -
         vk_legacy,
         proof_tuple,
         chip_cumulative_sums_per_input,
-        chip_log_heights_per_input,
+        chip_heights_per_input,
         &wrap_machine,
         max_log_row_count,
         PublicValuesOutputDigest::Root,

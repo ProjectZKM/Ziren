@@ -213,7 +213,7 @@ where
         // the legacy bitrev anchor is used (see the cells/anchor branch).
         // CEIL log — must match the verifier's `ChipEvaluation::log_degree`
         // source (`row_gkr::top_level`: `h.next_power_of_two().trailing_zeros()`)
-        // and `build_chip_log_heights`.  `trailing_zeros` agrees only for
+        // and `build_chip_heights`'s ceil-log derivation.  `trailing_zeros` agrees only for
         // power-of-two heights; under a `next_multiple_of_32` core
         // padding it would silently disagree with the verifier's `embed_LEAD`.
         // Byte-identical for every power-of-two height.

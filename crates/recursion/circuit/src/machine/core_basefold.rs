@@ -129,14 +129,14 @@ fn contains_chip(chip_names: &[String], name: &str) -> bool {
 // Per-shard chip → log_height map, indexed by the same order as
 // `input.shard_proof_tuples`. Empty slice falls back to all-zero
 // degree bits (placeholder behavior). Real heights flow from the
-// host-side `BasefoldShardProof.chip_log_heights` populated by
+// host-side `BasefoldShardProof.chip_heights` populated by
 // `prove_shard_with_data`.
 pub fn verify_core_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMCoreBasefoldWitnessVariable<C, SC>,
     machine: &zkm_pcs::StarkMachine<SC, A>,
     max_log_row_count: usize,
-    chip_log_heights_per_shard: &[std::collections::BTreeMap<String, u8>],
+    chip_heights_per_shard: &[std::collections::BTreeMap<String, usize>],
 ) where
     SC: KoalaBearFriParametersVariable<
         C,
@@ -247,7 +247,7 @@ pub fn verify_core_basefold<C, SC, A>(
     let basefold_vk_ref = &basefold_vk;
     let basefold_shard_verifier_ref = &basefold_shard_verifier;
     let cumsums_per_shard_ref = &chip_cumulative_sums_per_shard;
-    // chip_log_heights_per_shard, machine, max_log_row_count are already
+    // chip_heights_per_shard, machine, max_log_row_count are already
     // refs / Copy.
 
     // ---- VERIFY pass (parallel) ----
@@ -389,25 +389,25 @@ pub fn verify_core_basefold<C, SC, A>(
                 }
             };
             // Real chip_height_bits derivation: pulls per-chip log
-            // heights from `chip_log_heights_per_shard` (witnessed from
-            // each shard's `BasefoldShardProof.chip_log_heights`) and
+            // heights from `chip_heights_per_shard` (witnessed from
+            // each shard's `BasefoldShardProof.chip_heights`) and
             // sorts by (Reverse(log_h), name) to match the prover
             // prologue.  Falls back to a zero-filled map when the
             // input is missing (empty-slice callers).
-            let empty_log_heights_core = std::collections::BTreeMap::<String, u8>::new();
-            let chip_log_heights_for_shard = chip_log_heights_per_shard
+            let empty_heights_core = std::collections::BTreeMap::<String, usize>::new();
+            let chip_heights_for_shard = chip_heights_per_shard
                 .get(i)
-                .unwrap_or(&empty_log_heights_core);
+                .unwrap_or(&empty_heights_core);
             // VERIFY_VK=true: derive chip_height_bits from the
             // WITNESSED per-chip `degree` (= host quotient[0], carried in
             // `proof_opened_values`) instead of baking them from the
-            // COMPILE-TIME `chip_log_heights`.  The observed prologue
+            // COMPILE-TIME `chip_heights`.  The observed prologue
             // value is identical (= log_h) so the host transcript is
             // unchanged, but the program bytes become chip-set-determined
             // (value-independent) so the normalize vk lands in the
             // enumerated vk_map.  See
             // `chip_height_bits_from_opened_degrees` for the encoding.
-            let _ = chip_log_heights_for_shard;
+            let _ = chip_heights_for_shard;
             let chip_height_bits =
                 crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                     builder,
@@ -455,7 +455,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     evaluation_proof_var,
                     chip_height_bits,
                 );
-            // chip_log_heights_per_shard is consumed above; the height bits
+            // chip_heights_per_shard is consumed above; the height bits
             // derive from the witnessed opened degrees.
             let empty_cumsums = std::collections::BTreeMap::new();
             let cumsums_for_shard = cumsums_per_shard_ref
@@ -477,7 +477,7 @@ pub fn verify_core_basefold<C, SC, A>(
                     builder,
                     proof_opened_values,
                     &chip_names,
-                    chip_log_heights_for_shard,
+                    chip_heights_for_shard,
                     cumsums_for_shard,
                     max_log_row_count,
                 );

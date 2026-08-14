@@ -251,9 +251,9 @@ pub mod tests {
              — this is the shape-stability invariant for program_from_shape",
         );
         assert_eq!(
-            proof.chip_log_heights.len(),
+            proof.chip_heights.len(),
             shape.inner.len(),
-            "chip_log_heights must have one entry per chip in the shape",
+            "chip_heights must have one entry per chip in the shape",
         );
         // opened_values.chips is intentionally empty in the basefold
         // pipeline — the recursion verifier builds per-chip openings

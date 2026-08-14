@@ -159,16 +159,16 @@ impl<SC: StarkGenericConfig> ShardProof<SC> {
     /// is answered by the instruction-chip set instead: a memory-global or
     /// precompile shard contains none of these.
     pub fn contains_execution(&self) -> bool {
-        let heights = &self.basefold().chip_log_heights;
+        let heights = &self.basefold().chip_heights;
         EXECUTION_CHIP_NAMES.iter().any(|n| heights.contains_key(*n))
     }
 
     pub fn contains_global_memory_init(&self) -> bool {
-        self.basefold().chip_log_heights.contains_key("MemoryGlobalInit")
+        self.basefold().chip_heights.contains_key("MemoryGlobalInit")
     }
 
     pub fn contains_global_memory_finalize(&self) -> bool {
-        self.basefold().chip_log_heights.contains_key("MemoryGlobalFinalize")
+        self.basefold().chip_heights.contains_key("MemoryGlobalFinalize")
     }
 }
 
@@ -211,16 +211,20 @@ impl From<[u32; 8]> for DeferredDigest {
 }
 
 impl<SC: StarkGenericConfig> ShardProof<SC> {
-    /// The shard's chip shape, from the BaseFold payload's per-chip log
+    /// The shard's chip shape, from the BaseFold payload's per-chip RAW
     /// heights (a name-sorted `BTreeMap`, which is exactly the shard's
-    /// chip order).
+    /// chip order).  Shapes are LOG-height keyed, so this derives
+    /// ceil-log2 from the raw value — the transcript observes the raw
+    /// height, the shape system keeps its log convention.
     pub fn shape(&self) -> OrderedShape {
         OrderedShape {
             inner: self
                 .basefold()
-                .chip_log_heights
+                .chip_heights
                 .iter()
-                .map(|(name, log_height)| (name.clone(), *log_height as usize))
+                .map(|(name, height)| {
+                    (name.clone(), crate::shard_level::prover::ceil_log2(*height))
+                })
                 .collect(),
         }
     }

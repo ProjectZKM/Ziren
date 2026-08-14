@@ -16,21 +16,22 @@ use crate::{Challenge, Chip, ShardOpenedValues, StarkGenericConfig, Val};
 /// `main_commitment`, and returns the precomputed commit so the caller
 /// threads it into the jagged-PCS opening.  The opening then skips its own
 /// commit step and the in-band commit observe, matching the verifier
-/// counterpart (`verify_jagged_basefold_no_observe`).  The incoming
-/// `main_traces` views are only relabeled to `InnerVal` for the commit build
-/// (a zero-copy slice reinterpret) and returned unchanged — no trace data is
-/// copied or moved.
-pub fn commit_traces<'t, SC, A, P>(
+/// counterpart (`verify_jagged_basefold_no_observe`).  The `main_traces`
+/// views are BORROWED (SP1's `commit_traces(&self, &Traces)` shape) and only
+/// relabeled to `InnerVal` for the commit build (a zero-copy slice
+/// reinterpret) — no trace data is copied or moved, and no ownership
+/// round-trips through the return.
+pub fn commit_traces<SC, A, P>(
     // The COMMIT dispatch seam: `commit_multilinears` goes to the prover's
     // `MachineProver` method, so a `StarkGpuProver` device override is picked up
     // and `CpuProver` takes the host default.
     prover: &P,
     chips: &[&Chip<Val<SC>, A>],
     // BORROWED views over the shard prover's shared
-    // `Arc<Mle>` store (no owned deep copy).  Passed through untouched on the
-    // host eager-commit path; on the device / in-dispatch commit path they are
-    // zero-copy relabeled to InnerVal views for the commit hook / host fallback.
-    main_traces: Vec<crate::multilinear::PaddedMle<Val<SC>>>,
+    // `Arc<Mle>` store (no owned deep copy).  On the device / in-dispatch
+    // commit path they are zero-copy relabeled to InnerVal views for the
+    // commit hook / host fallback.
+    main_traces: &[crate::multilinear::PaddedMle<Val<SC>>],
     // The per-shard rev(zeta) orientation
     // (from `StarkMachine::core_rev()`).  Threaded to the host-fallback
     // precompute (dense materialize) and FORCED onto the built
@@ -45,7 +46,6 @@ pub fn commit_traces<'t, SC, A, P>(
     // shrink / wrap path (byte-identical).
     recursion_area_pin: Option<usize>,
 ) -> (
-    Vec<crate::multilinear::PaddedMle<Val<SC>>>,
     [Val<SC>; 8],
     crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<<SC as crate::BasefoldRing>::BfMmcs>,
 )
@@ -83,7 +83,7 @@ where
     // `OuterChallenger` (and `BfMmcs = OuterValMmcs`).  The inner ring routes the
     // commit through the `commit_multilinears` device seam (so a `StarkGpuProver`
     // override is picked up); the outer ring — always host (the wrap never runs
-    // on the GPU) — builds via the `BasefoldRing::precompute_jagged_inline`
+    // on the GPU) — builds via the `BasefoldRing::commit_multilinears`
     // trait method (which encapsulates the ring-generic `SC::BfMmcs` bounds).
     let is_inner =
         TypeId::of::<SC::Challenger>() == TypeId::of::<crate::jagged_pcs::JaggedChallenger>();
@@ -178,11 +178,8 @@ where
         // Build the ring-native BaseFold precompute via the `BasefoldRing`
         // trait method, INLINE during the prove pass.  The returned commit
         // already stamps `rev` / `recursion_area_pin`.
-        let precomputed_generic = <SC as BasefoldRing>::precompute_jagged_inline(
-            &named_inner,
-            use_rev,
-            recursion_area_pin,
-        );
+        let precomputed_generic =
+            <SC as BasefoldRing>::commit_multilinears(&named_inner, use_rev, recursion_area_pin);
         // Ring-generic digest: NO jagged hash-bind on the outer ring (the
         // BN254 wrap re-binds in its registered hook).
         let digest_jv: [crate::jagged_pcs::JaggedVal; 8] =
@@ -194,14 +191,13 @@ where
         (main_commitment, precomputed_generic)
     };
 
-    // The borrowed `main_traces` views are returned unchanged (`named_inner`
-    // only relabeled them to InnerVal for the commit build; no owned buffer to
-    // move back).  They still borrow the shared `Arc<Mle>` store for the open.
+    // The borrowed `main_traces` views stay with the caller (`named_inner`
+    // only relabeled them to InnerVal for the commit build).  They still
+    // borrow the shared `Arc<Mle>` store for the open.
     drop(named_inner);
 
-    (main_traces, main_commitment, precomputed_generic)
+    (main_commitment, precomputed_generic)
 }
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Shared NON-DEVICE shard-driver orchestration helpers, `pub` so the
@@ -209,6 +205,38 @@ where
 // helper's operation order + observe/sample sequence must stay in lockstep
 // with the inline driver above (the drivers must emit byte-identical proofs).
 // ═══════════════════════════════════════════════════════════════════════════
+
+/// Per-chip RAW height for the transcript prologue + the proof's
+/// `chip_heights` map (SP1 parity: the observed felt is the raw
+/// `num_real_entries`, 0 allowed for an unexercised chip — NOT its
+/// ceil-log2).  Device-residency aware: a device chip's REAL height is
+/// baked into its dummy MLE (`metadata_height()`), floored at 1 — the
+/// device dummy's VirtualGeq floor.  This is the SINGLE source for the
+/// observe, the proof map and the degree-bit decomposition; deriving any
+/// of them separately risks a transcript-vs-proof desync.
+#[inline]
+pub fn raw_chip_height<F: p3_field::Field>(pm: &crate::multilinear::PaddedMle<F>) -> usize {
+    if pm.inner().is_some() {
+        pm.num_real_entries()
+    } else {
+        pm.metadata_height().unwrap_or(0).max(1)
+    }
+}
+
+/// ceil(log2(h)) with `ceil_log2(0) == 0` — the shared geometry
+/// derivation for consumers that need a LOG height (shape lookups,
+/// `log_degree`) from the RAW `chip_heights` value.  Kept separate from
+/// the transcript felt: the prologue observes the RAW height, never this.
+#[inline]
+pub fn ceil_log2(h: usize) -> usize {
+    if h <= 1 {
+        0
+    } else if h.is_power_of_two() {
+        h.trailing_zeros() as usize
+    } else {
+        (usize::BITS - h.leading_zeros()) as usize
+    }
+}
 
 /// Stage-1 transcript prologue.  Observes, in order:
 /// `public_values → main_commitment → num_chips → per-chip {height_felt,
@@ -243,19 +271,15 @@ pub fn observe_transcript_prologue<SC, A>(
         "observe_transcript_prologue: chips/shared_trace_mles must be parallel",
     );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
-        // Per-chip log-height observe (device-residency aware): a device
-        // chip's REAL height is baked into its dummy MLE, read back
-        // via `metadata_height()`; a host chip reports its real row count the
-        // same way.  Falls back to h=1/log_h=0 for genuinely unexercised
-        // chips.  Source matches the `chip_log_heights` map + the verifier
-        // re-observe.
-        let h = pm.metadata_height().unwrap_or(0).max(1);
-        let log_h = if h.is_power_of_two() {
-            h.trailing_zeros() as u64
-        } else {
-            (usize::BITS - h.leading_zeros()) as u64
-        };
-        challenger.observe(Val::<SC>::from_u64(log_h));
+        // Per-chip RAW-height observe (SP1 parity — shard.rs observes
+        // `num_real_entries` directly, a true 0 for an unexercised chip;
+        // the previous ceil-log2 felt with a `.max(1)` floor is retired).
+        // Source matches the proof's `chip_heights` map
+        // (`build_chip_heights`) + the verifier re-observe + the recursion
+        // circuit's Horner recompose of the witnessed degree bits — the
+        // FOUR mirrors observe this exact value.
+        let h = raw_chip_height(pm);
+        challenger.observe(Val::<SC>::from_u64(h as u64));
 
         // Name length + name bytes.
         let name_bytes = chip.name();
@@ -582,19 +606,19 @@ where
     out
 }
 
-/// Per-chip log-height (u8, stored on the proof) + REAL per-chip height
-/// (usize, the VirtualGeq threshold feeding the `opened_values` degree-bit
-/// decomposition) maps, device-residency aware.  MUST agree with the Phase-1
-/// prologue observe + the verifier re-observe.
-pub fn build_chip_log_heights<SC, A>(
+/// Per-chip RAW height map (the value stored on the proof as
+/// `chip_heights`, observed in the Phase-1 prologue AND the VirtualGeq
+/// threshold feeding the `opened_values` degree-bit decomposition),
+/// device-residency aware.  MUST agree with the Phase-1 prologue observe +
+/// the verifier re-observe — all three read [`raw_chip_height`].
+pub fn build_chip_heights<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     shared_trace_mles: &[crate::multilinear::PaddedMle<Val<SC>>],
-) -> (std::collections::BTreeMap<String, u8>, std::collections::BTreeMap<String, usize>)
+) -> std::collections::BTreeMap<String, usize>
 where
     SC: StarkGenericConfig,
     A: MachineAir<Val<SC>>,
 {
-    let mut chip_log_heights = std::collections::BTreeMap::new();
     let mut chip_heights = std::collections::BTreeMap::new();
     // PARALLEL-ARRAY PRECONDITION.  The pairings below are POSITIONAL (`zip`),
     // and `zip` TRUNCATES on a length mismatch rather than failing — so a
@@ -603,30 +627,18 @@ where
     assert_eq!(
         chips.len(),
         shared_trace_mles.len(),
-        "build_chip_log_heights: chips/shared_trace_mles must be parallel",
+        "build_chip_heights: chips/shared_trace_mles must be parallel",
     );
     for (chip, pm) in chips.iter().zip(shared_trace_mles.iter()) {
         // Device residency: a device chip's REAL height is baked into its
-        // dummy MLE, read back via `metadata_height()`.  A MISSING
-        // canonical-cluster chip is a genuine 0-row matrix (log_h 0 => all-zero
-        // degree bits); the device branch keeps `.max(1)`.
-        let h = if pm.inner().is_some() {
-            pm.num_real_entries()
-        } else {
-            pm.metadata_height().unwrap_or(0).max(1)
-        };
-        let log_h = if h <= 1 {
-            0u8
-        } else if h.is_power_of_two() {
-            h.trailing_zeros() as u8
-        } else {
-            (usize::BITS - h.leading_zeros()) as u8
-        };
+        // dummy MLE, read back via `metadata_height()` with the `.max(1)`
+        // dummy floor; a MISSING canonical-cluster HOST chip is a genuine
+        // 0-row matrix (raw 0 => all-zero degree bits).
+        let h = raw_chip_height(pm);
         let name = MachineAir::<Val<SC>>::name(*chip);
-        chip_log_heights.insert(name.clone(), log_h);
         chip_heights.insert(name, h);
     }
-    (chip_log_heights, chip_heights)
+    chip_heights
 }
 
 /// Per-chip trace@z opened values, emitted in chip-NAME order (matching the
@@ -637,7 +649,6 @@ where
 pub fn build_opened_values<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
     mut trace_at_z: std::collections::BTreeMap<String, Vec<Challenge<SC>>>,
-    chip_log_heights: &std::collections::BTreeMap<String, u8>,
     chip_heights: &std::collections::BTreeMap<String, usize>,
     max_log_row_count: usize,
 ) -> ShardOpenedValues<Val<SC>, Challenge<SC>>
@@ -659,10 +670,12 @@ where
             let mut prep_local: Vec<Challenge<SC>> = trace_at_z.remove(&name).unwrap_or_default();
             let split = prep_width.min(prep_local.len());
             let main_local = prep_local.split_off(split);
-            let log_degree = *chip_log_heights.get(&name).unwrap_or(&0) as usize;
             // big-endian bit decomposition of the REAL height (the
             // VirtualGeq threshold).  bit_len = max_log_row_count + 1.
-            let height = *chip_heights.get(&name).unwrap_or(&1);
+            // `log_degree` is DERIVED geometry (ceil-log2 of the raw
+            // height) — the transcript observes the RAW height, not this.
+            let height = *chip_heights.get(&name).unwrap_or(&0);
+            let log_degree = ceil_log2(height);
             let bit_len = max_log_row_count + 1;
             let degree_bits: Vec<Challenge<SC>> = (0..bit_len)
                 .map(|i| {
@@ -756,7 +769,7 @@ pub fn assemble_basefold_shard_proof<SC>(
     logup_gkr_proof: crate::shard_level::types::LogupGkrProof<Val<SC>, Challenge<SC>>,
     zerocheck_proof: crate::shard_level::types::PartialSumcheckProof<Challenge<SC>>,
     opened_values: ShardOpenedValues<Val<SC>, Challenge<SC>>,
-    chip_log_heights: std::collections::BTreeMap<String, u8>,
+    chip_heights: std::collections::BTreeMap<String, usize>,
     chip_cumulative_sums: std::collections::BTreeMap<
         String,
         crate::shard_level::shard_proof::ChipCumulativeSums<Val<SC>, Challenge<SC>>,
@@ -850,7 +863,7 @@ where
         logup_gkr_proof,
         zerocheck_proof,
         opened_values,
-        chip_log_heights,
+        chip_heights,
         chip_cumulative_sums,
         evaluation_proof,
         fold_orientation: orientation,

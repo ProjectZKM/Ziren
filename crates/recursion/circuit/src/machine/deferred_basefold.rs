@@ -103,7 +103,7 @@ pub struct ZKMDeferredBasefoldWitnessVariable<
     >,
     /// per-input per-chip log heights (mirrors
     /// `chip_cumulative_sums_per_input`).
-    pub chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>>,
+    pub chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>>,
     pub vk_merkle_data: ZKMMerkleProofWitnessVariable<C, SC>,
     pub start_reconstruct_deferred_digest: [Felt<C::F>; POSEIDON_NUM_WORDS],
     pub zkm_vk_digest: [Felt<C::F>; DIGEST_SIZE],
@@ -155,7 +155,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
     let ZKMDeferredBasefoldWitnessVariable {
         vks_and_proofs,
         chip_cumulative_sums_per_input,
-        chip_log_heights_per_input,
+        chip_heights_per_input,
         vk_merkle_data,
         start_reconstruct_deferred_digest,
         zkm_vk_digest,
@@ -333,12 +333,12 @@ pub fn verify_deferred_basefold<C, SC, A>(
             }
         };
         // VERIFY_VK=true: derive from the WITNESSED opened
-        // `degree` instead of baking from host-side chip_log_heights
+        // `degree` instead of baking from host-side chip_heights
         // (mirrors core/compress).
-        let empty_log_heights_deferred = std::collections::BTreeMap::<String, u8>::new();
-        let chip_log_heights_for_input =
-            chip_log_heights_per_input.get(_deferred_i).unwrap_or(&empty_log_heights_deferred);
-        let _ = chip_log_heights_for_input;
+        let empty_heights_deferred = std::collections::BTreeMap::<String, usize>::new();
+        let chip_heights_for_input =
+            chip_heights_per_input.get(_deferred_i).unwrap_or(&empty_heights_deferred);
+        let _ = chip_heights_for_input;
         let chip_height_bits =
             crate::shard_proof_variable_lift::chip_height_bits_from_opened_degrees::<C>(
                 builder,
@@ -370,12 +370,12 @@ pub fn verify_deferred_basefold<C, SC, A>(
         let empty_cumsums_deferred = std::collections::BTreeMap::new();
         let cumsums_for_input =
             chip_cumulative_sums_per_input.get(_deferred_i).unwrap_or(&empty_cumsums_deferred);
-        let empty_log_heights_deferred = std::collections::BTreeMap::new();
+        let empty_heights_deferred = std::collections::BTreeMap::new();
         let opened_values = crate::shard_proof_variable_lift::finalize_carried_opened_values::<C>(
             builder,
             proof_opened_values,
             &chip_names,
-            &empty_log_heights_deferred,
+            &empty_heights_deferred,
             cumsums_for_input,
             max_log_row_count,
         );

@@ -302,11 +302,11 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            // Mirror chip_log_heights per input (plain u8 map, no
+            // Mirror chip_heights per input (plain RAW-height map, no
             // witness-stream consumption — host-side metadata threaded
-            // into chip_height_bits_from_log_heights at the lift site).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
+            // into chip_height_bits_from_heights at the lift site).
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             // Read vk-merkle witness so verify_compress_basefold can
             // bind each child VK hash to vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
@@ -314,7 +314,7 @@ mod basefold_witness {
             ZKMCompressBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
-                chip_log_heights_per_input,
+                chip_heights_per_input,
                 vk_merkle_data,
                 is_complete,
             }
@@ -328,9 +328,9 @@ mod basefold_witness {
                     sums.write(witness);
                 }
             }
-            // chip_log_heights is host-side metadata; no witness-stream
+            // chip_heights is host-side metadata; no witness-stream
             // write (the recursion circuit consumes it via constants
-            // emitted at compile-time inside chip_height_bits_from_log_heights).
+            // emitted at compile-time inside chip_height_bits_from_heights).
             // Write vk-merkle witness in matching read order.
             self.vk_merkle_data.write(witness);
             InnerVal::from_bool(self.is_complete).write(witness);
@@ -356,13 +356,13 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            // Mirror chip_log_heights per input (host-side metadata).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
+            // Mirror chip_heights per input (host-side metadata).
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             ZKMDeferredBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
-                chip_log_heights_per_input,
+                chip_heights_per_input,
                 vk_merkle_data: self.vk_merkle_data.read(builder),
                 start_reconstruct_deferred_digest: self
                     .start_reconstruct_deferred_digest
@@ -420,16 +420,16 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            // Mirror chip_log_heights per input (host-side metadata).
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
+            // Mirror chip_heights per input (host-side metadata).
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             // Read vk-merkle witness so verify_wrap_basefold can bind
             // the input VK hash against vk_merkle_data.root.
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
-                chip_log_heights_per_input,
+                chip_heights_per_input,
                 vk_merkle_data,
             }
         }
@@ -474,13 +474,13 @@ mod basefold_witness {
                         .collect::<std::collections::BTreeMap<_, _>>()
                 })
                 .collect();
-            let chip_log_heights_per_input: Vec<std::collections::BTreeMap<String, u8>> =
-                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_log_heights.clone()).collect();
+            let chip_heights_per_input: Vec<std::collections::BTreeMap<String, usize>> =
+                self.vks_and_proofs.iter().map(|(_, sp)| sp.chip_heights.clone()).collect();
             let vk_merkle_data = self.vk_merkle_data.read(builder);
             ZKMWrapBasefoldWitnessVariable {
                 vks_and_proofs,
                 chip_cumulative_sums_per_input,
-                chip_log_heights_per_input,
+                chip_heights_per_input,
                 vk_merkle_data,
             }
         }

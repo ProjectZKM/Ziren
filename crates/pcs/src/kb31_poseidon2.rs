@@ -438,16 +438,11 @@ pub mod koala_bear_poseidon2 {
         chip_traces: &[(String, p3_matrix::dense::RowMajorMatrix<crate::jagged_pcs::JaggedVal>)],
         use_rev: bool,
     ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommit {
-        use crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic;
-        let mmcs = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::bf_mmcs();
-        let fri = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::fri_config();
         // The commit consumes BORROWED views over the
         // owned `chip_traces` (JaggedVal == InnerVal), kept alive across the call.
         let chip_trace_views = crate::jagged_pcs::jagged::views_over_owned(chip_traces);
-        let pre = precompute_jagged_basefold_commit_generic::<crate::jagged_pcs::JaggedMmcs>(
+        <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
             &chip_trace_views,
-            mmcs,
-            fri,
             // The MACHINE's orientation: the preprocessed round is opened at
             // the same shard point as main, so both rounds must agree on row
             // order.
@@ -455,8 +450,7 @@ pub mod koala_bear_poseidon2 {
             // Preprocessed / setup commit is never a recursion prove commit
             // → no AREA PIN (`None`), byte-identical.
             None,
-        );
-        pre
+        )
     }
 
     impl ZeroCommitment<KoalaBearPoseidon2> for Pcs {
@@ -493,19 +487,8 @@ pub mod koala_bear_poseidon2 {
             crate::jagged_pcs::basefold_commit_digest_felts(commit)
         }
 
-        fn precompute_jagged_inline(
-            named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
-            use_rev: bool,
-            recursion_area_pin: Option<usize>,
-        ) -> crate::jagged_pcs::jagged::PrecomputedJaggedCommitGeneric<Self::BfMmcs> {
-            crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic::<Self::BfMmcs>(
-                named_inner,
-                Self::bf_mmcs(),
-                Self::fri_config(),
-                use_rev,
-                recursion_area_pin,
-            )
-        }
+        // `commit_multilinears` — the ring commit — is the trait DEFAULT
+        // (this ring's `bf_mmcs()` / `fri_config()` are what it reads).
 
         /// Ring-native jagged BaseFold open.  `Self::BfMmcs == JaggedMmcs` and
         /// `Self::Challenger == JaggedChallenger` CONCRETELY here, so the shared

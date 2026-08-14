@@ -91,7 +91,7 @@ pub const DEFAULT_LOG_STACKING_HEIGHT: u32 = 21;
 /// keyed by which machine is proving: the recursion (`compress`) prover passes
 /// `Some(RECURSION_LOG_TRACE_AREA)` as the `recursion_area_pin` param of
 /// `MachineProver::commit`, so
-/// [`precompute_jagged_basefold_commit_generic`] bumps `packing.log_dense_size` to
+/// [`crate::config::BasefoldRing::commit_multilinears`] bumps `packing.log_dense_size` to
 /// `max(natural, RECURSION_LOG_TRACE_AREA)` and record it on
 /// `PrecomputedJaggedCommit.recursion_area_pin` (read back at open); core passes
 /// `None` and is byte-identical to the unpinned path.
@@ -810,9 +810,7 @@ pub mod jagged {
     use p3_matrix::dense::RowMajorMatrix;
 
     use crate::basefold::StackedBasefoldProof;
-    use crate::jagged::{
-        compute_jagged_metadata, materialize_dense_jagged, JaggedChipInfo, JaggedPacking,
-    };
+    use crate::jagged::{JaggedChipInfo, JaggedPacking};
     use crate::jagged_sumcheck::{verify_jagged_reduction, JaggedReductionProof};
     use crate::kb31_poseidon2::{InnerChallenge, InnerVal};
 
@@ -1056,7 +1054,7 @@ pub mod jagged {
 
     /// Pre-computed jagged-PCS commit bundle for the
     /// single-main-commit flow.  Produced by
-    /// [`precompute_jagged_basefold_commit_generic`] before the shard-level
+    /// [`crate::config::BasefoldRing::commit_multilinears`] before the shard-level
     /// Phase 1 prologue, then consumed as a [`JaggedOpenRound`] by
     /// [`prove_jagged_basefold_rounds`] in Phase 4.
     ///
@@ -1111,86 +1109,11 @@ pub mod jagged {
     // (called DIRECTLY by the override); its recursion-AREA-PIN + provider-read
     // rev(zeta) semantics match the host path byte-identically.
 
-    /// BaseFold-over-BN254 generic precompute: build the BaseFold commit
-    /// over an arbitrary Mmcs (the ring's `BasefoldRing::BfMmcs`). Inner uses
-    /// Poseidon2-KoalaBear; the wrap (OuterSC) passes the Poseidon2-BN254
-    /// `OuterValMmcs` so the commitment is the BN254 root. The DFT is over
-    /// KoalaBear for BOTH rings (Val == KoalaBear everywhere), so `JaggedDft`
-    /// is reused. No challenger observe (caller surfaces the commitment).
-    pub fn precompute_jagged_basefold_commit_generic<MT>(
-        chip_traces: &[ChipTraceView],
-        mmcs: MT,
-        fri: FriConfig<crate::jagged_pcs::JaggedVal>,
-        // The per-shard rev(zeta) orientation (from `StarkMachine::core_rev()`);
-        // threaded to `materialize_dense_jagged` and recorded on the returned
-        // `PrecomputedJaggedCommitGeneric.rev`.  `false` on the wrap/BN254 path.
-        use_rev: bool,
-        // The recursion-layer AREA PIN.
-        // `Some(target_log)` (a recursion/compress commit) => pin
-        // `log_dense_size` to `max(natural, target_log)`; `None` (CORE / shrink /
-        // wrap) => NATURAL own-area packing.
-        recursion_area_pin: Option<usize>,
-    ) -> PrecomputedJaggedCommitGeneric<MT>
-    where
-        // `'static`/`Send` bounds on the commitment + prover data.  Both rings
-        // (JaggedMmcs / OuterValMmcs) are concrete `'static` types, so this is a
-        // no-op tightening for every existing caller.
-        MT: p3_commit::Mmcs<
-                crate::jagged_pcs::JaggedVal,
-                Commitment: Clone + Send + 'static,
-                ProverData<RowMajorMatrix<crate::jagged_pcs::JaggedVal>>: Send + 'static,
-            > + Clone
-            + 'static,
-    {
-        let mut packing = compute_jagged_metadata::<InnerVal>(chip_traces);
-        // RECURSION-LAYER AREA PIN.  When the
-        // recursion (`compress`) prover passes `Some(target_log)` here, so
-        // raise the committed `dense_len` to the pin floor so the dense
-        // materialize + commit run at a FIXED area (`2^pin`) → constant
-        // `num_stripes` → compose VK = f(chip-set, arity).  `None` on every
-        // CORE / shrink / wrap path → NATURAL own-area packing (byte-identical).
-        let pin = recursion_area_pin;
-        if let Some(target) = pin {
-            packing.dense_len = packing.dense_len.max(1usize << target);
-        }
-        // A round with NO CELLS still has to produce a well-formed commitment.
-        // `setup` drops every chip that generates no preprocessed trace, so a
-        // machine whose chips all have `preprocessed_width() == 0` reaches here
-        // with an empty trace list and a zero-length dense — and the Merkle
-        // commit cannot commit zero matrices ("all matrices have height 0").
-        // The shard prover already handles the empty round downstream: it reads
-        // the round's chips off `packing.chip_infos`, which stays EMPTY here, so
-        // no preprocessed round is opened and the proof is single-round.  All
-        // that is needed is one cell to hang a commitment on; nothing is ever
-        // opened against it.
-        if packing.dense_len == 0 {
-            packing.dense_len = 1;
-        }
-        let (commit, prover_data) = {
-            let dense_q =
-                materialize_dense_jagged::<InnerVal>(chip_traces, packing.dense_len, use_rev);
-            debug_assert_eq!(dense_q.len(), packing.dense_len);
-            let dense_traces = vec![(
-                alloc::string::String::from("<jagged-dense>"),
-                RowMajorMatrix::new(dense_q, 1),
-            )];
-
-            let dft = std::sync::Arc::new(crate::jagged_pcs::JaggedDft::default());
-            crate::jagged_pcs::commit_jagged_pcs_generic::<MT, crate::jagged_pcs::JaggedDft>(
-                dense_traces,
-                mmcs,
-                dft,
-                fri,
-            )
-        };
-        PrecomputedJaggedCommitGeneric {
-            packing,
-            commit,
-            prover_data,
-            rev: use_rev,
-            recursion_area_pin,
-        }
-    }
+    // The generic BaseFold precompute body now lives as the DEFAULT
+    // `BasefoldRing::commit_multilinears` trait method (SP1's single
+    // generic `StackedPcsProver::commit_multilinears` shape — no free-fn
+    // indirection); each ring commits with its own `bf_mmcs()` /
+    // `fri_config()`.
 
     /// One commitment ROUND's inputs to the jagged open.
     ///
@@ -2156,7 +2079,7 @@ mod test {
         // Two synthetic chip traces of different shapes, committed the way
         // PRODUCTION commits them: as ONE width-1 jagged dense
         // (`materialize_dense_jagged` over `committed_dense_len` cells —
-        // `precompute_jagged_basefold_commit_generic`'s call shape).  Committing the
+        // `BasefoldRing::commit_multilinears`'s call shape).  Committing the
         // raw per-chip matrices instead would round EACH chip's height up to
         // whole 2^21 stacking blocks (28 stripes for this toy, vs the dense's
         // single stripe).
@@ -2319,7 +2242,7 @@ mod test {
     /// row-MLE evaluations the production prover reads off the zerocheck
     /// residual, recomputed here from the traces.  Legacy bitrev row
     /// orientation (`use_rev = false`), in lockstep with each test's
-    /// `precompute_jagged_inline(&views, false, None)` commit — the pairing
+    /// `commit_multilinears(&views, false, None)` commit — the pairing
     /// the shard prover carries via `PrecomputedJaggedCommit.rev`.
     fn column_claims(
         views: &[ChipTraceView],
@@ -2405,7 +2328,9 @@ mod test {
         // (inner ring, legacy `use_rev = false`, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
-        let precomputed = KoalaBearPoseidon2::precompute_jagged_inline(&views, false, None);
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views, false, None,
+        );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2435,7 +2360,9 @@ mod test {
         // (inner ring, legacy `use_rev = false`, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
-        let precomputed = KoalaBearPoseidon2::precompute_jagged_inline(&views, false, None);
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views, false, None,
+        );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2499,7 +2426,9 @@ mod test {
         // (inner ring, legacy `use_rev = false`, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
-        let precomputed = KoalaBearPoseidon2::precompute_jagged_inline(&views, false, None);
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views, false, None,
+        );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {
@@ -2555,7 +2484,9 @@ mod test {
         // (inner ring, legacy `use_rev = false`, no area pin), observe it
         // (the shard-level Phase 1 prologue observe), open the single MAIN
         // round.
-        let precomputed = KoalaBearPoseidon2::precompute_jagged_inline(&views, false, None);
+        let precomputed = <KoalaBearPoseidon2 as crate::config::BasefoldRing>::commit_multilinears(
+            &views, false, None,
+        );
         p_chal.observe(precomputed.commit.original_commitment.clone());
         let r_row = r_row_suffixes(&views, &z_row);
         let rounds = [JaggedOpenRound {

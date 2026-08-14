@@ -261,7 +261,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
     /// Ring-aware chip-height-bits derivation for the SC-generic wrap
     /// verifier.  INNER ring: WITNESSED (from the opened `degree`,
     /// value-independent — keeps the witnessed vk verifiable).  OUTER/gnark ring:
-    /// BAKED from chip_log_heights — the gnark constraint compiler has
+    /// BAKED from the RAW `chip_heights` — the gnark constraint compiler has
     /// no `CircuitV2HintBitsF`, and the gnark circuit is a single
     /// artifact whose inputs have canonical shapes, so value-dependence
     /// is moot there (earlier baked behavior preserved).
@@ -269,7 +269,7 @@ pub trait FieldHasherVariable<C: CircuitConfig>: FieldHasher<C::F> {
         builder: &mut Builder<C>,
         chip_names: &[String],
         opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
-        chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>
     where
@@ -507,7 +507,7 @@ impl<C: CircuitConfig<F = KoalaBear, Bit = Felt<KoalaBear>>> FieldHasherVariable
         builder: &mut Builder<C>,
         chip_names: &[String],
         opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
-        _chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        _chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>
     where
@@ -760,20 +760,20 @@ impl<C: CircuitConfig<F = KoalaBear, N = Bn254, Bit = Var<Bn254>>> FieldHasherVa
         builder: &mut Builder<C>,
         chip_names: &[String],
         _opened_values: &crate::basefold_chip_opened_values::BasefoldShardOpenedValuesVariable<C>,
-        chip_log_heights: &std::collections::BTreeMap<String, u8>,
+        chip_heights: &std::collections::BTreeMap<String, usize>,
         max_log_row_count: usize,
     ) -> Vec<(String, Vec<Felt<C::F>>)>
     where
         C: CircuitConfig<F = KoalaBear, EF = zkm_pcs::InnerChallenge>,
     {
-        // OUTER/gnark ring: BAKED from chip_log_heights — the gnark
+        // OUTER/gnark ring: BAKED from the RAW chip_heights — the gnark
         // constraint compiler has no CircuitV2HintBitsF, and the single
         // gnark artifact's inputs have canonical shapes (earlier baked wrap
         // behavior preserved on this ring).
-        crate::shard_proof_variable_lift::chip_height_bits_from_log_heights::<C>(
+        crate::shard_proof_variable_lift::chip_height_bits_from_heights::<C>(
             builder,
             chip_names,
-            chip_log_heights,
+            chip_heights,
             max_log_row_count,
         )
     }
