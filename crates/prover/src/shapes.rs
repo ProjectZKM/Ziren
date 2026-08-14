@@ -36,8 +36,8 @@ pub enum ZKMProofShape {
     /// per-shard shape: the production normalize is arity-1 (`compress` →
     /// `get_first_layer_inputs` with first_layer_batch_size=1 →
     /// `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
-    /// `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
-    /// shard_proofs.len()==1).  Arity≥2 Recursion shapes would be a PHANTOM
+    /// `ZKMCoreBasefoldWitnessValues`, hard-asserted
+    /// there).  Arity≥2 Recursion shapes would be a PHANTOM
     /// VK class no real proof produces; cross-shard aggregation lives in
     /// COMPRESS.  The `Vec` is retained for wire-format/serde stability but
     /// the enumerator emits only `vec![one]` and the dummy/in-circuit
@@ -694,10 +694,10 @@ impl ZKMProofShape {
         // The production normalize is single-shard (`compress` →
         // `get_first_layer_inputs` with first_layer_batch_size=1 →
         // `get_recursion_core_inputs_basefold` chunks(1) → one core shard per
-        // `ZKMCoreBasefoldWitnessValues`; SP1 core.rs:118 asserts
-        // shard_proofs.len()==1).  Arity≥2 Recursion shapes are a PHANTOM
+        // `ZKMCoreBasefoldWitnessValues`, hard-asserted
+        // there).  Arity≥2 Recursion shapes are a PHANTOM
         // VK class that NO real proof produces.  Cross-shard aggregation lives
-        // in COMPRESS (arity-4 + arity-1 tail), which has the full SP1-parity
+        // in COMPRESS (arity-4 + arity-1 tail), which has the full
         // PV chain.  Emitting just arity-1 makes the enumerated normalize VK
         // set match the runtime exactly (every real single-shard normalize
         // lands in-map) and shrinks the map (4× fewer Recursion shapes).
@@ -919,7 +919,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
                 self.compose_program_basefold(&input)
             }
             ZKMCompressProgramShape::Shrink(shape) => {
-                // SP1 alignment: dummy now consumes the full
+                // The dummy consumes the full
                 // ZKMCompressWithVkeyShape so its embedded merkle_tree_height
                 // sizes the vk-merkle witness for the wrap stage too.
                 let input = ZKMWrapBasefoldWitnessValues::dummy(

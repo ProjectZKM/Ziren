@@ -1,42 +1,9 @@
-//! Shard-level LogUp-GKR prover.
+//! Trace-MLE evaluation helpers for the shard-level LogUp-GKR phase.
 //!
-//! Replaces Ziren's per-chip
-//! [`crate::logup_gkr::prove_logup_gkr`] loop (one proof per chip)
-//! with a single shard-level proof per the design.  The output
-//! type is the SP1-shape [`super::types::LogupGkrProof<F, EF>`].
-//!
-//! # Algorithm
-//!
-//! Mirror of `crates/hypercube/src/logup_gkr/prover.rs:70-215`,
-//! adapted to Ziren's existing per-chip leaf construction
-//! ([`crate::logup_gkr::build_lookup_leaves`]) and fraction-tree
-//! prover ([`crate::logup_gkr::prove_logup_gkr`]):
-//!
-//!   1. Grind the PoW witness, sample `alpha` (lookup mixing
-//!      challenge) and `beta_seed` (per-arity beta seed point).
-//!   2. For each chip, call `build_lookup_leaves` with the
-//!      per-chip `[alpha, beta]` tuple — this emits the
-//!      fingerprinted (multiplicity, denominator) fractions for
-//!      the chip's lookup interactions.
-//!   3. Concatenate per-chip leaves into a single shard-level
-//!      leaf vector, pad to the next power of two with identity
-//!      fractions, observe num/denom of the GKR root.
-//!   4. Run [`crate::logup_gkr::prove_logup_gkr`] on the combined
-//!      leaf vector to produce the layered sumcheck stack.
-//!   5. Convert the per-chip-internal `LogUpGkrProof<EF>` into the
-//!      SP1-shape [`LogupGkrProof<F, EF>`] (different field
-//!      layout, single shard-level proof).
-//!   6. Compute per-chip trace MLE evaluations at the final
-//!      `eval_point` for the [`LogUpEvaluations`] payload.
-//!
-//! # Status
-//!
-//! Step (1)+(2)+(3) implemented (see [`aggregate_chip_leaves`]).
-//! Step (4)-(6) wired through but the type-shape conversion step
-//! (5) is stubbed pending the layer-by-layer projection from
-//! Ziren's `LogUpGkrLayerProof` shape into SP1's
-//! `LogupGkrRoundProof` shape.  Per-chip trace evaluations (6)
-//! are the next session's work.
+//! The shard-level LogUp-GKR prover itself lives in
+//! [`super::row_gkr::top_level::prove_shard_logup_gkr_rows`]; this module
+//! holds the per-chip trace-column evaluations at the GKR eval point that
+//! populate the [`super::types::LogUpEvaluations`] payload.
 
 use p3_field::{ExtensionField, PrimeField};
 
@@ -105,15 +72,14 @@ where
         return Vec::new();
     }
     let height = trace.len() / width;
-    // Phase 1 (height-agnostic): evaluate the trace MLE over the
+    // Height-agnostic: evaluate the trace MLE over the
     // 2^|eval_point| cube treating rows `[height, domain)` as implicit
-    // zero padding.  The previous pow2-only `height == 1 << eval_point.len()`
-    // debug_assert rejected the (legitimate) case where a real trace's
-    // height is < the cube the verifier opens it over — exactly what the
-    // SP1-style height-agnostic jagged recursion needs (1 program / cluster,
+    // zero padding — a real trace's
+    // height may be < the cube the verifier opens it over, which is
+    // what height-agnostic jagged recursion needs (1 program / cluster,
     // any heights).  Correctness guard: the trace cannot be TALLER than the
     // cube (that would silently drop rows), so require `height <= domain`.
-    // For `height == domain` (the old pow2 case) this is byte-identical:
+    // For `height == domain` this is byte-identical:
     // every eq-table entry is consumed, no rows are padded.
     let domain = 1usize << eval_point.len();
     debug_assert!(

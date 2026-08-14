@@ -1,49 +1,21 @@
-//! Shard-level zerocheck prover.
-//!
-//! Replaces Ziren's per-chip
-//! [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
-//! loop (one ZerocheckProof per chip) with a single shard-level
-//! [`super::types::PartialSumcheckProof<EF>`] per SP1's design.
+//! Shard-level zerocheck prover: ONE shard-level
+//! [`super::types::PartialSumcheckProof<EF>`] covering every chip.
 //!
 //! # Algorithm
 //!
-//! Mirror of `crates/hypercube/src/prover/shard.rs:474-646`,
-//! adapted to Ziren's existing per-chip constraint evaluator
-//! ([`crate::zerocheck_prover::eval_constraints_on_hypercube`])
-//! and per-chip sumcheck prover
-//! ([`crate::zerocheck_prover::prove_zerocheck_with_challenger`]):
-//!
-//!   1. For each chip, compute the per-chip constraint table
-//!      `C_i: {0,1}^{m_i} → EF` via
-//!      `eval_constraints_on_hypercube`.  This evaluates the
-//!      chip's transition constraints batched via the
-//!      `batching_challenge` powers (alpha) over the chip's
-//!      Boolean hypercube.
-//!   2. RLC the per-chip tables via a fresh `lambda` challenge:
-//!      `C_combined = Σ_i λ^i · C_i`.  This requires padding all
-//!      tables to the max-chip num_vars first; unpadded virtual
-//!      rows contribute zero (the constraint is `0` outside the
-//!      chip's real height).
-//!   3. Run a single [`crate::zerocheck_prover::prove_zerocheck_with_challenger`]
-//!      on the combined table.
-//!   4. The produced [`crate::zerocheck::ZerocheckProof`] (per-chip
-//!      shape) projects onto SP1's [`super::types::PartialSumcheckProof`]
-//!      shape by:
-//!        - `univariate_polys` ← per-round 3-tuples reconstructed
-//!          as degree-2 polynomials via Lagrange interpolation
-//!          over `{0, 1, 2}`.
-//!        - `claimed_sum` ← the initial combined claim (`0` for
-//!          a true zerocheck).
-//!        - `point_and_eval` ← (eval_point, final_claim).
-//!
-//! # Status
-//!
-//! Step (1) has a per-chip helper; step (2) has a same-size RLC
-//! helper.  Steps (3) + (4) wired through with stubs pending the
-//! virtual-row padding (`VirtualGeq` analogue) and the round
-//! polynomial reconstruction.  Per-chip max-vars padding is the
-//! biggest remaining gap (chips of different log_degree must be
-//! lifted to the shard's max log_degree before RLC).
+//!   1. Sample `alpha` (per-chip constraint batching), `gkr_batch_open`
+//!      (GKR-opening batch powers), `lambda` (inter-chip RLC) — in this
+//!      exact order; the verifier samples the same three.
+//!   2. Build one lazy
+//!      [`crate::shard_level::zerocheck_poly::ZeroCheckPoly`] per chip,
+//!      summing only the chip's real rows with the padded tail handled
+//!      analytically by `VirtualGeq`.
+//!   3. Seed each chip's claim from its GKR openings
+//!      (`Σ openings · β^(1..)`).
+//!   4. Reduce via
+//!      [`super::sumcheck_poly::reduce_sumcheck_to_evaluation`]
+//!      (λ-RLC across chips, name order) into `univariate_polys` /
+//!      `claimed_sum` / `point_and_eval`.
 
 use std::collections::BTreeMap;
 
@@ -63,9 +35,10 @@ use crate::{Challenge, Chip, StarkGenericConfig, Val};
 ///   1. Sample `alpha` (per-chip constraint batching),
 ///      `gkr_batch_open` (transcript alignment with the verifier),
 ///      `lambda` (inter-chip RLC).
-///   2. Build per-chip constraint tables `C_i: {0,1}^{m_i} → EF`.
-///   3. Pad to `2^max_log_degree` and lambda-RLC into one table.
-///   4. Reduce via `reduce_sumcheck_to_evaluation`.
+///   2. Build one lazy `ZeroCheckPoly` per chip (real rows only; the
+///      padded tail is handled analytically by `VirtualGeq`).
+///   3. Seed per-chip claims from the GKR openings.
+///   4. Reduce via `reduce_sumcheck_to_evaluation` (λ-RLC across chips).
 #[allow(clippy::too_many_arguments)]
 pub fn prove_shard_zerocheck<SC, A>(
     chips: &[&Chip<Val<SC>, A>],
@@ -122,19 +95,13 @@ where
     Challenge<SC>: ExtensionField<Val<SC>> + BasedVectorSpace<Val<SC>>,
 {
 
-    // Per-shard zerocheck sub-phase timing.  Three sub-phases:
-    //   (a) per-chip constraint-table build (par_iter — typically the
-    //       hot kernel for column-rich chips like Cpu, MemoryLocal).
-    //   (b) lambda-RLC fold (N×target_size ext-mul-adds).
-    //   (c) sumcheck driver (log_n rounds of MSB folds).
     let n_chips = chips.len();
 
     // Sample the per-chip constraint-batching challenge
     // (powers-of-alpha), the gkr_batch_open challenge (transcript
     // alignment with verify_zerocheck_host — see verifier.rs:544),
-    // and the inter-chip RLC challenge (lambda).  SP1 samples
-    // batching_challenge upstream and passes in; here we sample all
-    // three at entry for self-containment.
+    // and the inter-chip RLC challenge (lambda).  All
+    // three are sampled at entry for self-containment.
     //
     // The gkr_batch_open sample is required for transcript alignment:
     // verify_zerocheck_host samples three EF elements in this order
@@ -147,7 +114,7 @@ where
         challenger.sample_algebra_element::<Challenge<SC>>();
     let lambda: Challenge<SC> = challenger.sample_algebra_element::<Challenge<SC>>();
 
-    // ── SP1-aligned per-chip ZeroCheckPoly path ──────────────────────
+    // ── Per-chip ZeroCheckPoly path ──────────────────────
     //
     // Builds one lazy
     // `ZeroCheckPoly` per chip — summing only over the chip's real rows
@@ -156,14 +123,13 @@ where
     // batched sumcheck's `claimed_sum = λ-RLC(claims)` chains the
     // zerocheck to the LogUp-GKR openings exactly as the recursion
     // verifier asserts (`recursion_circuit::zerocheck::verify_zerocheck`,
-    // steps 5-7) and the host identity
-    // (the retired host crypto-identity check).
+    // steps 5-7).
     //
     // Conventions are pinned to the verifier: β powers `[β¹, β², …]`,
     // columns main-then-preprocessed, chips folded in chip-NAME order
-    // (matching the recursion verifier + SP1), eq anchored at the
+    // (matching the recursion verifier), eq anchored at the
     // GKR-emitted point.
-    // ── SP1-aligned per-chip ZeroCheckPoly setup (K-independent) ─────────
+    // ── Per-chip ZeroCheckPoly setup (K-independent) ─────────
     let zeta: Vec<Challenge<SC>> = logup_evaluations.point.clone();
     let num_variables = max_log_row_count as u32;
     debug_assert_eq!(
@@ -176,7 +142,7 @@ where
     let _ = n_chips;
 
     // The cross-chip lambda-RLC folds in chip-NAME order (matching the
-    // recursion verifier + SP1 BTreeSet<Chip>).  The incoming slices are
+    // recursion verifier's name-sorted chip maps).  The incoming slices are
     // ALREADY name-ordered: `CpuProver::commit` height-sorts only to pick the
     // commit's size order, then re-sorts by name before committing
     // (prover.rs), whose `chip_ordering` therefore enumerates NAME order, and
@@ -189,31 +155,20 @@ where
     // SHARD-UNIFORM rev(zeta) convention: driven solely by the per-stage
     // `dense_rev` flag (from `StarkMachine::core_rev()` — `true` only on the
     // CORE prove path; `false` on every recursion / shrink / wrap prove, the
-    // legacy arm).  Piece A makes the GKR opening ALWAYS emit
+    // legacy arm).  The GKR opening ALWAYS emits
     // `main_trace_evaluations_full` for every chip (device-only/height-0 →
-    // zeros, width-0 → empty), so the former `full_openings_ok()` gate is always
-    // true on core and has been retired.
+    // zeros, width-0 → empty).
     let shard_use_rev = dense_rev;
 
-    // Run the FIRST sumcheck round in the BASE field (K = F) on
-    // the pure-host CPU path (no device provider) — dropping the up-front
-    // whole-trace `EF` lift of the widest round.  Every other path (device
-    // residency / GPU y-tuple hook) keeps the `EF` cell field (K = EF).  The
-    // ring-hom `iota: F -> EF` makes the two proofs BIT-IDENTICAL.
+    // The FIRST sumcheck round runs unconditionally in the BASE field
+    // (`K = Val<SC>`) — no up-front whole-trace `EF` lift of the widest
+    // round.  The ring-hom `iota: F -> EF` makes the proof BIT-IDENTICAL
+    // to an all-`EF` run.
     //
     // CPU/GPU prover separation: the host zerocheck is entered ONLY by the
-    // CpuProver path, which always threads `_device_traces = None`
+    // CpuProver path
     // (StarkGpuProver uses the device-native `prove_shard_zerocheck_gpu`, never
-    // this free-fn).  The provider-`Some` `K = EF` cell instantiation was
-    // therefore dead; the first sumcheck round runs unconditionally in the base
-    // field (`K = Val<SC>`).  The `iota: F -> EF` ring-hom kept the two
-    // bit-identical, so that collapse was byte-neutral.
-    //
-    // This body used to be a local `macro_rules!` expanded once per concrete
-    // `K`, because a higher-ranked `for<'b> Air<Folder<'b, F, K, EF>>` bound
-    // cannot discharge the folder's *generic* `K: ExtensionField<F>` from a
-    // function environment.  With `K = EF` gone there is one instantiation left,
-    // so the macro bought nothing and the body is written out directly.
+    // this free-fn).
     use p3_field::PrimeCharacteristicRing;
 
     use crate::shard_level::zerocheck_poly::{
@@ -229,9 +184,8 @@ where
         let chip = chips[chip_idx];
         // The shared per-chip main-trace MLE.  Host chips carry a real inner
         // (`guts == the raw trace`); device-resident / unexercised chips are a
-        // `dummy` (inner `None`, width 0).  `inner().is_none()` is the exact
-        // "empty host trace" test the raw `main_traces[chip_idx].width == 0`
-        // check used to be.
+        // `dummy` (inner `None`, width 0).  `inner().is_none()` is THE
+        // "empty host trace" test.
         let pm = &shared_trace_mles[chip_idx];
         let name = chip.name().to_string();
         let opening =
@@ -239,20 +193,12 @@ where
                 panic!("chip {name} missing from logup_evaluations.chip_openings")
             });
 
-        // C4: device residency (path A) now runs on the ziren-gpu
-        // `GpuZeroCheckPoly` (single-GPU device path).  The shared host
-        // `ZeroCheckPoly` is host-cell only: a device-resident chip (empty host
-        // main trace) materializes its main trace via the provider (D2H) and
-        // folds it as host cells — the former "device-fold prepare cells" arm
-        // (`dev.zerocheck_prepare_cells` + `device_cells`/`df_dims`) is retired.
-        // CPU/GPU prover separation: the host zerocheck runs ONLY on the CpuProver
-        // path, which threads `_device_traces = None` (StarkGpuProver assembles the
+        // The shared host `ZeroCheckPoly` is host-cell only, and this free-fn
+        // never runs with a device provider (StarkGpuProver assembles the
         // shard stages itself and routes the zerocheck to the device-native
-        // `prove_shard_zerocheck_gpu`, so this free-fn is never entered with a
-        // provider).  The former device-resident provider-materialize D2H
-        // (`materialized_dev`) was therefore always `None` here and is retired; a
-        // device-resident / unexercised chip is a width-0 `dummy` whose cells come
-        // from the empty-slice fallback below.
+        // `prove_shard_zerocheck_gpu`).  A
+        // device-resident / unexercised chip is a width-0 `dummy` whose cells
+        // come from the empty-slice fallback below.
         let prep_trace = &preprocessed_traces[chip_idx];
         let prep_width = prep_trace.num_polynomials();
         // Main-trace dims from the shared MLE (`num_polynomials`/`num_real_entries`;
@@ -299,8 +245,8 @@ where
         // the legacy bitrev anchor is used (see the cells/anchor branch).
         // CEIL log — must match the verifier's `ChipEvaluation::log_degree`
         // source (`row_gkr::top_level`: `h.next_power_of_two().trailing_zeros()`)
-        // and `build_chip_log_heights`.  `trailing_zeros` agreed only for
-        // power-of-two heights; under the SP1-parity `next_multiple_of_32` core
+        // and `build_chip_log_heights`.  `trailing_zeros` agrees only for
+        // power-of-two heights; under a `next_multiple_of_32` core
         // padding it would silently disagree with the verifier's `embed_LEAD`.
         // Byte-identical for every power-of-two height.
         let log_h = if main_height == 0 {
@@ -363,15 +309,12 @@ where
         // chip's inner Mle is `Mle::new(raw trace)`, so `inner().guts()`
         // equals the raw trace bit-for-bit (same row-major layout) — the SAME
         // lift (`Challenge::from`) and the SAME downstream bitrev reproduce
-        // IDENTICAL `main_cells`.  A chip with no MLE inner is device-resident,
-        // and its cells come from the provider-materialize D2H
-        // (`materialized_dev`).  Byte-neutral.
+        // IDENTICAL `main_cells`.
         let main_cells: Vec<Val<SC>> = {
             let cells_src: &[Val<SC>] = match pm.inner().as_ref() {
                 Some(mle) => mle.guts().as_slice(),
-                // Device-resident / unexercised chip (no host MLE inner): the
-                // provider-materialize D2H is retired (host zerocheck is
-                // `_device_traces = None`-only), so its cells are empty.
+                // Device-resident / unexercised chip (no host MLE
+                // inner): no host cells.
                 None => &[],
             };
             cells_src.iter().map(|v| <Val<SC>>::from(*v)).collect()

@@ -1,7 +1,6 @@
 //! Zero-fill allocator for [`BasefoldShardProof`].
 //!
-//! Port of SP1's `dummy_shard_proof` (crates/recursion/circuit/src/dummy/shard_proof.rs)
-//! adapted for Ziren's `BasefoldShardProof<F, EF>` struct.  Every
+//! Every
 //! field is zero-filled — no real prove call, no AIR evaluation,
 //! microseconds per invocation instead of seconds.
 //!
@@ -32,13 +31,10 @@ use zkm_pcs::{
 
 /// Allocator for [`PartialSumcheckProof`] — zero-filled.
 ///
-/// Mirror of SP1's `dummy_sumcheck_proof`
-/// (crates/recursion/circuit/src/dummy/sumcheck.rs).
-///
 /// * `num_variables` — number of sumcheck rounds (= number of
 ///   univariate polys, = dimension of `point_and_eval.0`)
 /// * `degree` — per-round polynomial degree (each poly carries
-///   `degree + 1` coefficients).  SP1 uses 4 for zerocheck and 3
+///   `degree + 1` coefficients).  4 for zerocheck and 3
 ///   for LogUp-GKR rounds.
 pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
     num_variables: usize,
@@ -55,12 +51,9 @@ pub fn dummy_partial_sumcheck_proof<EF: Field + Copy + PrimeCharacteristicRing>(
 }
 
 /// Allocator for [`LogupGkrProof`] — zero-filled, structurally
-/// SP1-shaped.
+/// identical to the real prover's output.
 ///
-/// Mirror of SP1's `dummy_gkr_proof`
-/// (crates/recursion/circuit/src/dummy/logup_gkr.rs).
-///
-/// Key shape rules (mirror SP1 exactly):
+/// Key shape rules (must match the prover + verifier):
 ///
 ///   * `round_proofs.len() == log_max_row_height - 1`
 ///   * per-round sumcheck dimension `i + log_interactions + 1`
@@ -89,9 +82,9 @@ where
     // verifier (`shard_basefold.rs::chip_metadata_from_chips`) compute
     // `num_interaction_variables` as
     //   `log2_ceil(Σ chip.num_lookups().next_power_of_two())`
-    // — per-chip-padded sum, then log-ceil.  SP1 uses raw sum + log-ceil
-    // instead, but Ziren diverged at `shard_basefold.rs:232-244` ("BUG
-    // FIX") to align with the host's column-width padding pattern.
+    // — per-chip-padded sum, then log-ceil (NOT a raw sum + log-ceil:
+    // the padded sum is what aligns with the host's column-width padding
+    // pattern, see `shard_basefold.rs:232-244`).
     //
     // This dummy MUST mirror the verifier's expectation, otherwise the
     // recursion-circuit `evaluate_mle_ext` assertion at
@@ -112,7 +105,7 @@ where
         denominator: vec![EF::ZERO; output_size],
     };
 
-    // SP1 emits `log_max_row_height - 1` rounds — guard against
+    // The GKR walk emits `log_max_row_height - 1` rounds — guard against
     // underflow in degenerate single-row shapes (would never happen
     // in production, but the saturating sub keeps the allocator
     // total since it can be called with any shape during fixture
@@ -124,7 +117,7 @@ where
             numerator_1: EF::ZERO,
             denominator_0: EF::ZERO,
             denominator_1: EF::ZERO,
-            // SP1: round i sumcheck has `i + log2_ceil(interactions) + 1`
+            // Round i's sumcheck has `i + log2_ceil(interactions) + 1`
             // rounds, degree 3.
             sumcheck_proof: dummy_partial_sumcheck_proof::<EF>(
                 i + log_interactions + 1,
@@ -157,7 +150,7 @@ where
                         // `BasefoldShardProof.chip_log_heights`
                         // (see [`dummy_basefold_shard_proof`]).
                         log_degree: 0,
-                        // SP1-parity FULL-POINT openings.  The
+                        // FULL-POINT openings.  The
                         // VK-enumeration dummy MUST carry these with the SAME
                         // shape the real prover emits (top_level.rs:517-538) so
                         // the recursion AIR / witness layout (and thus the
@@ -235,7 +228,7 @@ where
     let logup_gkr_proof =
         dummy_logup_gkr_proof::<F, EF, A>(chips, max_log_row_count);
 
-    // SP1 uses degree 4 for zerocheck rounds (max_log_row_count
+    // Zerocheck rounds are degree 4 (max_log_row_count
     // rounds total).
     let zerocheck_proof =
         dummy_partial_sumcheck_proof::<EF>(max_log_row_count, 4);
@@ -519,8 +512,8 @@ pub fn dummy_jagged_basefold_bundle(
     // log_height)`, name-sorted — the order `setup` commits them in.  Empty for
     // a machine with no preprocessed chips, which is the single-round shape.
     //
-    // A real proof opens preprocessed as its own round ahead of main (SP1's
-    // `Rounds` in `hypercube/src/prover/shard.rs:762`), so a dummy that models
+    // A real proof opens preprocessed as its own round ahead of main,
+    // so a dummy that models
     // one round disagrees with it on the round count, the per-round stripe
     // multiples, the concatenated column space and the reduction dimension —
     // every one of them a witness-stream LENGTH, and so a different program.
@@ -628,7 +621,7 @@ pub fn dummy_jagged_basefold_bundle(
 
         // The gap between the round's real cells and its committed area, split
         // into columns no taller than the row cube — ALWAYS at least one, even
-        // when the round lands on a stripe boundary (SP1's `.max(1)`).
+        // when the round lands on a stripe boundary (the `.max(1)`).
         let pad = area.saturating_sub(pk.total_values);
         let mut this_round_pads: Vec<usize> = Vec::new();
         let mut done = 0usize;
@@ -675,8 +668,7 @@ pub fn dummy_jagged_basefold_bundle(
 
     // ── Derived sub-lengths ──
     let l = log_dense_size;
-    // Per-round stripe counts — SP1's `log_stacking_height_multiples`
-    // (`recursion/circuit/src/dummy/jagged.rs:56`).  They size the batched
+    // Per-round stripe counts.  They size the batched
     // open's per-round component openings and batch evaluations.
     let round_stripes: Vec<usize> = areas.iter().map(|a| a >> log_stacking).collect();
     let inner_fri = lb_fri_config();
@@ -808,7 +800,7 @@ pub fn dummy_jagged_basefold_bundle(
         y_per_chip: column_counts.iter().map(|c| vec![EF::ZERO; *c]).collect(),
         commit: JaggedCommit {
             original_commitment: zero_cap(),
-            // The late-binding commit is over the DENSE stacked poly as a
+            // The jagged BaseFold commit is over the DENSE stacked poly as a
             // single column: chip_dims = [(width=1, log_h)] (NOT the per-chip
             // dims).  The bundle carries the LAST round's commit, so the height
             // is that round's own committed area — not the concatenation's.
@@ -821,7 +813,7 @@ pub fn dummy_jagged_basefold_bundle(
         packing: packing_meta,
         jagged_eval,
         // The RAW root of every round before the last, as the prover carries
-        // them (SP1's `original_commitments`).  Value-independent — only the
+        // them.  Value-independent — only the
         // COUNT reaches the program.
         preceding_commits: (0..round_stripes.len().saturating_sub(1))
             .map(|_| zero_cap())
@@ -840,8 +832,6 @@ pub fn dummy_jagged_basefold_bundle(
 
 /// ceil(log2(n)) for `n >= 1`.  Returns 0 for n == 0 (degenerate
 /// input — only reachable from probing with empty chip sets).
-///
-/// Mirror of slop's `log2_ceil_usize` used by SP1's dummy helpers.
 #[inline]
 fn log2_ceil_usize(n: usize) -> usize {
     if n <= 1 {
@@ -861,7 +851,7 @@ mod tests {
     type F = KoalaBear;
     type EF = BinomialExtensionField<F, 4>;
 
-    /// `log2_ceil_usize` matches the canonical SP1 / slop semantics
+    /// `log2_ceil_usize` matches the canonical ceil-log2 semantics
     /// across the n=0,1,2,3,4,5,8,1024 spectrum.
     #[test]
     fn log2_ceil_canonical_values() {

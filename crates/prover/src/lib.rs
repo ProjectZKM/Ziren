@@ -123,8 +123,6 @@ pub type DeviceProvingKey<C> = <<C as ZKMProverComponents>::CoreProver as Machin
 /// 2707 keys today.  A height that cannot hold them is not "a smaller map" —
 /// it is a map that rejects real proofs, which is what 2^11 (2048) did.
 /// `tests::enumeration_size_probe` asserts the fit.
-/// SP1 does not fix the height at all: it derives it as
-/// `log2_ceil_usize(num_shapes)` (`prover/src/shapes.rs:508`).
 pub const VK_MERKLE_TREE_HEIGHT: usize = 12;
 
 const COMPRESS_DEGREE: usize = 3;
@@ -132,8 +130,7 @@ const SHRINK_DEGREE: usize = 3;
 const WRAP_DEGREE: usize = 9;
 
 const CORE_CACHE_SIZE: usize = 5;
-/// Tree-reduce arity for the compress stage. SP1 uses 4
-/// (`DEFAULT_ARITY`). Ziren's tree-reduce worker pre-computes
+/// Tree-reduce arity for the compress stage. The tree-reduce worker pre-computes
 /// `layer_sizes` and emits partial batches when the source layer is
 /// exhausted, so any arity ≥ 2 reaches the root cleanly. Larger
 /// arity → fewer compress invocations
@@ -204,8 +201,7 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// (program, arity) → (pk, vk) is deterministic, which holds today
     /// because `compose_program_basefold` is keyed only on arity in
     /// the program cache and `setup()` is a pure function of the
-    /// program.  Mirrors SP1's `RecursionKeys::Exists(pk, vk)`
-    /// (recursion.rs:280-345).
+    /// program.
     pub compose_pks_basefold_cache: Mutex<
         BTreeMap<
             usize,
@@ -224,10 +220,9 @@ pub struct ZKMProver<C: ZKMProverComponents = DefaultProverComponents> {
     /// instruction count must equal the next input's witness stream
     /// length).
     ///
-    /// **Rationale**: keying on `arity` alone (as SP1 does at
-    /// `crates/prover/src/worker/prover/recursion.rs:446`) is unsound for
+    /// **Rationale**: keying on `arity` alone is unsound for
     /// Ziren because per-input shapes vary widely across calls of the same
-    /// arity (lift heights span 5K..328K vs SP1's tight clustering).
+    /// arity (lift heights span 5K..328K).
     /// Re-using a program built for shape A with shape B's witness stream
     /// triggers `RuntimeError::EmptyWitnessStream` panics under
     /// `ZIREN_GPU_RESIDENCY=full`.
@@ -348,7 +343,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         // Compose-program pre-warm.
         //
-        // Mirrors SP1's `worker/prover/recursion.rs:461-487` arity walk:
+        // Arity walk:
         // for each arity in `1..=REDUCE_BATCH_SIZE`, synthesize a dummy
         // compose witness and build the compose recursion program.  The
         // built program is discarded — the goal is to amortize the
@@ -363,11 +358,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // tables, shape-fix tables) that survive across builds even
         // when each per-arity program object is discarded.
         //
-        // Default ON.  After the SP1 dummy_shard_proof port (commit
-        // 8728b983), the prewarm cost dropped from ~64.8s to ~2.0s
-        // (the dummy basefold shard proof is now a struct-only stub
-        // rather than a real `prove_shard_with_data` invocation per
-        // arity slot), so the universal ~2.4s amortizable
+        // Default ON.  The dummy basefold shard proof is a struct-only
+        // stub rather than a real `prove_shard_with_data` invocation per
+        // arity slot, keeping the prewarm at ~2.0s
+        // (vs ~64.8s with real proves), so the universal ~2.4s amortizable
         // compose-compile saving easily justifies the small upfront
         // cost.  This gate is intentionally decoupled from
         // `ZIREN_GPU_RESIDENCY` — that profile still gates broader
@@ -383,8 +377,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// `arity in 1..=REDUCE_BATCH_SIZE`, building (and discarding) a
     /// dummy compose program per arity to amortize first-compile cost.
     ///
-    /// Default ON.  Post the SP1 dummy_shard_proof port (commit
-    /// 8728b983) the prewarm walk costs ~2.0s total and amortizes
+    /// Default ON.  The prewarm walk costs ~2.0s total and amortizes
     /// ~2.4s of compose-compile work that would otherwise be paid
     /// inside the first user `compress()` invocation, so it is
     /// universally beneficial and runs by default.
@@ -406,9 +399,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         // Pull the first allowed recursion shape — replicated across
         // `arity` slots, this is a valid `ZKMCompressShape` that
-        // survives `fix_shape`.  Mirrors SP1's
-        // `compress_proof_shape_from_arity(arity)` which also uses a
-        // single canonical shape replicated.
+        // survives `fix_shape`.
         let Some(first_shape_map) = recursion_shape_config.first() else {
             tracing::debug!(
                 "compose pre-warm skipped: recursion_shape_config has no allowed shapes"
@@ -598,7 +589,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
     /// PER-STAGE zerocheck cube for a recursion verifier-circuit.
     ///
-    /// The cube is PINNED to the FIXED base (22 = SP1's core cap) for EVERY
+    /// The cube is PINNED to the FIXED base (22, the core cap) for EVERY
     /// stage — it is NOT floated up to a FIX-off input proof's zerocheck dim.
     /// The recursion program's cube axis is HEIGHT-INDEPENDENT: the same
     /// cube=BASE program is reused for FIX-on and FIX-off alike, so it stays
@@ -616,7 +607,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// NOT grown into the circuit.
     ///
     /// If an input proof's dim genuinely EXCEEDS the fixed cube, that is a
-    /// real over-cap chip (AXIS-1b: SP1 HEIGHT_THRESHOLD shard-splitting) —
+    /// real over-cap chip (height-threshold shard-splitting territory) —
     /// the function WARNs (it does NOT grow the circuit), so a real failing
     /// prove surfaces it precisely.
     ///
@@ -639,7 +630,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .map(|p| p.zerocheck_proof.point_and_eval.0.len())
             .max()
             .unwrap_or(0);
-        // PIN the recursion cube to the FIXED base (22 = SP1's core cap).  The
+        // PIN the recursion cube to the FIXED base (22, the core cap).  The
         // cube is NOT floated up to a FIX-off input proof's zerocheck dim — the
         // recursion program's cube axis is HEIGHT-INDEPENDENT.  An over-tall
         // FIX-off chip is WITNESSED under the full_geq degree mask
@@ -649,7 +640,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // vk_map-stable) for ALL stages.
         //
         // The diagnostic is a WARN: if an input proof's dim exceeds the fixed
-        // cube, that surfaces a genuine over-cap chip (SP1 HEIGHT_THRESHOLD
+        // cube, that surfaces a genuine over-cap chip (height-threshold
         // shard-splitting territory) — it must be reported, not silently
         // absorbed by growing the circuit.
         if in_dim > base {
@@ -679,7 +670,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     }
 
     /// Snap a basefold recursion program onto one of the allowed recursion
-    /// shapes, as SP1 does before proving a recursion shard.
+    /// shapes before proving a recursion shard.
     ///
     /// This is what makes the produced verifying keys ENUMERABLE.  A program
     /// left at its organic heights produces a proof whose per-chip heights are
@@ -702,8 +693,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Normalize (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::recursion_program`].
     ///
-    /// Band-snapped through [`Self::fix_recursion_shape`], as SP1 snaps a
-    /// recursion program before proving it — that is what keeps the produced
+    /// Band-snapped through [`Self::fix_recursion_shape`] before proving —
+    /// that is what keeps the produced
     /// verifying key inside `ZKMProofShape::generate`'s enumerated space.
     pub fn recursion_program_basefold(
         &self,
@@ -731,9 +722,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     /// Build the Compose (basefold) recursion program. Cluster-parametrized
     /// analog of [`Self::compress_program`].
     ///
-    /// SP1-style per-arity cache (`crates/prover/src/worker/prover/recursion.rs:446`):
+    /// Per-shape cache:
     /// under `ZIREN_GPU_RESIDENCY=full` the program is built once per
-    /// arity and reused.
+    /// shape key and reused.
     /// With the cache audit on (orthogonal to the residency
     /// profile), every cache hit rebuilds and asserts bincode
     /// byte-equality — catches the failure mode where real input
@@ -881,8 +872,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ///    KoalaBear-side [`Self::shrink_prover`].
     /// 2. Verifies the input proof against
     ///    [`Self::shrink_prover`]`.machine()` (the machine that produced
-    ///    the shrink-basefold output we are wrapping), mirroring how the
-    ///    legacy [`Self::wrap_program`] verifies against `shrink_prover`.
+    ///    the shrink-basefold output we are wrapping).
     ///
     /// The `verify_wrap_basefold` body is generic over `C: CircuitConfig`
     /// with `F=InnerVal` / `EF=InnerChallenge` / `Bit=Felt<KoalaBear>`,
@@ -932,9 +922,9 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         Arc::new(program)
     }
 
-    /// Extract `BasefoldShardProof`s from a batch of legacy `ShardProof`s
-    /// (via the side-channel `basefold_shard_proof` field populated by
-    /// `StarkMachine::open` for KoalaBear MIPS shards) and wrap each batch
+    /// Extract `BasefoldShardProof`s from a batch of `ShardProof`s
+    /// (the `basefold_shard_proof` payload populated by
+    /// the prover's `open()`) and wrap each batch
     /// into a `ZKMCoreBasefoldWitnessValues`.
     ///
     /// Returns `None` if any proof in the batch lacks the basefold side
@@ -961,8 +951,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // `batch_size = 1`, one shard per `ZKMCoreBasefoldWitnessValues`).
             // A multi-shard normalize VK is a PHANTOM (only the enumerator
             // would emit arity≥2 Recursion shapes), so an in-circuit
-            // aggregate loop + multi-shard dummy would be dead weight on a path
-            // SP1 likewise forbids (core.rs:118 asserts shard_proofs.len()==1).
+            // aggregate loop + multi-shard dummy would be dead weight on a
+            // forbidden path.
             // Hard-assert the single-shard invariant so any caller that batches
             // core shards into the normalize stage (a regression) is caught at
             // input construction rather than silently building a normalize proof
@@ -1137,8 +1127,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             // No turn-based sync here: the per-height pending lists in the
             // next-layer worker (see `pending: Vec<Vec<Item>>` below) are
             // arrival-order tolerant, so workers can race to drain `input_rx`
-            // without preserving first-layer index order. SP1 dropped the
-            // equivalent serialization for the same reason.
+            // without preserving first-layer index order.
             let (input_tx, input_rx) = sync_channel::<(usize, usize, ZKMCircuitWitness)>(
                 opts.recursion_opts.checkpoints_channel_capacity,
             );
@@ -1559,7 +1548,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("shrink: input compressed proof missing basefold side-channel — legacy FRI shrink removed");
-        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // Bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -1598,35 +1587,15 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
 
         // ── BaseFold side-channel attach (GPU shrink) ──────────────────
         //
-        // The CPU `StarkMachine::open` populates `basefold_shard_proof`
-        // inline via `try_prove_shard_to_basefold_boxed`
-        // (crates/pcs/src/prover.rs:564), so on CPU this guard is a
-        // no-op.  Under `StarkGpuProver<InnerSC, ShrinkAir>` with
-        // `ZIREN_GPU_DROP_FRI` (default), the GPU `open()` returns
-        // `basefold_shard_proof: None`, and `wrap_bn254` `.expect()`s
-        // that side channel.  Mirror the GPU compress orchestrator
-        // (ziren-gpu/prover/src/compress_multi_gpu.rs:1496-1865) by
-        // re-running the pipeline pieces on the shrink machine and
-        // driving `prove_shard_with_data` here, extracting the 8-felt
-        // `main_commitment` from the `MerkleCap` (precomputed_commit =
-        // None, since the GPU lacks the precomputed jagged commit the
-        // CPU helper expects).  The `device_traces` this drives
-        // `prove_shard_with_data` with is NOT unconditionally `None`: it
-        // comes from `shrink_prover.shard_device_trace_provider(&data)`
-        // below, which is build-dependent.  On CPU components
-        // (`ShrinkProver = CpuProver`) the trait default returns `None` — no
-        // device snapshot.  On GPU components `ShrinkProver =
-        // StarkGpuProver`, which OVERRIDES it and returns `Some((
-        // DeviceShardTraces, device_id))` over the device-resident traces
-        // `commit()` left behind — so the GPU shrink path DOES carry a device
-        // snapshot, and it is threaded through at the call below.
-        // Attach the BaseFold shard side-channel (GPU shrink).  Byte-exact
-        // no-op on the CPU prover (`StarkMachine::open` already populated
-        // `basefold_shard_proof`); a `StarkGpuProver` OVERRIDES it and drives
-        // the device-native BaseFold producer over its own in-crate
-        // `DeviceShardTraces` (the block that used to live inline here).
-        // SP1 parity: `fn shrink` is backend-agnostic — no device-shaped
-        // provider on the host prover surface.
+        // Byte-exact no-op on the CPU prover (`CpuProver::open` already
+        // populated `basefold_shard_proof` inline via
+        // `prove_shard_with_data_boxed`); a `StarkGpuProver` OVERRIDES
+        // `attach_shard_basefold_side_channel` and drives the device-native
+        // BaseFold producer over its own in-crate `DeviceShardTraces`
+        // (its GPU `open()` returns `basefold_shard_proof: None`, and
+        // `wrap_bn254` `.expect()`s that side channel).  `fn shrink` stays
+        // backend-agnostic — no device-shaped provider on the host prover
+        // surface.
         self.shrink_prover.attach_shard_basefold_side_channel(
             &mut proof,
             &shrink_pk,
@@ -1654,7 +1623,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
             .basefold_shard_proof
             .clone()
             .expect("wrap_bn254: input shrink proof missing basefold side-channel — legacy FRI wrap removed");
-        // SP1 alignment: bundle vk_merkle_data so verify_wrap_basefold
+        // Bundle vk_merkle_data so verify_wrap_basefold
         // can bind the input VK against the canonical vk_root.
         let vk_merkle_data =
             self.make_basefold_merkle_proofs(&[compressed_vk.clone()]);
@@ -1710,8 +1679,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> PlonkBn254Proof {
         // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
         // verifies the BaseFold shard proof, so the witness MUST be built from the
-        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues, which
-        // emits a stale 523-flat witness incompatible with the 15208-flat circuit).
+        // wrap-basefold witness type — any other layout emits a flat witness
+        // incompatible with the circuit (e.g. 523-flat vs the 15208-flat circuit).
         let basefold_proof = *proof
             .proof
             .basefold_shard_proof
@@ -1758,8 +1727,8 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> Groth16Bn254Proof {
         // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
         // verifies the BaseFold shard proof, so the witness MUST be built from the
-        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues, which
-        // emits a stale 523-flat witness incompatible with the 15208-flat circuit).
+        // wrap-basefold witness type — any other layout emits a flat witness
+        // incompatible with the circuit (e.g. 523-flat vs the 15208-flat circuit).
         let basefold_proof = *proof
             .proof
             .basefold_shard_proof
@@ -1812,7 +1781,7 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
     ) -> DvSnarkBn254Proof {
         // Mirror `build_constraints_and_witness` (build.rs): the gnark wrap circuit
         // verifies the BaseFold shard proof, so the witness MUST be built from the
-        // wrap-basefold witness type (NOT the legacy ZKMCompressWitnessValues).
+        // wrap-basefold witness type.
         let basefold_proof = *proof
             .proof
             .basefold_shard_proof
@@ -1893,13 +1862,10 @@ impl<C: ZKMProverComponents> ZKMProver<C> {
         // VK-binding soundness: the witnessed `value` MUST be the ACTUAL
         // leaf at the opened index — the in-circuit `merkle_tree::verify`
         // walks the path from `value` to the root UNCONDITIONALLY (only the
-        // value==vk_digest binding is gated on vk_verification).  The old
-        // code fabricated `[index; 8]` under VERIFY_VK=false, which can
-        // never re-derive the real root; that was masked while the
-        // recursion asserts were vacuous.  SP1 parity: RecursionVks::open
-        // returns MerkleTree::open's (value, proof) verbatim.  Under
-        // vk_verification=true the leaf IS the vk digest, so this is
-        // value-identical to the previous behavior there.
+        // value==vk_digest binding is gated on vk_verification), and a
+        // fabricated leaf can never re-derive the real root.
+        // `MerkleTree::open`'s (value, proof) is returned verbatim; under
+        // vk_verification=true the leaf IS the vk digest.
         let (values, proofs): (Vec<_>, Vec<_>) = vk_indices
             .iter()
             .map(|index| MerkleTree::open(&self.recursion_vk_tree, *index))
@@ -1966,56 +1932,34 @@ pub mod tests {
         run_e2e_prover_with_options(prover, elf, stdin, opts, test_kind, true)
     }
 
-    /// STEP-2 (SP1 MachineShape port): the COMPOSE program-cache key
+    /// The COMPOSE program-cache key
     /// (`ZKMCompressBasefoldWitnessValues::shape_key`) must satisfy exactly one
     /// invariant — **equal `shape_key` implies a byte-identical compose
     /// program** — because `compose_program_basefold` hands back the cached
     /// program on a key hit.  This test pins both directions of that
     /// invariant.
     ///
-    /// ## History: what the previous version of this test asserted, and why it
-    /// was wrong
-    ///
-    /// This test used to be named `compose_program_basefold_band_is_load_bearing`
-    /// and asserted that two same-(chip-set, arity) compose witnesses at
-    /// DIFFERENT per-child height bands build compose programs of DIFFERENT
-    /// byte length, while noting as a "latent cache hazard" that `shape_key`
-    /// COLLIDES across those bands.  Both halves have since been overtaken:
-    ///
-    ///   * The band half is now FALSE.  Two things made the compose program
-    ///     height-agnostic: (1) the recursion-layer AREA PIN
+    ///   * Height bands do NOT split the key: the compose program is
+    ///     height-agnostic — (1) the recursion-layer AREA PIN
     ///     (`RECURSION_LOG_TRACE_AREA` = 27) fixes every child bundle's
     ///     `log_dense_size` for any child whose natural area is under the
-    ///     floor, so both bands commit at L=27 with identical stripe/round
+    ///     floor, so all bands commit at L=27 with identical stripe/round
     ///     counts; and (2) `chip_height_bits_from_opened_degrees`
-    ///     (`compress_basefold.rs:383`) replaced the older
-    ///     `chip_height_bits_from_log_heights`, so per-chip heights are DERIVED
-    ///     from witnessed values instead of BAKED as `builder.constant()`s.
+    ///     DERIVES per-chip heights
+    ///     from witnessed values instead of baking `builder.constant()`s.
     ///     MEASURED at bands 3/8/12/16: one shape_key, one 173,774,597-byte
-    ///     program, byte-identical.  The old test's own escape-hatch message
-    ///     ("if the recursion became height-agnostic ... this test's premise is
-    ///     stale") is precisely what happened.
+    ///     program, byte-identical.
     ///
-    ///   * The "latent hazard" half named the wrong axis.  The collision it
-    ///     observed across bands is BENIGN — same key, same program, which is
-    ///     the invariant holding, not breaking.  The REAL hazard is on the
-    ///     `log_dense_size` axis itself, and it is reachable because the area
-    ///     pin is a FLOOR (`max(natural, 27)`), not a clamp: a recursion child
-    ///     whose NATURAL jagged area exceeds 2^27 carries L > 27.  Using the
-    ///     compress machine's real chip widths and the per-chip natural maxima
-    ///     recorded in `RecursionShapeConfig::allowed_shapes`, the
-    ///     normalize-sized band lands at natural L=27 (pin binds) but the
+    ///   * `log_dense_size` MUST split the key: the area
+    ///     pin is a FLOOR (`max(natural, 27)`), not a clamp, so a recursion
+    ///     child
+    ///     whose NATURAL jagged area exceeds 2^27 carries L > 27 (the
     ///     soundness compose band used by tendermint and goat lands at natural
-    ///     **L=29**, and the FIX-off maxima at **L=31**.  So real compose
-    ///     children genuinely span several L, and before the fix L=27/28/29 all
-    ///     produced the SAME `shape_key` while building 173.8 MB / 178.0 MB /
-    ///     185.3 MB programs.
-    ///
-    /// The old test could never have caught this: it never ran.  It has been
-    /// uncompilable since the area pin added the `recursion_area_pin` parameter
-    /// to `dummy_basefold_vk_and_shard_proof` without updating the call site at
-    /// `tests::dummy_core_vk_chip_information_is_faithful`, and separately since
-    /// `deabd433` left a double-comma syntax error in the `MemoryInstrs` split.
+    ///     **L=29**; the FIX-off maxima at **L=31**), and
+    ///     L=27/28/29 build DIFFERENT programs
+    ///     (measured 173.8 MB / 178.0 MB /
+    ///     185.3 MB), so a key that collided across L would serve the wrong
+    ///     cached program.
     #[test]
     #[serial]
     fn compose_program_cache_key_implies_identical_program() {
@@ -2153,7 +2097,7 @@ pub mod tests {
         );
     }
 
-    /// STEP-3 (SP1 MachineShape port, faithful-dummy diagnostic): verify the
+    /// Faithful-dummy diagnostic: verify the
     /// NORMALIZE dummy reproduces the REAL core VK's `vk.hash` structural
     /// region.  The normalize recursion program hashes the verified CORE vk
     /// (`vk_legacy.hash(builder)` at core_basefold.rs:759); that hash reads
@@ -3552,7 +3496,7 @@ pub mod tests {
     /// PROBE: how large is the shape space `fix_shape` can actually snap a core
     /// record onto?  That set is what the enumeration has to cover, and the vk
     /// merkle tree has a FIXED capacity, so its size decides whether a full
-    /// SP1-style enumeration is even representable.
+    /// enumeration is even representable.
     #[test]
     #[serial]
     #[ignore]

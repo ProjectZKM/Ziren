@@ -48,8 +48,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>>> Verifier<SC, A> {
                 >,
             >,
         // Threaded to the shard-level BaseFold verifier's static
-        // OUTER generic verify (former `OUTER_JAGGED_VERIFY_HOOK`). Verify-only,
-        // both rings satisfy it.
+        // OUTER generic verify. Verify-only, both rings satisfy it.
         SC: crate::BasefoldRing,
         SC::Challenger: 'static
             + p3_challenger::FieldChallenger<crate::jagged_pcs::JaggedVal>
@@ -239,10 +238,3 @@ impl<SC: StarkGenericConfig> Display for VerificationError<SC> {
 }
 
 impl<SC: StarkGenericConfig> std::error::Error for VerificationError<SC> {}
-
-// `try_verify_late_binding_proofs`, `try_verify_jagged_late_binding_proof`,
-// and the per-KB jagged-jagged-PCS helper have been removed.  BaseFold
-// MIPS verification lives in
-// `BasefoldShardVerifier::verify_shard`
-// (`crates/pcs/src/shard_level/verifier.rs`), dispatched from
-// `Verifier::verify_shard` when `basefold_shard_proof.is_some()`.

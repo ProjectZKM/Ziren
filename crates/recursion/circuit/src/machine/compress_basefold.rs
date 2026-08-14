@@ -1,13 +1,9 @@
-//! SP1-style parallel call site for the compress recursion stage.
+//! Basefold call site for the compress (compose) recursion stage.
 //!
-//! Mirrors [`super::compress::ZKMCompressVerifier`] but consumes
-//! the new SP1-style [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
-//! instead of the legacy [`zkm_pcs::ShardProof`], and dispatches
-//! to [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`]
-//! instead of [`crate::stark::StarkVerifier::verify_shard`].
-//!
-//! legacy compress program stays the production verifier surface
-//! until aggregation end-to-end validates against this path.
+//! Consumes
+//! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
+//! inputs and dispatches
+//! to [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
 //! # Migration deltas vs legacy [`super::compress`]
 //!
@@ -60,7 +56,7 @@ use crate::machine::{
 };
 use crate::public_values_folder::RecursivePublicValuesConstraintFolder;
 
-/// Compress witness value type for the SP1-style shard-level
+/// Compress witness value type for the shard-level
 /// proof shape — host-side input the prover packages and the
 /// recursion harness threads through the witness layer.
 ///
@@ -77,9 +73,7 @@ pub struct ZKMCompressBasefoldWitnessValues<
     /// Per-input (vk, basefold-proof) pairs to aggregate.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the vk_root used by the verifier to the
-    /// allowed-VK set.  Mirrors SP1's
-    /// `SP1CompressWithVKeyWitnessValues::merkle_val`
-    /// (`/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:107`).
+    /// allowed-VK set.
     /// vk_root is sourced from this witness rather than baked
     /// as a compile-time constant, so the compose program is independent
     /// of the vk_map root and vk_map regen is self-consistent.
@@ -144,14 +138,13 @@ pub struct ZKMCompressBasefoldWitnessVariable<
     pub is_complete: Felt<C::F>,
 }
 
-/// SP1-style compress verifier — parallel to
-/// [`super::compress::ZKMCompressVerifier`].
+/// Compress verifier over basefold shard proofs.
 #[derive(Debug, Clone, Copy)]
 pub struct ZKMCompressBasefoldVerifier<C, SC, A> {
     _phantom: PhantomData<(C, SC, A)>,
 }
 
-/// Verify a batch of SP1-style shard-level recursive proofs.
+/// Verify a batch of shard-level recursive proofs.
 ///
 /// Free function (rather than impl method) to keep the
 /// `InnerVal`/`InnerChallenge` concrete-type constraints simple.
@@ -197,8 +190,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         is_complete,
     } = input;
 
-    // Source vk_root from the merkle witness (SP1 pattern at
-    // `/tmp/sp1/crates/recursion/circuit/src/machine/vkey_proof.rs:118`)
+    // Source vk_root from the merkle witness
     // and bind each input's VK hash to that root via merkle proof.
     // Sourcing vk_root from the witness rather than a compile-time parameter
     // decouples the compose program structure from the vk_map root.
@@ -254,8 +246,8 @@ pub fn verify_compress_basefold<C, SC, A>(
 
     // Split the per-input loop into a parallel-friendly
     // VERIFY pass (ir_par_map_collect emits DslIr::Parallel) and a
-    // sequential AGGREGATE pass. Mirrors SP1's compress.rs:159+182
-    // pattern. Verify ops have no aggregator-state dependencies; only
+    // sequential AGGREGATE pass.
+    // Verify ops have no aggregator-state dependencies; only
     // `public_values: Vec<Felt>` flows from verify to aggregate (it's
     // cloned at closure entry before being moved into the proof
     // assembly call).
@@ -304,7 +296,7 @@ pub fn verify_compress_basefold<C, SC, A>(
             .iter()
             .map(|c| _Base1::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        // SP1's two opening rounds: [preprocessed, main].  The preprocessed round
+        // Two opening rounds: [preprocessed, main].  The preprocessed round
         // is the MACHINE's preprocessed chips in chip-NAME order — the order
         // `setup` commits them.  Same shape as core_basefold.rs; the recursion
         // machine has its own preprocessed chips, so its shards are two-round
@@ -422,7 +414,7 @@ pub fn verify_compress_basefold<C, SC, A>(
         // Derive per-shard chip set from the machine —
         // filter machine.chips() to the chips actually present
         // in this shard (per logup_gkr_proof.chip_openings names).
-        // SP1's `chip_metadata_from_chips` consumes this slice to
+        // `chip_metadata_from_chips` consumes this slice to
         // compute beta_seed_dim + log_num_interactions.
         let mut _shard_chips: Vec<&zkm_pcs::MachineChip<SC, A>> = machine
             .chips()
@@ -616,7 +608,6 @@ pub fn verify_compress_basefold<C, SC, A>(
     });
 
     // Sequential aggregate pass: state mutations + consistency checks.
-    // Mirrors SP1's compress.rs:182 sequential loop.
     for (_i, public_values) in _verify_pubvals.into_iter().enumerate() {
         // Aggregate public values into the compress output digest.
         // Ports the legacy logic at
@@ -979,9 +970,7 @@ pub fn noop_eval_public_values_fn<C: CircuitConfig>(
 ///
 /// Runs the jagged-eval sub-sumcheck verification entirely in-circuit,
 /// mirroring the host-side verifier at
-/// [`zkm_pcs::jagged_sumcheck::verify_jagged_reduction`] and SP1's
-/// `RecursiveJaggedEvalSumcheckConfig::jagged_evaluation`
-/// (`/tmp/sp1/crates/recursion/circuit/src/jagged/jagged_eval.rs:97-170`).
+/// [`zkm_pcs::jagged_sumcheck::verify_jagged_reduction`].
 ///
 /// # Protocol
 ///
@@ -1136,7 +1125,7 @@ where
         }
 
         // (6) Multiply by the branching-program evaluation.
-        //     BP parameterized by (z_row, z_eval) ≈ SP1's (z_row, z_trace);
+        //     BP parameterized by (z_row, z_eval);
         //     evaluated with first/second halves of the sub-sumcheck point.
         // z_row reversed (BIG-endian host BP vs LITTLE-endian emitter); z_eval
         // stays un-reversed (the host structural prover already uses rev(z_star)

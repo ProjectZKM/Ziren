@@ -212,8 +212,8 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // The OUTER (wrap) impl of `BasefoldRing`.
 // Lives here — not in zkm-pcs — because zkm-pcs cannot import OuterSC
 // (recursion-core depends on stark, not vice versa). `Val<OuterSC> = KoalaBear`
-// and `Challenge<OuterSC> = KoalaBear⁴` (same as inner; mirrors SP1's
-// `BNGC<KoalaBear, KoalaBear⁴>`), so the BaseFold jagged-PCS over the
+// and `Challenge<OuterSC> = KoalaBear⁴` (same as
+// inner), so the BaseFold jagged-PCS over the
 // Poseidon2-BN254 Merkle MMCS (`OuterValMmcs`, whose
 // `Commitment = Hash<KoalaBear, Bn254, 1>`) applies directly. `bf_mmcs()`
 // builds that MMCS so the generic BaseFold cores
@@ -225,9 +225,8 @@ impl ZeroCommitment<KoalaBearPoseidon2Outer> for OuterPcs {
 // wrap STARK proves and host-verifies over the BN254 BaseFold jagged-PCS
 // (OuterValMmcs + OuterChallenger): the outer commit builds the BN254 commit
 // via `precompute_jagged_basefold_commit_generic::<OuterValMmcs>`, and
-// `prove_trusted_evaluations` / `verify_jagged_pcs_host` route to the
-// recursion-core hooks.  (gnark `verify_wrap_basefold` + wrap vk regen + FRI
-// deletion remain.)
+// `prove_trusted_evaluations` / `verify_jagged_pcs_host` dispatch statically
+// through this impl.
 impl BasefoldRing for KoalaBearPoseidon2Outer {
     fn prep_open_data(
         prep: &Self::PrepPrecomputed,
@@ -341,7 +340,7 @@ pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
 // BN254 commitment (`OuterValMmcs::Commitment = Hash<KoalaBear, Bn254, 1>`)
 // "flows" through commit/open/verify exactly where the inner ring uses the
 // 8-felt Poseidon2-KoalaBear digest. `Val`/`Challenge` stay KoalaBear /
-// KoalaBear⁴ for both (mirrors SP1's `BNGC<KoalaBear, KoalaBear⁴>`); only the
+// KoalaBear⁴ for both; only the
 // Merkle-commitment hash + challenger vary.
 //
 // No runtime body: these functions are never *called* here (the OuterSC wrap
@@ -469,7 +468,7 @@ pub mod outer_jagged_hooks {
     // `BasefoldRing` associated type and call the generic BaseFold open/verify
     // statically, so only the setup/VK-side commit lives here.
 
-    /// SP1-style PREPROCESSED-trace setup commit for the OuterSC wrap
+    /// PREPROCESSED-trace setup commit for the OuterSC wrap
     /// machine: stacked BaseFold over the Poseidon2-BN254 `OuterValMmcs`
     /// (no two-adic coset LDE).  Returns the `OuterValMmcs::Commitment`, which
     /// is `Com<KoalaBearPoseidon2Outer>` since
@@ -559,16 +558,13 @@ mod basefold_over_bn254_roundtrip_test {
         let mmcs = <KoalaBearPoseidon2Outer as BasefoldRing>::bf_mmcs();
         let dft = Arc::new(OuterDft::default());
 
-        // Body inlined from what used to be `zkm_pcs::jagged_pcs::roundtrip_jagged_pcs_generic`,
-        // matching SP1, whose equivalent (`test_jagged_basefold`, basefold.rs:121) is a generic fn
-        // inside `#[cfg(test)] mod tests` that never leaves the test module.
+        // The commit/open/verify roundtrip body is inlined in this test.
         //
         // It lives HERE rather than next to the PCS purely because of crate layering: the outer-ring
         // types (`OuterValMmcs` / `OuterChallenger` / `OuterDft`) are defined in this crate while the
-        // PCS is in `zkm-pcs`, so the test cannot sit beside the code it exercises. SP1 avoids this
-        // only because `BnProver`/`BNGC` are co-located with the jagged crate inside `slop`.
+        // PCS is in `zkm-pcs`, so the test cannot sit beside the code it exercises.
         // Do NOT "tidy" this back into a shared `pub fn` in the prover library — that ships a test
-        // fixture as public API, which is what this change removed.
+        // fixture as public API.
         use p3_challenger::{CanObserve, FieldChallenger};
         use zkm_pcs::basefold::FriConfig;
         use zkm_pcs::jagged_pcs::{

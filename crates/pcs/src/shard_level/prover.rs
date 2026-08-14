@@ -45,7 +45,7 @@ pub fn commit_traces<'t, SC, A, P>(
     // host-fallback precompute (pins `log_dense_size`) and FORCED onto the built
     // `PrecomputedJaggedCommit.recursion_area_pin` so the OPEN-path jagged-eval
     // half reads it back in lockstep.  `Some(RECURSION_LOG_TRACE_AREA)` on the
-    // GPU RECURSION (compress) lazy-commit path; `None` on every host / CORE /
+    // GPU RECURSION (compress) commit path; `None` on every host / CORE /
     // shrink / wrap path (byte-identical).
     recursion_area_pin: Option<usize>,
 ) -> (
@@ -237,13 +237,13 @@ pub fn prove_shard_with_data<SC, A, P>(
     challenger: &mut SC::Challenger,
     orientation: FoldOrientation,
     // The per-shard rev(zeta) orientation
-    // (from `StarkMachine::core_rev()`).  Threaded to `maybe_auto_precompute`
+    // (from `StarkMachine::core_rev()`).  Threaded to `commit_traces`
     // (records it on the built `PrecomputedJaggedCommit.rev`) + the zerocheck,
     // so the commit + zerocheck stay in lockstep.
     dense_rev: bool,
     // The recursion-layer AREA PIN, threaded to
-    // `maybe_auto_precompute` (pins the lazy device/host commit + records the
-    // field).  `Some(_)` on the GPU RECURSION (compress) lazy-commit path; `None`
+    // `commit_traces` (pins the built commit + records the
+    // field).  `Some(_)` on the GPU RECURSION (compress) commit path; `None`
     // elsewhere (byte-identical).
     recursion_area_pin: Option<usize>,
     // The prover IS the dispatch seam: its `commit_multilinears` /
@@ -304,18 +304,18 @@ where
     // is kept alive.  Callers MOVE their owned traces into these `Arc<Mle>`s,
     // so handing the slice down costs a refcount, not a copy.
 
-    // Auto-precompute.  This driver is the CpuProver path ONLY: the GPU
-    // pipeline assembles the shard stages device-natively in ziren-gpu's
+    // Commit: consume-or-build.  This driver is the CpuProver path ONLY: the
+    // GPU pipeline assembles the shard stages device-natively in ziren-gpu's
     // `shard-prover/src/lib.rs` and never enters this function.
     //
-    // `commit_traces` runs the BaseFold pre-commit when the
-    // caller supplied no `precomputed_commit`, overrides `main_commitment`
-    // with its 8-felt digest, and threads the result into the jagged-PCS
+    // `commit_traces` builds the BaseFold commit when `commit_data` is
+    // `None`, produces `main_commitment` as
+    // its 8-felt digest, and threads the result into the jagged-PCS
     // opening so the in-band commit observe is skipped.  That skip is
     // load-bearing: the verifier ALWAYS uses
-    // `verify_jagged_basefold_no_observe`, so a `None` here would make the
-    // prover observe the BaseFold commit in-band while the verifier skips it
-    // → transcript desync.
+    // `verify_jagged_basefold_no_observe`, so an in-band observe on the
+    // prover side would be
+    // a transcript desync.
     //
     // Every chip is host-resident on this driver, so the device-residency
     // parameters the shared helpers accept are inert here: `chip_cum_tails` is
@@ -498,8 +498,8 @@ where
     //
     // Its chip set, ORDER and dims come from the commit itself
     // (`packing.chip_infos`), which is authoritative: `setup` sorted the
-    // preprocessed traces by (Reverse(height), name) and committed them in that
-    // order, which is NOT the main round's name order.  Reading the order off
+    // preprocessed traces by NAME and committed them in that
+    // order.  Reading the order off
     // the commit means the round can never disagree with what was committed.
     //
     // A machine with no preprocessed traces yields an empty round set and a
@@ -524,8 +524,7 @@ where
         // This chip's PREPROCESSED columns at z are the PREFIX of its zerocheck
         // residual (`preprocessed.local ++ main.local`, split by
         // `preprocessed_width` — see the opened-values builder).  They are
-        // already computed; the round proves them against the vk's commitment,
-        // which is what nothing did before.
+        // already computed; the round proves them against the vk's commitment.
         let evals = trace_at_z.get(&info.name).unwrap_or_else(|| {
             panic!("preprocessed round: chip {} has no zerocheck residual", info.name)
         });

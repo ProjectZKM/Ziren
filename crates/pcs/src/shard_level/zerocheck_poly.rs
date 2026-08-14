@@ -1,23 +1,16 @@
-//! Per-chip lazy `ZeroCheckPoly` for the SP1-aligned shard zerocheck.
-//!
-//! This is a CPU port of SP1's
-//! [`hypercube::prover::zerocheck::ZeroCheckPoly`] (mod.rs / sum_as_poly.rs
-//! / fix_last_variable.rs) plus the `slop_multilinear` primitives it
+//! Per-chip lazy `ZeroCheckPoly` for the shard zerocheck: the sum-as-poly /
+//! fix-last-variable round machinery plus the multilinear primitives it
 //! depends on (`VirtualGeq`, the LSB-adjacent MLE fold,
-//! `partial_lagrange`) and `slop_algebra::interpolate_univariate_polynomial`.
+//! `partial_lagrange`, univariate interpolation).
 //!
-//! # Why this exists
+//! # Transcript shape
 //!
-//! Ziren's legacy zerocheck materialized one dense per-chip C-table,
-//! zero-padded every chip up to the shard's `max_log_row_count`,
-//! lambda-RLC'd them into a single combined table, and ran a degree-1
-//! sumcheck whose `claimed_sum` was forced to `0`.  That transcript is
-//! NOT what the recursion verifier
-//! (`crate::recursion_circuit::zerocheck::verify_zerocheck`) expects:
-//! the circuit asserts `claimed_sum == λ-RLC(GKR opening batches)` and
+//! The recursion verifier
+//! (`crate::recursion_circuit::zerocheck::verify_zerocheck`)
+//! asserts `claimed_sum == λ-RLC(GKR opening batches)` and
 //! that the reduced evaluation equals `Σ_chip λ^k·eq·(constraint_eval
-//! + openings_batch)`, built from genuine eq-weighted degree-3 round
-//! polynomials.  This module produces exactly that SP1-shape transcript
+//! + openings_batch)`, built from genuine eq-weighted round
+//! polynomials.  This module produces exactly that transcript
 //! on the host, per chip, summing only over each chip's real rows
 //! (`num_real_entries`) with the padded tail handled analytically by
 //! [`VirtualGeq`] — so cost grows as `Σ chip_height`, not
@@ -28,25 +21,23 @@
 //!
 //!   * MLE fold: adjacent pairs `(2i, 2i+1)` → `i`, last odd row
 //!     paired with the `ZERO` padding constant (LSB-first, identical to
-//!     `crate::basefold::Mle` and `slop` `mle_fix_last_variable`).  The
+//!     `crate::basefold::Mle`).  The
 //!     "last variable" fixed each round is the least-significant bit of
 //!     the row index; `zeta`'s last coordinate.
 //!   * `partial_lagrange`: big-endian, `point[0]` is the MSB.
 //!   * constraint α-RLC: Horner (`acc·α + c`) via
-//!     [`BasefoldConstraintFolder`] — algebraically identical to SP1's
+//!     [`BasefoldConstraintFolder`] — algebraically identical to a
 //!     reversed `powers_of_alpha` array.
 //!   * GKR-opening batch powers: `[β¹, β², …]`, columns ordered
 //!     main-then-preprocessed.
 //!
 //! # Field typing
 //!
-//! SP1 keeps the first sumcheck round in the base field (`K = F`) for
-//! speed, transitioning to `EF` after the first fold.  Ziren's
-//! `SumcheckPoly` traits are monomorphic in the challenge field, so this
-//! port lifts trace columns to `EF` up front and runs every round in
-//! `EF`.  The result is bit-identical for honest traces (the dropped
-//! base-field fast path only skips arithmetic that evaluates to the same
-//! value); the first-round constraint-at-point-0 skip is preserved
+//! The FIRST sumcheck round runs in the base field (`K = F` — the
+//! cell-field type parameter on [`ZeroCheckPoly`], no up-front `EF` lift
+//! of the widest round); `fix_last` folds the cells crossing `K → EF`,
+//! and every later round runs in `EF`.  The first-round
+//! constraint-at-point-0 skip is preserved
 //! exactly (it is `0` on satisfied real rows).
 
 use std::marker::PhantomData;
@@ -69,7 +60,7 @@ use crate::Chip;
 
 // The zerocheck sumcheck reduction is `sumcheck_poly::
 // reduce_sumcheck_to_evaluation` — ONE driver for the zerocheck and the
-// GKR rounds (this file used to carry a chip-serial copy).  The host
+// GKR rounds.  The host
 // driver maps the chip axis with rayon (measured win: with it serial, a
 // shard's many short chips leave the calling thread doing nearly all
 // the work); the GPU twin (`ziren-gpu reduce_gpu_zerocheck_serial`)
@@ -80,9 +71,9 @@ use crate::Chip;
 // ───────────────────────────── ported primitives ─────────────────────────
 
 /// `eq(point, -)` lagrange weights over the WHOLE `2^|point|` hypercube,
-/// big-endian (`point[0]` = MSB).  Port of `slop` `partial_lagrange`.
+/// big-endian (`point[0]` = MSB).
 ///
-/// The prover now always builds only the prefix it reads
+/// The prover always builds only the prefix it reads
 /// ([`partial_lagrange_prefix`]); this full build is retained as that
 /// function's test ORACLE and as the readable statement of the convention.
 #[cfg(test)]
@@ -144,8 +135,7 @@ pub(crate) fn partial_lagrange_prefix<EF: Field>(point: &[EF], n: usize) -> Vec<
 }
 
 /// Lagrange-interpolate the polynomial through `(xs[i], ys[i])` into
-/// monomial-basis coefficients.  Port of
-/// `slop_algebra::interpolate_univariate_polynomial`.  Panics if `xs`
+/// monomial-basis coefficients.  Panics if `xs`
 /// has duplicate points or `xs.len() != ys.len()`.
 pub fn interpolate_univariate_polynomial<EF: Field>(
     xs: &[EF],
@@ -214,7 +204,7 @@ fn zerocheck_eq_root<EF: Field>(last: EF) -> Option<EF> {
 }
 
 /// Reconstruct the five zerocheck round-poly evaluations at `{0, 1, 2, 3, 4}`
-/// from the SP1 **eq-root trick**, given the three computed samples
+/// from the **eq-root trick**, given the three computed samples
 /// `p0 = p(0)`, `p2 = p(2)`, `p4 = p(4)` of the *corrected* round poly (the
 /// `elf_X · eq_adjustment` scale + VirtualGeq padded-row subtraction already
 /// applied), the round `claim`, and the binding coordinate `last`.
@@ -263,7 +253,7 @@ fn reconstruct_zerocheck_evals_from_eqroot<EF: Field>(
 }
 
 /// Dense linear combination of a geq and an eq polynomial sharing one
-/// threshold.  Port of `slop_multilinear::VirtualGeq` restricted to the
+/// threshold, restricted to the
 /// `fix_last_variable` + `eval_at_usize` operations the zerocheck round
 /// prover needs.
 #[derive(Clone, Copy, Debug)]
@@ -319,7 +309,7 @@ impl<F: Field> VirtualGeq<F> {
 /// single `prove_shard_zerocheck` call; the poly never escapes it.
 ///
 /// The `K` type parameter is the *cell* field (the field the trace rows
-/// `main_cells` / `prep_cells` are held in).  Following SP1, the FIRST
+/// `main_cells` / `prep_cells` are held in).  The FIRST
 /// sumcheck round runs in the base field (`K = F`, no up-front `EF` lift
 /// of the widest round) and every later round in the extension field
 /// (`K = EF`); `fix_last` folds the cells crossing `K → EF`.  The
@@ -442,9 +432,9 @@ where
         let num_real = self.num_real_entries;
         if num_real == 0 {
             // Pure-padding chip contributes nothing; emit a degree-4
-            // dummy (5 zero coefficients) to byte-match SP1's
-            // `UnivariatePolynomial::zero(4)` (= vec![zero; degree+1] = 5)
-            // and the recursion dummy `dummy_partial_sumcheck_proof(.., 4)`,
+            // dummy (`UnivariatePolynomial::zero(4)` = vec![zero; degree+1]
+            // = 5 coefficients) to byte-match
+            // the recursion dummy `dummy_partial_sumcheck_proof(.., 4)`
             // and the real-path degree-4 interpolant over {0,1,2,4,eq-root}.
             return UnivariatePolynomial { coefficients: vec![EF::ZERO; 5] };
         }
@@ -534,13 +524,11 @@ where
 
         // Each pair `(row0 = 2·pair, row1 = 2·pair+1)` contributes an
         // INDEPENDENT degree-4 `(Δy_0, Δy_2, Δy_3, Δy_4)`, so the hypercube
-        // sum is parallelized across pairs — SP1 parity with the CPU
-        // `sum_as_poly` (`hypercube::prover::zerocheck::sum_as_poly` par_bridge
-        // over pair chunks / `slop` `mle.rs` `par_iter().step_by(2)`).  Field
+        // sum is parallelized across pairs.  Field
         // addition is associative + commutative, so rayon's tree-reduction of
         // the per-pair tuples is byte-identical to the serial left-fold.
-        // `map_init` reuses the cell-field scratch buffers per WORKER THREAD
-        // (SP1's per-chunk scratch), so the reinterpolation allocations are
+        // `map_init` reuses the cell-field scratch buffers per WORKER THREAD,
+        // so the reinterpolation allocations are
         // amortized across pairs rather than re-allocated each pair.
         (0..num_pairs)
             .into_par_iter()
@@ -904,7 +892,7 @@ fn fold_cells<K: Field, EF: ExtensionField<K>>(
 /// The GKR per-chip opening (`evaluate_trace_columns_at_point`
 /// -> `eq_mle_table`) is LSB-first (`point[0]` <-> row-LSB), while this module's
 /// zerocheck poly is big-endian (`partial_lagrange` / `fold_cells` peel
-/// `zeta[dim-1]` <-> row-LSB, matching SP1).  Feeding the bit-reversed trace to
+/// `zeta[dim-1]` <-> row-LSB).  Feeding the bit-reversed trace to
 /// the poly makes its big-endian boolean-cube sum equal the LSB-first GKR-batch
 /// claim, restoring `claim == cube-sum` without touching `zeta`, the GKR
 /// openings, or the claim.
@@ -943,7 +931,7 @@ where
     EF: ExtensionField<F> + ExtensionField<K>,
 {
     /// Final per-column evaluations at the reduced point, preprocessed
-    /// then main (SP1 ordering).  Ziren's zerocheck consumers discard
+    /// then main.  Ziren's zerocheck consumers discard
     /// this (openings come from the GKR phase); provided for the trait.
     ///
     /// Called only at `num_variables == 0`, i.e. on the fully-reduced
@@ -1046,6 +1034,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation;
+    use crate::shard_level::types::PartialSumcheckProof;
     use crate::{InnerChallenge, InnerVal};
     use p3_field::PrimeCharacteristicRing;
 
@@ -1154,7 +1144,7 @@ mod tests {
     }
 
     /// `fold_cells` applied round-by-round (fixing the LSB each round, as
-    /// `reduce_sumcheck_serial` does) over a real-cell buffer must equal
+    /// `reduce_sumcheck_to_evaluation` does) over a real-cell buffer must equal
     /// the multilinear extension of the ZERO-padded table at the reduced
     /// point — i.e. `component_poly_evals` = padded-MLE@z (the zerocheck
     /// "dense claim").  Uses a non-power-of-two `num_real` (3) so the
@@ -1254,7 +1244,7 @@ mod tests {
         let _ = InnerVal::ONE; // keep InnerVal import used
     }
 
-    // ───── reduce_sumcheck_serial end-to-end identity (host sum_as_poly) ─────
+    // ───── sumcheck-reduction end-to-end identity (host sum_as_poly) ─────
     use crate::air::{MachineAir, MachineProgram};
     use crate::chip::Chip;
     use crate::record::MachineRecord;
@@ -1453,7 +1443,7 @@ mod tests {
             vg,
         );
 
-        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+        let (proof, cpe) = reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(
             vec![poly],
             &mut challenger,
             vec![claim],
@@ -1693,7 +1683,7 @@ mod tests {
         );
 
         let (proof, cpe) =
-            reduce_sumcheck_serial::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
+            reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
 
         // INVARIANT (2) — the exact identity the recursion verifier asserts
         // (zerocheck.rs:628/648): reduced value == eq_eval(zeta_ORIGINAL, z)
@@ -1883,7 +1873,7 @@ mod tests {
         );
 
         let (proof, cpe) =
-            reduce_sumcheck_serial::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
+            reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(vec![poly], &mut challenger, vec![claim], 1, lambda);
 
         let z = &proof.point_and_eval.0;
         let main_at_z = &cpe[0][prep_width..];
@@ -2014,9 +2004,9 @@ mod tests {
         let claim_gkr: EF =
             main_evals.iter().zip(gkr_powers.iter()).fold(EF::ZERO, |a, (o, p)| a + *o * *p);
 
-        // SP1-FAITHFUL CLAIM CORRECTION (PaddedMle::eval_at_eq embedding):
-        // SP1 opens each chip at the FULL max-dim point, so its opening already
-        // carries Π_{extra}(1 − zeta[k]) over the nonzero zeta coords BETWEEN
+        // CLAIM CORRECTION (PaddedMle::eval_at_eq embedding): a full
+        // max-dim-point opening would already
+        // carry Π_{extra}(1 − zeta[k]) over the nonzero zeta coords BETWEEN
         // this chip's trailing log_h and the shard max (`num_row_variables`).
         // Ziren's GKR opens at the trailing log_h only, dropping that factor.
         // Re-apply it so the zerocheck claim equals the embedded boolean-cube
@@ -2071,7 +2061,7 @@ mod tests {
         }
         let inv1 = cube_sum == claim;
 
-        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+        let (proof, cpe) = reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(
             vec![poly],
             &mut challenger,
             vec![claim],
@@ -2222,7 +2212,7 @@ mod tests {
         }
         let inv1 = cube_sum == claim;
 
-        let (proof, cpe) = reduce_sumcheck_serial::<InnerVal, EF, _, _>(
+        let (proof, cpe) = reduce_sumcheck_to_evaluation::<InnerVal, EF, _, _>(
             vec![poly],
             &mut challenger,
             vec![claim],

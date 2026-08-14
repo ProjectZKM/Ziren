@@ -80,9 +80,9 @@ pub struct ChipEvaluation<EF> {
     /// verifier treats 0 as uniform-max-log-row-count padding.
     #[serde(default)]
     pub log_degree: u8,
-    /// SP1-parity FULL-POINT main-trace opening: the chip's main
+    /// FULL-POINT main-trace opening: the chip's main
     /// trace columns evaluated at the FULL `max_log_row_count`-coord
-    /// GKR `trace_point` (SP1 `eval_point.last_k(trace_dimension)`),
+    /// GKR `trace_point`,
     /// LSB-first / natural-row.  The existing `main_trace_evaluations`
     /// is the chip's own trailing-`log_h` opening (consumed by the
     /// zerocheck's bit-reversed sum-modification path); this field is

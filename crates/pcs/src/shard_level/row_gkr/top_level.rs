@@ -83,10 +83,9 @@ where
     // the actual (heterogeneous) chip heights — `build_gkr_circuit`
     // emits `num_row_variables - 1` round proofs (see `build.rs:94-117`
     // layer ladder), so `num_row_variables = max_log_row_count` yields
-    // exactly `max_log_row_count - 1` rounds.  This mirrors SP1, whose
-    // verifier hard-asserts `round_proofs.len() + 1 == max_log_row_count`
-    // (`hypercube/logup_gkr/verifier.rs:198`) and lazily zero-pads the
-    // first-layer MLEs to `max_log_row_count` (`execution.rs:226`).
+    // exactly `max_log_row_count - 1` rounds — the count the verifier
+    // hard-asserts (`round_proofs.len() + 1 == max_log_row_count`); the
+    // first-layer MLEs are lazily zero-padded to `max_log_row_count`.
     //
     // Device residency: chips whose host trace was emptied (device
     // resident) resolve their REAL height from the per-shard provider
@@ -264,12 +263,9 @@ where
     let _extract_span = tracing::info_span!("logup_gkr_output_extract").entered();
     use p3_maybe_rayon::prelude::*;
 
-    // Per-chip device-eval map. Device eval-at seam retired (Option-C D3a):
-    // the batched host helper is
-    // CpuProver-only and always yields all-None, so this map is always empty
+    // Per-chip device-eval map: always empty
     // on the host path (the GPU driver calls the `_gpu` batch kernel directly).
-    // Device-only chips therefore fall to the zero-vector below — byte-identical
-    // to the former always-None provider call.
+    // Device-only chips therefore fall to the zero-vector below.
     let batched_main_evals: BTreeMap<String, Vec<EF>> = BTreeMap::new();
 
     let chip_openings: BTreeMap<String, ChipEvaluation<EF>> = chips
@@ -296,7 +292,7 @@ where
             } else {
                 &eval_point[..]
             };
-            // SP1-parity FULL-POINT opening point: the trailing
+            // FULL-POINT opening point: the trailing
             // `max_log_row_count` coords (= the full trace_point), LSB-first.
             // Used to populate `*_full` for the LogUp last-layer reconstruction
             // (the GKR leaf is LSB-first natural-row).  Independent of the
@@ -311,10 +307,8 @@ where
             // zero vector of its declared width.
             let chip_main_width = <_ as p3_air::BaseAir<F>>::width(&chip.air);
             let main_evals = if pm.inner().is_none() && chip_main_width > 0 {
-                // Device-only chip. On the host path the batched map is empty
-                // and the per-chip device eval-at seam is retired (CpuProver
-                // helper always None), so the chip emits the legacy zero vector
-                // of its declared width. The GPU driver evaluates the
+                // Device-only chip: the host path emits a zero vector
+                // of the declared width; the GPU driver evaluates the
                 // device-resident trace at the GKR point via its own kernel.
                 batched_main_evals
                     .get(&chip.name().to_string())
@@ -350,20 +344,19 @@ where
                 None
             };
 
-            // SP1-parity FULL-POINT openings at `full_eval_point` (the full
+            // FULL-POINT openings at `full_eval_point` (the full
             // trace_point), for the LogUp last-layer reconstruction.  The GKR
             // leaf is LSB-first natural-row, so the full-point opening of the
             // zero-padded trace = Σ_{row<height} eq(row, trace_point)·trace[row]
             // (rows ≥ height implicitly zero) — exactly what the reconstruction
             // needs.  Host path: `evaluate_trace_columns_at_point` over the full
-            // coords.  Device-only chips: per-chip provider hook at the full
-            // point (no batch map for this point); falls back to None.
-            // SP1-parity: ALWAYS emit the full-point opening for every chip so
+            // coords.
+            // ALWAYS emit the full-point opening for every chip so
             // the shard-uniform rev(zeta) convention is unconditional on core.
             // Host chips consume the shared analytic trace-MLE (`PaddedMle::
             // eval_at`, transcript-neutral, reproduces
             // `evaluate_trace_columns_at_point` bit-for-bit).  On the host CPU
-            // path the per-chip device eval-at seam is retired, so device-only
+            // path device-only
             // chips serve a zero vector of declared width (unexercised/height-0);
             // width-0 chips emit an empty opening.
             let main_evals_full: Option<Vec<EF>> = if pm.inner().is_some() {
@@ -430,10 +423,9 @@ where
         witness,
     };
 
-    // SP1 observe slot 1 — the GKR trace openings (trace@ζ), observed HERE,
+    // Observe slot 1 — the GKR trace openings (trace@ζ), observed HERE,
     // inside the GKR phase, before the shard driver samples the zerocheck's
-    // α / γ / λ.  Mirrors `sp1-latest/crates/hypercube/src/logup_gkr/prover.rs
-    // :187,204,206`.  Keeping it inside this function (rather than in the shard
+    // α / γ / λ.  Keeping it inside this function (rather than in the shard
     // driver) makes it structurally impossible for a driver to sample a
     // zerocheck challenge against an unbound opening vector.  See
     // `shard_level::prover::observe_logup_gkr_openings`.

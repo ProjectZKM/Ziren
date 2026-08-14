@@ -104,8 +104,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub fold_orientation: FoldOrientation,
     /// Height-agnostic jagged-verifier groundwork:
     /// witnessed per-round, per-chip **actual row counts** (column
-    /// heights, pre-padding) -- the NUMERIC counterpart SP1 carries in
-    /// `row_counts_and_column_counts`.  Ziren still derives the same
+    /// heights, pre-padding).  Ziren still derives the same
     /// values from `evaluation_proof`'s packing offsets at lift time;
     /// these are PURE DATA carried alongside.  Empty on older proof bytes.
     #[serde(default)]
@@ -147,7 +146,7 @@ pub struct BasefoldShardProof<F, EF> {
     pub preprocessed_row_counts: Vec<F>,
     /// Each opening round's stacking-PADDING column height, in round order.
     ///
-    /// Every round carries exactly one such column (SP1's `.max(1)`, and the
+    /// Every round carries exactly one such column (the `.max(1)`, and the
     /// gap is always under one stripe), and its height is what closes the round
     /// out to its committed area.  Like the row counts above it is
     /// height-derived, so a height-agnostic verifier takes it from here; the

@@ -371,8 +371,8 @@ pub trait MachineProver<SC: StarkGenericConfig, A: MachineAir<SC::Val>>:
         &self,
         chips: &[&MachineChip<SC, A>],
         // The FIRST opening round: the preprocessed traces, in the order
-        // `setup` committed them (by (Reverse(height), name) — NOT the main
-        // round's name order), their column claims, and the proving key's
+        // `setup` committed them (BY NAME — the same convention as the main
+        // round), their column claims, and the proving key's
         // commit.  Empty for a machine with no preprocessed traces, which then
         // proves a single main round.
         preprocessed_named: &[(String, crate::multilinear::PaddedMle<Val<SC>>)],
@@ -730,17 +730,24 @@ where
         // Order the chips and traces by trace size (biggest first), and get the ordering map.
         named_traces.sort_by_key(|(name, trace)| (Reverse(trace.height()), name.clone()));
 
-        // FIX-off MISSING-CHIP INJECTION (EXACT mirror of the GPU `commit`): when
-        // `Some(cluster_widths)` is passed (the FIX-off predicate — CORE only),
-        // inject a genuine HEIGHT-0 (0-row, FULL-WIDTH, zero) `RowMajorMatrix` at
-        // each canonical-CLUSTER chip's width for every cluster chip this raw
+        // MISSING-CHIP INJECTION (exact mirror of the GPU `commit`).
+        //
+        // Terminology: "FIX-off" in this codebase means the NATURAL-HEIGHTS
+        // discipline — chips commit at their event-driven heights, no shape
+        // fitting ("FIX" was the retired `FIX_CORE_SHAPES` mode, which padded
+        // every chip up to a fitted canonical shape; only offline shape/vk
+        // tooling ever fits now).  The core prove path is always FIX-off.
+        //
+        // When `Some(cluster_widths)` is passed (CORE only), inject a genuine
+        // HEIGHT-0 (0-row, FULL-WIDTH, zero) `RowMajorMatrix` at each
+        // canonical-CLUSTER chip's width for every cluster chip this raw
         // (event-driven) shard is MISSING.  The chip is then PRESENT in the
-        // committed set (VK intact — flows through `chip_ordering` ->
-        // `opened_values` AND the inline BaseFold commit packing) but commits
-        // NOTHING (`row_count:0`), so the degree-masked reconstruction excludes it
-        // (degree=0 => full_geq=1 => identity fraction (0,1)).  `None`
-        // (recursion / shrink / wrap / FIX-on) => own-chip-set commit
-        // (byte-identical to legacy).
+        // committed set — the chip SET (and thus the vk structure) stays
+        // uniform, flowing through `chip_ordering` and the BaseFold commit
+        // packing — but commits NOTHING (`row_count: 0`), so the
+        // degree-masked reconstruction excludes it (degree=0 => full_geq=1 =>
+        // identity fraction (0,1)).  `None` (recursion / shrink / wrap) =>
+        // own-chip-set commit.
         if let Some(cluster_widths) = cluster_widths {
             use std::collections::BTreeSet;
             let present: BTreeSet<String> =
@@ -890,28 +897,10 @@ where
         // (otherwise round 0's claimed_sum check desyncs).
         let basefold_challenger_snapshot: SC::Challenger = challenger.clone();
 
-        // === BaseFold fast path (KoalaBear/JaggedChallenger default) ===
-        // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the default proof
-        // system whenever the generic config is the KoalaBear/JaggedChallenger
-        // stack.  The path still uses `TwoAdicFriPcs` for the prep + main
-        // commit/open placeholders, with soundness carried by the BaseFold
-        // per-shard proof generated below.
-        //
-        // Dispatch is purely TypeId-based: inner rings take BaseFold for all
-        // shards, the OuterSC wrap stays on FRI:
-        //   - SC == KoalaBearPoseidon2 (Val=KoalaBear + Challenge=InnerChallenge
-        //     + Challenger=JaggedChallenger)  → basefold path for ALL shards,
-        //     including recursion shards (compose/shrink).
-        //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
-        //     → fall through to the FRI body below.  Wrap stays on FRI
-        //     permanently; the basefold path's inner
-        //     `prove_shard_with_data_boxed` has the same TypeId
-        //     guard so this outer check matches its assumption.
-        //
-        // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
-        // Every ring (inner KoalaBear/JaggedChallenger and the OUTER wrap
-        // BN254/MultiField32) opens via the shard-level BaseFold jagged-PCS;
-        // the two-adic-quotient FRI open path is not used.
+        // BaseFold + jagged PCS + zerocheck + LogUp-GKR is the ONLY proof
+        // system: every ring (inner KoalaBear/JaggedChallenger and the OUTER
+        // wrap BN254/MultiField32) opens via the shard-level BaseFold
+        // jagged-PCS.  There is no two-adic-quotient FRI open path.
         {
             // Produce the shard-level BaseFold proof: LogUp-GKR, zerocheck,
             // and the jagged-PCS opening, driven from the challenger
@@ -1038,21 +1027,18 @@ impl Display for CpuProverError {
 impl Error for CpuProverError {}
 
 // ───────────────────────────────────────────────────────────
-// Helper: drive prove_shard_with_data from inside StarkMachine::open()
-// for KoalaBearPoseidon2.  Always invoked — non-KoalaBear configs
-// short-circuit to None via the TypeId gate inside the helper.
+// Helper: drive prove_shard_with_data from inside `CpuProver::open()`.
 // ───────────────────────────────────────────────────────────
 
 /// Drive [`crate::shard_level::prover::prove_shard_with_data`]
-/// using a cloned challenger so the outer transcript isn't perturbed.
+/// using a cloned challenger so the caller's transcript isn't perturbed.
 ///
-/// Returns `Some(Box::new(basefold_proof))` when SC is
-/// `KoalaBearPoseidon2` (monomorphic dispatch gate — see
-/// `crate::shard_level::prover::prove_trusted_evaluations`) and
-/// `None` otherwise.
+/// Always returns `Some(Box::new(basefold_proof))`; asserts
+/// `Val == KoalaBear` / `Challenge == KoalaBear^4` (shared by the inner
+/// and outer rings) on entry.
 ///
-/// Invoked from the KoalaBear/JaggedChallenger BaseFold path.  Bridges
-/// between the generic `StarkMachine::open` state and the shard-level
+/// Bridges
+/// between the generic `CpuProver::open` state and the shard-level
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
 fn prove_shard_with_data_boxed<SC, A, P>(
@@ -1143,8 +1129,8 @@ where
     // `main_commitment`, and applies the jagged HASH-BIND for the inner ring),
     // so there is no digest to compute up-front here.
 
-    // Clone the outer challenger so our shard-level run doesn't
-    // perturb the legacy transcript state.
+    // Clone the outer challenger so the shard-level run doesn't
+    // perturb the caller's transcript state.
     let mut shard_challenger: SC::Challenger = challenger.clone();
 
     // Convert &[&Chip] into &[&Chip<Val<SC>, A>] — Chip alias check.

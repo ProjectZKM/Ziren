@@ -76,9 +76,8 @@ pub fn build_chip_interaction_tables<F: PrimeField + Send + Sync, EF: ExtensionF
     let mut denom_evals: Vec<EF> = vec![EF::ZERO; total];
 
     // Performance optimization: parallelize per-row interaction
-    // computation. Mirrors SP1's `numer_evals.par_chunks_exact_mut(num_interactions)`
-    // pattern at `crates/hypercube/src/logup_gkr/execution.rs:144-217`.
-    // For chips with hundreds of thousands of rows (Cpu at 131K, Program
+    // computation (`par_chunks_exact_mut(num_interactions)`).
+    // For chips with hundreds of thousands of rows (e.g. Program
     // at 524K), per-row parallelism is the right granularity — chip-level
     // alone leaves a single core doing the work for the largest chip.
     if height > 0 && num_interactions > 0 {
@@ -147,7 +146,7 @@ fn pad_rows<F: Clone>(values: Vec<F>, num_cols: usize, target_log_rows: usize, p
 ///   * `real_upper = min(real_rows, half_logical)`
 ///   * `real_lower = saturating_sub(real_rows, half_logical).min(half_logical)`
 ///
-/// This is the SP1 `PaddedMle::padded` shape: virtual rows beyond
+/// This is the `PaddedMle::padded` shape: virtual rows beyond
 /// `real_*` are NOT materialized; consumers (`ChipLayerState`)
 /// resolve them via the per-quadrant pad constant.
 fn split_real_msb<F: Clone>(
@@ -176,7 +175,7 @@ fn split_real_msb<F: Clone>(
 
 /// Split a row-major table along its row MSB.  Returns
 /// `(upper_half, lower_half)` each of shape
-/// `(2^(log_rows-1)) × num_cols`.  Mirrors slop's
+/// `(2^(log_rows-1)) × num_cols` — i.e.
 /// `fix_last_variable(0)` / `fix_last_variable(1)`.
 ///
 /// Requires `values.len() == (1 << log_rows) * num_cols` and
@@ -257,7 +256,7 @@ where
     // padded widths (each chip pads its raw interaction count to the next
     // power of two), so `flatten_layer`'s running offset across chips
     // never overflows the global axis.  Using the sum of *raw* counts
-    // (SP1's choice) under-counts and trips
+    // instead under-counts and trips
     // `round.rs:99 "layer interaction axis too narrow for chip
     //  contributions: offset {} + chip_cols {} > global {}"`
     // when chips have padded widths > raw widths.
@@ -312,7 +311,7 @@ where
 
         // Encode each half as a `RowMajorTable` with raw per-chip
         // `num_interactions` storage (no per-chip column padding —
-        // SP1's `PaddedMle` pattern; padding is virtual via
+        // the `PaddedMle` pattern; padding is virtual via
         // `num_interaction_variables` metadata).  Layer-wide global
         // `num_interaction_variables` is computed below from
         // `total_interactions` (sum of per-chip raw counts).

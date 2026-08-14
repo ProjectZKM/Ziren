@@ -361,32 +361,27 @@ pub mod koala_bear_poseidon2 {
 
     }
 
-    /// SP1-style PREPROCESSED-trace setup commit for the inner
+    /// PREPROCESSED-trace setup commit for the inner
     /// (`KoalaBearPoseidon2`) core/compress/shrink config: stacked BaseFold
     /// over the Poseidon2-KoalaBear `JaggedMmcs` (no two-adic coset LDE, so no
     /// `2^(TWO_ADICITY - log_blowup)` ceiling).  Mirrors `outer_prep_commit`
-    /// (recursion-core, BN254 ring).  Returns bincode of the
+    /// (recursion-core, BN254 ring).  Returns the
     /// `JaggedMmcs::Commitment` — equal to `Com<KoalaBearPoseidon2>` since the
     /// inner `Pcs` is `TwoAdicFriPcs<_, _, InnerValMmcs, _>` and
     /// `JaggedMmcs == InnerValMmcs` (same Poseidon2-KoalaBear Merkle root).
-    /// Preprocessed-trace commit for the inner config: the jagged BaseFold
-    /// path (no two-adic coset LDE), returning `Com<KoalaBearPoseidon2>`.
     impl crate::config::PrepCommitRoot<KoalaBearPoseidon2>
         for crate::jagged_pcs::jagged::PrecomputedJaggedCommit
     {
-        /// The HASH-BOUND commitment, as SP1's `commit_multilinears` returns
-        /// (`slop/crates/jagged/src/prover.rs:141-150`): the raw BaseFold root
-        /// with the committed GEOMETRY folded in,
-        /// `compress([root, hash(row_counts ++ column_counts)])`.
+        /// The HASH-BOUND commitment: the raw BaseFold root with the committed
+        /// GEOMETRY folded in,
+        /// `compress([root, hash(row_counts ++ column_counts)])` — the same
+        /// binding the MAIN round uses.
         ///
-        /// This is what makes a verifying key say anything about the shape of
-        /// what it committed.  Ziren already binds the MAIN round this way; the
-        /// key holding only the raw root left the preprocessed geometry
-        /// prover-supplied, so a verifier that cannot see the traces (the
-        /// recursion circuit) had nothing to pin the preprocessed row counts
-        /// against.  The raw root travels in the PROOF, and the verifier
-        /// re-derives this digest from it (SP1
-        /// `slop/crates/jagged/src/verifier.rs:206`).
+        /// The geometry binding is what makes a verifying key say anything
+        /// about the shape of what it committed: a verifier that cannot see
+        /// the traces (the recursion circuit) pins the preprocessed row
+        /// counts against this digest.  The raw root travels in the PROOF,
+        /// and the verifier re-derives the digest from it.
         fn commit_root(&self) -> Com<KoalaBearPoseidon2> {
             let raw = crate::jagged_pcs::basefold_commit_digest(&self.commit);
             let modified =
@@ -495,7 +490,7 @@ pub mod koala_bear_poseidon2 {
             >,
             challenger: &mut Self::Challenger,
         ) -> crate::shard_level::shard_proof::EvaluationProof {
-            // ONE jagged proof spanning every round — SP1's shape.  A
+            // ONE jagged proof spanning every round.  A
             // per-round proof would cost a reduction, an eval and an open each.
             let bundle = crate::jagged_pcs::jagged::prove_jagged_basefold_rounds(
                 &rounds,

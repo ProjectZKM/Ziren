@@ -1,6 +1,6 @@
-//! SP1-style parallel call site for the deferred recursion stage.
+//! Basefold call site for the deferred recursion stage.
 //!
-//! Mirror of [`super::deferred`] but consumes
+//! Consumes
 //! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
@@ -121,8 +121,7 @@ pub struct ZKMDeferredBasefoldVerifier<C, SC, A> {
 
 /// Verify a batch of deferred recursive proofs.
 ///
-/// Direct port of [`super::deferred::ZKMDeferredVerifier::verify`]
-/// (lines 113-247 of `deferred.rs`) adapted for the SP1-style shard
+/// Deferred-stage batch verify over the basefold shard
 /// proof shape.  Constraints:
 ///
 ///   * Each VK in `vks_and_proofs` lies inside the merkle tree whose
@@ -233,7 +232,7 @@ pub fn verify_deferred_basefold<C, SC, A>(
             .iter()
             .map(|c| BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
             .collect();
-        // SP1's two opening rounds: [preprocessed, main] — same shape as
+        // Two opening rounds: [preprocessed, main] — same shape as
         // core/compress; the machine's preprocessed chips in chip-NAME order.
         let prep_widths: Vec<usize> = {
             let mut dims: Vec<(String, usize)> = machine

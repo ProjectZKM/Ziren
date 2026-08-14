@@ -45,7 +45,7 @@ pub struct StarkMachine<SC: StarkGenericConfig, A> {
     num_pv_elts: usize,
 
     /// Whether this machine's shard proofs use the rev(zeta) CORE
-    /// orientation (the SP1-natural / collapsed-claim convention).  `true` ONLY
+    /// orientation (the collapsed-claim convention).  `true` ONLY
     /// for the CORE (MIPS) machine — its FIX-off/FIX-on prove path installs the
     /// `Some(true)` orientation carrier, so its shard proofs are rev.  `false`
     /// (the default) for every recursion / shrink / wrap machine — those proofs
@@ -124,12 +124,11 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     pub initial_global_cumulative_sum: SepticDigest<Val<SC>>,
     /// The preprocessed traces, row-major.  These are the AIR-side form:
     /// serialized with the key and handed to the constraint folder / debug
-    /// paths, exactly as SP1 keeps `RowMajorMatrix` on its AIR side.
+    /// paths.
     pub traces: Vec<RowMajorMatrix<Val<SC>>>,
     /// The same preprocessed traces in the PROVE-path form: one `Arc<Mle>`
     /// per entry of `traces`, built once on first use and shared by every
-    /// shard.  SP1 carries this as `ShardProverData::preprocessed_traces`
-    /// (`Traces` = name-keyed `PaddedMle`); the shard cube differs per stage,
+    /// shard.  The shard cube differs per stage,
     /// so the cube-dependent `PaddedMle` wrapper is applied per shard —
     /// that wrap is an `Arc` bump because `PaddedMle` padding is virtual.
     ///
@@ -140,10 +139,9 @@ pub struct StarkProvingKey<SC: StarkGenericConfig> {
     /// The PRECOMPUTED preprocessed commit — the commitment plus the BaseFold
     /// prover data and jagged packing needed to OPEN the preprocessed traces,
     /// not merely observe them.  `self.commit` is the root of exactly this
-    /// commit; SP1 keeps the pair as `(preprocessed_commit, preprocessed_data)`
-    /// out of `setup` (`hypercube/src/prover/shard.rs:416`), the commit in the
-    /// vk and the data in the proving key, and opens the preprocessed traces as
-    /// their own ROUND of every shard proof.
+    /// commit: `setup` puts the commit in the verifying key and this data in
+    /// the proving key, and the preprocessed traces are opened as their own
+    /// ROUND of every shard proof.
     ///
     /// Not serialized: it is a deterministic function of `traces`, so a
     /// deserialized key rebuilds it on first use — same contract as
@@ -230,11 +228,9 @@ impl<SC: StarkGenericConfig> StarkProvingKey<SC> {
 
     /// The precomputed preprocessed commit, built on first use from `traces`
     /// in the SAME name/height order `setup` committed them in (the order
-    /// `chip_ordering` records), so the rebuilt commitment reproduces
-    /// `self.commit` exactly.
-    /// The precomputed preprocessed commit, built on first use from `traces`
-    /// under the orientation recorded on the key (`prep_rev`), so a rebuild
-    /// always reproduces the commitment the verifying key carries.
+    /// `chip_ordering` records) and under the orientation recorded on the key
+    /// (`prep_rev`), so the rebuilt commitment reproduces `self.commit`
+    /// exactly.
     pub fn preprocessed_data(&self) -> &std::sync::Arc<SC::PrepPrecomputed> {
         let use_rev = self.prep_rev;
         self.preprocessed_data.get_or_init(|| {
@@ -630,22 +626,18 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // to know which committed column belongs to which chip.  Under a
         // height-first order that mapping can only come from the key
         // (`chip_information`); under NAME order any verifier reproduces it
-        // from the machine's chip set alone, which is what lets the key stop
-        // carrying chip metadata at all — SP1's `MachineVerifyingKey` carries
-        // none (hypercube/src/verifier/config.rs:73).
+        // from the machine's chip set alone, without key-carried chip
+        // metadata.
         //
-        // Nothing downstream wanted the heights descending: the jagged packer
+        // Nothing downstream wants the heights descending: the jagged packer
         // walks the list in the given order and accumulates offsets
         // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
-        // `traces` by the same list either way.  The height-first order is a
-        // habit from the coset-LDE commit that predates jagged.
+        // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
         let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
-        // verifying key's `chip_information`.  The `(domain, trace.to_owned())`
-        // half of this map used to feed `pcs.commit`; that branch is gone, and
-        // with it a full clone of every preprocessed trace per setup.
+        // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
@@ -656,15 +648,13 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .collect();
 
         // Commit to the preprocessed traces.  One path, always -- no height
-        // threshold, no opt-in flag, no fallback -- matching SP1, where setup
-        // and the shard commit go through the same commit.
+        // threshold, no opt-in flag, no fallback.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
             .collect();
-        // SP1 parity: setup produces the commitment AND the data needed to open
-        // it (`hypercube/src/prover/shard.rs:416` returns
-        // `(preprocessed_commit, preprocessed_data)`).  Keep both — the root goes
+        // Setup produces the commitment AND the data needed to open it.
+        // Keep both — the root goes
         // to the vk, the precompute is seeded into the proving key below, so the
         // opening round never has to re-derive the committed order.
         let prep_precomputed = SC::prep_precompute(&named, self.core_rev());
@@ -782,22 +772,18 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
         // to know which committed column belongs to which chip.  Under a
         // height-first order that mapping can only come from the key
         // (`chip_information`); under NAME order any verifier reproduces it
-        // from the machine's chip set alone, which is what lets the key stop
-        // carrying chip metadata at all — SP1's `MachineVerifyingKey` carries
-        // none (hypercube/src/verifier/config.rs:73).
+        // from the machine's chip set alone, without key-carried chip
+        // metadata.
         //
-        // Nothing downstream wanted the heights descending: the jagged packer
+        // Nothing downstream wants the heights descending: the jagged packer
         // walks the list in the given order and accumulates offsets
         // (`compute_jagged_metadata_from_dims`), and `chip_ordering` indexes
-        // `traces` by the same list either way.  The height-first order is a
-        // habit from the coset-LDE commit that predates jagged.
+        // `traces` by the same list either way.
         named_preprocessed_traces.sort_by(|a, b| a.0.cmp(&b.0));
 
         let pcs = self.config.pcs();
         // Only the serialisable domain description is kept -- it goes into the
-        // verifying key's `chip_information`.  The `(domain, trace.to_owned())`
-        // half of this map used to feed `pcs.commit`; that branch is gone, and
-        // with it a full clone of every preprocessed trace per setup.
+        // verifying key's `chip_information`.
         let chip_information: Vec<_> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| {
@@ -808,8 +794,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             .collect();
 
         // Commit to the preprocessed traces.  One path, always -- no height
-        // threshold, no opt-in flag, no fallback -- matching SP1, where setup
-        // and the shard commit go through the same commit.
+        // threshold, no opt-in flag, no fallback.
         let named: Vec<(String, RowMajorMatrix<Val<SC>>)> = named_preprocessed_traces
             .iter()
             .map(|(name, trace)| (name.to_string(), trace.clone()))
@@ -859,8 +844,7 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
     /// `setup` asserts that a chip's generated preprocessed trace is `Some` iff
     /// `preprocessed_width() > 0` (the `map_or(0, width) == preprocessed_width()`
     /// check), so the set is a property of the MACHINE and needs neither the
-    /// program nor the verifying key to reconstruct.  That is what lets the key
-    /// stop carrying `chip_information` -- SP1's carries none.
+    /// program nor the verifying key to reconstruct.
     pub fn preprocessed_chip_dims(&self) -> Vec<(String, usize)> {
         let mut dims: Vec<(String, usize)> = self
             .chips()
@@ -1001,18 +985,11 @@ impl<SC: StarkGenericConfig, A: MachineAir<Val<SC>> + Air<SymbolicAirBuilder<Val
             // failures and re-verify the lowest-index one serially for the
             // identical typed error.
             //
-            // HISTORICAL: this cap existed because each shard verify used to
-            // materialize a padded-dense-sized transient — `verify_jagged_reduction`
-            // built the full `2^log_dense_size` weight MLE and then CLONED it to
-            // fold (jagged_sumcheck.rs).  On a core reth shard (`log_dense_size ==
-            // 28`) that was 4.0 GiB allocated + 4.0 GiB cloned, 10.0 GiB peak RSS
-            // and 14.7 s of SINGLE-THREADED work per shard, so an unbounded
-            // `par_iter` over all shards OOMed the host. That weight MLE is now
-            // computed by the SP1-parity branching-program closed form
-            // (`full_jagged_evaluation`, ~38 ms, size-independent, no transient),
-            // so the cap no longer guards against a multi-GiB per-shard peak and
-            // is merely a conservative default. It is left in place because
-            // verify is not a throughput target; raise
+            // The cap is a conservative default, not a memory guard:
+            // per-shard verify materializes no padded-dense-sized transient
+            // (the weight MLE comes from the branching-program closed form
+            // `full_jagged_evaluation`, ~38 ms, size-independent).  Verify is
+            // not a throughput target; raise
             // `ZIREN_VERIFY_SHARD_CONCURRENCY` if it ever becomes one.
             let cap = std::env::var("ZIREN_VERIFY_SHARD_CONCURRENCY")
                 .ok()

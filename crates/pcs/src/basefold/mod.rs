@@ -1,25 +1,19 @@
-//! **Basefold multilinear PCS — Ziren port of SP1's slop_basefold.**
+//! **Basefold multilinear PCS.**
 //!
-//! Source-mapped from
-//! `slop/crates/basefold` and
-//! `slop/crates/basefold-prover`.
-//!
-//! Replaces the WHIR PCS stack.  Structural OOM cure: encodes each MLE
-//! via DFT individually (`Message<Mle<F>>` flow), no single dense
-//! `Vec<F>` materialization.  See
-//! [`docs/perf_results.md`](docs/perf_results.md) for the WHIR OOM
-//! root-cause analysis this addresses.
+//! Encodes each MLE via DFT individually (`Message<Mle<F>>` flow) — no
+//! single dense `Vec<F>` materialization, which keeps peak memory
+//! bounded per-MLE instead of per-batch.
 //!
 //! Layered above this module:
 //!   * `stacked` — interleaves heterogeneous batches into stripes of
 //!     fixed `log_stacking_height`, then commits via this protocol.
-//!   * `jagged_pcs` — jagged jagged-PCS adapter
-//!     (the BaseFold replacement for the removed WHIR late-binding commit).
+//!   * `jagged_pcs` — the jagged adapter that packs per-chip trace
+//!     columns into the dense stacked polynomial this protocol commits.
 //!
-//! Per-round protocol shape (much simpler than WHIR):
+//! Per-round protocol shape:
 //!   * one univariate sumcheck poly (degree-1, two coefficients)
 //!   * exactly one merkle commitment to the folded codeword
-//!   * **no** STIR-within-rounds — all queries deferred to the FRI
+//!   * no in-round queries — all queries deferred to the FRI
 //!     query phase at the end.
 
 pub mod code;
@@ -28,10 +22,6 @@ pub mod encoder;
 pub mod fri;
 pub mod mle;
 pub mod proof;
-// jagged_per_chip module removed: per-chip
-// jagged-PCS path was a perf experiment that diverged from SP1's
-// single-dense design and never landed.  Removed in favor of the
-// SP1-aligned dense path in `jagged_pcs::jagged`.
 pub mod prover;
 pub mod stacked;
 pub mod verifier;

@@ -80,8 +80,8 @@ impl<F: Clone> RowMajorTable<F> {
     /// for `num_real_rows × num_interactions` only — the remaining
     /// `(1 << num_row_variables) - num_real_rows` rows are virtual and
     /// resolve to a per-quadrant identity-fraction value at access time
-    /// (`F::ZERO` for numerators, `F::ONE` for denominators).  Mirrors
-    /// SP1's `PaddedMle::padded` analytic-padding pattern.
+    /// (`F::ZERO` for numerators, `F::ONE` for denominators) — the
+    /// `PaddedMle::padded` analytic-padding pattern.
     ///
     /// Caller must satisfy:
     ///   * `cells.len() == num_real_rows * num_interactions`

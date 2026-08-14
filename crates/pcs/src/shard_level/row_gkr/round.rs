@@ -165,7 +165,7 @@ where
 
 /// Compute the four round-polynomial evaluations `p(0), p(1), p(2), p(3)`
 /// for one sumcheck round, using the **factored eq layout**
-/// (`eq_int`, `eq_row`) and the SP1-aligned **MSB fold** convention.
+/// (`eq_int`, `eq_row`) and the **MSB fold** convention.
 ///
 /// `p(X) = Σ_{b ∈ {0,1}^{m-1}} eq_X(b) · [λ · (n0_X(b) · d1_X(b) + n1_X(b) · d0_X(b)) + d0_X(b) · d1_X(b)]`
 ///
@@ -277,7 +277,7 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
         }
     };
 
-    // ── SP1 eq-root HALF trick ──────────────────────────────────────
+    // ── eq-root HALF trick ──────────────────────────────────────────
     // `p(X) = eq(round_coord, X) · g(X)` factors through the eq factor of
     // the bound variable, so `p` vanishes at the eq-factor root and (by
     // the sumcheck identity) `p(0) + p(1) = current_claim`.  Evaluate the
@@ -320,7 +320,7 @@ fn round_poly_evaluations<EF: Field + Send + Sync>(
     //
     // EF arithmetic optimizations:
     //   - `x.double()` (4 base adds) instead of `two * x` (16 base muls)
-    //   - SP1's 3-point sumcheck trick: skip the X=0 evaluation since
+    //   - 3-point sumcheck trick: skip the X=0 evaluation since
     //     the sumcheck invariant gives us `p(0) = current_claim - p(1)`
     //     for free.  Saves the entire `contrib(e0, n00, d00, n10, d10)`
     //     call per pair — 5 EF muls — for a ~25% reduction in the
@@ -481,9 +481,8 @@ struct ChipLayerState<EF> {
 /// values, returns the unique degree-3 polynomial coefficients
 /// (low-degree-first: c0 + c1*x + c2*x^2 + c3*x^3).
 ///
-/// Used by the first_round_dispatch diff harness to reconstruct a polynomial
-/// from SP1's interpolation point set [0, 1, 1/2, b_const] and
-/// compare against Ziren's host evals at [0, 1, 2, 3].
+/// Used by [`reconstruct_round_evals_from_eqroot`] to rebuild the round
+/// polynomial from the node set `{0, 1, 1/2, eq_root}`.
 fn lagrange_interp_4<EF: Field>(pts: [EF; 4], vals: [EF; 4]) -> [EF; 4] {
     let mut result = [EF::ZERO; 4];
     for i in 0..4 {
@@ -508,7 +507,7 @@ fn lagrange_interp_4<EF: Field>(pts: [EF; 4], vals: [EF; 4]) -> [EF; 4] {
 }
 
 /// Reconstruct the four round-polynomial evaluations at `{0, 1, 2, 3}`
-/// from the SP1 **eq-root HALF trick**.
+/// from the **eq-root HALF trick**.
 ///
 /// Each per-layer LogUp-GKR round polynomial factors as
 ///   `p(X) = eq(c, X) · g(X)`
@@ -608,9 +607,8 @@ where
     // chip's overall "real rows" marker — pad-only rows in either
     // quadrant resolve to 0 / 1 respectively when read.
     //
-    // For simplicity and to mirror SP1's `LogUpGkrCpuLayer` (which
-    // tracks one num_real_rows per chip via the underlying inner Mle
-    // bound), we ALIGN the four quadrants by setting each chip's
+    // For simplicity (one num_real_rows per chip), we
+    // ALIGN the four quadrants by setting each chip's
     // num_real_rows to the max across its quadrants and zero-padding
     // the shorter quadrants up to that max with the appropriate pad
     // constant.  This keeps the per-quadrant storage layout uniform
@@ -758,7 +756,7 @@ fn round_poly_evaluations_chip_structured<EF: Field + Send + Sync>(
 
     let num_chips = state.n0.len();
 
-    // ── SP1 eq-root HALF trick ──────────────────────────────────────
+    // ── eq-root HALF trick ──────────────────────────────────────────
     // `p(X) = eq(round_coord, X) · g(X)` (the row eq factor `eq(c, X)` is
     // common across every chip / row / pad term), so `p` vanishes at the
     // eq-factor root and `p(0) + p(1) = current_claim`.  Evaluate the FULL
@@ -1204,24 +1202,21 @@ fn fold_eq<EF: Field + Send + Sync>(tab: &[EF], alpha: EF) -> Vec<EF> {
     out
 }
 
-/// Sumcheck-poly wrapper around the row-only LogUp-GKR layer state.
-///
-/// Mirrors SP1's
-/// [`LogupRoundPolynomial`](file:///tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs#L13-L28)
-/// in role: it carries the layer's per-chip n/d MLEs plus the factored
+/// Sumcheck-poly wrapper around the row-only LogUp-GKR layer state:
+/// it carries the layer's per-chip n/d MLEs plus the factored
 /// eq tables (`eq_row`, `eq_interaction`) and a batching scalar
 /// `lambda`.  The sumcheck driver in
 /// [`crate::shard_level::sumcheck_poly::reduce_sumcheck_to_evaluation`]
 /// walks it round-by-round.
 ///
-/// Differences from SP1:
-///   * Uses Ziren's `Vec<Vec<EF>>` chip-structured representation
+/// Representation notes:
+///   * Uses a `Vec<Vec<EF>>` chip-structured representation
 ///     plus a flat `Vec<EF>` packed-interaction representation,
 ///     matching the two-mode prover.
-///   * Numerators are pre-lifted to `EF` (Ziren currently lacks a
-///     base-field first-round optimization).  Therefore there is only
+///   * Numerators are pre-lifted to `EF` (no
+///     base-field first-round optimization here).  Therefore there is only
 ///     one type for both `Self` and `NextRoundPoly`.
-///   * The batching `padding_adjustment` / `eq_adjustment` machinery
+///   * The batching padding/eq-adjustment machinery
 ///     is collapsed into a single `pad_eq_int_sum` cached scalar (the
 ///     analytic identity-fraction contribution from un-covered global
 ///     interaction columns).
@@ -1274,42 +1269,24 @@ pub struct LogupRoundPolynomial<EF> {
     gpu_cached_first_poly: Option<UnivariatePolynomial<EF>>,
 }
 
-/// Two-mode storage backing for `LogupRoundPolynomial.state`.
-///
-/// Mirrors SP1's `PolynomialLayer` (CircuitLayer / InteractionLayer)
-/// at a high level, with Ziren's representation choices.
+/// Two-mode storage backing for `LogupRoundPolynomial.state`
+/// (row-binding vs interaction-binding).
 enum PolynomialLayer<EF> {
     /// Row-binding mode — per-chip `Vec<Vec<EF>>` storage.
     Chip(ChipLayerState<EF>),
     /// Interaction-binding mode — single flat `Vec<EF>` per quadrant.
     Packed { n0: Vec<EF>, d0: Vec<EF>, n1: Vec<EF>, d1: Vec<EF> },
-    /// first_round: SP1-aligned GPU pre-folded round 0.
+    /// GPU pre-folded round 0: a round-0 fix-and-sum pass already done
+    /// with the round-0 univariate polynomial cached in
+    /// `cached_round_poly`.
     ///
-    /// Set by `LogupRoundPolynomial::new` when
-    /// `try_first_round_on_gpu` returned Some — i.e. the GPU kernel
-    /// has already done one fix-and-sum pass on the layer's raw FELT
-    /// numerator + EF denominator data, AND the round-0 univariate
-    /// polynomial has been cached in `cached_round_poly`.
-    ///
-    /// Lifecycle:
-    ///   1. `sum_as_poly_in_last_t_variables(claim, t=1)` is the
-    ///      first call from the round driver.  It MUST hit this
-    ///      variant; returns the cached polynomial verbatim.
-    ///   2. `fix_t_variables(alpha, t=1)` is the second call.  It
-    ///      MUST hit this variant; it transitions to
-    ///      `Chip(post_fix_state)` (or `Packed` if remaining row
-    ///      vars hit zero) using the pre-folded layer-1 data.
-    ///   3. After step 2 the variant is consumed.  Subsequent rounds
-    ///      see `Chip` or `Packed` as before.
-    ///
-    /// Both calls MUST happen in this order on the GpuPrefolded
-    /// variant.  Any other call site reaching this variant should
-    /// panic loudly — it's a state-machine invariant violation.
-    ///
-    /// P7: no longer constructed (the fused first-round dispatcher
-    /// `try_first_round_on_gpu` was runtime-dead and deleted with the
-    /// `GPU_FIRST_ROUND` hook); the variant + its fold/sum arms are retained
-    /// for a later dedicated retirement.
+    /// NEVER CONSTRUCTED on the current host path (`new` always seeds
+    /// `Chip`); the variant and its fold/sum arms are retained for a
+    /// later dedicated retirement.  Its state-machine contract, should
+    /// a producer return: `sum_as_poly_in_last_t_variables` first
+    /// (returns the cached poly verbatim), then `fix_t_variables`
+    /// (transitions to `Chip(post_fix_state)`, or `Packed` if the row
+    /// vars hit zero); any other call order panics.
     #[allow(dead_code)]
     GpuPrefolded {
         /// Round-0 univariate polynomial (pre-computed by GPU).
@@ -1353,7 +1330,7 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
         );
 
         // Build the per-chip chip-structured n/d state (raw FELT numerators for
-        // a FirstLayer, matching SP1's layer-0 type signature).
+        // a FirstLayer — the layer-0 type signature).
         let chip_state: ChipLayerState<EF> = match circuit {
             GkrCircuitLayer::Layer(l) => build_chip_state::<EF, EF>(l),
             GkrCircuitLayer::FirstLayer(l) => build_chip_state::<F, EF>(l),
@@ -1370,13 +1347,9 @@ impl<EF: Field + Send + Sync> LogupRoundPolynomial<EF> {
 
         let claimed_sum = lambda * numerator_eval + denominator_eval;
 
-        // P7: the GPU fused first-round (`PolynomialLayer::GpuPrefolded`) path
-        // is retired — its dispatcher `try_first_round_on_gpu` was runtime-dead
-        // (`enabled = false`) and was deleted with the `GPU_FIRST_ROUND` hook.
-        // The layer takes the legacy per-chip round-0 path (itself device-
-        // accelerated via the chip-structured / zerocheck device ops); the
+        // The layer always takes the per-chip round-0 path; the
         // round-0 univariate poly is computed lazily by the first
-        // `sum_as_poly_in_last_variable`.
+        // `sum_as_poly_in_last_variable` (`GpuPrefolded` is never seeded).
         let initial_state = PolynomialLayer::Chip(chip_state);
         let gpu_cached_first_poly: Option<UnivariatePolynomial<EF>> = None;
 
@@ -1487,24 +1460,12 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
         // Fold n/d data based on current mode.
         match &mut self.state {
             PolynomialLayer::GpuPrefolded { post_fix_state, .. } => {
-                // first_round: round 0 was pre-computed
-                // by GPU.  Transition into Chip(post_fix_state) and
-                // fold by alpha (which is round-0's binding).
-                //
-                // The post-fix state already has chip_rows = N/2
-                // (one row-fold done).  We replace `state` with
-                // Chip(post_fix_state) and then fold-by-alpha — but
-                // wait: the GPU already did the alpha binding at
-                // round-0 time, NOT this round's alpha.
-                //
-                // Subtlety: the SP1 kernel takes a single alpha
-                // and produces post-fix data.  But the round
-                // driver passes its alpha at fix_last_variable
-                // time.  These have to match — which means
-                // try_first_round_on_gpu must use THIS round's
-                // alpha, not a kernel-internal random.  See
-                // try_first_round_on_gpu's alpha plumbing for the
-                // contract.
+                // Unreachable on the current host path (`GpuPrefolded` is
+                // never constructed).  Contract if a producer returns: round 0
+                // was pre-computed by GPU with THIS round's alpha already
+                // bound (`post_fix_state` has `chip_rows = N/2`, one row-fold
+                // done), so install the post-fix chip state WITHOUT folding
+                // by alpha again.
                 let chip = std::mem::replace(post_fix_state.as_mut(),
                     ChipLayerState {
                         n0: Vec::new(), d0: Vec::new(),
@@ -1618,15 +1579,14 @@ impl<EF: Field + Send + Sync> SumcheckPoly<EF> for LogupRoundPolynomial<EF> {
     }
 
     fn sum_as_poly_in_last_variable(&self, claim: Option<EF>) -> UnivariatePolynomial<EF> {
-        // GPU first-round cache.  Returns SP1-reconstructed
-        // poly from try_first_round_on_gpu (verified COEFFS_MATCH=true
-        // on production tendermint).  Saves the heavy
-        // round_poly_evaluations work.  Cache cleared on
+        // GPU first-round cache: always `None` on the current host path
+        // (never populated); when set, returns the cached poly and skips the
+        // heavy round_poly_evaluations work.  Cleared on
         // fix_last_variable so subsequent rounds use the host path.
         if let Some(cached) = &self.gpu_cached_first_poly {
             return cached.clone();
         }
-        // first_round: GpuPrefolded short-circuit.  When
+        // GpuPrefolded short-circuit (same never-constructed status).  When
         // round 0 was pre-computed by GPU, return the cached
         // univariate polynomial verbatim.  fix_last_variable will
         // then transition the state out of GpuPrefolded.
@@ -1715,10 +1675,8 @@ impl<EF: Field + Send + Sync> SumcheckPolyFirstRound<EF> for LogupRoundPolynomia
 ///
 /// During the first `num_row_variables` rounds the n/d data is kept
 /// in **per-chip** `Vec<Vec<EF>>` form (`Σ_c chip_rows × chip_cols`)
-/// rather than the layer-wide `2^total_vars × |EF|` flat tables.
-/// This mirrors SP1's `LogUpGkrCpuLayer` representation
-/// (`/tmp/sp1/crates/hypercube/src/logup_gkr/logup_poly.rs:106-225`)
-/// and avoids materialising the column-padded interaction axis.  On
+/// rather than the layer-wide `2^total_vars × |EF|` flat tables,
+/// avoiding materialisation of the column-padded interaction axis.  On
 /// production reth shards the saving is on the order of 10–60×
 /// because `Σ chip_cols ≪ 2^num_int_vars` for most layer shapes.
 ///
@@ -2181,7 +2139,7 @@ mod tests {
     // ───────────────────────────────────────────────────────────────
     // eq-root HALF-trick bit-identity tests.
     //
-    // These assert the SP1 {0, 1/2}+claim+eq_root reconstruction produces
+    // These assert the {0, 1/2}+claim+eq_root reconstruction produces
     // the SAME degree-3 round polynomial (bit-for-bit) as the direct
     // {1, 2, 3} sweep.  Because the round poly is unique and field
     // arithmetic is exact, the two paths are guaranteed identical for any

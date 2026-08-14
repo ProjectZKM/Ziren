@@ -8,7 +8,8 @@
 //!   * MSB fold with `point.insert(0, alpha)` so the reduced point
 //!     reads `point[k]` = challenge for variable k of the flat
 //!     index under an LSB-first MLE consumer.
-//!   * `t = 1` only; the `t` parameter is kept for SP1-API parity.
+//!   * `t = 1` only; the `t` parameter is kept so a multi-variable
+//!     first round stays drop-in.
 
 use alloc::vec::Vec;
 
@@ -51,7 +52,7 @@ pub trait SumcheckPoly<K: Field>: SumcheckPolyBase + ComponentPoly<K> + Sized {
 }
 
 /// Sumcheckable polynomial whose first round binds `t` variables at
-/// once. Ziren only consumes `t = 1`; the signature is SP1-shaped.
+/// once. Ziren only consumes `t = 1`.
 pub trait SumcheckPolyFirstRound<K: Field>: SumcheckPolyBase {
     type NextRoundPoly: SumcheckPoly<K>;
 
@@ -108,16 +109,15 @@ fn poly_eval<EF: Field>(coeffs: &[EF], x: EF) -> EF {
 /// Generic sumcheck driver — reduces a sumcheck claim to an evaluation
 /// claim about the polynomial at a randomly-sampled point.
 ///
-/// Port of
-/// `reduce_sumcheck_to_evaluation`
-/// adapted to Ziren's per-coefficient base-field observation pattern.
+/// Round polys are observed per-coefficient in base-field basis (the
+/// verifier's observation pattern).
 ///
 /// # Single-poly case (`polys.len() == 1`)
 ///
-/// Today's only caller, `prove_gkr_round`, passes one polynomial.  The
-/// `lambda` argument is unused in that case (no RLC batching needed),
-/// but it is kept in the signature for SP1 parity and to make a
-/// future multi-poly batching extension drop-in.
+/// When a caller passes one polynomial (e.g. `prove_gkr_round`), the
+/// `lambda` argument is unused (no RLC batching needed),
+/// but it is kept in the signature to make
+/// multi-poly batching drop-in.
 ///
 /// # Returns
 ///
@@ -364,12 +364,6 @@ pub trait GpuZerocheckChallenger {
 // and the VirtualGeq padded-row correction. That finalize is analytic and
 // stays on the host, so the Fiat-Shamir transcript is byte-identical
 // whichever side computed the accumulators.
-//
-// The two whole-pipeline jagged-PCS orchestration hooks are gone rather than
-// migrated: nothing ever registered them, so `prove_trusted_evaluations`
-// always fell through to the host path. Both are architecturally retired by
-// openings-for-free — step-3 `y_per_chip` now comes from the zerocheck
-// residual.
 
 // ------------------------------------------------------------------
 // Device-built logup-round eq_row tables.
@@ -455,37 +449,20 @@ pub fn take_nv28_chip_meta() -> Option<Nv28ChipMeta> {
     NV28_CHIP_META.with(|c| c.borrow_mut().take())
 }
 
-// P7 removal: the `GPU_FIRST_ROUND` hook (SP1-aligned fused first-round
-// chip-structured kernel) was RUNTIME-DEAD — its sole consumers
-// (`try_first_round_on_gpu` + the `synthetic_diff_test_step7z` diff harness in
-// `row_gkr/round.rs`) sat behind a `let enabled = false` short-circuit, so the
-// GpuPrefolded fused first-round path never engaged (the legacy per-chip
-// round-0 path, device-accelerated via the zerocheck device-fold / y-tuple
-// ops, is the sole path).  The `OnceLock` + `register_/get_` accessors + the
-// `GpuFirstRoundHookFn` fn-ptr alias were dropped (the disabled consumer paths
-// deleted; the ziren-gpu register sites retired to no-ops).
-
 // ── BaseFold-over-BN254 wrap port: OUTER-ring jagged BaseFold open/verify ──
 //
 // The OUTER (wrap) ring proves/verifies the jagged BaseFold open over
 // `OuterValMmcs` (Poseidon2-BN254) + `OuterChallenger` (MultiField32). Those
 // types live in recursion-core, which depends on zkm-pcs, so zkm-pcs cannot
-// name them. recursion-core registers these hooks; the generic shard
-// prover (`prove_trusted_evaluations`) / verifier consult them when the config's
-// challenger is NOT the inner `JaggedChallenger`. `Val`/`Challenge` are identical
-// KoalaBear / KoalaBear^4 for both rings, so the trace/point payloads cross the
-// boundary unchanged; only the challenger + MMCS (type-erased here) differ.
-// STAGE-B b1/b1': the OUTER jagged BaseFold OPEN hook (b1) AND VERIFY hook (b1')
-// (`OuterJaggedOpenFn`/`OuterJaggedVerifyFn` + their `OUTER_JAGGED_*_HOOK` slots
-// + register/get accessors) were RETIRED. The shard prover
-// (`prove_trusted_evaluations`) and host verifier (`verify_jagged_pcs_host`) now
-// name `OuterChallenger`/`OuterValMmcs` via the `BasefoldRing` associated type
-// and call `prove_jagged_basefold_single_round_generic` / `build_jagged_verify_inputs`
-// + `verify_jagged_basefold_inner_generic` statically, so the dyn-Any open/verify
-// hooks are dead. The PREP-COMMIT indirection is gone too: the setup commit is
-// now the typed `StarkGenericConfig::prep_commit` method, implemented directly
-// by the inner and wrap configs, so there is no fn-pointer type and no bincode
-// laundering of traces or commitments.
+// name them.  The shard prover (`prove_trusted_evaluations`) and host
+// verifier (`verify_jagged_pcs_host`) reach them STATICALLY via the
+// `BasefoldRing` associated types
+// (`prove_jagged_basefold_single_round_generic` /
+// `build_jagged_verify_inputs` + `verify_jagged_basefold_inner_generic`);
+// the setup commit is the typed `StarkGenericConfig::prep_commit` method,
+// implemented directly by the inner and wrap configs.  `Val`/`Challenge` are
+// identical KoalaBear / KoalaBear^4 for both rings, so trace/point payloads
+// cross the boundary unchanged; only the challenger + MMCS differ.
 
 #[cfg(test)]
 mod tests {

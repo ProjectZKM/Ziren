@@ -1,14 +1,12 @@
-//! SP1-style parallel call site for the core recursion stage.
+//! Basefold call site for the core recursion stage.
 //!
-//! Mirror of [`super::core`] but consumes
+//! Consumes
 //! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
 //!
-//!
 //! Verifies every shard via the basefold shard verifier, then asserts
-//! the same shard-to-shard consistency chain the legacy
-//! [`super::core::ZKMRecursiveVerifier::verify`] asserts (shard index,
+//! the shard-to-shard consistency chain (shard index,
 //! execution shard, pc, memory init/finalize address bits, committed
 //! value digest, deferred proofs digest, exit code), and finally commits
 //! the aggregated [`RecursionPublicValues`] to the output stream.
@@ -202,7 +200,7 @@ pub fn verify_core_basefold<C, SC, A>(
     // Single-shard normalize: the production normalize is arity-1
     // (one core shard per `ZKMCoreBasefoldWitnessValues`; see
     // `get_recursion_core_inputs_basefold` / `get_first_layer_inputs`
-    // first_layer_batch_size=1, and SP1 core.rs:118 `assert shard_proofs.len()==1`).
+    // first_layer_batch_size=1, hard-asserted there).
     // The aggregate loop below is collapsed to the single lone-shard body
     // (the first-shard init runs once, the cross-shard `+1`/continuity becomes
     // `next = start + 1` for the one shard).  Bind the arity here so the
@@ -293,11 +291,11 @@ pub fn verify_core_basefold<C, SC, A>(
                 .iter()
                 .map(|c| p3_air::BaseAir::<<SC as zkm_pcs::StarkGenericConfig>::Val>::width(*c))
                 .collect();
-            // SP1's two opening rounds: [preprocessed, main]
-            // (hypercube/src/verifier/shard.rs:638).  The preprocessed round is
+            // Two opening rounds: [preprocessed, main].
+            // The preprocessed round is
             // the MACHINE's preprocessed chips in chip-NAME order -- the order
-            // `setup` commits them, and one a verifier reproduces without the
-            // key, which is why the key no longer carries chip metadata.
+            // `setup` commits them, and one a verifier reproduces without
+            // key-carried chip metadata.
             let prep_widths_pre: Vec<usize> = {
                 let mut dims: Vec<(String, usize)> = machine
                     .chips()
@@ -574,9 +572,8 @@ pub fn verify_core_basefold<C, SC, A>(
             // The fix is PROVER-SIDE: stop clamping
             // `log_stacking_height` (always commit at the fixed
             // DEFAULT_LOG_STACKING_HEIGHT = 21, padding tiny commits' area UP —
-            // exactly what SP1's `JaggedPcsProver::commit_multilinears` does:
-            // it asserts every padded MLE is at `max_log_row_count` and pads
-            // area to the next multiple of a FIXED stacking height, never
+            // every padded MLE is asserted at `max_log_row_count` and area
+            // pads to the next multiple of a FIXED stacking height, never
             // clamping).  Then every commit is honestly 21-round, this rebuild
             // becomes a constant `num_variables = 21`, and clamp-independence
             // (VK = f(chip-set)) follows with NO masking and NO FS risk.  That

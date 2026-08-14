@@ -19,7 +19,7 @@ use crate::Chip;
 ///
 ///   * `F`   — the base field (public values, global cumulative sum).
 ///   * `K`   — the *cell* field: the trace rows evaluated through the
-///             folder (`Var = Expr = K`).  For the SP1 base-field first
+///             folder (`Var = Expr = K`).  For the base-field first
 ///             sumcheck round `K = F`; for every later round `K = EF`.
 ///   * `EF`  — the challenge field: the constraint-batching challenge
 ///             `alpha` and the running `accumulator` live here.

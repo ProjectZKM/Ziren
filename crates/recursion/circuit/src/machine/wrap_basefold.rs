@@ -1,6 +1,6 @@
-//! SP1-style parallel call site for the final wrap recursion stage.
+//! Basefold call site for the final wrap recursion stage.
 //!
-//! Mirror of [`super::wrap`] but consumes
+//! Consumes
 //! [`zkm_pcs::shard_level::shard_proof::BasefoldShardProof`]
 //! and dispatches to
 //! [`crate::shard_basefold::BasefoldShardVerifier::verify_shard`].
@@ -43,9 +43,7 @@ pub struct ZKMWrapBasefoldWitnessValues<
     /// Single `(vk, root-proof)` pair to wrap.
     pub vks_and_proofs: Vec<(StarkVerifyingKey<SC>, BasefoldShardProof<InnerVal, InnerChallenge>)>,
     /// vk-merkle witness binding the input VK against the canonical
-    /// vk_root.  Mirrors SP1's
-    /// `SP1CompressRootVerifierWithVKey::verify` which forwards to
-    /// `SP1MerkleProofVerifier` (`/tmp/sp1/crates/recursion/circuit/src/machine/root.rs:30-50`).
+    /// vk_root.
     pub vk_merkle_data: ZKMMerkleProofWitnessValues<SC>,
 }
 
@@ -96,8 +94,8 @@ pub struct ZKMWrapBasefoldVerifier<C, SC, A> {
 
 /// Verify the single-proof input at the wrap (terminal) stage.
 ///
-/// Direct port of [`super::wrap::ZKMWrapVerifier::verify`] adapted
-/// for the SP1-style shard proof shape.
+/// Terminal-stage single-proof verify over
+/// the basefold shard proof shape.
 pub fn verify_wrap_basefold<C, SC, A>(
     builder: &mut Builder<C>,
     input: ZKMWrapBasefoldWitnessVariable<C, SC>,
@@ -129,10 +127,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
     } = input;
 
     // Bind the single input VK to the witnessed
-    // vk_root via merkle proof, mirroring SP1's
-    // `SP1CompressRootVerifierWithVKey::verify` (forwards to
-    // `SP1CompressWithVKeyVerifier::verify` which runs
-    // `SP1MerkleProofVerifier`).
+    // vk_root via merkle proof.
     let vk_hashes: Vec<_> = vks_and_proofs.iter().map(|(vk, _)| vk.hash(builder)).collect();
     ZKMMerkleProofVerifier::verify(builder, vk_hashes, vk_merkle_data, value_assertions);
 
@@ -153,7 +148,7 @@ pub fn verify_wrap_basefold<C, SC, A>(
 /// Bit + vk-digest type. The recursion layer reaches it via
 /// `verify_wrap_basefold` (which prepends the vk-merkle bind); the gnark OUTER
 /// layer (`build_outer_circuit`, OuterConfig/OuterSC) calls it directly — no
-/// merkle (mirrors SP1WrapVerifier; binding is commit/pc_start + public vkey_hash).
+/// merkle (binding is commit/pc_start + public vkey_hash).
 #[allow(clippy::too_many_arguments)]
 pub fn verify_wrap_basefold_core<C, SC, A>(
     builder: &mut Builder<C>,
@@ -549,8 +544,7 @@ pub fn verify_wrap_basefold_core<C, SC, A>(
             // compress_basefold/deferred_basefold's Reduce arm) — NOT the
             // root digest, which only the final BN254 wrap computes.  Bind
             // the reflected digest to the reflected fields and re-emit it
-            // (SP1 parity: compress.rs:468-472 recomputes the Reduce-kind
-            // output digest; root digest validity is only asserted by the
+            // (root digest validity is only asserted by the
             // HOST on the final wrap output).  Asserting
             // `digest == root_digest(pv)` here would be UNSATISFIABLE for an
             // honest compress output.

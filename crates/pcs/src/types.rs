@@ -14,8 +14,8 @@ pub type QuotientOpenedValues<T> = Vec<T>;
 
 /// Per-shard main-trace metadata produced by `MachineProver::commit`.
 ///
-/// `traces` is `Vec<Arc<M>>` so post-`open()` consumers (the W2
-/// `prove_shard_to_basefold_gpu` device-residency hook) can capture
+/// `traces` is `Vec<Arc<M>>` so post-`open()` consumers (the GPU
+/// device-residency path) can capture
 /// the per-chip device-side trace matrices via cheap pointer-bump
 /// `Arc::clone` instead of (a) re-uploading from host or (b) cloning
 /// device buffers (impossible — `ColMajorMatrixDevice` /

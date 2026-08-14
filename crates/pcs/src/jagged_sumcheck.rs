@@ -1,10 +1,9 @@
 //! PCS-agnostic jagged sumcheck reduction.
 //!
-//! Originally extracted from the (now-removed) WHIR jagged late-binding
-//! prover for E1 (drop p3-whir).  The math here is field-typed via
+//! The math here is field-typed via
 //! `InnerVal`/`InnerChallenge` from [`crate::kb31_poseidon2`].  This module
-//! exists so the BaseFold path can call the reduction without depending on
-//! no feature gate.
+//! exists so the BaseFold path can call the reduction without any feature
+//! gate.
 
 
 use alloc::vec::Vec;
@@ -27,7 +26,7 @@ pub struct JaggedReductionProof<EF> {
     pub q_at_z: EF,
 }
 
-/// SP1-aligned column mixing: the per-global-column weight is
+/// Column mixing: the per-global-column weight is
 /// `z_col_lagrange[k]` (= `eq(z_col, k)`), NOT `gamma^k`.  This makes
 /// the reduction's claimed sum equal `Σ_k eq(z_col,k)·column_claim_k`,
 /// matching the recursion verifier's `evaluate_mle_ext(column_claims,
@@ -42,7 +41,7 @@ fn build_weight_table(
     // dims).  The per-chip row weight is the full row_eq over z_row indexed by
     // the natural row (0..h_c) — NO trailing slice, NO Pi_high embedding (the
     // full row_eq subsumes the height factor since high bits of any row <
-    // 2^log_h_c are 0).  Mirrors SP1 partial_jagged_little_polynomial_evaluation.
+    // 2^log_h_c are 0).
     z_row: &[InnerChallenge],
 ) -> Vec<InnerChallenge> {
     let n = 1usize << packing.log_dense_size();
@@ -52,9 +51,8 @@ fn build_weight_table(
     // over z_row, indexed by the LITERAL row index (0..h_c).  No trailing
     // slice, no stride, no explicit Pi_high embedding — the full row_eq
     // bakes the height factor in for any row < 2^log_h_c because the high
-    // bits of such a row are 0.  Mirrors SP1
-    // partial_jagged_little_polynomial_evaluation's `row_eq[current_row]`.
-    let _ = r_row_per_chip; // no longer used under the SP1 convention
+    // bits of such a row are 0.
+    let _ = r_row_per_chip; // unused: the full row_eq subsumes the per-chip row points
     let z_row_rev: Vec<InnerChallenge> = z_row.iter().rev().copied().collect();
     let row_eq_full: Vec<InnerChallenge> =
         crate::zerocheck_prover::eq_mle_table::<InnerChallenge>(&z_row_rev);
@@ -134,7 +132,7 @@ fn jagged_eval_round_poly(p: [InnerChallenge; 3], x: InnerChallenge) -> InnerCha
 
 
 
-/// Build the SP1-aligned jagged-reduction weight table for an EXTERNAL
+/// Build the jagged-reduction weight table for an EXTERNAL
 /// (GPU-hook) prover.  Exactly the table `prove_jagged_reduction_owned`
 /// uses internally: `w[off_k + row] = eq(z_col, k) · row_eq_full[row]`
 /// with `row_eq_full = eq_mle_table(rev(z_row))`.  Exposed `pub` so the
@@ -199,7 +197,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         return None;
     }
 
-    // SP1-aligned: `z_col` is sampled by the caller at the matching
+    // `z_col` is sampled by the caller at the matching
     // transcript position; form the claimed sum as the z_col-weighted
     // column mix.  Column claims are already in the transcript.
     let z_col_lagrange = crate::jagged_branching_program::partial_lagrange(z_col);
@@ -231,8 +229,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
 
     // The recorded point is in SAMPLE order: the reduction binds the stride-1
-    // (LSB) variable per round, as SP1 does, and pushes each challenge.  (It was
-    // reversed under the old MSB binding, which recorded via `insert(0, alpha)`.)
+    // (LSB) variable per round and pushes each challenge.
     for (i, &s) in sampled.iter().enumerate() {
         if s != proof.eval_point[i] {
             tracing::debug!("jagged sumcheck round {} eval-point mismatch", i);
@@ -241,7 +238,7 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     }
     let z_star = proof.eval_point.clone();
 
-    // ── CLOSING WEIGHT `w_at_z` — CLOSED FORM (SP1 parity) ──────────────
+    // ── CLOSING WEIGHT `w_at_z` — CLOSED FORM ──────────────
     //
     // `w_at_z` is the dense weight-MLE `w[off_k + row] = eq(z_col,k)·eq(z_row,row)`
     // evaluated at `z_star`.  It is a function of the VERIFIER's own trusted
@@ -249,32 +246,22 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
     // `(z_row, z_col, z_star)` — no prover-supplied field element enters it —
     // so any way of computing it is equally sound; only the cost differs.
     //
-    // The former implementation MATERIALIZED that MLE:
-    //     build_weight_table(..)                -> Vec<EF> of 2^log_dense_size
-    //     MultilinearExt::new(w).evaluate(z*)   -> CLONES it, then serially folds
-    // For a core reth shard (`log_dense_size == 28`, see `opts.rs`
-    // ELEMENT_THRESHOLD: median jagged-hypercube fill 0.909) that is a 4.0 GiB
-    // allocation, a 4.0 GiB clone, and ~2^29 serial extension-field multiplies:
-    // **14.7 s and 10.0 GiB peak RSS per shard, single-threaded**.  It was the
-    // whole of host verify — and the reason `StarkMachine::verify` has to cap
-    // shard concurrency at 8 (machine.rs) to avoid OOM.
-    //
-    // SP1's verifier never builds it: it closes the identity with the
-    // branching-program evaluation of the jagged polynomial
-    // (`full_jagged_little_polynomial_evaluation`,
-    // slop/crates/jagged/src/verifier.rs:355-361).  Ziren already ports that
-    // closed form as `full_jagged_evaluation`, and the in-tree acceptance gate
+    // It is computed by the branching-program evaluation of the jagged
+    // polynomial (`full_jagged_evaluation`): `O(num_columns · log(area))` —
+    // **38 ms**, size-independent, no transient.  (Materializing the
+    // `2^log_dense_size` table instead costs 4.0 GiB allocated + 4.0 GiB
+    // cloned and 14.7 s single-threaded on a `log_dense_size == 28` core reth
+    // shard.)  The acceptance gate
     // `phase1_acceptance_gate::gate_weight_table_matches_branching_program`
-    // asserts the two agree on equal AND mixed heights.  It is
-    // `O(num_columns · log(area))` — **38 ms**, size-independent, no transient.
+    // asserts the closed form agrees with the table form on equal AND mixed
+    // heights.
     //
-    // The one thing the table form did implicitly that the closed form does not:
-    // it wrote each column's run at `offsets[k]..offsets[k]+row_count`, so a
-    // packing whose `offsets` disagreed with its `chip_infos` row/column counts,
-    // or ran past the dense size, tripped its bounds assert.  The closed form
-    // reads `offsets` alone, so those consistency conditions are now CHECKED
-    // EXPLICITLY below (and as a graceful reject rather than a panic).  SP1
-    // makes the same monotonicity check on its prefix sums (verifier.rs:338-347).
+    // A table form would implicitly bounds-check the packing: each column's
+    // run is written at `offsets[k]..offsets[k]+row_count`, so `offsets`
+    // disagreeing with the `chip_infos` row/column counts, or running past
+    // the dense size, would trip an assert.  The closed form
+    // reads `offsets` alone, so those consistency conditions are CHECKED
+    // EXPLICITLY below (and as a graceful reject rather than a panic).
     {
         let n_dense = 1usize << packing.log_dense_size();
         // (a) One offset per global column plus the sentinel.
@@ -304,11 +291,9 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
         // (c) Every column's run is exactly its chip's row_count, laid out
         //     contiguously and monotonically.  This is precisely the layout
         //     `build_weight_table`'s `w[offsets[k] + row]` writes assumed.
-        //     Also bound `row_count` by the cube — the table form enforced this
-        //     only as an out-of-bounds PANIC on its `2^|z_row|` row-eq table
-        //     (a DoS on a malformed proof); SP1 rejects it explicitly
-        //     (`r > 1 << max_log_row_count` -> IncorrectShape,
-        //     slop/crates/jagged/src/verifier.rs:274).
+        //     Also bound `row_count` by the cube — rejected explicitly here
+        //     rather than surfacing as an out-of-bounds panic on the row-eq
+        //     table (a DoS on a malformed proof).
         let max_rows = 1usize << z_row.len();
         let mut k = 0usize;
         for info in packing.chip_infos.iter() {
@@ -361,22 +346,15 @@ pub fn verify_jagged_reduction<C: p3_challenger::FieldChallenger<InnerVal>>(
 
 // ZIREN_PHASE1_ACCEPTANCE_GATE
 //
-// Acceptance gate for the jagged/zerocheck SP1 alignment.
+// Acceptance gate for the jagged/zerocheck closing identity.
 //
 // For a MIXED-HEIGHT packing, the host jagged reduction's closing weight
 // value `w_at_z` (= the dense weight-MLE evaluated at the reduction's
 // eval point z*) MUST equal the closed-form branching-program jagged
-// polynomial `full_jagged_evaluation(offsets, z_row, z_col, z*)` — this
-// is SP1's closing identity
-// (`*expected_eval * jagged_eval == sumcheck_proof.point_and_eval.1`,
-// slop/crates/jagged/src/verifier.rs:360) and exactly what the recursion
+// polynomial `full_jagged_evaluation(offsets, z_row, z_col, z*)` — the
+// verifier's closing identity, and exactly what the recursion
 // circuit checks in-circuit (`real_jagged_evaluator_fn` /
 // `emit_branching_program_eval`).
-//
-// Under Ziren's CURRENT (non-SP1) convention — strided eq_mle@trailing +
-// explicit Π_high embedding + log_m-bit prefix sums — this identity FAILS
-// for mixed heights, while the host chain remains internally consistent
-// (so `test_e2e_wrap_fibonacci` passes but gnark wrap step-8 fails).
 //
 // The gate passes when `gate_weight_table_matches_branching_program`
 // holds for all mixed-height shapes AND `test_e2e_wrap_fibonacci` is
@@ -441,7 +419,7 @@ mod phase1_acceptance_gate {
                 }))
                 .collect();
 
-        // Metadata packing (column-by-column, SP1 col_prefix_sums layout).
+        // Metadata packing (column-by-column prefix-sum layout).
         let packing = crate::jagged::compute_jagged_metadata(&trace_views);
 
         // Dense q (column-by-column, natural row order) padded to 2^n.
@@ -555,17 +533,17 @@ mod phase1_acceptance_gate {
         )
         .expect("reduction must self-verify (internal identity)");
 
-        // SP1 closing identity: w_at_z must equal the BP jagged polynomial
+        // Closing identity: w_at_z must equal the BP jagged polynomial
         // evaluated at the same (z_row, z_col, z_star).
         let z_star_rev: Vec<InnerChallenge> = z_star.iter().rev().copied().collect();
         let bp = full_jagged_evaluation(&packing.offsets, &z_row, &z_col, &z_star_rev);
         (w_at_z, bp)
     }
 
-    // PHASE-1 acceptance gate (PASSING): under the SP1-aligned host jagged
-    // convention (full row_eq in build_weight_table + y_per_chip, dropping
-    // the strided eq_mle@trailing + Pi_high embedding; SP1-correct BP
-    // num_bits), the closing identity w_at_z == branching-program jagged eval
+    // PHASE-1 acceptance gate (PASSING): under the full-row_eq host jagged
+    // convention (build_weight_table + y_per_chip; no strided
+    // eq_mle@trailing / Pi_high embedding), the closing identity
+    // w_at_z == branching-program jagged eval
     // holds for mixed AND equal heights.  test_e2e_wrap_fibonacci stays green.
     #[test]
     fn gate_weight_table_matches_branching_program() {
@@ -844,16 +822,16 @@ mod phase1_acceptance_gate {
 
 }
 
-/// Differential test for the closed-form `w_at_z` substitution in
+/// Differential test for the closed-form `w_at_z` computation in
 /// [`verify_jagged_reduction`].
 ///
-/// The verifier used to compute the closing weight by MATERIALIZING the
-/// `2^log_dense_size` weight MLE (`build_weight_table` +
-/// `MultilinearExt::evaluate`) — 4.0 GiB and 14.7 s on a core reth shard.  It
-/// now uses the branching-program closed form (`full_jagged_evaluation`, 38 ms,
-/// no transient), which is what SP1's verifier does.  These tests pin the two
+/// The verifier's closing weight comes from the branching-program closed
+/// form (`full_jagged_evaluation`, 38 ms, no transient) rather than
+/// materializing the `2^log_dense_size` weight MLE (`build_weight_table` +
+/// `MultilinearExt::evaluate` — 4.0 GiB and 14.7 s on a core reth shard).
+/// These tests pin the two
 /// to be BIT-IDENTICAL across randomized and degenerate packing geometry, so
-/// the substitution cannot silently change any verdict.
+/// the closed form cannot silently change any verdict.
 #[cfg(test)]
 mod closed_form_weight_equivalence {
     use crate::kb31_poseidon2::InnerChallenger;

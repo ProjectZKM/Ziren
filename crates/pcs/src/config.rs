@@ -92,13 +92,11 @@ pub trait StarkGenericConfig: 'static + Send + Sync + Serialize + DeserializeOwn
     ///
     /// [`prep_commit`](Self::prep_commit) throws all of that away and keeps only
     /// the root, which is enough to OBSERVE the preprocessed commitment but not
-    /// to OPEN it.  SP1 retains both — `setup` produces
-    /// `(preprocessed_commit, preprocessed_data)`
-    /// (`hypercube/src/prover/shard.rs:416`), stores the commit in the vk and the
-    /// data in the proving key, and opens the preprocessed traces as their OWN
-    /// ROUND of every shard proof
-    /// (`hypercube/src/verifier/shard.rs:638` opens
-    /// `vec![vk.preprocessed_commit, *main_commitment]`).
+    /// to OPEN it.  `setup` retains both: the commit goes into the verifying
+    /// key and the data into the proving key
+    /// (`StarkProvingKey::preprocessed_data`), and the preprocessed traces are
+    /// opened as their OWN ROUND of every shard proof
+    /// (`[preprocessed_commit, main_commitment]`).
     ///
     /// Committed once per program, NOT once per shard.
     type PrepPrecomputed: PrepCommitRoot<Self> + Send + Sync + 'static;
@@ -138,11 +136,9 @@ pub trait ZeroCommitment<SC: StarkGenericConfig> {
 ///
 /// `Val<Self>`/`Challenge<Self>` stay KoalaBear / KoalaBear⁴ for *both* the
 /// inner (Poseidon2-KoalaBear) and the wrap (OuterSC, Poseidon2-BN254) paths
-/// — mirrors SP1's `BNGC<KoalaBear, KoalaBear⁴>`, where only the
-/// challenger + Merkle-commitment hash vary by context.  This trait is the
-/// single source of truth for the dispatch, replacing an open-coded
-/// `TypeId::of::<SC::Challenger>() == TypeId::of::<JaggedChallenger>()` gate in
-/// `prover.rs` / `shard_level/*`.
+/// — only the challenger + Merkle-commitment hash vary by context.  This
+/// trait is the single source of truth for the dispatch (no runtime
+/// `TypeId` gates in `prover.rs` / `shard_level/*`).
 ///
 /// * Inner (`KoalaBearPoseidon2`, the default core/compress/shrink config):
 ///   `BfMmcs = JaggedMmcs` (Poseidon2-KoalaBear Merkle).
@@ -202,8 +198,7 @@ pub trait BasefoldRing: StarkGenericConfig {
 
     /// Per-stage BaseFold FRI config (rate / query count / grinding).
     ///
-    /// SP1 keeps SEPARATE per-stage configs (core/recursion vs shrink/wrap;
-    /// `crates/primitives/src/fri_params.rs`).  The Ziren default returns the
+    /// The default returns the
     /// inner / env-overridable config (`FriConfig::from_env_or_default()` =
     /// `(log_blowup=1, num_queries=94, pow_bits=16)`), which is used by
     /// core/compress/shrink.  The **wrap** ring (`KoalaBearPoseidon2Outer`)
@@ -225,7 +220,7 @@ pub trait BasefoldRing: StarkGenericConfig {
         commit: &<Self::BfMmcs as p3_commit::Mmcs<crate::jagged_pcs::JaggedVal>>::Commitment,
     ) -> [crate::jagged_pcs::JaggedVal; 8];
 
-    /// Ring-native jagged BaseFold precompute for the INLINE lazy-commit path.
+    /// Ring-native jagged BaseFold precompute for the inline commit path.
     ///
     /// Used by `commit_traces` on the OUTER/wrap ring (whose
     /// `BfMmcs = OuterValMmcs` cannot flow through the inner-only
@@ -234,9 +229,8 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// [`crate::jagged_pcs::jagged::precompute_jagged_basefold_commit_generic`]
     /// needs are discharged INSIDE each concrete impl (where `Self::BfMmcs` is a
     /// concrete `'static` MMCS), rather than propagating up the whole
-    /// shard-prover call chain.  It is EXACTLY the commit body the retired
-    /// eager wrap-ring commit produced (same MMCS / FRI config / `use_rev` /
-    /// `recursion_area_pin`), just built during the prove pass.
+    /// shard-prover call chain.  Builds with the ring's own MMCS / FRI config
+    /// and the caller's `use_rev` / `recursion_area_pin`.
     fn precompute_jagged_inline(
         named_inner: &[crate::jagged_pcs::jagged::ChipTraceView],
         use_rev: bool,
@@ -256,33 +250,21 @@ pub trait BasefoldRing: StarkGenericConfig {
     /// OuterValMmcs>`, which has no concrete slot in the enum).  Dispatching
     /// that on `Self` puts the choice where the concrete types are known.
     ///
-    /// This replaces a `TypeId::of::<SC::Challenger>()` test that stood in for
-    /// two facts the type system was not carrying: that the CHALLENGER is
-    /// `JaggedChallenger`, and — separately, and not implied by it — that
-    /// `Self::BfMmcs` is `JaggedMmcs`, so that
-    /// `PrecomputedJaggedCommitGeneric<Self::BfMmcs>` could be `.expect()`-ed
-    /// out of a `Box<dyn Any>`.  Both downcasts are gone: inside each impl the
-    /// two types ARE the concrete ones, by construction.
-    ///
     /// Like `precompute_jagged_inline` this is a required method, NOT a
     /// default, so the `Self::Challenger` capability bounds the generic
     /// BaseFold prover needs (`FieldChallenger` / `GrindingChallenger` /
     /// `CanObserve<BfCommitment<Self>>`) are discharged INSIDE each concrete
     /// impl instead of propagating up the whole shard-prover call chain.
     ///
-    /// `precomputed` is NOT optional: the commit is built inline during the
-    /// prove pass and handed over.  It used to be an `Option` for a legacy
-    /// in-band-commit flow that no longer exists — and a `None` reaching here
-    /// would have made the prover observe the BaseFold commit in-band while the
-    /// verifier uses `verify_jagged_basefold_no_observe`, a transcript desync no
-    /// green test suite can see.
-    /// Open the jagged PCS over one or more commitment ROUNDS at the shared
-    /// `z_row`.
+    /// Every round's `precomputed` commit is built by `commit_traces` before
+    /// the open and handed over — the open itself must NOT observe the
+    /// BaseFold commit in-band: the verifier uses
+    /// `verify_jagged_basefold_no_observe`, so an in-band observe here is a
+    /// transcript desync no green test suite can see.
     ///
-    /// SP1 passes per-round `prover_data` / `evaluation_claims`
-    /// (`slop/crates/jagged/src/prover.rs:162`); `rounds` is the same, with
-    /// each round's commit, traces and claims kept together.  One round is the
-    /// main-only proof; two are SP1's `[preprocessed, main]`.
+    /// Opens the jagged PCS over one or more commitment ROUNDS at the shared
+    /// `z_row`, each round's commit, traces and claims kept together.  One
+    /// round is a main-only proof; two are `[preprocessed, main]`.
     fn prove_jagged_open(
         z_row: &[crate::InnerChallenge],
         rounds: alloc::vec::Vec<

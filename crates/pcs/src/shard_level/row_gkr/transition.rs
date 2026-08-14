@@ -74,8 +74,7 @@ where
     // Performance optimization: NESTED parallelism. The
     // outer chip loop is parallel (each chip is independent), AND
     // within each chip, the per-row work is parallel (rows are
-    // independent). Mirrors SP1's
-    // `crates/hypercube/src/logup_gkr/execution.rs:286-348` pattern.
+    // independent).
     //
     // For single-large-chip workloads (e.g. Program at 2^19 rows),
     // chip-level parallelism alone leaves one core doing all the
