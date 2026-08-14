@@ -905,7 +905,7 @@ where
         //   - SC == OuterSC (bn254 wrap path with `MultiField32Challenger`)
         //     → fall through to the FRI body below.  Wrap stays on FRI
         //     permanently; the basefold path's inner
-        //     `try_prove_shard_to_basefold_boxed` has the same TypeId
+        //     `prove_shard_to_basefold_boxed` has the same TypeId
         //     guard so this outer check matches its assumption.
         //
         // Wrap regression guard: `test_e2e_wrap_fibonacci` (FRI path).
@@ -920,7 +920,7 @@ where
             // Pass `self` so the basefold producer routes through the
             // trait-method seam (`self.prove_shard_to_basefold` ->
             // `self.prove_trusted_evaluations`).
-            let basefold_shard_proof = try_prove_shard_to_basefold_boxed::<SC, A, _>(
+            let basefold_shard_proof = prove_shard_to_basefold_boxed::<SC, A, _>(
                 self,
                 &chips,
                 pk.preprocessed_mles(),
@@ -1055,7 +1055,7 @@ impl Error for CpuProverError {}
 /// between the generic `StarkMachine::open` state and the shard-level
 /// prover's KoalaBear-oriented API.
 #[allow(clippy::too_many_arguments)]
-fn try_prove_shard_to_basefold_boxed<SC, A, P>(
+fn prove_shard_to_basefold_boxed<SC, A, P>(
     // The prover, so the inner
     // `prove_shard_to_basefold` call routes through `prover`'s trait method
     // (`prover.prove_shard_to_basefold` -> `self.prove_trusted_evaluations`),
@@ -1131,7 +1131,7 @@ where
         TypeId::of::<Val<SC>>() == TypeId::of::<InnerVal>()
             && TypeId::of::<<SC as StarkGenericConfig>::Challenge>()
                 == TypeId::of::<InnerChallenge>(),
-        "try_prove_shard_to_basefold_boxed requires Val == KoalaBear and \
+        "prove_shard_to_basefold_boxed requires Val == KoalaBear and \
          Challenge == KoalaBear^4 (shared by the inner and outer rings); the \
          per-ring jagged open is dispatched downstream in \
          prove_trusted_evaluations",
