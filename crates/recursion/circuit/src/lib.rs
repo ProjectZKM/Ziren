@@ -60,7 +60,7 @@ use zkm_pcs::{
 use p3_challenger::{CanObserve, CanSample, FieldChallenger, GrindingChallenger};
 use p3_commit::{ExtensionMmcs, Mmcs};
 use p3_dft::Radix2DitParallel;
-use p3_fri::{FriParameters, TwoAdicFriPcs};
+use p3_fri::TwoAdicFriPcs;
 use zkm_recursion_core::{
     air::RecursionPublicValues,
     stark::{KoalaBearPoseidon2Outer, OuterValMmcs},
@@ -72,17 +72,7 @@ use utils::{felt_bytes_to_bn254_var, felts_to_bn254_var, words_to_bytes};
 
 type EF = <KoalaBearPoseidon2 as StarkGenericConfig>::Challenge;
 
-pub type PcsConfig<C> = FriParameters<
-    ExtensionMmcs<
-        <C as StarkGenericConfig>::Val,
-        <C as StarkGenericConfig>::Challenge,
-        <C as KoalaBearFriParameters>::ValMmcs,
-    >,
->;
-
 pub type Digest<C, SC> = <SC as FieldHasherVariable<C>>::DigestVariable;
-
-pub type FriMmcs<C> = ExtensionMmcs<KoalaBear, EF, <C as KoalaBearFriParameters>::ValMmcs>;
 
 pub trait KoalaBearFriParameters:
     StarkGenericConfig<
@@ -109,8 +99,6 @@ pub trait KoalaBearFriParameters:
         + CanSample<EF>
         + GrindingChallenger<Witness = KoalaBear>
         + FieldChallenger<KoalaBear>;
-
-    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>>;
 
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape;
 }
@@ -683,10 +671,6 @@ impl KoalaBearFriParameters for KoalaBearPoseidon2 {
     type FriChallenger = <Self as StarkGenericConfig>::Challenger;
     type RowMajorProverData = <ValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
 
-    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>> {
-        self.get_fri_config()
-    }
-
     fn challenger_shape(challenger: &Self::FriChallenger) -> SpongeChallengerShape {
         SpongeChallengerShape {
             input_buffer_len: challenger.input_buffer.len(),
@@ -701,10 +685,6 @@ impl KoalaBearFriParameters for KoalaBearPoseidon2Outer {
 
     type RowMajorProverData =
         <OuterValMmcs as Mmcs<KoalaBear>>::ProverData<RowMajorMatrix<KoalaBear>>;
-
-    fn fri_config(&self) -> &FriParameters<FriMmcs<Self>> {
-        self.get_fri_config()
-    }
 
     fn challenger_shape(_challenger: &Self::FriChallenger) -> SpongeChallengerShape {
         unimplemented!("Shape not supported for outer fri challenger");

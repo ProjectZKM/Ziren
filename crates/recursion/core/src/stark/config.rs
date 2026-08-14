@@ -1,10 +1,9 @@
 use p3_bn254_fr::{Bn254, Poseidon2Bn254};
 use p3_challenger::MultiField32Challenger;
-use p3_commit::BatchOpening;
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
-use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_koala_bear::KoalaBear;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
@@ -40,14 +39,6 @@ pub type OuterChallenger = MultiField32Challenger<
 >;
 pub type OuterPcs = TwoAdicFriPcs<OuterVal, OuterDft, OuterValMmcs, OuterChallengeMmcs>;
 
-pub type OuterInputProof = Vec<BatchOpening<OuterVal, OuterValMmcs>>;
-
-pub type OuterQueryProof = QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof>;
-pub type OuterCommitPhaseStep = CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs>;
-pub type OuterFriProof = FriProof<OuterChallenge, OuterChallengeMmcs, OuterVal, OuterInputProof>;
-pub type OuterBatchOpening = BatchOpening<OuterVal, OuterValMmcs>;
-pub type OuterPcsProof = <OuterPcs as p3_commit::Pcs<OuterChallenge, OuterChallenger>>::Proof;
-
 /// The permutation for outer recursion.
 pub fn outer_perm() -> OuterPerm {
     const ROUNDS_F: usize = 8;
@@ -82,32 +73,6 @@ pub fn outer_fri_config() -> FriParameters<OuterChallengeMmcs> {
     };
     FriParameters {
         log_blowup: 4,
-        log_final_poly_len: 0,
-        max_log_arity: 1,
-        num_queries,
-        commit_proof_of_work_bits: 16,
-        query_proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
-}
-
-/// The FRI config for outer recursion.
-/// This targets by default 100 bits of security.
-pub fn outer_fri_config_with_blowup(log_blowup: usize) -> FriParameters<OuterChallengeMmcs> {
-    let perm = outer_perm();
-    let hash = OuterHash::new(perm.clone()).unwrap();
-    let compress = OuterCompress::new(perm.clone());
-    let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress, 0));
-    let num_queries = if zkm_dev_mode() {
-        1
-    } else {
-        match std::env::var("FRI_QUERIES") {
-            Ok(value) => value.parse().unwrap(),
-            Err(_) => 84 / log_blowup,
-        }
-    };
-    FriParameters {
-        log_blowup,
         log_final_poly_len: 0,
         max_log_arity: 1,
         num_queries,
@@ -161,16 +126,6 @@ impl KoalaBearPoseidon2Outer {
     /// Get a reference to the FRI configuration.
     pub fn get_fri_config(&self) -> &FriParameters<OuterChallengeMmcs> {
         &self.fri_config
-    }
-    pub fn new_with_log_blowup(log_blowup: usize) -> Self {
-        let perm = outer_perm();
-        let hash = OuterHash::new(perm.clone()).unwrap();
-        let compress = OuterCompress::new(perm.clone());
-        let val_mmcs = OuterValMmcs::new(hash, compress, 0);
-        let dft = OuterDft::default();
-        let fri_config = outer_fri_config_with_blowup(log_blowup);
-        let pcs = OuterPcs::new(dft, val_mmcs, fri_config.clone());
-        Self { pcs, perm, fri_config }
     }
 }
 
@@ -322,25 +277,6 @@ impl BasefoldRing for KoalaBearPoseidon2Outer {
         zkm_pcs::shard_level::shard_proof::EvaluationProof::Bytes(bundle.to_bytes())
     }
 }
-
-/// The FRI config for testing recursion.
-pub fn test_fri_config() -> FriParameters<OuterChallengeMmcs> {
-    let perm = outer_perm();
-    let hash = OuterHash::new(perm.clone()).unwrap();
-    let compress = OuterCompress::new(perm.clone());
-    let challenge_mmcs = OuterChallengeMmcs::new(OuterValMmcs::new(hash, compress, 0));
-    FriParameters {
-        log_blowup: 1,
-        log_final_poly_len: 0,
-        max_log_arity: 1,
-        num_queries: 1,
-        commit_proof_of_work_bits: 1,
-        query_proof_of_work_bits: 1,
-        mmcs: challenge_mmcs,
-    }
-}
-
-// ── D=5 outer config (128-bit security) ───────────────────────────────────
 
 // Compile-time proof that the genericized
 // BaseFold jagged-PCS digest path (`zkm_pcs::jagged_pcs::*_generic`) is

@@ -672,11 +672,9 @@ pub fn assert_num_vars_le_max<C>(
 /// Returns the final folded Ext after all rounds; caller asserts
 /// equality with `final_poly`.
 ///
-/// Modeled after [`crate::fri::verify_query`]'s body — the math is
-/// identical at arity 2, so this could equivalently delegate to
-/// `verify_query` via a `FriCommitPhaseProofStepVariable` adapter.
-/// Inlining gives us tighter control over the witness shape (no
-/// dependency on `KoalaBearFriParametersVariable`).
+/// Modeled after the retired legacy FRI `verify_query` body — the math
+/// is identical at arity 2.  Inlining gives us tighter control over the
+/// witness shape (no dependency on `KoalaBearFriParametersVariable`).
 ///
 /// **Untested in this environment** (test-artifacts requires a
 /// MIPS toolchain not available).  The algorithm matches the

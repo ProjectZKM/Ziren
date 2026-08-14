@@ -1,23 +1,14 @@
-use std::borrow::Borrow;
-
 use p3_bn254_fr::Bn254;
 use p3_field::PrimeCharacteristicRing;
 
-use p3_fri::{CommitPhaseProofStep, QueryProof};
 pub use zkm_recursion_compiler::ir::Witness as OuterWitness;
 use zkm_recursion_compiler::{
     config::OuterConfig,
     ir::{Builder, Var},
 };
-use zkm_recursion_core::stark::{
-    KoalaBearPoseidon2Outer, OuterBatchOpening, OuterChallenge, OuterChallengeMmcs, OuterDigest,
-    OuterFriProof, OuterInputProof, OuterVal,
-};
+use zkm_recursion_core::stark::{OuterChallenge, OuterVal};
 
-use crate::{
-    BatchOpeningVariable, CircuitConfig, FriCommitPhaseProofStepVariable, FriProofVariable,
-    FriQueryProofVariable,
-};
+use crate::CircuitConfig;
 
 use super::{WitnessWriter, Witnessable};
 
@@ -47,104 +38,5 @@ impl<C: CircuitConfig<N = Bn254>> Witnessable<C> for Bn254 {
     }
     fn write(&self, witness: &mut impl WitnessWriter<C>) {
         witness.write_var(*self)
-    }
-}
-
-impl Witnessable<OuterConfig> for OuterBatchOpening {
-    type WitnessVariable = BatchOpeningVariable<OuterConfig, KoalaBearPoseidon2Outer>;
-
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        let opened_values =
-            self.opened_values.read(builder).into_iter().map(|a| a.into_iter().collect()).collect();
-        let opening_proof = self.opening_proof.read(builder);
-        Self::WitnessVariable { opened_values, opening_proof }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.opened_values.write(witness);
-        self.opening_proof.write(witness);
-    }
-}
-
-impl Witnessable<OuterConfig> for OuterFriProof {
-    type WitnessVariable = FriProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
-
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        let commit_phase_commits = self
-            .commit_phase_commits
-            .iter()
-            .map(|commit| {
-                let cap: &[OuterDigest] = commit.borrow();
-                assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
-                cap[0].read(builder)
-            })
-            .collect();
-        let commit_pow_witnesses =
-            self.commit_pow_witnesses.iter().map(|w| w.read(builder)).collect();
-        let query_proofs = self.query_proofs.read(builder);
-        assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
-        let final_poly = self.final_poly[0].read(builder);
-        let pow_witness = self.query_pow_witness.read(builder);
-        Self::WitnessVariable {
-            commit_phase_commits,
-            commit_pow_witnesses,
-            query_proofs,
-            final_poly,
-            pow_witness,
-        }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.commit_phase_commits.iter().for_each(|commit| {
-            let cap: &[OuterDigest] = commit.borrow();
-            assert!(!cap.is_empty(), "MerkleCap must have at least one digest");
-            cap[0].write(witness);
-        });
-        for w in &self.commit_pow_witnesses {
-            w.write(witness);
-        }
-        self.query_proofs.write(witness);
-        assert!(!self.final_poly.is_empty(), "final_poly must have at least one element");
-        self.final_poly[0].write(witness);
-        self.query_pow_witness.write(witness);
-    }
-}
-
-impl Witnessable<OuterConfig> for CommitPhaseProofStep<OuterChallenge, OuterChallengeMmcs> {
-    type WitnessVariable = FriCommitPhaseProofStepVariable<OuterConfig, KoalaBearPoseidon2Outer>;
-
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        use p3_field::PrimeCharacteristicRing;
-        let sibling_value = self.sibling_values[0].read(builder);
-        let opening_proof = self.opening_proof.read(builder);
-        // Every FRI round currently uses binary folding
-        // (log_arity = 1); promoted to a Felt so the wire format
-        // is ready for variable-arity schedules.
-        let log_arity = builder.constant(
-            <OuterConfig as zkm_recursion_compiler::ir::Config>::F::from_canonical_usize(
-                self.log_arity.into(),
-            ),
-        );
-        Self::WitnessVariable { log_arity, sibling_value, opening_proof }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.sibling_values[0].write(witness);
-        self.opening_proof.write(witness);
-    }
-}
-
-impl Witnessable<OuterConfig> for QueryProof<OuterChallenge, OuterChallengeMmcs, OuterInputProof> {
-    type WitnessVariable = FriQueryProofVariable<OuterConfig, KoalaBearPoseidon2Outer>;
-
-    fn read(&self, builder: &mut Builder<OuterConfig>) -> Self::WitnessVariable {
-        let input_proof = self.input_proof.read(builder);
-        let commit_phase_openings = self.commit_phase_openings.read(builder);
-        Self::WitnessVariable { input_proof, commit_phase_openings }
-    }
-
-    fn write(&self, witness: &mut impl WitnessWriter<OuterConfig>) {
-        self.input_proof.write(witness);
-        self.commit_phase_openings.write(witness);
     }
 }

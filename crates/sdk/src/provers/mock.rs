@@ -10,7 +10,6 @@ use crate::{
 };
 use anyhow::Result;
 use p3_field::{PrimeCharacteristicRing, PrimeField};
-use p3_fri::FriProof;
 use p3_koala_bear::KoalaBear;
 use zkm_pcs::septic_digest::SepticDigest;
 use zkm_prover::{

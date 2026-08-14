@@ -7,7 +7,7 @@ use p3_symmetric::{Hash, MerkleCap};
 use p3_field::PrimeCharacteristicRing;
 use zkm_pcs::{
     koala_bear_poseidon2::KoalaBearPoseidon2, Com, InnerChallenge, InnerPerm, InnerVal,
-    OpeningProof, StarkVerifyingKey, Word,
+    StarkVerifyingKey, Word,
 };
 use zkm_recursion_compiler::ir::Builder;
 
@@ -19,7 +19,7 @@ use crate::{
     merkle_tree::MerkleProof,
     stark::MerkleProofVariable,
     witness::{WitnessWriter, Witnessable},
-    CircuitConfig, FriProofVariable, KoalaBearFriParametersVariable, VerifyingKeyVariable,
+    CircuitConfig, KoalaBearFriParametersVariable, VerifyingKeyVariable,
 };
 
 use super::{ZKMMerkleProofWitnessValues, ZKMMerkleProofWitnessVariable};
@@ -102,7 +102,6 @@ impl<
     > Witnessable<C> for StarkVerifyingKey<SC>
 where
     Com<SC>: Witnessable<C, WitnessVariable = <SC as FieldHasherVariable<C>>::DigestVariable>,
-    OpeningProof<SC>: Witnessable<C, WitnessVariable = FriProofVariable<C, SC>>,
 {
     type WitnessVariable = VerifyingKeyVariable<C, SC>;
 

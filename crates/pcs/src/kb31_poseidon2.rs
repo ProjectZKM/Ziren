@@ -1,17 +1,10 @@
 #![allow(missing_docs)]
 
 use p3_challenger::DuplexChallenger;
-use p3_commit::BatchOpening;
-use p3_commit::ExtensionMmcs;
-use p3_dft::Radix2DitParallel;
-use p3_field::{
-    extension::{BinomialExtensionField, QuinticTrinomialExtensionField},
-    Field,
-};
-use p3_fri::{CommitPhaseProofStep, FriParameters, FriProof, QueryProof, TwoAdicFriPcs};
+use p3_field::{extension::BinomialExtensionField, Field};
 use p3_koala_bear::{KoalaBear, Poseidon2KoalaBear};
 use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{Hash, PaddingFreeSponge, TruncatedPermutation};
+use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
 use zkm_primitives::poseidon2_init;
 
 pub const DIGEST_SIZE: usize = 8;
@@ -21,8 +14,6 @@ pub type InnerVal = KoalaBear;
 pub type InnerChallenge = BinomialExtensionField<InnerVal, 4>;
 pub type InnerPerm = Poseidon2KoalaBear<16>;
 pub type InnerHash = PaddingFreeSponge<InnerPerm, 16, 8, DIGEST_SIZE>;
-pub type InnerDigestHash = Hash<InnerVal, InnerVal, DIGEST_SIZE>;
-pub type InnerDigest = [InnerVal; DIGEST_SIZE];
 pub type InnerCompress = TruncatedPermutation<InnerPerm, 2, 8, 16>;
 pub type InnerValMmcs = MerkleTreeMmcs<
     <InnerVal as Field>::Packing,
@@ -32,124 +23,12 @@ pub type InnerValMmcs = MerkleTreeMmcs<
     2,
     8,
 >;
-pub type InnerChallengeMmcs = ExtensionMmcs<InnerVal, InnerChallenge, InnerValMmcs>;
 pub type InnerChallenger = DuplexChallenger<InnerVal, InnerPerm, 16, 8>;
-pub type InnerDft = Radix2DitParallel<InnerVal>;
-pub type InnerPcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, InnerChallengeMmcs>;
-
-pub type InnerInputProof = Vec<BatchOpening<InnerVal, InnerValMmcs>>;
-
-pub type InnerQueryProof = QueryProof<InnerChallenge, InnerChallengeMmcs, InnerInputProof>;
-pub type InnerCommitPhaseStep = CommitPhaseProofStep<InnerChallenge, InnerChallengeMmcs>;
-pub type InnerFriProof = FriProof<InnerChallenge, InnerChallengeMmcs, InnerVal, InnerInputProof>;
-pub type InnerBatchOpening = BatchOpening<InnerVal, InnerValMmcs>;
-
-pub type InnerPcsProof = <InnerPcs as p3_commit::Pcs<InnerChallenge, InnerChallenger>>::Proof;
-
-// ── Quintic extension types (D=5, ~155 bits) ─────────────────────────────
-//
-// Reference: Plonky3-recursion uses D=5 for KoalaBear to achieve provable
-// 128-bit security under Johnson Bound [BCSS25].
-
-/// Quintic extension challenge field (~155 bits).
-pub type Inner128Challenge = QuinticTrinomialExtensionField<InnerVal>;
-pub type Inner128ChallengeMmcs = ExtensionMmcs<InnerVal, Inner128Challenge, InnerValMmcs>;
-pub type Inner128Pcs = TwoAdicFriPcs<InnerVal, InnerDft, InnerValMmcs, Inner128ChallengeMmcs>;
-
-/// FRI config targeting a given security level with quintic extension (D=5).
-///
-/// With D=5 extension (~155-bit field), the Johnson Bound [BCSS25] analysis
-/// provides provable security up to ~128 bits without conjectures.
-///
-/// Reference: Plonky3-recursion uses log_blowup=3, max_log_arity=4,
-/// log_final_poly_len=5, query_pow_bits=16 as defaults for recursive layers.
-///
-/// `security_bits`: target security level (e.g. 100, 128).
-/// Queries are derived as: ceil((security_bits - pow_bits) / log2(1/(1-delta)))
-#[must_use]
-pub fn fri_config_d5(security_bits: usize) -> FriParameters<Inner128ChallengeMmcs> {
-    let perm = inner_perm();
-    let hash = InnerHash::new(perm.clone());
-    let compress = InnerCompress::new(perm.clone());
-    let challenge_mmcs = Inner128ChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
-
-    let pow_bits: usize = 16;
-    let log_blowup: usize = 1;
-
-    // delta for UniqueDecoding at rate 1/2: delta = 0.25, log2(1-delta) = -0.415
-    // queries = ceil(protocol_bits / 0.415)
-    let protocol_bits = security_bits.saturating_sub(pow_bits);
-    let num_queries = match std::env::var("FRI_QUERIES") {
-        Ok(value) => value.parse().unwrap(),
-        Err(_) => {
-            // UniqueDecoding: delta = 0.5 * (1 - rate), rate = 1/2^log_blowup
-            let rate = 1.0 / (1u64 << log_blowup) as f64;
-            let delta = 0.5 * (1.0 - rate);
-            let log_1_delta = (1.0 - delta).log2();
-            (-(protocol_bits as f64) / log_1_delta).ceil() as usize
-        }
-    };
-
-    FriParameters {
-        log_blowup,
-        log_final_poly_len: 0,
-        max_log_arity: 1,
-        num_queries,
-        commit_proof_of_work_bits: 0,
-        query_proof_of_work_bits: pow_bits,
-        mmcs: challenge_mmcs,
-    }
-}
 
 /// The permutation for inner recursion.
 #[must_use]
 pub fn inner_perm() -> InnerPerm {
     poseidon2_init()
-}
-
-/// The FRI config for Ziren proofs.
-#[must_use]
-pub fn zkm_fri_config() -> FriParameters<InnerChallengeMmcs> {
-    let perm = inner_perm();
-    let hash = InnerHash::new(perm.clone());
-    let compress = InnerCompress::new(perm.clone());
-    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
-    let num_queries = match std::env::var("FRI_QUERIES") {
-        Ok(value) => value.parse().unwrap(),
-        Err(_) => 84,
-    };
-    FriParameters {
-        log_blowup: 1,
-        log_final_poly_len: 0,
-        max_log_arity: 1,
-        num_queries,
-        commit_proof_of_work_bits: 0,
-        query_proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
-}
-
-/// The FRI config for inner recursion.
-/// This targets by default 100 bits of security.
-#[must_use]
-pub fn inner_fri_config() -> FriParameters<InnerChallengeMmcs> {
-    let perm = inner_perm();
-    let hash = InnerHash::new(perm.clone());
-    let compress = InnerCompress::new(perm.clone());
-    let challenge_mmcs = InnerChallengeMmcs::new(InnerValMmcs::new(hash, compress, 0));
-    let num_queries = match std::env::var("FRI_QUERIES") {
-        Ok(value) => value.parse().unwrap(),
-        Err(_) => 84,
-    };
-    FriParameters {
-        log_blowup: 1,
-        log_final_poly_len: 0,
-        max_log_arity: 1,
-        num_queries,
-        commit_proof_of_work_bits: 0,
-        query_proof_of_work_bits: 16,
-        mmcs: challenge_mmcs,
-    }
 }
 
 /// The recursion config used for recursive reduce circuit.

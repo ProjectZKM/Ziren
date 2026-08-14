@@ -76,9 +76,9 @@ impl<F: PrimeField32 + BinomiallyExtendable<D>, const DEGREE: usize> RecursionAi
             // compress/shrink machine. Both carry `when_transition` /
             // padded-row AIR constraints that `BasefoldConstraintFolder`
             // cannot evaluate (it has no row selectors — `unimplemented!`).
-            // BatchFRI emits zero events on this path: its only emitter
-            // `C::batch_fri` is the legacy `TwoAdicFriPcs` FRI verifier
-            // (fri.rs:227), which BaseFold never exercises. ExpReverseBitsLen
+            // BatchFRI emits zero events on this path: its only emitter,
+            // the legacy `TwoAdicFriPcs` FRI verifier (`C::batch_fri`), is
+            // retired, and BaseFold never exercises it. ExpReverseBitsLen
             // is now lowered inline to ALU/Select ops in
             // `InnerConfig::exp_reverse_bits` (circuit/lib.rs), so it too
             // emits zero events here. Both chips remain in the legacy-FRI
