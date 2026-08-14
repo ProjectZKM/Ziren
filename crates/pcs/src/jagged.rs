@@ -220,27 +220,16 @@ pub fn compute_jagged_metadata_from_dims<F: Field>(
 pub fn materialize_dense_jagged<F: Field>(
     traces: &[(String, crate::multilinear::PaddedMle<F>)],
     dense_len: usize,
-    use_rev: bool,
-) -> Vec<F> {
-    // Delegate to the cells-based core — `real_cells` is the only thing this
-    // function reads off a view, so the delegation is byte-identical.
-    let cells: Vec<(&[F], usize)> = traces.iter().map(|(_, pm)| real_cells(pm)).collect();
-    materialize_dense_jagged_from_cells(&cells, dense_len, use_rev)
-}
-
-/// Cells-based twin of [`materialize_dense_jagged`] — identical packing over
-/// explicit per-chip `(cells, width)` borrows.  Lets `commit()` build the
-/// dense polynomial straight over its just-sorted `RowMajorMatrix`es without
-/// moving them into view types.
-pub fn materialize_dense_jagged_from_cells<F: Field>(
-    chip_cells: &[(&[F], usize)],
-    dense_len: usize,
     // The per-shard rev(zeta) orientation, threaded EXPLICITLY from the
     // per-stage source of truth (`StarkMachine::core_rev()` — `true` only on
     // the CORE MIPS prove path).  `true` => NATURAL row order; `false` =>
     // bit-reversed (byte-identical to the recursion / shrink / wrap stages).
     use_rev: bool,
 ) -> Vec<F> {
+    // `real_cells` is the only thing the packing reads off a view, so it runs
+    // over explicit per-chip `(cells, width)` borrows.
+    let cells: Vec<(&[F], usize)> = traces.iter().map(|(_, pm)| real_cells(pm)).collect();
+    let chip_cells: &[(&[F], usize)] = &cells;
     // Pre-allocate the full output and write into per-chip slices in
     // parallel; each chip/column writes an independent slot.
     let padded_size = dense_len;
