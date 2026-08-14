@@ -3135,9 +3135,13 @@ pub mod tests {
     /// tree's FIXED capacity?  The tree height is baked into every enumerated
     /// recursion program, so an over-large map is not a tuning problem — it
     /// does not fit at all.
+    ///
+    /// Runs by default (~6 s): each recursion band adds exactly six shapes to
+    /// the enumeration, and `fix_shape` scores bands by cost rather than list
+    /// order, so bands are meant to be added freely — this is the only thing
+    /// standing between that and an enumeration too large to build.
     #[test]
     #[serial]
-    #[ignore]
     fn enumeration_size_probe() {
         use crate::shapes::ZKMProofShape;
         use zkm_core_machine::shape::CoreShapeConfig;
