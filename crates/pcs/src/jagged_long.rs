@@ -717,8 +717,8 @@ where
 /// `base` is the trace side: the per-chip component MLEs restacked into the
 /// single component the sumcheck requires, via
 /// [`crate::basefold::stacked::interleave_multilinears_with_fixed_rate`] — the
-/// same helper SP1 uses, already ported and (per its own `ILV_PROF` counters)
-/// currently never exercised.
+/// same helper SP1 uses, already ported and (measured: zero calls on the GPU
+/// prove path) currently never exercised there.
 ///
 /// `ext` is the weight side.  SP1's `partial_jagged_multilinear`
 /// (`populate.rs`) is just `partial_jagged_little_polynomial_evaluation`

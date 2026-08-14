@@ -144,71 +144,6 @@ pub fn dense_from_interleaved_mles<F: Field + Send + Sync>(
     out
 }
 
-/// Always-on, ~free attribution for [`interleave_multilinears_with_fixed_rate`]
-/// (a handful of relaxed atomics per CALL, never per element).
-///
-/// The point of the `w1_mles` counter is engagement, not timing: the
-/// per-MLE "transpose-in" is an IDENTITY when the MLE is width-1, and the
-/// jagged dense that the shard commit stripes is exactly one width-1 MLE.
-/// A non-zero `w1_mles` with a non-zero `copy_ns` is the identity memcpy
-/// this module used to pay; `copy_ns == 0` with `w1_mles > 0` means the
-/// borrow fast path below is engaged.
-pub mod ilv_prof {
-    use core::sync::atomic::{AtomicU64, Ordering};
-
-    pub static CALLS: AtomicU64 = AtomicU64::new(0);
-    pub static MLES: AtomicU64 = AtomicU64::new(0);
-    pub static W1_MLES: AtomicU64 = AtomicU64::new(0);
-    pub static W1_BORROWED: AtomicU64 = AtomicU64::new(0);
-    pub static ELEMS: AtomicU64 = AtomicU64::new(0);
-    pub static T_TOTAL_NS: AtomicU64 = AtomicU64::new(0);
-    pub static T_COPY_NS: AtomicU64 = AtomicU64::new(0);
-    pub static T_STRIPE_NS: AtomicU64 = AtomicU64::new(0);
-
-    #[inline]
-    pub(super) fn add(c: &'static AtomicU64, v: u64) {
-        c.fetch_add(v, Ordering::Relaxed);
-    }
-
-    /// `(calls, mles, w1_mles, w1_borrowed, elems, total_ns, copy_ns, stripe_ns)`
-    pub fn snapshot() -> (u64, u64, u64, u64, u64, u64, u64, u64) {
-        let g = |c: &AtomicU64| c.load(Ordering::Relaxed);
-        (
-            g(&CALLS),
-            g(&MLES),
-            g(&W1_MLES),
-            g(&W1_BORROWED),
-            g(&ELEMS),
-            g(&T_TOTAL_NS),
-            g(&T_COPY_NS),
-            g(&T_STRIPE_NS),
-        )
-    }
-
-    /// One-line STDERR dump.  STDERR is deliberate: the multi-GPU worker
-    /// child's STDOUT is the framed result protocol.
-    pub fn dump(tag: &str) {
-        let (calls, mles, w1, w1b, elems, tot, copy, stripe) = snapshot();
-        if calls == 0 {
-            eprintln!(
-                "ILV_PROF[{tag}] calls=0 (interleave_multilinears_with_fixed_rate NEVER RAN)"
-            );
-            return;
-        }
-        let ms = |n: u64| n as f64 / 1e6;
-        eprintln!(
-            "ILV_PROF[{tag}] calls={calls} mles={mles} width1_mles={w1} width1_borrowed={w1b} \
-             elems={elems} | total={:.1}ms copy_in={:.1}ms stripe_out={:.1}ms | \
-             per_call: total={:.2}ms copy_in={:.2}ms",
-            ms(tot),
-            ms(copy),
-            ms(stripe),
-            ms(tot) / calls as f64,
-            ms(copy) / calls as f64,
-        );
-    }
-}
-
 /// Layout helper: walk a stream of MLEs and pack their values into
 /// fixed-size `[batch_size, 1 << log_stacking_height]` stripes.
 ///
@@ -217,13 +152,12 @@ pub mod ilv_prof {
 ///
 /// NOT ON THE GPU PROVE PATH — MEASURED, do not re-derive this.  A full
 /// 281-shard reth core proof on the GPU prover calls this function ZERO
-/// times (`ILV_PROF[CORE_END] calls=0`): `StarkGpuProver`'s
-/// `MachineProver::commit_multilinears` override commits the shard's jagged
-/// dense device-side (ziren-gpu `basefold/src/commit_dense.rs`, which does
-/// its own per-stripe device transpose), and the free-fn host commit that
-/// reaches `StackedPcsProver::commit_multilinears` is the CPU-prover /
+/// times: `StarkGpuProver`'s `MachineProver::commit_multilinears` override
+/// commits the shard's jagged dense device-side (ziren-gpu
+/// `basefold/src/commit_dense.rs`, which does its own per-stripe device
+/// transpose), and the free-fn host commit that reaches
+/// `StackedPcsProver::commit_multilinears` is the CPU-prover /
 /// unit-test path.  Anything spent here converts to GPU throughput at 0:1.
-/// The counters above exist so that stays visible.
 ///
 /// WIDTH-1 BORROW: the per-MLE "transpose-in" below rewrites a
 /// `[height, width]` row-major buffer as `[width, height]` column-major.
@@ -242,9 +176,6 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
     multilinears: Vec<Arc<Mle<F>>>,
     log_stacking_height: u32,
 ) -> Vec<Arc<Mle<F>>> {
-    let __ilv_t0 = std::time::Instant::now();
-    ilv_prof::add(&ilv_prof::CALLS, 1);
-    ilv_prof::add(&ilv_prof::MLES, multilinears.len() as u64);
     let stack_height = 1usize << log_stacking_height;
     let stripe_capacity = batch_size * stack_height;
 
@@ -272,15 +203,9 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         // by the column-major transpose loop below.  For 134M cells
         // this avoids ~500 MiB of redundant writes on the commit path.
         let total = width * height;
-        ilv_prof::add(&ilv_prof::ELEMS, total as u64);
-        if width == 1 {
-            ilv_prof::add(&ilv_prof::W1_MLES, 1);
-        }
-        let __ilv_tc = std::time::Instant::now();
         // WIDTH-1 BORROW (see the fn header): the transpose is the identity,
         // so read the source slice directly instead of copying it.
         let owned: Vec<F> = if width == 1 {
-            ilv_prof::add(&ilv_prof::W1_BORROWED, 1);
             Vec::new()
         } else {
             // FLAKE FIX: see round.rs note about KoalaBear u32 serde.
@@ -295,8 +220,6 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
             data
         };
         let data: &[F] = if width == 1 { mle_vals } else { &owned };
-        ilv_prof::add(&ilv_prof::T_COPY_NS, __ilv_tc.elapsed().as_nanos() as u64);
-        let __ilv_ts = std::time::Instant::now();
 
         // Performance optimization: the SP1-port `data.split_off(needed)`
         // pattern has O(N²) cost when N = 134M and needed = 16384 (each
@@ -331,7 +254,6 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         }
         // Append the leftover (< stripe_capacity) to the overflow buffer.
         overflow.extend_from_slice(&data[data_pos..]);
-        ilv_prof::add(&ilv_prof::T_STRIPE_NS, __ilv_ts.elapsed().as_nanos() as u64);
     }
 
     // Final stripe: pad with zeros up to the next full stripe.
@@ -343,7 +265,6 @@ pub fn interleave_multilinears_with_fixed_rate<F: Field>(
         batch_multilinears.push(Arc::new(Mle::from_row_major(mat)));
     }
 
-    ilv_prof::add(&ilv_prof::T_TOTAL_NS, __ilv_t0.elapsed().as_nanos() as u64);
     batch_multilinears
 }
 

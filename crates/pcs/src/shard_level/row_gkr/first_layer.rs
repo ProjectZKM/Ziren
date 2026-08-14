@@ -119,33 +119,6 @@ pub fn build_chip_interaction_tables<
     )
 }
 
-/// Pad a row-major `(height × num_cols)` table up to
-/// `(2^target_log_rows) × num_cols`, using `pad_value` for the new
-/// rows.  Returns the padded `Vec<F>` (still row-major).
-///
-/// **Status**: no longer called by `generate_first_layer`
-/// — the PaddedMle path skips materialised row padding entirely.
-/// Retained for tests and as a reference implementation.
-#[allow(dead_code)]
-fn pad_rows<F: Clone>(
-    values: Vec<F>,
-    num_cols: usize,
-    target_log_rows: usize,
-    pad_value: F,
-) -> Vec<F> {
-    if num_cols == 0 {
-        return values;
-    }
-    let target_rows = 1usize << target_log_rows;
-    let target_len = target_rows * num_cols;
-    if values.len() >= target_len {
-        return values;
-    }
-    let mut padded = values;
-    padded.resize(target_len, pad_value);
-    padded
-}
-
 /// PaddedMle-aware MSB split.  Split a row-major
 /// `(real_rows × num_cols)` buffer at the logical row MSB
 /// (`half_logical = 2^(log_rows - 1)`) and return the **real-only**
@@ -163,7 +136,7 @@ fn pad_rows<F: Clone>(
 /// `real_*` are NOT materialized; consumers (`ChipLayerState`)
 /// resolve them via the per-quadrant pad constant.
 fn split_real_msb<F: Clone>(
-    values: Vec<F>,
+    mut values: Vec<F>,
     num_cols: usize,
     half_logical: usize,
     real_upper: usize,
@@ -176,34 +149,19 @@ fn split_real_msb<F: Clone>(
     let lower_off = half_logical * num_cols;
     let lower_len = real_lower * num_cols;
     debug_assert!(upper_len <= values.len());
-    let upper = values[..upper_len].to_vec();
+    // The upper half keeps the source allocation (real rows are a
+    // contiguous prefix, so a chip that fits in the upper half splits
+    // with zero copies); only a lower half that exists is moved out.
     let lower = if real_lower == 0 {
         Vec::new()
     } else {
         debug_assert!(lower_off + lower_len <= values.len());
-        values[lower_off..lower_off + lower_len].to_vec()
+        let mut lower = values.split_off(lower_off);
+        lower.truncate(lower_len);
+        lower
     };
-    (upper, lower)
-}
-
-/// Split a row-major table along its row MSB.  Returns
-/// `(upper_half, lower_half)` each of shape
-/// `(2^(log_rows-1)) × num_cols` — i.e.
-/// `fix_last_variable(0)` / `fix_last_variable(1)`.
-///
-/// Requires `values.len() == (1 << log_rows) * num_cols` and
-/// `log_rows >= 1`.
-#[allow(dead_code)] // retained for tests + as a reference reading
-fn split_row_msb<F: Clone>(values: &[F], num_cols: usize, log_rows: usize) -> (Vec<F>, Vec<F>) {
-    debug_assert!(log_rows >= 1, "split_row_msb requires log_rows >= 1");
-    if num_cols == 0 {
-        return (Vec::new(), Vec::new());
-    }
-    debug_assert_eq!(values.len(), (1 << log_rows) * num_cols);
-    let half = (1 << (log_rows - 1)) * num_cols;
-    let upper = values[..half].to_vec();
-    let lower = values[half..].to_vec();
-    (upper, lower)
+    values.truncate(upper_len);
+    (values, lower)
 }
 
 /// Generate the GKR circuit's first layer from raw chip data.
@@ -371,33 +329,6 @@ where
     }
 }
 
-/// Pad a row-major `(rows × num_cols)` table to
-/// `(rows × 2^target_log_cols)` by zero-extending each row's column
-/// slots.  Used to align per-chip interaction width to a power of two.
-// TODO: currently unused; retained for upcoming non-power-of-two
-// interaction-width support in the LogUp-GKR first-layer port.
-#[allow(dead_code)]
-fn pad_row_cols<F: Clone>(
-    values: Vec<F>,
-    num_cols: usize,
-    log_rows: usize,
-    target_log_cols: usize,
-    pad_value: F,
-) -> Vec<F> {
-    let target_cols = 1usize << target_log_cols;
-    if num_cols >= target_cols {
-        return values;
-    }
-    let rows = 1usize << log_rows;
-    let mut padded = Vec::with_capacity(rows * target_cols);
-    for r in 0..rows {
-        let row_start = r * num_cols;
-        let row_end = row_start + num_cols;
-        padded.extend_from_slice(&values[row_start..row_end]);
-        padded.resize(padded.len() + (target_cols - num_cols), pad_value.clone());
-    }
-    padded
-}
 
 #[cfg(test)]
 mod tests {
@@ -411,44 +342,20 @@ mod tests {
     type EF = Challenge<SC>;
 
     #[test]
-    fn pad_rows_zero_extends_to_power_of_two() {
-        // 3 rows × 2 cols = 6 cells, pad to 4 rows × 2 cols = 8 cells.
-        let values: Vec<u32> = vec![1, 2, 3, 4, 5, 6];
-        let padded = pad_rows(values, 2, 2, 0u32);
-        assert_eq!(padded, vec![1, 2, 3, 4, 5, 6, 0, 0]);
-    }
-
-    #[test]
-    fn split_row_msb_halves_row_dimension() {
-        // 4 rows × 2 cols = 8 cells. Split row MSB → upper 2 rows, lower 2 rows.
-        let values: Vec<u32> = vec![10, 11, 20, 21, 30, 31, 40, 41];
-        let (upper, lower) = split_row_msb(&values, 2, 2);
+    fn split_real_msb_reuses_the_source_allocation() {
+        // 3 real rows × 2 cols in a 2-row-per-half (half_logical=2)
+        // logical table: upper gets rows 0-1, lower gets row 2.
+        let values: Vec<u32> = vec![10, 11, 20, 21, 30, 31];
+        let (upper, lower) = split_real_msb(values, 2, 2, 2, 1);
         assert_eq!(upper, vec![10, 11, 20, 21]);
-        assert_eq!(lower, vec![30, 31, 40, 41]);
-    }
+        assert_eq!(lower, vec![30, 31]);
 
-    #[test]
-    fn split_row_msb_handles_log_rows_one() {
-        // 2 rows × 3 cols = 6 cells. Split row MSB → 1 row each.
-        let values: Vec<u32> = vec![1, 2, 3, 4, 5, 6];
-        let (upper, lower) = split_row_msb(&values, 3, 1);
-        assert_eq!(upper, vec![1, 2, 3]);
-        assert_eq!(lower, vec![4, 5, 6]);
-    }
-
-    #[test]
-    fn pad_row_cols_zero_extends_each_row() {
-        // 2 rows × 3 cols → 2 rows × 4 cols.
-        let values: Vec<u32> = vec![1, 2, 3, 4, 5, 6];
-        let padded = pad_row_cols(values, 3, 1, 2, 0u32);
-        assert_eq!(padded, vec![1, 2, 3, 0, 4, 5, 6, 0]);
-    }
-
-    #[test]
-    fn pad_row_cols_noop_when_already_power_of_two() {
+        // Chip fits entirely in the upper half → lower is empty and
+        // the upper IS the source vec.
         let values: Vec<u32> = vec![1, 2, 3, 4];
-        let padded = pad_row_cols(values, 2, 1, 1, 0u32);
-        assert_eq!(padded, vec![1, 2, 3, 4]);
+        let (upper, lower) = split_real_msb(values, 2, 4, 2, 0);
+        assert_eq!(upper, vec![1, 2, 3, 4]);
+        assert!(lower.is_empty());
     }
 
     #[test]
